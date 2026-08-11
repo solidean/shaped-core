@@ -13,13 +13,11 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
 
-namespace sg
-{
 /// Records GPU work, and is submitted through the context that created it.
 /// Single-use and single-threaded: recorded by one thread, then submitted or dropped exactly once, in the epoch it was opened in.
 /// Letting a list go out of scope un-consumed auto-drops it and warns — a safety net, not the intended path.
 /// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
-class command_list
+class sg::command_list
 {
 public:
     virtual ~command_list();
@@ -162,4 +160,3 @@ protected:
     epoch _epoch = epoch::invalid;
     class context* _context = nullptr; // the creating context; outlives this list
 };
-} // namespace sg

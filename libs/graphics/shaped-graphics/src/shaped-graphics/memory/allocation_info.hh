@@ -2,8 +2,6 @@
 
 #include <shaped-graphics/fwd.hh>
 
-namespace sg
-{
 /// A value describing where a resource's backing GPU memory lives — a cheap, copyable placement handle rather than an owner of the GPU resource.
 /// Produced by a memory_heap, or hand-built for the dedicated case, and passed to a create_* call.
 ///
@@ -11,7 +9,7 @@ namespace sg
 ///   - null: self-allocating, so the resource gets its own dedicated allocation and `offset` / `size` are unused.
 ///   - set: placed, so the resource is sub-allocated into `heap` at `offset` and shares the heap's underlying allocation.
 ///     Holding the memory_heap_handle keeps that heap alive.
-struct allocation_info
+struct sg::allocation_info
 {
     /// Owning heap this placement points into, or null for a dedicated (self-allocating) resource.
     memory_heap_handle heap = nullptr;
@@ -31,4 +29,3 @@ struct allocation_info
     /// True when the resource is sub-allocated into a shared heap.
     [[nodiscard]] bool is_placed() const { return heap != nullptr; }
 };
-} // namespace sg

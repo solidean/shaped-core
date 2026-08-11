@@ -1,14 +1,13 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
-namespace tg
-{
 /// Hyperplane in D dimensions, stored in Hesse normal form.
 ///
 /// Represents the set of points {x : dot(normal, x) == dist} — the plane *itself*, not a side of it.
@@ -24,7 +23,7 @@ namespace tg
 ///
 ///     tg::plane3f p(tg::vec3f(0, 0, 1), 5.0f);   // z == 5
 template <int D, class T>
-struct plane
+struct tg::plane
 {
     static_assert(D > 0, "plane requires a positive dimension");
 
@@ -94,11 +93,9 @@ public:
 };
 
 template <int D, class T>
-struct object_traits<plane<D, T>>
+struct tg::object_traits<tg::plane<D, T>>
 {
     static constexpr int intrinsic_dim = D - 1;
     static constexpr int ambient_dim = D;
     static constexpr bool is_finite = false;
 };
-
-} // namespace tg

@@ -1,13 +1,12 @@
 #pragma once
 
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
-namespace tg
-{
 /// Ellipsoid surface, stored as a center and its D semi-axis vectors.
 ///
 /// Represents {center + sum_i u_i * semi_axes[i] : |u| == 1} — the surface itself, not the solid interior, so intrinsic_dim is D - 1.
@@ -24,7 +23,7 @@ namespace tg
 ///     auto const e = tg::ellipsoid3f(tg::pos3f(0, 0, 0), tg::vec3f(2, 0, 0), tg::vec3f(0, 2, 0), tg::vec3f(0, 0, 2));   // radius-2 sphere
 ///     auto const c = tg::ellipsoid2in3f(tg::pos3f(0, 0, 0), tg::vec3f(2, 0, 0), tg::vec3f(0, 1, 0));                    // an ellipse in the xy-plane of 3D
 template <int D, int DAmbient, class T>
-struct ellipsoid
+struct tg::ellipsoid
 {
     static_assert(D > 0, "ellipsoid requires a positive dimension");
     static_assert(D <= DAmbient, "an ellipsoid cannot curve in more dimensions than the space it is embedded in");
@@ -98,11 +97,9 @@ public:
 };
 
 template <int D, int DAmbient, class T>
-struct object_traits<ellipsoid<D, DAmbient, T>>
+struct tg::object_traits<tg::ellipsoid<D, DAmbient, T>>
 {
     static constexpr int intrinsic_dim = D - 1;
     static constexpr int ambient_dim = DAmbient;
     static constexpr bool is_finite = true;
 };
-
-} // namespace tg

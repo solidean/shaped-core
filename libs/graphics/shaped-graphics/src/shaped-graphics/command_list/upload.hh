@@ -9,12 +9,10 @@
 #include <ranges>
 #include <type_traits>
 
-namespace sg
-{
 /// Host→device upload facade for a command list, reached as `cmd.upload`.
 /// Inline: recorded into this list, and visible to later commands in it.
 /// `ctx.upload` is the async counterpart — see libs/graphics/shaped-graphics/docs/concepts/upload.inline.md.
-class command_list_upload_scope
+class sg::command_list_upload_scope
 {
     // Typed-buffer overloads — the preferred form.
     // `buffer<T>` alone names the element type, so the span, the value and `offset_in_elements` are all in units of that same `T`.
@@ -92,4 +90,3 @@ private:
 
     command_list& _cmd;
 };
-} // namespace sg

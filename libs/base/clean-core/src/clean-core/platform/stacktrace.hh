@@ -34,13 +34,13 @@ using stacktrace_entry = std::stacktrace_entry;
 
 #else // CC_HAS_STACKTRACE
 
+#include <clean-core/fwd.hh>
+
 #include <cstddef>
 
-namespace cc
-{
 /// Stub stacktrace frame for toolchains without <stacktrace> (Emscripten / WASI).
 /// Carries no information; present only so the empty stacktrace stub can be iterated.
-struct stacktrace_entry
+struct cc::stacktrace_entry
 {
     [[nodiscard]] constexpr bool operator==(stacktrace_entry const&) const = default;
 };
@@ -48,7 +48,7 @@ struct stacktrace_entry
 /// Stub stacktrace for toolchains without <stacktrace> — see CC_HAS_STACKTRACE.
 /// Always empty, so current() yields a trace of size 0.
 /// Stays API-shaped enough that storing and iterating a cc::stacktrace compiles unchanged; it simply has nothing to report.
-struct stacktrace
+struct cc::stacktrace
 {
     /// Capture the current call stack, which on the stub is always an empty trace.
     /// The skip and max-depth parameters mirror std::stacktrace::current and are ignored.
@@ -64,6 +64,5 @@ struct stacktrace
 
     [[nodiscard]] constexpr bool operator==(stacktrace const&) const = default;
 };
-} // namespace cc
 
 #endif // CC_HAS_STACKTRACE

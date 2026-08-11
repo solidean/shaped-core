@@ -12,12 +12,20 @@
 
 namespace scl
 {
+struct apply_outcome;
+struct apply_problems;
+struct apply_report;
+struct apply_settings;
+struct file_prose_delta;
+struct planned_rewrite;
+} // namespace scl
+
 /// One file's rewritten text, plus where the plan's new lines ended up in it.
 ///
 /// `edited_lines` is in NEW-file coordinates and is what the prose re-check is scoped to: a violation the
 /// plan did not write is not the plan's problem, which is the same non-ripple rule the `--changed-lines`
 /// filter enforces for `--dirty-only`.
-struct planned_rewrite
+struct scl::planned_rewrite
 {
     cc::string path;
     cc::string text;
@@ -25,7 +33,7 @@ struct planned_rewrite
 };
 
 /// How `apply_prose_plan` runs.
-struct apply_settings
+struct scl::apply_settings
 {
     /// Validate the whole plan and report, but write nothing.
     bool dry_run = false;
@@ -35,7 +43,7 @@ struct apply_settings
 };
 
 /// One file's prose on either side of its rewrite.
-struct file_prose_delta
+struct scl::file_prose_delta
 {
     cc::string path;
     prose_stats before;
@@ -43,7 +51,7 @@ struct file_prose_delta
 };
 
 /// What `apply_prose_plan` did, or would have done under `--dry-run`.
-struct apply_report
+struct scl::apply_report
 {
     isize files_changed = 0;
     isize edits_applied = 0;
@@ -56,7 +64,7 @@ struct apply_report
 ///
 /// A plan is authored against many files at once, so failing on the first problem costs the author a
 /// round trip per problem — every check therefore keeps going and appends here.
-struct apply_problems
+struct scl::apply_problems
 {
     /// Structural failures: the target could not be read, a span ran past the end of it, or the edit
     /// changed code rather than prose.
@@ -77,12 +85,15 @@ struct apply_problems
 /// `report` is meaningful only when `problems` is empty — a plan with any problem writes nothing at all.
 /// `sources` owns the rewritten buffers `problems.findings` span into and must outlive them, which is why
 /// it travels with them rather than being rebuilt by the caller.
-struct apply_outcome
+struct scl::apply_outcome
 {
     apply_report report;
     apply_problems problems;
     source_manager sources;
 };
+
+namespace scl
+{
 
 /// Rewrite one file's text per `file.edits` and report which new lines the plan wrote.
 ///

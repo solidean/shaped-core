@@ -7,8 +7,6 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh> // buffer_usage
 
-namespace sg
-{
 /// Base of every shaped-graphics exception, carrying a formatted message.
 /// Catch a concrete derived type for structured context, or `sg::exception` for "any sg failure".
 /// Thrown only by the throwing create façades and the submit/advance path — the `try_*` surface never throws.
@@ -17,7 +15,7 @@ namespace sg
 ///   try { auto buf = ctx->persistent.create_raw_buffer(size, usage); ... }
 ///   catch (sg::device_lost_exception const&) { rebuild_context(); }
 ///   catch (sg::allocation_exception const& e) { shrink_and_retry(e.size_in_bytes()); }
-class exception
+class sg::exception
 {
 public:
     explicit exception(cc::string message) : _message(cc::move(message)) {}
@@ -33,7 +31,7 @@ protected:
 /// The GPU device was lost (driver reset / TDR / removed adapter).
 /// Sticky: the owning context stays lost once this fires, so tear it down and recreate.
 /// Surfaced at submit / advance / fence waits and from the throwing create façades, never through the `try_*` channel.
-class device_lost_exception final : public exception
+class sg::device_lost_exception final : public exception
 {
 public:
     explicit device_lost_exception(cc::string_view reason)
@@ -51,7 +49,7 @@ private:
 /// A GPU resource allocation failed — out of device memory, or a fixed heap / descriptor region is exhausted.
 /// Recoverable in principle by a coarse handler that frees or resizes: the classic bubble-up-to-a-budget failure.
 /// Carries the requested size and the underlying backend error.
-class allocation_exception final : public exception
+class sg::allocation_exception final : public exception
 {
 public:
     allocation_exception(cc::string what, isize size_in_bytes, cc::any_error const& error)
@@ -70,7 +68,7 @@ private:
 /// Building a binding_group_layout, pipeline_layout, or compute / raster / raytracing pipeline failed.
 /// A shader / root-signature / PSO compile or create error the driver reported.
 /// Carries the pipeline's entry point for context.
-class pipeline_creation_exception final : public exception
+class sg::pipeline_creation_exception final : public exception
 {
 public:
     pipeline_creation_exception(cc::string_view entry_point, cc::any_error const& error)
@@ -89,7 +87,7 @@ private:
 /// Creating a swapchain failed — a bad window handle, an unsupported surface format, or a DXGI/driver error creating the flip chain.
 /// Recoverable in principle: fix the window or format and retry.
 /// Carries the underlying backend error.
-class swapchain_creation_exception final : public exception
+class sg::swapchain_creation_exception final : public exception
 {
 public:
     explicit swapchain_creation_exception(cc::any_error const& error)
@@ -102,7 +100,7 @@ public:
 /// A bound view names no binding, a view's access or shape does not match its binding, or a declared binding was left unprovided.
 /// So it is a caller-side mistake in wiring views to a layout, as opposed to running out of GPU memory.
 /// Carries the message the backend produced, which names the offending binding.
-class binding_group_exception final : public exception
+class sg::binding_group_exception final : public exception
 {
 public:
     explicit binding_group_exception(cc::any_error const& error)
@@ -110,4 +108,3 @@ public:
     {
     }
 };
-} // namespace sg

@@ -13,13 +13,17 @@ namespace scl
 ///
 /// `impl` and `custom` are exempt at any depth: both are namespaces a reader is meant to see opened, and neither is part of a library's public vocabulary.
 /// An anonymous namespace is exempt too, having no name to qualify with.
-/// Enums are not records and never fire, so a namespace holding enums *and* records still reports only the records — the mixed case, where the type moves out and the rest stays.
 ///
-/// The fix is offered only when the namespace body is a plain series of record definitions.
-/// Anything else in there — a function, a nested namespace, a variable, a forward declaration — cannot come along, since a qualified name may not *declare* a new entity.
-/// The parser answers that with `node::body_holds_records_only`, and everything it does not model clears the flag, so an unrecognized construct costs the fix rather than the correctness.
+/// The fix moves each run of adjacent record definitions out of the namespace and leaves everything else inside.
+/// A namespace holding nothing but definitions therefore disappears.
+/// One that also holds an enum, a function or a forward declaration is split around its records, since none of those can carry a qualified name.
+/// A run is what the parser's `node::follows_record` marks, so a statement the parser does not model breaks the run rather than being moved out with it.
+///
+/// Three shapes stay where they are and end the run around them, since a moved block cannot take them along:
+/// a record declared inside a function body, an anonymous one, and the `struct S { } s;` form whose variable would land at file scope.
 ///
 /// The rewrite compiles only where the type is already declared, normally in the library's `fwd.hh`, and a single-file linter cannot see that.
+/// The same holds for the template arguments of a specialization, which are looked up where it is written.
 /// It ships as a fix regardless: a missing declaration is a compile error on the very next build, which is a cheaper way to learn it than never offering the rewrite.
 rule const& qualified_record_definition_rule();
 } // namespace scl

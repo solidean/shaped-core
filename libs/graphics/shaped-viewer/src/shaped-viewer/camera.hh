@@ -6,14 +6,12 @@
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
 
-namespace sv
-{
 /// GPU-side pinhole camera constants, matching the `Camera` struct in shaders/common.hlsli.
 ///
 /// Each `float3` sits in its own 16-byte lane (the trailing pad scalars), which is the std140-ish cbuffer layout HLSL expects.
 /// So this struct uploads straight into a uniform buffer.
 /// `right_scaled` / `up_scaled` carry the aspect and field-of-view scaling pre-baked, so the raygen just forms `forward + right_scaled * ndc.x - up_scaled * ndc.y`.
-struct camera_gpu
+struct sv::camera_gpu
 {
     tg::vec3f position;
     f32 _pad0 = 0;
@@ -32,7 +30,7 @@ struct camera_gpu
 ///
 /// This is the only projection kind for now.
 /// `aspect_ratio` is a property of the projection, not of the render target — set it from the target size before baking the GPU basis (the view renderer does this).
-struct perspective_projection
+struct sv::perspective_projection
 {
     tg::angle_d vertical_fov = tg::angle_d::make_from_degree(60.0);
     f64 aspect_ratio = 1.0;
@@ -45,7 +43,7 @@ struct perspective_projection
 /// +y to up, +z to forward (left-handed, forward points into the scene, matching the raygen). Build one from
 /// a look-at with `look_rotation` / `look_at`; the default frames the origin from `position`. The GPU basis is
 /// baked by `camera_gpu::from`, taking the aspect ratio from `projection`.
-struct camera
+struct sv::camera
 {
     tg::pos3d position = tg::pos3d(2.2, 1.8, -3.2);
     tg::quat_d orientation = look_rotation(position, tg::pos3d::zero);
@@ -74,4 +72,3 @@ struct camera
         orientation = look_rotation(position, target, up);
     }
 };
-} // namespace sv

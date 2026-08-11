@@ -4,8 +4,6 @@
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh> // sg::context, sg::command_list
 
-namespace sg
-{
 /// Base class for a reusable, self-contained unit of GPU work — a post-process pass, a LUT bake, a mipmap generate, a texture copy.
 /// It owns its own lazy, hot-reload-aware initialization, so a call site only has to ask for it and use it.
 /// Concrete routines derive from the CRTP sg::render_routine (render_routine.hh), which adds the by-type acquire(cmd) entry point;
@@ -31,7 +29,7 @@ namespace sg
 /// the losers of the race block until the winner is done, then see it initialized.
 /// It is the same lock acquire_exclusive hands out, so it guards the derived routine's own state too; see sg::render_routine.
 /// A phase callback therefore must not call back into acquire/acquire_exclusive/prewarm for the same routine.
-class render_routine_base
+class sg::render_routine_base
 {
 public:
     virtual ~render_routine_base() = default;
@@ -83,4 +81,3 @@ private:
 
     cc::mutex<init_state> _init;
 };
-} // namespace sg

@@ -5,6 +5,16 @@
 #include <clean-core/thread/atomic.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 
+namespace slib_test
+{
+class fake_compiler;
+} // namespace slib_test
+
+namespace slib_test
+{
+class fake_compiler;
+} // namespace slib_test
+
 /// A compiler that pretends.
 /// It resolves `#include "x"` lines itself, then turns the flattened text into an sg::compiled_shader whose "bytecode" is that text.
 ///
@@ -18,7 +28,9 @@ using namespace cc::primitive_defines;
 /// Text that makes the fake compiler fail, standing in for a shader that does not build.
 inline constexpr cc::string_view k_broken_source = "!!broken!!";
 
-class fake_compiler final : public slib::shader_compiler
+} // namespace slib_test
+
+class slib_test::fake_compiler final : public slib::shader_compiler
 {
 public:
     fake_compiler(slib::shader_language language, sg::shader_format format) : _language(language), _format(format) {}
@@ -90,4 +102,3 @@ private:
     mutable cc::atomic<i64> _compile_count = {0};
     mutable cc::atomic<i64> _preprocess_count = {0};
 };
-} // namespace slib_test

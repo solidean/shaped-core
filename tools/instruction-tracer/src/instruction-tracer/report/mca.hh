@@ -4,6 +4,17 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <instruction-tracer/fwd.hh>
+
+namespace itrace
+{
+struct mca_bottleneck;
+struct mca_input;
+struct mca_instruction;
+struct mca_port_usage;
+struct mca_result;
+struct mca_summary;
+} // namespace itrace
 
 namespace itrace
 {
@@ -11,9 +22,11 @@ using namespace cc::primitive_defines;
 
 struct trace;
 
+} // namespace itrace
+
 /// Per-instruction timing from llvm-mca, aligned to one trace instruction.
 /// `valid == false` marks a blank row: a trace instruction llvm-mca had no datum for, undecoded or dropped as unparseable.
-struct mca_instruction
+struct itrace::mca_instruction
 {
     bool valid = false;
 
@@ -38,7 +51,7 @@ struct mca_instruction
 };
 
 /// The SummaryView block: steady-state aggregate over `iterations` passes.
-struct mca_summary
+struct itrace::mca_summary
 {
     double ipc = 0;
     double block_rthroughput = 0;
@@ -50,14 +63,14 @@ struct mca_summary
 };
 
 /// One resource named as a bottleneck by -bottleneck-analysis, with its pressure cycle count.
-struct mca_port_usage
+struct itrace::mca_port_usage
 {
     cc::string resource;
     double cycles = 0;
 };
 
 /// The BottleneckAnalysis block: where the modeled cycles went.
-struct mca_bottleneck
+struct itrace::mca_bottleneck
 {
     bool available = false;
     u64 total_cycles = 0;
@@ -73,7 +86,7 @@ struct mca_bottleneck
 /// `instructions` is sized to the *full* trace, aligned 1:1; entries with no mca datum stay `valid == false`.
 /// `per_instruction_valid == false` means the alignment could not be trusted, the survivor count not matching mca's list.
 /// Summary and ports still hold then, but the per-instruction column and waterfall must be suppressed.
-struct mca_result
+struct itrace::mca_result
 {
     bool available = false;
     bool per_instruction_valid = false;
@@ -85,11 +98,14 @@ struct mca_result
 };
 
 /// The asm fed to llvm-mca, plus the fed-line -> trace-index map (undecoded instructions are omitted).
-struct mca_input
+struct itrace::mca_input
 {
     cc::string asm_text;               // ".intel_syntax noprefix\n" + one insn.text per decoded instruction
     cc::vector<u32> fed_trace_indices; // fed_trace_indices[k] = trace instruction index of fed line k
 };
+
+namespace itrace
+{
 
 /// Build the llvm-mca input for a trace.
 /// Undecoded instructions (length == 0 / empty text) are skipped and therefore absent from fed_trace_indices — the caller treats them as having no timing.

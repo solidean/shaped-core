@@ -7,11 +7,9 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 
-namespace sg::backend::dx12
-{
 /// dx12 ray-tracing pipeline: an ID3D12StateObject (DXR raytracing pipeline) assembled from the compiled shader libraries, hit groups, and the pipeline layout's global root signature.
 /// Holds the pipeline layout to keep the root signature alive.
-class dx12_raytracing_pipeline final : public sg::raytracing_pipeline
+class sg::backend::dx12::dx12_raytracing_pipeline final : public sg::raytracing_pipeline
 {
 public:
     /// One DXR shader identifier — D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES (32) opaque bytes.
@@ -39,4 +37,3 @@ public:
     cc::vector<shader_identifier> shader_ids_hit;
     cc::vector<shader_identifier> shader_ids_callable;
 };
-} // namespace sg::backend::dx12

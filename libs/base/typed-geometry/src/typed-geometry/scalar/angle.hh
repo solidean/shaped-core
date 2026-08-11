@@ -1,12 +1,11 @@
 #pragma once
 
 #include <clean-core/container/pair.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/scalar/constants.hh>
 #include <typed-geometry/scalar/fwd.hh>
 #include <typed-geometry/scalar/traits.hh>
 
-namespace tg
-{
 /// A scalar angle — a domain newtype over T whose storage is always radians.
 ///
 /// angle exists to stop radian/degree mix-ups.
@@ -20,7 +19,7 @@ namespace tg
 ///     using namespace tg::literals;
 ///     auto const c = 45_deg_f + 0.5_rad_f;
 template <class T>
-struct angle
+struct tg::angle
 {
     // construction
 public:
@@ -111,6 +110,9 @@ public:
 private:
     T _radians = {};
 };
+
+namespace tg
+{
 
 /// User-defined literals for angles, kept in their own namespace.
 /// tg re-exports them so tg-internal code can write `90_deg_f` directly; downstream code opts in with `using namespace tg::literals;`.

@@ -2,11 +2,10 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/registry.hh>
 
-namespace nx
-{
-struct test_instance
+struct nx::test_instance
 {
     test_declaration const* declaration = nullptr;
 
@@ -17,7 +16,7 @@ struct test_instance
     cc::vector<cc::vector<cc::string>> section_scopes;
 };
 
-struct test_schedule_config
+struct nx::test_schedule_config
 {
     cc::vector<cc::string> filters;
     cc::vector<cc::string> section_filters;
@@ -78,7 +77,7 @@ struct test_schedule_config
     static test_schedule_config create_from_args(int argc, char** argv);
 };
 
-struct test_schedule
+struct nx::test_schedule
 {
     cc::vector<test_instance> instances;
 
@@ -90,5 +89,3 @@ struct test_schedule
 
     void print() const;
 };
-
-} // namespace nx

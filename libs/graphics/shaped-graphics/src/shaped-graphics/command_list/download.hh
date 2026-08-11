@@ -8,12 +8,10 @@
 
 #include <type_traits>
 
-namespace sg
-{
 /// Device→host download facade for a command list, reached as `cmd.download`.
 /// Inline: the copy is recorded into this list, and its bytes are delivered once the submitted list has run.
 /// `ctx.download` is the async counterpart — see libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
-class command_list_download_scope
+class sg::command_list_download_scope
 {
     // Typed-buffer overloads — the preferred form.
     // `buffer<T>` supplies the element type, so `T` is deduced rather than spelled out and the offset / count are in units of that same `T`.
@@ -76,4 +74,3 @@ private:
 
     command_list& _cmd;
 };
-} // namespace sg

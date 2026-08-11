@@ -2,12 +2,11 @@
 
 #include <clean-core/container/span.hh>
 #include <shaped-shader-library/filesystem/filesystem.hh>
+#include <shaped-shader-library/fwd.hh>
 
-namespace slib
-{
 /// One file baked into the binary by the shader-package generator.
 /// Paths are normalized at generation.
-struct embedded_file
+struct slib::embedded_file
 {
     cc::string_view path;
     cc::string_view text;
@@ -18,7 +17,7 @@ struct embedded_file
 ///
 /// Non-owning: `files` and the text it points at must outlive the filesystem.
 /// Generated package data has static storage, which is the intended source.
-class embedded_filesystem final : public filesystem
+class slib::embedded_filesystem final : public filesystem
 {
 public:
     explicit embedded_filesystem(cc::span<embedded_file const> files) : _files(files) {}
@@ -40,4 +39,3 @@ private:
 
     cc::span<embedded_file const> _files;
 };
-} // namespace slib

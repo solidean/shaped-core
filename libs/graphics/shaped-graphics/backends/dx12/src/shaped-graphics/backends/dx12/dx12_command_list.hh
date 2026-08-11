@@ -10,15 +10,14 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 
-namespace sg::backend::dx12
-{
 /// DirectX 12 implementation of sg::command_list.
 /// Owns its allocator and graphics command list, and is handed out already recording.
 /// Buffer and texture transfers stage through the context's inline upload/download systems.
 /// Downloads accumulate here token-less and are enqueued when the list is submitted.
-class dx12_command_list final : public sg::command_list
+class sg::backend::dx12::dx12_command_list final : public sg::command_list
 {
 public:
     // Defined in the .cc: the sg::command_list base needs dx12_context complete to upcast it to sg::context.
@@ -234,4 +233,3 @@ private:
     // Called by raster_draw / raster_draw_indexed just before flush_barriers and the draw.
     void declare_raster_draw_barriers(bool indexed);
 };
-} // namespace sg::backend::dx12

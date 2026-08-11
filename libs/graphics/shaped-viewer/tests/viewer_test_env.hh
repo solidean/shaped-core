@@ -11,6 +11,26 @@
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
+namespace sv_test
+{
+struct env;
+struct rng;
+struct triangle_cloud;
+struct indexed_mesh;
+struct area_light;
+struct cornell_box;
+} // namespace sv_test
+
+namespace sv_test
+{
+struct env;
+struct rng;
+struct triangle_cloud;
+struct indexed_mesh;
+struct area_light;
+struct cornell_box;
+} // namespace sv_test
+
 // Shared setup for shaped-viewer's GPU tests (Windows + DXC only).
 //
 // The generated shader symbols are process-wide globals, and a package may be registered only once per process.
@@ -20,11 +40,16 @@ namespace sv_test
 {
 using namespace cc::primitive_defines;
 
-struct env
+} // namespace sv_test
+
+struct sv_test::env
 {
     slib::shader_library* lib = nullptr; // intentionally leaked: process-wide, lives for the test binary
     bool has_compiler = false;
 };
+
+namespace sv_test
+{
 
 /// The one shader library for this test binary, with sv's and sr's packages registered.
 /// `has_compiler` is false when DXC is not installed — a caller SKIPs, since nothing will compile.
@@ -47,8 +72,10 @@ inline env const& shared_env()
     return e;
 }
 
+} // namespace sv_test
+
 /// A tiny deterministic LCG, so a cloud is reproducible across runs (headless test) yet varied.
-struct rng
+struct sv_test::rng
 {
     u64 state;
     explicit rng(u64 seed) : state(seed != 0 ? seed : 1) {}
@@ -61,11 +88,14 @@ struct rng
     float range(float a, float b) { return a + (b - a) * unit(); }
 };
 
-struct triangle_cloud
+struct sv_test::triangle_cloud
 {
     cc::vector<tg::pos3f> positions;        // non-indexed triangle list (3 per triangle)
     cc::vector<sv::pbr_material> materials; // one per triangle
 };
+
+namespace sv_test
+{
 
 /// A random cloud of `triangle_count` small triangles scattered in a box, each with its own PBR material.
 inline triangle_cloud make_triangle_cloud(int triangle_count, u64 seed = 0x5EED1234u)
@@ -89,13 +119,18 @@ inline triangle_cloud make_triangle_cloud(int triangle_count, u64 seed = 0x5EED1
     return out;
 }
 
+} // namespace sv_test
+
 /// A welded indexed triangle list: the same geometry as its source, with duplicate positions collapsed onto
 /// one vertex — so the index buffer genuinely shares vertices (both triangles of a quad land on 4 positions).
-struct indexed_mesh
+struct sv_test::indexed_mesh
 {
     cc::vector<tg::pos3f> positions;
     cc::vector<u32> indices;
 };
+
+namespace sv_test
+{
 
 /// Welds `triangle_list` (3 positions per triangle) into an indexed_mesh, preserving triangle order — so a material set indexed by PrimitiveIndex() still lines up.
 /// O(n²): test-sized meshes only.
@@ -118,10 +153,12 @@ inline indexed_mesh weld_triangle_list(cc::span<tg::pos3f const> triangle_list)
     return out;
 }
 
+} // namespace sv_test
+
 /// The rectangular ceiling light of a Cornell box.
 /// The geometry (a quad in `positions`) is what emits.
 /// These fields let the caller fill the path tracer's pt_frame_constants_gpu so its next-event estimation samples the exact same rectangle.
-struct area_light
+struct sv_test::area_light
 {
     tg::vec3f center;   // rect center in world space (on the ceiling plane)
     float half_x;       // half-extent along world x
@@ -130,12 +167,15 @@ struct area_light
 };
 
 /// A Cornell box as a non-indexed triangle list with per-triangle materials, plus its light description.
-struct cornell_box
+struct sv_test::cornell_box
 {
     cc::vector<tg::pos3f> positions;        // non-indexed triangle list (3 per triangle)
     cc::vector<sv::pbr_material> materials; // one per triangle
     area_light light;
 };
+
+namespace sv_test
+{
 
 /// Appends a quad (a-b-c + a-c-d) carrying material `m` to a Cornell box.
 /// Winding is irrelevant — the closest-hit shades two-sided.

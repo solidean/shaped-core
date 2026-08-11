@@ -128,10 +128,12 @@ template <class T, class U = T>
     return old_val;
 }
 
+} // namespace cc
+
 /// Default transparent key equality for the node-chaining associative containers (cc::map / cc::set): a == b.
 /// Heterogeneous when the key type defines operator== against the probe type (as string does against
 /// string_view).
-struct default_equal
+struct cc::default_equal
 {
     template <class A, class B>
     [[nodiscard]] constexpr bool operator()(A const& a, B const& b) const
@@ -139,6 +141,9 @@ struct default_equal
         return a == b;
     }
 };
+
+namespace cc
+{
 
 // =========================================================================================================
 // Comparison and clamping
@@ -431,12 +436,14 @@ template <class T>
 // Callable utilities
 // =========================================================================================================
 
+} // namespace cc
+
 /// Empty struct representing void as a regular value
 /// Allows treating void-returning functions uniformly with value-returning functions
 /// Usage:
 ///   cc::unit do_something() { side_effect(); return {}; }
 ///   auto result = regular_invoke(f);  // returns unit{} if f returns void
-struct unit
+struct cc::unit
 {
 };
 
@@ -452,7 +459,7 @@ struct unit
 ///   f(5.0f);    // calls float overload -> 15.0f
 ///   f("hello"); // calls string overload -> 5
 template <class... Fs>
-struct overloaded : Fs...
+struct cc::overloaded : Fs...
 {
     overloaded(Fs... fs) : Fs(fs)... {}
     using Fs::operator()...;
@@ -464,7 +471,7 @@ struct overloaded : Fs...
 ///   cc::void_function{}();           // returns void
 ///   cc::void_function{}(1, 2, 3);    // returns void
 ///   std::visit(cc::void_function{}, variant);  // ignores all alternatives
-struct void_function
+struct cc::void_function
 {
     template <class... Args>
     constexpr void operator()(Args&&...) const noexcept
@@ -479,7 +486,7 @@ struct void_function
 ///   int& ref = cc::identify_function{}(x);        // returns lvalue reference
 ///   int&& rval = cc::identify_function{}(10);     // returns rvalue reference
 ///   auto val = cc::identify_function{}(x);        // copies x
-struct identify_function
+struct cc::identify_function
 {
     template <class T>
     constexpr T&& operator()(T&& arg) const noexcept
@@ -495,7 +502,7 @@ struct identify_function
 ///   cc::constant_function<42>{}(1, 2, 3);    // returns 42
 ///   cc::constant_function<3.14f>{}("test");  // returns 3.14f
 template <auto C>
-struct constant_function
+struct cc::constant_function
 {
     template <class... Args>
     constexpr auto operator()(Args&&...) const noexcept
@@ -511,7 +518,7 @@ struct constant_function
 ///   cc::projection_function<1>{}(10, 20, 30);     // returns second arg: 20
 ///   cc::projection_function<2>{}(10, 20, 30);     // returns third arg: 30
 template <unsigned I>
-struct projection_function
+struct cc::projection_function
 {
     template <class... Args>
     constexpr auto&& operator()(Args&&... args) const noexcept
@@ -531,6 +538,9 @@ private:
             return projection_function::get_nth<Idx - 1>(cc::forward<Ts>(rest)...);
     }
 };
+
+namespace cc
+{
 
 /// Invoke a callable with perfect forwarding, supporting member pointers
 /// Handles three cases:
@@ -844,6 +854,8 @@ struct placement_new_tag
 ///   T* arr = new(cc::placement_new, memory) T[5];
 [[maybe_unused]] static constexpr impl::placement_new_tag placement_new;
 
+} // namespace cc
+
 /// Uninitialized storage for a value of type T
 /// Provides a union wrapper that does not default-construct or destruct T
 /// Useful for manual lifetime management in containers like optional, variant, etc.
@@ -863,7 +875,7 @@ struct placement_new_tag
 ///       bool _has_value = false;
 ///   };
 template <class T>
-union storage_for // NOLINT(cppcoreguidelines-special-member-functions)
+union cc::storage_for // NOLINT(cppcoreguidelines-special-member-functions)
 {
     // empty dtor in order to not initialize value but preserve triviality
     ~storage_for()
@@ -877,6 +889,9 @@ union storage_for // NOLINT(cppcoreguidelines-special-member-functions)
     byte dummy = {};
     T value;
 };
+
+namespace cc
+{
 
 /// Copy bytes from source to destination
 /// Performs the following operations in order:
@@ -934,6 +949,8 @@ deferred<F> operator+(deferred_tag, F&& f)
 // Iterator utilities
 // =========================================================================================================
 
+} // namespace cc
+
 /// A generic end-of-range sentinel type
 /// Used as a lightweight alternative to a full iterator for range end
 /// Usage:
@@ -945,9 +962,12 @@ deferred<F> operator+(deferred_tag, F&& f)
 ///       bool operator!=(cc::sentinel) const { return is_still_valid(); }
 ///       // ... other iterator operations ...
 ///   };
-struct sentinel
+struct cc::sentinel
 {
 };
+
+namespace cc
+{
 
 /// Get begin iterator from container (mutable version)
 /// Calls c.begin() on any container that provides it
@@ -1019,12 +1039,14 @@ template <class T, size_t N>
 // Named range arguments
 // =========================================================================================================
 
+} // namespace cc
+
 /// Named range argument: an offset plus a count, both in container-index units (isize).
 /// Intended as a "named arg" for range-taking APIs (e.g. span::subspan, string::subview/replace).
 /// Has no default member initializers on purpose, so designated initializers must name both fields.
 /// Usage (designated initializers):
 ///   auto s = span.subspan({.offset = 2, .size = 3});
-struct offset_size
+struct cc::offset_size
 {
     isize offset;
     isize size;
@@ -1035,13 +1057,12 @@ struct offset_size
 /// Has no default member initializers on purpose, so designated initializers must name both fields.
 /// Usage (designated initializers):
 ///   auto s = span.subspan({.start = 2, .end = 5});
-struct start_end
+struct cc::start_end
 {
     isize start;
     isize end;
 };
 
-} // namespace cc
 
 // =========================================================================================================
 // Implementation

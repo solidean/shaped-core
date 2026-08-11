@@ -6,21 +6,21 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/signature.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <type_traits>
 #include <typeindex>
 #include <typeinfo>
 
-namespace nx::fuzz
-{
 /// A named, typed operation in a fuzz test: a value seed, a mutating/producing call, or an invariant.
 ///
 /// Created via test::add_op / add_value / add_invariant, then configured with the chainable builder
 /// (execute_at_least/at_most/once, when(...)). The same object also evaluates directly — eval(...) —
 /// which is what emitted regression code uses to replay a recorded program.
-struct fuzz_operation
+struct nx::fuzz::fuzz_operation
 {
     /// Upper bound used when no explicit at-most is set ("effectively unbounded").
     static constexpr int unbounded = 1 << 30;
@@ -160,4 +160,3 @@ private:
     int _at_least = 50;
     int _at_most = unbounded;
 };
-} // namespace nx::fuzz

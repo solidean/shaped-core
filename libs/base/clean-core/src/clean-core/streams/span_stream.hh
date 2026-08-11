@@ -76,11 +76,9 @@ private:
 };
 } // namespace cc::impl
 
-namespace cc
-{
 /// Read adapter over an immutable byte span.
 /// Hands out a seekable_read_stream.
-class span_read_stream_adapter : public impl::span_adapter_base<seekable_read_stream>
+class cc::span_read_stream_adapter : public impl::span_adapter_base<seekable_read_stream>
 {
 public:
     explicit span_read_stream_adapter(cc::span<byte const> data)
@@ -92,7 +90,7 @@ public:
 
 /// Write adapter over a mutable byte span, handing out a seekable_write_stream.
 /// Bounded: the sink is full once curr == end, and writing past it errors.
-class span_write_stream_adapter : public impl::span_adapter_base<seekable_write_stream>
+class cc::span_write_stream_adapter : public impl::span_adapter_base<seekable_write_stream>
 {
 public:
     explicit span_write_stream_adapter(cc::span<byte> data) : span_adapter_base(data.data(), data.size()) {}
@@ -100,9 +98,8 @@ public:
 
 /// Read+write adapter over a mutable byte span, handing out a seekable_read_write_stream.
 /// Reads and writes share the single cursor within [base, base + size].
-class span_read_write_stream_adapter : public impl::span_adapter_base<seekable_read_write_stream>
+class cc::span_read_write_stream_adapter : public impl::span_adapter_base<seekable_read_write_stream>
 {
 public:
     explicit span_read_write_stream_adapter(cc::span<byte> data) : span_adapter_base(data.data(), data.size()) {}
 };
-} // namespace cc

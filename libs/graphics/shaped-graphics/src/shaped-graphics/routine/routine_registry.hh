@@ -22,6 +22,8 @@ template <class T>
 }
 } // namespace impl
 
+} // namespace sg
+
 /// Per-context storage of render-routine instances, reached as `ctx.routines`.
 /// A routine is a per-context singleton:
 /// the first acquire of a given type creates and registers it here (lazy self-registration — no explicit registration, no by-name lookup),
@@ -34,7 +36,7 @@ template <class T>
 /// Map access is guarded, so acquiring is safe from parallel command-list recording.
 /// What a routine holds itself is guarded by the routine's own lock instead, which acquire_exclusive hands to its caller (see sg::render_routine).
 /// Do not clear()/evict() a registry while another thread is still recording against the same context.
-class routine_registry
+class sg::routine_registry
 {
 public:
     /// Drop every instance, releasing their cached GPU resources.
@@ -86,4 +88,3 @@ private:
 
     cc::mutex<routine_map> _entries;
 };
-} // namespace sg

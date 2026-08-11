@@ -2,16 +2,15 @@
 
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory/memory_heap.hh>
 
 #include <memory>
 
-namespace sg::backend::dx12
-{
 /// dx12 memory_heap: a GPU-resident ID3D12Heap (DEFAULT, buffers-only) that placed buffers sub-allocate into via CreatePlacedResource.
 /// Reports per-buffer requirements from GetResourceAllocationInfo.
 /// Keeps its own device ref, so it can answer queries independently.
-class dx12_memory_heap final : public sg::memory_heap
+class sg::backend::dx12::dx12_memory_heap final : public sg::memory_heap
 {
 public:
     /// Creates a buffers-only DEFAULT heap.
@@ -30,4 +29,3 @@ protected:
     [[nodiscard]] sg::memory_requirements query_buffer_requirements(isize size_in_bytes,
                                                                     sg::buffer_usage usage) const override;
 };
-} // namespace sg::backend::dx12

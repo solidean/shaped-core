@@ -6,13 +6,11 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg
-{
 /// The shaders of one hit group.
 /// `closest_hit` and `any_hit` run for triangle geometry; `intersection` makes the group procedural, for custom primitives.
 /// Whether `intersection` is present picks the hit-group type: a triangle BLAS must not run a group that has one, and a procedural BLAS must.
 /// A mismatch is undefined behavior the backend may not catch.
-struct hit_shader
+struct sg::hit_shader
 {
     cc::optional<compiled_shader> closest_hit;
     cc::optional<compiled_shader> any_hit;
@@ -24,7 +22,7 @@ struct hit_shader
 ///
 /// Register shaders with the `add_*` helpers, which return the handle to reference the shader by — its slot in the matching vector.
 /// That is the order a raytracing_shader_table later maps to table indices.
-struct raytracing_pipeline_description
+struct sg::raytracing_pipeline_description
 {
     pipeline_layout_handle layout;
 
@@ -57,7 +55,7 @@ struct raytracing_pipeline_description
 
 /// A ready-to-trace ray-tracing pipeline, built from a raytracing_pipeline_description and held via raytracing_pipeline_handle.
 /// Bind it with cmd.raytracing.bind_pipeline, and dispatch it via cmd.raytracing.dispatch_rays through a raytracing_shader_table.
-class raytracing_pipeline
+class sg::raytracing_pipeline
 {
 public:
     virtual ~raytracing_pipeline();
@@ -69,4 +67,3 @@ public:
 protected:
     raytracing_pipeline() = default;
 };
-} // namespace sg

@@ -5,10 +5,11 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/fwd.hh> // std::decay_t
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/thread/async_node.hh>
 
-#include <type_traits> // std::decay_t
+#include <type_traits>
 
 // cc::async<T, E = async_error> — a low-overhead value/dataflow async for compute-heavy dependency graphs.
 //
@@ -174,12 +175,14 @@ struct async_manual_tag
 };
 } // namespace impl
 
+} // namespace cc
+
 /// The normal composable async handle, always used through shared_async<T, E> — the node itself is non-copyable and immovable.
 /// E is the failure-channel type, defaulting to async_error.
 /// Create with cc::make_async_lazy / cc::make_async_scheduled, whose variadic dependency form covers single- and multi-dependency transforms, or with the make_async_from_* factories.
 /// Drive with cc::async_blocking_get_singlethreaded.
 template <class T, class E>
-struct async : impl::async_typed_node<T, E>
+struct cc::async : impl::async_typed_node<T, E>
 {
     /// Install this concrete type's ops for the intrusive free and typed value/error teardown paths.
     /// Nodes are only ever created via make_async_* / cc::make_shared<async<T, E>>, which allocate exactly node_class_index_for<async<T, E>>(), matching the ops' class_index.
@@ -291,7 +294,7 @@ public:
 /// The T/E-agnostic half of the compute-step context — what the poll loop and the type-erased stored frame name.
 /// It reads dependencies and reports wait/yield; the typed async_context<T, E> wraps it to add the value/error resolves.
 /// Not owned by the frame, and valid only for the duration of a single step.
-struct async_context_base
+struct cc::async_context_base
 {
     async_node_base* current = nullptr;
     async_scheduler* scheduler = nullptr;
@@ -324,7 +327,7 @@ public:
 /// It carries no extra state — a thin wrapper the frame closure builds around the async_context_base for the step, adding the value/error resolves that need T/E.
 /// Inherits require / wait_for_dependencies / yield.
 template <class T, class E>
-struct async_context : async_context_base
+struct cc::async_context : async_context_base
 {
     /// Wrap the step's base context (copies the two pointers).
     async_context(async_context_base const& base) : async_context_base(base) {}
@@ -388,6 +391,9 @@ public:
         return resolve_to_error(async_error::make_error(cc::move(e)));
     }
 };
+
+namespace cc
+{
 
 // ============================================================================
 // dependency-argument plumbing (for the variadic make_async_* forms)

@@ -4,8 +4,6 @@
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-namespace sv
-{
 /// Light types a view holds.
 ///
 /// A view keeps one typed list per kind (view::area_lights, and more as they land), rather than a single tagged list.
@@ -19,7 +17,7 @@ namespace sv
 /// The rect is given directly in world space: a center plus the two half-extent vectors spanning it, so a point on it is `center + s * half_extent_u + t * half_extent_v` for s, t in [-1, 1].
 /// The emitting face is the one `cross(half_extent_u, half_extent_v)` points along — swap the two half-extents to flip it.
 /// The two must not be parallel: a rect collapsed to a line or a point has no normal.
-struct area_light
+struct sv::area_light
 {
     tg::pos3f center;
     tg::vec3f half_extent_u;
@@ -38,7 +36,7 @@ struct area_light
 /// A tighter packing is available when the block starts to matter (many lights per view, or the cbuffer running out of room):
 /// `normal` is redundant — the integrator can form `normalize(cross(u, v))` itself — and the five pad scalars are free lanes the remaining fields could fold into, taking 80 bytes to 64 or less.
 /// It stays spelled out for now: one lane per vector reads directly against the shader struct.
-struct area_light_gpu
+struct sv::area_light_gpu
 {
     tg::vec3f center;
     f32 _pad0 = 0;
@@ -56,4 +54,3 @@ struct area_light_gpu
     /// A negative `emission` component means the light never got one: it passes through unchanged, reported once to stderr.
     [[nodiscard]] static area_light_gpu from(area_light const& light);
 };
-} // namespace sv

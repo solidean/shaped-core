@@ -8,12 +8,10 @@
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg::backend::dx12
-{
 /// dx12 pipeline_layout: the ID3D12RootSignature composed from an ordered list of binding_group_layouts.
 /// Each group contributes its CBV/SRV/UAV and/or SAMPLER descriptor table(s) at its own root-parameter slot, and its static samplers are baked in.
 /// `groups[set]` gives the root-parameter indices the command list binds a group at slot `set` to.
-class dx12_pipeline_layout final : public sg::pipeline_layout
+class sg::backend::dx12::dx12_pipeline_layout final : public sg::pipeline_layout
 {
 public:
     /// One group slot: the group layout bound here, plus the root-parameter indices of its descriptor tables.
@@ -41,4 +39,3 @@ public:
     int inline_constants_root_param = -1; ///< root-parameter index of the 32-bit-constants param, -1 if none
     int inline_constants_num_32bit = 0;   ///< block_size / 4, for full-replace size validation
 };
-} // namespace sg::backend::dx12

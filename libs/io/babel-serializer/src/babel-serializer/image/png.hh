@@ -8,6 +8,11 @@
 #include <clean-core/streams/stream.hh> // cc::read_stream / cc::write_stream
 #include <clean-core/string/string.hh>
 
+namespace babel::png
+{
+struct write_options;
+} // namespace babel::png
+
 // Low-level PNG codec (image/).
 //
 // The faithful, format-shaped view of a PNG: decoded pixels PLUS the PNG's own metadata.
@@ -51,8 +56,10 @@ enum class component : u8
     u16,
 };
 
+} // namespace babel::png
+
 /// One text chunk (tEXt / zTXt / iTXt). [todo] not populated yet — needs a native chunk walker.
-struct text_entry
+struct babel::png::text_entry
 {
     cc::string keyword;
     cc::string text;
@@ -62,7 +69,7 @@ struct text_entry
 };
 
 /// Physical pixel dimensions (pHYs chunk). [todo]
-struct physical_dimensions
+struct babel::png::physical_dimensions
 {
     int ppu_x = 0; // pixels per unit, x axis
     int ppu_y = 0; // pixels per unit, y axis
@@ -71,7 +78,7 @@ struct physical_dimensions
 
 /// A faithful native decode of a PNG.
 /// Read-once; deliberately not built for mutation.
-struct data
+struct babel::png::data
 {
     // --- populated now ---
     int width = 0;
@@ -95,6 +102,9 @@ struct data
     [[nodiscard]] bool is_empty() const { return width <= 0 || height <= 0; }
 };
 
+namespace babel::png
+{
+
 // reading
 // -------------------------------------------------------------------------------------------------
 
@@ -108,12 +118,17 @@ struct data
 // writing
 // -------------------------------------------------------------------------------------------------
 
+} // namespace babel::png
+
 /// PNG encode knobs.
 /// PNG is lossless, and babel exposes no encoder tuning today.
-struct write_options
+struct babel::png::write_options
 {
     // [todo] int compression_level once a non-stb encoder lands
 };
+
+namespace babel::png
+{
 
 /// Encode `img`'s pixels to PNG file bytes.
 /// Metadata fields stb cannot emit are ignored (see the header note).

@@ -2,12 +2,16 @@
 
 #include <clean-core/container/span.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
 namespace itrace
 {
+class instruction_decoder;
+} // namespace itrace
+
 /// Turns recorded instruction bytes into text via Zydis.
 /// Pure: no debuggee, no symbols, no I/O — the bytes were captured live, so decoding them is just a function.
-class instruction_decoder
+class itrace::instruction_decoder
 {
 public:
     /// Decode one instruction's bytes, filling text/category and the is_atomic / is_indirect / reads_memory / writes_memory facts.
@@ -17,6 +21,9 @@ public:
     /// decode_one over a whole trace.
     void decode(cc::span<recorded_instruction> instructions) const;
 };
+
+namespace itrace
+{
 
 /// True for `syscall` / `sysenter` / `int 0x2e` — the user-to-kernel transitions we refuse to single-step through.
 /// Matches raw bytes, so it works before anything is decoded.

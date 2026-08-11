@@ -35,6 +35,8 @@ enum class vertex_attribute_format
     rgba8_uint,  // DX12 R8G8B8A8_UINT  / Vk R8G8B8A8_UINT
 };
 
+} // namespace sg
+
 /// One attribute pulled from a vertex buffer.
 /// It names which shader input it feeds: `semantic` + `semantic_index`, matched via reflection.
 /// Plus its component format, its byte offset within the vertex, and the bound buffer (`slot`) it comes from.
@@ -43,7 +45,7 @@ enum class vertex_attribute_format
 /// Location is the only cross-language identity: SPIR-V, WGSL and Metal all match by it.
 /// The semantic then moves into compiled_shader's reflected I/O signature, and only the dx12 backend resolves location -> semantic.
 /// See libs/graphics/shaped-graphics/docs/TODO.md.
-struct vertex_attribute
+struct sg::vertex_attribute
 {
     cc::string semantic;    ///< HLSL semantic (e.g. "POSITION") the input is matched by
     u32 semantic_index = 0; ///< semantic index (matrix rows / arrays)
@@ -54,7 +56,7 @@ struct vertex_attribute
 
 /// One bound vertex buffer: the stride between consecutive vertices and whether it advances per vertex
 /// or per instance.
-struct vertex_input_slot
+struct sg::vertex_input_slot
 {
     isize stride = 0;          ///< bytes between consecutive elements in this buffer
     bool per_instance = false; ///< false: advance per vertex; true: advance per instance
@@ -62,7 +64,7 @@ struct vertex_input_slot
 
 /// The complete vertex-input layout: one `slots` entry per bound vertex buffer, plus the flat list of `attributes`, each naming its slot.
 /// Fill it directly, or build it from vertex types via `create`.
-struct vertex_input_layout
+struct sg::vertex_input_layout
 {
     cc::small_vector<vertex_input_slot, 8> slots;
     cc::vector<vertex_attribute> attributes;
@@ -76,12 +78,15 @@ struct vertex_input_layout
 
 /// One vertex type's contribution to a layout: its stride, its attributes (with `slot` unset — `create` assigns it), and whether it is a per-instance buffer.
 /// The value a `vertex_layout_of<V>` returns.
-struct vertex_type_layout
+struct sg::vertex_type_layout
 {
     isize stride = 0;
     bool per_instance = false;
     cc::vector<vertex_attribute> attributes;
 };
+
+namespace sg
+{
 
 /// Customization point for `vertex_input_layout::create<V>()`: specialize for a vertex struct `V` with a
 /// `static vertex_type_layout get()`. Example:

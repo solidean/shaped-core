@@ -4,11 +4,9 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
 
-namespace cc
-{
 /// A 128-bit hash value, stored as two u64 limbs.
 /// Structurally comparable; the default operator<=> orders lexicographically by (low, high).
-struct hash128
+struct cc::hash128
 {
     u64 low = 0;
     u64 high = 0;
@@ -24,4 +22,3 @@ struct hash128
     /// A hash128 is already a hash, so its low limb is surfaced as the 64-bit hash.
     [[nodiscard]] friend constexpr u64 hash(hash128 const& v) { return v.low; }
 };
-} // namespace cc

@@ -18,9 +18,7 @@
 /// Built for reuse: clear() resets the length without releasing the allocation, so the buffer stays hot for the next build.
 /// thread_local_scratch() hands out a per-thread instance for exactly this.
 
-namespace cc
-{
-class byte_stream_builder
+class cc::byte_stream_builder
 {
 public:
     /// An empty per-thread builder, cleared on each call — amortizes allocations when building a local blob to hash.
@@ -95,4 +93,3 @@ public:
 private:
     cc::vector<byte> _buffer;
 };
-} // namespace cc

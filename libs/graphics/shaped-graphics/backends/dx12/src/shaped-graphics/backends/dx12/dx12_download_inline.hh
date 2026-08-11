@@ -16,12 +16,10 @@
 #include <atomic>
 #include <memory>
 
-namespace sg::backend::dx12
-{
 /// bytes_waiter for an inline download: ready once the download actor has copied the readback bytes into the destination.
 /// wait() can only block after the recording list has been submitted — blocking earlier would deadlock the very thread that must submit.
 /// A dropped recording list cancels the download: its future never becomes ready, and wait() reports failure.
-class dx12_download_waiter final : public sg::bytes_waiter
+class sg::backend::dx12::dx12_download_waiter final : public sg::bytes_waiter
 {
 public:
     /// Set true when the recording command list is submitted; gates wait().
@@ -50,7 +48,7 @@ private:
 /// The actor waits for `token` on the submission fence, then runs `deferred_cpu_copy` if `pin` is still alive.
 /// A dropped future expires the pin and cancels the copy.
 /// It then marks `waiter` ready and releases one count from `epoch_copies`, the per-epoch tally gating ring reclaim.
-struct dx12_download_copy_job
+struct sg::backend::dx12::dx12_download_copy_job
 {
     sg::submission_token token = sg::submission_token::not_submitted;
     cc::unique_function<void()> deferred_cpu_copy;
@@ -67,7 +65,7 @@ struct dx12_download_copy_job
 /// So a download completes without advancing the epoch.
 /// Ring space is reclaimed at **epoch granularity**, never per submission: each epoch carries an outstanding-copy counter, and its whole span frees when that counter hits zero.
 /// Why that coarsening is load-bearing under concurrent recording: libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
-class dx12_download_inline_system
+class sg::backend::dx12::dx12_download_inline_system
 {
 public:
     explicit dx12_download_inline_system(dx12_context& ctx) : _ctx(ctx) {}
@@ -211,4 +209,3 @@ private:
 
     cc::unique_ptr<cc::threaded_actor<dx12_download_copy_job>> _actor;
 };
-} // namespace sg::backend::dx12

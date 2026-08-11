@@ -11,6 +11,13 @@ namespace sv
 using namespace cc::primitive_defines;
 
 // vocabulary
+// GPU resource managers (see resources/resource_managers.hh)
+struct resource_budget;
+struct manager_config;
+struct mesh_record;
+struct material_record;
+struct scene_resources_config;
+
 struct gpu_boolean;
 struct view_id;
 struct camera;

@@ -8,16 +8,15 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/fwd.hh>
 
 #include <cstring>
 
-namespace sg::backend::dx12
-{
 /// A window inside the persistently-mapped READBACK ring buffer, handed to execute_next_job.
 /// The GPU copies into [offset, offset + size); the deferred CPU copy later reads from base + offset.
 /// `base` points at byte 0 of the mapped buffer.
 /// Non-owning.
-struct dx12_download_allocation
+struct sg::backend::dx12::dx12_download_allocation
 {
     ID3D12Resource* buffer = nullptr;
     byte const* base = nullptr;
@@ -26,7 +25,7 @@ struct dx12_download_allocation
 };
 
 /// The CPU-side move of one chunk out of the readback buffer, deferred until the GPU copy completes.
-struct dx12_pending_copy
+struct sg::backend::dx12::dx12_pending_copy
 {
     cc::unique_function<void()> deferred_cpu_copy;
     isize bytes = 0;
@@ -34,7 +33,7 @@ struct dx12_pending_copy
 
 /// Records the readback copy commands for one resource through the inline READBACK ring buffer, hiding buffer vs texture.
 /// Mirrors dx12_resource_upload, except that each job also yields a deferred CPU copy to run once the GPU work has finished.
-struct dx12_resource_download
+struct sg::backend::dx12::dx12_resource_download
 {
     virtual ~dx12_resource_download() = default;
 
@@ -57,7 +56,7 @@ struct dx12_resource_download
 /// Resumable — each execute_next_job reads as much as the window holds and yields that chunk's deferred copy.
 /// A read larger than the window therefore splits across successive calls.
 /// `dst` must outlive every deferred copy; the future's pin is what keeps it alive.
-struct dx12_buffer_download final : dx12_resource_download
+struct sg::backend::dx12::dx12_buffer_download final : dx12_resource_download
 {
     dx12_buffer_download(dx12_buffer const& src, isize src_offset, cc::span<byte> dst)
       : dx12_buffer_download(src._resource.Get(), src_offset, dst)
@@ -108,7 +107,7 @@ private:
 /// A region larger than the window, or one straddling the seam, splits across successive calls.
 /// The driver emits the copy_src barrier.
 /// `dst` must outlive every deferred copy; the future's pin is what keeps it alive.
-struct dx12_texture_download final : dx12_resource_download
+struct sg::backend::dx12::dx12_texture_download final : dx12_resource_download
 {
     dx12_texture_download(ID3D12Resource* src, dx12_texture_footprint const& fp, cc::span<byte> dst)
       : _src(src), _fp(fp), _dst(dst)
@@ -209,4 +208,3 @@ private:
     cc::span<byte> _dst;
     isize _rows_done = 0; // padded staging rows read so far (flat over slices)
 };
-} // namespace sg::backend::dx12

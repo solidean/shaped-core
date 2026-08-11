@@ -21,6 +21,8 @@ enum class texture_dimension : u8
     d3, ///< width + height + depth
 };
 
+} // namespace sg
+
 /// The immutable shape of a texture: everything a backend needs to allocate the GPU resource.
 /// Shape is derived, not duplicated in redundant flags — libs/graphics/shaped-graphics/docs/concepts/textures.md has the reasoning.
 ///   - `dimension` alone decides which extents are meaningful: d1 -> width, d2 -> +height, d3 -> +depth.
@@ -28,7 +30,7 @@ enum class texture_dimension : u8
 ///   - `array_layers` is nullopt for a non-array texture and a count, 1 included, for an array.
 ///     So a plain 2D texture is distinct from a single-slice 2D array, with no separate flag to keep in step.
 ///   - `is_cube` is orthogonal: a cube array is `is_cube` plus `array_layers = N`, which is `6 * N` faces internally.
-struct texture_description
+struct sg::texture_description
 {
     pixel_format format = pixel_format::undefined;
     texture_dimension dimension = texture_dimension::d2;
@@ -59,7 +61,7 @@ struct texture_description
 /// The typed `texture<Traits>` wrapper (texture.hh) adds shape-checked, concept-gated accessors on top.
 ///
 /// Abstract: a backend subclasses it and owns the GPU resource, reading the description below directly.
-class raw_texture : public std::enable_shared_from_this<raw_texture>
+class sg::raw_texture : public std::enable_shared_from_this<raw_texture>
 {
 public:
     virtual ~raw_texture();
@@ -152,4 +154,3 @@ protected:
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
 };
-} // namespace sg

@@ -6,10 +6,8 @@
 
 #include <memory>
 
-namespace sr
-{
 /// How an imgui_context is created.
-struct imgui_context_description
+struct sr::imgui_context_description
 {
     /// Whether an imgui window dragged outside the main one becomes its own OS window.
     ///
@@ -44,7 +42,7 @@ struct imgui_context_description
 ///
 /// Move-only, and destroying it destroys the ImGui context.
 /// ImGui keeps one process-global current context, so only one of these may exist at a time.
-class imgui_context
+class sr::imgui_context
 {
     // construction
 public:
@@ -149,4 +147,3 @@ private:
     /// begin_frame asserts on it, so a caller who never wires update_viewports gets told rather than losing all mouse hit-testing silently.
     bool _viewport_update_pending = false;
 };
-} // namespace sr

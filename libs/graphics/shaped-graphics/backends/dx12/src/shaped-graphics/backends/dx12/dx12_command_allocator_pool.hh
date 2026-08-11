@@ -4,22 +4,21 @@
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/fwd.hh>
 
 #include <array>
 
-namespace sg::backend::dx12
-{
 /// A command allocator tagged with the queue type it was created for.
 /// The type is fixed at creation — D3D12 requires it to match the lists recorded onto it — so the allocator must be routed back to that queue's free pool.
 /// An allocator can only be reset once every list sourced from it has finished on the GPU, which is why it is epoch-gated.
-struct dx12_pooled_allocator
+struct sg::backend::dx12::dx12_pooled_allocator
 {
     ComPtr<ID3D12CommandAllocator> allocator;
     D3D12_COMMAND_LIST_TYPE queue = D3D12_COMMAND_LIST_TYPE_DIRECT;
 };
 
 /// A freshly acquired allocator paired with an open (recording) command list.
-struct dx12_acquired_command_list
+struct sg::backend::dx12::dx12_acquired_command_list
 {
     dx12_pooled_allocator allocator;
     ComPtr<ID3D12GraphicsCommandList> list;
@@ -34,7 +33,7 @@ struct dx12_acquired_command_list
 ///
 /// Thread-safe: create / submit / drop run concurrently.
 /// Each queue has its own mutex, so recording on different queues never contends.
-class dx12_command_allocator_pool
+class sg::backend::dx12::dx12_command_allocator_pool
 {
 public:
     explicit dx12_command_allocator_pool(dx12_context& ctx) : _ctx(ctx) {}
@@ -90,4 +89,3 @@ private:
 
     std::array<cc::mutex<per_queue_pool>, queue_count> _by_queue;
 };
-} // namespace sg::backend::dx12

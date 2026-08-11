@@ -15,12 +15,10 @@
 #include <atomic>
 #include <memory>
 
-namespace sg::backend::dx12
-{
 /// bytes_waiter for an async download: ready once the copy actor has memcpy'd the readback bytes into the destination.
 /// There is no "submitted" gate, unlike the inline path — an async download is always handed to the actor.
 /// The actor drains every window before it sleeps, so a blocking wait always makes progress.
-class dx12_async_download_waiter final : public sg::bytes_waiter
+class sg::backend::dx12::dx12_async_download_waiter final : public sg::bytes_waiter
 {
 public:
     [[nodiscard]] bool wait() override
@@ -37,7 +35,7 @@ public:
 /// A caller that dropped the future before the actor reached this job leaves `pin` expired, and the copy is skipped.
 /// Its `completion_value` is signaled anyway, so a later writer waiting on it never hangs.
 /// `wait_token` defers the read behind the last direct-queue list that used the buffer, so it reads committed bytes.
-struct dx12_async_download_job
+struct sg::backend::dx12::dx12_async_download_job
 {
     // Exactly one source is set: a buffer (`buffer_source` + `src_offset`/`size`) or a texture (`texture_source` + `footprint`).
     // Both are held strong across the read, so the storage survives it.
@@ -69,7 +67,7 @@ struct dx12_async_download_job
 /// A later direct-queue list that WRITES the buffer waits on the completion fence at submit.
 /// The system owns one copy command list plus one allocator per window slot, cycled on the window fence — deliberately not the epoch-gated pool.
 /// See libs/graphics/shaped-graphics/docs/concepts/download.async.md.
-class dx12_download_async_system
+class sg::backend::dx12::dx12_download_async_system
 {
 public:
     explicit dx12_download_async_system(dx12_context& ctx) : _ctx(ctx) {}
@@ -135,4 +133,3 @@ private:
 
     cc::unique_ptr<cc::threaded_actor<dx12_async_download_job>> _actor;
 };
-} // namespace sg::backend::dx12

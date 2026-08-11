@@ -4,7 +4,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/fuzz/executed_operation.hh>
+#include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/operation.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
@@ -19,15 +21,13 @@ struct assertion_failure
 };
 } // namespace nx::fuzz::impl
 
-namespace nx::fuzz
-{
 /// The runtime model of a fuzz test: types and operations flattened into dense, integer-indexed
 /// tables, plus the execution of a single recorded step against a mutable state.
 ///
 /// The machine is built once from the user's operations and is then immutable; all per-run data
 /// lives in `state`. Operations communicate only through slots, never through object identity,
 /// which is what makes runs reproducible, analyzable, and minimizable.
-struct fuzz_machine
+struct nx::fuzz::fuzz_machine
 {
     struct op_info
     {
@@ -105,4 +105,3 @@ private:
     cc::vector<type_info> _types;
     type_index _random_type = type_index::invalid;
 };
-} // namespace nx::fuzz

@@ -23,13 +23,11 @@
 // tier ranks against the others are in libs/base/clean-core/docs/formatting.md.
 // =========================================================================================================
 
-namespace cc
-{
 /// A minimal, trivially-copyable output target for formatting: a context pointer plus a write function.
 /// This is what a cc::custom::formatter writes into; call put() to append bytes.
 /// No allocation is implied: the same sink backs both the allocating cc::format and the non-allocating
 /// cc::format_to.
-struct format_sink
+struct cc::format_sink
 {
     void* ctx = nullptr;
     void (*write)(void* ctx, char const* data, isize size) = nullptr;
@@ -44,6 +42,9 @@ struct format_sink
             write(ctx, &c, 1);
     }
 };
+
+namespace cc
+{
 
 namespace custom
 {

@@ -10,16 +10,15 @@
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
 #include <memory>
 
-namespace sg::backend::vulkan
-{
 /// Per-backend creation config for the Vulkan context.
 /// The two flags are independent.
-struct vulkan_config
+struct sg::backend::vulkan::vulkan_config
 {
     /// Enable the Khronos validation layer plus a debug messenger that routes messages to stderr.
     /// Best-effort — skipped if the layer / VK_EXT_debug_utils isn't installed.
@@ -33,7 +32,7 @@ struct vulkan_config
 /// Vulkan implementation of sg::context.
 /// The sg::context virtuals are thin forwarders to the backend-typed create_vulkan_* methods — prefer those when you hold a vulkan_context.
 /// Bodies live in the sibling vulkan_*.cc files.
-class vulkan_context final : public sg::context
+class sg::backend::vulkan::vulkan_context final : public sg::context
 {
     // vulkan consumes SPIR-V only.
     static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::spirv};
@@ -248,7 +247,6 @@ public:
 
     VkDebugUtilsMessengerEXT _debug_messenger = VK_NULL_HANDLE; // VK_NULL_HANDLE when validation is off
 };
-} // namespace sg::backend::vulkan
 
 namespace sg
 {

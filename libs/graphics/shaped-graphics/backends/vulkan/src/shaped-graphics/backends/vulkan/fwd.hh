@@ -6,6 +6,7 @@
 
 namespace sg::backend::vulkan
 {
+struct vulkan_config; // instance/device creation knobs (see vulkan_context.hh)
 class vulkan_context;
 class vulkan_command_list;
 class vulkan_buffer;

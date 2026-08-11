@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -8,8 +9,6 @@
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
-namespace tg
-{
 /// Unit quaternion for representing 3D rotations.
 ///
 /// Storage is the public C array member `data` in the order {x, y, z, w}: (x, y, z) is the vector part, w the scalar part.
@@ -18,7 +17,7 @@ namespace tg
 ///     auto q = tg::quat_f::make_rotation_z(tg::angle_f::make_from_degree(90));
 ///     tg::vec3f const v = q * tg::vec3f(1, 0, 0);   // ~ (0, 1, 0)
 template <class T>
-struct quat
+struct tg::quat
 {
     T data[4] = {};
 
@@ -214,6 +213,9 @@ public:
         return v + w * t + tg::dual(tg::cross(u, t));
     }
 };
+
+namespace tg
+{
 
 template <class T>
 inline quat<T> const quat<T>::zero = quat<T>{};

@@ -22,13 +22,11 @@
 
 #include <memory>
 
-namespace sg
-{
 /// Mutable entry point to a graphics backend: the factory for command lists and GPU resources.
 /// Abstract — a backend subclasses it (e.g. sg::backend::vulkan::vulkan_context), and you obtain one from that backend's sg::create_<backend>_context(config).
 /// Must outlive every command list and resource it creates.
 /// A backend's destructor runs shutdown() for you; call it yourself only to release the device early.
-class context
+class sg::context
 {
 public:
     virtual ~context();
@@ -342,4 +340,3 @@ protected:
 
     [[nodiscard]] pipeline_cache& pipeline_cache_ref();
 };
-} // namespace sg

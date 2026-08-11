@@ -8,16 +8,25 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
+namespace sg::backend::dx12
+{
+struct dx12_epoch_state;
+} // namespace sg::backend::dx12
+
+namespace sg::backend::dx12
+{
+struct dx12_epoch_data;
+struct dx12_expiring_resource;
+} // namespace sg::backend::dx12
+
 // Per-epoch bookkeeping structs for the dx12 backend's epoch system.
 // The epoch *concept* lives in sg:: — fwd.hh plus the sg::context contract — and this is dx12's concrete realization.
 // See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
-namespace sg::backend::dx12
-{
 /// A GPU resource captured for deferred deletion.
 /// Its handle is released and its finalizers run only once the GPU is no longer using it.
 /// That means both: the owning epoch has retired on the direct queue, *and* the async-upload copy queue has passed `copy_wait`.
-struct dx12_expiring_resource
+struct sg::backend::dx12::dx12_expiring_resource
 {
     ComPtr<ID3D12Resource> resource;
     cc::vector<cc::unique_function<void()>> finalizers;
@@ -28,7 +37,7 @@ struct dx12_expiring_resource
 
 /// Everything one epoch owns and must reclaim once its GPU work finishes.
 /// Built at advance, drained at retire.
-struct dx12_epoch_data
+struct sg::backend::dx12::dx12_epoch_data
 {
     epoch epoch_id = epoch::invalid;
     cc::vector<dx12_pooled_allocator> allocators; // reset + returned to the pool on retire
@@ -37,7 +46,7 @@ struct dx12_epoch_data
 
 /// The mutex-guarded epoch state: the in-flight FIFO plus the deferred-deletion staging area.
 /// Guarded because a resource's refcount can hit zero — staging a deletion — on any thread, while advance/retire run on the driver thread.
-struct dx12_epoch_state
+struct sg::backend::dx12::dx12_epoch_state
 {
     cc::vector<dx12_epoch_data> in_flight;     // FIFO, oldest at the front
     cc::vector<dx12_expiring_resource> staged; // refcount-zero resources awaiting the next advance
@@ -46,6 +55,9 @@ struct dx12_epoch_state
     // Normally empty and short-lived, since the copy queue drains promptly behind the direct queue.
     cc::vector<dx12_expiring_resource> copy_deferred;
 };
+
+namespace sg::backend::dx12
+{
 
 /// Reclaims one expiring resource in the required order.
 /// Null the GPU handle *first*, releasing GPU memory, then move its finalizers into `out_finalizers` to run once the caller has left any lock.

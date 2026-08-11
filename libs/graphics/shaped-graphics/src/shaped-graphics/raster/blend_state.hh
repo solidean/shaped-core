@@ -62,9 +62,11 @@ enum class color_write_mask : u8
     return (u8(mask) & u8(flag)) == u8(flag);
 }
 
+} // namespace sg
+
 /// One channel group's blend: `src * source + dst * ...` combined by `op`.
 /// Used for the color and alpha groups independently.
-struct blend_component
+struct sg::blend_component
 {
     blend_factor source = blend_factor::one;
     blend_factor target = blend_factor::zero;
@@ -73,9 +75,8 @@ struct blend_component
 
 /// The color-blend equation for a render target, with separate color and alpha components — DX12 and Vulkan both blend RGB and A independently.
 /// Present on a color_target_state only when blending is enabled.
-struct blend_state
+struct sg::blend_state
 {
     blend_component color = {};
     blend_component alpha = {};
 };
-} // namespace sg

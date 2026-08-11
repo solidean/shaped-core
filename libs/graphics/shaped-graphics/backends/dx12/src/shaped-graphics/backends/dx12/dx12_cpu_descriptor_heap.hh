@@ -11,6 +11,12 @@
 
 namespace sg::backend::dx12
 {
+struct dx12_cpu_descriptor_heap;
+struct dx12_descriptor_ref;
+} // namespace sg::backend::dx12
+
+namespace sg::backend::dx12
+{
 /// A slot index into a dx12_cpu_descriptor_heap.
 /// Strongly typed — an enum, not a bare int — so it cannot be confused with a count or another index.
 /// `invalid` is the null / heap-exhausted result of allocate().
@@ -19,8 +25,10 @@ enum class cpu_descriptor_slot : int
     invalid = -1,
 };
 
+} // namespace sg::backend::dx12
+
 /// A created RTV/DSV descriptor: the CPU handle to bind (OMSetRenderTargets / Clear*), plus the heap slot to return via the owning context's free_* when the RTV/DSV is no longer needed.
-struct dx12_descriptor_ref
+struct sg::backend::dx12::dx12_descriptor_ref
 {
     D3D12_CPU_DESCRIPTOR_HANDLE handle = {};
     cpu_descriptor_slot slot = cpu_descriptor_slot::invalid;
@@ -31,7 +39,7 @@ struct dx12_descriptor_ref
 /// They are passed to OMSetRenderTargets / Clear* by CPU handle, never bound as a table.
 /// So this is a flat slab with a bump cursor plus a free list for slot reuse.
 /// Single-descriptor allocations, with no lifetime or epoch tracking: a descriptor is valid until its slot is freed or overwritten.
-struct dx12_cpu_descriptor_heap
+struct sg::backend::dx12::dx12_cpu_descriptor_heap
 {
     /// Creates a non-shader-visible heap of `heap_type` (RTV or DSV) holding `capacity` descriptors, owned by the returned unique_ptr.
     [[nodiscard]] static cc::result<std::unique_ptr<dx12_cpu_descriptor_heap>> create(dx12_context& ctx,
@@ -62,4 +70,3 @@ struct dx12_cpu_descriptor_heap
     };
     cc::mutex<alloc_state> state;
 };
-} // namespace sg::backend::dx12

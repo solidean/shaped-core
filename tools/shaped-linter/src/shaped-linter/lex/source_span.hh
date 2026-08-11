@@ -4,13 +4,11 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-linter/fwd.hh>
 
-namespace scl
-{
 /// A half-open byte range `[byte_begin, byte_end)` within one source file.
 /// Small value type: line/column are never stored here — they are resolved lazily from the buffer, only when a finding is reported.
 /// This is the backbone of macro-placement rules and future fix-its.
 /// Every token and every syntax node carries a source_span, and a later macro-expansion table keys off the same spans — the span always stays the *spelling* location.
-struct source_span
+struct scl::source_span
 {
     u32 file_id = 0;
     u32 byte_begin = 0;
@@ -34,7 +32,7 @@ struct source_span
 
 /// A 1-based line and column.
 /// Column is byte-based rather than UTF-8 codepoint-based, which is fine for diagnostics.
-struct line_col
+struct scl::line_col
 {
     u32 line = 1;
     u32 column = 1;
@@ -45,17 +43,16 @@ struct line_col
 /// A span to underline in a rendered snippet, with optional text next to the underline.
 /// Empty `text` draws the underline alone.
 /// Spans in different files are fine — each file gets its own block.
-struct label
+struct scl::label
 {
     source_span span;
     cc::string text;
 };
 
 /// A fully resolved location for reporting: the file path plus 1-based line/column.
-struct resolved_location
+struct scl::resolved_location
 {
     cc::string_view path;
     u32 line = 1;
     u32 column = 1;
 };
-} // namespace scl

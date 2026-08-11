@@ -7,18 +7,25 @@
 #include <typeindex>
 #include <typeinfo>
 
+namespace cc
+{
+template <class R, class... A>
+struct signature;
+} // namespace cc
+
 // Compile-time signature reflection for arbitrary callables.
 //
 // Any callable — a free function, a lambda or functor, a member-function pointer — is reduced to a signature<R(A...)>.
 // From that we extract the decayed argument types, which arguments are mutable (non-const lvalue references), and the return type.
 // This is the generic machinery; callers wrap it in their own invocation glue.
 
-namespace cc
-{
 template <class R, class... A>
-struct signature
+struct cc::signature
 {
 };
+
+namespace cc
+{
 
 // member function pointers (this also covers a lambda's operator())
 template <class T, class R, class... A>

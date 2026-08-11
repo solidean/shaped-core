@@ -1,7 +1,7 @@
 #pragma once
 
-namespace tg
-{
+#include <typed-geometry/fwd.hh>
+
 /// Two transforms held side by side, applied inner first, then outer.
 ///
 /// This is what composition falls back to when the two cannot be fused into a single transform —
@@ -18,7 +18,7 @@ namespace tg
 /// That member is public here on purpose: unlike a transform special-casing a particular object, this one
 /// has an answer for anything its two parts have an answer for, and it is the same answer they would give.
 template <class TransformOuter, class TransformInner>
-struct composed_transform
+struct tg::composed_transform
 {
     /// applied second
     TransformOuter outer;
@@ -64,5 +64,3 @@ public:
 public:
     [[nodiscard]] friend constexpr bool operator==(composed_transform const&, composed_transform const&) = default;
 };
-
-} // namespace tg

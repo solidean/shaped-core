@@ -34,13 +34,15 @@ namespace cc
 // API
 //
 
+} // namespace cc
+
 /// A format string whose syntax and argument types are validated at compile time.
 ///
 /// Implicitly constructed from a string literal, or from any compile-time string_view-convertible constant.
 /// The consteval constructor parses it against Args... and turns any error into a compile error.
 /// You never name this type directly — it is the first parameter of cc::format / format_append / format_to.
 template <class... Args>
-struct format_string
+struct cc::format_string
 {
     template <class T>
         requires std::convertible_to<T const&, string_view>
@@ -51,6 +53,9 @@ struct format_string
 private:
     string_view _str;
 };
+
+namespace cc
+{
 
 /// Formats arguments into a freshly allocated string.
 template <class... Args>

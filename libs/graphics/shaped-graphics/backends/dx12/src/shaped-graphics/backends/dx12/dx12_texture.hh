@@ -15,9 +15,11 @@ namespace sg::backend::dx12
 /// The create path is its only caller today: placed textures and heap requirement queries need a texture-capable memory_heap, which dx12 does not have.
 [[nodiscard]] D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& desc);
 
+} // namespace sg::backend::dx12
+
 /// DirectX 12 implementation of sg::raw_texture, holding the ID3D12Resource (GPU-resident, default heap).
 /// Also owns the per-command-list subresource access tracking that drives layout-transition barriers — see dx12_texture_access.
-class dx12_texture final : public sg::raw_texture
+class sg::backend::dx12::dx12_texture final : public sg::raw_texture
 {
 public:
     dx12_texture(dx12_context& ctx,
@@ -124,4 +126,3 @@ private:
     // A no-op once already released, so expire()-then-destroy does not double-schedule.
     void release_storage() const;
 };
-} // namespace sg::backend::dx12

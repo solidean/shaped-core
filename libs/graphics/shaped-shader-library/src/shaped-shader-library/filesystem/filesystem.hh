@@ -16,13 +16,15 @@ enum class file_revision : u64
     none = 0,
 };
 
+} // namespace slib
+
 /// Read-only virtual filesystem — the only way slib reaches shader sources.
 ///
 /// Paths are '/'-separated and relative to this filesystem's own root.
 /// An implementation normalizes what it is given, and a path escaping the root resolves to nothing.
 ///
 /// Reads must be safe from several threads at once: the reload watcher polls revision() while a consumer may be in read_text().
-class filesystem
+class slib::filesystem
 {
 public:
     virtual ~filesystem() = default;
@@ -53,4 +55,3 @@ public:
         return cc::nullopt;
     }
 };
-} // namespace slib

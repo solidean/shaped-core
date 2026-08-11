@@ -4,8 +4,6 @@
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg
-{
 /// The raw, **uncached** factory for pipeline schemas — group layouts, pipeline layouts, and pipelines — reached as `ctx.uncached`.
 /// Unlike ctx.persistent / ctx.transient these are not lifetime-scoped GPU resources but immutable schemas / PSOs.
 /// They therefore have no transient variant and are always created persistent.
@@ -16,7 +14,7 @@ namespace sg
 ///
 /// Every create comes in a `try_create_*` fallible core and a throwing `create_*` default — the pattern in docs/error-handling.md.
 /// The throwing flavor raises sg::pipeline_creation_exception, or sg::device_lost_exception if the device was lost.
-class context_uncached_scope
+class sg::context_uncached_scope
 {
 public:
     /// Builds a binding_group_layout (one group's schema) from a shader's reflected bindings.
@@ -77,4 +75,3 @@ private:
 
     context& _ctx;
 };
-} // namespace sg

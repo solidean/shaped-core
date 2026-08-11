@@ -709,50 +709,39 @@ TEST("shaped-linter - parser - namespace definitions")
     }
 }
 
-TEST("shaped-linter - parser - body_holds_records_only")
+TEST("shaped-linter - parser - follows_record")
 {
-    // The one shape whose contents can all be respelled as qualified names.
-    // Everything the parser does not model has to clear it, so the flag is only ever trusted in the "yes" direction.
-    auto const only_records = [](cc::string_view source)
+    // Which records sit next to each other is what decides how big a block a rule moves out of a namespace.
+    // Everything the parser does not model breaks the run, which is the direction that costs a fix rather than correctness.
+    auto const runs = [](cc::string_view source)
     {
         auto const p = parse_text(source);
-        auto const ns = p.nodes_of(node_kind::namespace_definition);
-        REQUIRE(ns.size() >= 1);
-        return ns[0]->body_holds_records_only;
+        cc::string out;
+        for (auto const* r : p.nodes_of(node_kind::record_definition))
+            out += r->follows_record ? '+' : '|';
+        return out;
     };
 
-    SECTION("a series of record definitions, and an empty body")
+    SECTION("a series of record definitions is one run")
     {
-        CHECK(only_records("namespace cc { struct a { }; class b { }; union c { }; }"));
-        CHECK(only_records("namespace cc { }"));
-        CHECK(only_records("namespace cc { template <class T> struct a { }; }"));
-        CHECK(only_records(
-            "namespace cc { struct a { void f(); int x = 1; }; }")); // members are the record's, not the namespace's
+        CHECK(runs("namespace cc { struct a { }; class b { }; union c { }; }") == "|++");
     }
-    SECTION("a function, defined or merely declared")
+    SECTION("a function breaks the run, defined or merely declared")
     {
-        CHECK(!only_records("namespace cc { struct a { }; void f(); }"));
-        CHECK(!only_records("namespace cc { struct a { }; void f() { } }"));
+        CHECK(runs("namespace cc { struct a { }; void f(); struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; void f() { } struct b { }; }") == "||");
     }
-    SECTION("a declaration that is not a record definition")
+    SECTION("so does any other declaration")
     {
-        CHECK(!only_records("namespace cc { struct a { }; struct fwd; }"));
-        CHECK(!only_records("namespace cc { struct a { }; enum class e { }; }"));
-        CHECK(!only_records("namespace cc { struct a { }; using x = int; }"));
-        CHECK(!only_records("namespace cc { struct a { }; int k = 3; }"));
-        CHECK(!only_records("namespace cc { struct a { }; namespace inner { } }"));
+        CHECK(runs("namespace cc { struct a { }; struct fwd; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; enum class e { }; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; using x = int; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; int k = 3; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; namespace inner { } struct b { }; }") == "||");
     }
-    SECTION("a trailing declarator on the record itself")
+    SECTION("a member record is the record's own child and joins no run")
     {
-        CHECK(!only_records("namespace cc { struct a { } the_one; }"));
-    }
-    SECTION("the outer namespace of a nest holds a namespace, the inner one holds the records")
-    {
-        auto const p = parse_text("namespace a { namespace b { struct x { }; } }");
-        auto const ns = p.nodes_of(node_kind::namespace_definition);
-        REQUIRE(ns.size() == 2);
-        CHECK(!ns[0]->body_holds_records_only);
-        CHECK(ns[1]->body_holds_records_only);
+        CHECK(runs("namespace cc { struct a { struct inner { }; }; struct b { }; }") == "||+");
     }
 }
 

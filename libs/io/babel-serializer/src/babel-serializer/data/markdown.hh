@@ -51,10 +51,12 @@ enum class node_kind : u8
     thematic_break, // `---` / `***` / `___`
 };
 
+} // namespace babel::markdown
+
 /// One parsed block.
 /// Not used directly — traverse via `ref`.
 /// The payload fields are read according to `kind`; the unrelated ones are left at 0.
-struct node
+struct babel::markdown::node
 {
     node_kind kind = node_kind::document;
 
@@ -78,7 +80,7 @@ struct node
 
 /// A parsed markdown document: owns the flat node array, the child-index array and the text arena.
 /// Move-only-cheap value type (three vectors). Obtain one from babel::markdown::read; traverse via root().
-class document
+class babel::markdown::document
 {
     // access
 public:
@@ -117,7 +119,7 @@ private:
 
 /// A non-owning handle to one block in a document: {document*, node index}. Copyable and cheap.
 /// All accessors are kind-tolerant — a mismatched kind returns the fallback / an invalid ref rather than asserting.
-struct ref
+struct babel::markdown::ref
 {
     // construction
 public:
@@ -187,6 +189,9 @@ private:
     document const* _doc = nullptr;
     i32 _index = -1;
 };
+
+namespace babel::markdown
+{
 
 inline ref document::root() const
 {

@@ -14,14 +14,12 @@
 #include <atomic>
 #include <memory>
 
-namespace sg
-{
 /// A GPU-resident buffer of immutable shape — size and usage are fixed at creation, like a span over mutable GPU memory.
 /// Contents change through command lists, and there is no host-visible mapping, so transfers go through them too.
 /// Size 0 is a valid empty buffer, and the resource is held via `raw_buffer_handle`.
 ///
 /// Abstract: a backend subclasses it and owns the GPU resource, reading and setting the shape metadata below directly.
-class raw_buffer : public std::enable_shared_from_this<raw_buffer>
+class sg::raw_buffer : public std::enable_shared_from_this<raw_buffer>
 {
 public:
     virtual ~raw_buffer();
@@ -333,4 +331,3 @@ protected:
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
 };
-} // namespace sg

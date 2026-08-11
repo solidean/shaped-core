@@ -48,10 +48,11 @@ enum class decl_scope : u8
 /// Fields are interpreted by `kind`:
 ///  - translation_unit / record_definition / namespace_definition: `children` are the node ids inside.
 ///  - record_definition: `rec_keyword` and `name` (the record name span; empty if anonymous).
+///    `follows_record` says the previous statement in the same scope was a record definition too, which is what makes a run of them one block to move.
+///    `scope` says where it sits, so a type declared inside a function body is not mistaken for one of the namespace's.
+///    `has_declarator` marks the `struct S { } s;` form, whose variable would change scope if the definition moved.
 ///  - namespace_definition: `name` (the name as written — `a::b` for `namespace a::b`, empty when anonymous).
 ///    Its `body` is the `{…}` including the braces, which is what a rule tests an offset against.
-///    `body_holds_records_only` says the body is a plain series of record definitions and nothing else — the one shape that survives being rewritten into qualified names.
-///    Any statement the parser does not model as a record definition clears it, so it is only ever trustworthy in the affirmative.
 ///  - using_directive: `name` (the nominated namespace, `cc::primitive_defines`).
 ///    Its `effect` is the bytes over which the directive is in force: past its `;` to the end of the enclosing scope.
 ///  - variable_declaration: `scope`, `form`, and for brace form `init_span` (the `{…}` incl. braces) and `init_inner` (strictly between the braces).
@@ -63,6 +64,8 @@ struct scl::node
 
     // record_definition
     record_keyword rec_keyword = record_keyword::struct_;
+    bool follows_record = false; // the statement right before this one was a record definition too
+    bool has_declarator = false; // `struct S { } s;` — the definition also declares a variable
 
     // record_definition (record name) OR variable_declaration (declarator-id) OR the name a
     // namespace_definition / using_directive spells
@@ -73,12 +76,11 @@ struct scl::node
 
     // namespace_definition
     source_span body;
-    bool body_holds_records_only = true; // an empty body trivially qualifies
 
     // using_directive
     source_span effect;
 
-    // variable_declaration
+    // record_definition / variable_declaration
     decl_scope scope = decl_scope::namespace_scope;
     init_form form = init_form::none;
     source_span declarator; // brace form: the declarator-id THROUGH any array suffix — `a[N]`, not `a`

@@ -41,7 +41,7 @@ void expect_none(cc::string_view source, cc::string_view path = "a.hh")
 }
 } // namespace
 
-TEST("shaped-linter - qualified-record-definition - the fix unwraps the namespace")
+TEST("shaped-linter - qualified-record-definition - a namespace of definitions is unwrapped whole")
 {
     SECTION("one struct")
     {
@@ -77,32 +77,74 @@ TEST("shaped-linter - qualified-record-definition - the fix unwraps the namespac
     }
 }
 
-TEST("shaped-linter - qualified-record-definition - anything but definitions costs the fix, not the finding")
+TEST("shaped-linter - qualified-record-definition - a mixed namespace is split around its records")
 {
-    SECTION("a function alongside the record")
+    SECTION("a function after the record keeps the namespace below it")
     {
-        auto const found = run_rules_on_text("namespace cc\n{\nstruct span\n{\n};\nvoid f();\n}\n", "a.hh");
-        CHECK(reported_only(found).suggested_hint.value().message.contains("cc::span"));
+        CHECK(fixed("namespace cc\n{\nstruct span\n{\n};\nvoid f();\n}\n")
+              == "struct cc::span\n{\n};\n\nnamespace cc\n{\nvoid f();\n}\n");
     }
-    SECTION("an enum alongside the record")
+    SECTION("a function before the record keeps the namespace above it")
     {
-        reported_only(run_rules_on_text("namespace cc\n{\nenum class e\n{\n};\nstruct s\n{\n};\n}\n", "a.hh"));
+        CHECK(fixed("namespace cc\n{\nvoid f();\nstruct span\n{\n};\n}\n")
+              == "namespace cc\n{\nvoid f();\n} // namespace cc\n\nstruct cc::span\n{\n};\n");
     }
-    SECTION("a forward declaration cannot be qualified, so it blocks the unwrap")
+    SECTION("a record between two functions is lifted out of the middle")
     {
-        reported_only(run_rules_on_text("namespace cc\n{\nstruct fwd;\nstruct s\n{\n};\n}\n", "a.hh"));
+        CHECK(fixed("namespace cc\n{\nvoid f();\nstruct span\n{\n};\nvoid g();\n}\n")
+              == "namespace cc\n{\nvoid f();\n} // namespace cc\n\nstruct cc::span\n{\n};\n\nnamespace cc\n{\nvoid "
+                 "g();\n}\n");
     }
-    SECTION("a namespace-scope variable")
+    SECTION("adjacent records move as one block, not one at a time")
     {
-        reported_only(run_rules_on_text("namespace cc\n{\nint k = 3;\nstruct s\n{\n};\n}\n", "a.hh"));
+        CHECK(fixed("namespace cc\n{\nvoid f();\nstruct a\n{\n};\nstruct b\n{\n};\n}\n", 2)
+              == "namespace cc\n{\nvoid f();\n} // namespace cc\n\nstruct cc::a\n{\n};\nstruct cc::b\n{\n};\n");
     }
-    SECTION("a trailing declarator on the record itself")
+    SECTION("an enum stays behind, since it cannot be defined qualified")
     {
-        reported_only(run_rules_on_text("namespace cc\n{\nstruct s\n{\n} the_one;\n}\n", "a.hh"));
+        CHECK(fixed("namespace cc\n{\nenum class e\n{\n};\nstruct s\n{\n};\n}\n")
+              == "namespace cc\n{\nenum class e\n{\n};\n} // namespace cc\n\nstruct cc::s\n{\n};\n");
     }
-    SECTION("an anonymous record has no name to qualify")
+    SECTION("a forward declaration stays behind — a qualified name may not declare a new entity")
     {
-        reported_only(run_rules_on_text("namespace cc\n{\nstruct\n{\n} anon;\n}\n", "a.hh"));
+        CHECK(fixed("namespace cc\n{\nstruct fwd;\nstruct s\n{\n};\n}\n")
+              == "namespace cc\n{\nstruct fwd;\n} // namespace cc\n\nstruct cc::s\n{\n};\n");
+    }
+    SECTION("the record's doc comment moves with it")
+    {
+        CHECK(fixed("namespace cc\n{\nvoid f();\n/// docs\nstruct s\n{\n};\n}\n")
+              == "namespace cc\n{\nvoid f();\n} // namespace cc\n\n/// docs\nstruct cc::s\n{\n};\n");
+    }
+    SECTION("a class-template specialization is qualified like any other definition")
+    {
+        CHECK(fixed("namespace tg\n{\nvoid f();\ntemplate <class T>\nstruct traits<T>\n{\n};\n}\n")
+              == "namespace tg\n{\nvoid f();\n} // namespace tg\n\ntemplate <class T>\nstruct tg::traits<T>\n{\n};\n");
+    }
+}
+
+TEST("shaped-linter - qualified-record-definition - what cannot move stays, and ends the run")
+{
+    SECTION("an anonymous record is never reported")
+    {
+        expect_none("namespace cc\n{\nstruct\n{\n} anon;\n}\n");
+    }
+    SECTION("the named record beside it still moves, and the anonymous one keeps the namespace")
+    {
+        CHECK(fixed("namespace cc\n{\nstruct\n{\n} anon;\nstruct s\n{\n};\n}\n")
+              == "namespace cc\n{\nstruct\n{\n} anon;\n} // namespace cc\n\nstruct cc::s\n{\n};\n");
+    }
+    SECTION("a definition that also declares a variable would move that variable's scope")
+    {
+        expect_none("namespace cc\n{\nstruct s\n{\n} the_one;\n}\n");
+    }
+    SECTION("it ends the run, so an adjacent record moves on its own")
+    {
+        CHECK(fixed("namespace cc\n{\nstruct s\n{\n} the_one;\nstruct b\n{\n};\n}\n")
+              == "namespace cc\n{\nstruct s\n{\n} the_one;\n} // namespace cc\n\nstruct cc::b\n{\n};\n");
+    }
+    SECTION("a record declared inside a function body belongs to the function")
+    {
+        expect_none("namespace cc\n{\nauto make()\n{\n    struct seeder\n    {\n    };\n    return seeder{};\n}\n}\n");
     }
 }
 

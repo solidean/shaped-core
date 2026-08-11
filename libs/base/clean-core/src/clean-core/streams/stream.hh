@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/fwd.hh>
 #include <clean-core/streams/impl/stream.hh>
 
 #include <type_traits>
@@ -69,8 +70,6 @@ template <> struct public_stream<stream_access::read_write,  true>  { using type
 // clang-format on
 } // namespace cc::impl
 
-namespace cc
-{
 // The six stream types.
 // Each is a real, distinct type that PRIVATELY inherits the shared engine (cc::impl::stream<Access, Seekable>) and explicitly pulls in only the methods its capability supports.
 // So the type's own definition IS its API, the way cc::vector lists its methods over allocating_container.
@@ -79,7 +78,7 @@ namespace cc
 
 /// Non-owning, move-only read view over a byte source.
 /// Refills on demand via its adapter.
-struct read_stream : private impl::stream<impl::stream_access::read, false>
+struct cc::read_stream : private impl::stream<impl::stream_access::read, false>
 {
     using engine = impl::stream<impl::stream_access::read, false>;
     template <impl::stream_access, bool>
@@ -110,7 +109,7 @@ struct read_stream : private impl::stream<impl::stream_access::read, false>
 
 /// Non-owning, move-only write view over a byte sink.
 /// Drains on demand via its adapter.
-struct write_stream : private impl::stream<impl::stream_access::write, false>
+struct cc::write_stream : private impl::stream<impl::stream_access::write, false>
 {
     using engine = impl::stream<impl::stream_access::write, false>;
     template <impl::stream_access, bool>
@@ -136,7 +135,7 @@ struct write_stream : private impl::stream<impl::stream_access::write, false>
 };
 
 /// Non-owning, move-only read+write view (e.g. over an in-memory span).
-struct read_write_stream : private impl::stream<impl::stream_access::read_write, false>
+struct cc::read_write_stream : private impl::stream<impl::stream_access::read_write, false>
 {
     using engine = impl::stream<impl::stream_access::read_write, false>;
     template <impl::stream_access, bool>
@@ -171,7 +170,7 @@ struct read_write_stream : private impl::stream<impl::stream_access::read_write,
 
 /// A read_stream that also supports fast seeking — O(1), or at worst O(log n). A source that can only
 /// reposition by re-reading must present as a plain read_stream instead.
-struct seekable_read_stream : private impl::stream<impl::stream_access::read, true>
+struct cc::seekable_read_stream : private impl::stream<impl::stream_access::read, true>
 {
     using engine = impl::stream<impl::stream_access::read, true>;
     template <impl::stream_access, bool>
@@ -206,7 +205,7 @@ struct seekable_read_stream : private impl::stream<impl::stream_access::read, tr
 };
 
 /// A write_stream that also supports fast (O(1)/O(log n)) seeking.
-struct seekable_write_stream : private impl::stream<impl::stream_access::write, true>
+struct cc::seekable_write_stream : private impl::stream<impl::stream_access::write, true>
 {
     using engine = impl::stream<impl::stream_access::write, true>;
     template <impl::stream_access, bool>
@@ -237,7 +236,7 @@ struct seekable_write_stream : private impl::stream<impl::stream_access::write, 
 };
 
 /// A read_write_stream that also supports fast (O(1)/O(log n)) seeking.
-struct seekable_read_write_stream : private impl::stream<impl::stream_access::read_write, true>
+struct cc::seekable_read_write_stream : private impl::stream<impl::stream_access::read_write, true>
 {
     using engine = impl::stream<impl::stream_access::read_write, true>;
     template <impl::stream_access, bool>
@@ -265,4 +264,3 @@ struct seekable_read_write_stream : private impl::stream<impl::stream_access::re
     using engine::write;
     using engine::write_pod;
 };
-} // namespace cc

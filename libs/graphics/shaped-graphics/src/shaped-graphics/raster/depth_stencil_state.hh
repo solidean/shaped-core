@@ -22,9 +22,11 @@ enum class stencil_op
     decrement_wrap,  // DX12 STENCIL_OP_DECR     / Vk STENCIL_OP_DECREMENT_AND_WRAP
 };
 
+} // namespace sg
+
 /// The stencil operations + comparison for one face, front or back.
 /// `compare` tests the masked stencil value against the dynamic reference, and the ops select what to write on stencil-fail / depth-fail / pass.
-struct stencil_face
+struct sg::stencil_face
 {
     stencil_op fail = stencil_op::keep;       ///< stencil test failed
     stencil_op depth_fail = stencil_op::keep; ///< stencil passed, depth failed
@@ -36,7 +38,7 @@ struct stencil_face
 /// Defaults leave both disabled, so a pipeline with no depth-stencil target uses this as-is.
 /// `depth_compare` applies only when `depth_test` is set, and the stencil fields only when `stencil_test` is.
 /// The stencil write reference is dynamic — cmd.raster.set_stencil_reference.
-struct depth_stencil_state
+struct sg::depth_stencil_state
 {
     bool depth_test = false;                     ///< enable the depth comparison
     bool depth_write = false;                    ///< write passing fragments' depth
@@ -48,4 +50,3 @@ struct depth_stencil_state
     stencil_face front = {};
     stencil_face back = {};
 };
-} // namespace sg

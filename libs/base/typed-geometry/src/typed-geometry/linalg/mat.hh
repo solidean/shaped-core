@@ -2,14 +2,13 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh>
 #include <typed-geometry/scalar/traits.hh>
 
-namespace tg
-{
 /// Column-major matrix with C columns and R rows.
 ///
 /// mat is a linear-algebra object, not a transform type — there is no mat * pos.
@@ -23,7 +22,7 @@ namespace tg
 ///     auto r = tg::mat3f::make_rotation_z(tg::angle_f::make_from_degree(90));
 ///     tg::vec3f const v = r * tg::vec3f(1, 0, 0);   // ~ (0, 1, 0)
 template <int C, int R, class T>
-struct mat
+struct tg::mat
 {
     static_assert(C > 0 && R > 0, "mat requires positive dimensions");
 
@@ -341,6 +340,9 @@ public:
         return r;
     }
 };
+
+namespace tg
+{
 
 namespace impl
 {

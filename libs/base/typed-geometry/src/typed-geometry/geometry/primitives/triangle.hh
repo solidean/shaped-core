@@ -1,12 +1,11 @@
 #pragma once
 
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
-namespace tg
-{
 /// Triangle (filled) with D-dimensional vertices.
 ///
 /// Represents the solid triangle — the convex hull of its three vertices.
@@ -16,7 +15,7 @@ namespace tg
 ///
 ///     tg::triangle3f t(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0));
 template <int D, class T>
-struct triangle
+struct tg::triangle
 {
     static_assert(D > 0, "triangle requires a positive dimension");
 
@@ -66,11 +65,9 @@ public:
 };
 
 template <int D, class T>
-struct object_traits<triangle<D, T>>
+struct tg::object_traits<tg::triangle<D, T>>
 {
     static constexpr int intrinsic_dim = 2;
     static constexpr int ambient_dim = D;
     static constexpr bool is_finite = true;
 };
-
-} // namespace tg

@@ -106,7 +106,49 @@ u32 line_tail(cc::string_view text, u32 offset, bool allow_comment)
     return i >= text.size() ? u32(text.size()) : offset;
 }
 
-/// The record definitions declared directly in `ns`.
+/// Are the bytes in `[from, to)` nothing but whitespace?
+bool only_blanks(cc::string_view text, u32 from, u32 to)
+{
+    for (auto i = isize(from); i < isize(to) && i < text.size(); ++i)
+        if (!cc::is_space(text[i]))
+            return false;
+    return true;
+}
+
+/// The offset a record's statement starts at, its leading `//` comment block included.
+/// The record node's span opens at `template` or at the keyword, so the doc comment above it would otherwise be left on the wrong side of a moved brace.
+u32 statement_start(source_buffer const& src, u32 offset)
+{
+    auto line = src.line_col_at(offset).line;
+    while (line > 1 && trimmed(src.line_text(line - 1)).starts_with("//"))
+        --line;
+    return src.line_span(line).byte_begin;
+}
+
+/// The offset just past a record definition's terminating `;`, and past the rest of that line when nothing but a comment follows.
+u32 past_declaration(cc::string_view text, u32 record_end)
+{
+    auto i = isize(record_end);
+    while (i < text.size() && (text[i] == ' ' || text[i] == '\t'))
+        ++i;
+    if (i < text.size() && text[i] == ';')
+        ++i;
+    return line_tail(text, u32(i), true);
+}
+
+/// Is this record one the rule can ask to be qualified?
+///
+/// Three shapes are not, and each of them also ends the run it sits in, since a block that moves out cannot take them along:
+///  - a record declared inside a function body, which the parser parents to the enclosing namespace rather than to the function;
+///  - an anonymous one, which has no name to put a qualifier in front of;
+///  - `struct S { } s;`, whose variable would land at file scope if the definition moved out.
+bool is_candidate(lint_context const& ctx, isize record)
+{
+    auto const& rec = ctx.tree[record];
+    return rec.scope == decl_scope::namespace_scope && !rec.has_declarator && !ctx.source.span_text(rec.name).empty();
+}
+
+/// The record definitions declared directly in `ns`, in source order.
 /// A record nested in another record is that record's child, so it never appears here — only the outermost type is the one to qualify.
 cc::vector<isize> direct_records(syntax_tree const& tree, isize ns)
 {
@@ -138,51 +180,68 @@ void check(lint_context& ctx)
         if (records.empty())
             continue;
 
-        // An anonymous record has no name to put the qualifier in front of, and the fix is all-or-nothing: whatever stays behind would lose its namespace.
-        auto all_named = true;
-        for (auto const r : records)
-            if (ctx.source.span_text(ctx.tree[r].name).empty())
-                all_named = false;
-
-        // The two edits that unwrap the namespace are shared by every finding in it, and `collect_fix_edits` merges the byte-identical copies.
-        // Each finding therefore carries a fix that is complete on its own, which is the contract `--fix` rests on.
-        auto const head = text_edit{.span = {.file_id = n.span.file_id,
-                                             .byte_begin = n.span.byte_begin,
-                                             .byte_end = line_tail(text, n.body.byte_begin + 1, false)}};
-        auto const closer = text_edit{.span = {.file_id = n.span.file_id,
-                                               .byte_begin = n.body.byte_end - 1,
-                                               .byte_end = line_tail(text, n.body.byte_end, true)}};
-
-        for (auto const r : records)
+        auto const fid = n.span.file_id;
+        auto const insertion = [fid](u32 at, cc::string replacement)
         {
-            auto const& rec = ctx.tree[r];
-            auto const rec_name = ctx.source.span_text(rec.name);
+            return text_edit{.span = {.file_id = fid, .byte_begin = at, .byte_end = at},
+                             .replacement = cc::move(replacement)};
+        };
 
-            auto suggested_fix = cc::optional<fix>();
-            auto suggested_hint = cc::optional<hint>();
-            if (n.body_holds_records_only && all_named)
-            {
-                auto const qualify = text_edit{
-                    .span
-                    = {.file_id = rec.name.file_id, .byte_begin = rec.name.byte_begin, .byte_end = rec.name.byte_begin},
-                    .replacement = cc::string(ns_name) + "::"};
-                suggested_fix = fix{.edits = {head, closer, qualify}};
-            }
+        // Dropping the namespace head, and its closing brace, whole.
+        // Only correct where nothing that must stay scoped is left behind — a run of records at the start of the body, or at its end.
+        auto const drop_head = text_edit{.span = {.file_id = fid,
+                                                  .byte_begin = n.span.byte_begin,
+                                                  .byte_end = line_tail(text, n.body.byte_begin + 1, false)}};
+        auto const drop_closer = text_edit{
+            .span
+            = {.file_id = fid, .byte_begin = n.body.byte_end - 1, .byte_end = line_tail(text, n.body.byte_end, true)}};
+
+        // A run is a maximal series of adjacent candidate definitions, which moves out of the namespace as one block.
+        // Its edits are shared by every finding in it — including the qualifier for each of its records — so applying any one finding's fix rewrites the whole run consistently.
+        // `collect_fix_edits` merges the byte-identical copies, so a whole-file run still lands exactly once.
+        for (auto i = isize(0); i < records.size(); ++i)
+        {
+            if (!is_candidate(ctx, records[i]))
+                continue;
+
+            auto last = i;
+            while (last + 1 < records.size() && ctx.tree[records[last + 1]].follows_record
+                   && is_candidate(ctx, records[last + 1]))
+                ++last;
+
+            auto const open = statement_start(ctx.source, ctx.tree[records[i]].span.byte_begin);
+            auto const close = past_declaration(text, ctx.tree[records[last]].span.byte_end);
+
+            cc::vector<text_edit> edits;
+            if (only_blanks(text, n.body.byte_begin + 1, open))
+                edits.push_back(drop_head);
             else
-                suggested_hint = hint{.message = cc::string("the namespace holds more than record definitions, so "
-                                                            "only the record moves out: define it as `")
-                                               + ns_name + "::" + rec_name
-                                               + "` above or below the namespace, and leave the rest inside"};
+                edits.push_back(insertion(open, cc::string("} // namespace ") + ns_name + "\n\n"));
 
-            ctx.report({
-                .rule_id = k_id,
-                .span = rec.name,
-                .message = cc::string("`") + rec_name + "` should be defined as `" + ns_name + "::" + rec_name
-                         + "`, not inside an open `namespace " + ns_name + "`",
-                .sev = severity::warning,
-                .suggested_fix = cc::move(suggested_fix),
-                .suggested_hint = cc::move(suggested_hint),
-            });
+            if (only_blanks(text, close, n.body.byte_end - 1))
+                edits.push_back(drop_closer);
+            else
+                edits.push_back(insertion(close, cc::string("\nnamespace ") + ns_name + "\n{\n"));
+
+            for (auto k = i; k <= last; ++k)
+                edits.push_back(insertion(ctx.tree[records[k]].name.byte_begin, cc::string(ns_name) + "::"));
+
+            for (auto k = i; k <= last; ++k)
+            {
+                auto const& rec = ctx.tree[records[k]];
+                auto const rec_name = ctx.source.span_text(rec.name);
+
+                ctx.report({
+                    .rule_id = k_id,
+                    .span = rec.name,
+                    .message = cc::string("`") + rec_name + "` should be defined as `" + ns_name + "::" + rec_name
+                             + "`, not inside an open `namespace " + ns_name + "`",
+                    .sev = severity::warning,
+                    .suggested_fix = fix{.edits = edits},
+                });
+            }
+
+            i = last;
         }
     }
 }

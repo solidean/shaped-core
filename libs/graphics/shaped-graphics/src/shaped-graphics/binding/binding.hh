@@ -92,10 +92,12 @@ enum class binding_type
     return access_of(v) == access_of(t) && shape_of(v) == shape_of(t);
 }
 
+} // namespace sg
+
 /// A single reflected shader resource binding: a named slot the shader reads.
 /// Identified by a backend-agnostic (set, index) address — SPIR-V set/binding, WGSL @group/@binding, Metal argument index.
 /// A D3D12 backend derives (register-type from `type`, register = index, space = set).
-struct binding
+struct sg::binding
 {
     cc::string name; ///< reflection name — the key a binding_group matches a bound view against
     u32 set = 0;     ///< descriptor set / @group
@@ -107,6 +109,9 @@ struct binding
     /// Absent for other kinds.
     cc::optional<isize> block_size;
 };
+
+namespace sg
+{
 
 /// Appends every binding of `from` whose name `into` does not already carry.
 /// One pipeline has one binding interface, so a multi-stage pipeline's group layout must cover the union of

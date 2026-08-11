@@ -10,13 +10,14 @@
 #include <type_traits>
 #include <utility> // for tuple_size
 
-namespace cc
-{
-struct debug_string_config
+struct cc::debug_string_config
 {
     // a soft cap: it is tested before each element is appended, so the result can overshoot it
     isize max_length = 100;
 };
+
+namespace cc
+{
 
 // Converts a value to a developer-facing debug string.
 // Best-effort, non-semantic, and intended only for diagnostics.

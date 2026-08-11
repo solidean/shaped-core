@@ -5,10 +5,18 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <instruction-tracer/fwd.hh>
+
+namespace itrace
+{
+class json_writer;
+} // namespace itrace
 
 namespace itrace
 {
 using namespace cc::primitive_defines;
+
+} // namespace itrace
 
 /// A minimal JSON emitter, just enough to serialize the trace model for the HTML export.
 /// Not a general library — no pretty-printing, and no validation beyond nesting bookkeeping.
@@ -18,7 +26,7 @@ using namespace cc::primitive_defines;
 ///     Emit addresses and register values with value_string.
 ///   * Every string escapes `<` as `\u003c`, so a symbol or source line containing `</script>` cannot break out of the `<script>` tag it is embedded in.
 ///     The JS parser turns it back into `<`, so the data is unchanged — only the byte sequence in the file is made safe.
-class json_writer
+class itrace::json_writer
 {
 public:
     void begin_object()
@@ -179,4 +187,3 @@ private:
     cc::vector<bool> _first; // per nesting level: is the next sibling the first?
     bool _after_key = false;
 };
-} // namespace itrace

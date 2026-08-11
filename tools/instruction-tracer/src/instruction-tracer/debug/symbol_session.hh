@@ -7,11 +7,10 @@
 #include <instruction-tracer/cli/target_spec.hh>
 #include <instruction-tracer/debug/module_registry.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
-namespace itrace
-{
 /// A symbol found by name lookup.
-struct symbol_match
+struct itrace::symbol_match
 {
     u64 address = 0;
     /// Extent in bytes, for [address, address + size). 0 when the PDB does not say.
@@ -21,7 +20,7 @@ struct symbol_match
 };
 
 /// A source file and line from the PDB.
-struct source_line
+struct itrace::source_line
 {
     cc::string file;
     u32 line = 0;
@@ -29,7 +28,7 @@ struct source_line
 
 /// Why a symbol lookup failed.
 /// `candidates` is non-empty exactly when the spec was ambiguous.
-struct symbol_error
+struct itrace::symbol_error
 {
     cc::string message;
     cc::vector<symbol_match> candidates;
@@ -38,7 +37,7 @@ struct symbol_error
 /// dbghelp lifetime and queries against a live debuggee.
 /// All calls must happen on the debug-loop thread — dbghelp is not reentrant.
 /// Owns nothing but the dbghelp session; module storage lives in the registry passed at construction, which must outlive this.
-class symbol_session
+class itrace::symbol_session
 {
 public:
     /// `process` is the debuggee's HANDLE.
@@ -71,4 +70,3 @@ private:
     void* _process = nullptr;
     module_registry const& _modules;
 };
-} // namespace itrace

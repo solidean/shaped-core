@@ -14,13 +14,15 @@ enum class scene_item_kind : u8
     triangle_mesh,
 };
 
+} // namespace sv
+
 /// One concrete object in a view: a mesh placed into the world with a transform, shaded by a material set.
 ///
 /// It names its resources by id — `mesh` (geometry + BLAS) and `materials` (one PBR material per triangle, indexed by `PrimitiveIndex()` in the closest-hit).
 /// The view_renderer resolves both through the managers.
 /// `transform` is a standard column-major `tg::mat4f`.
 /// The renderer repacks it into the row-major 3x4 the TLAS instance wants.
-struct scene_item
+struct sv::scene_item
 {
     scene_item_kind kind = scene_item_kind::triangle_mesh;
 
@@ -29,4 +31,3 @@ struct scene_item
 
     tg::mat4f transform = tg::mat4f::identity;
 };
-} // namespace sv

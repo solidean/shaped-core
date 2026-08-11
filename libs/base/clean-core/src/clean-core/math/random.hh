@@ -26,12 +26,10 @@
 //   rng.clone()                              - explicit duplicate of the current stream position
 //
 
-namespace cc
-{
 /// Deterministic PCG32 generator.
 /// Reproducible across platforms for a fixed seed.
 /// Move-only by design; use clone() to intentionally duplicate the stream position.
-struct random
+struct cc::random
 {
     /// Default-constructed generators share a fixed seed, so they are reproducible but identical.
     /// Prefer the seeded constructor whenever distinct streams matter.
@@ -171,4 +169,3 @@ private:
     u64 _state = 0;
     u64 _inc = _default_stream;
 };
-} // namespace cc

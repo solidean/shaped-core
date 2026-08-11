@@ -18,10 +18,12 @@ namespace sg::backend::dx12
 /// `size_in_bytes` must be > 0.
 [[nodiscard]] D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usage usage);
 
+} // namespace sg::backend::dx12
+
 /// DirectX 12 implementation of sg::raw_buffer.
 /// Holds the ID3D12Resource (GPU-resident, default heap); null for an empty (size 0) buffer.
 /// A placed buffer also holds a handle to its backing memory_heap, so the heap outlives the placement.
-class dx12_buffer final : public sg::raw_buffer
+class sg::backend::dx12::dx12_buffer final : public sg::raw_buffer
 {
 public:
     dx12_buffer(dx12_context& ctx,
@@ -133,4 +135,3 @@ private:
     // A no-op once already released, so expire()-then-destroy does not double-schedule.
     void release_storage() const;
 };
-} // namespace sg::backend::dx12

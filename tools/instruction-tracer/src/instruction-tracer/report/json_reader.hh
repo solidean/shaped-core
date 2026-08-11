@@ -6,18 +6,26 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <instruction-tracer/fwd.hh>
 
 #include <charconv>
 
 namespace itrace
 {
+struct json_value;
+} // namespace itrace
+
+namespace itrace
+{
 using namespace cc::primitive_defines;
+
+} // namespace itrace
 
 /// A minimal recursive-descent JSON reader, scoped to what `llvm-mca -json` emits: objects, arrays, strings (with `\uXXXX` escapes), numbers (int and float), bool, null.
 /// Not spec-complete and not a general library — lookup is first-key-wins, and big integers lose precision past a double's 2^53.
 ///
 /// Deliberately local rather than babel-serializer's reader: instruction-tracer-core links clean-core only, and one llvm-mca parse does not justify the dependency.
-struct json_value
+struct itrace::json_value
 {
     enum class kind
     {
@@ -78,6 +86,9 @@ struct json_value
         return (k == kind::array && i >= 0 && i < arr.size()) ? &arr[i] : nullptr;
     }
 };
+
+namespace itrace
+{
 
 namespace impl
 {

@@ -9,8 +9,6 @@
 #include <shaped-rendering/keyed_pipeline_cache.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-namespace sr
-{
 /// Renders one frame of Dear ImGui draw data through sg — the renderer half of an imgui backend.
 /// Everything goes through sg; there are no native graphics calls.
 ///
@@ -30,7 +28,7 @@ namespace sr
 ///
 /// `draw_data` is non-const because imgui's 1.92 texture protocol writes back into it:
 /// the backend reports each texture's new id and status on ImTextureData.
-class imgui_routine : public sg::render_routine<imgui_routine>
+class sr::imgui_routine : public sg::render_routine<imgui_routine>
 {
     // per-frame
 public:
@@ -86,6 +84,9 @@ private:
     /// The buffers are epoch-scoped: the returned handles do not own them, and they expire with the frame.
     [[nodiscard]] static geometry upload_geometry(sg::command_list& cmd, ImDrawData* draw_data);
 };
+
+namespace sr
+{
 
 /// Renders one finished imgui frame to `main` and to every secondary viewport —
 /// the batteries-included path for when imgui *owns* the window rather than being composited over the caller's own rendering.

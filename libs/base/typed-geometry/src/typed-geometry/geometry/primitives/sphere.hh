@@ -1,5 +1,6 @@
 #pragma once
 
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
 #include <typed-geometry/geometry/traits.hh>
@@ -26,12 +27,14 @@ namespace tg
 template <int D, int DAmbient, class T>
 struct sphere;
 
+} // namespace tg
+
 /// A sphere spanning its ambient space: an ordinary sphere in 3D, a circle in 2D.
 ///
 ///     auto const s = tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f);
 ///     auto const e = s.transformed(some_affine);   // an ellipsoid, not a sphere
 template <int D, class T>
-struct sphere<D, D, T>
+struct tg::sphere<D, D, T>
 {
     static_assert(D > 0, "sphere requires a positive dimension");
 
@@ -98,7 +101,7 @@ public:
 ///
 ///     auto const c = tg::sphere2in3f(tg::pos3f(0, 0, 0), 1.0f, tg::vec3f(0, 0, 1));   // unit circle in the xy-plane
 template <class T>
-struct sphere<2, 3, T>
+struct tg::sphere<2, 3, T>
 {
     pos<3, T> center;
     T radius = {};
@@ -151,11 +154,9 @@ public:
 };
 
 template <int D, int DAmbient, class T>
-struct object_traits<sphere<D, DAmbient, T>>
+struct tg::object_traits<tg::sphere<D, DAmbient, T>>
 {
     static constexpr int intrinsic_dim = D - 1;
     static constexpr int ambient_dim = DAmbient;
     static constexpr bool is_finite = true;
 };
-
-} // namespace tg

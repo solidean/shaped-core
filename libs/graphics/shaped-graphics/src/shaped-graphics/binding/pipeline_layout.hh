@@ -6,12 +6,10 @@
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg
-{
 /// A static sampler bound directly to a shader register, for attaching to a pipeline_layout — the register-bound counterpart to a group layout's name-matched `named_sampler`.
 /// Use this for a static sampler a pipeline needs on top of, or independent of, its group layouts.
 /// `binding` carries the register/space (set/index) and count, and its `type` must be a sampler binding.
-struct bound_sampler
+struct sg::bound_sampler
 {
     sg::binding binding;
     sg::sampler sampler;
@@ -19,7 +17,7 @@ struct bound_sampler
 
 /// Description for building a pipeline_layout: an ordered list of binding_group_layouts, one per bind slot, plus any extra register-bound static samplers.
 /// `groups[i]` is the schema bound at slot `i` — the `set` index of cmd.compute.bind_group.
-struct pipeline_layout_description
+struct sg::pipeline_layout_description
 {
     // Ordered; index = bind slot.
     // Owning, and inline-capped at max_binding_groups so the common case never heap-allocates.
@@ -52,7 +50,7 @@ struct pipeline_layout_description
 ///
 /// Abstract: a backend subclasses it and owns the native object (dx12 root signature, vulkan
 /// VkPipelineLayout). See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
-class pipeline_layout
+class sg::pipeline_layout
 {
 public:
     virtual ~pipeline_layout();
@@ -60,4 +58,3 @@ public:
 protected:
     pipeline_layout() = default;
 };
-} // namespace sg

@@ -1,17 +1,42 @@
 #pragma once
 
-#include <shaped-graphics/resource/raw_texture.hh> // texture_description, texture_dimension
+#include <shaped-graphics/fwd.hh> // texture_description, texture_dimension
+#include <shaped-graphics/resource/raw_texture.hh>
+
+namespace sg
+{
+template <texture_dimension Dim, bool Array = false, bool Cube = false, bool Multisampled = false>
+struct texture_traits;
+} // namespace sg
+
+namespace sg
+{
+struct no_params;
+struct readonly_2d_array_of_cube_params;
+struct readonly_2d_of_cube_array_params;
+struct readonly_2d_of_cube_params;
+struct readonly_array_params;
+struct readonly_cube_array_params;
+struct readonly_cube_of_array_params;
+struct readonly_params;
+struct readonly_slice_params;
+struct readwrite_2d_of_cube_array_params;
+struct readwrite_2d_of_cube_params;
+struct readwrite_3d_params;
+struct readwrite_array_params;
+struct readwrite_params;
+struct readwrite_slice_params;
+struct view_range;
+} // namespace sg
 
 /// The compile-time shape of a texture: `texture_traits<Dim, Array, Cube, Multisampled>`, the single template argument of `texture<Traits>` (texture.hh).
 /// It carries the shape as static members, a `matches()` runtime shape check, and the per-view parameter bags the view factories take.
 /// Split out so code that only names shapes or params need not pull in the whole wrapper.
 
-namespace sg
-{
 /// A half-open sub-range selection for one texture-view axis — mips, array slices, cubes, depth slices — in that axis's own units.
 /// The default `{}` selects the whole axis, and a `count < 0` means from `start` to the end.
 /// The factory resolves and bounds-checks it against the texture's extent.
-struct view_range
+struct sg::view_range
 {
     int start = 0;
     int count = -1; ///< < 0 = to the end of the axis
@@ -23,49 +48,49 @@ struct view_range
 
 /// Selectable axes are detected structurally by the factories, via `requires { p.field; }`, so these stay plain aggregates.
 /// `no_params` is the placeholder a shape uses for a view it does not support.
-struct no_params
+struct sg::no_params
 {
 };
 
 // Read-only (sampled / SRV) natural-dimension params.
-struct readonly_params
+struct sg::readonly_params
 {
     view_range mips;
 };
-struct readonly_array_params
+struct sg::readonly_array_params
 {
     view_range mips;
     view_range slices; ///< in array-slice units (a cube face is one slice)
 };
-struct readonly_cube_array_params
+struct sg::readonly_cube_array_params
 {
     view_range mips;
     view_range cubes; ///< in whole-cube units (6 faces each)
 };
 
 // Read-only (sampled / SRV) reinterpreting params (bind one slice/face/cube as a lower dimension).
-struct readonly_slice_params ///< one slice of a 1D/2D array -> Texture1D/Texture2D
+struct sg::readonly_slice_params ///< one slice of a 1D/2D array -> Texture1D/Texture2D
 {
     int slice = 0;
     view_range mips;
 };
-struct readonly_2d_of_cube_params ///< one face of a cube -> Texture2D
+struct sg::readonly_2d_of_cube_params ///< one face of a cube -> Texture2D
 {
     int face = 0;
     view_range mips;
 };
-struct readonly_2d_of_cube_array_params ///< one face of one cube of a cube array -> Texture2D
+struct sg::readonly_2d_of_cube_array_params ///< one face of one cube of a cube array -> Texture2D
 {
     int cube = 0;
     int face = 0;
     view_range mips;
 };
-struct readonly_cube_of_array_params ///< one cube of a cube array -> TextureCube
+struct sg::readonly_cube_of_array_params ///< one cube of a cube array -> TextureCube
 {
     int cube = 0;
     view_range mips;
 };
-struct readonly_2d_array_of_cube_params ///< a cube's faces as a Texture2DArray (all faces, or a sub-range)
+struct sg::readonly_2d_array_of_cube_params ///< a cube's faces as a Texture2DArray (all faces, or a sub-range)
 {
     view_range slices; ///< in face/slice units (a cube array is 6 per cube)
     view_range mips;
@@ -73,38 +98,41 @@ struct readonly_2d_array_of_cube_params ///< a cube's faces as a Texture2DArray 
 
 // Read-write (storage / UAV) natural-dimension params.
 // Always a single mip level.
-struct readwrite_params
+struct sg::readwrite_params
 {
     int mip = 0;
 };
-struct readwrite_array_params
+struct sg::readwrite_array_params
 {
     int mip = 0;
     view_range slices; ///< in array-slice units (a cube face is one slice)
 };
-struct readwrite_3d_params
+struct sg::readwrite_3d_params
 {
     int mip = 0;
     view_range depth_slices; ///< the 3D texture's W/Z axis (FirstWSlice/WSize)
 };
 
 // Read-write (storage / UAV) reinterpreting params.
-struct readwrite_slice_params ///< one slice of a 1D/2D array -> Texture1D/Texture2D
+struct sg::readwrite_slice_params ///< one slice of a 1D/2D array -> Texture1D/Texture2D
 {
     int slice = 0;
     int mip = 0;
 };
-struct readwrite_2d_of_cube_params ///< one face of a cube -> Texture2D
+struct sg::readwrite_2d_of_cube_params ///< one face of a cube -> Texture2D
 {
     int face = 0;
     int mip = 0;
 };
-struct readwrite_2d_of_cube_array_params ///< one face of one cube of a cube array -> Texture2D
+struct sg::readwrite_2d_of_cube_array_params ///< one face of one cube of a cube array -> Texture2D
 {
     int cube = 0;
     int face = 0;
     int mip = 0;
 };
+
+namespace sg
+{
 
 namespace impl
 {
@@ -231,12 +259,14 @@ consteval auto pick_target_view_2d_params()
 }
 } // namespace impl
 
+} // namespace sg
+
 /// The compile-time shape of a texture — the single template argument of `texture<Traits>`.
 /// Carries the shape as static members, a `matches()` runtime check against a texture_description, and the per-view parameter bags the factories take.
 /// Array-ness, cube-ness and multisampling are the *kind* only; extents, mip count and format stay runtime, on the description.
 /// Prefer the `texture_2d` / `texture_cube_array` / … typedefs over spelling this out.
-template <texture_dimension Dim, bool Array = false, bool Cube = false, bool Multisampled = false>
-struct texture_traits
+template <sg::texture_dimension Dim, bool Array, bool Cube, bool Multisampled>
+struct sg::texture_traits
 {
     static constexpr texture_dimension dimension = Dim;
     static constexpr bool is_array = Array;
@@ -267,4 +297,3 @@ struct texture_traits
     using depth_stencil_params = render_target_params;
     using depth_stencil_2d_params = render_target_2d_params;
 };
-} // namespace sg

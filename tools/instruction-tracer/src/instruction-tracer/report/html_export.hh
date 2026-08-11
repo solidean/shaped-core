@@ -3,15 +3,19 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/string/string.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 #include <instruction-tracer/report/mca.hh>
 #include <instruction-tracer/report/memory_formatter.hh>
 #include <instruction-tracer/report/source_cache.hh>
 
 namespace itrace
 {
+struct html_export_meta;
+} // namespace itrace
+
 /// Everything main gathers after run() that is not in the trace model itself: the capture-time environment, and the settings the run was launched with.
 /// All best-effort — an empty string just renders as a blank cell.
-struct html_export_meta
+struct itrace::html_export_meta
 {
     cc::string generated_at_iso; // wall clock at export time, ISO 8601
     cc::string os_version;       // e.g. "Windows 11 Pro 10.0.26200"
@@ -28,6 +32,9 @@ struct html_export_meta
     bool stop_at_syscall = false;
     memory_view_options regions; // the default region set the header shows
 };
+
+namespace itrace
+{
 
 /// Build the whole self-contained HTML page: the shell, the inlined CSS/JS assets, and one big `TRACE_DATA` JSON object serialized from the traces, meta and per-trace source views.
 /// Pure over already-enriched traces; `sources` is used to read the context lines for the source view.

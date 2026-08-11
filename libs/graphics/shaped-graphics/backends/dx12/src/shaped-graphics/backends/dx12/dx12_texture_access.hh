@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/string/print.hh>
+#include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
@@ -13,13 +14,21 @@
 
 namespace sg::backend::dx12
 {
+struct combined_layout;
+struct dx12_subresource_barrier;
+class dx12_texture_access;
+} // namespace sg::backend::dx12
+
 /// A barrier the tracker asks the command list to emit, scoped to a subresource range.
 /// dx12-internal: SG core never produces barriers, and each backend owns its own tracking and emission.
-struct dx12_subresource_barrier
+struct sg::backend::dx12::dx12_subresource_barrier
 {
     sg::subresource_range range;
     sg::access_barrier barrier;
 };
+
+namespace sg::backend::dx12
+{
 
 /// The subresource grid a texture's access state partitions: mip × array-slice × aspect-plane.
 /// A cube is 6 array slices per cube; a depth+stencil format has two aspect planes.
@@ -41,11 +50,16 @@ enum class layout_combine
     conflict, ///< the two accesses can't coexist in one op (e.g. copy-dest + sampled) — caller error
 };
 
-struct combined_layout
+} // namespace sg::backend::dx12
+
+struct sg::backend::dx12::combined_layout
 {
     sg::texture_layout layout;
     layout_combine result;
 };
+
+namespace sg::backend::dx12
+{
 
 /// Combine the two layouts a subresource is required to be in within a single operation, i.e. a texture bound as more than one view.
 /// The policy is D3D12-specific.
@@ -69,6 +83,8 @@ struct combined_layout
     return {sg::texture_layout::general, layout_combine::conflict};
 }
 
+} // namespace sg::backend::dx12
+
 /// Per-texture, per-command-list access tracking — the dx12 realization of the covering-partition + slot model.
 /// Pure logic, with no D3D12 objects, so it is unit-testable without a device.
 /// dx12_texture holds one under a mutex; the command list drives declare/finalize/discard and emits the returned barriers.
@@ -77,7 +93,7 @@ struct combined_layout
 /// A per-texture `active_slot_count` tracks how many open lists are using it.
 /// The finalize that drops it to zero — the *last* such list — promotes that list's partition into `canonical`, the one case that may leave the texture in a new layout.
 /// Every earlier finalize restores the texture to the canonical layout for the lists still using it.
-class dx12_texture_access
+class sg::backend::dx12::dx12_texture_access
 {
 public:
     explicit dx12_texture_access(sg::subresource_extent extent) : _canonical(extent) {}
@@ -284,4 +300,3 @@ private:
     sg::subresource_partition _canonical;   // between-lists state (initial layout general)
     int _active_slot_count = 0;             // open command lists currently using this texture (active slots)
 };
-} // namespace sg::backend::dx12

@@ -16,9 +16,11 @@ enum class present_mode : u8
     immediate, ///< present as soon as ready — may tear, uncapped (DX12 sync interval 0 + allow-tearing)
 };
 
+} // namespace sg
+
 /// How a swapchain is created.
 /// Defaults describe a plain double-buffered vsync surface.
-struct swapchain_description
+struct sg::swapchain_description
 {
     /// OS window to present into — an HWND on Windows.
     /// Opaque here so the sg core stays backend-agnostic; the backend reinterprets it.
@@ -55,7 +57,7 @@ struct swapchain_description
 /// Per-frame use: acquire_backbuffer() -> render into the returned target -> ctx.submit_command_list_and_present(sc, cmd).
 /// The returned render_target_view is the source of truth for this frame's size (rt.width() / rt.height()).
 /// The swapchain intentionally exposes no size getter, since a later acquire may resize under you.
-class swapchain : public std::enable_shared_from_this<swapchain>
+class sg::swapchain : public std::enable_shared_from_this<swapchain>
 {
 public:
     virtual ~swapchain();
@@ -92,4 +94,3 @@ protected:
 
     swapchain_description _desc;
 };
-} // namespace sg

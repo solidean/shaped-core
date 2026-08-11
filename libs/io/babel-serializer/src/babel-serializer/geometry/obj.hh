@@ -25,10 +25,8 @@
 //       for (auto ci = f.first_corner; ci < f.first_corner + f.corner_count; ++ci)
 //           auto const p = m.positions[m.corners[ci].position];
 
-namespace babel::obj
-{
 /// One face corner: 0-based indices into positions / texcoords / normals; -1 when that attribute is absent.
-struct corner
+struct babel::obj::corner
 {
     i32 position = -1;
     i32 texcoord = -1;
@@ -37,7 +35,7 @@ struct corner
 
 /// A face as a contiguous run of corners in data.corners: [first_corner, first_corner + corner_count).
 /// Polygons of any arity are preserved (not triangulated).
-struct face
+struct babel::obj::face
 {
     i32 first_corner = 0;
     i32 corner_count = 0;
@@ -45,7 +43,7 @@ struct face
 
 /// A named span over faces: [first_face, first_face + face_count). Used for `o` / `g` names and `usemtl`
 /// material assignment — recorded, not applied.
-struct group
+struct babel::obj::group
 {
     cc::string name;
     i32 first_face = 0;
@@ -54,7 +52,7 @@ struct group
 
 /// The faithful parse of a Wavefront .obj.
 /// Read-once; the vectors mirror the file's declaration order.
-struct data
+struct babel::obj::data
 {
     cc::vector<tg::pos3f> positions; // v  (optional w is dropped)
     cc::vector<tg::vec2f> texcoords; // vt (u, v; an optional third coord is dropped)
@@ -69,6 +67,9 @@ struct data
 
     cc::vector<cc::string> material_libraries; // `mtllib` referenced files
 };
+
+namespace babel::obj
+{
 
 // reading
 // -------------------------------------------------------------------------------------------------

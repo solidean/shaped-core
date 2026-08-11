@@ -8,8 +8,6 @@
 #include <shaped-graphics/resource/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
 #include <shaped-graphics/types.hh>
 
-namespace sg
-{
 /// Resource factory for a context's *persistent* lifetime scope, reached as `ctx.persistent`.
 /// Persistent resources live until their handles are released, unlike ctx.transient's, which the backend recycles per epoch.
 /// See lifetime_scope.
@@ -17,7 +15,7 @@ namespace sg
 /// Every create comes in a `try_create_*` fallible core and a throwing `create_*` default — the pattern in docs/error-handling.md.
 /// The throwing flavor raises sg::allocation_exception or sg::binding_group_exception, and sg::device_lost_exception if the device was lost.
 /// Contract violations assert in either flavor — they are bugs, not runtime failures.
-class context_persistent_scope
+class sg::context_persistent_scope
 {
     // buffers
 public:
@@ -241,4 +239,3 @@ private:
 
     context& _ctx;
 };
-} // namespace sg

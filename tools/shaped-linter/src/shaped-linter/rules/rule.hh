@@ -15,6 +15,20 @@
 
 namespace scl
 {
+struct finding;
+struct hint;
+struct lint_context;
+struct rule;
+} // namespace scl
+
+namespace scl
+{
+struct fix;
+struct text_edit;
+} // namespace scl
+
+namespace scl
+{
 enum class severity : u8
 {
     note,
@@ -22,9 +36,11 @@ enum class severity : u8
     error,
 };
 
+} // namespace scl
+
 /// Replace the bytes of `span` with `replacement`. The unit of an automatic fix.
 /// An EMPTY span is an insertion at that offset — nothing is removed and `replacement` is spliced in.
-struct text_edit
+struct scl::text_edit
 {
     source_span span;
     cc::string replacement;
@@ -39,7 +55,7 @@ struct text_edit
 /// A rewrite that only compiles once the file also gains an include or a using-directive carries both edits on every finding.
 /// Putting the shared one on the first finding alone would break that contract.
 /// `collect_fix_edits` merges the byte-identical copies, so the shared line still lands exactly once however many findings asked for it.
-struct fix
+struct scl::fix
 {
     cc::vector<text_edit> edits;
 };
@@ -50,7 +66,7 @@ struct fix
 /// `message` is what to weigh, and is always printed.
 /// `edits` are optional: a hint whose better form cannot be spelled mechanically carries prose alone.
 /// Nothing in the engine applies a hint's edits; they exist so the reporter can show the exact replacement.
-struct hint
+struct scl::hint
 {
     cc::string message;
     cc::vector<text_edit> edits;
@@ -65,7 +81,7 @@ struct hint
 /// `primary_label` and `secondary` are opt-in and rarely needed — the message above the snippet usually says it all.
 /// Reach for them when a finding is only intelligible as a relation between two places ("declared here" / "used here").
 /// A secondary span may live in another file, which gets its own block.
-struct finding
+struct scl::finding
 {
     cc::string_view rule_id;
     source_span span;
@@ -76,6 +92,9 @@ struct finding
     cc::string primary_label;
     cc::vector<label> secondary;
 };
+
+namespace scl
+{
 
 /// The layer a rule walks.
 /// The engine builds only what some enabled rule asked for, so a cheap rule
@@ -93,6 +112,8 @@ enum class rule_layer : u8
     // semantics — later
 };
 
+} // namespace scl
+
 /// What a rule's `check` is handed: the source and what it was read as, the layers the engine built for
 /// it, and the sink to report into.
 ///
@@ -100,7 +121,7 @@ enum class rule_layer : u8
 /// syntax tree, `prose` unless one walks prose, and `tokens` holds nothing for markdown, which has no
 /// lexer.
 /// A rule reads the layer it declared and no other.
-struct lint_context
+struct scl::lint_context
 {
     source_buffer const& source;
     source_language language = source_language::cpp;
@@ -118,7 +139,7 @@ struct lint_context
 ///
 /// `languages` is the set of file kinds it fires on, and defaults to C++ alone — a rule never sees a file
 /// it did not ask for, so a C++ rule is safe from ever meeting markdown.
-struct rule
+struct scl::rule
 {
     cc::string_view id;
     cc::string_view rationale;
@@ -127,6 +148,9 @@ struct rule
     severity default_severity = severity::warning;
     void (*check)(lint_context&) = nullptr;
 };
+
+namespace scl
+{
 
 inline bool applies_to(rule const& r, source_language l)
 {

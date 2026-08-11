@@ -3,6 +3,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-shader-library/filesystem/filesystem.hh>
+#include <shaped-shader-library/fwd.hh>
 
 #include <memory>
 
@@ -11,13 +12,11 @@ namespace slib::impl
 class watch_registry;
 }
 
-namespace slib
-{
 /// An in-memory filesystem you write to directly.
 /// Every write bumps the file's revision, so a reload is a write() rather than a sleep — which is what reload tests are built on.
 ///
 /// Also the seam for shader sources that were never files: generated, downloaded, or authored in a UI.
-class memory_filesystem final : public filesystem
+class slib::memory_filesystem final : public filesystem
 {
 public:
     memory_filesystem();
@@ -60,4 +59,3 @@ private:
     /// Held by pointer so a public header need not name an impl type; not mutable because the registry — not this pointer — is what a const watch() changes.
     std::unique_ptr<impl::watch_registry> _watches;
 };
-} // namespace slib

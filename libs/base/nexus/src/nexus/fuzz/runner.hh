@@ -2,19 +2,19 @@
 
 #include <clean-core/container/vector.hh>
 #include <nexus/fuzz/executed_operation.hh>
+#include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/machine.hh>
+#include <nexus/fwd.hh>
 
 namespace cc
 {
 struct random;
 }
 
-namespace nx::fuzz
-{
 /// Generates a single fuzz program: on each step it rolls a type-correct operation, biased toward operations that still owe executions (execute_at_least).
 /// The fallback runs any eligible operation, to manufacture missing prerequisite values.
 /// A non-progress guard aborts a pathological setup, such as a precondition that can never be satisfied.
-struct fuzz_runner
+struct nx::fuzz::fuzz_runner
 {
     fuzz_runner(fuzz_machine const& machine, cc::random& rng);
 
@@ -38,4 +38,3 @@ private:
     cc::vector<int> _exec_count;
     int _non_progress = 0;
 };
-} // namespace nx::fuzz

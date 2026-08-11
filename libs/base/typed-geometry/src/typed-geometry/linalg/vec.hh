@@ -1,13 +1,12 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 #include <initializer_list>
 
-namespace tg
-{
 /// Displacement / direction vector in D dimensions.
 ///
 /// A vec is a free vector: a difference between positions, a direction, or any quantity that adds component-wise.
@@ -23,7 +22,7 @@ namespace tg
 ///     auto const l = b.length();            // 3
 ///     auto const n = b.normalized();        // unit length
 template <int D, class T>
-struct vec
+struct tg::vec
 {
     static_assert(D > 0, "vec requires a positive dimension");
 
@@ -211,6 +210,9 @@ public:
         return a;
     }
 };
+
+namespace tg
+{
 
 template <int D, class T>
 inline vec<D, T> const vec<D, T>::zero = vec<D, T>{};

@@ -14,12 +14,10 @@
 ///   inflight_*       — everything issued since the last write / command-list start
 ///   barriered_read_* — the reads already synced against the last write (so read-after-read is free)
 
-namespace sg
-{
 /// The barrier `flush` asks the backend to emit.
 /// `needed == false` means the access was a freebie and no barrier is required.
 /// For buffers the layouts are always `general`; they matter for textures.
-struct access_barrier
+struct sg::access_barrier
 {
     bool needed = false;
     pipeline_stage_flags src_stages = pipeline_stage_flags::none;
@@ -30,7 +28,7 @@ struct access_barrier
     texture_layout dst_layout = texture_layout::general;
 };
 
-struct resource_access_state
+struct sg::resource_access_state
 {
     // curr — accumulated for the next op
     pipeline_stage_flags curr_read_stages = pipeline_stage_flags::none;
@@ -177,4 +175,3 @@ struct resource_access_state
         prev_layout = layout;
     }
 };
-} // namespace sg

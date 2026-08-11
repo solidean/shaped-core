@@ -6,12 +6,10 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
-namespace sg::backend::dx12
-{
 /// dx12 ray-tracing shader table: a GPU buffer of 32-byte shader-identifier records — raygen / miss / hit / callable sections — copied from a dx12_raytracing_pipeline.
 /// It also carries the four GPU-address ranges DispatchRays reads.
 /// Backed by a plain shader-readable + copy-dst buffer, a stand-in until a dedicated shader-table buffer exists.
-class dx12_raytracing_shader_table final : public sg::raytracing_shader_table
+class sg::backend::dx12::dx12_raytracing_shader_table final : public sg::raytracing_shader_table
 {
 public:
     /// Builds the table: validates the handles against the pipeline, lays out the four sections, uploads the records, and captures the address ranges.
@@ -37,4 +35,3 @@ private:
     {
     }
 };
-} // namespace sg::backend::dx12

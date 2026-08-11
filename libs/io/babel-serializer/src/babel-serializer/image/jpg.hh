@@ -8,6 +8,11 @@
 #include <clean-core/streams/stream.hh> // cc::read_stream / cc::write_stream
 #include <clean-core/string/string.hh>
 
+namespace babel::jpg
+{
+struct write_options;
+} // namespace babel::jpg
+
 // Low-level JPEG codec (image/).
 //
 // The format-shaped view of a JPEG: decoded pixels PLUS the JPEG's own metadata (precision, progressive vs baseline, chroma subsampling, JFIF density, ICC profile, EXIF, comments).
@@ -43,8 +48,10 @@ enum class density_unit : u8
     dpcm, // 2 — dots per centimeter
 };
 
+} // namespace babel::jpg
+
 /// JFIF pixel density (APP0). [populated when a JFIF APP0 marker is present]
-struct density
+struct babel::jpg::density
 {
     density_unit unit = density_unit::none;
     int x = 0;
@@ -53,7 +60,7 @@ struct density
 
 /// A faithful native decode of a JPEG.
 /// Read-once.
-struct data
+struct babel::jpg::data
 {
     // --- populated now, best-effort: a field keeps the default below when its marker is absent ---
     int width = 0;
@@ -73,6 +80,9 @@ struct data
     [[nodiscard]] bool is_empty() const { return width <= 0 || height <= 0; }
 };
 
+namespace babel::jpg
+{
+
 // reading
 // -------------------------------------------------------------------------------------------------
 
@@ -86,12 +96,17 @@ struct data
 // writing
 // -------------------------------------------------------------------------------------------------
 
+} // namespace babel::jpg
+
 /// JPEG encode knobs.
 /// JPEG is lossy.
-struct write_options
+struct babel::jpg::write_options
 {
     int quality = 90; // 1..100
 };
+
+namespace babel::jpg
+{
 
 /// Encode `img`'s pixels to JPEG file bytes.
 /// Metadata fields stb cannot emit are ignored (see the header note).

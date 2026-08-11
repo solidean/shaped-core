@@ -52,10 +52,12 @@ enum class column_kind : u8
     blob,
 };
 
+} // namespace babel::sqlite
+
 /// A non-owning view of the statement's current result row.
 /// Valid only until the next step, or until the statement dies.
 /// Columns are 0-based, and accessors follow SQLite's type coercion (as_i64 on a text cell parses it).
-struct row
+struct babel::sqlite::row
 {
     row() = default;
     explicit row(sqlite3_stmt* stmt) : _stmt(stmt) {}
@@ -79,7 +81,7 @@ private:
 ///
 /// Iterate with a range-for (single pass). Row-stepping cannot return a result per iteration, so a step failure is
 /// sticky: it ends the loop and is readable afterwards via is_ok() / error(). For explicit control use next().
-class statement
+class babel::sqlite::statement
 {
 public:
     statement() = default;
@@ -146,7 +148,7 @@ private:
 /// A live SQLite database connection.
 /// Move-only: it owns the sqlite3 handle and closes it in the destructor.
 /// Full read/write: exec arbitrary SQL, prepare/query statements, run DDL and transactions.
-class database
+class babel::sqlite::database
 {
 public:
     database() = default;
@@ -186,4 +188,3 @@ private:
 
     sqlite3* _db = nullptr;
 };
-} // namespace babel::sqlite

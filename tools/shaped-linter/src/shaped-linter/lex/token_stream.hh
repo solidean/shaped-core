@@ -8,11 +8,9 @@
 #include <shaped-linter/lex/source_span.hh>
 #include <shaped-linter/lex/token.hh>
 
-namespace scl
-{
 /// A soft lexer diagnostic: an unterminated string or comment.
 /// The lexer recovers and keeps going, so a diagnostic never stops tokenization — it only records that the input was malformed.
-struct lex_diagnostic
+struct scl::lex_diagnostic
 {
     source_span span;
     cc::string message;
@@ -21,7 +19,7 @@ struct lex_diagnostic
 /// The full token sequence of one file.
 /// It tiles the file gap-free: trivia (whitespace, newlines, comments) is kept, so byte ranges are exact for fix-its and future macro work.
 /// The last token is always `end_of_file`.
-struct token_stream
+struct scl::token_stream
 {
     cc::vector<token> tokens;
     cc::vector<lex_diagnostic> diagnostics;
@@ -32,7 +30,7 @@ struct token_stream
 
 /// A forward, trivia-skipping view over a token span — what the parser drives.
 /// `peek` / `current` never return trivia; `raw_index` exposes the position in the full stream so callers can join spans.
-struct token_cursor
+struct scl::token_cursor
 {
     explicit token_cursor(cc::span<token const> toks) : _toks(toks) { _skip_trivia(); }
 
@@ -78,4 +76,3 @@ private:
             ++_pos;
     }
 };
-} // namespace scl

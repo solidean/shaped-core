@@ -2,8 +2,14 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/function/unique_function.hh>
+#include <shaped-shader-library/fwd.hh>
 
 #include <memory>
+
+namespace slib
+{
+class watch_subscription;
+} // namespace slib
 
 namespace slib
 {
@@ -14,6 +20,8 @@ namespace slib
 /// See filesystem::watch for the full contract.
 using watch_sink = cc::unique_function<void()>;
 
+} // namespace slib
+
 /// A live watch; destroying it unsubscribes.
 ///
 /// Once the destructor has returned, the sink is neither running nor callable again.
@@ -23,7 +31,7 @@ using watch_sink = cc::unique_function<void()>;
 /// Move-only.
 /// A default-constructed one is valid and never fires, which is the honest answer for content that cannot change (embedded_filesystem).
 /// That is *not* the same as filesystem::watch returning nullopt, which means "I cannot notify at all — poll me".
-class watch_subscription final
+class slib::watch_subscription final
 {
 public:
     /// Whatever a filesystem must keep alive for the watch.
@@ -48,4 +56,3 @@ private:
     /// Null when inert.
     std::unique_ptr<impl_base> _impl;
 };
-} // namespace slib

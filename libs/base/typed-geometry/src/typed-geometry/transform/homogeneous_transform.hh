@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/bivec.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -13,8 +14,6 @@
 #include <typed-geometry/transform/impl/transform_representation.hh>
 #include <typed-geometry/transform/impl/transform_representation_access.hh>
 
-namespace tg
-{
 /// A transform of the capability class `Flags`, mapping DSource-dimensional space to DTarget-dimensional space.
 ///
 /// The two dimensions are what will let a transform lift or project between spaces: `pos<DSource, T>` goes in and
@@ -45,7 +44,7 @@ namespace tg
 /// Equality is representational, not geometric: a quaternion and its negation denote the same
 /// rotation but do not compare equal, exactly as for tg::quat.
 template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
-struct homogeneous_transform
+struct tg::homogeneous_transform
 {
     static_assert(DSource == 2 || DSource == 3,
                   "typed-geometry transforms are 2D or 3D; the 4x4 case is the 3D homogeneous matrix");
@@ -659,6 +658,9 @@ private:
         return result;
     }
 };
+
+namespace tg
+{
 
 template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
 inline homogeneous_transform<DSource, DTarget, T, Flags> const homogeneous_transform<DSource, DTarget, T, Flags>::identity

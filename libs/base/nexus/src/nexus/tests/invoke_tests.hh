@@ -5,20 +5,31 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
 
 namespace nx
 {
+struct invocation_result;
+} // namespace nx
+
+namespace nx
+{
 struct test_declaration;
 
+} // namespace nx
+
 /// Outcome of an nx::invoke_tests call.
-struct invocation_result
+struct nx::invocation_result
 {
     int matched = 0;  ///< invocable tests whose signature matched (before -c / name scoping)
     int executed = 0; ///< instances actually run after scoping
 };
+
+namespace nx
+{
 
 namespace impl
 {

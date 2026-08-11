@@ -4,11 +4,9 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg
-{
 /// Everything needed to build a compute_pipeline: the compiled compute `shader` and the `pipeline_layout` it is compiled against.
 /// A struct rather than loose arguments, so it stays consistent with the graphics-pipeline descriptions to come and can grow a cached-pipeline field for PSO caching.
-struct compute_pipeline_description
+struct sg::compute_pipeline_description
 {
     compiled_shader const& shader;
     pipeline_layout_handle layout;
@@ -25,7 +23,7 @@ struct compute_pipeline_description
 ///
 /// Abstract: a backend subclasses it and owns the native object (dx12 pipeline state + root signature,
 /// vulkan VkPipeline + VkPipelineLayout). See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
-class compute_pipeline
+class sg::compute_pipeline
 {
 public:
     virtual ~compute_pipeline();
@@ -42,4 +40,3 @@ protected:
 
     compute_dimensions _workgroup_size;
 };
-} // namespace sg

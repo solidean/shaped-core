@@ -8,6 +8,19 @@
 
 namespace sg::backend::dx12
 {
+// Declared here so each header defines its types qualified rather than opening the namespace around them.
+struct dx12_config;
+struct dx12_descriptor_alloc;
+struct dx12_pooled_allocator;
+struct dx12_acquired_command_list;
+struct dx12_hazard_view;
+struct dx12_texture_hazard_view;
+struct dx12_upload_allocation;
+struct dx12_download_allocation;
+struct dx12_pending_copy;
+struct dx12_texture_upload;
+struct dx12_texture_download;
+
 /// Monotonic value on the async-upload completion fence (dx12_upload_async_system::_completion_fence).
 /// Its own newtype so it cannot be confused with the epoch / submission / staging fence timelines.
 /// A later direct-queue list waits on this value to see an async upload's writes; `none` means no pending upload.

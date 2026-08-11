@@ -7,11 +7,9 @@
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/fwd.hh>
 
-namespace slib
-{
 /// One shader in a package: which file, which stage, which entry point — plus the generated global to
 /// write the asset handle back into.
-struct shader_definition
+struct slib::shader_definition
 {
     cc::string_view path; ///< package-relative and must stay inside the package, e.g. "compute/invert.hlsl"
     sg::shader_stage stage;
@@ -24,7 +22,7 @@ struct shader_definition
 
 /// A target's shaders, as emitted by sc_add_shader_package.
 /// A pure description with static storage — generated code owns one and hands it out through its package() function.
-struct shader_package
+struct slib::shader_package
 {
     /// Identifies the package and, by default, where it mounts.
     cc::string_view name;
@@ -40,4 +38,3 @@ struct shader_package
 
     cc::span<shader_definition const> definitions;
 };
-} // namespace slib
