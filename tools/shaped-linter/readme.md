@@ -31,7 +31,12 @@ uv run dev.py run shaped-linter <file>...   # point it at specific files (builds
 
 uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]  # apply a plan of prose rewrites (see below)
 uv run dev.py lint prose-stats <path>...            # how much prose files carry, before writing a plan
+
+uv run dev.py lint bless-includes [--write]         # refill each .shaped-lint.yml's generated baseline block
 ```
+
+Rules whose answer differs per library read a [`.shaped-lint.yml`](docs/configuration.md) — the per-library policy file, merged from the repo root down.
+`blessed-includes` is the first of them.
 
 It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates.
 So the rules adopt incrementally — a changed file with a brace-form initializer is flagged, and the existing tree is not swept.

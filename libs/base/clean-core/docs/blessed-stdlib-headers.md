@@ -24,9 +24,16 @@ The header may leak through our public includes — `clean-core/thread/atomic.hh
 But code outside its `cc::` wrapper must not name the `std::` facility.
 `cc::atomic` / `cc::atomic_ref` / `cc::atomic_flag` / `cc::atomic_thread_fence` / `cc::memory_order` cover every use clean-core has.
 
-This is not enforced by tooling — it is a review rule.
-The tell is that `std::atomic` in a diff compiles and passes on every threaded preset.
+**The include half is enforced.**
+[`.shaped-lint.yml`](../.shaped-lint.yml) carries the machine-checked list, and shaped-linter's `blessed-includes` rule reports every angle include nothing above it blesses.
+The file format is [configuration](../../../../tools/shaped-linter/docs/configuration.md)'s.
+This table is the *argument*; that file is the gate, and the two are kept in step by hand.
+
+**The second tier is still a review rule**, because it is a claim about symbols rather than includes.
+`<atomic>` appearing in a header is exactly what the config allows, and no include rule can see a `std::atomic` written below it.
+The tell is that such a line compiles and passes on every threaded preset.
 Only the single-threaded preset that `dev.py check` runs would notice, and only if the type is on a path that build exercises.
 
 The list grows by **targeted addition only**: add a header here, with its justification and its tier, when a concrete need arises rather than pre-emptively.
 Anything not listed should go through a `cc::` equivalent.
+A library that genuinely needs one blesses it in its own `.shaped-lint.yml`, which is where the deviation stays visible instead of widening this list.

@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-linter/cli/changed_lines.hh>
 #include <shaped-linter/cli/options.hh>
+#include <shaped-linter/config/baseline.hh>
 #include <shaped-linter/config/config_resolver.hh>
 #include <shaped-linter/lex/source_manager.hh>
 #include <shaped-linter/prose/apply.hh>
@@ -301,6 +302,146 @@ int run_prose_stats(scl::prose_stats_options const& opts)
     return exit_ok;
 }
 
+/// Just the include rule, so a baseline run neither parses a tree nor collects prose findings.
+/// Taken from the registry by id rather than by including the rule's header — a rule is reached from one
+/// place only, and that place is registry.cc.
+cc::vector<scl::rule> include_rule_only()
+{
+    cc::vector<scl::rule> out;
+    for (auto const& r : scl::all_rules())
+        if (r.id == "blessed-includes")
+            out.push_back(r);
+    return out;
+}
+
+int run_bless_includes(scl::bless_includes_options const& opts)
+{
+    auto files = cc::vector<cc::string>(opts.files);
+    if (!opts.files_from_path.empty())
+    {
+        scl::source_manager list_sm;
+        auto list = list_sm.add_from_file(opts.files_from_path);
+        if (list.has_error())
+        {
+            cc::eprintln("error: cannot read {}: {}", opts.files_from_path, list.error().to_string());
+            return exit_usage;
+        }
+        auto const text = list.value()->text();
+        for (auto begin = isize(0); begin < text.size();)
+        {
+            auto end = begin;
+            while (end < text.size() && text[end] != '\n')
+                ++end;
+
+            auto line = text.subview({.start = begin, .end = end});
+            while (!line.empty() && (line[line.size() - 1] == '\r' || line[line.size() - 1] == ' '))
+                line = line.subview({.start = 0, .end = line.size() - 1});
+            if (!line.empty())
+                files.push_back(cc::string(line));
+
+            begin = end + 1;
+        }
+    }
+
+    scl::config_resolver configs;
+    cc::vector<scl::baseline_group> groups;
+    auto const rules = include_rule_only();
+    auto skipped = isize(0);
+
+    for (auto const& file : files)
+    {
+        if (scl::language_from_path(file) != scl::source_language::cpp)
+            continue;
+
+        scl::source_manager sm;
+        auto buffer = sm.add_from_file(file);
+        if (buffer.has_error())
+        {
+            cc::eprintln("error: cannot read {}: {}", file, buffer.error().to_string());
+            return exit_usage;
+        }
+
+        auto const& config = configs.resolve(file);
+        if (config.nearest_config_path.empty())
+        {
+            // Where a config belongs is a human's call about a library, never a scan's.
+            ++skipped;
+            continue;
+        }
+
+        // The findings ARE the answer: what the rule would report is exactly what needs blessing, so the
+        // baseline cannot drift from the gate it is meant to satisfy.
+        for (auto const& f : scl::run_rules(*buffer.value(), rules, config))
+            scl::add_to_baseline(groups, config.nearest_config_path, sm.span_text(f.span));
+    }
+
+    if (!configs.errors().empty())
+    {
+        for (auto const& e : configs.errors())
+            cc::eprintln("error: {}", e);
+        return exit_usage;
+    }
+
+    scl::sort_baseline(groups);
+
+    for (auto const& g : groups)
+    {
+        scl::source_manager sm;
+        auto existing = sm.add_from_file(g.config_path);
+        if (existing.has_error())
+        {
+            cc::eprintln("error: cannot read {}: {}", g.config_path, existing.error().to_string());
+            return exit_usage;
+        }
+
+        auto const updated = scl::apply_baseline_block(existing.value()->text(), g.includes);
+        if (updated == existing.value()->text())
+            continue;
+
+        if (!opts.write)
+        {
+            cc::println("--- {} ({} include(s))", g.config_path, g.includes.size());
+            cc::print(scl::render_baseline_block(g.includes));
+            continue;
+        }
+
+        auto const written = scl::write_file(g.config_path, updated);
+        if (written.has_error())
+        {
+            cc::eprintln("error: cannot write {}: {}", g.config_path, written.error().to_string());
+            return exit_usage;
+        }
+        cc::println("shaped-linter: blessed {} include(s) in {}", g.includes.size(), g.config_path);
+    }
+
+    if (skipped > 0)
+        cc::println("shaped-linter: skipped {} file(s) with no .shaped-lint.yml above them", skipped);
+
+    return exit_ok;
+}
+
+/// Dispatch `shaped-linter bless-includes …`. `args` is the full argv.
+int run_bless_includes_command(cc::span<char const* const> args)
+{
+    auto opts = scl::parse_bless_includes_options(args.subspan(2));
+    cc::console::configure(opts.has_value() ? opts.value().color : cc::console::color_mode::automatic);
+
+    if (opts.has_error())
+    {
+        cc::eprintln("error: {}", opts.error().to_string());
+        cc::eprint(scl::bless_includes_usage_text());
+        return exit_usage;
+    }
+
+    if (opts.value().help)
+    {
+        cc::print(scl::bless_includes_usage_text());
+        return exit_ok;
+    }
+
+    return run_bless_includes(opts.value());
+}
+
 /// Dispatch `shaped-linter prose apply …` / `prose stats …`. `args` is the full argv.
 int run_prose_command(cc::span<char const* const> args)
 {
@@ -364,6 +505,8 @@ int main(int argc, char const* const* argv)
     // Everything else is the flat lint command it has always been.
     if (args.size() >= 2 && cc::string_view(args[1]) == "prose")
         return run_prose_command(args);
+    if (args.size() >= 2 && cc::string_view(args[1]) == "bless-includes")
+        return run_bless_includes_command(args);
 
     auto opts = scl::parse_options(args);
 

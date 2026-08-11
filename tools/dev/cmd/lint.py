@@ -47,6 +47,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     ps = lint_sub.add_parser("prose-stats", help="Report how much prose files carry — lines and words, per file and total")
     a.preset(ps)
     ps.add_argument("paths", nargs="+", help="Files or directories to measure (a directory is walked for lintable sources)")
+
+    bi = lint_sub.add_parser("bless-includes",
+                             help="Fill each .shaped-lint.yml's generated block with the includes the tree still needs blessed")
+    a.preset(bi)
+    bi.add_argument("--write", action="store_true", help="Rewrite the generated blocks in place, rather than printing them")
     return p
 
 
@@ -245,6 +250,55 @@ def run_prose_stats(
     return result.ok
 
 
+def run_bless_includes(
+    ctx: Context,
+    *,
+    preset_specs: list[str] | None,
+    write: bool,
+    mirror: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Build shaped-linter and fill every .shaped-lint.yml's generated block; return True if it ran.
+
+    The scan is repo-wide by design.
+    A blessing is a claim about a whole library, so a dirty-only baseline would bless whatever this commit happened to touch and no more.
+    """
+    preset = ctx.resolve_presets(preset_specs)[0]
+    ctx.discover(preset)  # (re)configure if stale
+
+    build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True,
+                              mirror=mirror, verbose=verbose)
+    if not all(r.ok for r in build_results):
+        dev.report.print_build_failure(build_results, [preset], ctx.root)
+        return False
+
+    exe = next((t.artifact for t in ctx.discover(preset)
+                if t.name == "shaped-linter" and t.kind == "EXECUTABLE" and t.artifact), None)
+    if exe is None:
+        print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
+        return False
+
+    files = dev.discover_lint_files(ctx.root, dirty_only=False)
+
+    # One invocation, unlike `lint shaped`: a config's block is written from everything below it at once,
+    # and a batched run would rewrite each block from one batch's share of the files.
+    # That many paths do not fit on a command line, so they go in a spec file instead.
+    spec = preset.build_dir / "shaped-linter-bless-files.txt"
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text("\n".join(str(f) for f in files) + "\n", encoding="utf-8")
+
+    argv = [str(exe), "bless-includes", "--color", "always" if dev.console.enabled() else "never",
+            "--files-from", str(spec)]
+    if write:
+        argv.append("--write")
+
+    result = dev.run_step(
+        argv, step_type="lint", name="bless-includes",
+        build_dir=preset.build_dir, cwd=ctx.root, mirror=True, verbose=verbose,
+    )
+    return result.ok
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     match args.lint_cmd:
         case "clang-tidy":
@@ -268,6 +322,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         case "prose-stats":
             ok = run_prose_stats(
                 ctx, preset_specs=args.preset, paths=args.paths,
+                mirror=args.mirror_output, verbose=args.verbose,
+            )
+            raise SystemExit(0 if ok else 1)
+        case "bless-includes":
+            ok = run_bless_includes(
+                ctx, preset_specs=args.preset, write=args.write,
                 mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)

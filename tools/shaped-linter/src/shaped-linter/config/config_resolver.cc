@@ -11,12 +11,22 @@ namespace scl
 namespace
 {
 /// The directory holding `path`, normalized, or empty when there is none left to climb to.
+///
+/// A relative path climbs one step further than its first component, to `.` — the working directory.
+/// Without that a run given `libs/base/clean-core/x.cc` would stop at `libs` and never reach the repo-root
+/// config, while the same run given absolute paths would find it.
 cc::string_view parent_of(cc::string_view path)
 {
     auto const slash = path.rfind('/');
-    if (slash <= 0) // no separator, or only the leading one of an absolute posix path
+    if (slash > 0)
+        return path.subview({.start = 0, .end = slash});
+    if (slash == 0)
+        return {}; // the leading separator of an absolute posix path
+
+    // No separator left: a drive (`C:`) is the top, and anything else is a relative first component.
+    if (path == "." || path.contains(':'))
         return {};
-    return path.subview({.start = 0, .end = slash});
+    return ".";
 }
 
 /// Read a whole file, or nothing when it is not there.

@@ -21,10 +21,13 @@ cc::string lowered(cc::string_view s)
 }
 
 /// `path` seen from `base`, or an empty optional when it does not live there.
+///
 /// An empty `base` means the paths are already relative to it, which is what an in-memory config uses.
+/// So does `.`, the working directory a run given repo-relative paths climbs to — every such path is
+/// already spelled from there.
 cc::optional<cc::string_view> path_under(cc::string_view base, cc::string_view path)
 {
-    if (base.empty())
+    if (base.empty() || base == ".")
         return path;
     if (!path.starts_with(base))
         return {};

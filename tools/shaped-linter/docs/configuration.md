@@ -96,6 +96,20 @@ rules:
 
 A library never edits the root to make room for itself.
 
+## The generated baseline block
+
+`uv run dev.py lint bless-includes --write` fills the block at the end of each config with an `allow-include` for every include the tree below it still needs.
+It exists so the rule could be turned on without first cleaning the tree: what a library includes today is written down, and the entries then get curated away one at a time.
+
+Everything between the markers belongs to the generator and is rewritten on every run.
+Everything above them is a human's and is never touched — so **curating means moving an entry out of the block**, or deleting it and fixing the include.
+A re-run reproduces the block byte for byte, which is what makes the next diff exactly the decisions someone made.
+
+The baseline is deliberately coarse: it blesses a header for the whole library, with `reason: baseline`, and never guesses a `files:` scope.
+Narrowing one to the tests, or to the one file that is the seam, is the curation.
+
+`bless-includes` fills configs in; it does not decide where they belong, so a file with no `.shaped-lint.yml` above it is skipped.
+
 ## A file with no config above it is unchecked
 
 An empty merged policy means "nothing was said here", not "deny everything".

@@ -1,0 +1,55 @@
+# The repo-wide lint policy. Every library extends it with its own .shaped-lint.yml next to its readme.
+#
+# The format, the merge order and what a `files:` glob is relative to: tools/shaped-linter/docs/configuration.md.
+# Why we avoid std:: at all: docs/coding-guidelines.md, section "Standard Library & Dependencies".
+#
+# What sits here is what holds for every library.
+# A blessing only one library needs belongs in that library's file, and is written there rather than widened into this one.
+
+rules:
+  # ---- blessed to include and to call ----
+  # The two tiers, and the argument for each header, are libs/base/clean-core/docs/blessed-stdlib-headers.md's.
+
+  - kind: allow-include
+    value: <type_traits>
+    reason: thin wrappers around compiler intrinsics, and there is no value in re-wrapping them
+
+  - kind: allow-include
+    value: <initializer_list>
+    reason: the language itself requires it for braced-init-list constructors
+
+  - kind: allow-include
+    value: <compare>
+    reason: the language itself requires it for operator<=>, and `= default` needs the ordering categories
+
+  - kind: allow-include
+    value: [<typeinfo>, <typeindex>]
+    reason: typeid and its hashable handle are language-level RTTI, not something to reimplement
+
+  - kind: allow-include
+    value: <chrono>
+    reason: OS clocks plus unit-safe duration algebra — use steady_clock for elapsed time, never system_clock
+
+  # ---- denied, with the replacement named ----
+  # A deny is not redundant with the default: "not blessed" cannot point anywhere, and a reason can.
+  # These are the containers with a cc:: counterpart that nothing in the tree reaches for today, so the pointer lands before the first use rather than after it.
+
+  - kind: deny-include
+    value: [<map>, <set>, <deque>, <forward_list>, <stack>, <queue>]
+    reason: use cc::map / cc::set, or a cc::vector — see libs/base/clean-core/cheat-sheet.md
+
+  - kind: deny-include
+    value: [<sstream>, <iomanip>, <ostream>, <istream>, <streambuf>]
+    reason: use cc::format / cc::string_stream — clean-core/string/format.hh and clean-core/streams/
+
+  - kind: deny-include
+    value: <functional>
+    reason: use cc::function_ref (non-owning) or cc::unique_function (owning)
+
+  - kind: deny-include
+    value: <span>
+    reason: use cc::span
+
+  - kind: deny-include
+    value: <shared_mutex>
+    reason: use cc::mutex — clean-core/thread/mutex.hh

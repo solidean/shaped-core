@@ -85,6 +85,19 @@ TEST("config resolver - each directory is read once, however many files it holds
     CHECK(tree.reads[cc::string("/repo/.shaped-lint.yml")] == 1);
 }
 
+TEST("config resolver - a relative path still reaches the working directory's config")
+{
+    // A run given repo-relative paths must see the repo-root config, exactly as an absolute run does.
+    fake_tree tree;
+    tree.files[cc::string("./.shaped-lint.yml")] = cc::string(k_deny_atomic);
+
+    auto r = tree.resolver();
+    auto const& cfg = r.resolve("libs/base/clean-core/src/a.hh");
+
+    REQUIRE(cfg.checks_includes());
+    CHECK(cfg.classify_include("libs/base/clean-core/src/a.hh", "<atomic>").verdict == include_verdict::denied);
+}
+
 TEST("config resolver - windows separators resolve like posix ones")
 {
     fake_tree tree;
