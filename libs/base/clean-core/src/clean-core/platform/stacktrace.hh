@@ -38,6 +38,14 @@ using stacktrace_entry = std::stacktrace_entry;
 
 #include <cstddef>
 
+namespace cc
+{
+// Declared before the definitions below, which spell their names qualified.
+// This branch's declarations cannot move to fwd.hh: with <stacktrace> both names are aliases of the std types, so there is nothing there to declare.
+struct stacktrace_entry;
+struct stacktrace;
+} // namespace cc
+
 /// Stub stacktrace frame for toolchains without <stacktrace> (Emscripten / WASI).
 /// Carries no information; present only so the empty stacktrace stub can be iterated.
 struct cc::stacktrace_entry
