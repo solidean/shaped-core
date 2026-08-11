@@ -5,6 +5,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-linter/config/lint_config.hh>
 #include <shaped-linter/fwd.hh>
 #include <shaped-linter/lex/source_buffer.hh>
 #include <shaped-linter/lex/source_language.hh>
@@ -121,6 +122,10 @@ enum class rule_layer : u8
 /// syntax tree, `prose` unless one walks prose, and `tokens` holds nothing for markdown, which has no
 /// lexer.
 /// A rule reads the layer it declared and no other.
+///
+/// `config` is every `.shaped-lint.yml` above this file, merged — the per-library policy.
+/// It is resolved once per file before any rule runs, and a file nothing was said about gets an empty one,
+/// which a config-reading rule must treat as "stay quiet" rather than "deny everything".
 struct scl::lint_context
 {
     source_buffer const& source;
@@ -128,6 +133,7 @@ struct scl::lint_context
     token_stream const& tokens;
     syntax_tree const& tree;
     prose_view const& prose;
+    lint_config const& config;
     cc::vector<finding>& out;
 
     void report(finding f) { out.push_back(cc::move(f)); }

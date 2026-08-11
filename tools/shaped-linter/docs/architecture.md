@@ -11,6 +11,9 @@ A `source_buffer` is lexed into a `token_stream`, which feeds the C++ parser on 
 Each rule declares the layer it needs (`tokens`, `syntax_tree` or `prose`) and the **languages** it applies to.
 The engine builds only what some enabled rule asked for — cheap rules stay cheap, and a rule never sees a file it did not ask for.
 
+Alongside those layers rides the file's merged `.shaped-lint.yml` policy, on `lint_context::config`.
+It is resolved once per file before any rule runs and handed to `run_rules`, which is what keeps the engine itself off the filesystem — see [configuration](configuration.md).
+
 ## Three languages, one dispatch point
 
 A file's extension picks its front end, in `run_rules` and nowhere else: `.cc` / `.hh` are C++, `.py` is Python, `.md` is markdown, anything unrecognized is C++.
@@ -44,6 +47,8 @@ That is because several prose judgements are block-level: whether a line is a sh
 * **`report/`** — the diagnostic renderer: `snippet` (the line-numbered source view with its carets), `renderer` (a finding, and a whole run, as text).
   Plus `style` (the presentation knobs) and `reporter` (the write to stdout).
 * **`cli/`** — `options` (the parsed command line and the usage text) and `changed_lines` (the `--changed-lines` spec `--dirty-only` passes in).
+* **`config/`** — the per-library policy: the `.shaped-lint.yml` reader (`config_parser` over a `config_value` arena), the typed `lint_config` a rule reads, and the `glob` matcher.
+  Plus `config_resolver`, which walks up from a file and merges what it finds — see [configuration](configuration.md).
 
 `src/` is the framework a rule stands on; the rules themselves live outside it, one folder each — see [coding-guidelines](coding-guidelines.md#a-rule-is-a-folder).
 The one thing that is architectural rather than convention: the tool directory is a second include root.

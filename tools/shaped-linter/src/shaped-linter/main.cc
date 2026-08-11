@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-linter/cli/changed_lines.hh>
 #include <shaped-linter/cli/options.hh>
+#include <shaped-linter/config/config_resolver.hh>
 #include <shaped-linter/lex/source_manager.hh>
 #include <shaped-linter/prose/apply.hh>
 #include <shaped-linter/prose/plan.hh>
@@ -69,6 +70,7 @@ int run(scl::options const& opts)
     }
 
     scl::source_manager sm;
+    scl::config_resolver configs;
     cc::vector<scl::finding> all;
 
     for (auto const& file : opts.files)
@@ -80,7 +82,7 @@ int run(scl::options const& opts)
             return exit_usage;
         }
 
-        auto found = scl::run_rules(*buffer.value());
+        auto found = scl::run_rules(*buffer.value(), scl::all_rules(), configs.resolve(file));
         for (auto& f : found)
         {
             // Prose findings outside the changed lines are somebody else's older prose, not this edit's.
@@ -90,6 +92,15 @@ int run(scl::options const& opts)
 
             all.push_back(cc::move(f));
         }
+    }
+
+    // A config that does not parse is a usage error, not a finding: the policy those files carry is
+    // unknown, so every verdict taken against them is suspect.
+    if (!configs.errors().empty())
+    {
+        for (auto const& e : configs.errors())
+            cc::eprintln("error: {}", e);
+        return exit_usage;
     }
 
     if (all.empty())
