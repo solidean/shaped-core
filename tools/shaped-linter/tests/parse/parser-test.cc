@@ -709,6 +709,53 @@ TEST("shaped-linter - parser - namespace definitions")
     }
 }
 
+TEST("shaped-linter - parser - body_holds_records_only")
+{
+    // The one shape whose contents can all be respelled as qualified names.
+    // Everything the parser does not model has to clear it, so the flag is only ever trusted in the "yes" direction.
+    auto const only_records = [](cc::string_view source)
+    {
+        auto const p = parse_text(source);
+        auto const ns = p.nodes_of(node_kind::namespace_definition);
+        REQUIRE(ns.size() >= 1);
+        return ns[0]->body_holds_records_only;
+    };
+
+    SECTION("a series of record definitions, and an empty body")
+    {
+        CHECK(only_records("namespace cc { struct a { }; class b { }; union c { }; }"));
+        CHECK(only_records("namespace cc { }"));
+        CHECK(only_records("namespace cc { template <class T> struct a { }; }"));
+        CHECK(only_records(
+            "namespace cc { struct a { void f(); int x = 1; }; }")); // members are the record's, not the namespace's
+    }
+    SECTION("a function, defined or merely declared")
+    {
+        CHECK(!only_records("namespace cc { struct a { }; void f(); }"));
+        CHECK(!only_records("namespace cc { struct a { }; void f() { } }"));
+    }
+    SECTION("a declaration that is not a record definition")
+    {
+        CHECK(!only_records("namespace cc { struct a { }; struct fwd; }"));
+        CHECK(!only_records("namespace cc { struct a { }; enum class e { }; }"));
+        CHECK(!only_records("namespace cc { struct a { }; using x = int; }"));
+        CHECK(!only_records("namespace cc { struct a { }; int k = 3; }"));
+        CHECK(!only_records("namespace cc { struct a { }; namespace inner { } }"));
+    }
+    SECTION("a trailing declarator on the record itself")
+    {
+        CHECK(!only_records("namespace cc { struct a { } the_one; }"));
+    }
+    SECTION("the outer namespace of a nest holds a namespace, the inner one holds the records")
+    {
+        auto const p = parse_text("namespace a { namespace b { struct x { }; } }");
+        auto const ns = p.nodes_of(node_kind::namespace_definition);
+        REQUIRE(ns.size() == 2);
+        CHECK(!ns[0]->body_holds_records_only);
+        CHECK(ns[1]->body_holds_records_only);
+    }
+}
+
 TEST("shaped-linter - parser - using-directives")
 {
     SECTION("at file scope it is in force to the end of the file")

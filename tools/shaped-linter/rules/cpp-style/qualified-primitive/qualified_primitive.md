@@ -51,7 +51,10 @@ namespace cc { using my_index = cc::isize; }
 namespace cc { void f(thing const& t) { g(cc::u32(t.count)); } }
 ```
 
-```cpp [qualified-primitive]
+A member declaration is one more such position.
+Defining `S` inside an open namespace is a `qualified-record-definition` finding of its own, named here because a block must account for every rule that fires on it.
+
+```cpp [qualified-primitive] [qualified-record-definition]
 namespace cc { struct S { void f(); cc::u64 hash() const; }; }
 ```
 

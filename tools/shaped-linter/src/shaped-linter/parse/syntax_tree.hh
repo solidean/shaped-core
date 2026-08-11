@@ -42,6 +42,7 @@ enum class decl_scope : u8
     record_scope,    // a data member of a class/struct/union
     function_scope,  // a local — a function body, a nested block, or a lambda body
 };
+} // namespace scl
 
 /// One node in the arena tree.
 /// Fields are interpreted by `kind`:
@@ -49,11 +50,13 @@ enum class decl_scope : u8
 ///  - record_definition: `rec_keyword` and `name` (the record name span; empty if anonymous).
 ///  - namespace_definition: `name` (the name as written — `a::b` for `namespace a::b`, empty when anonymous).
 ///    Its `body` is the `{…}` including the braces, which is what a rule tests an offset against.
+///    `body_holds_records_only` says the body is a plain series of record definitions and nothing else — the one shape that survives being rewritten into qualified names.
+///    Any statement the parser does not model as a record definition clears it, so it is only ever trustworthy in the affirmative.
 ///  - using_directive: `name` (the nominated namespace, `cc::primitive_defines`).
 ///    Its `effect` is the bytes over which the directive is in force: past its `;` to the end of the enclosing scope.
 ///  - variable_declaration: `scope`, `form`, and for brace form `init_span` (the `{…}` incl. braces) and `init_inner` (strictly between the braces).
 ///    Its `name` is the declarator-id span, and `declarator` that plus any array suffix — a rewrite replacing the initializer starts at the declarator's end.
-struct node
+struct scl::node
 {
     node_kind kind = node_kind::translation_unit;
     source_span span; // the whole construct
@@ -70,6 +73,7 @@ struct node
 
     // namespace_definition
     source_span body;
+    bool body_holds_records_only = true; // an empty body trivially qualifies
 
     // using_directive
     source_span effect;
@@ -84,7 +88,7 @@ struct node
 
 /// A soft parse diagnostic.
 /// The parser recovers and produces a best-effort tree rather than failing.
-struct parse_diagnostic
+struct scl::parse_diagnostic
 {
     source_span span;
     cc::string message;
@@ -92,7 +96,7 @@ struct parse_diagnostic
 
 /// The arena tree for one translation unit.
 /// Nodes are referenced by `isize` id; `root` is the translation_unit node.
-struct syntax_tree
+struct scl::syntax_tree
 {
     cc::vector<node> nodes;
     isize root = -1;
@@ -101,4 +105,3 @@ struct syntax_tree
     node const& operator[](isize id) const { return nodes[id]; }
     node const& root_node() const { return nodes[root]; }
 };
-} // namespace scl

@@ -240,8 +240,10 @@ Dirty-only by default so gates adopt incrementally; `--all` widens to the whole 
 `shaped-lint` is the same shape over shaped-linter's own rules, which cover `.cc` / `.hh` / `.md` / `.py` — code *and* prose.
 `dev.py lint` is the front door for both, plus `prose-apply` and `prose-stats`; the prose half is [prose.md](prose.md)'s.
 
-`crossrefs` scans markdown links — `[text](path#L42)`, including line and heading anchors — and `//`-comment doc references, then flags any that no longer resolve.
-Its scope is `libs/`, `docs/`, `.claude/` and the root meta docs.
+`crossrefs` scans markdown links — `[text](path#L42)`, including line and heading anchors — and the references inside comments, then flags any that no longer resolve.
+Comments count in every language we write prose in: `//` in `.cc`/`.hh`, `#` and docstrings in `.py`, `#` in `CMakeLists.txt` / `*.cmake`.
+A comment reference is either a bare path ending in `.md` or a markdown link, whose target may have any extension.
+Its scope is `libs/`, `docs/`, `tools/`, `.claude/` and the root meta files.
 These rot silently, because a moved file breaks links in *other*, untouched files, so the scan is always full-repo and `--all` does not affect it.
 It reports each offender as `file:line: reason`.
 

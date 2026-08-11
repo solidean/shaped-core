@@ -154,9 +154,26 @@ struct parser_impl
     /// Records, namespaces, function bodies, nested blocks and lambda bodies are all descended.
     void parse_scope(isize begin, isize end, decl_scope scope, isize parent)
     {
+        // A namespace body that is a plain series of record definitions is the one shape that can be rewritten into qualified names, so the parser answers that here.
+        // Everything it does not model — a function, a macro, a preprocessor line, a nested namespace, a forward declaration — adds no record child and clears the flag.
+        // The unmodelled cases therefore all fail toward "not rewritable", which is the safe direction for a fix.
+        bool const track = tree.nodes[parent].kind == node_kind::namespace_definition;
+
         isize pos = begin;
         while (pos < end && !is_eof(pos))
+        {
+            auto const children_before = tree.nodes[parent].children.size();
             pos = scan_one(pos, end, scope, parent);
+            if (track && !added_one_record(parent, children_before))
+                tree.nodes[parent].body_holds_records_only = false;
+        }
+    }
+
+    /// Whether the statement just scanned contributed exactly one record definition to `parent`.
+    bool added_one_record(isize parent, isize children_before) const
+    {
+        auto const& children = tree.nodes[parent].children;
+        return children.size() == children_before + 1 && tree.nodes[children.back()].kind == node_kind::record_definition;
     }
 
     /// Consume exactly one declaration or statement starting at `begin`; return the index just past it.
@@ -509,6 +526,9 @@ struct parser_impl
         isize j = body_close + 1;
         while (j < end && !is_eof(j) && !punct(j, ";"))
             ++j;
+        // `struct S {} s;` declares a variable the record node does not model, so the enclosing namespace is no longer a plain series of definitions.
+        if (j > body_close + 1 && tree.nodes[parent].kind == node_kind::namespace_definition)
+            tree.nodes[parent].body_holds_records_only = false;
         return (j < end && punct(j, ";")) ? j + 1 : j;
     }
 

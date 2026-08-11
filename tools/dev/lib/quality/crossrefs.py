@@ -1,14 +1,16 @@
 """Cross-reference validator: verify links between docs and code still resolve.
 
 This backs `dev.py check crossrefs`.
-It scans tracked, and untracked-but-not-ignored, markdown and `.cc`/`.hh` sources under `libs/`, `docs/` and `.claude/`, plus the repo-root meta docs, and verifies that:
+It scans tracked, and untracked-but-not-ignored, markdown and source files under `libs/`, `docs/`, `tools/` and `.claude/`, plus the repo-root meta files, and verifies that:
 
-  - Markdown links in `.md` files resolve — `[text](relative/path.cc#L42-L51)`.
-    The path resolves relative to the `.md` file, except for a target starting with a repo-root segment (`docs/`, `libs/`, `.claude/`, ...).
+  - Markdown links in `.md` files resolve — `[text](docs/coding-guidelines.md)`.
+    The path resolves relative to the `.md` file, except for a target starting with a repo-root segment (`docs/`, `libs/`, `tools/`, `.claude/`).
     Those are tried repo-root-relative first and fall back to file-relative, which is how the meta docs link and how a per-library sheet still reaches its own docs/.
     Line anchors (`#L42` / `#L42-L51`) are checked against the target's line count, and section anchors (`#some-heading`) against the target `.md`'s headings.
     An in-page anchor (`#foo` with no path) resolves against the same file.
-  - Doc references in `//` and `///` comments inside `.cc`/`.hh` files resolve — repo-root paths like `docs/guides/building-and-testing.md`.
+  - References in comments resolve, in every language whose comments we write prose in: `//` in `.cc`/`.hh`, `#` and docstrings in `.py`, `#` in `CMakeLists.txt` / `*.cmake`.
+    Two forms count — a bare path token ending in `.md`, and a markdown link `[text](target)` whatever the target's extension.
+    A markdown link in a comment is only read as one when its target looks like a path, so a C++ comment writing `a[i](b)` is not mistaken for a reference.
 
 These rot easily: rename or move a file and links in *other*, untouched files silently break.
 The scan is therefore full-repo, so the breakage is caught wherever it lands.
@@ -22,6 +24,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tokenize
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,14 +41,26 @@ REPO_ROOT_SEGMENTS = (
 
 # Dirs scanned as link *sources*, so their markdown and sources are walked.
 # A link *target* anywhere in the repo is still validated regardless of this list.
-_SCAN_DIRS = ("libs", "docs", ".claude")
+_SCAN_DIRS = ("libs", "docs", "tools", ".claude")
+
+# Source kinds whose comments carry references.
+# Everything here has a line comment marker we can find without a lexer; `.py` additionally has docstrings, which tokenize gives us.
+_SOURCE_SUFFIXES = (".cc", ".hh", ".py", ".cmake")
+_CMAKE_NAME = "CMakeLists.txt"
 
 # Markdown inline link or image: [text](target) or ![text](target).
 # The target is captured and its line recovered via offset; nested brackets in the text are rare enough in our docs that the non-greedy text match is fine.
 MD_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]*)\)")
 
 # A path-like token ending in .md, used to find doc references inside comments.
-DOC_TOKEN_RE = re.compile(r"[\w.\-/]+\.md")
+# The stem must end in a name character and carry no glob marker in front, so the `*.md` of a pathspec written up in a comment is not read as a path.
+DOC_TOKEN_RE = re.compile(r"(?<![*?\[])[\w.\-/]*[\w\-]\.md")
+
+# Extensions a markdown link inside a *comment* may point at without naming a directory.
+# A target with none of these and no `/` is not a path, which is what keeps a C++ comment's `a[i](b)` out of the scan.
+_LINKABLE_SUFFIXES = (
+    ".md", ".py", ".cc", ".hh", ".cmake", ".txt", ".json", ".yml", ".yaml", ".toml", ".sh", ".ps1", ".hlsl",
+)
 
 # #L42 or #L42-L51 or #L42-51 line anchors.
 LINE_ANCHOR_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
@@ -74,26 +89,31 @@ class CrossRefResult:
 
 def list_files(root: Path) -> list[Path]:
     # Tracked plus untracked-but-not-ignored, so a freshly added doc is seen before it is committed.
-    # Scoped to the dirs we own cross-references for, plus the repo-root meta docs.
-    # The "*.md" pathspec also matches markdown deeper in the tree (tools/, ...), so only the root-level ones are kept — those subtrees are link targets, not sources.
+    # Scoped to the dirs we own cross-references for, plus the repo-root meta files (CLAUDE.md, README.md, dev.py, CMakeLists.txt).
+    # The file pathspecs match at any depth, so anything outside a scan dir is dropped again below and only its root-level matches survive.
     result = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard",
-         "--", *_SCAN_DIRS, "*.md"],
+         "--", *_SCAN_DIRS, "*.md", "*.py", "*.cmake", _CMAKE_NAME],
         check=True,
         capture_output=True,
         text=True,
     )
     scan_prefixes = tuple(f"{d}/" for d in _SCAN_DIRS)
     files: list[Path] = []
+    seen: set[str] = set()
     for line in result.stdout.splitlines():
         rel = line.strip()
-        if not rel:
+        if not rel or rel in seen:
             continue
-        # Root-level markdown only from the "*.md" spec; dir specs keep their depth.
-        if rel.endswith(".md") and "/" in rel and not rel.startswith(scan_prefixes):
+        if "/" in rel and not rel.startswith(scan_prefixes):
             continue
+        seen.add(rel)
         files.append(root / rel)
     return files
+
+
+def is_source(path: Path) -> bool:
+    return path.suffix in _SOURCE_SUFFIXES or path.name == _CMAKE_NAME
 
 
 def slugify_heading(text: str) -> str:
@@ -228,7 +248,7 @@ def check_md_links(md_path: Path, root: Path, offenders: list[str]) -> int:
     return checked
 
 
-def resolve_doc_token(token: str, src_path: Path, root: Path) -> Path | None:
+def resolve_doc_token(token: str, src_path: Path, root: Path, *, wants_dir: bool = False) -> Path | None:
     # Returns the resolved existing path, or None if it does not resolve.
     # A docs/... token may be repo-root-relative or, in a per-library source file, relative to that file's own docs/ subdir.
     # So try repo-root for a segment token, then next to the referencing file, then the repo root.
@@ -236,31 +256,130 @@ def resolve_doc_token(token: str, src_path: Path, root: Path) -> Path | None:
     bases += [src_path.parent, root]
     for base in bases:
         candidate = Path(os.path.normpath(base / token))
-        if candidate.is_file():
+        if candidate.is_dir() if wants_dir else candidate.is_file():
             return candidate
     return None
+
+
+def line_comments(path: Path, marker: str) -> list[tuple[int, str]]:
+    # Every line's text past the first `marker`, paired with its 1-based line number.
+    # A marker inside a string literal is read as a comment too; over-scanning only ever adds a reference to check.
+    out: list[tuple[int, str]] = []
+    for lineno, line in enumerate(read_lines(path), start=1):
+        idx = line.find(marker)
+        if idx >= 0:
+            out.append((lineno, line[idx + len(marker) :]))
+    return out
+
+
+def cpp_comments(path: Path) -> list[tuple[int, str]]:
+    # Like line_comments("//"), except a marker inside a double-quoted literal is not a comment.
+    # A test that feeds the linter its own sample source (`extract("int x; // c", …)`) would otherwise report that sample's paths as this file's.
+    # Only `"` is tracked: a `'` is as often a digit separator as a char literal, and a raw string spanning lines is rare enough to leave to the fail-safe direction.
+    out: list[tuple[int, str]] = []
+    for lineno, line in enumerate(read_lines(path), start=1):
+        in_string = False
+        i = 0
+        while i < len(line) - 1:
+            c = line[i]
+            if c == "\\" and in_string:
+                i += 2
+                continue
+            if c == '"':
+                in_string = not in_string
+            elif c == "/" and line[i + 1] == "/" and not in_string:
+                out.append((lineno, line[i + 2 :]))
+                break
+            i += 1
+    return out
+
+
+def python_comments(path: Path) -> list[tuple[int, str]]:
+    """The `#` comments and the docstrings of a Python file, one entry per physical line.
+
+    Tokenizing rather than splitting on `#` is what keeps a pathspec *value* like `"*.md"` out of the scan while the comment describing it stays in.
+    A file that will not tokenize falls back to the plain `#` split, since a soft degrade beats a crashed gate.
+    """
+    try:
+        with path.open("rb") as f:
+            tokens = list(tokenize.tokenize(f.readline))
+    except (tokenize.TokenError, SyntaxError, IndentationError, OSError, UnicodeDecodeError):
+        return line_comments(path, "#")
+
+    out: list[tuple[int, str]] = []
+    # A string is a docstring when it opens a logical line; ENCODING seeds that for a module docstring on line 1.
+    prev_type = tokenize.ENCODING
+    for tok in tokens:
+        if tok.type == tokenize.COMMENT:
+            out.append((tok.start[0], tok.string[1:]))
+        elif tok.type == tokenize.STRING and prev_type in (
+            tokenize.ENCODING, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
+        ):
+            for offset, text in enumerate(tok.string.splitlines()):
+                out.append((tok.start[0] + offset, text))
+        if tok.type not in (tokenize.NL, tokenize.COMMENT):
+            prev_type = tok.type
+    return out
+
+
+def source_comments(src_path: Path) -> list[tuple[int, str]]:
+    if src_path.suffix == ".py":
+        return python_comments(src_path)
+    if src_path.suffix == ".cmake" or src_path.name == _CMAKE_NAME:
+        return line_comments(src_path, "#")
+    return cpp_comments(src_path)
+
+
+def looks_like_path(target: str) -> bool:
+    # What separates a reference from a comment that merely happens to spell `](`, such as C++'s `a[i](b)`.
+    return "/" in target or target.endswith(_LINKABLE_SUFFIXES)
 
 
 def check_source_refs(src_path: Path, root: Path, offenders: list[str]) -> int:
     checked = 0
     rel_src = src_path.relative_to(root).as_posix()
-    for lineno, line in enumerate(read_lines(src_path), start=1):
-        idx = line.find("//")
-        if idx == -1:
-            continue
-        comment = line[idx + 2 :]
+    for lineno, comment in source_comments(src_path):
+        loc = f"{rel_src}:{lineno}"
+        # Byte ranges the link form already accounted for, so a `[text](…)` link is not counted a second time as a bare token.
+        consumed: list[tuple[int, int]] = []
+
+        for m in MD_LINK_RE.finditer(comment):
+            raw = m.group(1).strip()
+            if not raw or is_external(raw):
+                continue
+            target = raw.split(" ", 1)[0].split("\t", 1)[0]
+            path_part, _, fragment = target.partition("#")
+            path_part = urllib.parse.unquote(path_part)
+            if not path_part or not looks_like_path(path_part):
+                continue
+
+            consumed.append((m.start(1), m.end(1)))
+            checked += 1
+            wants_dir = path_part.endswith("/")
+            resolved = resolve_doc_token(path_part, src_path, root, wants_dir=wants_dir)
+            if resolved is None:
+                detail = " (directory not found)" if wants_dir else ""
+                offenders.append(f"{loc}: broken link{detail}: {raw}")
+                continue
+            if fragment:
+                err = check_anchor(resolved, fragment)
+                if err:
+                    offenders.append(f"{loc}: {err}: {raw}")
+
         for m in DOC_TOKEN_RE.finditer(comment):
+            if any(begin <= m.start() < end for begin, end in consumed):
+                continue
             token = m.group(0)
             checked += 1
             if resolve_doc_token(token, src_path, root) is None:
-                offenders.append(f"{rel_src}:{lineno}: broken doc ref: {token}")
+                offenders.append(f"{loc}: broken doc ref: {token}")
     return checked
 
 
 def check_crossrefs(root: Path) -> CrossRefResult:
     """Scan the repo's docs and sources and validate every cross-reference.
 
-    Markdown links, their line and heading anchors, and `//`-comment doc tokens are all resolved against the on-disk tree.
+    Markdown links, their line and heading anchors, and the references inside C++, Python and CMake comments are all resolved against the on-disk tree.
     A link *target* anywhere in the repo counts, even in a subtree not scanned as a source.
     The lines cache is cleared on entry, so repeated calls in one process see current file contents.
     """
@@ -271,7 +390,7 @@ def check_crossrefs(root: Path) -> CrossRefResult:
     for path in list_files(root):
         if path.suffix == ".md":
             md_files.append(path)
-        elif path.suffix in (".cc", ".hh"):
+        elif is_source(path):
             src_files.append(path)
 
     offenders: list[str] = []
