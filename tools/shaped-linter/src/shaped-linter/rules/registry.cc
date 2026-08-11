@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
+#include <rules/cpp-style/blessed-includes/blessed_includes.hh>
 #include <rules/cpp-style/default-init-assignment/default_init_assignment.hh>
 #include <rules/cpp-style/qualified-primitive/qualified_primitive.hh>
 #include <rules/cpp-style/qualified-record-definition/qualified_record_definition.hh>
@@ -15,6 +16,7 @@ cc::span<rule const> all_rules()
     static cc::vector<rule> const rules = []
     {
         cc::vector<rule> v;
+        v.push_back(blessed_includes_rule());
         v.push_back(default_init_assignment_rule());
         v.push_back(qualified_primitive_rule());
         v.push_back(qualified_record_definition_rule());

@@ -6,6 +6,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+#include <shaped-linter/config/lint_config.hh>
 #include <shaped-linter/rules/engine.hh>
 
 #include <algorithm> // std::sort
@@ -182,7 +183,20 @@ INVOCABLE_TEST("shaped-linter - corpus cases", (lint_corpus_group const& group))
         SECTION("{} (L{})", c.title, c.line)
         {
             auto const where = cc::format("{}:{}", group.path, c.line); // the block a failure came from
-            auto const found = c.path.empty() ? run_rules_on_text(c.source) : run_rules_on_text(c.source, c.path);
+
+            // A block with no `config=` is linted against no policy at all, which is what a file with no
+            // .shaped-lint.yml above it gets — so a config-reading rule stays quiet unless the block asked for it.
+            auto config = lint_config();
+            if (!c.config.empty())
+            {
+                auto directives = load_include_directives(c.config, "");
+                REQUIRE(directives.has_value()).context(where);
+                config.include_directives = cc::move(directives.value());
+                config.nearest_config_path = ".shaped-lint.yml";
+            }
+
+            auto const path = c.path.empty() ? cc::string_view("<memory>") : cc::string_view(c.path);
+            auto const found = run_rules_on_text(c.source, path, config);
 
             // How many findings each named rule owes: one per positive annotation, none for a `~[…]`.
             auto expected_total = isize(0);

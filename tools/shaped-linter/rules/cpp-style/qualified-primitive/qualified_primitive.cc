@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-linter/lex/directive.hh>
 
 namespace scl
 {
@@ -251,18 +252,6 @@ bool is_implementation_file(cc::string_view path)
         if (path.ends_with(ext))
             return true;
     return false;
-}
-
-/// The word naming a directive: `include` for `#include <x>`, `endif` for `#  endif`.
-cc::string_view directive_word(cc::string_view text)
-{
-    auto i = isize(1); // past the '#'
-    while (i < text.size() && cc::is_space(text[i]))
-        ++i;
-    auto const start = i;
-    while (i < text.size() && !cc::is_space(text[i]))
-        ++i;
-    return text.subview({.start = start, .end = i});
 }
 
 /// Where a file-scope `using namespace cc::primitive_defines;` can go, and the text to put there.

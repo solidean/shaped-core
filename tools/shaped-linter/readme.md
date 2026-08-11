@@ -176,6 +176,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 
 | Rule | What it enforces |
 |---|---|
+| `blessed-includes` | Every angle include that is not one of ours — standard library, platform SDK, third-party — is blessed by name in a [`.shaped-lint.yml`](docs/configuration.md) above the file. The default is deny; a `deny-include` entry differs only in carrying a reason that names the replacement (`<mutex>` → `clean-core/thread/mutex.hh`). An include with a path in it or ending in `.hh` is ours and never fires, and a file no config reaches is not checked at all. Hint only: swapping a header also rewrites the call sites below it. |
 | `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
 | `no-flow-prose` | Prose is one semantic point per line, so a sentence ending *mid-line* is a finding — in C++ and Python comments, Python docstrings, and markdown body text alike. A heuristic and a reminder: it carries no fix, because obeying the rule means modelling the prose rather than splicing in a newline. |
 | `no-long-prose-line` | A prose line over 200 characters, the hard ceiling above the otherwise free line length. A point that long almost always holds two and wants splitting at the seam. A line whose longest unbreakable run already exceeds the ceiling — a bare URL, a long path — is left alone, since no split can bring it under. |
