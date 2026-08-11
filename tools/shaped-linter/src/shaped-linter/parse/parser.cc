@@ -154,9 +154,29 @@ struct parser_impl
     /// Records, namespaces, function bodies, nested blocks and lambda bodies are all descended.
     void parse_scope(isize begin, isize end, decl_scope scope, isize parent)
     {
+        // Which record definitions sit next to each other is what tells a rule how big a block moves out of the namespace, so the parser answers that here.
+        // Everything it does not model — a function, a macro, a preprocessor line, a nested namespace, a forward declaration — breaks the run, which is the safe direction.
+        bool const track = tree.nodes[parent].kind == node_kind::namespace_definition;
+
+        bool prev_was_record = false;
         isize pos = begin;
         while (pos < end && !is_eof(pos))
+        {
+            auto const children_before = tree.nodes[parent].children.size();
             pos = scan_one(pos, end, scope, parent);
+
+            auto const is_record = added_one_record(parent, children_before);
+            if (track && is_record && prev_was_record)
+                tree.nodes[tree.nodes[parent].children.back()].follows_record = true;
+            prev_was_record = is_record;
+        }
+    }
+
+    /// Whether the statement just scanned contributed exactly one record definition to `parent`.
+    bool added_one_record(isize parent, isize children_before) const
+    {
+        auto const& children = tree.nodes[parent].children;
+        return children.size() == children_before + 1 && tree.nodes[children.back()].kind == node_kind::record_definition;
     }
 
     /// Consume exactly one declaration or statement starting at `begin`; return the index just past it.
@@ -238,7 +258,7 @@ struct parser_impl
                 if (paren_group_seen || def_head)
                 {
                     if (is_record)
-                        return finish_record(begin, pos, end, rec_kw, rec_name_index, parent);
+                        return finish_record(begin, pos, end, rec_kw, rec_name_index, scope, parent);
 
                     auto after = skip_balanced(pos, "{", "}");
 
@@ -490,13 +510,20 @@ struct parser_impl
 
     /// `open_brace` is the record body '{'.
     /// Emit the record_definition, recurse into its body, and consume any trailing declarator up to the terminating ';'.
-    isize finish_record(isize begin, isize open_brace, isize end, record_keyword rec_kw, isize rec_name_index, isize parent)
+    isize finish_record(isize begin,
+                        isize open_brace,
+                        isize end,
+                        record_keyword rec_kw,
+                        isize rec_name_index,
+                        decl_scope scope,
+                        isize parent)
     {
         auto const body_close = skip_balanced(open_brace, "{", "}") - 1; // matching '}'
 
         node rn;
         rn.kind = node_kind::record_definition;
         rn.rec_keyword = rec_kw;
+        rn.scope = scope;
         rn.name = {.file_id = file_id}; // likewise for an anonymous record
         if (rec_name_index >= 0)
             rn.name = tk(rec_name_index).span;
@@ -509,6 +536,7 @@ struct parser_impl
         isize j = body_close + 1;
         while (j < end && !is_eof(j) && !punct(j, ";"))
             ++j;
+        tree.nodes[id].has_declarator = j > body_close + 1;
         return (j < end && punct(j, ";")) ? j + 1 : j;
     }
 

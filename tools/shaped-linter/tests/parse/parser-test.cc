@@ -709,6 +709,42 @@ TEST("shaped-linter - parser - namespace definitions")
     }
 }
 
+TEST("shaped-linter - parser - follows_record")
+{
+    // Which records sit next to each other is what decides how big a block a rule moves out of a namespace.
+    // Everything the parser does not model breaks the run, which is the direction that costs a fix rather than correctness.
+    auto const runs = [](cc::string_view source)
+    {
+        auto const p = parse_text(source);
+        cc::string out;
+        for (auto const* r : p.nodes_of(node_kind::record_definition))
+            out += r->follows_record ? '+' : '|';
+        return out;
+    };
+
+    SECTION("a series of record definitions is one run")
+    {
+        CHECK(runs("namespace cc { struct a { }; class b { }; union c { }; }") == "|++");
+    }
+    SECTION("a function breaks the run, defined or merely declared")
+    {
+        CHECK(runs("namespace cc { struct a { }; void f(); struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; void f() { } struct b { }; }") == "||");
+    }
+    SECTION("so does any other declaration")
+    {
+        CHECK(runs("namespace cc { struct a { }; struct fwd; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; enum class e { }; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; using x = int; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; int k = 3; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; namespace inner { } struct b { }; }") == "||");
+    }
+    SECTION("a member record is the record's own child and joins no run")
+    {
+        CHECK(runs("namespace cc { struct a { struct inner { }; }; struct b { }; }") == "||+");
+    }
+}
+
 TEST("shaped-linter - parser - using-directives")
 {
     SECTION("at file scope it is in force to the end of the file")

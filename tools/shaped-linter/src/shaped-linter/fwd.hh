@@ -7,4 +7,25 @@
 namespace scl
 {
 using namespace cc::primitive_defines;
+
+// Declared here so each header defines its types qualified rather than opening the namespace around them.
+
+// lex/
+struct source_span;
+struct line_col;
+struct label;
+struct resolved_location;
+struct source_buffer;
+struct source_manager;
+struct lex_diagnostic;
+struct token_stream;
+struct token_cursor;
+
+// parse/
+struct node;
+struct parse_diagnostic;
+struct syntax_tree;
+
+// report/
+struct report_style;
 } // namespace scl

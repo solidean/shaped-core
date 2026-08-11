@@ -7,16 +7,15 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/fwd.hh>
 
 #include <cstring>
 
-namespace sg::backend::dx12
-{
 /// A window inside the persistently-mapped UPLOAD ring buffer, handed to execute_next_job.
 /// `base` points at byte 0 of the mapped buffer; the writable window is [base + offset, base + offset + size).
 /// `offset` is also the GPU-side source offset for the copy.
 /// Non-owning.
-struct dx12_upload_allocation
+struct sg::backend::dx12::dx12_upload_allocation
 {
     ID3D12Resource* buffer = nullptr;
     byte* base = nullptr;
@@ -28,7 +27,7 @@ struct dx12_upload_allocation
 /// Hides whether the destination is a buffer or a texture.
 /// The upload system drives it: reserve a window, prepare(), then execute_next_job().
 /// That is once for a buffer, repeatedly for a chunked texture.
-struct dx12_resource_upload
+struct sg::backend::dx12::dx12_resource_upload
 {
     virtual ~dx12_resource_upload() = default;
 
@@ -51,7 +50,7 @@ struct dx12_resource_upload
 /// Resumable — each execute_next_job stages as much as the window holds and records that chunk.
 /// An upload larger than the window therefore splits across successive calls.
 /// The source bytes are read during execute_next_job, so they need only outlive the calls that consume them.
-struct dx12_buffer_upload final : dx12_resource_upload
+struct sg::backend::dx12::dx12_buffer_upload final : dx12_resource_upload
 {
     dx12_buffer_upload(dx12_buffer const& dst, isize dst_offset, cc::span<byte const> data)
       : dx12_buffer_upload(dst._resource.Get(), dst_offset, data)
@@ -102,7 +101,7 @@ private:
 /// A region larger than the free window, or one straddling the seam, splits across successive calls.
 /// Unsupported: a single padded row wider than a whole ring or window (a very wide 1D texture).
 /// Layout barriers are the driver's job, so `prepare` is a no-op.
-struct dx12_texture_upload final : dx12_resource_upload
+struct sg::backend::dx12::dx12_texture_upload final : dx12_resource_upload
 {
     dx12_texture_upload(ID3D12Resource* dst, dx12_texture_footprint const& fp, cc::span<byte const> data)
       : _dst(dst), _fp(fp), _data(data)
@@ -177,4 +176,3 @@ private:
     cc::span<byte const> _data;
     isize _rows_done = 0; // padded staging rows recorded so far (flat over slices)
 };
-} // namespace sg::backend::dx12

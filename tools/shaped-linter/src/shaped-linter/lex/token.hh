@@ -6,6 +6,11 @@
 
 namespace scl
 {
+struct token;
+} // namespace scl
+
+namespace scl
+{
 /// The lexical category of a token.
 /// Punctuators/operators all share `punctuation` and are told apart
 /// by `token::text` (via `is_punct`). Trivia (whitespace/newlines/comments) is kept in the stream so
@@ -39,9 +44,11 @@ enum class token_kind : u8
     dedent,
 };
 
+} // namespace scl
+
 /// A single lexed token.
 /// Carries its source_span and a non-owning view of its spelling.
-struct token
+struct scl::token
 {
     token_kind kind = token_kind::unknown;
     source_span span;
@@ -64,6 +71,9 @@ struct token
             || kind == token_kind::block_comment;
     }
 };
+
+namespace scl
+{
 
 /// Whether `word` is one of the C++ keywords shaped-linter recognizes (a pragmatic subset — enough for
 /// the constructs the parser walks; unknown identifiers just stay identifiers).

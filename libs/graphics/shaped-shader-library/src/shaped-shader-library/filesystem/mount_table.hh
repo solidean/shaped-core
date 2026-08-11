@@ -3,9 +3,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-shader-library/filesystem/filesystem.hh>
+#include <shaped-shader-library/fwd.hh>
 
-namespace slib
-{
 /// A filesystem assembled from other filesystems mounted at virtual paths.
 /// This is how slib addresses shader sources without naming a disk layout anywhere.
 /// A package's folder, a shared include library, and the binary's embedded copy all answer under paths the mounting code picked.
@@ -14,7 +13,7 @@ namespace slib
 /// So a mount at "common" beats one at the root for "common/brdf.hlsli", and re-mounting a prefix shadows what was there — which is all an overlay is.
 ///
 /// Mounting is thread-safe against lookups, so a filesystem may be mounted while the reload watcher runs.
-class mount_table final : public filesystem
+class slib::mount_table final : public filesystem
 {
 public:
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
@@ -74,4 +73,3 @@ private:
     // Mutable so const reads can lock.
     mutable cc::mutex<state> _state;
 };
-} // namespace slib

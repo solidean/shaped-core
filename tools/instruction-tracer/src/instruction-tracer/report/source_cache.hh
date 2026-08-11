@@ -5,13 +5,12 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
-namespace itrace
-{
 /// Reads source files off disk to annotate traces, caching each file's lines.
 ///
 /// A file that cannot be read is cached as empty and never retried — a build whose sources have moved would otherwise re-stat once per instruction.
-class source_cache
+class itrace::source_cache
 {
 public:
     /// One 1-based line, trimmed of leading indentation and trailing whitespace.
@@ -32,4 +31,3 @@ private:
 
     cc::map<cc::string, cc::vector<cc::string>> _files;
 };
-} // namespace itrace

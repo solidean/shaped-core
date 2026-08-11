@@ -458,10 +458,12 @@ void set_default_node_allocator(node_allocator* alloc);
 /// Use it to save and restore the slot around an override — see scoped_default_node_allocator.
 [[nodiscard]] node_allocator* get_default_node_allocator();
 
+} // namespace cc
+
 /// Scoped override of this thread's default node allocator.
 /// Restores the exact previous slot value, including null, so overrides nest.
 /// Same lifetime contract as set_default_node_allocator: nodes allocated inside must not outlive `alloc`.
-struct scoped_default_node_allocator
+struct cc::scoped_default_node_allocator
 {
     explicit scoped_default_node_allocator(node_allocator* alloc) : _prev(cc::get_default_node_allocator())
     {
@@ -477,7 +479,6 @@ struct scoped_default_node_allocator
 private:
     node_allocator* _prev;
 };
-} // namespace cc
 
 /// Move-only owning handle for a single live T stored in node memory.
 /// Stores only a T*; all information required to free the slot is derived from the pointer and sizeof/alignof(T).

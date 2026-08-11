@@ -13,11 +13,9 @@
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-namespace sv
-{
 /// Everything one view's trace binds.
 /// The renderer fills this from the resolved scene; the routine owns the per-frame TLAS build and the dispatch.
-struct trace_desc
+struct sv::trace_desc
 {
     sg::buffer<frame_constants_gpu> frame;       // the FrameConstants cbuffer (camera + directional light)
     sg::buffer<background_gpu> background;       // the Background cbuffer (SH environment probe) the miss reads
@@ -35,7 +33,7 @@ struct trace_desc
 /// It owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired shaders and rebuilt on reload.
 /// `execute` (re)builds the frame's TLAS, binds the scene, and dispatches one ray per pixel into the output image.
 /// `execute` only reads what `init_declare` built, so it takes the const `acquire` and holds no lock — concurrent traces on the same context do not serialize on this routine.
-class pbr_raytrace_routine : public sg::render_routine<pbr_raytrace_routine>
+class sv::pbr_raytrace_routine : public sg::render_routine<pbr_raytrace_routine>
 {
 public:
     /// Builds the TLAS from `d.instances`, binds the scene, and dispatches `d.size` primary rays into `d.output`.
@@ -53,4 +51,3 @@ private:
     sg::raytracing_shader_table_handle _table;
     sg::raygen_index _raygen = {};
 };
-} // namespace sv

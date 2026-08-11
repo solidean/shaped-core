@@ -10,8 +10,6 @@
 #include <shaped-viewer/view_id.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-namespace sv
-{
 /// One thing to render this frame: a camera looking at a list of scene items, lit by the view's lights and environment, traced into a single target texture of `size` pixels.
 ///
 /// A view is a plain per-frame value — build a fresh one each frame.
@@ -20,7 +18,7 @@ namespace sv
 ///
 /// Lights are held in typed lists (one per kind) rather than mixed into `items`, so a consumer takes exactly the light type it handles.
 /// The `background` is the environment a missed ray sees.
-struct view
+struct sv::view
 {
     /// stable identity naming the accumulators and history reused across frames
     view_id id;
@@ -43,4 +41,3 @@ struct view
     /// per-view renderer knobs (sample counts, bounce limits, …)
     render_settings settings;
 };
-} // namespace sv

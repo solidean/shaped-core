@@ -1,12 +1,11 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 
 #include <initializer_list>
 
-namespace tg
-{
 /// Neutral component container: D values of T with no geometric semantics.
 ///
 /// Unlike vec/pos, comp carries no notion of direction or position — it is just "D components".
@@ -24,7 +23,7 @@ namespace tg
 ///     auto const b = v + 10;              // {11, 12, 13} (scalar broadcast)
 ///     c[0] = 5;
 template <int D, class T>
-struct comp
+struct tg::comp
 {
     static_assert(D > 0, "comp requires a positive dimension");
 
@@ -222,6 +221,9 @@ public:
         return a;
     }
 };
+
+namespace tg
+{
 
 template <int D, class T>
 inline comp<D, T> const comp<D, T>::zero = comp<D, T>{};

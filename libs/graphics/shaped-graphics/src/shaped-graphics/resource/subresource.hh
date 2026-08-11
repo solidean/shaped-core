@@ -23,10 +23,12 @@ enum class texture_aspect : u32
     plane2,
 };
 
+} // namespace sg
+
 /// The size of a texture's subresource domain along each axis.
 /// `aspect_count` is the number of planes — 1 for a plain color texture, 2 for depth+stencil.
 /// A buffer is `{1, 1, 1}`.
-struct subresource_extent
+struct sg::subresource_extent
 {
     int mip_count = 1;
     int array_count = 1;
@@ -38,7 +40,7 @@ struct subresource_extent
 /// Addresses a single subresource: one (mip level, array layer, aspect) point in the grid — the point analog of `subresource_range`.
 /// Defaults to the first subresource: mip 0, layer 0, color.
 /// `array_layer` counts slices, so a cube's faces are layers 0..5 and a cube array's are `6*cube + face`.
-struct subresource_index
+struct sg::subresource_index
 {
     int mip_level = 0;
     int array_layer = 0;
@@ -48,7 +50,7 @@ struct subresource_index
 /// A half-open box in the subresource grid: a `[start, end)` range on each of the mip, array-slice and aspect-plane axes.
 /// Used to name the range an access covers.
 /// A single `subresource_index` converts to the one-wide box at its point, so an op touching one subresource can pass it directly.
-struct subresource_range
+struct sg::subresource_range
 {
     cc::start_end mip_range = {.start = 0, .end = 1};
     cc::start_end array_range = {.start = 0, .end = 1};
@@ -76,4 +78,3 @@ struct subresource_range
             || aspect_range.start >= aspect_range.end;
     }
 };
-} // namespace sg

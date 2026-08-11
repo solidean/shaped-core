@@ -14,7 +14,14 @@
 #define byte win_byte_override
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <shaped-graphics/backends/dx12/fwd.hh>
 #include <wrl/client.h>
+
+namespace sg::backend::dx12
+{
+struct dx12_mapped_buffer;
+} // namespace sg::backend::dx12
+
 #undef byte
 
 namespace sg::backend::dx12
@@ -31,12 +38,17 @@ using Microsoft::WRL::ComPtr;
     return cc::error(cc::format("{} (hr=0x{:08X})", what, u32(hr)), site);
 }
 
+} // namespace sg::backend::dx12
+
 /// A committed buffer resource together with its persistent CPU mapping.
-struct dx12_mapped_buffer
+struct sg::backend::dx12::dx12_mapped_buffer
 {
     ComPtr<ID3D12Resource> resource;
     void* mapped = nullptr; // byte 0 of the mapping; cast to cc::byte* at the call site
 };
+
+namespace sg::backend::dx12
+{
 
 /// Creates a `size`-byte committed BUFFER on `heap_type`, left in `initial_state`, and persistently maps it.
 /// Used for the inline UPLOAD / READBACK ring buffers.

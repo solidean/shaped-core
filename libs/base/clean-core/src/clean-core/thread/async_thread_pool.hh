@@ -4,12 +4,18 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/fwd.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+
+namespace cc
+{
+struct scoped_default_async_pool;
+} // namespace cc
 
 #if CC_HAS_THREADS
 #include <clean-core/thread/impl/chase_lev_deque.hh>
@@ -51,9 +57,7 @@
 // What it cannot do is wait: a graph parked on work only another thread could supply never completes, and
 // blocking_get's is_ready() assert reports that rather than hanging.
 
-namespace cc
-{
-struct async_thread_pool final : async_scheduler
+struct cc::async_thread_pool final : async_scheduler
 {
     /// Starts `worker_count` (>= 1) worker threads.
     /// Defaults to one FEWER than the hardware concurrency: a foreign thread in blocking_get participates as a worker for the duration, so the default leaves it a core.
@@ -198,6 +202,9 @@ private:
 #endif
 };
 
+namespace cc
+{
+
 /// Install `pool` as the process-wide default: nodes that cannot run on the current thread route here.
 /// Install once at startup, before the graphs that depend on it run.
 /// Asserts if a default is already installed — overriding a live default is almost never correct, since outer asyncs may outlive the inner pool yet get scheduled on it.
@@ -208,8 +215,10 @@ void install_default_async_pool(async_thread_pool& pool);
 /// Asserts it is the currently installed default, and must be called before the pool is destroyed.
 void uninstall_default_async_pool(async_thread_pool& pool);
 
+} // namespace cc
+
 /// RAII: installs `pool` as the process-wide default for the scope, uninstalling it on destruction.
-struct scoped_default_async_pool
+struct cc::scoped_default_async_pool
 {
     explicit scoped_default_async_pool(async_thread_pool& pool) : _pool(pool) { install_default_async_pool(pool); }
     ~scoped_default_async_pool() { uninstall_default_async_pool(_pool); }
@@ -222,6 +231,9 @@ struct scoped_default_async_pool
 private:
     async_thread_pool& _pool;
 };
+
+namespace cc
+{
 
 // ============================================================================
 // blocking driver — templated, defined inline

@@ -47,9 +47,11 @@ enum class accel_build_flags : u32
     return (u32(flags) & u32(flag)) == u32(flag);
 }
 
+} // namespace sg
+
 /// One triangle geometry in a BLAS, indexed when an index buffer is given.
 /// Every buffer referenced here must carry buffer_usage::accel_structure_build_input.
-struct blas_triangles
+struct sg::blas_triangles
 {
     /// float3 positions, where `stride_in_bytes` allows interleaved vertex structs and `offset_in_bytes` selects a sub-range.
     /// On a non-indexed geometry `vertex_count` must be a multiple of 3; an indexed one constrains `index_count` instead.
@@ -78,7 +80,7 @@ struct blas_triangles
 
 /// One procedural geometry in a BLAS: a list of axis-aligned bounding boxes an intersection shader refines.
 /// A BLAS is triangles *or* AABBs, never both, which is enforced by the build_blas overload chosen.
-struct blas_aabbs
+struct sg::blas_aabbs
 {
     /// Buffer of `D3D12_RAYTRACING_AABB`-shaped records — 6 floats, min.xyz then max.xyz.
     /// `stride_in_bytes` must be a multiple of 8, and the buffer must carry buffer_usage::accel_structure_build_input.
@@ -88,6 +90,9 @@ struct blas_aabbs
     isize aabb_offset_in_bytes = 0;
     bool is_opaque = true;
 };
+
+namespace sg
+{
 
 /// Winding-based triangle cull selection for a TLAS instance.
 /// `none` disables triangle culling, while `back` and `front` differ by winding — `front` flips it.
@@ -99,9 +104,11 @@ enum class instance_cull_mode : u8
     none,  ///< disable triangle culling — sets the cull-disable flag
 };
 
+} // namespace sg
+
 /// One TLAS instance: places a built BLAS into the world.
 /// Holding the blas_handle is the ownership edge, so the referenced BLAS outlives every TLAS that names it.
-struct tlas_instance
+struct sg::tlas_instance
 {
     /// The BLAS this instance places.
     /// Must be non-null and fully built before build_tlas.
@@ -134,7 +141,7 @@ struct tlas_instance
 /// A vocabulary type with no typed wrapper, held via blas_handle.
 /// Abstract: a backend subclasses it and owns the native object, while the single accel_structure_storage buffer and the cheap stats live here.
 /// Built through cmd.raytracing.build_blas, and the returned handle is persistent — valid across epochs.
-class blas : public std::enable_shared_from_this<blas>
+class sg::blas : public std::enable_shared_from_this<blas>
 {
 public:
     virtual ~blas();
@@ -194,7 +201,7 @@ protected:
 /// A vocabulary type held via tlas_handle, and abstract like blas, with the storage and stats here.
 /// Built through cmd.raytracing.build_tlas, and the returned handle is persistent — valid across epochs.
 /// A tlas keeps every referenced blas alive.
-class tlas : public std::enable_shared_from_this<tlas>
+class sg::tlas : public std::enable_shared_from_this<tlas>
 {
 public:
     virtual ~tlas();
@@ -242,4 +249,3 @@ protected:
     mutable cc::vector<cc::unique_function<void()>> _finalizers;
     mutable std::atomic<bool> _expired = {false};
 };
-} // namespace sg

@@ -20,9 +20,7 @@
 /// Threading: the async pipeline build calls a backend create from a pool worker, which is only safe where the backend permits concurrent pipeline creation (dx12 device creates are free-threaded).
 /// With a single_threaded thread_model, install no pool and drive the node inline on the main thread via cc::async_blocking_get_singlethreaded.
 
-namespace sg
-{
-class pipeline_cache
+class sg::pipeline_cache
 {
 public:
     // provider configuration
@@ -88,4 +86,3 @@ private:
     cc::key_value_cache<cc::hash128, async_raytracing_pipeline> _raytracing_cache;
     // TODO: a raster_pipeline cache tier.
 };
-} // namespace sg

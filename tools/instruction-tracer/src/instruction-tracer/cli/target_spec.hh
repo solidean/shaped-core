@@ -4,11 +4,15 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
 namespace itrace
 {
+struct target_spec;
+} // namespace itrace
+
 /// Where to set the entry breakpoint.
-struct target_spec
+struct itrace::target_spec
 {
     enum class kind
     {
@@ -26,6 +30,9 @@ struct target_spec
     /// How the spec was written, for diagnostics.
     cc::string to_string() const;
 };
+
+namespace itrace
+{
 
 /// Parse a --target value; the form is inferred from the separators.
 /// `0x`-prefixed => address, `mod!sym` => module_symbol, `mod+0xN` => module_offset, anything else => a bare symbol.

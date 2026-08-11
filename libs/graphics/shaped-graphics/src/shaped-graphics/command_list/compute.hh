@@ -9,11 +9,9 @@
 
 #include <type_traits>
 
-namespace sg
-{
 /// Per-element access for a *buffer* array bound to a shader — the payload of `declare_array_buffer_access`.
 /// Buffers have no layout, so only the accessed element, stage(s), and access are named.
-struct array_buffer_access
+struct sg::array_buffer_access
 {
     int index = 0;                                            ///< element index within the bound array
     pipeline_stage_flags stages = pipeline_stage_flags::none; ///< stage(s) the shader accesses it in
@@ -22,7 +20,7 @@ struct array_buffer_access
 
 /// Per-element access for a *texture* array bound to a shader — the payload of `declare_array_texture_access`.
 /// It adds the layout the element must be in.
-struct array_texture_access
+struct sg::array_texture_access
 {
     int index = 0;                                            ///< element index within the bound array
     pipeline_stage_flags stages = pipeline_stage_flags::none; ///< stage(s) the shader accesses it in
@@ -33,7 +31,7 @@ struct array_texture_access
 
 /// Compute recording facade for a command list, reached as `cmd.compute`: bind a pipeline and resource groups, then dispatch.
 /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md for the bind path.
-class command_list_compute_scope
+class sg::command_list_compute_scope
 {
 public:
     /// Makes `pipeline` the active compute pipeline for subsequent bind_group / dispatch calls.
@@ -98,4 +96,3 @@ private:
     int _bound_wg_y = 1;
     int _bound_wg_z = 1;
 };
-} // namespace sg

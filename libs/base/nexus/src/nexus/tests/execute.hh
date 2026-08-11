@@ -5,8 +5,16 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/schedule.hh>
 
+namespace nx
+{
+struct recorded_metric;
+struct test_error;
+struct test_execution;
+struct test_schedule_execution;
+} // namespace nx
 
 // Forward declaration for impl namespace
 namespace nx::impl
@@ -15,9 +23,7 @@ enum class check_kind;
 enum class cmp_op;
 } // namespace nx::impl
 
-namespace nx
-{
-struct test_error
+struct nx::test_error
 {
     cc::string expr; // usually not shown in editor (assumed to be part of source already)
     cc::source_location location;
@@ -28,7 +34,7 @@ struct test_error
 
 // A single performance metric recorded by a guide benchmark via nx::guide (see guide.hh).
 // higher_is_better orients comparisons (throughput vs. latency); unit is a free-form label (e.g. "GB/s", "s").
-struct recorded_metric
+struct nx::recorded_metric
 {
     cc::string name;
     double value = 0;
@@ -36,7 +42,7 @@ struct recorded_metric
     bool higher_is_better = true;
 };
 
-struct test_execution
+struct nx::test_execution
 {
     test_instance instance;
 
@@ -75,7 +81,7 @@ struct test_execution
     [[nodiscard]] bool is_considered_failing() const;
 };
 
-struct test_schedule_execution
+struct nx::test_schedule_execution
 {
     cc::vector<test_execution> executions;
 
@@ -85,6 +91,9 @@ struct test_schedule_execution
     [[nodiscard]] int count_total_checks() const;
     [[nodiscard]] int count_failed_checks() const;
 };
+
+namespace nx
+{
 
 test_schedule_execution execute_tests(test_schedule const& schedule, test_schedule_config const& config);
 

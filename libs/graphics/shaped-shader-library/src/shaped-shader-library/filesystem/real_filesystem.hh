@@ -2,6 +2,7 @@
 
 #include <clean-core/thread/mutex.hh>
 #include <shaped-shader-library/filesystem/filesystem.hh>
+#include <shaped-shader-library/fwd.hh>
 
 #include <memory>
 
@@ -10,8 +11,6 @@ namespace slib::impl
 class watch_backend;
 }
 
-namespace slib
-{
 /// A filesystem over a real directory on disk, rooted at `root_dir`.
 /// Paths resolve beneath that root and nowhere else — `..` cannot climb out.
 /// `revision` folds the file's modification time and its size.
@@ -20,7 +19,7 @@ namespace slib
 ///
 /// A missing or unreadable root is not an error: every lookup simply finds nothing.
 /// That is what lets a source dir be mounted over the embedded copy without anyone checking which build this is.
-class real_filesystem final : public filesystem
+class slib::real_filesystem final : public filesystem
 {
 public:
     /// `root_dir` is an absolute native path.
@@ -58,4 +57,3 @@ private:
     /// Stays null where the platform has no backend, which is what makes watch() answer "poll me".
     mutable cc::mutex<watch_state> _watch_state;
 };
-} // namespace slib

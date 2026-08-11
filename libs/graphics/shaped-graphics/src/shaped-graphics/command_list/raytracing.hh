@@ -4,13 +4,11 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 
-namespace sg
-{
 /// Ray-tracing recording facade for a command list, reached as `cmd.raytracing`: build acceleration structures and trace rays.
 /// A build sizes and allocates the result buffer from a prebuild query, records the GPU build with transient scratch, and returns a **persistent** handle valid across epochs.
 /// See libs/graphics/shaped-graphics/docs/concepts/acceleration-structures.md.
 /// libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md covers the trace path.
-class command_list_raytracing_scope
+class sg::command_list_raytracing_scope
 {
 public:
     /// Whether this backend/device supports ray tracing.
@@ -65,4 +63,3 @@ private:
 
     command_list& _cmd;
 };
-} // namespace sg

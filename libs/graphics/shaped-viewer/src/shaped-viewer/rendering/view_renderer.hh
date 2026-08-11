@@ -11,8 +11,6 @@ namespace sg
 struct color_target;
 }
 
-namespace sv
-{
 /// The per-frame view renderer — itself a render routine, and the orchestrator that composes the leaf routines.
 ///
 /// It resolves each view's scene items to GPU resources through the managers, then path-traces the view into a transient target by driving sv::pathtrace_routine.
@@ -25,7 +23,7 @@ namespace sv
 ///
 /// It is the only one of the three that takes a guard: both leaves it drives read-only, so driving them under its own guard nests no lock.
 /// Should a leaf ever need one, the order is view_renderer before leaf — matching init_declare, which prewarms the same leaves.
-class view_renderer : public sg::render_routine<view_renderer>
+class sv::view_renderer : public sg::render_routine<view_renderer>
 {
 public:
     /// Path-traces every view in `def` into its own transient rgba16f target, then opens a raster scope on `output` and blits the first view across it.
@@ -55,4 +53,3 @@ private:
 
     cc::map<view_id, persistent_view_resources> _persistent;
 };
-} // namespace sv

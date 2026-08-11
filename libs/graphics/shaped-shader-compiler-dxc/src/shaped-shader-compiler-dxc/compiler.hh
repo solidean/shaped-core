@@ -7,6 +7,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/compile_options.hh>
+#include <shaped-shader-compiler-dxc/fwd.hh>
 #include <shaped-shader-compiler-dxc/preprocessed_source.hh>
 #include <shaped-shader-compiler-dxc/shader_description.hh>
 
@@ -26,7 +27,9 @@ namespace ssc::dxc
 /// (DXC then reports the include as an error). Non-owning — the callable must outlive the call.
 using include_resolver = cc::function_ref<cc::optional<cc::string>(cc::string_view path)>;
 
-class compiler
+} // namespace ssc::dxc
+
+class ssc::dxc::compiler
 {
 public:
     /// Creates a compiler (one IDxcUtils + IDxcCompiler3). Fails only on a broken DXC install.
@@ -58,4 +61,3 @@ private:
     explicit compiler(std::unique_ptr<state> s);
     std::unique_ptr<state> _state;
 };
-} // namespace ssc::dxc

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <shaped-graphics/resource/texture.hh> // texture<Traits> + the shape typedefs
+#include <shaped-graphics/fwd.hh> // texture<Traits> + the shape typedefs
+#include <shaped-graphics/resource/texture.hh>
 
 /// Shape-specific texture descriptions — the input to the typed `create_texture_*` factories on the context scopes (context/persistent.hh, context/transient.hh).
 /// Each exposes only the parameters that are *free* for its shape, so a plain 2D texture has no depth / layers / samples.
@@ -8,9 +9,7 @@
 /// `to_texture_description()` expands one into the full `texture_description` by filling in the shape-fixed fields.
 /// The factory then creates the raw_texture and wraps it in the matching `texture<Traits>`, named by the `texture_type` alias.
 
-namespace sg
-{
-struct texture_1d_description
+struct sg::texture_1d_description
 {
     pixel_format format = pixel_format::undefined;
     int width = 1;
@@ -29,7 +28,7 @@ struct texture_1d_description
     }
 };
 
-struct texture_2d_description
+struct sg::texture_2d_description
 {
     pixel_format format = pixel_format::undefined;
     int width = 1;
@@ -50,7 +49,7 @@ struct texture_2d_description
     }
 };
 
-struct texture_3d_description
+struct sg::texture_3d_description
 {
     pixel_format format = pixel_format::undefined;
     int width = 1;
@@ -73,7 +72,7 @@ struct texture_3d_description
     }
 };
 
-struct texture_cube_description
+struct sg::texture_cube_description
 {
     pixel_format format = pixel_format::undefined;
     int size = 1; ///< edge length; cube faces are square (width == height == size)
@@ -94,7 +93,7 @@ struct texture_cube_description
     }
 };
 
-struct texture_1d_array_description
+struct sg::texture_1d_array_description
 {
     pixel_format format = pixel_format::undefined;
     int width = 1;
@@ -115,7 +114,7 @@ struct texture_1d_array_description
     }
 };
 
-struct texture_2d_array_description
+struct sg::texture_2d_array_description
 {
     pixel_format format = pixel_format::undefined;
     int width = 1;
@@ -138,7 +137,7 @@ struct texture_2d_array_description
     }
 };
 
-struct texture_cube_array_description
+struct sg::texture_cube_array_description
 {
     pixel_format format = pixel_format::undefined;
     int size = 1; ///< edge length; cube faces are square (width == height == size)
@@ -161,7 +160,7 @@ struct texture_cube_array_description
     }
 };
 
-struct texture_2d_ms_description
+struct sg::texture_2d_ms_description
 {
     pixel_format format = pixel_format::undefined;
     int width = 1;
@@ -182,7 +181,7 @@ struct texture_2d_ms_description
     }
 };
 
-struct texture_2d_array_ms_description
+struct sg::texture_2d_array_ms_description
 {
     pixel_format format = pixel_format::undefined;
     int width = 1;
@@ -205,7 +204,7 @@ struct texture_2d_array_ms_description
     }
 };
 
-struct texture_cube_ms_description
+struct sg::texture_cube_ms_description
 {
     pixel_format format = pixel_format::undefined;
     int size = 1;         ///< edge length; cube faces are square (width == height == size)
@@ -226,7 +225,7 @@ struct texture_cube_ms_description
     }
 };
 
-struct texture_cube_array_ms_description
+struct sg::texture_cube_array_ms_description
 {
     pixel_format format = pixel_format::undefined;
     int size = 1;         ///< edge length; cube faces are square (width == height == size)
@@ -248,4 +247,3 @@ struct texture_cube_array_ms_description
                 .usage = usage};
     }
 };
-} // namespace sg

@@ -4,12 +4,10 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg
-{
 /// Selects which of a raytracing_pipeline's registered shaders go into a shader table, and in what order.
 /// The `add_*` helpers take a pipeline handle, in registration order, and return the table index, in dispatch order.
 /// That index is what HLSL TraceRay's shader-record offsets address.
-struct raytracing_shader_table_description
+struct sg::raytracing_shader_table_description
 {
     raytracing_pipeline_handle pipeline;
 
@@ -31,7 +29,7 @@ struct raytracing_shader_table_description
 /// A shader table (not "SBT"): the GPU-resident table of shader records dispatch_rays reads to pick the raygen / miss / hit-group / callable shaders.
 /// Each record holds only a 32-byte shader identifier, with no local root arguments, so resources bind through the pipeline's global root signature instead.
 /// Persistent and tied to one raytracing_pipeline; held via raytracing_shader_table_handle.
-class raytracing_shader_table
+class sg::raytracing_shader_table
 {
 public:
     virtual ~raytracing_shader_table();
@@ -43,4 +41,3 @@ protected:
 
     raytracing_pipeline_handle _pipeline;
 };
-} // namespace sg

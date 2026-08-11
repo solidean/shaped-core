@@ -22,9 +22,11 @@ enum class shader_language
 /// slib backs this with the package's filesystem and records every path it resolves, which is what makes a shader reload when a file it includes changes.
 using include_resolver = cc::function_ref<cc::optional<cc::string>(cc::string_view path)>;
 
+} // namespace slib
+
 /// One shader to compile.
 /// `source` is the shader text — flattened once preprocess has run.
-struct shader_source_description
+struct slib::shader_source_description
 {
     cc::string source;
     cc::string entry_point;
@@ -35,7 +37,7 @@ struct shader_source_description
 /// Register implementations on a shader_library, which picks the edge connecting a package's language to a format the target context accepts.
 ///
 /// Implementations must be safe to call from several threads at once — a reload compiles on the watcher thread while a consumer may compile on its own.
-class shader_compiler
+class slib::shader_compiler
 {
 public:
     virtual ~shader_compiler() = default;
@@ -51,4 +53,3 @@ public:
     /// A compile failure arrives as an error on the returned node rather than a throw: a broken shader edit must not take down a running app.
     [[nodiscard]] virtual sg::async_compiled_shader compile(shader_source_description const& desc) const = 0;
 };
-} // namespace slib

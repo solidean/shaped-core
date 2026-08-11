@@ -6,6 +6,14 @@
 #include <clean-core/platform/console.hh>
 #include <clean-core/string/string.hh>
 #include <instruction-tracer/cli/target_spec.hh>
+#include <instruction-tracer/fwd.hh>
+
+namespace itrace
+{
+struct memory_regions;
+struct options;
+struct output_sections;
+} // namespace itrace
 
 namespace itrace
 {
@@ -13,10 +21,12 @@ namespace itrace
 /// A truncated trace makes every aggregate silently wrong, and 100 would truncate anything worth tabling.
 inline constexpr u32 stats_instruction_default = 100000;
 
+} // namespace itrace
+
 /// Which output sections to print, in any combination.
 /// All come from one capture, since the memory data cannot be reliably reproduced across runs.
 /// Nothing selected means the trace alone.
-struct output_sections
+struct itrace::output_sections
 {
     bool trace = false;        // the raw retired-instruction trace
     bool stats = false;        // the per-symbol instruction table
@@ -32,7 +42,7 @@ struct output_sections
 
 /// Which address regions the memory sections include.
 /// Default heap + stack: the data accesses that answer "am I touching my data well", without the current frame's own spills or the code stream.
-struct memory_regions
+struct itrace::memory_regions
 {
     bool heap = true;
     bool frame = false;
@@ -42,7 +52,7 @@ struct memory_regions
 
 /// Parsed command line.
 /// See usage_text() for the flags, and readme.md for what they mean.
-struct options
+struct itrace::options
 {
     cc::string exe;
     target_spec target;
@@ -90,6 +100,9 @@ struct options
     /// Set by --help; main prints usage and exits 0.
     bool help = false;
 };
+
+namespace itrace
+{
 
 /// Parse argv; argv[0] is ignored.
 /// Every boolean flag has a `--no-<flag>` form.

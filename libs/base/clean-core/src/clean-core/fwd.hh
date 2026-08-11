@@ -64,10 +64,15 @@ template <class T>
 struct node_allocation;
 template <class T, class NodeTraits>
 struct poly_node_allocation;
+struct scoped_default_node_allocator; // scoped override of the default node allocator (memory/node_allocation.hh)
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>
 struct shared_ptr;
+struct shared_release; // what a shared block's traits do at refcount zero (memory/shared_ptr.hh)
+struct fused_refcount;
+template <class T>
+struct default_shared_traits;
 template <class T, class Traits>
 struct weak_ptr;
 
@@ -145,7 +150,12 @@ struct set;
 
 template <class K, class V>
 struct key_value_provider;
-template <class K, class V, class Hash>
+namespace impl
+{
+template <class K>
+struct cc_key_hash;
+}
+template <class K, class V, class Hash = impl::cc_key_hash<K>>
 struct in_memory_key_value_provider;
 template <class K, class V>
 struct key_value_cache;
@@ -183,6 +193,16 @@ template <class T>
 struct function_ref;
 template <class T>
 struct unique_function;
+
+// The small callable objects of common/utility.hh.
+template <class... Fs>
+struct overloaded;
+struct void_function;
+struct identify_function;
+template <auto C>
+struct constant_function;
+template <unsigned I>
+struct projection_function;
 
 
 //
@@ -225,6 +245,7 @@ struct threaded_actor_impl;
 //
 
 struct async_error;
+struct alignas(32) async_type_ops; // the type-erased node ops descriptor (thread/async_node.hh)
 struct async_node_base;
 namespace impl
 {
@@ -250,6 +271,19 @@ using shared_async = shared_ptr<async<T, E>, impl::async_node_traits>;
 //
 
 struct hash128;
+
+
+//
+// Math
+//
+
+struct random; // the pseudo-random generator (defined in math/random.hh)
+
+// 128-bit intermediates and the carry-out pairs of math/wide_arith.hh.
+struct u128;
+struct i128;
+struct carrying_add_result;
+struct borrowing_sub_result;
 
 
 //
@@ -283,5 +317,20 @@ template <class EnumT>
 struct flags;
 
 struct unit;
+
+// The vocabulary of common/utility.hh.
+// The character comparators of string/char_predicates.hh, and format's output sink.
+struct equal_case_sensitive;
+struct debug_string_config; // how to_debug_string renders (string/to_debug_string.hh)
+struct equal_case_insensitive;
+struct compare_ascii_case_sensitive;
+struct compare_ascii_case_insensitive;
+struct format_sink;
+
+template <class T>
+union storage_for;
+struct sentinel;
+struct offset_size;
+struct start_end;
 
 } // namespace cc

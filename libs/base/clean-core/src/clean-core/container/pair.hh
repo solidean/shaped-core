@@ -35,17 +35,14 @@ struct cc::pair
     }
 };
 
-namespace std
-{
 template <class T, class U>
-struct tuple_size<cc::pair<T, U>> : std::integral_constant<std::size_t, 2>
+struct std::tuple_size<cc::pair<T, U>> : std::integral_constant<std::size_t, 2>
 {
 };
 
 template <std::size_t I, class T, class U>
-struct tuple_element<I, cc::pair<T, U>>
+struct std::tuple_element<I, cc::pair<T, U>>
 {
     static_assert(I < 2);
     using type = std::conditional_t<I == 0, T, U>;
 };
-} // namespace std

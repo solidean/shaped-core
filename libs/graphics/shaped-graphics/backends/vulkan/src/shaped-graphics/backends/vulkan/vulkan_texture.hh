@@ -2,14 +2,13 @@
 
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
-namespace sg::backend::vulkan
-{
 /// Vulkan implementation of sg::raw_texture.
 /// Holds the VkImage and its backing device-local VkDeviceMemory, always a dedicated allocation.
 /// There is no layout tracking yet, so a texture is creatable but unusable in a command list until layout transitions land.
-class vulkan_texture final : public sg::raw_texture
+class sg::backend::vulkan::vulkan_texture final : public sg::raw_texture
 {
 public:
     vulkan_texture(vulkan_context& ctx,
@@ -31,4 +30,3 @@ public:
     VkImage _image = VK_NULL_HANDLE;
     VkDeviceMemory _memory = VK_NULL_HANDLE;
 };
-} // namespace sg::backend::vulkan

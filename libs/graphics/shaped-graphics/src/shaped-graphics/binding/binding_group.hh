@@ -5,11 +5,9 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
-namespace sg
-{
 /// A binding name paired with the view bound to it — the input to create_binding_group.
 /// A typed view converts implicitly to its `raw_view`, so call sites read `{"Output", buf->as_readwrite_buffer<u32>()}`.
-struct named_view
+struct sg::named_view
 {
     cc::string name;
     raw_view view;
@@ -19,7 +17,7 @@ struct named_view
 /// As a `create_binding_group_layout` argument it declares a *static* sampler, baked into the pipeline layout's root signature.
 /// As a `create_binding_group` argument it supplies a *dynamic* sampler for a sampler binding of that name.
 /// Same value type either way.
-struct named_sampler
+struct sg::named_sampler
 {
     cc::string name;
     sg::sampler sampler; // qualified: bare `sampler` here would shadow the type (GCC -Wchanges-meaning)
@@ -32,7 +30,7 @@ struct named_sampler
 ///
 /// Abstract: a backend subclasses it and owns the native allocation (dx12 descriptor-heap range,
 /// vulkan VkDescriptorSet). See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
-class binding_group
+class sg::binding_group
 {
 public:
     virtual ~binding_group();
@@ -40,4 +38,3 @@ public:
 protected:
     binding_group() = default;
 };
-} // namespace sg

@@ -3,11 +3,9 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
 
-namespace sg
-{
 /// GPU-query recording facade for a command list, reached as `cmd.query`: record a query at this point in the list, and read its result back on the host after submit.
 /// GPU timestamps are the only query type today — see libs/graphics/shaped-graphics/docs/concepts/queries.md.
-class command_list_query_scope
+class sg::command_list_query_scope
 {
 public:
     /// Whether this backend/device supports GPU timestamps.
@@ -34,4 +32,3 @@ private:
 
     command_list& _cmd;
 };
-} // namespace sg

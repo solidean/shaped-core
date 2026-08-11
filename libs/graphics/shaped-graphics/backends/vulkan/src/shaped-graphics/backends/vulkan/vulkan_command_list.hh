@@ -6,14 +6,13 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/fwd.hh>
 
-namespace sg::backend::vulkan
-{
 /// Vulkan implementation of sg::command_list.
 /// Owns its command pool and the single command buffer allocated from it, handed out already recording.
 /// Recording is not implemented: every recording call below aborts.
 /// The exceptions are the raytracing / query support queries, which honestly answer false, and record_gpu_timestamp, which returns an invalid query.
-class vulkan_command_list final : public sg::command_list
+class sg::backend::vulkan::vulkan_command_list final : public sg::command_list
 {
 public:
     // Defined in the .cc: the sg::command_list base needs vulkan_context complete to upcast it to sg::context.
@@ -161,4 +160,3 @@ protected:
     [[nodiscard]] bool query_timestamps_supported() const override { return false; }
     [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override { return {}; }
 };
-} // namespace sg::backend::vulkan

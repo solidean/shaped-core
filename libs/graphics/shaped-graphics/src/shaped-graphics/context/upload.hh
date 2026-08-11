@@ -8,8 +8,6 @@
 
 #include <type_traits>
 
-namespace sg
-{
 /// Async host→device upload facade for a context, reached as `ctx.upload`.
 ///
 /// The context-level mirror of the inline `cmd.upload`, which records a copy inline in a command list, visible to later commands in that list.
@@ -20,7 +18,7 @@ namespace sg
 /// The pin holds the source bytes alive until the copy has consumed them, so the caller may free the original right away — unlike inline upload, which copies synchronously.
 /// A later command list that reads the buffer automatically waits on the copy, with no manual synchronization.
 /// Uploads to one buffer keep their submission order; across buffers the order is unconstrained.
-class context_upload_scope
+class sg::context_upload_scope
 {
     // Typed-buffer overload — the preferred form.
     // `buffer<T>` alone names the element type, so a pin of any other element type is a compile error at the argument rather than a silently reinterpreted upload.
@@ -83,4 +81,3 @@ private:
 
     context& _ctx;
 };
-} // namespace sg

@@ -4,13 +4,12 @@
 #include <clean-core/thread/mutex.hh>                   // cc::mutex_guard
 #include <shaped-graphics/command_list/command_list.hh> // cmd.context()
 #include <shaped-graphics/context/context.hh>           // ctx.routines
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/routine/render_routine_base.hh>
 #include <shaped-graphics/routine/routine_registry.hh>
 
 #include <memory>
 
-namespace sg
-{
 /// Exclusive, mutable access to a render routine's per-context instance — what acquire_exclusive returns.
 /// The routine is reached through -> and *.
 ///
@@ -19,7 +18,7 @@ namespace sg
 /// The lock is not recursive, so the *same* routine must never be acquired again while a guard on it is alive.
 /// Acquiring a *different* routine under it is fine, as long as every path takes the two in the same order.
 template <class Derived>
-class routine_guard
+class sg::routine_guard
 {
 public:
     [[nodiscard]] Derived& operator*() const { return *_routine; }
@@ -88,7 +87,7 @@ private:
 ///
 /// Do not clear()/evict() a registry while another thread is still recording against the same context.
 template <class Derived>
-class render_routine : public render_routine_base
+class sg::render_routine : public render_routine_base
 {
 public:
     /// The per-context instance for Derived, fully initialized (declare + materialize) at the current reload generation.
@@ -143,4 +142,3 @@ private:
         return *held;
     }
 };
-} // namespace sg

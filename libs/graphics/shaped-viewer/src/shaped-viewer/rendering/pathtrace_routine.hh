@@ -14,8 +14,6 @@
 #include <shaped-viewer/pbr_material.hh>
 #include <typed-geometry/linalg/pos.hh>
 
-namespace sv
-{
 /// The per-view constant block the path tracer reads at b0 (the FrameConstants cbuffer in shaders/pt_common.hlsli).
 /// Mirrors that cbuffer lane-for-lane — keep them in lockstep.
 ///
@@ -23,7 +21,7 @@ namespace sv
 /// Laid out as 16-byte lanes to match HLSL cbuffer packing: each `vec3` pairs with the scalar after it to fill one lane.
 ///
 /// The view_renderer fills the light with `area_light_gpu::from(view's area_light)`.
-struct pt_frame_constants_gpu
+struct sv::pt_frame_constants_gpu
 {
     camera_gpu camera;
     area_light_gpu light;
@@ -44,11 +42,16 @@ struct pt_frame_constants_gpu
     f32 _reserved[20] = {};
 };
 
+namespace sv
+{
+
 static_assert(sizeof(pt_frame_constants_gpu) == 256, "pt_frame_constants_gpu must be a full 256-byte CBV block");
+
+} // namespace sv
 
 /// Everything one view's path trace binds.
 /// Mirrors trace_desc, but the frame block is a pt_frame_constants_gpu — it carries the area light and the sample controls the integrator needs.
-struct pt_trace_desc
+struct sv::pt_trace_desc
 {
     sg::buffer<pt_frame_constants_gpu> frame;    // the FrameConstants cbuffer (camera + light + sample controls)
     sg::buffer<background_gpu> background;       // the Background cbuffer (SH environment probe) the miss reads
@@ -68,7 +71,7 @@ struct pt_trace_desc
 /// The environment is gathered by multiple importance sampling (balance heuristic) between that NEE ray and the escaped bounce ray, keeping a bright, non-uniform sky low-variance.
 /// `samples_per_pixel` paths per pixel accumulate in one dispatch; `shaders/pathtrace.hlsl` carries the estimators themselves.
 /// `execute` only reads what `init_declare` built, so it takes the const `acquire` and holds no lock — concurrent traces on the same context do not serialize on this routine.
-class pathtrace_routine : public sg::render_routine<pathtrace_routine>
+class sv::pathtrace_routine : public sg::render_routine<pathtrace_routine>
 {
 public:
     /// Builds the TLAS from `d.instances`, binds the scene, and integrates one path bundle per pixel over `d.output`'s extent into `d.output`.
@@ -86,4 +89,3 @@ private:
     sg::raytracing_shader_table_handle _table;
     sg::raygen_index _raygen = {};
 };
-} // namespace sv

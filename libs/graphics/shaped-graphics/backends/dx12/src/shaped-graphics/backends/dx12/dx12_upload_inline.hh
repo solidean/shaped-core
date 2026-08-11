@@ -8,13 +8,11 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg::backend::dx12
-{
 /// Inline UPLOAD path: stages CPU→GPU writes through a persistently-mapped UPLOAD-heap ring on the direct queue.
 /// The copy is recorded immediately, so the destination is usable by later commands in the same list.
 /// An epoch's ring space is reclaimed once that epoch's GPU work retires.
 /// See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md.
-class dx12_upload_inline_system
+class sg::backend::dx12::dx12_upload_inline_system
 {
 public:
     explicit dx12_upload_inline_system(dx12_context& ctx) : _ctx(ctx) {}
@@ -103,4 +101,3 @@ private:
     };
     cc::mutex<ring_state> _ring;
 };
-} // namespace sg::backend::dx12

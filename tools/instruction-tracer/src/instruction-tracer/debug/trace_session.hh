@@ -3,11 +3,10 @@
 #include <clean-core/common/utility.hh>
 #include <instruction-tracer/debug/symbol_session.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
-namespace itrace
-{
 /// Stop conditions and budget for one recorded invocation.
-struct trace_config
+struct itrace::trace_config
 {
     u32 max_instructions = 100;
     bool until_return = true;
@@ -21,7 +20,7 @@ struct trace_config
 ///
 /// Captures rip, bytes and registers and nothing else — no disassembly, no source.
 /// The one decode it does is the raw-byte syscall check, which has to happen before the step that would enter the kernel.
-class trace_session
+class itrace::trace_session
 {
 public:
     trace_session(void* process, trace_config const& config);
@@ -68,4 +67,3 @@ private:
     bool _active = false;
     u64 _entry_rsp = 0;
 };
-} // namespace itrace

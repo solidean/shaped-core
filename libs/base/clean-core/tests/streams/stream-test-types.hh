@@ -5,7 +5,22 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/streams/stream.hh>
 
-#include <cstring> // std::memmove, std::memcpy
+#include <cstring>
+
+namespace cc_stream_test
+{
+class mock_pipe_read_stream_adapter;
+class recording_write_stream_adapter;
+class mock_split_bounds_read_write_adapter;
+} // namespace cc_stream_test
+
+namespace cc_stream_test
+{
+class mock_pipe_read_stream_adapter;
+class recording_write_stream_adapter;
+class mock_split_bounds_read_write_adapter;
+} // namespace cc_stream_test
+// std::memmove, std::memcpy
 
 // Shared test helpers + deliberately non-seekable mock adapters, used to exercise the parts of the stream
 // contract that the (always-seekable) span and file adapters can't reach: flush returning -1, try_as_seekable
@@ -28,10 +43,12 @@ inline bool bytes_equal(cc::span<byte const> a, cc::span<byte const> b)
     return a.empty() || std::memcmp(a.data(), b.data(), size_t(a.size())) == 0;
 }
 
+} // namespace cc_stream_test
+
 /// A non-seekable in-memory READ source, modelling a pipe.
 /// It serves bytes from a fixed source in fixed-size chunks, and returns -1 for every seek and dry-seek, so try_as_seekable must fail on it.
 /// A plain flush (relative, 0) still works, and also returns -1, since there is no meaningful position.
-class mock_pipe_read_stream_adapter
+class cc_stream_test::mock_pipe_read_stream_adapter
 {
 public:
     mock_pipe_read_stream_adapter(cc::span<byte const> data, isize chunk) : _data(data), _chunk(chunk) {}
@@ -79,7 +96,7 @@ private:
 
 /// A non-seekable in-memory WRITE sink that records every write-through range it is handed, so tests can
 /// verify first_write is set on write and reset after each flush.
-class recording_write_stream_adapter
+class cc_stream_test::recording_write_stream_adapter
 {
 public:
     recording_write_stream_adapter() = default;
@@ -125,7 +142,7 @@ private:
 /// A read_write adapter whose read boundary and write capacity are deliberately DIFFERENT: a flush hands out `readable` bytes to read, but the whole buffer to write into.
 /// On a span adapter the two always coincide, so this is the only shape that can tell `end` (read) and `write_end` (write) apart.
 /// Which is exactly what a read_write -> write narrowing has to get right.
-class mock_split_bounds_read_write_adapter
+class cc_stream_test::mock_split_bounds_read_write_adapter
 {
 public:
     static constexpr isize k_cap = 16;
@@ -154,4 +171,3 @@ private:
     isize _readable;
     byte _buffer[k_cap] = {};
 };
-} // namespace cc_stream_test

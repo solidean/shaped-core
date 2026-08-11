@@ -4,7 +4,13 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
-#include <clean-core/streams/stream.hh> // cc::read_stream / cc::write_stream
+#include <clean-core/streams/stream.hh>
+
+namespace babel::image
+{
+struct write_options;
+} // namespace babel::image
+// cc::read_stream / cc::write_stream
 
 // Image aggregator (image/) — the "I just want pixel data" layer.
 //
@@ -34,8 +40,10 @@ enum class component : u8
     f32,
 };
 
+} // namespace babel::image
+
 /// Decoded pixels, row-major, top-left origin, tightly packed (row_stride == width * channels * bytes_per_component).
-struct image
+struct babel::image::image
 {
     int width = 0;
     int height = 0;
@@ -51,6 +59,9 @@ struct image
     /// Bytes per pixel row: width * channels * bytes_per_component().
     [[nodiscard]] isize row_stride() const;
 };
+
+namespace babel::image
+{
 
 // reading
 // -------------------------------------------------------------------------------------------------
@@ -68,12 +79,17 @@ struct image
 // writing
 // -------------------------------------------------------------------------------------------------
 
+} // namespace babel::image
+
 /// Aggregator write knobs.
 /// `jpg_quality` is ignored for PNG.
-struct write_options
+struct babel::image::write_options
 {
     int jpg_quality = 90; // 1..100
 };
+
+namespace babel::image
+{
 
 /// Encode `img` to `fmt`'s file bytes, delegating to the matching low-level codec.
 [[nodiscard]] cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options opts = {});

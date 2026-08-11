@@ -181,9 +181,11 @@ constexpr key_modifiers& operator|=(key_modifiers& a, key_modifiers b)
     return (held & query) == query;
 }
 
+} // namespace sr
+
 /// A key going down or coming up.
 /// Auto-repeat produces further is_down events with is_repeat set; there is no repeat for release.
-struct key_event
+struct sr::key_event
 {
     /// Physical position (see sr::scancode).
     /// What to test for movement and anything spatial.
@@ -209,7 +211,7 @@ struct key_event
 /// One event is not one key: an IME commits a whole composed phrase at once, a dead key commits nothing until
 /// the following keystroke, and a paste arrives as one event.
 /// Append it to your buffer — never reconstruct text from key_events.
-struct text_event
+struct sr::text_event
 {
     cc::string text;
 };
@@ -217,7 +219,7 @@ struct text_event
 /// Cursor motion.
 /// In relative mouse mode cursor_pos stops being meaningful and only delta is — see
 /// window::set_relative_mouse_mode.
-struct mouse_move_event
+struct sr::mouse_move_event
 {
     /// Cursor position in pixels, relative to the window's client area.
     tg::pos2f cursor_pos;
@@ -227,7 +229,7 @@ struct mouse_move_event
     tg::vec2f delta;
 };
 
-struct mouse_button_event
+struct sr::mouse_button_event
 {
     sr::mouse_button button = mouse_button::left;
 
@@ -244,7 +246,7 @@ struct mouse_button_event
 };
 
 /// A scroll, already corrected for the platform's scroll direction.
-struct mouse_wheel_event
+struct sr::mouse_wheel_event
 {
     /// Scroll amount in ticks; positive is right and away from the user.
     /// Fractional on trackpads and high-resolution wheels, so do not assume whole steps.
@@ -264,7 +266,7 @@ struct mouse_wheel_event
 ///         if (auto const* k = std::get_if<sr::key_event>(&e.payload))
 ///             if (k->is_down && k->scancode == sr::scancode::escape)
 ///                 e.window->request_close();
-struct input_event
+struct sr::input_event
 {
     /// The window the event went to, or null when none had focus.
     /// Never dangles within one frame: a window destroyed mid-frame drops its events from this span.
@@ -274,4 +276,3 @@ struct input_event
     /// Switch this to cc::variant when it lands — the alternatives are the API, the holder is not.
     std::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
 };
-} // namespace sr

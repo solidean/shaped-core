@@ -2,12 +2,8 @@
 
 #include <clean-core/fwd.hh>
 
-namespace cc
-{
 template <class... Ts>
-struct variant
+struct cc::variant
 {
     // TODO: implement variant
 };
-
-} // namespace cc

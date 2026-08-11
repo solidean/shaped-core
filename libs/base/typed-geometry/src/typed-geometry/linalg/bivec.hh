@@ -1,12 +1,11 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 
 #include <initializer_list>
 
-namespace tg
-{
 /// Bivector in D dimensions — an oriented area element.
 ///
 /// A bivector has C(D, 2) = D*(D-1)/2 components, one per pair of basis axes: 1 in 2D, 3 in 3D, 6 in 4D.
@@ -19,7 +18,7 @@ namespace tg
 ///     tg::bivec3f b;                                // {0, 0, 0}
 ///     auto const c = tg::cross(tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0));  // bivec3
 template <int D, class T>
-struct bivec
+struct tg::bivec
 {
     static_assert(D >= 2, "bivec requires at least 2 dimensions");
 
@@ -135,6 +134,9 @@ public:
         return a;
     }
 };
+
+namespace tg
+{
 
 template <int D, class T>
 inline bivec<D, T> const bivec<D, T>::zero = bivec<D, T>{};

@@ -4,17 +4,24 @@
 #include <clean-core/string/string.hh>
 #include <instruction-tracer/debug/symbol_session.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 #include <instruction-tracer/report/source_cache.hh>
 
 namespace itrace
 {
+struct format_options;
+} // namespace itrace
+
 /// Which optional blocks the trace section prints, straight off `--stack` / `--source` / `--register-diffs`.
-struct format_options
+struct itrace::format_options
 {
     bool stack = true;
     bool source = true;
     bool register_diffs = false;
 };
+
+namespace itrace
+{
 
 /// Render one enriched trace: the stack at entry, then the retired instructions grouped under the
 /// source lines they came from, with branch annotation derived from where control actually went.

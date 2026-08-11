@@ -1,5 +1,6 @@
 #pragma once
 
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/scalar/fwd.hh>
 
 #include <cmath>
@@ -27,12 +28,10 @@
 ///         static my_scalar sqrt(my_scalar x) { return my_sqrt(x); }
 ///     };
 
-namespace tg
-{
 /// Primary template — no capabilities by default.
 /// Specialize it per scalar type to opt in; there is deliberately no default one()/sqrt()/..., so a scalar must declare what it supports.
 template <class T>
-struct scalar_traits
+struct tg::scalar_traits
 {
     static constexpr bool has_sqrt = false;
     static constexpr bool has_trigonometry = false;
@@ -41,7 +40,7 @@ struct scalar_traits
 // std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
 // Routed through them for now; libs/base/typed-geometry/docs/TODO.md tracks the replacement.
 template <>
-struct scalar_traits<f32>
+struct tg::scalar_traits<cc::f32>
 {
     static constexpr bool has_sqrt = true;
     static constexpr bool has_trigonometry = true;
@@ -60,7 +59,7 @@ struct scalar_traits<f32>
 };
 
 template <>
-struct scalar_traits<f64>
+struct tg::scalar_traits<cc::f64>
 {
     static constexpr bool has_sqrt = true;
     static constexpr bool has_trigonometry = true;
@@ -83,7 +82,7 @@ struct scalar_traits<f64>
 // `bool` has its own specialization below.
 template <class T>
     requires(std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>)
-struct scalar_traits<T>
+struct tg::scalar_traits<T>
 {
     static constexpr bool has_sqrt = false;
     static constexpr bool has_trigonometry = false;
@@ -94,7 +93,7 @@ struct scalar_traits<T>
 };
 
 template <>
-struct scalar_traits<bool>
+struct tg::scalar_traits<bool>
 {
     static constexpr bool has_sqrt = false;
     static constexpr bool has_trigonometry = false;
@@ -103,6 +102,9 @@ struct scalar_traits<bool>
     [[nodiscard]] static constexpr bool is_zero(bool x) { return !x; }
     [[nodiscard]] static constexpr bool is_one(bool x) { return x; }
 };
+
+namespace tg
+{
 
 namespace traits
 {

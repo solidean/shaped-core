@@ -8,6 +8,11 @@
 
 namespace scl
 {
+struct plan_edit;
+struct plan_file;
+struct prose_plan;
+} // namespace scl
+
 /// One span of a prose plan: the lines to replace, and what to put there.
 ///
 /// `first_line` / `last_line` are 1-based and inclusive, and cover whole lines — the format has no column
@@ -18,7 +23,7 @@ namespace scl
 /// `lines` is verbatim final text with the `| ` prefix already stripped — comment markers and indentation
 /// included, because the applier deliberately infers neither.
 /// Empty `lines` on a replacement is a deletion.
-struct plan_edit
+struct scl::plan_edit
 {
     u32 first_line = 0;
     u32 last_line = 0;
@@ -30,17 +35,20 @@ struct plan_edit
 };
 
 /// Every edit for one file, in ascending, non-overlapping line order (the parser enforces both).
-struct plan_file
+struct scl::plan_file
 {
     cc::string path;
     cc::vector<plan_edit> edits;
 };
 
 /// A parsed prose plan: what `shaped-linter prose apply` was asked to do.
-struct prose_plan
+struct scl::prose_plan
 {
     cc::vector<plan_file> files;
 };
+
+namespace scl
+{
 
 /// Parse the plan text format.
 ///

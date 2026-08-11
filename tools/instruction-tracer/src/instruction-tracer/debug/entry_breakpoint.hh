@@ -1,14 +1,13 @@
 #pragma once
 
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
-namespace itrace
-{
 /// The 0xCC patch at the traced function's entry.
 ///
 /// An int3 cannot stay armed while the byte it replaced executes, so every hit runs the same dance: rewind rip past the trap, disarm, single-step the real instruction, re-arm.
 /// arm()/disarm() are the two halves; the debug loop sequences them.
-class entry_breakpoint
+class itrace::entry_breakpoint
 {
 public:
     /// `process` is the debuggee's HANDLE.
@@ -35,4 +34,3 @@ private:
     u8 _original = 0;
     bool _armed = false;
 };
-} // namespace itrace

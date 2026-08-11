@@ -7,14 +7,13 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/fwd.hh>
 
-namespace sg::backend::dx12
-{
 /// dx12 binding_group_layout: one group's descriptor-table schema.
 /// That is a CBV/SRV/UAV table (one range per resource-view binding) and a SAMPLER table (one range per *dynamic* sampler binding), plus any *static* sampler descs baked from this group's bindings.
 /// It is NOT a root signature: a dx12_pipeline_layout composes one or more of these into the root signature and assigns each a root-parameter slot.
 /// Keeps the reflected view/sampler bindings and their table offsets, so a binding_group can place and validate descriptors.
-class dx12_binding_group_layout final : public sg::binding_group_layout
+class sg::backend::dx12::dx12_binding_group_layout final : public sg::binding_group_layout
 {
 public:
     /// A reflected binding plus where its descriptor(s) sit in the group's descriptor table.
@@ -42,4 +41,3 @@ public:
     cc::vector<D3D12_DESCRIPTOR_RANGE> sampler_ranges;
     cc::vector<D3D12_STATIC_SAMPLER_DESC> static_sampler_descs;
 };
-} // namespace sg::backend::dx12

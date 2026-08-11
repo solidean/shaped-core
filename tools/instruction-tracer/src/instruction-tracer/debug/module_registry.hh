@@ -5,11 +5,16 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
 namespace itrace
 {
+struct module_info;
+class module_registry;
+} // namespace itrace
+
 /// One image loaded in the debuggee.
-struct module_info
+struct itrace::module_info
 {
     u64 base = 0;
     u64 size = 0;
@@ -21,7 +26,7 @@ struct module_info
 
 /// The debuggee's loaded images, tracked from the debug loop's load/unload events.
 /// Address ranges never overlap, so rip -> module is unambiguous.
-class module_registry
+class itrace::module_registry
 {
 public:
     void add(module_info module);
@@ -39,6 +44,9 @@ public:
 private:
     cc::vector<module_info> _modules;
 };
+
+namespace itrace
+{
 
 /// The file-name portion of a path, after the last '/' or '\'.
 cc::string_view path_file_name(cc::string_view path);

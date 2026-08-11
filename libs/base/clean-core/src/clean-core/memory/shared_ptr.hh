@@ -45,11 +45,9 @@
 // Create only via cc::make_shared<T, Traits>(...): a node is born owned, strong = 1.
 // Upcasts to a base with the SAME Traits are allowed; aliasing/projection to a subobject is not (deferred).
 
-namespace cc
-{
 /// What dropping a strong reference leaves for the caller to do, in this order.
 /// `free` without `destroy` never happens; the protocol block above carries the full contract.
-struct shared_release
+struct cc::shared_release
 {
     bool destroy; ///< this was the last strong reference: run destroy_object
     bool free;    ///< also the last reference of any kind: run free_storage, and skip release_weak
@@ -61,7 +59,7 @@ struct shared_release
 ///
 /// Weak is the LOW half, so a weak overflow carries straight into the strong count.
 /// 2^32 live weak refs is unreachable in practice, since each costs a pointer somewhere — an invariant, not a check.
-struct fused_refcount
+struct cc::fused_refcount
 {
     static constexpr u64 strong_unit = u64(1) << 32;
     static constexpr u64 weak_unit = 1;
@@ -98,14 +96,19 @@ struct fused_refcount
         return false;        // lost the race to the last strong drop -> object is (being) destroyed
     }
 };
+
+namespace cc
+{
 static_assert(cc::atomic<u64>::is_always_lock_free, "fused refcounts need a lock-free 64-bit atomic");
 
 // ============================================================================
 // default_shared_traits — non-intrusive: control trails the payload in the node
 // ============================================================================
 
+} // namespace cc
+
 template <class T>
-struct default_shared_traits
+struct cc::default_shared_traits
 {
     struct control
     {
@@ -148,6 +151,9 @@ private:
     static control* ctrl(T* p) { return reinterpret_cast<control*>(reinterpret_cast<byte*>(p) + control_offset); }
 };
 
+namespace cc
+{
+
 // ============================================================================
 // shared_ptr / weak_ptr
 // ============================================================================
@@ -158,8 +164,10 @@ struct weak_ptr;
 template <class T, class Traits = default_shared_traits<T>, class... Args>
 [[nodiscard]] shared_ptr<T, Traits> make_shared(Args&&... args);
 
-template <class T, class Traits = default_shared_traits<T>>
-struct shared_ptr
+} // namespace cc
+
+template <class T, class Traits = cc::default_shared_traits<T>>
+struct cc::shared_ptr
 {
     // ctors / dtor
 public:
@@ -288,8 +296,8 @@ private:
     friend shared_ptr<U, Tr> make_shared(Args&&...);
 };
 
-template <class T, class Traits = default_shared_traits<T>>
-struct weak_ptr
+template <class T, class Traits = cc::default_shared_traits<T>>
+struct cc::weak_ptr
 {
     static_assert(Traits::supports_weak, "weak_ptr requires a Traits with supports_weak == true");
 
@@ -400,6 +408,9 @@ private:
     friend struct weak_ptr;
     friend struct shared_ptr<T, Traits>;
 };
+
+namespace cc
+{
 
 /// Create a T in one slab-allocated node (sized by the Traits: T plus a trailing control block by default, or
 /// the object itself for intrusive control) with strong = 1. The only way to construct a shared_ptr.

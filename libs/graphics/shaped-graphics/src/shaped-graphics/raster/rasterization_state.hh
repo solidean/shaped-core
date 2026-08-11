@@ -29,9 +29,11 @@ enum class front_face
     clockwise,         // DX12 FrontCounterClockwise = FALSE / Vk FRONT_FACE_CLOCKWISE
 };
 
+} // namespace sg
+
 /// The rasterizer configuration of a raster pipeline.
 /// Defaults describe the common case: solid back-face culling, counter-clockwise front faces, depth clipping on, no depth bias.
-struct rasterization_state
+struct sg::rasterization_state
 {
     fill_mode fill = fill_mode::solid;
     cull_mode cull = cull_mode::back;
@@ -45,4 +47,3 @@ struct rasterization_state
     float depth_bias_slope = 0.0f; ///< slope-scaled bias (DX12 SlopeScaledDepthBias / Vk depthBiasSlopeFactor)
     float depth_bias_clamp = 0.0f; ///< maximum bias magnitude (DX12 DepthBiasClamp / Vk depthBiasClamp)
 };
-} // namespace sg

@@ -4,6 +4,16 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/string/string.hh>
+#include <instruction-tracer/fwd.hh>
+
+namespace itrace
+{
+struct memory_access;
+struct recorded_instruction;
+struct register_snapshot;
+struct stack_frame;
+struct trace;
+} // namespace itrace
 
 /// Windows x64 single-step instruction tracer.
 /// See tools/instruction-tracer/readme.md.
@@ -35,13 +45,18 @@ enum class insn_category
     syscall,
 };
 
+} // namespace itrace
+
 /// The 16 GPRs plus rflags, sampled before an instruction.
 /// Captured with --register-diffs, any memory section or --html: the effective-address computation reads base/index registers from here.
-struct register_snapshot
+struct itrace::register_snapshot
 {
     cc::fixed_array<u64, gpr_count> gpr = {};
     u64 rflags = 0;
 };
+
+namespace itrace
+{
 
 /// Where a touched address lives.
 ///
@@ -57,11 +72,13 @@ enum class access_region
     instructions,
 };
 
+} // namespace itrace
+
 /// One memory location an instruction touched, with the effective address resolved from the register snapshot taken before the instruction ran.
 ///
 /// Every memory operand is recorded: explicit data operands, the implicit stack traffic of push/pop/call/ret (which lands in `frame`), and the instruction fetch.
 /// Noise is dropped by region *filtering* at print time, never by omission here, so one capture serves every region selection.
-struct memory_access
+struct itrace::memory_access
 {
     u64 address = 0;
     u16 size = 0; // bytes
@@ -78,7 +95,7 @@ struct memory_access
 /// The live loop fills only rip/next_rip/rsp/bytes.
 /// `length`, `text`, `category` and the is_/…_memory flags come from the decoder afterwards, and file/line/target_symbol/owner_symbol from symbol enrichment.
 /// Everything past the raw capture is best-effort and stays empty/false when unavailable.
-struct recorded_instruction
+struct itrace::recorded_instruction
 {
     u64 rip = 0;
     /// Where the CPU actually went next — the authority for branch annotation.
@@ -121,6 +138,9 @@ struct recorded_instruction
     cc::vector<memory_access> memory_accesses;
 };
 
+namespace itrace
+{
+
 /// True when control did not simply fall through to the next instruction — the authority for whether a conditional branch was taken.
 /// False when unknowable: an undecoded record, or the last one, whose successor we never saw.
 inline bool diverged(recorded_instruction const& insn)
@@ -141,8 +161,10 @@ enum class step_reason
     process_exited,
 };
 
+} // namespace itrace
+
 /// One resolved frame of the stack captured at function entry.
-struct stack_frame
+struct itrace::stack_frame
 {
     u64 rip = 0;
     cc::string symbol;
@@ -152,7 +174,7 @@ struct stack_frame
 };
 
 /// One recorded invocation of the traced function.
-struct trace
+struct itrace::trace
 {
     u32 index = 0;     // 1-based, across all threads
     u64 hit_index = 0; // 1-based breakpoint hit this trace came from
@@ -180,4 +202,3 @@ struct trace
 
     step_reason reason = step_reason::instruction_budget;
 };
-} // namespace itrace

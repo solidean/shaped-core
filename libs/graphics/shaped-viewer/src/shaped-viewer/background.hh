@@ -3,8 +3,6 @@
 #include <shaped-viewer/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-namespace sv
-{
 /// The view's background / environment: the radiance a primary ray sees when it misses all geometry.
 ///
 /// For now it is an order-3 RGB spherical-harmonics probe — 16 coefficients, each an RGB radiance, in the standard real-SH basis with index 0 the constant (DC) term.
@@ -13,7 +11,7 @@ namespace sv
 ///
 /// All-zero is a black background.
 /// This is the scene-side description; the path tracer's miss does not read it yet — it lands with the pt environment.
-struct background
+struct sv::background
 {
     static constexpr int sh_coefficient_count = 16; // order 3: (3 + 1)^2 real-SH coefficients
 
@@ -23,7 +21,7 @@ struct background
 /// GPU-side SH probe, mirroring the `Background` cbuffer in shaders/background.hlsli.
 /// Each coefficient sits in its own 16-byte lane (`.xyz` = RGB radiance, `.w` unused), because HLSL pads cbuffer array elements to a full float4 lane.
 /// Bound at b1, evaluated by the miss shaders (`background_radiance`).
-struct background_gpu
+struct sv::background_gpu
 {
     tg::vec4f sh[background::sh_coefficient_count] = {};
 
@@ -36,6 +34,9 @@ struct background_gpu
         return out;
     }
 };
+
+namespace sv
+{
 
 static_assert(sizeof(background_gpu) == sizeof(tg::vec4f) * background::sh_coefficient_count,
               "background_gpu must be a tight array of vec4 lanes to match the HLSL cbuffer");

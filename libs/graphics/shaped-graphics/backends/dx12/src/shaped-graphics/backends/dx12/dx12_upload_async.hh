@@ -12,15 +12,13 @@
 
 #include <atomic>
 
-namespace sg::backend::dx12
-{
 /// One async upload handed to the copy actor.
 /// `src`'s pin holds the source bytes alive until they have been staged; the job is then destroyed on the actor thread, off the submission path.
 /// `buffer_target` / `texture_target` is a weak ref resolved at stage time.
 /// A destination whose every handle was dropped before the actor ran skips the copy.
 /// Its `copy_fence_value` is signaled anyway, so the lifetime gate and any forward reader stamped with it never hang.
 /// `copy_fence_value` is reserved synchronously at enqueue, and the completion fence reaches it once the copy has run or the job was dropped.
-struct dx12_async_upload_job
+struct sg::backend::dx12::dx12_async_upload_job
 {
     // Exactly one destination is set: a buffer (`buffer_target` + `dst_offset`) or a texture (`texture_target` + `footprint`).
     // Both are weak refs, locked at stage time — see stage_job.
@@ -44,7 +42,7 @@ struct dx12_async_upload_job
 /// A later direct-queue reader waits on the completion fence at submit.
 /// The system owns one copy command list plus one allocator per window slot, cycled on the window fence — deliberately not the epoch-gated command pool.
 /// See libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
-class dx12_upload_async_system
+class sg::backend::dx12::dx12_upload_async_system
 {
 public:
     explicit dx12_upload_async_system(dx12_context& ctx) : _ctx(ctx) {}
@@ -113,4 +111,3 @@ private:
 
     cc::unique_ptr<cc::threaded_actor<dx12_async_upload_job>> _actor;
 };
-} // namespace sg::backend::dx12

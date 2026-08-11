@@ -33,9 +33,11 @@ enum class target_op : u8
     discard,  ///< contents become undefined (neither loaded nor cleared)
 };
 
+} // namespace sg
+
 /// A color (render-target) target of a rendering scope: the view plus what to do with it at pass start.
 /// Build with view.cleared(color) / view.preserved() / view.discarded().
-struct color_target
+struct sg::color_target
 {
     render_target_view view;
     target_op op = target_op::preserve;
@@ -44,7 +46,7 @@ struct color_target
 
 /// A depth-stencil target of a rendering scope.
 /// Build with view.cleared(depth[, stencil]) / view.preserved() / view.discarded().
-struct depth_stencil_target
+struct sg::depth_stencil_target
 {
     depth_stencil_view view;
     target_op op = target_op::preserve;
@@ -55,7 +57,7 @@ struct depth_stencil_target
 /// The region of the target(s) rendering maps to, plus the depth range.
 /// Offset/size are in pixels.
 /// Omitting the viewport from rendering_info uses the full target extent with depth [0, 1].
-struct viewport
+struct sg::viewport
 {
     tg::pos2f offset; ///< top-left, in pixels
     tg::vec2f size;   ///< width / height, in pixels
@@ -65,7 +67,7 @@ struct viewport
 
 /// The targets + rasterizer state a rendering scope binds — passed to cmd.raster.render_to / cmd.raster.manual.begin_rendering.
 /// viewport / scissor unset default to the full target extent.
-struct rendering_info
+struct sg::rendering_info
 {
     cc::fixed_vector<color_target, max_color_targets> color_targets;
     cc::optional<sg::depth_stencil_target> depth_stencil_target;
@@ -75,7 +77,7 @@ struct rendering_info
 
 /// Parameters of a non-indexed draw: a `{offset = first vertex, size = vertex count}` vertex range,
 /// drawn once per instance in the `{offset = first instance, size = instance count}` instance range.
-struct draw_config
+struct sg::draw_config
 {
     cc::offset_size vertex_range = {.offset = 0, .size = 0};
     cc::offset_size instance_range = {.offset = 0, .size = 1};
@@ -84,7 +86,7 @@ struct draw_config
 /// Parameters of an indexed draw: an `{offset = first index, size = index count}` index range into the bound index buffer,
 /// each index offset by `vertex_offset` before the vertex fetch,
 /// drawn once per instance in the `{offset = first instance, size = instance count}` instance range.
-struct draw_indexed_config
+struct sg::draw_indexed_config
 {
     cc::offset_size index_range = {.offset = 0, .size = 0};
     cc::offset_size instance_range = {.offset = 0, .size = 1};
@@ -101,7 +103,7 @@ struct draw_indexed_config
 ///
 /// Only raster operations are here.
 /// Anything else the command list offers — uploads, downloads, the context — is reached through `command_list()`; a rendering scope does not mirror them.
-class rendering_scope
+class sg::rendering_scope
 {
 public:
     ~rendering_scope();
@@ -176,7 +178,7 @@ private:
 /// Low-level rendering passthrough, reached as cmd.raster.manual: begin / end a rendering scope by hand, forwarding straight to the backend.
 /// begin_rendering and end_rendering must be balanced.
 /// Prefer render_to, which pairs them via RAII.
-class command_list_raster_manual_scope
+class sg::command_list_raster_manual_scope
 {
 public:
     void begin_rendering(rendering_info const& info);
@@ -221,7 +223,7 @@ private:
 
 /// Raster recording facade for a command list, reached as `cmd.raster`: open a rendering scope over a set of targets, clearing / preserving / discarding each.
 /// `manual` exposes the same begin/end by hand.
-class command_list_raster_scope
+class sg::command_list_raster_scope
 {
 public:
     /// Opens a rendering scope over `info`'s targets (applying each target's clear / discard) and returns an RAII handle;
@@ -268,4 +270,3 @@ private:
 
     command_list& _cmd;
 };
-} // namespace sg

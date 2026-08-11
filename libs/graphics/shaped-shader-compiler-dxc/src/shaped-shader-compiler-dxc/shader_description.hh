@@ -3,13 +3,12 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/compile_options.hh>
+#include <shaped-shader-compiler-dxc/fwd.hh>
 
 /// One shader to compile: its HLSL source plus what and how to build it.
 /// For compile(), `source` must already be fully preprocessed (see compiler::preprocess).
 
-namespace ssc::dxc
-{
-struct shader_description
+struct ssc::dxc::shader_description
 {
     /// HLSL source text.
     /// For compile() this must be self-contained, with every `#include` already resolved (compile() rejects includes).
@@ -26,4 +25,3 @@ struct shader_description
     /// HLSL shader model — the profile suffix (sm_6_8 -> "cs_6_8").
     shader_model model = shader_model::sm_6_8;
 };
-} // namespace ssc::dxc

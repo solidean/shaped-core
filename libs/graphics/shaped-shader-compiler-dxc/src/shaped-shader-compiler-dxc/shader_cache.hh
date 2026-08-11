@@ -17,9 +17,7 @@
 /// With none installed, cc::async_blocking_get_singlethreaded drives it inline on the calling thread.
 /// Each worker uses its own thread-local ssc::dxc::compiler, since the compiler is one-per-thread / not thread-safe.
 
-namespace ssc::dxc
-{
-class shader_cache
+class ssc::dxc::shader_cache
 {
 public:
     /// Adds a cache tier (see cc::key_value_cache). Front tiers are consulted first.
@@ -44,4 +42,3 @@ private:
 
     cc::key_value_cache<cc::hash128, sg::async_compiled_shader> _cache;
 };
-} // namespace ssc::dxc

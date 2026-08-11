@@ -43,10 +43,12 @@ enum class node_kind : u8
     object,
 };
 
+} // namespace babel::json
+
 /// One parsed value in the document's flat node array.
 /// Not used directly — traverse via `ref`.
 /// The payload fields are read according to `kind`; the unrelated ones are left at 0.
-struct node
+struct babel::json::node
 {
     node_kind kind = node_kind::null;
     bool boolean = false; // kind == boolean
@@ -69,7 +71,7 @@ struct node
 
 /// A parsed JSON document: owns the flat node array, the child-index array and the string arena.
 /// Move-only-cheap value type (three vectors). Obtain one from babel::json::read; traverse via root().
-class document
+class babel::json::document
 {
     // access
 public:
@@ -103,7 +105,7 @@ private:
 
 /// A non-owning handle to one node in a document: {document*, node index}. Copyable and cheap.
 /// All accessors are kind-tolerant — a mismatched kind returns the fallback / an invalid ref rather than asserting.
-struct ref
+struct babel::json::ref
 {
     // construction
 public:
@@ -181,6 +183,9 @@ private:
     document const* _doc = nullptr;
     i32 _index = -1;
 };
+
+namespace babel::json
+{
 
 inline ref document::root() const
 {

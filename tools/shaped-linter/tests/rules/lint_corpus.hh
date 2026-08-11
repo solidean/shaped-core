@@ -21,8 +21,13 @@
 
 namespace scl
 {
+struct lint_corpus_expectation;
+struct lint_corpus_case;
+struct lint_corpus_group;
+} // namespace scl
+
 /// One `[rule-id]` / `~[rule-id]` annotation, with whatever `fix="…"` / `hint="…"` was chained onto it.
-struct lint_corpus_expectation
+struct scl::lint_corpus_expectation
 {
     cc::string rule_id;
     bool negated = false;         // `~[rule-id]`: this rule must not fire at all
@@ -31,7 +36,7 @@ struct lint_corpus_expectation
 };
 
 /// One annotated code block from a corpus file.
-struct lint_corpus_case
+struct scl::lint_corpus_case
 {
     cc::string title; // the nearest preceding heading — names the section this case runs under
     i32 line = 0;     // 1-based line of the opening fence, so a failure points into the file
@@ -43,13 +48,15 @@ struct lint_corpus_case
 
 /// Every case in one corpus file.
 /// This is the invocable key type — a struct, never a bare primitive, so `nx::invoke_tests` matches it unambiguously.
-struct lint_corpus_group
+struct scl::lint_corpus_group
 {
-    cc::string path; // relative to the corpus root, e.g. "default_init_assignment.md"
+    cc::string path; // relative to the corpus root (tools/shaped-linter/rules/), so the group folder is part of it
     cc::vector<lint_corpus_case> cases;
     isize skipped = 0; // unannotated lintable blocks; counted here, but nothing reads it yet
 };
 
+namespace scl
+{
 /// Parse an already-loaded corpus file.
 /// Fails on a malformed annotation, because a typo must not read as "no expectations".
 cc::result<lint_corpus_group> parse_lint_corpus(cc::string_view text, cc::string_view relative_path);

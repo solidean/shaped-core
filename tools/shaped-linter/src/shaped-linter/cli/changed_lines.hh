@@ -8,6 +8,9 @@
 
 namespace scl
 {
+struct changed_lines;
+} // namespace scl
+
 /// The lines a run is allowed to report prose findings on, per file.
 ///
 /// A prose finding sits on exactly one line, and that line either changed or it did not — so scoping a
@@ -18,7 +21,7 @@ namespace scl
 /// A file with no entry has no reportable lines.
 /// That is what makes editing one section of a long file a terminating job: the file's other, older
 /// violations are out of scope by construction and cannot ripple into the edit.
-struct changed_lines
+struct scl::changed_lines
 {
     /// Whether any file was listed at all — an empty set means no filtering was requested.
     bool empty() const { return _files.empty(); }
@@ -41,6 +44,9 @@ private:
 
     friend cc::result<changed_lines> parse_changed_lines(cc::string_view text);
 };
+
+namespace scl
+{
 
 /// Parse the `--changed-lines` spec: one `<path>:a-b,c-d` per line, blank lines ignored.
 /// A single line is spelled `a-a`; the ranges of one path are unioned if it appears more than once.

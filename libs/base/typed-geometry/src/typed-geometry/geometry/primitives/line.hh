@@ -1,13 +1,12 @@
 #pragma once
 
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
-namespace tg
-{
 /// Line: an infinite straight line through a point along a direction.
 ///
 /// Represents the set of points {origin + t*dir : t in R}, unbounded in both directions.
@@ -17,7 +16,7 @@ namespace tg
 ///
 ///     tg::line3f l(tg::pos3f(0, 0, 0), tg::vec3f(1, 0, 0));   // the x axis
 template <int D, class T>
-struct line
+struct tg::line
 {
     static_assert(D > 0, "line requires a positive dimension");
 
@@ -60,11 +59,9 @@ public:
 };
 
 template <int D, class T>
-struct object_traits<line<D, T>>
+struct tg::object_traits<tg::line<D, T>>
 {
     static constexpr int intrinsic_dim = 1;
     static constexpr int ambient_dim = D;
     static constexpr bool is_finite = false;
 };
-
-} // namespace tg

@@ -3,15 +3,13 @@
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg
-{
 /// Cache facade for a context's built-in pipeline_cache, reached as `ctx.cached`.
 /// `acquire` is the get-or-create verb: identical arguments return the already-built handle / async node instead of rebuilding.
 /// Layouts are cached synchronously; compute and raytracing pipelines build asynchronously.
 ///
 /// Use cache() to install extra tiers (e.g. a disk-backed provider) or run bookkeeping.
 /// A context installs default in-memory tiers at construction, so dedup works without any setup.
-class context_cached_scope
+class sg::context_cached_scope
 {
 public:
     /// The cached binding_group_layout for these bindings + static samplers, created on a miss.
@@ -51,4 +49,3 @@ private:
 
     context& _ctx;
 };
-} // namespace sg

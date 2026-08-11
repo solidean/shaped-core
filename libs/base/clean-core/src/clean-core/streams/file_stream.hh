@@ -26,11 +26,9 @@
 // For the write adapter the differentiation is at the factory: create truncates, open overwrites in place, append starts at EOF.
 // The read_write adapter grows too — a write past the current end extends the file, including a fresh seek-to-end plus write, since it keeps the read boundary and the write capacity as separate ends.
 
-namespace cc
-{
 /// Buffered read adapter over a file.
 /// Hands out a seekable_read_stream.
-class file_read_stream_adapter
+class cc::file_read_stream_adapter
 {
 public:
     static constexpr isize k_buffer_size = 4096;
@@ -72,7 +70,7 @@ private:
 
 /// Buffered write adapter over a file, handing out a seekable_write_stream.
 /// Unbounded: a write-flush always frees the whole buffer (curr < end) unless the disk errors.
-class file_write_stream_adapter
+class cc::file_write_stream_adapter
 {
 public:
     static constexpr isize k_buffer_size = 4096;
@@ -122,7 +120,7 @@ private:
 /// Buffered read+write adapter over a file, handing out a seekable_read_write_stream: seekable reads, in-place overwrite, and growth.
 /// Writing past the current end extends the file, including a fresh seek-to-end plus write with nothing buffered.
 /// That works because the stream tracks the read boundary and the write capacity as two separate ends, so at EOF there is still free write space, rather than overloading a single window.
-class file_read_write_stream_adapter
+class cc::file_read_write_stream_adapter
 {
 public:
     static constexpr isize k_buffer_size = 4096;
@@ -163,4 +161,3 @@ private:
     i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
     byte _buffer[k_buffer_size];
 };
-} // namespace cc

@@ -6,15 +6,13 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/present/swapchain.hh>
 
-namespace sg::backend::dx12
-{
 /// DirectX 12 implementation of sg::swapchain over an IDXGISwapChain3, flip-discard model.
 /// Each back buffer is wrapped in a dx12_texture with borrowed storage, so it flows through the normal render-pass / barrier path.
 /// The RTV is created on demand by the render pass.
 /// A dedicated present fence gates back-buffer reuse.
 /// Auto-resizes to its HWND's client area, checked at most once per epoch so acquire never advances an epoch under the caller.
 /// Created by dx12_context::create_dx12_swapchain.
-class dx12_swapchain final : public sg::swapchain
+class sg::backend::dx12::dx12_swapchain final : public sg::swapchain
 {
 public:
     dx12_swapchain(dx12_context& ctx,
@@ -92,4 +90,3 @@ private:
     UINT _acquired_index = 0;                          // back-buffer index handed out by the current acquire
     bool _acquired = false; // true between acquire_backbuffer and present (enforces the 1:1 pairing)
 };
-} // namespace sg::backend::dx12

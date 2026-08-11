@@ -1,12 +1,11 @@
 #pragma once
 
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
-namespace tg
-{
 /// Axis-aligned bounding box in D dimensions.
 ///
 /// Represents the solid box — the set of points {x : min[i] <= x[i] <= max[i] for all i}. It is a
@@ -17,7 +16,7 @@ namespace tg
 ///
 ///     tg::aabb3f b(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1));   // the unit cube
 template <int D, class T>
-struct aabb
+struct tg::aabb
 {
     static_assert(D > 0, "aabb requires a positive dimension");
 
@@ -77,11 +76,9 @@ public:
 };
 
 template <int D, class T>
-struct object_traits<aabb<D, T>>
+struct tg::object_traits<tg::aabb<D, T>>
 {
     static constexpr int intrinsic_dim = D;
     static constexpr int ambient_dim = D;
     static constexpr bool is_finite = true;
 };
-
-} // namespace tg

@@ -7,6 +7,11 @@
 
 namespace scl
 {
+struct markdown_line;
+} // namespace scl
+
+namespace scl
+{
 /// What a markdown line is, at the only granularity the linter needs.
 enum class markdown_line_kind : u8
 {
@@ -18,12 +23,17 @@ enum class markdown_line_kind : u8
     frontmatter, // a leading --- ... --- block, delimiters included; metadata a tool consumes whole, not prose
 };
 
+} // namespace scl
+
 /// One line of the file, tagged.
-struct markdown_line
+struct scl::markdown_line
 {
     markdown_line_kind kind = markdown_line_kind::text;
     source_span span; // the line's content, without its terminator
 };
+
+namespace scl
+{
 
 /// Split a markdown file into tagged lines.
 ///

@@ -5,15 +5,21 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/config.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
 
-
 namespace nx
 {
-struct test_declaration
+struct alias_fragment;
+struct test_alias;
+struct test_declaration;
+struct test_registry;
+} // namespace nx
+
+struct nx::test_declaration
 {
     cc::string name;
     nx::config::cfg test_config;
@@ -34,7 +40,7 @@ struct test_declaration
 // One runnable target an alias expands to: a driver test, plus the section path that scopes into it.
 // For a per-backend invocable the path is {invoke-group, invocable-name}, e.g. {"dx12", "sg - clears backbuffer"}.
 // Running the alias then drives just that one instance, under that one backend's driver.
-struct alias_fragment
+struct nx::alias_fragment
 {
     test_declaration const* driver = nullptr;
     cc::vector<cc::string> section_path;
@@ -42,14 +48,14 @@ struct alias_fragment
 
 // A pseudo test-name standing for a set of scoped runs, defined at startup by NX_TEST_SETUP with full registry access.
 // A filter matching an alias name expands into one scheduled instance per fragment.
-struct test_alias
+struct nx::test_alias
 {
     cc::string name;
     cc::vector<alias_fragment> fragments;
     cc::source_location location;
 };
 
-struct test_registry
+struct nx::test_registry
 {
     cc::vector<test_declaration> declarations;
 
@@ -69,6 +75,9 @@ struct test_registry
 
     void add_alias(test_alias alias);
 };
+
+namespace nx
+{
 
 test_registry& get_static_test_registry();
 

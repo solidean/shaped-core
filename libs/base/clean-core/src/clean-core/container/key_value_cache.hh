@@ -14,12 +14,10 @@
 /// A tiered get-or-create cache: key_value_cache over a stack of key_value_provider tiers.
 /// The tier interface is the extension seam for on-disk / networked caches; only an in-memory tier ships today.
 
-namespace cc
-{
 /// One tier of a key_value_cache, fastest first.
 /// Implementations are always called under the owning cache's lock, so they need not be individually thread-safe.
 template <class K, class V>
-struct key_value_provider
+struct cc::key_value_provider
 {
     /// The cached value for key, or nullopt if this tier does not have it.
     [[nodiscard]] virtual cc::optional<V> try_get(K const& key) = 0;
@@ -33,6 +31,9 @@ struct key_value_provider
     virtual ~key_value_provider() = default;
 };
 
+namespace cc
+{
+
 namespace impl
 {
 /// std::unordered_map hasher routed through cc's finalized hashing — lets cc::hash128 and any
@@ -44,13 +45,15 @@ struct cc_key_hash
 };
 } // namespace impl
 
+} // namespace cc
+
 /// In-memory tier backed by std::unordered_map.
 /// Eviction is crude: apply_bookkeeping clears the whole map once it exceeds max_entries.
 /// Subclass for a smarter policy.
 ///
 /// TODO: migrate std::unordered_map -> cc::map.
-template <class K, class V, class Hash = impl::cc_key_hash<K>>
-struct in_memory_key_value_provider final : key_value_provider<K, V>
+template <class K, class V, class Hash>
+struct cc::in_memory_key_value_provider final : key_value_provider<K, V>
 {
     explicit in_memory_key_value_provider(isize max_entries) : _max_entries(max_entries) {}
 
@@ -79,7 +82,7 @@ private:
 /// All operations serialize under an internal cc::mutex.
 /// Keys are hashed through cc's hashing, so cc::hash128 and any cc-hashable key work as-is.
 template <class K, class V>
-struct key_value_cache
+struct cc::key_value_cache
 {
     /// Adds a provider as the last (slowest) tier.
     void add_provider(std::shared_ptr<key_value_provider<K, V>> provider)
@@ -137,4 +140,3 @@ private:
 
     cc::mutex<state> _state;
 };
-} // namespace cc

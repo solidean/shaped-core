@@ -13,6 +13,12 @@
 
 namespace sg::backend::dx12
 {
+struct dx12_query_heap_lease;
+class dx12_query_system;
+} // namespace sg::backend::dx12
+
+namespace sg::backend::dx12
+{
 /// Logical query-heap categories the query system pools.
 /// Only timestamps exist today; occlusion / pipeline-statistics would slot in here and reuse the same lease/resolve/download machinery.
 enum class dx12_query_heap_type : u32
@@ -22,10 +28,12 @@ enum class dx12_query_heap_type : u32
     count
 };
 
+} // namespace sg::backend::dx12
+
 /// One ID3D12QueryHeap leased exclusively by a single command list while recording, returned to the pool after submit/drop.
 /// Slots are bump-allocated via next_slot.
 /// Every gpu_timestamp pointing into this heap shares `shared_future`, which is assigned in place at submit to the heap's readback.
-struct dx12_query_heap_lease
+struct sg::backend::dx12::dx12_query_heap_lease
 {
     ComPtr<ID3D12QueryHeap> heap;
     dx12_query_heap_type type = dx12_query_heap_type::timestamp;
@@ -44,7 +52,7 @@ struct dx12_query_heap_lease
 /// Heaps return to the pool right after.
 ///
 /// All public methods are threadsafe: multiple command lists may lease and release heaps concurrently.
-class dx12_query_system
+class sg::backend::dx12::dx12_query_system
 {
 public:
     /// Slots per query heap, intentionally small: it mirrors the tighter limits of other APIs and bounds each readback chunk.
@@ -87,4 +95,3 @@ private:
     // Heaps here have next_slot == 0 and a fresh invalid shared_future.
     cc::mutex<cc::vector<cc::unique_ptr<dx12_query_heap_lease>>> _free_list_by_type[int(dx12_query_heap_type::count)];
 };
-} // namespace sg::backend::dx12

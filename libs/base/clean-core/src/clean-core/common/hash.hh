@@ -171,11 +171,13 @@ inline constexpr impl::make_hash_fn make_hash = {};
 /// Finalized hash = hash_finalize(make_hash(...)). Use for stand-alone keys and container hashes.
 inline constexpr impl::make_hash_finalized_fn make_hash_finalized = {};
 
+} // namespace cc
+
 /// Default transparent hasher for the node-chaining associative containers (cc::map / cc::set).
 /// Finalizes via make_hash_finalized, so tables can mask low bits directly.
 /// Transparent: K and heterogeneous probe keys hash through the same path, so equal keys of different types (string / string_view) hash equally.
 /// That is the precondition for heterogeneous lookup.
-struct default_hash
+struct cc::default_hash
 {
     template <class T>
     [[nodiscard]] constexpr u64 operator()(T const& v) const
@@ -183,6 +185,9 @@ struct default_hash
         return cc::make_hash_finalized(v);
     }
 };
+
+namespace cc
+{
 
 /// Structural, ORDER-dependent hash of a range — the building block for the sequence containers (vector, array, span, …).
 /// Folds each element's make_hash through combine_hash, and mixes in the element count so different lengths, and the empty range, stay distinct.

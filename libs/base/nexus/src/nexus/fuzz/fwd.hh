@@ -1,6 +1,12 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <nexus/fuzz/fwd.hh>
+
+namespace nx::fuzz
+{
+struct typed_value_index;
+} // namespace nx::fuzz
 
 namespace nx
 {
@@ -36,14 +42,19 @@ enum class value_index : int
     invalid = -1
 };
 
+} // namespace nx::fuzz
+
 /// Addresses one value in the state: which type, and which slot of that type.
-struct typed_value_index
+struct nx::fuzz::typed_value_index
 {
     type_index type = type_index::invalid;
     value_index value = value_index::invalid;
 
     [[nodiscard]] bool is_valid() const { return type != type_index::invalid && value != value_index::invalid; }
 };
+
+namespace nx::fuzz
+{
 
 struct fuzz_operation;
 struct executed_operation;

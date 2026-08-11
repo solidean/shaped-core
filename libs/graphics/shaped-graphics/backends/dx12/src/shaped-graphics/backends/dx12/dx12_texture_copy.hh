@@ -1,8 +1,15 @@
 #pragma once
 
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+
+namespace sg::backend::dx12
+{
+struct dx12_texture_copy_chunk;
+struct dx12_texture_footprint;
+} // namespace sg::backend::dx12
 
 namespace sg::backend::dx12
 {
@@ -10,12 +17,14 @@ namespace sg::backend::dx12
 inline constexpr isize texture_row_pitch_alignment = 256; // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
 inline constexpr isize texture_placement_alignment = 512; // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
 
+} // namespace sg::backend::dx12
+
 /// Everything a texture upload/download job needs to stage one (sub)region through a staging buffer.
 /// That is the resolved region, the D3D12 subresource index, the tightly-packed host layout
 /// (`row_bytes` × `rows` × `depth_slices`), and the padded staging layout.
 /// `padded_pitch` is `row_bytes` rounded up to 256, so the placed footprint is legal.
 /// Rows and heights count in block units for block-compressed formats.
-struct dx12_texture_footprint
+struct sg::backend::dx12::dx12_texture_footprint
 {
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     u32 subresource = 0; // D3D12 subresource index (mip + slice*mips + plane*mips*slices)
@@ -40,7 +49,7 @@ struct dx12_texture_footprint
 /// or a partial run of block-rows within a single slice (`slice_count` == 1).
 /// A copy that fits its window is one chunk; one straddling a ring seam or window edge splits into several — up to four for 3D.
 /// `staging_rows` counts the padded rows it occupies.
-struct dx12_texture_copy_chunk
+struct sg::backend::dx12::dx12_texture_copy_chunk
 {
     int slice_start = 0;
     int slice_count = 1;
@@ -49,6 +58,9 @@ struct dx12_texture_copy_chunk
 
     [[nodiscard]] isize staging_rows() const { return isize(slice_count) * isize(row_count); }
 };
+
+namespace sg::backend::dx12
+{
 
 /// Picks the largest copy chunk that fits `max_staging_rows` staging rows, starting at cursor (`slice`, `row`).
 /// Prefers whole depth slices when the cursor sits on a slice boundary and at least one full slice fits.

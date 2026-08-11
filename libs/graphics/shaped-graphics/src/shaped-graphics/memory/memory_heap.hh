@@ -6,11 +6,9 @@
 
 #include <memory>
 
-namespace sg
-{
 /// Backend memory requirements for placing a resource into a memory_heap, returned by the memory_requirements_for_* queries.
 /// Feed both fields to the external allocator that picks the offset.
-struct memory_requirements
+struct sg::memory_requirements
 {
     /// Required alignment in bytes, a power of two, for the resource's offset within the heap.
     /// The offset passed to acquire_allocation_for_* must be a multiple of it.
@@ -30,7 +28,7 @@ struct memory_requirements
 /// Then pass the allocation_info to the matching create_* call.
 ///
 /// Abstract: a backend subclasses it and owns the GPU allocation.
-class memory_heap : public std::enable_shared_from_this<memory_heap>
+class sg::memory_heap : public std::enable_shared_from_this<memory_heap>
 {
 public:
     virtual ~memory_heap();
@@ -57,4 +55,3 @@ protected:
 
     isize _size_in_bytes = 0;
 };
-} // namespace sg

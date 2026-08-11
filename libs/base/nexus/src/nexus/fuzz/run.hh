@@ -4,6 +4,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/fuzz/executed_operation.hh>
+#include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/regression_dialect.hh>
 
 namespace cc
@@ -15,10 +16,12 @@ namespace nx::fuzz
 {
 struct fuzz_machine;
 
+} // namespace nx::fuzz
+
 /// A recorded fuzz program: the machine it ran against plus the linear list of executed steps.
 /// A run is a value type, cheap to copy, which is what makes minimization (which probes many
 /// derived candidate runs) practical.
-struct fuzz_run
+struct nx::fuzz::fuzz_run
 {
     fuzz_machine const* machine = nullptr;
     cc::vector<executed_operation> operations;
@@ -41,4 +44,3 @@ struct fuzz_run
     /// Renders the run as copy-pasteable C++ regression code using `test_var` as the fuzz_test handle.
     [[nodiscard]] cc::string emit_regression(cc::string_view test_var, regression_dialect const& dialect) const;
 };
-} // namespace nx::fuzz

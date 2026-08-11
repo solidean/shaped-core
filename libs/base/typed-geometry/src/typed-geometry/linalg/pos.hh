@@ -1,13 +1,12 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 #include <initializer_list>
 
-namespace tg
-{
 /// Position / point in D dimensions.
 ///
 /// A pos is a point in space — conceptually a singleton point set, not a free vector.
@@ -28,7 +27,7 @@ namespace tg
 ///     auto const d = q - p;                 // tg::vec3f{3, 4, 0}
 ///     auto const r = p + d;                 // back to q
 template <int D, class T>
-struct pos
+struct tg::pos
 {
     static_assert(D > 0, "pos requires a positive dimension");
 
@@ -164,6 +163,9 @@ public:
         return a;
     }
 };
+
+namespace tg
+{
 
 template <int D, class T>
 inline pos<D, T> const pos<D, T>::zero = pos<D, T>{};

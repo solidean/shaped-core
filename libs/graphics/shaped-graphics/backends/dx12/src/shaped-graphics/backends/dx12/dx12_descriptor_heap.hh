@@ -7,15 +7,13 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
-namespace sg::backend::dx12
-{
 /// A reservation of `count` contiguous descriptors at `offset` in the shader-visible heap, heap-relative.
 /// Move-only, so a range has exactly one owner and its free is easy to follow.
 /// It does NOT free itself.
 /// A persistent range must be handed to dx12_descriptor_heap::free_persistent at the right epoch — its owning binding_group moves it into that epoch's deferred-deletion finalizer.
 /// A transient range is reclaimed collectively by the ring, so its owner just drops it.
 /// `count == 0` is the empty / moved-from state.
-struct dx12_descriptor_alloc
+struct sg::backend::dx12::dx12_descriptor_alloc
 {
     int offset = 0;
     int count = 0;
@@ -58,7 +56,7 @@ struct dx12_descriptor_alloc
 ///     So long-lived groups do not leak the heap.
 ///
 /// A binding_group allocates a contiguous range from the region matching its lifetime; the command list binds it as a root descriptor table.
-struct dx12_descriptor_heap
+struct sg::backend::dx12::dx12_descriptor_heap
 {
     /// Initializes a shader-visible heap of `heap_type` (CBV/SRV/UAV or SAMPLER) with `capacity` descriptors.
     /// The leading `transient_fraction` share (0..1) backs the transient ring, the rest the persistent free list.
@@ -128,4 +126,3 @@ struct dx12_descriptor_heap
     };
     cc::mutex<ring_state> transient_ring;
 };
-} // namespace sg::backend::dx12

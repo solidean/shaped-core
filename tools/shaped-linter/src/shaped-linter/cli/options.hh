@@ -10,9 +10,14 @@
 
 namespace scl
 {
+struct options;
+struct prose_apply_options;
+struct prose_stats_options;
+} // namespace scl
+
 /// Parsed command line for the shaped-linter executable.
 /// See usage_text() for the flags and readme.md for what they mean.
-struct options
+struct scl::options
 {
     /// Source files to lint.
     /// At least one is required, unless --help.
@@ -34,6 +39,9 @@ struct options
     bool help = false;
 };
 
+namespace scl
+{
+
 /// Parse argv (including argv[0], which is ignored).
 /// `--` stops flag parsing; every later argument is a file, even one starting with `-`.
 /// Fails on an unknown `--flag` or, after parsing, on no input files.
@@ -42,8 +50,10 @@ cc::result<options> parse_options(cc::span<char const* const> args);
 /// The --help / usage text.
 cc::string_view usage_text();
 
+} // namespace scl
+
 /// Parsed command line for `shaped-linter prose apply`.
-struct prose_apply_options
+struct scl::prose_apply_options
 {
     /// The plan file to read.
     cc::string plan_path;
@@ -61,6 +71,9 @@ struct prose_apply_options
     bool help = false;
 };
 
+namespace scl
+{
+
 /// Parse the arguments AFTER the `prose apply` verb — `args` holds nothing to skip.
 /// Fails on an unknown flag, a missing plan path, or more than one.
 cc::result<prose_apply_options> parse_prose_apply_options(cc::span<char const* const> args);
@@ -68,8 +81,10 @@ cc::result<prose_apply_options> parse_prose_apply_options(cc::span<char const* c
 /// The `prose apply` usage text.
 cc::string_view prose_apply_usage_text();
 
+} // namespace scl
+
 /// Parsed command line for `shaped-linter prose stats`.
-struct prose_stats_options
+struct scl::prose_stats_options
 {
     /// Files to measure.
     /// At least one is required (unless --help).
@@ -81,6 +96,9 @@ struct prose_stats_options
     /// -h / --help: main prints usage and exits 0.
     bool help = false;
 };
+
+namespace scl
+{
 
 /// Parse the arguments AFTER the `prose stats` verb — `args` holds nothing to skip.
 /// Fails on an unknown flag or on no input files.

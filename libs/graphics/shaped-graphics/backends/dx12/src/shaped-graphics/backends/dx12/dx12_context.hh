@@ -21,16 +21,15 @@
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
 #include <memory>
 
-namespace sg::backend::dx12
-{
 /// Creation config for the dx12 context.
 /// The flags are independent.
-struct dx12_config
+struct sg::backend::dx12::dx12_config
 {
     /// Enable the D3D12 debug/validation layer.
     /// Best-effort: skipped when it isn't installed.
@@ -77,7 +76,7 @@ struct dx12_config
 
 /// DirectX 12 implementation of sg::context.
 /// The sg::context virtuals are thin forwarders to the backend-typed create_dx12_* methods — prefer those when you hold a dx12_context.
-class dx12_context final : public sg::context
+class sg::backend::dx12::dx12_context final : public sg::context
 {
     // dx12 consumes DXIL only.
     static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::dxil};
@@ -424,7 +423,6 @@ public:
     std::unique_ptr<dx12_cpu_descriptor_heap> _rtv_heap;
     std::unique_ptr<dx12_cpu_descriptor_heap> _dsv_heap;
 };
-} // namespace sg::backend::dx12
 
 namespace sg
 {

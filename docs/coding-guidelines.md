@@ -207,7 +207,9 @@ auto const p = tg::pos3f(x, y, z);    // prefer
   struct cc::string { ... };
   void cc::to_string(...) { ... }
   ```
-  This works when the declaration already exists.
+  This works when the declaration already exists — which is what the `fwd.hh` above is for.
+  shaped-linter's `qualified-record-definition` enforces it for a class or struct **definition** in a header;
+  a forward declaration, `impl` and `custom` are all exempt, and functions are left to judgement.
 - Use `impl` nested namespaces for implementation details that must be visible (e.g., due to inlining requirements):
   ```cpp
   namespace cc::impl

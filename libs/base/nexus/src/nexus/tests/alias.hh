@@ -6,6 +6,7 @@
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/invoke_tests.hh> // nx::impl::signatures_equal
 #include <nexus/tests/registry.hh>
 
@@ -13,9 +14,12 @@
 
 namespace nx
 {
+struct setup;
+} // namespace nx
+
 // Handle passed to an NX_TEST_SETUP body: it reads the registry and defines aliases against it.
 // Aliases land on the wrapped registry — the static one for a real run, a local one in meta-tests.
-struct setup
+struct nx::setup
 {
     explicit setup(test_registry& registry) : _registry(&registry) {}
 
@@ -47,6 +51,9 @@ struct setup
 private:
     test_registry* _registry;
 };
+
+namespace nx
+{
 
 namespace impl
 {

@@ -6,11 +6,13 @@
 target_sources(shaped-linter-core PRIVATE
     default-init-assignment/default_init_assignment.cc
     qualified-primitive/qualified_primitive.cc
+    qualified-record-definition/qualified_record_definition.cc
 )
 
 if(SC_BUILD_TESTS)
     target_sources(shaped-linter-test PRIVATE
         default-init-assignment/default_init_assignment-test.cc
         qualified-primitive/qualified_primitive-test.cc
+        qualified-record-definition/qualified_record_definition-test.cc
     )
 endif()

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/fwd.hh>
+
 // =========================================================================================================
 // Locale-independent character predicates on 'char'.
 //
@@ -169,11 +171,13 @@ namespace cc
 // Predicate functors
 // =========================================================================================================
 
+} // namespace cc
+
 /// Functor for case-sensitive character equality comparison
 /// Usage:
 ///   cc::equal_case_sensitive{}('a', 'a')  // true
 ///   cc::equal_case_sensitive{}('a', 'A')  // false
-struct equal_case_sensitive
+struct cc::equal_case_sensitive
 {
     [[nodiscard]] constexpr bool operator()(char a, char b) const { return a == b; }
 };
@@ -184,7 +188,7 @@ struct equal_case_sensitive
 /// Usage:
 ///   cc::equal_case_insensitive{}('a', 'A')  // true
 ///   cc::equal_case_insensitive{}('a', 'b')  // false
-struct equal_case_insensitive
+struct cc::equal_case_insensitive
 {
     [[nodiscard]] constexpr bool operator()(char a, char b) const { return to_lower(a) == to_lower(b); }
 };
@@ -198,7 +202,7 @@ struct equal_case_insensitive
 ///   cc::compare_ascii_case_sensitive{}('a', 'b')  // < 0
 ///   cc::compare_ascii_case_sensitive{}('b', 'a')  // > 0
 ///   cc::compare_ascii_case_sensitive{}('a', 'a')  // 0
-struct compare_ascii_case_sensitive
+struct cc::compare_ascii_case_sensitive
 {
     [[nodiscard]] constexpr int operator()(char a, char b) const { return int(a) - int(b); }
 };
@@ -214,9 +218,7 @@ struct compare_ascii_case_sensitive
 ///   cc::compare_ascii_case_insensitive{}('A', 'a')  // 0
 ///   cc::compare_ascii_case_insensitive{}('a', 'B')  // < 0
 ///   cc::compare_ascii_case_insensitive{}('B', 'a')  // > 0
-struct compare_ascii_case_insensitive
+struct cc::compare_ascii_case_insensitive
 {
     [[nodiscard]] constexpr int operator()(char a, char b) const { return int(to_lower(a)) - int(to_lower(b)); }
 };
-
-} // namespace cc

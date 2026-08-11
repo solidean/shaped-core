@@ -1,5 +1,12 @@
 #pragma once
 
+#include <nexus/fwd.hh>
+
+namespace nx::config
+{
+struct cfg;
+} // namespace nx::config
+
 namespace nx::config
 {
 // Which selection bucket a test belongs to; a test lives in exactly one.
@@ -13,12 +20,17 @@ enum class test_bucket
     guide_benchmark,
 };
 
-struct cfg
+} // namespace nx::config
+
+struct nx::config::cfg
 {
     bool enabled = true;
     test_bucket bucket = test_bucket::normal;
     int seed = 0;
 };
+
+namespace nx::config
+{
 
 // Orthogonal to buckets: a disabled test is skipped by a sweep of any bucket.
 // It runs only when named exactly, or under a bulk "run disabled too" request.

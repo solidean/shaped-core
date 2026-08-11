@@ -13,6 +13,11 @@
 
 namespace sr
 {
+struct display_info;
+} // namespace sr
+
+namespace sr
+{
 /// The shape the mouse pointer is drawn as.
 ///
 /// One cursor is showing at a time for the whole process, so this is set on the window_system rather than on a window — see window_system::set_cursor.
@@ -35,9 +40,11 @@ enum class cursor_shape : u8
     resize_nwse, ///< over the bottom-right or top-left corner
 };
 
+} // namespace sr
+
 /// How a window is created.
 /// Defaults describe a resizable, visible 1280x720 window.
-struct window_description
+struct sr::window_description
 {
     /// Caption shown in the title bar and the task switcher.
     /// Copied at creation; set_title changes it later.
@@ -84,7 +91,7 @@ struct window_description
 ///
 ///     auto const win = wsys->create_window({.title = "viewer", .width = 1600, .height = 900});
 ///     auto const sc = ctx->create_swapchain({.native_window_handle = win->native_window_handle()});
-class window
+class sr::window
 {
 public:
     ~window();
@@ -200,7 +207,7 @@ private:
 ///
 /// All coordinates are in the same desktop space as window::position, so a window is on the display whose bounds contain it.
 /// A multi-monitor desktop puts origins wherever the user arranged them, which is why a coordinate here may be negative.
-struct display_info
+struct sr::display_info
 {
     /// The display's full rectangle.
     tg::pos2i position;
@@ -216,7 +223,7 @@ struct display_info
 };
 
 /// How a window_system is created.
-struct window_system_description
+struct sr::window_system_description
 {
     /// Run without a display: windows are created and tracked as usual but never appear.
     /// Their native handles stay null, so nothing can present.
@@ -244,7 +251,7 @@ struct window_system_description
 ///         wsys->poll_events();
 ///         // ... render and present ...
 ///     }
-class window_system
+class sr::window_system
 {
 public:
     /// Brings the window subsystem up, or fails with the reason.
@@ -365,4 +372,3 @@ private:
     bool _is_headless = false;
     bool _is_quit_requested = false;
 };
-} // namespace sr

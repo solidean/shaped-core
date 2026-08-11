@@ -3,12 +3,11 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move, cc::offset_size
 #include <clean-core/error/optional.hh> // cc::optional (try_reinterpret_as)
+#include <shaped-graphics/fwd.hh>       // std::is_same_v (view factories are pinned to the buffer's own element type)
 #include <shaped-graphics/resource/raw_buffer.hh>
 
-#include <type_traits> // std::is_same_v (view factories are pinned to the buffer's own element type)
+#include <type_traits>
 
-namespace sg
-{
 /// A strongly-typed view onto a raw_buffer whose element type is fixed at compile time by `T` — think a GPU-side `span<T>`.
 /// The view factories (`as_readonly_buffer()`, `as_uniform_buffer()`, …) drop the element-type argument the raw API needs and infer it from `T`.
 /// Each is `requires`-gated, so a nonsensical one — a uniform block of `byte`, a storage view of a non-DWORD type — is a compile error.
@@ -19,7 +18,7 @@ namespace sg
 /// `T` must be trivially copyable, since a buffer is raw GPU bytes, but is otherwise open — a vertex struct, an index type, a uniform block, `byte`, ….
 /// Each view factory imposes its own further constraint, and every element count or range is in units of `T`.
 template <class T>
-class buffer
+class sg::buffer
 {
     static_assert(std::is_trivially_copyable_v<T>,
                   "buffer<T>: the element type must be trivially copyable (raw GPU bytes)");
@@ -335,6 +334,9 @@ private:
 
     raw_buffer_handle _raw = nullptr;
 };
+
+namespace sg
+{
 
 // raw_buffer -> buffer<T>, declared on raw_buffer and defined here where `buffer<T>` is complete.
 // Thin wrappers over from_raw / try_from_raw, so a handle re-types with `raw->as_buffer<T>()` instead of naming `buffer<T>`.

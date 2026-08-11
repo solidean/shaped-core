@@ -12,6 +12,10 @@ using namespace cc::primitive_defines;
 // Scalar-like types
 //
 
+/// What tg knows about a scalar type — its zero, one, epsilon and whether it is exact (see scalar/traits.hh).
+template <class T>
+struct scalar_traits;
+
 /// a scalar angle (storage is radians); a unit-checked newtype over T.
 template <class T>
 struct angle;

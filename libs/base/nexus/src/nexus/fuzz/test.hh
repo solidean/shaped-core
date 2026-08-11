@@ -6,14 +6,14 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/machine.hh>
 #include <nexus/fuzz/operation.hh>
 #include <nexus/fuzz/regression_dialect.hh>
 #include <nexus/fuzz/run.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/typed_value.hh>
 
-namespace nx::fuzz
-{
 /// The public façade for an API-sequence fuzz test.
 ///
 /// Declare a bag of operations, seed values and invariants, then call execute_fuzz_test().
@@ -21,7 +21,7 @@ namespace nx::fuzz
 /// The same object also evaluates operations directly (eval_op...), which is what the emitted regression code calls to replay a failing program.
 ///
 /// libs/base/nexus/docs/fuzz-testing.md is the full mechanism, including the shared-state trap.
-struct test
+struct nx::fuzz::test
 {
     struct fuzz_result
     {
@@ -112,4 +112,3 @@ private:
     bool _setup_ok = false;
     regression_dialect _dialect;
 };
-} // namespace nx::fuzz

@@ -11,12 +11,11 @@
 #include <instruction-tracer/debug/module_registry.hh>
 #include <instruction-tracer/debug/symbol_session.hh>
 #include <instruction-tracer/debug/trace_session.hh>
+#include <instruction-tracer/fwd.hh>
 
-namespace itrace
-{
 /// What one debug_session run needs: the process to launch, where to break, and how much to record.
 /// Its fields mirror the like-named ones on `options`, which is where they are documented.
-struct debug_config
+struct itrace::debug_config
 {
     cc::string exe;
     cc::vector<cc::string> args;
@@ -32,7 +31,7 @@ struct debug_config
 ///
 /// One invocation per instance; run() drives the debuggee to completion (or kills it once the last
 /// trace lands) and hands back what it recorded.
-class debug_session
+class itrace::debug_session
 {
 public:
     explicit debug_session(debug_config config);
@@ -108,4 +107,3 @@ private:
     /// Non-owning and valid only for the duration of run() — never give it a temporary.
     cc::function_ref<void(trace&, symbol_session const&)> _on_trace;
 };
-} // namespace itrace

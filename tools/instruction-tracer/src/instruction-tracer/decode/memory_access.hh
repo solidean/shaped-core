@@ -4,17 +4,24 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string_view.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
 namespace itrace
 {
+struct mem_operand;
+} // namespace itrace
+
 /// One memory operand of an instruction, resolved to a runtime effective address but not yet classified into a region or symbolized.
-struct mem_operand
+struct itrace::mem_operand
 {
     u64 address = 0;
     u16 size = 0; // bytes
     bool is_read = false;
     bool is_write = false;
 };
+
+namespace itrace
+{
 
 /// Resolve every memory operand of one instruction to an effective address, from the register snapshot sampled before it ran.
 /// That is base + index*scale + disp, plus rip-relative.

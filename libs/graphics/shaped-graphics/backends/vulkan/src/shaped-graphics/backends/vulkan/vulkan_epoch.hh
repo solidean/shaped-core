@@ -3,19 +3,27 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
+#include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/fwd.hh>
+
+namespace sg::backend::vulkan
+{
+struct vulkan_command_pool;
+struct vulkan_command_pool_set;
+struct vulkan_epoch_data;
+struct vulkan_epoch_state;
+struct vulkan_expiring_resource;
+} // namespace sg::backend::vulkan
 
 // Per-epoch bookkeeping for the vulkan backend's epoch system.
 // The epoch *concept* lives in sg:: — fwd.hh plus the sg::context contract — and this is vulkan's concrete realization on a pair of timeline semaphores.
 // See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
-namespace sg::backend::vulkan
-{
 /// A command pool and the single command buffer allocated from it.
 /// Recycled as a unit: resetting the pool recycles its buffer.
 /// Idle pools live in the pool set; in-flight ones ride along in the owning epoch until it retires.
-struct vulkan_command_pool
+struct sg::backend::vulkan::vulkan_command_pool
 {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer buffer = VK_NULL_HANDLE; // owned by the pool; reset with it, not freed separately
@@ -23,7 +31,7 @@ struct vulkan_command_pool
 
 /// A GPU resource captured for deferred deletion.
 /// Its handles and backing memory are freed, and its finalizers run, only once the owning epoch has retired — i.e. the GPU is no longer using it.
-struct vulkan_expiring_resource
+struct sg::backend::vulkan::vulkan_expiring_resource
 {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkImage image = VK_NULL_HANDLE;
@@ -33,7 +41,7 @@ struct vulkan_expiring_resource
 
 /// Everything one epoch owns and must reclaim once its GPU work finishes.
 /// Built at advance, drained at retire.
-struct vulkan_epoch_data
+struct sg::backend::vulkan::vulkan_epoch_data
 {
     epoch epoch_id = epoch::invalid;
     cc::vector<vulkan_command_pool> command_pools; // reset + returned to the pool set on retire
@@ -45,7 +53,7 @@ struct vulkan_epoch_data
 /// Guarded by a mutex because create / submit / drop are thread-safe.
 ///
 /// TODO: promote to a standalone object owning its own synchronization, with pools per queue once the epoch system grows multiple queues.
-struct vulkan_command_pool_set
+struct sg::backend::vulkan::vulkan_command_pool_set
 {
     cc::vector<vulkan_command_pool> in_epoch; // captured by submitted lists this epoch
     cc::vector<vulkan_command_pool> free;     // idle, ready for reuse (reset on reuse)
@@ -53,11 +61,14 @@ struct vulkan_command_pool_set
 
 /// The mutex-guarded epoch state: the in-flight FIFO plus the deferred-deletion staging area.
 /// Guarded because a resource's refcount can hit zero — staging a deletion — on any thread, while advance and retire run externally synchronized.
-struct vulkan_epoch_state
+struct sg::backend::vulkan::vulkan_epoch_state
 {
     cc::vector<vulkan_epoch_data> in_flight;     // FIFO, oldest at the front
     cc::vector<vulkan_expiring_resource> staged; // refcount-zero resources awaiting the next advance
 };
+
+namespace sg::backend::vulkan
+{
 
 /// Reclaims one expiring resource in the required order.
 /// Free the GPU handles *first*, releasing GPU memory, then move its finalizers into `out_finalizers` to run once the caller has left any lock.

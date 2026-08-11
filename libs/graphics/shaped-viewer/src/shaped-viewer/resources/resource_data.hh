@@ -18,10 +18,8 @@
 // `create` takes an existing pin or any contiguous range, and leaves the strategy to cc::make_pinned_data.
 // A pin is shared as is, an owning rvalue is moved in; only a borrow or an lvalue is deep-copied.
 
-namespace sv
-{
 /// Geometry as a non-indexed triangle list: 3 consecutive positions per triangle, count a multiple of 3.
-struct triangle_data
+struct sv::triangle_data
 {
     cc::pinned_data<tg::pos3f const> positions;
     cc::hash128 hash;
@@ -41,7 +39,7 @@ struct triangle_data
 ///
 /// Triangle order — and with it `PrimitiveIndex()`, which is what a material set is indexed by — follows the
 /// index buffer, not the position buffer.
-struct indexed_triangle_data
+struct sv::indexed_triangle_data
 {
     cc::pinned_data<tg::pos3f const> positions;
     cc::pinned_data<u32 const> indices;
@@ -64,7 +62,7 @@ struct indexed_triangle_data
 
 /// One PBR material per triangle, indexed by `PrimitiveIndex()` in the closest-hit — so the count must match
 /// the triangle count of the mesh it is drawn with.
-struct material_data
+struct sv::material_data
 {
     cc::pinned_data<pbr_material const> materials;
     cc::hash128 hash;
@@ -78,4 +76,3 @@ struct material_data
         return {.materials = cc::move(pinned), .hash = hash};
     }
 };
-} // namespace sv

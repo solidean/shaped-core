@@ -7,6 +7,11 @@
 #include <clean-core/string/string.hh>
 #include <nexus/bench/fwd.hh>
 
+namespace nx::bench
+{
+struct hw_measure_config;
+} // namespace nx::bench
+
 // Hardware performance counters, miniperf-style.
 //
 // measure_hw_counters(body) invokes `body` once with the requested counters running, and returns the deltas.
@@ -20,10 +25,8 @@
 //
 // docs/guides/profiling.md has the per-platform availability rules and the one-time non-admin grant Windows needs.
 
-namespace nx::bench
-{
 /// A counter this machine can measure right now, with its native name and our best-effort description.
-struct hw_counter_info
+struct nx::bench::hw_counter_info
 {
     hw_counter id;
     cc::string name;        ///< native/platform name (may be cryptic, e.g. "BranchMispredictions")
@@ -32,7 +35,7 @@ struct hw_counter_info
 };
 
 /// One counter value measured across a single run.
-struct hw_counter_sample
+struct nx::bench::hw_counter_sample
 {
     hw_counter id;
     cc::string name;
@@ -41,13 +44,16 @@ struct hw_counter_sample
 };
 
 /// The result of one measure_hw_counters() call: one sample per requested counter, in request order.
-struct hw_measurement
+struct nx::bench::hw_measurement
 {
     cc::vector<hw_counter_sample> samples;
 
     /// The measured value for `c`, or nullopt if it was not requested or came back invalid.
     [[nodiscard]] cc::optional<u64> value_of(hw_counter c) const;
 };
+
+namespace nx::bench
+{
 
 /// The hardware counters this machine reports as measurable right now, in a stable order.
 ///
@@ -62,8 +68,10 @@ struct hw_measurement
 /// Print the available counters and their descriptions to stdout (human-readable, for quick discovery).
 void print_hw_counters();
 
+} // namespace nx::bench
+
 /// Options for measure_hw_counters().
-struct hw_measure_config
+struct nx::bench::hw_measure_config
 {
     /// Which counters to measure; absent (nullopt) means default_hw_counter_set().
     /// Order matters when the requested set exceeds the hardware's simultaneous-counter budget, but how is per-backend.
@@ -80,6 +88,9 @@ struct hw_measure_config
     /// No effect when the requested counters already fit in one pass.
     bool measure_all = false;
 };
+
+namespace nx::bench
+{
 
 /// Measure counters across invocation(s) of `body`.
 /// With the default config `body` runs exactly once, and counters that do not fit the hardware budget come back invalid.

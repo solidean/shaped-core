@@ -10,11 +10,9 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh> // sg::view_class
 
-namespace sg::backend::dx12
-{
 /// A bound buffer paired with the access class it is used as — the backend-typed input to the dispatch
 /// hazard declares (see dx12_command_list::compute_dispatch).
-struct dx12_hazard_view
+struct sg::backend::dx12::dx12_hazard_view
 {
     dx12_buffer_handle buffer;
     sg::view_class access;
@@ -22,7 +20,7 @@ struct dx12_hazard_view
 
 /// A bound texture paired with the subresource range + access class it is used as — the texture analogue
 /// of dx12_hazard_view, declared for layout-transition barriers at dispatch.
-struct dx12_texture_hazard_view
+struct sg::backend::dx12::dx12_texture_hazard_view
 {
     dx12_texture_handle texture;
     sg::subresource_range range;
@@ -35,7 +33,7 @@ struct dx12_texture_hazard_view
 /// The descriptor range comes from the heap region matching `scope`.
 /// A persistent group's table is allocated from the free list and returned to it, epoch-deferred, when the group is released.
 /// A transient group's is ring-allocated and reclaimed collectively when its epoch retires.
-class dx12_binding_group final : public sg::binding_group
+class sg::backend::dx12::dx12_binding_group final : public sg::binding_group
 {
 public:
     [[nodiscard]] static cc::result<dx12_binding_group_handle> create(dx12_context& ctx,
@@ -66,4 +64,3 @@ public:
     sg::epoch creation_epoch = sg::epoch::invalid;
     bool transient = false;
 };
-} // namespace sg::backend::dx12

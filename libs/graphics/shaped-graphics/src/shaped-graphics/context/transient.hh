@@ -8,8 +8,6 @@
 #include <shaped-graphics/resource/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
 #include <shaped-graphics/types.hh>
 
-namespace sg
-{
 /// Resource factory for a context's *transient* lifetime scope, reached as `ctx.transient`.
 /// Transient resources are tied to the current epoch and recycled when it retires (see lifetime_scope) — per-frame scratch that never needs to outlive the work that produced it.
 /// Using one past its epoch is a hard error.
@@ -19,7 +17,7 @@ namespace sg
 /// Requests larger than the budget fall back to a dedicated (committed) allocation.
 ///
 /// Every create comes in a `try_create_*` fallible core and a throwing `create_*` default, as on context_persistent_scope — the pattern in docs/error-handling.md.
-class context_transient_scope
+class sg::context_transient_scope
 {
     // buffers
 public:
@@ -214,4 +212,3 @@ private:
     };
     cc::mutex<bump_state> _bump;
 };
-} // namespace sg

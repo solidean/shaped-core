@@ -6,8 +6,6 @@
 
 #include <memory>
 
-namespace sg
-{
 /// Result of a `cmd.query.record_gpu_timestamp()` — a pending read of one GPU timestamp.
 /// A small, copyable value type, the query analogue of bytes_future.
 ///
@@ -18,7 +16,7 @@ namespace sg
 ///
 /// is_valid() reflects whether the backend supports timestamps, so a default-constructed timestamp and every timestamp from a backend without support is invalid.
 /// It says nothing about whether the read has completed — that is is_ready().
-class gpu_timestamp
+class sg::gpu_timestamp
 {
     // ctx.wait_for_ticks/seconds block on the shared future and read this timestamp — kept off the public API.
     friend class context;
@@ -63,4 +61,3 @@ private:
     /// Multiplier from raw GPU ticks to seconds (1 / timestamp frequency).
     double _tick_to_seconds = 0.0;
 };
-} // namespace sg

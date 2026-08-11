@@ -12,11 +12,9 @@
 #include <shaped-graphics/raster/vertex_input.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
-namespace sg
-{
 /// The PSO-side state of one color target: the format the pipeline is compiled for, its optional blend equation, and which channels it writes.
 /// The command-side counterpart is `color_target`, the actual bound view plus clear/discard — the two must agree on format and order at draw time.
-struct color_target_state
+struct sg::color_target_state
 {
     pixel_format format = pixel_format::undefined;
     cc::optional<blend_state> blend = {}; ///< unset => the source overwrites the target (no blend)
@@ -29,7 +27,7 @@ struct color_target_state
 /// The color-target formats and sample count live here, not only in the rendering scope, because backends bake them into the PSO.
 /// That is dx12 RTVFormats / DSVFormat, and vulkan's dynamic-rendering formats.
 /// A rendering scope's bound targets must match `color_targets` in count and format, and `depth_stencil_format`.
-struct raster_pipeline_description
+struct sg::raster_pipeline_description
 {
     pipeline_layout_handle layout;
 
@@ -77,7 +75,7 @@ struct raster_pipeline_description
 ///
 /// Abstract: a backend subclasses it and owns the native object (dx12 pipeline state + root signature,
 /// vulkan VkPipeline + VkPipelineLayout).
-class raster_pipeline
+class sg::raster_pipeline
 {
 public:
     virtual ~raster_pipeline();
@@ -89,4 +87,3 @@ public:
 protected:
     raster_pipeline() = default;
 };
-} // namespace sg

@@ -17,9 +17,12 @@
 
 namespace slib
 {
+struct reload_config;
+} // namespace slib
+
 /// How the reload watcher runs.
 /// See shader_library::start_hot_reload.
-struct reload_config
+struct slib::reload_config
 {
     /// How long between rescans while polling.
     /// Ignored where the filesystem can notify: there is no interval then, the change itself is the trigger.
@@ -52,7 +55,7 @@ struct reload_config
 /// Threading: the asset list is fixed once start_hot_reload has run — add_package asserts that.
 /// acquire() is then safe from any thread.
 /// The library must still outlive every acquire in flight: the weak reference reports a library that is already gone, not one being torn down under a live call.
-class shader_library
+class slib::shader_library
 {
 public:
     shader_library();
@@ -172,6 +175,9 @@ private:
     std::shared_ptr<cc::atomic<bool>> _watcher_stopping;
     std::shared_ptr<impl::reload_wake> _wake;
 };
+
+namespace slib
+{
 
 /// The process-global shader-reload counter: it moves whenever any shader is reloaded, anywhere.
 /// There is only ever one live shader_library, so a single global counter is enough.

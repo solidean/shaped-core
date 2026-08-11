@@ -32,10 +32,12 @@ enum class async_error_kind : u8
     cancelled,
 };
 
+} // namespace cc
+
 /// Value carried on an async's failure channel: either a wrapped cc::any_error or a cancellation.
 /// Move-only, following cc::any_error.
 /// A default-constructed async_error is an empty placeholder for the "no failure yet" slot inside a node — only read it once the node reports has_error().
-struct async_error
+struct cc::async_error
 {
     async_error() = default;
 
@@ -69,6 +71,9 @@ private:
     async_error_kind _kind = async_error_kind::error;
     cc::any_error _error;
 };
+
+namespace cc
+{
 
 // ============================================================================
 // result of a single compute step
@@ -121,6 +126,8 @@ using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
 // scheduler seam
 // ============================================================================
 
+} // namespace cc
+
 /// Where runnable nodes go.
 /// The async machinery only ever asks a scheduler to make a node runnable — it never owns execution and never blocks.
 /// A worker binds a scheduler to its thread with async_worker_scope; nodes reach it via async_scheduler::current().
@@ -128,7 +135,7 @@ using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
 ///
 /// A queued node is passed as a shared handle, so the scheduler co-owns it while it waits.
 /// A node therefore cannot be destroyed while runnable, which is what makes a required dependency freely schedulable and steal-safe.
-struct async_scheduler
+struct cc::async_scheduler
 {
     /// True if a node enqueued here may be picked up by ANOTHER thread.
     /// Fixed at construction, so the poll loop reads it as a plain field rather than paying a virtual call per step.
@@ -163,7 +170,7 @@ public:
 
 /// RAII begin/end of an async worker scope: binds `scheduler` to the calling thread for its lifetime, so node scheduling and polling on this thread route through it.
 /// Nesting restores the previous binding.
-struct async_worker_scope
+struct cc::async_worker_scope
 {
     /// Binds `scheduler` to the calling thread.
     explicit async_worker_scope(async_scheduler& scheduler);
@@ -183,7 +190,7 @@ private:
 ///
 /// Single-threaded by construction, not by circumstance — it has no peers, so it never publishes work.
 /// Progress happens only while this thread is inside blocking_get / run_one / run_until, which is why a graph parked on a manual node needs the pump called again after the external push.
-struct singlethreaded_scheduler final : async_scheduler
+struct cc::singlethreaded_scheduler final : async_scheduler
 {
     singlethreaded_scheduler() : async_scheduler(false) {}
 
@@ -217,6 +224,9 @@ struct singlethreaded_scheduler final : async_scheduler
 private:
     cc::vector<async_node_ptr> _queue;
 };
+
+namespace cc
+{
 
 namespace impl
 {
@@ -496,13 +506,15 @@ enum class async_node_state : u8
     // is-error is encoded in the state itself (ready_value vs ready_error), not as a separate flag.
 };
 
+} // namespace cc
+
 /// Type-erased per-async<T, E, F> operations, reached from the untemplated base — the hand-rolled replacement for a C++ vtable.
 /// One static-constexpr instance per distinct op set, keyed so it collapses across types; the node points at it from construction, and again once a frame picks F.
 /// It recovers what a base-typed pointer cannot: how to destroy the typed value or error, and how to run and destroy the inline frame.
 /// It also carries the size class, which the intrusive free path needs long after the concrete type is erased.
 ///
 /// alignas(32) is load-bearing: the node packs the 5 low bits of this pointer with the lifecycle state + wake + lock, so every instance must be 32-aligned to keep those bits free.
-struct alignas(32) async_type_ops
+struct alignas(32) cc::async_type_ops
 {
     void (*teardown_value)(async_node_base*); // destroy the resolved value in the payload (ready_value)
     void (*teardown_error)(async_node_base*); // destroy the resolved error in the payload (ready_error)
@@ -515,6 +527,9 @@ struct alignas(32) async_type_ops
 
     cc::node_class_index class_index; // concrete async<T, E> size class (free_storage frees by it)
 };
+
+namespace cc
+{
 static_assert(alignof(async_type_ops) >= 32, "async_type_ops must be 32-aligned so its low 5 bits are free for tags");
 
 namespace impl
@@ -525,6 +540,8 @@ namespace impl
 template <class U>
 void async_typed_teardown(async_node_base* n);
 } // namespace impl
+
+} // namespace cc
 
 /// Shared, T/E-agnostic node machinery: the atomic state, the not-ready dependency set, the continuation list of dependents to wake, and the type-erased compute frame.
 /// The typed value AND the typed error live in the derived typed node (async.hh), sharing payload offset 0 by state.
@@ -539,7 +556,7 @@ void async_typed_teardown(async_node_base* n);
 /// A node MUST be created via make_async_*: a stack node is unsupported, because from_alive would corrupt a never-initialized count.
 ///
 /// alignas(64) lives on the derived typed node, not here — forcing it on this base alone would round its own size up to 64 and push the typed value and frame onto a second line.
-struct async_node_base
+struct cc::async_node_base
 {
     // queries
 public:
@@ -897,6 +914,9 @@ private:
     // No further members: this is a 16 B header.
     // The payload — unresolved scratch ⊍ resolved value/error, including the compute frame — is raw storage declared by the derived async_typed_node<T> at offset 16, via payload().
 };
+
+namespace cc
+{
 static_assert(sizeof(async_node_base) == 16, "async_node_base must be a 16 B header (payload() offset relies on it)");
 
 // ============================================================================

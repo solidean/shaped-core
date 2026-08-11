@@ -51,10 +51,12 @@ enum class compare_op
     always,
 };
 
+} // namespace sg
+
 /// An immutable sampler state.
 /// Defaults are a trilinear repeating sampler with no anisotropy and no depth comparison — the common case.
 /// A value type: cheap to copy and compare.
-struct sampler
+struct sg::sampler
 {
     /// Sentinel `max_lod` meaning "no upper mip clamp" (FLT_MAX).
     static constexpr float lod_max = 3.4028235e38f;
@@ -80,4 +82,3 @@ struct sampler
 
     [[nodiscard]] bool operator==(sampler const&) const = default;
 };
-} // namespace sg

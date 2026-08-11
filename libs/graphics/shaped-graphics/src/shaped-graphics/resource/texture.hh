@@ -3,19 +3,24 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move, cc::start_end
 #include <clean-core/error/optional.hh> // cc::optional (try_from_raw)
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture_traits.hh> // texture_traits<…> + the view-factory parameter bags
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg
 {
+template <class Traits>
+class texture;
+} // namespace sg
+
 /// A strongly-typed view onto a raw_texture whose shape is fixed at compile time by `Traits`, a `texture_traits`.
 /// Shape-specific accessors are gated by `requires`, so `depth()` exists only on 3D textures and misuse is a compile error.
 /// `raw()` reaches the underlying resource for the general API.
 /// A value type, so copying is a cheap handle copy.
 /// Prefer the typedefs — `texture_2d`, `texture_cube_array`, … — over spelling `Traits` out.
 template <class Traits>
-class texture
+class sg::texture
 {
 public:
     // Compile-time shape, mirrored from Traits for convenient introspection.
@@ -388,6 +393,9 @@ private:
 
     raw_texture_handle _raw = nullptr;
 };
+
+namespace sg
+{
 
 // Shape typedefs — the ergonomic names.
 // Anything not spelled out is defaulted: non-array, non-cube, single-sampled.

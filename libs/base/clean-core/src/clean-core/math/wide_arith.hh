@@ -19,10 +19,8 @@
 #include <intrin.h>
 #endif
 
-namespace cc
-{
 /// Low and high 64-bit halves of an unsigned 128-bit value (hi is the more significant half).
-struct u128
+struct cc::u128
 {
     u64 lo = 0;
     u64 hi = 0;
@@ -32,7 +30,7 @@ struct u128
 
 /// Low and high halves of a signed 128-bit value.
 /// lo is the raw low bit pattern; hi carries the sign.
-struct i128
+struct cc::i128
 {
     u64 lo = 0;
     i64 hi = 0;
@@ -41,7 +39,7 @@ struct i128
 };
 
 /// A 64-bit sum paired with its carry-out (0 or 1). See add_with_carry.
-struct carrying_add_result
+struct cc::carrying_add_result
 {
     u64 value = 0;
     u64 carry = 0;
@@ -50,13 +48,16 @@ struct carrying_add_result
 };
 
 /// A 64-bit difference paired with its borrow-out (0 or 1). See sub_with_borrow.
-struct borrowing_sub_result
+struct cc::borrowing_sub_result
 {
     u64 value = 0;
     u64 borrow = 0;
 
     [[nodiscard]] friend constexpr bool operator==(borrowing_sub_result const&, borrowing_sub_result const&) = default;
 };
+
+namespace cc
+{
 
 // Plain-u64 fallbacks, only instantiated on MSVC: its consteval path, and the ARM64 add/sub path that has no carry intrinsic.
 // The clang/gcc __int128 backend never references them.

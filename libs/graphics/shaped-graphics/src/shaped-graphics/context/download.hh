@@ -9,8 +9,6 @@
 
 #include <type_traits>
 
-namespace sg
-{
 /// Async device→host download facade for a context, reached as `ctx.download`.
 ///
 /// The context-level mirror of the inline `cmd.download`, which records the readback inline in a command list, its future delivered once that list runs.
@@ -21,7 +19,7 @@ namespace sg
 /// Block on it with ctx.wait_for.
 /// No manual synchronization: the read waits on the last command list that wrote the buffer, and a later command list that writes the buffer waits on the read.
 /// Dropping the future cancels the copy at the next opportunity.
-class context_download_scope
+class sg::context_download_scope
 {
     // Typed-buffer overloads — the preferred form.
     // `buffer<T>` supplies the element type, so `T` is deduced rather than spelled out and the offset / count are in units of that same `T`.
@@ -88,4 +86,3 @@ private:
 
     context& _ctx;
 };
-} // namespace sg

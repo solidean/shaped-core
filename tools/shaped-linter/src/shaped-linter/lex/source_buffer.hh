@@ -6,12 +6,10 @@
 #include <shaped-linter/fwd.hh>
 #include <shaped-linter/lex/source_span.hh>
 
-namespace scl
-{
 /// One source file: owns its bytes and a line-start index, addressable by byte offset or by 1-based line.
 /// The text is NOT null-terminated (clean-core string semantics); do not pass `.data()` to C APIs.
 /// Construction scans the text once to build the line index.
-struct source_buffer
+struct scl::source_buffer
 {
     /// A buffer over in-memory text (tests, snippets) — no file IO.
     /// `path` is used only for reporting.
@@ -51,4 +49,3 @@ private:
 
     void build_line_index();
 };
-} // namespace scl

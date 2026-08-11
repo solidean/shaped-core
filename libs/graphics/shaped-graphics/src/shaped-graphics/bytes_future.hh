@@ -10,12 +10,10 @@
 #include <memory>
 #include <type_traits>
 
-namespace sg
-{
 /// The pollable completion handle behind a bytes_future.
 /// Abstract — a backend subclasses it to track its own readback mechanism (fence values, ring positions, …).
 /// A download's data is valid once the waiter reports ready.
-class bytes_waiter
+class sg::bytes_waiter
 {
 public:
     virtual ~bytes_waiter();
@@ -46,7 +44,7 @@ protected:
 
 /// A bytes_waiter that is ready on construction — for empty or synchronous downloads that need no
 /// GPU readback.
-class ready_bytes_waiter final : public bytes_waiter
+class sg::ready_bytes_waiter final : public bytes_waiter
 {
 public:
     ready_bytes_waiter() { _is_ready.store(true, std::memory_order_release); }
@@ -58,7 +56,7 @@ public:
 /// Copyable and movable, and it outlives the command list that recorded it.
 /// It holds the destination span, a pin keeping that destination alive until the transfer finishes, and the waiter tracking completion.
 /// Read the bytes with try_get_bytes() once ready, or block on ctx.wait_for(future).
-class bytes_future
+class sg::bytes_future
 {
     // ctx.wait_for(future) reaches the blocking wait — kept off the future's own public API.
     friend class context;
@@ -108,7 +106,7 @@ private:
 /// Strongly-typed view of a bytes_future for a trivially-copyable element type.
 /// The byte count must be a multiple of sizeof(T).
 template <class T>
-class data_future
+class sg::data_future
 {
     static_assert(std::is_trivially_copyable_v<T>, "data_future element type must be trivially copyable");
 
@@ -146,4 +144,3 @@ private:
 
     bytes_future _bytes;
 };
-} // namespace sg

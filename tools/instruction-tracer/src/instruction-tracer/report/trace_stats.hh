@@ -4,14 +4,20 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/fwd.hh>
 
 namespace itrace
 {
+struct slow_op;
+struct stats_summary;
+struct symbol_stats;
+} // namespace itrace
+
 /// What one symbol did, summed over every recorded trace.
 ///
 /// Self, not cumulative: each instruction is charged to the function containing its rip, so a callee's work never lands on its caller.
 /// Needs `owner_symbol`, i.e. enrichment run with want_owner.
-struct symbol_stats
+struct itrace::symbol_stats
 {
     cc::string symbol;
     u32 instructions = 0;
@@ -34,7 +40,7 @@ struct symbol_stats
 ///
 /// Named rather than merely counted because the bag is heterogeneous: "3" says nothing, while "idiv x2" says where to look.
 /// Rare enough that it is worth a line each.
-struct slow_op
+struct itrace::slow_op
 {
     cc::string mnemonic;
     cc::string symbol;
@@ -42,7 +48,7 @@ struct slow_op
 };
 
 /// Per-symbol rows plus what the reader needs to judge them.
-struct stats_summary
+struct itrace::stats_summary
 {
     /// Sorted by instructions descending, then by symbol for a stable table.
     cc::vector<symbol_stats> rows;
@@ -53,6 +59,9 @@ struct stats_summary
     /// Some trace hit --instructions, so the counts below it are incomplete.
     bool truncated = false;
 };
+
+namespace itrace
+{
 
 /// Bucket every instruction of every trace by its containing symbol.
 stats_summary collect_stats(cc::span<trace const> traces);

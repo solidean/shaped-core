@@ -5,12 +5,10 @@
 
 #include <type_traits>
 
-namespace sg
-{
 /// Arguments for a byte-granularity buffer→buffer region copy (cmd.copy.buffer_bytes_region).
 /// The required fields — src, dst, size_in_bytes — have no default, so omitting one warns.
 /// The offsets are optional and default to 0.
-struct buffer_bytes_copy
+struct sg::buffer_bytes_copy
 {
     raw_buffer_handle src;         ///< copy source; must not be null; needs buffer_usage::copy_src
     raw_buffer_handle dst;         ///< copy destination; must not be null; needs buffer_usage::copy_dst
@@ -22,7 +20,7 @@ struct buffer_bytes_copy
 /// Typed variant in units of T (cmd.copy.buffer_data_region<T>) — count and offsets are in elements of T, like taking a subspan on both sides.
 /// For sub-element (byte) granularity, use the buffer_bytes_region escape hatch.
 template <class T>
-struct buffer_data_copy
+struct sg::buffer_data_copy
 {
     raw_buffer_handle src;
     raw_buffer_handle dst;
@@ -34,7 +32,7 @@ struct buffer_data_copy
 /// Device→device copy facade for a command list, reached as `cmd.copy`.
 /// Buffer regions only today; texture copy ops land here later, following the same `<resource>_<bytes|data>_region` scheme.
 /// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
-class command_list_copy_scope
+class sg::command_list_copy_scope
 {
 public:
     /// Copies `size_in_bytes` from `src` to `dst`, each starting at its byte offset.
@@ -71,4 +69,3 @@ private:
 
     command_list& _cmd;
 };
-} // namespace sg

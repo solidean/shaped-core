@@ -67,9 +67,11 @@ enum class shader_format
     // Future: dxbc, wgsl.
 };
 
+} // namespace sg
+
 /// Provenance of the compile — mostly a cache-invalidation / debugging aid.
 /// `signature` is a free-form string capturing the flags/defines/source identity a compiler folds into its cache key.
-struct compiler_info
+struct sg::compiler_info
 {
     cc::string name;      ///< e.g. "dxc"
     cc::string version;   ///< compiler version
@@ -77,7 +79,7 @@ struct compiler_info
 };
 
 /// A compute shader's `[numthreads]` / `local_size` — the workgroup dimensions.
-struct compute_dimensions
+struct sg::compute_dimensions
 {
     int x = 1;
     int y = 1;
@@ -87,7 +89,7 @@ struct compute_dimensions
 /// A successfully compiled shader: the bytecode blob and its extracted metadata + reflection, ready to build a pipeline from or cache.
 /// Reflection (the `bindings`) is stored inline.
 /// A pure value; share it via compiled_shader_handle.
-struct compiled_shader
+struct sg::compiled_shader
 {
     shader_stage stage = shader_stage::compute;
     shader_format format = shader_format::dxil;
@@ -106,4 +108,3 @@ struct compiled_shader
 
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };
-} // namespace sg

@@ -2,17 +2,24 @@
 
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <instruction-tracer/fwd.hh>
 
 namespace itrace
 {
+struct mca_run_result;
+} // namespace itrace
+
 /// Raw result of running llvm-mca once: its captured stdout (the -json output) and stderr (the skip warnings).
 /// `ran == false` means the process could not be launched at all.
-struct mca_run_result
+struct itrace::mca_run_result
 {
     bool ran = false;
     cc::string json;
     cc::string stderr_text;
 };
+
+namespace itrace
+{
 
 /// Run llvm-mca (`mca_exe`) over `input_asm` (fed on stdin), returning its JSON and stderr.
 ///

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/fwd.hh>
 
 #include <atomic>
 
@@ -49,10 +50,20 @@ inline void atomic_thread_fence(memory_order order) noexcept
 
 #else
 
+// Declared before the definitions below, which spell their names qualified.
+// This branch's declarations cannot move to fwd.hh: with threads these three are aliases of the std types, so there is nothing there to declare.
+template <class T>
+struct atomic;
+template <class T>
+struct atomic_ref;
+struct atomic_flag;
+
+} // namespace cc
+
 /// std::atomic's API over a plain T.
 /// Single-threaded, every op is already indivisible and the memory_order arguments constrain nothing observable, so they are accepted and ignored.
 template <class T>
-struct atomic
+struct cc::atomic
 {
     /// True: with no concurrency there is nothing to lock.
     /// Callers static_assert on it to reject a type the hardware would emulate with a mutex.
@@ -159,7 +170,7 @@ private:
 /// std::atomic_ref's API over a plain lvalue.
 /// Same reasoning as cc::atomic; the referent stays a plain T.
 template <class T>
-struct atomic_ref
+struct cc::atomic_ref
 {
     static constexpr bool is_always_lock_free = true;
 
@@ -228,7 +239,7 @@ private:
 
 /// std::atomic_flag's API over a plain bool.
 /// Constinit-able and trivially destructible like the real one — load-bearing for the static spinlocks that must outlive static destruction (see node_allocation.cc).
-struct atomic_flag
+struct cc::atomic_flag
 {
     constexpr atomic_flag() noexcept = default;
 
@@ -244,6 +255,9 @@ struct atomic_flag
 private:
     bool _value = false;
 };
+
+namespace cc
+{
 
 /// No-op: a fence orders one thread's writes against another's reads, and there is no other thread.
 inline void atomic_thread_fence(memory_order) noexcept

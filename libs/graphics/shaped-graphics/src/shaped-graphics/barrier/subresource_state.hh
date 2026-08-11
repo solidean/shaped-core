@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
+#include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 
 /// The covering partition that tracks per-subresource access state for a texture.
@@ -12,10 +13,8 @@
 /// Boxes merge back to one when all their states are equivalent, so a uniform texture stops paying per-box cost.
 /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
 
-namespace sg
-{
 /// One tile of the covering partition: a range plus the access state that holds over it.
-struct subresource_box
+struct sg::subresource_box
 {
     subresource_range range;
     resource_access_state state;
@@ -23,7 +22,7 @@ struct subresource_box
 
 /// A covering partition of a texture's subresource domain: non-overlapping boxes that always tile the whole `[0,mips)×[0,slices)×[0,planes)` grid.
 /// Starts as a single whole-domain box.
-struct subresource_partition
+struct sg::subresource_partition
 {
     explicit subresource_partition(subresource_extent extent = {}) : _extent(extent)
     {
@@ -156,4 +155,3 @@ private:
     subresource_extent _extent;
     cc::vector<subresource_box> _boxes;
 };
-} // namespace sg

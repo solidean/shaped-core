@@ -2,6 +2,7 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-shader-compiler-dxc/fwd.hh>
 
 /// Compilation knobs, mapped to DXC command-line flags.
 /// Closed enums (not raw strings/ints) so the valid set is fixed and typo-proof; each maps to one flag internally (see command_line_args.cc).
@@ -41,9 +42,11 @@ enum class optimization_level
     level_3,
 };
 
+} // namespace ssc::dxc
+
 /// Options for a single compile.
 /// Defaults produce optimized, warnings-as-errors DXIL.
-struct compile_options
+struct ssc::dxc::compile_options
 {
     compile_target target = compile_target::dxil;
     optimization_level optimization = optimization_level::level_3;
@@ -61,4 +64,3 @@ struct compile_options
     /// Raw DXC flags appended verbatim — an escape hatch for options this struct does not model.
     cc::vector<cc::string> extra_args;
 };
-} // namespace ssc::dxc

@@ -36,6 +36,17 @@ class command_list_query_scope;
 class command_list_raster_scope;
 class command_list_raster_manual_scope;
 class rendering_scope;
+class command_list_slot_allocator; // per-recorder slot pool (see barrier/command_list_slot.hh)
+struct viewport;                   // value type — one viewport of a rendering_info
+struct rendering_info;             // value type — what opens a rendering scope
+
+// Argument value types of the command-list scopes (see command_list/copy.hh and command_list/compute.hh).
+struct buffer_bytes_copy;
+template <class T>
+struct buffer_data_copy;
+struct array_buffer_access;
+struct array_texture_access;
+
 class raw_buffer;
 class raw_texture;
 class blas;                         // bottom-level acceleration structure (see raytracing/acceleration_structure.hh)
@@ -53,11 +64,27 @@ enum class index_format : u8
     uint16, // DX12 R16_UINT / Vk INDEX_TYPE_UINT16
     uint32, // DX12 R32_UINT / Vk INDEX_TYPE_UINT32
 };
-struct texture_description;        // value type (see resource/raw_texture.hh) — input to create_raw_texture
+struct texture_description; // value type (see resource/raw_texture.hh) — input to create_raw_texture
+struct texture_region;      // value type (see resource/texture_region.hh) — a subresource byte range
+
+// The shape-specific description structs that build a texture_description (see resource/texture_descriptions.hh).
+struct texture_1d_description;
+struct texture_2d_description;
+struct texture_3d_description;
+struct texture_cube_description;
+struct texture_1d_array_description;
+struct texture_2d_array_description;
+struct texture_cube_array_description;
+struct texture_2d_ms_description;
+struct texture_2d_array_ms_description;
+struct texture_cube_ms_description;
+struct texture_cube_array_ms_description;
+
 enum class pixel_format : u16;     // texel format (see resource/pixel_format.hh)
 enum class texture_usage : u32;    // texture usage flags (see types.hh)
 enum class texture_dimension : u8; // 1D / 2D / 3D (see resource/raw_texture.hh)
 class bytes_waiter;
+class ready_bytes_waiter; // the already-satisfied waiter (see bytes_future.hh)
 class bytes_future;
 template <class T>
 class data_future;
@@ -84,6 +111,11 @@ enum class pipeline_stage_flags : u32;
 enum class texture_layout : u32;
 struct access_barrier;
 struct resource_access_state;
+struct subresource_box;       // one tile of a covering partition (see barrier/subresource_state.hh)
+struct subresource_extent;    // the mip/layer/plane counts of a resource (see resource/subresource.hh)
+struct subresource_index;     // one subresource of a resource
+struct subresource_range;     // a box of subresources, which one index converts into
+struct subresource_partition; // the tiles covering one resource's subresources
 
 // Resource views (see resource/views.hh) — value types, no handle typedefs.
 // Only the enums are declared here: the typed view templates are constrained, and `raw_view` is a
@@ -95,6 +127,9 @@ enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see 
 struct raw_buffer_view;                 // erased buffer-view payload — one arm of raw_view (see resource/views.hh)
 struct raw_texture_view;                // erased texture-view payload — one arm of raw_view
 struct raw_tlas_view;                   // erased acceleration-structure-view payload — one arm of raw_view
+struct tlas_view;                       // the typed acceleration-structure view (see resource/views.hh)
+template <class T>
+class buffer; // a typed buffer facade (see resource/buffer.hh)
 
 // Render-target / depth-stencil views (see resource/views.hh) — a texture bound as a color / depth-stencil target.
 // Not shader-facing; they do not erase to raw_view.
@@ -228,6 +263,14 @@ enum class submission_token : u64
     first = 30000,           ///< first live value (see epoch::first for the high-value rationale)
     not_submitted = u64(-1), ///< sentinel that always compares "not yet complete"
 };
+
+// The exception hierarchy (see exceptions.hh) — what the throwing create façades and submit/advance raise.
+class exception;
+class device_lost_exception;
+class allocation_exception;
+class pipeline_creation_exception;
+class swapchain_creation_exception;
+class binding_group_exception;
 
 /// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type.
 /// context, buffer and memory_heap get handles; command_list does not, being a single-use temporary held by std::unique_ptr and passed by reference.

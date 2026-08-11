@@ -186,10 +186,12 @@ enum class wrap_mode : u16
 // document elements
 // -------------------------------------------------------------------------------------------------
 
+} // namespace babel::gltf
+
 /// The document's `asset` block.
 /// Named asset_info because `data` already has a member called `asset`.
 /// `version` is the one property glTF requires of every file.
-struct asset_info
+struct babel::gltf::asset_info
 {
     cc::string version;     // e.g. "2.0"
     cc::string min_version; // "minVersion"; empty when absent
@@ -200,7 +202,7 @@ struct asset_info
 /// One `buffers` entry, with its bytes resolved when they were reachable.
 /// A GLB's BIN chunk and a base64 `data:` URI both resolve during read; an external URI needs
 /// read_options::resolve_uri, and stays unresolved without it.
-struct buffer
+struct babel::gltf::buffer
 {
     cc::string uri;      // exactly as written; empty for the GLB BIN chunk
     i64 byte_length = 0; // the declared byteLength
@@ -211,7 +213,7 @@ struct buffer
 };
 
 /// One `bufferViews` entry: a window into a buffer, optionally with a vertex stride.
-struct buffer_view
+struct babel::gltf::buffer_view
 {
     buffer_index buffer = buffer_index::invalid;
     i64 byte_offset = 0;
@@ -225,7 +227,7 @@ struct buffer_view
 
 /// One `accessors` entry: typed elements inside a bufferView.
 /// Sparse accessors are rejected by read, so a parsed accessor is always dense.
-struct accessor
+struct babel::gltf::accessor
 {
     buffer_view_index buffer_view = buffer_view_index::invalid; // invalid == the spec's implicit all-zero data
     i64 byte_offset = 0;                                        // relative to the bufferView's own byte_offset
@@ -313,14 +315,14 @@ struct accessor
 
 /// One `attributes` entry of a primitive.
 /// The semantic is kept verbatim, custom `_NAME` ones included.
-struct attribute
+struct babel::gltf::attribute
 {
     cc::string semantic; // "POSITION", "NORMAL", "TEXCOORD_0", "_CUSTOM", ...
     accessor_index accessor = accessor_index::invalid;
 };
 
 /// One primitive of a mesh: a run of attributes plus the optional index and material references.
-struct primitive
+struct babel::gltf::primitive
 {
     i32 first_attribute = 0; // run in data.attributes
     i32 attribute_count = 0;
@@ -330,7 +332,7 @@ struct primitive
 };
 
 /// One `meshes` entry: a run of primitives.
-struct mesh
+struct babel::gltf::mesh
 {
     i32 first_primitive = 0; // run in data.primitives
     i32 primitive_count = 0;
@@ -338,7 +340,7 @@ struct mesh
 };
 
 /// One `nodes` entry of the scene graph.
-struct node
+struct babel::gltf::node
 {
     i32 first_child = 0; // run in data.node_children
     i32 child_count = 0;
@@ -358,7 +360,7 @@ struct node
 };
 
 /// One `scenes` entry: a run of root nodes.
-struct scene
+struct babel::gltf::scene
 {
     i32 first_node = 0; // run in data.scene_nodes
     i32 node_count = 0;
@@ -367,7 +369,7 @@ struct scene
 
 /// A material's reference to a texture.
 /// `texture == invalid` means the reference itself is absent.
-struct texture_ref
+struct babel::gltf::texture_ref
 {
     texture_index texture = texture_index::invalid;
     i32 texcoord = 0; // the n in TEXCOORD_n
@@ -375,7 +377,7 @@ struct texture_ref
 
 /// One `materials` entry, core metallic-roughness only.
 /// The KHR_materials_* extensions are not interpreted; their raw JSON is skipped.
-struct material
+struct babel::gltf::material
 {
     tg::vec4f base_color_factor = tg::vec4f(1, 1, 1, 1);
     f32 metallic_factor = 1;
@@ -398,7 +400,7 @@ struct material
 };
 
 /// One `textures` entry: an image plus how to sample it.
-struct texture
+struct babel::gltf::texture
 {
     sampler_index sampler = sampler_index::invalid; // invalid == the spec's default sampler
     image_index source = image_index::invalid;
@@ -407,7 +409,7 @@ struct texture
 
 /// One `images` entry, holding the image's ENCODED bytes — babel::gltf never decodes pixels.
 /// Hand `data` to babel::image::read when you want them.
-struct image
+struct babel::gltf::image
 {
     cc::string uri;       // exactly as written; empty for a bufferView-backed image
     cc::string mime_type; // "image/png" / "image/jpeg"; may be empty for a URI image
@@ -419,7 +421,7 @@ struct image
 };
 
 /// One `samplers` entry.
-struct sampler
+struct babel::gltf::sampler
 {
     filter mag_filter = filter::none;
     filter min_filter = filter::none;
@@ -441,7 +443,7 @@ struct sampler
 ///       for (auto const& p : v.as_strided<tg::vec3f>()) use(p);
 ///   else
 ///       for (auto const& p : v.read_elements<tg::vec3f>().value()) use(p);
-struct accessor_view
+struct babel::gltf::accessor_view
 {
     cc::pinned_data<byte const> bytes;
     i64 stride = 0;       // byte distance between elements; NEVER 0 (a packed accessor gets element_size)
@@ -505,6 +507,9 @@ struct accessor_view
     }
 };
 
+namespace babel::gltf
+{
+
 // import issues
 // -------------------------------------------------------------------------------------------------
 
@@ -525,9 +530,11 @@ enum class issue_kind : u8
     malformed,
 };
 
+} // namespace babel::gltf
+
 /// One thing the reader noticed and did not fail on.
 /// The message names the offending element by index, so it can be shown to a user as-is.
-struct issue
+struct babel::gltf::issue
 {
     issue_kind kind = issue_kind::unsupported;
     cc::string message;
@@ -539,7 +546,7 @@ struct issue
 /// The faithful parse of a glTF 2.0 document.
 /// Read-once; every vector mirrors the file's array order.
 /// The `*_of` helpers resolve the flattened runs, and `find` resolves a typed index (nullptr for `invalid`).
-struct data
+struct babel::gltf::data
 {
     container source = container::gltf;
     asset_info asset;
@@ -661,6 +668,9 @@ private:
     }
 };
 
+namespace babel::gltf
+{
+
 // reading
 // -------------------------------------------------------------------------------------------------
 
@@ -669,9 +679,11 @@ private:
 /// file reports a JSON parse error with a byte offset instead of a useless "unrecognized container".
 [[nodiscard]] container detect_container(cc::span<byte const> bytes);
 
+} // namespace babel::gltf
+
 /// Reader knobs.
 /// Every default means "touch nothing outside the input bytes".
-struct read_options
+struct babel::gltf::read_options
 {
     /// Called once per buffer / image carrying an external (non-`data:`) URI, in declaration order.
     /// Return the referenced file's bytes to resolve it, or an error to fail the whole read.
@@ -680,6 +692,9 @@ struct read_options
     /// resolver's job, because babel owns no filesystem policy.
     cc::function_ref<cc::result<cc::pinned_data<byte const>>(cc::string_view uri)> resolve_uri;
 };
+
+namespace babel::gltf
+{
 
 /// Parse a .gltf or .glb, auto-detecting the container.
 /// This is the zero-copy entry point: every embedded buffer and every bufferView-backed image comes back as

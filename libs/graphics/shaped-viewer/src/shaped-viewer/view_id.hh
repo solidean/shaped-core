@@ -4,8 +4,6 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
 
-namespace sv
-{
 /// Stable identity of a view across frames.
 ///
 /// A view is re-submitted every frame as a fresh value.
@@ -13,7 +11,7 @@ namespace sv
 /// Everything a view touches that is not keyed by a `view_id` is transient and recreated each frame.
 ///
 /// Derive one from a human-readable string once and keep reusing it — `from_string` is a plain content hash, so the same string always yields the same id.
-struct view_id
+struct sv::view_id
 {
     u64 value = 0;
 
@@ -24,4 +22,3 @@ struct view_id
     // ADL hidden friend so a view_id keys a cc::map / cc::set directly.
     [[nodiscard]] friend u64 hash(view_id v) { return cc::make_hash(v.value); }
 };
-} // namespace sv

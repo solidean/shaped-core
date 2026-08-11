@@ -7,11 +7,10 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-rendering/fwd.hh>
 
 #include <memory>
 
-namespace sr
-{
 /// A get-or-create cache of pipelines keyed by a caller-chosen key — one pipeline per key, built once.
 ///
 /// The key is almost always the render-target pixel format: a routine draws the same shaders into whatever target it is handed, and each distinct format needs its own pipeline.
@@ -33,7 +32,7 @@ namespace sr
 /// The context and callback are plain members set by `init`, so `init` must not race in-flight builds — call it at (re)load points, which are serialized with rendering.
 /// With no pool installed, builds are driven inline on the calling thread.
 template <class Key, class Pipeline = sg::raster_pipeline>
-class keyed_pipeline_cache
+class sr::keyed_pipeline_cache
 {
 public:
     using handle = std::shared_ptr<Pipeline const>;
@@ -105,4 +104,3 @@ private:
     // Mutable: acquiring is logically a read — the get-or-create is an internal detail behind the mutex.
     mutable cc::mutex<map_t> _cache;
 };
-} // namespace sr

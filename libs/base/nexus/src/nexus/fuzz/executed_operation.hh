@@ -2,12 +2,11 @@
 
 #include <clean-core/container/vector.hh>
 #include <nexus/fuzz/fwd.hh>
+#include <nexus/fwd.hh>
 
-namespace nx::fuzz
-{
 /// One recorded step of a fuzz program: which operation ran, where its inputs came from, and where its result went.
 /// A program (fuzz_run) is just a vector of these, which makes a run cheap to copy, analyze and minimize.
-struct executed_operation
+struct nx::fuzz::executed_operation
 {
     /// Per-step generator state, rolled for every operation.
     /// If the operation consumes a cc::random&, that generator is reconstructed via cc::random::from_state(state), which is what makes a run replayable.
@@ -26,4 +25,3 @@ struct executed_operation
     /// True for invariant checks whose bool result must be true (false bool == invariant violated).
     bool result_must_be_true = false;
 };
-} // namespace nx::fuzz

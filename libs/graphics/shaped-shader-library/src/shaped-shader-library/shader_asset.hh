@@ -11,8 +11,6 @@
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/fwd.hh>
 
-namespace slib
-{
 /// One shader, compiled on demand and kept current across reloads.
 ///
 /// acquire() is the whole consumer surface, and hot reload is invisible to it apart from the shader it returns changing.
@@ -24,7 +22,7 @@ namespace slib
 ///
 /// A reload is staged and promoted by the next acquire, so a broken edit leaves the last good shader running and last_error() saying why.
 /// Why it has to work that way: slib's coding guidelines, "Reload stages, it never replaces".
-class shader_asset
+class slib::shader_asset
 {
 public:
     /// `library` is weak on purpose — see the note on the members.
@@ -100,4 +98,3 @@ private:
     // Mutable so acquire() stays const: promoting a staged compile is not a change a caller can observe as one.
     mutable cc::mutex<state> _state;
 };
-} // namespace slib
