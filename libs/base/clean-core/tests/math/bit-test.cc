@@ -1,8 +1,6 @@
 #include <clean-core/math/bit.hh>
 #include <nexus/test.hh>
 
-#include <iostream>
-
 using namespace cc::primitive_defines;
 
 // =========================================================================================================
@@ -712,7 +710,6 @@ TEST("bit - power of two relationships")
         for (u8 i = 1; i <= 128; ++i)
         {
             bool const is_pow2 = cc::has_single_bit(i);
-            std::cerr << "i = " << (int)i << std::endl;
             bool const ceil_eq_floor = (cc::bit_ceil(i) == cc::bit_floor(i));
             CHECK(is_pow2 == ceil_eq_floor);
         }

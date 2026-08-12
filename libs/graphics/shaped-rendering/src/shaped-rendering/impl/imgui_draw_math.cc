@@ -1,7 +1,7 @@
 #include <clean-core/common/asserts.hh>
+#include <clean-core/common/utility.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
 
-#include <cstring> // memcpy
 
 namespace sr::impl
 {
@@ -61,7 +61,7 @@ cc::pinned_data<byte const> pack_texture_rect(byte const* pixels,
     for (auto y = 0; y < size[1]; ++y)
     {
         auto const* const src = pixels + (isize(offset[1]) + y) * pitch + isize(offset[0]) * bytes_per_pixel;
-        std::memcpy(packed.data() + isize(y) * row_bytes, src, size_t(row_bytes));
+        cc::memcpy(packed.data() + isize(y) * row_bytes, src, size_t(row_bytes));
     }
 
     return packed;

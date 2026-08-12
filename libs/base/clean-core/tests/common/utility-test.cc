@@ -1,9 +1,9 @@
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/exception.hh>
 #include <nexus/test.hh>
 
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 
 

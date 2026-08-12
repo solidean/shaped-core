@@ -1,0 +1,9 @@
+# shaped-rendering's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+
+rules:
+  - kind: allow-include
+    value: <memory>
+    reason: sg's handles ARE std::shared_ptr, so anything holding one names it — see shaped-graphics/docs/coding-guidelines.md

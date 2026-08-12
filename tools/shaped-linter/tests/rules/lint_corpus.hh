@@ -42,6 +42,7 @@ struct scl::lint_corpus_case
     i32 line = 0;     // 1-based line of the opening fence, so a failure points into the file
     cc::string source;
     cc::string path; // what to lint the block AS; empty means the default `<memory>`
+    cc::string config; // the `.shaped-lint.yml` this block is linted against; empty means none, and a config-reading rule then stays quiet
 
     cc::vector<lint_corpus_expectation> expect; // in annotation order
 };

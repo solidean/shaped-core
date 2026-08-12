@@ -24,7 +24,6 @@
 
 #include <chrono>
 #include <cstdio>
-#include <cstring>
 
 using namespace cc::primitive_defines;
 
@@ -51,7 +50,7 @@ u64 hash_fnv1a(char const* p, size_t n)
 
 // Word-at-a-time multiply/xor mixer — the kind of cheap hash a hash table might use for short keys.
 // Almost no fixed setup, and it processes 8 bytes per step.
-// The tail uses overlapping fixed-size reads (wyhash-style) so it never falls back to a variable-length std::memcpy, which compiles to a slow libc call.
+// The tail uses overlapping fixed-size reads (wyhash-style) so it never falls back to a variable-length cc::memcpy, which compiles to a slow libc call.
 // Not a vetted hash, just a competent speed foil for the small-string regime.
 u64 hash_mul(char const* p, size_t n)
 {
@@ -64,7 +63,7 @@ u64 hash_mul(char const* p, size_t n)
         while (rem >= 8)
         {
             u64 v;
-            std::memcpy(&v, p, 8); // constant size -> inlined load
+            cc::memcpy(&v, p, 8); // constant size -> inlined load
             h = (h ^ v) * k;
             h ^= h >> 29;
             p += 8;
@@ -73,15 +72,15 @@ u64 hash_mul(char const* p, size_t n)
         if (rem > 0)
         {
             u64 v;
-            std::memcpy(&v, p + rem - 8, 8); // last 8 bytes (overlaps, safe since n >= 8)
+            cc::memcpy(&v, p + rem - 8, 8); // last 8 bytes (overlaps, safe since n >= 8)
             h = (h ^ v) * k;
         }
     }
     else if (n >= 4)
     {
         u32 a, b;
-        std::memcpy(&a, p, 4);
-        std::memcpy(&b, p + n - 4, 4); // overlapping first/last 4 bytes
+        cc::memcpy(&a, p, 4);
+        cc::memcpy(&b, p + n - 4, 4); // overlapping first/last 4 bytes
         h = (h ^ ((u64(a) << 32) | b)) * k;
     }
     else if (n > 0)

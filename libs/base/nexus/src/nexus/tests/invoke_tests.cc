@@ -2,12 +2,12 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
 
 #include <algorithm> // std::sort: stable invocation order (registry order is static-init order)
-#include <cstring>   // std::strcmp: order matched tests by source location
 
 bool nx::impl::signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_index const> b)
 {
@@ -72,8 +72,10 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
               {
                   if (a->name != b->name)
                       return cc::string_view(a->name) < cc::string_view(b->name);
-                  if (int const c = std::strcmp(a->location.file_name(), b->location.file_name()); c != 0)
-                      return c < 0;
+                  auto const file_a = cc::string_view(a->location.file_name());
+                  auto const file_b = cc::string_view(b->location.file_name());
+                  if (file_a != file_b)
+                      return file_a < file_b;
                   return a->location.line() < b->location.line();
               });
 

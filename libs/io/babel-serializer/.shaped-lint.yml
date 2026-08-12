@@ -1,0 +1,24 @@
+# babel-serializer's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# babel's third-party headers are each confined to the one backend TU that wraps them, which is what keeps the dependency out of its public API.
+
+rules:
+  - kind: allow-include
+    value: <sqlite3.h>
+    reason: the engine babel::sqlite wraps; nothing outside this TU sees a sqlite3 type
+    files: src/babel-serializer/data/sqlite.cc
+
+  - kind: allow-include
+    value: [<stb_image.h>, <stb_image_write.h>]
+    reason: the PNG/JPEG codec behind babel::image, confined to the backend TU
+    files: src/babel-serializer/image/impl/stb_backend.cc
+
+  - kind: allow-include
+    value: <charconv>
+    reason: "TODO: from_chars is what a number is parsed with, and being fast is the point of these readers — migrate once a cc:: from-string lands"
+    files:
+      - src/babel-serializer/data/json.cc
+      - src/babel-serializer/geometry/obj.cc

@@ -10,7 +10,6 @@
 #include <clean-core/streams/stream_flush.hh> // public: cc::seek_dir, cc::stream_flush_fn
 #include <clean-core/string/string.hh>        // read_line output buffer
 
-#include <cstring> // std::memcpy
 #include <type_traits>
 
 // Implementation core for the byte streams: the internal stream_access enum, and the single cc::impl::stream<Access, Seekable> engine the six public stream types are built from.
@@ -184,7 +183,7 @@ public:
                     break; // genuine end of data
             }
             auto const n = cc::min(dst.size() - total, isize(_end - _curr));
-            std::memcpy(dst.data() + total, _curr, size_t(n));
+            cc::memcpy(dst.data() + total, _curr, size_t(n));
             _curr += n;
             total += n;
         }
@@ -355,7 +354,7 @@ public:
             auto const n = cc::min(src.size() - total, isize(this->impl_write_bound() - _curr));
             if (_first_write == nullptr)
                 _first_write = _curr;
-            std::memcpy(_curr, src.data() + total, size_t(n));
+            cc::memcpy(_curr, src.data() + total, size_t(n));
             _curr += n;
             total += n;
         }

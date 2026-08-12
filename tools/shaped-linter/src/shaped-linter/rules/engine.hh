@@ -12,12 +12,27 @@
 
 namespace scl
 {
+/// The config a run uses when the caller has none — every rule that reads config sees a file nothing was
+/// said about, and stays quiet.
+lint_config const& empty_lint_config();
+
 /// Lint one buffer: lex, parse (only if some rule needs the tree), run each rule, collect findings.
-cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> rules = all_rules());
+///
+/// `config` is the merged `.shaped-lint.yml` policy for this file, which only `config_resolver` produces —
+/// resolving it here rather than in each rule means one filesystem walk per file whatever the rule count,
+/// and it is what keeps the engine itself off the disk.
+cc::vector<finding> run_rules(source_buffer const& buffer,
+                              cc::span<rule const> rules = all_rules(),
+                              lint_config const& config = empty_lint_config());
 
 /// Convenience for tests / snippets: lint in-memory text with a throwaway buffer.
 /// The findings are self-contained (owned strings plus byte offsets), so they outlive the buffer.
-cc::vector<finding> run_rules_on_text(cc::string_view source, cc::string_view path = "<memory>");
+///
+/// Nothing here reads the filesystem, so a snippet is linted against the config passed in and no other —
+/// a test is hermetic wherever it runs from.
+cc::vector<finding> run_rules_on_text(cc::string_view source,
+                                      cc::string_view path = "<memory>",
+                                      lint_config const& config = empty_lint_config());
 
 /// Apply `edits` to `original`, returning the rewritten text.
 /// Edits are applied back-to-front (highest offset first), so earlier offsets stay valid; overlapping edits assert.

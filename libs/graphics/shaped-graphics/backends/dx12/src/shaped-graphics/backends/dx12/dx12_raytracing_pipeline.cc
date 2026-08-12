@@ -4,8 +4,6 @@
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
 
-#include <cstring>
-#include <string>
 
 namespace sg::backend::dx12
 {
@@ -98,7 +96,7 @@ struct hit_group_build
     if (id == nullptr)
         return cc::error("ID3D12StateObjectProperties::GetShaderIdentifier returned null");
     dx12_raytracing_pipeline::shader_identifier out;
-    std::memcpy(out.bytes, id, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    cc::memcpy(out.bytes, id, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
     return out;
 }
 } // namespace

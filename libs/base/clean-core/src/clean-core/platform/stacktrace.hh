@@ -34,9 +34,7 @@ using stacktrace_entry = std::stacktrace_entry;
 
 #else // CC_HAS_STACKTRACE
 
-#include <clean-core/fwd.hh>
-
-#include <cstddef>
+#include <clean-core/fwd.hh> // std::size_t, which the stub's signatures mirror
 
 namespace cc
 {

@@ -1,11 +1,10 @@
 #include <clean-core/container/span.hh>
+#include <clean-core/error/exception.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/config.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
-
-#include <stdexcept>
 
 
 TEST("test registry - basics")

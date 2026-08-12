@@ -2,11 +2,11 @@
 
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/exception.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/platform/native.hh>
 #include <nexus/tests/check.hh>
 
-#include <exception> // std::exception
 
 namespace nx::fuzz
 {

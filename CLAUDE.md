@@ -301,6 +301,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
 | Run the clang-tidy gates         | `uv run dev.py lint clang-tidy` (`--dirty-only` in `check`; gates in [tools/lint/clang-tidy-gates.yml](tools/lint/clang-tidy-gates.yml)) |
 | Run shaped-linter's own rules    | `uv run dev.py lint shaped [--dirty-only] [--fix]` ([readme](tools/shaped-linter/readme.md)) |
+| Bless a stdlib / platform include | add an entry to the library's `.shaped-lint.yml` ([configuration](tools/shaped-linter/docs/configuration.md)); `uv run dev.py lint bless-includes [--write]` regenerates the baseline block |
 | The prose / lint workflow        | [docs/guides/prose.md](docs/guides/prose.md)                     |
 | Rework a topic's comments/docs   | the `reworking-prose` skill, applied via `uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]` |
 | Measure a doc surface's prose    | `uv run dev.py lint prose-stats <path>...` (lines + words, per file and total) |

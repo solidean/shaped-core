@@ -1,11 +1,11 @@
 #pragma once
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/streams/stream.hh>
 
-#include <cstring>
 
 namespace cc_stream_test
 {
@@ -20,7 +20,7 @@ class mock_pipe_read_stream_adapter;
 class recording_write_stream_adapter;
 class mock_split_bounds_read_write_adapter;
 } // namespace cc_stream_test
-// std::memmove, std::memcpy
+// cc::memmove, cc::memcpy
 
 // Shared test helpers + deliberately non-seekable mock adapters, used to exercise the parts of the stream
 // contract that the (always-seekable) span and file adapters can't reach: flush returning -1, try_as_seekable
@@ -40,7 +40,7 @@ inline bool bytes_equal(cc::span<byte const> a, cc::span<byte const> b)
 {
     if (a.size() != b.size())
         return false;
-    return a.empty() || std::memcmp(a.data(), b.data(), size_t(a.size())) == 0;
+    return a.empty() || cc::memcmp(a.data(), b.data(), size_t(a.size())) == 0;
 }
 
 } // namespace cc_stream_test
@@ -73,14 +73,14 @@ private:
 
         byte* const base = self._buffer;
         isize const leftover = isize(end - curr);
-        std::memmove(base, curr, size_t(leftover));
+        cc::memmove(base, curr, size_t(leftover));
 
         isize const room = isize(sizeof(self._buffer)) - leftover;
         isize const want = cc::min(self._chunk, room);
         isize const avail = self._data.size() - self._pos;
         isize const n = cc::min(want, avail);
         if (n > 0)
-            std::memcpy(base + leftover, self._data.data() + self._pos, size_t(n));
+            cc::memcpy(base + leftover, self._data.data() + self._pos, size_t(n));
         self._pos += n;
 
         curr = base;

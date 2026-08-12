@@ -5,7 +5,6 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <string>
 #include <thread>
 
 // real_filesystem is the only part of slib that touches the disk, so it is also the only part whose tests need a real directory.

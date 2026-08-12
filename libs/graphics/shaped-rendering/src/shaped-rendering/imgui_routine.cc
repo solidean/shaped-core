@@ -1,5 +1,6 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/fwd.hh> // offsetof
 #include <clean-core/thread/async.hh>
 #include <imgui/imgui.h>
 #include <shaped-graphics/binding/binding_group.hh>
@@ -14,8 +15,6 @@
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
 #include <sr_shaders.hh>
-
-#include <cstddef> // offsetof
 
 // ImDrawVert is {ImVec2 pos; ImVec2 uv; ImU32 col;} — 20 bytes, matching imgui.hlsl's vs_input.
 // Kept in the .cc: this is the routine's private wiring, not a layout to impose on a consumer that might reasonably want a different one.

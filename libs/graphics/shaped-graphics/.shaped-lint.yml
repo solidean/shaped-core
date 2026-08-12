@@ -1,0 +1,45 @@
+# shaped-graphics's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+
+rules:
+  # =========================================================================================================
+  # sg's one sanctioned std:: deviation
+  # =========================================================================================================
+
+  - kind: allow-include
+    value: <memory>
+    reason: every sg *_handle IS a std::shared_ptr, and a polymorphic command_list is held by std::unique_ptr — the deviation docs/coding-guidelines.md argues for, and cc::shared_ptr does not yet carry the weak_ptr and aliasing-ctor uses this needs
+
+  # =========================================================================================================
+  # The SDK gates
+  # =========================================================================================================
+  # Each backend has ONE header that opens its SDK, brackets the `byte` typedef and is what every other TU in that backend includes.
+
+  - kind: allow-include
+    value: [<d3d12.h>, <dxgi1_6.h>]
+    reason: the single include gate for the D3D12 / DXGI headers — every other dx12 TU reaches them through this file
+    files: backends/dx12/src/shaped-graphics/backends/dx12/dx12_common.hh
+
+  - kind: allow-include
+    value: <d3d12sdklayers.h>
+    reason: the debug layer, needed only where the device is created — it leaks past the gate above, and belongs behind it eventually
+    files: backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc
+
+  # =========================================================================================================
+  # Language facilities with no cc:: equivalent
+  # =========================================================================================================
+
+  - kind: allow-include
+    value: <ranges>
+    reason: std::ranges::contiguous_range is what constrains the upload overloads, and cc:: has no range vocabulary
+    files: src/shaped-graphics/command_list/upload.hh
+
+  # =========================================================================================================
+  # Waiting on a migration
+  # =========================================================================================================
+
+  - kind: allow-include
+    value: <atomic>
+    reason: "TODO: migrate to cc::atomic — these predate it, and until then the single-threaded build still pays for the atomics (routine/reload_generation.cc shows the target shape)"

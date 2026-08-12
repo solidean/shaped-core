@@ -5,7 +5,6 @@
 #include <shaped-shader-compiler-dxc/compile_options.hh>
 #include <shaped-shader-compiler-dxc/shader_description.hh>
 
-#include <string>
 #include <vector>
 
 namespace ssc::dxc::impl

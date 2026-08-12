@@ -6,7 +6,6 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/string/to_string.hh>
 
-#include <iterator> // for std::begin / std::end (iterable detection); TODO: replace with a cc:: equivalent
 #include <type_traits>
 #include <utility> // for tuple_size
 
@@ -152,9 +151,12 @@ template <class T>
             return s;
         }
     }
-    else if constexpr (requires {
-                           std::begin(v);
-                           std::end(v);
+    // Exactly what the range-based for below needs: members, or a raw array.
+    // Deliberately not std::begin / std::end — that spelling also accepts a free begin() found by ADL, which
+    // nothing in this tree has, and it is what dragged <iterator> into clean-core.
+    else if constexpr (std::is_array_v<T> || requires {
+                           v.begin();
+                           v.end();
                        })
     {
         auto s = string("[");

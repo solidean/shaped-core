@@ -60,13 +60,14 @@ void f() { g({1, 2}); }
 `~[rule-id]` may not carry a `fix=` or a `hint=` — a rule that must not fire produces no rewrite to pin, and the loader rejects the block.
 | `hint="…"` | the same, over that rule's `hint` edits — the rewrites `--fix` does not apply |
 | `path="…"` | the file name the **block** is linted as — which also picks its language (default `<memory>`, so C++) |
+| `config="…"` | the `.shaped-lint.yml` the **block** is linted against, in the [config format](configuration.md) — a block without one is a file no config reaches |
 
 Inside a quoted value `\n` / `\t` / `\r` are the real characters, so a fix that splices in a whole line stays spellable on the one line a fence info string gets.
 Any other `\x` is just `x`, which is how `\"` and `\\` work.
 
 `fix=` binds to the annotation in front of it, which is what associates a rewrite with a rule at all — two rules on one block each pin their own, even when the texts are identical.
 
-`path=` is the exception: it describes the block rather than a rule, so it stands alone and may sit anywhere in the info string, at most once.
+`path=` and `config=` are the exceptions: they describe the block rather than a rule, so each stands alone and may sit anywhere in the info string, at most once.
 Only the name is read, never the contents — a rule that tells a header from a translation unit sees the extension and nothing else.
 
 **`path=` is also what picks the language.** The fence word says what the block *is*, and only `cpp`, `py` / `python` and `md` / `markdown` mark one lintable at all;

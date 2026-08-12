@@ -123,13 +123,15 @@ bool is_debugger_connected() noexcept;
 // the use in CC_ASSERT is simply to provide a cleaner debugging experience
 // and is followed by an abort anyways
 // NOTE: we don't want to pull in any posix header here, so we simply declare raise.
-//       Its exception specification must match the platform libc: bionic (Android) does NOT mark raise noexcept, unlike glibc/musl/Darwin.
-//       A noexcept here would then clash with bionic's <signal.h>.
+//       The exception specification must match the platform libc EXACTLY.
+//       This declaration lands before any <csignal> the same TU includes, and a mismatch is then a hard error on that later declaration, not on this one.
+//       glibc alone marks it __THROW (so, noexcept); bionic, Darwin and emscripten's musl all declare a plain `int raise(int)`.
+//       CC_OS_LINUX is glibc here — the macro chain above matches Android, Emscripten and WASI first — so musl-on-Linux is the one untested combination.
 //       SIGTRAP is 5 according to https://man7.org/linux/man-pages/man7/signal.7.html
-#if defined(CC_OS_ANDROID)
-extern "C" int raise(int);
-#else
+#if defined(CC_OS_LINUX)
 extern "C" int raise(int) noexcept;
+#else
+extern "C" int raise(int);
 #endif
 #define CC_IMPL_DEBUG_BREAK() (::cc::impl::is_debugger_connected() ? (void)::raise(5) : void(0))
 

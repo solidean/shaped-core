@@ -1,0 +1,9 @@
+# shaped-viewer's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# sv reaches for nothing outside cc:: and tg::, its tests included, so this file has no entries.
+# That is the state to keep it in: a new one here is a claim that sv needs something the libraries below it do not provide.
+
+rules: []

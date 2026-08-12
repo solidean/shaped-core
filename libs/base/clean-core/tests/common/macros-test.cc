@@ -1,8 +1,6 @@
 #include <clean-core/common/macros.hh>
+#include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
-
-#include <cstring>
-
 
 // =========================================================================================================
 // Preprocessor-level compile-time checks
@@ -292,7 +290,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     {
 #define MY_VALUE 42
         char const* str = CC_STRINGIFY_EXPR(MY_VALUE);
-        CHECK(std::strcmp(str, "42") == 0);
+        CHECK(cc::string_view(str) == "42");
 #undef MY_VALUE
     }
 
@@ -300,7 +298,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     {
 #define MY_IDENT foo
         char const* str = CC_STRINGIFY_EXPR(MY_IDENT);
-        CHECK(std::strcmp(str, "foo") == 0);
+        CHECK(cc::string_view(str) == "foo");
 #undef MY_IDENT
     }
 
@@ -308,7 +306,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     {
 #define MY_EXPR (1 + 2)
         char const* str = CC_STRINGIFY_EXPR(MY_EXPR);
-        CHECK(std::strcmp(str, "(1 + 2)") == 0);
+        CHECK(cc::string_view(str) == "(1 + 2)");
 #undef MY_EXPR
     }
 }
@@ -402,14 +400,14 @@ TEST("macros - CC_PRETTY_FUNC")
     SECTION("Contains function name")
     {
         char const* func_name = get_pretty_func_name();
-        CHECK(std::strstr(func_name, "get_pretty_func_name") != nullptr);
+        CHECK(cc::string_view(func_name).contains("get_pretty_func_name"));
     }
 
     SECTION("Works in method")
     {
         TestClass obj;
         char const* method_name = obj.get_method_func_name();
-        CHECK(std::strstr(method_name, "get_method_func_name") != nullptr);
+        CHECK(cc::string_view(method_name).contains("get_method_func_name"));
     }
 
     SECTION("Works in lambda")
@@ -418,6 +416,6 @@ TEST("macros - CC_PRETTY_FUNC")
         char const* lambda_name = lambda();
         // Lambda name format varies by compiler, just check it's not empty
         CHECK(lambda_name != nullptr);
-        CHECK(std::strlen(lambda_name) > 0);
+        CHECK(cc::string_view(lambda_name).size() > 0);
     }
 }

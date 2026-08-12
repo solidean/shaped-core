@@ -13,10 +13,17 @@ add_library(shaped-linter-core STATIC
     src/shaped-linter/cli/changed_lines.cc
     src/shaped-linter/cli/options.cc
 
+    src/shaped-linter/config/glob.cc
+    src/shaped-linter/config/baseline.cc
+    src/shaped-linter/config/config_parser.cc
+    src/shaped-linter/config/lint_config.cc
+    src/shaped-linter/config/config_resolver.cc
+
     src/shaped-linter/lex/source_buffer.cc
     src/shaped-linter/lex/source_language.cc
     src/shaped-linter/lex/source_manager.cc
     src/shaped-linter/lex/token.cc
+    src/shaped-linter/lex/directive.cc
     src/shaped-linter/lex/lexer.cc
     src/shaped-linter/lex/python_lexer.cc
     src/shaped-linter/lex/markdown_scanner.cc
@@ -58,6 +65,13 @@ if(SC_BUILD_TESTS)
         tests/cli/changed_lines-test.cc
         tests/cli/options-test.cc
 
+        tests/config/glob-test.cc
+        tests/config/baseline-test.cc
+        tests/config/config_parser-test.cc
+        tests/config/lint_config-test.cc
+        tests/config/config_resolver-test.cc
+
+        tests/lex/directive-test.cc
         tests/lex/source_buffer-test.cc
         tests/lex/source_language-test.cc
         tests/lex/lexer-test.cc

@@ -150,12 +150,7 @@ struct set;
 
 template <class K, class V>
 struct key_value_provider;
-namespace impl
-{
-template <class K>
-struct cc_key_hash;
-}
-template <class K, class V, class Hash = impl::cc_key_hash<K>>
+template <class K, class V, class Hash = default_hash>
 struct in_memory_key_value_provider;
 template <class K, class V>
 struct key_value_cache;

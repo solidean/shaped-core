@@ -1,0 +1,21 @@
+# shaped-shader-compiler-dxc's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# This library is a wrapper around a COM API, so the std:: it names is mostly what DXC's own signatures demand.
+
+rules:
+  - kind: allow-include
+    value: <memory>
+    reason: sg's handles ARE std::shared_ptr, and the compiled-shader results are handed back as one
+
+  - kind: allow-include
+    value: <d3d12shader.h>
+    reason: the single include gate for the DXC / COM reflection interfaces — every other TU reaches them through this file
+    files: src/shaped-shader-compiler-dxc/impl/dxc_common.hh
+
+  - kind: allow-include
+    value: [<string>, <vector>]
+    reason: "TODO: DXC's C++ API takes std::wstring arguments and returns std::vector; migrate the parts that are ours to cc::"
+    files: src/**

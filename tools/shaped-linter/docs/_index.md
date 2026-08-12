@@ -11,6 +11,8 @@ Repo-wide docs are at [docs/_index.md](../../../docs/_index.md).
 - [writing-a-rule](writing-a-rule.md) — the authoring procedure end to end: picking a layer and a language set, emitting a finding, the `fix` / `hint` line, registering, testing.
   This is the one to follow when adding a rule; the other two are reference.
 - [coding-guidelines](coding-guidelines.md) — the tool's own conventions: a rule is a folder, the two test layers, and **the corpus format** — the annotation spec every corpus file is written against.
+- [configuration](configuration.md) — `.shaped-lint.yml`: the per-library policy file, its grammar, and how a nearer config extends the ones above it.
+  Read it before writing a rule whose answer differs per library.
 
 ## Elsewhere
 

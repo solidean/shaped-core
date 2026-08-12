@@ -1,12 +1,12 @@
 #pragma once
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/impl/allocating_container.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/string/string_view.hh>
 
 #include <compare>
-#include <cstring>
 #include <type_traits>
 
 /// Owning UTF-8 byte string with small-string optimization (SSO).
@@ -116,7 +116,7 @@ public:
             result._data.heap._data.obj_end = result._data.heap._data.obj_start + source.size();
 
         if (!source.empty())
-            std::memcpy(result.data(), source.data(), source.size());
+            cc::memcpy(result.data(), source.data(), source.size());
         result.data()[source.size()] = '\0';
 
         return result;
@@ -150,7 +150,7 @@ public:
         {
             initialize_small_empty(resource);
             if (size > 0)
-                std::memcpy(_data.small.data, ptr, size);
+                cc::memcpy(_data.small.data, ptr, size);
             _data.small.size = static_cast<u8>(size);
         }
         else
@@ -171,7 +171,7 @@ public:
         {
             initialize_small_empty(resource);
             if (size > 0)
-                std::memcpy(_data.small.data, begin, size);
+                cc::memcpy(_data.small.data, begin, size);
             _data.small.size = static_cast<u8>(size);
         }
         else
@@ -186,12 +186,12 @@ public:
     {
         CC_ASSERT(cstr != nullptr, "use default constructor for empty string instead of nullptr");
 
-        auto const len = isize(std::strlen(cstr));
+        auto const len = cc::string_view(cstr).size();
         if (len <= small_capacity)
         {
             initialize_small_empty(resource);
             if (len > 0)
-                std::memcpy(_data.small.data, cstr, len);
+                cc::memcpy(_data.small.data, cstr, len);
             _data.small.size = u8(len);
         }
         else
@@ -216,7 +216,7 @@ public:
         {
             initialize_small_empty(resource);
             if (data_size > 0)
-                std::memcpy(_data.small.data, data_ptr, data_size);
+                cc::memcpy(_data.small.data, data_ptr, data_size);
             _data.small.size = static_cast<u8>(data_size);
         }
         else
@@ -509,7 +509,7 @@ public:
             auto const new_size = _data.small.size + sv.size();
             if (new_size <= small_capacity)
             {
-                std::memcpy(_data.small.data + _data.small.size, sv.data(), sv.size());
+                cc::memcpy(_data.small.data + _data.small.size, sv.data(), sv.size());
                 _data.small.size = u8(new_size);
                 return;
             }
@@ -519,7 +519,7 @@ public:
 
         auto const old_size = _data.heap.size();
         _data.heap.resize_to_uninitialized(old_size + sv.size());
-        std::memcpy(_data.heap.data() + old_size, sv.data(), sv.size());
+        cc::memcpy(_data.heap.data() + old_size, sv.data(), sv.size());
     }
 
     /// Appends a single character.

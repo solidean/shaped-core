@@ -4,9 +4,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
-#include <cstring> // strcmp
 
 namespace sg::backend::vulkan
 {
@@ -56,7 +56,7 @@ bool validation_layer_available()
     auto layers = cc::vector<VkLayerProperties>::create_defaulted(count);
     vkEnumerateInstanceLayerProperties(&count, layers.data());
     for (auto const& l : layers)
-        if (std::strcmp(l.layerName, k_validation_layer) == 0)
+        if (cc::string_view(l.layerName) == k_validation_layer)
             return true;
     return false;
 }
@@ -68,7 +68,7 @@ bool debug_utils_extension_available()
     auto exts = cc::vector<VkExtensionProperties>::create_defaulted(count);
     vkEnumerateInstanceExtensionProperties(nullptr, &count, exts.data());
     for (auto const& e : exts)
-        if (std::strcmp(e.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0)
+        if (cc::string_view(e.extensionName) == VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
             return true;
     return false;
 }

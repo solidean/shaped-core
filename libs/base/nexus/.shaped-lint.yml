@@ -1,0 +1,60 @@
+# nexus's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# nexus is mid-migration off std::, and docs/stdlib-migration.md is the live inventory with what each site waits on.
+# Everything in the "waiting on cc::" block below has an entry there; this file is the machine-checked half of it.
+
+rules:
+  # =========================================================================================================
+  # Platform APIs, each in the one TU that speaks to that OS
+  # =========================================================================================================
+
+  - kind: allow-include
+    value: [<evntcons.h>, <evntrace.h>]
+    reason: the real-time ETW consumer the Windows hardware counters read context switches from
+    files: src/nexus/bench/impl/hardware_counters_windows.cc
+
+  - kind: allow-include
+    value: <unistd.h>
+    reason: the perf_event_open syscall wrapper for the Linux hardware counters
+    files: src/nexus/bench/impl/hardware_counters_linux.cc
+
+  - kind: allow-include
+    value: [<intrin.h>, <x86intrin.h>]
+    reason: rdtsc and the serializing fences the timing baseline is measured with
+    files: src/nexus/bench/impl/baseline.hh
+
+  # =========================================================================================================
+  # Waiting on a cc:: replacement — see docs/stdlib-migration.md
+  # =========================================================================================================
+
+  - kind: allow-include
+    value: <atomic>
+    reason: "TODO: migrate to cc::atomic — the counter plumbing predates it"
+    files: src/nexus/bench/**
+
+  - kind: allow-include
+    value: [<iostream>, <cstdio>]
+    reason: "TODO: migrate to cc::println / cc::eprintln — the runner's output predates cc::print"
+    files: src/**
+
+  - kind: allow-include
+    value: [<string>, <string_view>]
+    reason: "TODO: migrate to cc::string — the runner's own strings predate it"
+    files: src/**
+
+  - kind: allow-include
+    value: [<unordered_map>, <unordered_set>]
+    reason: "TODO: cc::map has landed, the schedule and registry have not migrated"
+    files: src/**
+
+  # =========================================================================================================
+  # The tests
+  # =========================================================================================================
+
+  - kind: allow-include
+    value: [<string>, <vector>]
+    reason: the std:: types an invocable test is parametrized over, which is what pins that nexus accepts them
+    files: tests/**

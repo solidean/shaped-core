@@ -14,7 +14,13 @@
 
 namespace scl
 {
-cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> rules)
+lint_config const& empty_lint_config()
+{
+    static lint_config const empty;
+    return empty;
+}
+
+cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> rules, lint_config const& config)
 {
     cc::vector<finding> out;
 
@@ -50,17 +56,18 @@ cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> 
     if (any_needs_prose(active))
         prose = extract_prose(buffer, language, ts);
 
-    lint_context ctx = {.source = buffer, .language = language, .tokens = ts, .tree = tree, .prose = prose, .out = out};
+    lint_context ctx
+        = {.source = buffer, .language = language, .tokens = ts, .tree = tree, .prose = prose, .config = config, .out = out};
     for (auto const& r : active)
         r.check(ctx);
 
     return out;
 }
 
-cc::vector<finding> run_rules_on_text(cc::string_view source, cc::string_view path)
+cc::vector<finding> run_rules_on_text(cc::string_view source, cc::string_view path, lint_config const& config)
 {
     auto const buffer = source_buffer::from_text(cc::string(source), path, 0);
-    return run_rules(buffer, all_rules());
+    return run_rules(buffer, all_rules(), config);
 }
 
 cc::result<cc::unit> write_file(cc::string_view path, cc::string_view content)

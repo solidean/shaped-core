@@ -1,0 +1,27 @@
+# shaped-shader-library's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+
+rules:
+  - kind: allow-include
+    value: <memory>
+    reason: sg's handles ARE std::shared_ptr, and the filesystem and watch layers hold them — see shaped-graphics/docs/coding-guidelines.md
+
+  # docs/coding-guidelines.md already confines real storage to one layer; this is the machine-checked half of that.
+  - kind: allow-include
+    value: <filesystem>
+    reason: the one layer permitted to touch real storage — every other file goes through the slib::filesystem interface
+    files: src/shaped-shader-library/filesystem/real_filesystem.cc
+
+  - kind: allow-include
+    value: <thread>
+    reason: the watch backend runs its own OS wait loop, which is what a file watcher is
+    files:
+      - src/shaped-shader-library/filesystem/impl/watch_backend_windows.cc
+      - src/shaped-shader-library/impl/reload_watcher.cc
+
+  - kind: allow-include
+    value: [<filesystem>, <fstream>]
+    reason: fixture files these tests write and clean up, outside the API under test
+    files: tests/**

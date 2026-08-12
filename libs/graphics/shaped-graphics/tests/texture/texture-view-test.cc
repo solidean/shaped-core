@@ -4,7 +4,6 @@
 #include <shaped-graphics/resource/views.hh>
 
 #include <memory>
-#include <variant>
 
 // Pure tests for texture views: the `as_*_view` factories on texture<Traits> build the right strongly-typed descriptor, which erases to a `raw_view` with shape `texture`.
 // Each factory takes a shape-specific parameter bag, `Traits::*_params`, naming only the axes that shape has.

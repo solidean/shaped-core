@@ -1,0 +1,21 @@
+# shaped-linter's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See docs/configuration.md.
+#
+# The linter binary is deliberately clean-core only — no babel, no std:: containers.
+# Both entries below are in code that never ships in it: the corpus loader lives in the test binary, and the two renderer uses are sorting.
+
+rules:
+  - kind: allow-include
+    value: <algorithm>
+    reason: std::sort while cc:: has no algorithm library — findings are ordered before rendering, and the corpus files before running
+    files:
+      - src/shaped-linter/report/renderer.cc
+      - src/shaped-linter/report/snippet.cc
+      - tests/rules/corpus-test.cc
+
+  - kind: allow-include
+    value: <filesystem>
+    reason: walking the rule tree for corpus files, in the test binary only — the linter itself is handed its paths
+    files: tests/rules/corpus-test.cc

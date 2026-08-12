@@ -19,7 +19,6 @@ extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent() noexcept;
 #ifndef CC_OS_WINDOWS
 #include <unistd.h>
 
-#include <cstring>
 #endif
 
 #ifdef CC_ABI_DARWIN

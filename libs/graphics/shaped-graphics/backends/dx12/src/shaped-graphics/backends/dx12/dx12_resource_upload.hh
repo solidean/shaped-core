@@ -9,7 +9,6 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <cstring>
 
 /// A window inside the persistently-mapped UPLOAD ring buffer, handed to execute_next_job.
 /// `base` points at byte 0 of the mapped buffer; the writable window is [base + offset, base + offset + size).
@@ -78,7 +77,7 @@ struct sg::backend::dx12::dx12_buffer_upload final : dx12_resource_upload
         isize const remaining = _data.size() - _consumed;
         isize const n = remaining < alloc.size ? remaining : alloc.size;
         CC_ASSERT(n > 0, "upload allocation too small to make progress");
-        std::memcpy(alloc.base + alloc.offset, _data.data() + _consumed, std::size_t(n));
+        cc::memcpy(alloc.base + alloc.offset, _data.data() + _consumed, std::size_t(n));
         list.CopyBufferRegion(_dst, UINT64(_dst_offset + _consumed), alloc.buffer, UINT64(alloc.offset), UINT64(n));
         _consumed += n;
         return n;
@@ -138,8 +137,8 @@ struct sg::backend::dx12::dx12_texture_upload final : dx12_resource_upload
         // chunk's slices in both the source and the staging buffer, so one flat loop covers both shapes).
         byte* const base = alloc.base + aligned;
         for (isize i = 0; i < n; ++i)
-            std::memcpy(base + i * _fp.padded_pitch, _data.data() + (_rows_done + i) * _fp.row_bytes,
-                        std::size_t(_fp.row_bytes));
+            cc::memcpy(base + i * _fp.padded_pitch, _data.data() + (_rows_done + i) * _fp.row_bytes,
+                       std::size_t(_fp.row_bytes));
 
         D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
         dst_loc.pResource = _dst;

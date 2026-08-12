@@ -1,0 +1,13 @@
+# typed-geometry's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# tg reaches for almost nothing: its own docs/coding-guidelines.md already says scalars go through scalar_traits, never std:: directly.
+# The one entry below is that seam.
+
+rules:
+  - kind: allow-include
+    value: <cmath>
+    reason: scalar_traits is where sqrt / sin / cos are bound to a scalar type, so exotic scalars can override what std:: cannot
+    files: src/typed-geometry/scalar/traits.hh

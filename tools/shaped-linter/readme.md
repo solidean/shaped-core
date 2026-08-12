@@ -31,7 +31,12 @@ uv run dev.py run shaped-linter <file>...   # point it at specific files (builds
 
 uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]  # apply a plan of prose rewrites (see below)
 uv run dev.py lint prose-stats <path>...            # how much prose files carry, before writing a plan
+
+uv run dev.py lint bless-includes [--write]         # refill each .shaped-lint.yml's generated baseline block
 ```
+
+Rules whose answer differs per library read a [`.shaped-lint.yml`](docs/configuration.md) — the per-library policy file, merged from the repo root down.
+`blessed-includes` is the first of them.
 
 It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates.
 So the rules adopt incrementally — a changed file with a brace-form initializer is flagged, and the existing tree is not swept.
@@ -176,6 +181,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 
 | Rule | What it enforces |
 |---|---|
+| `blessed-includes` | Every angle include that is not one of ours — standard library, platform SDK, third-party — is blessed by name in a [`.shaped-lint.yml`](docs/configuration.md) above the file. The default is deny; a `deny-include` entry differs only in carrying a reason that names the replacement (`<mutex>` → `clean-core/thread/mutex.hh`). An include with a path in it or ending in `.hh` is ours and never fires, and a file no config reaches is not checked at all. Hint only: swapping a header also rewrites the call sites below it. |
 | `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
 | `no-flow-prose` | Prose is one semantic point per line, so a sentence ending *mid-line* is a finding — in C++ and Python comments, Python docstrings, and markdown body text alike. A heuristic and a reminder: it carries no fix, because obeying the rule means modelling the prose rather than splicing in a newline. |
 | `no-long-prose-line` | A prose line over 200 characters, the hard ceiling above the otherwise free line length. A point that long almost always holds two and wants splitting at the seam. A line whose longest unbreakable run already exceeds the ceiling — a bare URL, a long path — is left alone, since no split can bring it under. |

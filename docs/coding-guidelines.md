@@ -520,10 +520,13 @@ Each explicit UB usage must be heavily documented and justified.
 
 **Avoid `std::` code.** Almost always use `cc::` equivalents instead.
 
-**Exception:** a small set of *blessed* stdlib headers is allowed where re-creating them is infeasible or pointless — `<type_traits>`, `<typeinfo>` / `<typeindex>`, `<atomic>`, `<initializer_list>`.
-These are thin wrappers around compiler and runtime machinery that we don't re-wrap.
-clean-core keeps the authoritative list, with justifications, in [blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md).
-The list grows by targeted addition only.
+**Exception:** a small set of *blessed* headers is allowed where re-creating them is infeasible or pointless — thin wrappers around compiler and runtime machinery that we don't re-wrap.
+
+**The list is machine-checked, and there is no second copy of it here.**
+Every standard, platform or third-party header a library includes is blessed by name in that library's `.shaped-lint.yml`, and shaped-linter's `blessed-includes` rule reports the rest.
+[configuration](../tools/shaped-linter/docs/configuration.md) is the file format.
+[blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md) carries the argument behind each of clean-core's.
+The list grows by targeted addition only, in the library that needs the header rather than repo-wide.
 
 **Rationale:** Keep compiler intrinsics and `__builtin`s encapsulated in `cc::` implementations so downstream code avoids compiler and platform specifics.
 Provides a consistent, cohesive foundational library from a single source.
@@ -852,7 +855,7 @@ Liberal use of `friend` in core API is allowed to access internals in `experimen
 - [ ] Specialization-based customization points live in the `custom` namespace and don't expose `impl` types
 - [ ] Consider C++23 deducing `this` where appropriate
 - [ ] Move assignment is subobject-safe (or documented otherwise)
-- [ ] Avoid `std::`—use `cc::` equivalents (exception: `<type_traits>`)
+- [ ] Avoid `std::`—use `cc::` equivalents (a new stdlib header needs a blessing in the library's `.shaped-lint.yml`)
 - [ ] No reliance on UB (or heavily documented/justified)
 - [ ] Template bloat minimized (type erasure, thin templates)
 - [ ] `static_assert` used for quality error messages in templates

@@ -2,7 +2,6 @@
 #include <nexus/test.hh>
 
 #include <memory>
-#include <string>
 
 // result stays trivial when T and E are trivial
 static_assert(std::is_constructible_v<cc::result<int, int>>);

@@ -21,6 +21,13 @@ struct lex_diagnostic;
 struct token_stream;
 struct token_cursor;
 
+// config/
+struct config_node;
+struct config_document;
+struct include_directive;
+struct lint_config;
+struct config_resolver;
+
 // parse/
 struct node;
 struct parse_diagnostic;

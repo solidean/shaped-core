@@ -7,7 +7,6 @@
 #include <clean-core/fwd.hh>
 #include <clean-core/string/string_view.hh>
 
-#include <cstring> // std::memcpy
 #include <type_traits>
 
 /// Accumulates data into one contiguous byte buffer — the serialization front end for hashing
@@ -36,7 +35,7 @@ public:
         auto const offset = _buffer.size();
         _buffer.resize_to_uninitialized(offset + bytes.size());
         if (!bytes.empty())
-            std::memcpy(_buffer.data() + offset, bytes.data(), size_t(bytes.size()));
+            cc::memcpy(_buffer.data() + offset, bytes.data(), size_t(bytes.size()));
     }
 
     /// Append the byte representation of a single trivially-copyable value.

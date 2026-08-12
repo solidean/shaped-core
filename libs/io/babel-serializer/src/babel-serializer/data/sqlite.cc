@@ -13,10 +13,10 @@
 
 #if BABEL_HAS_SQLITE
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <sqlite3.h>
 
-#include <cstring> // std::memcpy
 
 namespace babel::sqlite
 {
@@ -101,7 +101,7 @@ cc::result<database> database::open_blob(cc::span<byte const> bytes)
     if (buffer == nullptr)
         return cc::error(cc::string("sqlite error: out of memory allocating the deserialize buffer"));
     if (n > 0)
-        std::memcpy(buffer, bytes.data(), size_t(n));
+        cc::memcpy(buffer, bytes.data(), size_t(n));
 
     int const rc = sqlite3_deserialize(db._db, "main", buffer, sqlite3_int64(n), sqlite3_int64(n),
                                        SQLITE_DESERIALIZE_FREEONCLOSE | SQLITE_DESERIALIZE_RESIZEABLE);

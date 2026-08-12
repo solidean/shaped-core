@@ -1,12 +1,12 @@
 #pragma once
 
 #include <clean-core/common/hash.hh> // derived containers define structural-hash hidden friends
+#include <clean-core/common/utility.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/allocation.hh>
 
-#include <cstring> // std::memcpy (push_back_range fast path)
 #include <initializer_list>
-#include <new>
+#include <new> // std::hardware_destructive_interference_size
 
 
 /// Mixin implementing the common "contiguous container over cc::allocation<T>" surface area.
@@ -721,7 +721,7 @@ public:
     /// Appends every element of `range` to the back, allocating at most once.
     /// A sized range (one exposing `.size()`) is reserved up front, so a large append is a single allocation; an unsized range falls back to per-element `emplace_back`.
     /// If capacity already covers the whole range, no invalidation of any kind occurs.
-    /// Fast path: a contiguous range of exactly T with trivially-copyable T is appended in one `std::memcpy`.
+    /// Fast path: a contiguous range of exactly T with trivially-copyable T is appended in one `cc::memcpy`.
     /// Amortized O(range size).
     template <class Range>
     constexpr void push_back_range(Range const& range)
@@ -738,7 +738,7 @@ public:
                           })
             {
                 if (count > 0)
-                    std::memcpy(_data.obj_end, range.data(), size_t(count) * sizeof(T));
+                    cc::memcpy(_data.obj_end, range.data(), size_t(count) * sizeof(T));
                 _data.obj_end += count;
             }
             else
@@ -757,7 +757,7 @@ public:
     /// Appends every element of `range` to the back using existing capacity.
     /// Requires `has_capacity_back_for(<range size>)`; caller must reserve in advance.
     /// No allocation occurs; pointers, references, and iterators remain valid (stable operation). O(range size).
-    /// Fast path: a contiguous range of exactly T with trivially-copyable T is appended in one `std::memcpy`.
+    /// Fast path: a contiguous range of exactly T with trivially-copyable T is appended in one `cc::memcpy`.
     /// Low-level primitive for performance-critical or reference-sensitive code.
     template <class Range>
     constexpr void push_back_range_stable(Range const& range)
@@ -771,7 +771,7 @@ public:
             auto const count = isize(range.size());
             CC_ASSERT(this->has_capacity_back_for(count), "not enough capacity for push_back_range_stable");
             if (count > 0)
-                std::memcpy(_data.obj_end, range.data(), size_t(count) * sizeof(T));
+                cc::memcpy(_data.obj_end, range.data(), size_t(count) * sizeof(T));
             _data.obj_end += count;
         }
         else

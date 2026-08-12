@@ -17,7 +17,6 @@
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
-#include <memory> // std::dynamic_pointer_cast
 
 namespace sg::backend::dx12
 {

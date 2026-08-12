@@ -71,10 +71,11 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
 
         // key="…", with \" and \\ escapes.
         // `fix=` / `hint=` pin a replacement text and bind identically,
-        // differing only in which of the rule's two rewrite channels they read; `path=` describes the
-        // block itself and binds to no rule at all.
+        // differing only in which of the rule's two rewrite channels they read; `path=` and `config=`
+        // describe the block itself and bind to no rule at all.
         auto matched_keyword = cc::string_view();
-        for (auto const kw : {cc::string_view("fix="), cc::string_view("hint="), cc::string_view("path=")})
+        for (auto const kw :
+             {cc::string_view("fix="), cc::string_view("hint="), cc::string_view("path="), cc::string_view("config=")})
             if (n - i >= kw.size() && info.subview({.start = i, .end = i + kw.size()}) == kw)
                 matched_keyword = kw;
 
@@ -133,6 +134,22 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
                     return false;
                 }
                 out.path = cc::move(value);
+                continue;
+            }
+
+            if (label == "config")
+            {
+                if (!out.config.empty())
+                {
+                    what = cc::string("a block has only one `config=`");
+                    return false;
+                }
+                if (value.empty())
+                {
+                    what = cc::string("`config=` must carry a config");
+                    return false;
+                }
+                out.config = cc::move(value);
                 continue;
             }
 

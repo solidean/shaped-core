@@ -10,7 +10,6 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <cstring>
 
 /// A window inside the persistently-mapped READBACK ring buffer, handed to execute_next_job.
 /// The GPU copies into [offset, offset + size); the deferred CPU copy later reads from base + offset.
@@ -91,7 +90,7 @@ struct sg::backend::dx12::dx12_buffer_download final : dx12_resource_download
         byte* const dst_ptr = _dst.data() + _consumed;
         auto const size = std::size_t(n);
         _consumed += n;
-        return dx12_pending_copy{[dst_ptr, src_ptr, size] { std::memcpy(dst_ptr, src_ptr, size); }, n};
+        return dx12_pending_copy{[dst_ptr, src_ptr, size] { cc::memcpy(dst_ptr, src_ptr, size); }, n};
     }
 
 private:
@@ -193,8 +192,8 @@ struct sg::backend::dx12::dx12_texture_download final : dx12_resource_download
                                      [src_base, dst_base, first_row, n, row_bytes, padded]
                                  {
                                      for (isize i = 0; i < n; ++i)
-                                         std::memcpy(dst_base + (first_row + i) * row_bytes, src_base + i * padded,
-                                                     std::size_t(row_bytes));
+                                         cc::memcpy(dst_base + (first_row + i) * row_bytes, src_base + i * padded,
+                                                    std::size_t(row_bytes));
                                  },
                                  .bytes = waste + n * padded};
     }

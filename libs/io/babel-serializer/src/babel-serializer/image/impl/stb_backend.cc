@@ -1,7 +1,7 @@
 #include <babel-serializer/image/impl/stb_backend.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 
-#include <cstring> // std::memcpy
 
 // The plain stb headers give only the prototypes (the implementation macros live in extern/stb/src/stb.c);
 // babel links the vendored `stb` target PRIVATE, so these includes never leave this TU.
@@ -18,7 +18,7 @@ void append_to_vector(void* context, void* data, int size)
     auto& out = *static_cast<cc::vector<byte>*>(context);
     auto const old = out.size();
     out.resize_to_uninitialized(old + size);
-    std::memcpy(out.data() + old, data, size_t(size));
+    cc::memcpy(out.data() + old, data, size_t(size));
 }
 
 /// Validate a pixel buffer against its claimed geometry — shared by both encoders.
@@ -55,7 +55,7 @@ cc::result<stb_image> stb_decode(cc::span<byte const> bytes, int req_channels)
 
     auto result = stb_image{.width = width, .height = height, .channels = out_channels};
     result.pixels.resize_to_uninitialized(count);
-    std::memcpy(result.pixels.data(), decoded, size_t(count));
+    cc::memcpy(result.pixels.data(), decoded, size_t(count));
     stbi_image_free(decoded); // never hand stb's malloc'd buffer out
     return cc::move(result);
 }
