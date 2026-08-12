@@ -9,6 +9,7 @@
 #include <cstdlib>
 
 #if CC_HAS_STACKTRACE
+#include <string> // std::to_string(std::stacktrace) is the only renderer that produces frame text
 #endif
 
 #ifdef CC_OS_WINDOWS
