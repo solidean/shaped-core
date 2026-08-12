@@ -8,7 +8,6 @@
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
 #include <typed-geometry/scalar/angle.hh>
-#include <typed-geometry/scalar/scalar.hh> // tg::sin / tg::cos
 
 #include <chrono>
 #include <variant>
@@ -33,11 +32,11 @@ namespace
 struct fly_camera
 {
     tg::pos3f position = tg::pos3f(0, 1.4f, -5.0f);
-    float yaw = 0.0f;   // radians, around +Y; 0 looks toward +Z
-    float pitch = 0.0f; // radians, around the camera's right axis
+    tg::angle_f yaw;   // around +Y; 0 looks toward +Z
+    tg::angle_f pitch; // around the camera's right axis
 
-    float move_speed = 3.0f;    // units / second
-    float look_speed = 0.0035f; // radians / pixel
+    float move_speed = 3.0f;                                          // units / second
+    tg::angle_f look_speed = tg::angle_f::make_from_radians(0.0035f); // per pixel of mouse motion
 
     bool looking = false; // right mouse button held
     bool key_forward = false, key_back = false, key_left = false, key_right = false;
@@ -45,11 +44,8 @@ struct fly_camera
 
     [[nodiscard]] tg::vec3f forward() const
     {
-        // Radians reach trigonometry as a tg::angle, never as a bare float — tg::sin / tg::cos take nothing else.
-        auto const y = tg::angle_f::make_from_radians(yaw);
-        auto const p = tg::angle_f::make_from_radians(pitch);
-        auto const cp = tg::cos(p);
-        return tg::vec3f(tg::sin(y) * cp, tg::sin(p), tg::cos(y) * cp).normalized();
+        auto const cp = pitch.cos();
+        return tg::vec3f(yaw.sin() * cp, pitch.sin(), yaw.cos() * cp).normalized();
     }
 
     [[nodiscard]] tg::vec3f right() const { return tg::dual(tg::cross(tg::vec3f(0, 1, 0), forward())).normalized(); }
@@ -103,9 +99,9 @@ struct fly_camera
         {
             if (looking)
             {
-                yaw += m->delta[0] * look_speed;
-                pitch -= m->delta[1] * look_speed;
-                auto const limit = 1.5f; // keep just shy of straight up/down
+                yaw += look_speed * float(m->delta[0]);
+                pitch -= look_speed * float(m->delta[1]);
+                auto const limit = tg::angle_f::make_from_radians(1.5f); // keep just shy of straight up/down
                 pitch = pitch < -limit ? -limit : (pitch > limit ? limit : pitch);
             }
         }

@@ -12,6 +12,7 @@
 /// You cannot construct one from a bare scalar, only via the explicit make_from_radians / make_from_degree factories, and you read it back with .radians() / .degree().
 /// It supports addition and scalar multiplication — it is a 1D vector space over T — but performs no wrap-around.
 /// It is a unit-checked number, not a modular [0, 2pi) value.
+/// It compares and orders like the number it is, so it can be clamped and sorted; 370 degrees is greater than 10, not equal to it.
 ///
 ///     auto const a = tg::angle_f::make_from_degree(90);
 ///     auto const r = a.radians();               // ~1.5708
@@ -89,8 +90,14 @@ public:
     }
 
     // comparison
+    //
+    // Ordering is by the underlying radians, so it is the ordering of the number line rather than of
+    // directions: 370 degrees is greater than 10 degrees, because angle stores a value and never wraps.
+    // The category is T's own, which is what makes a float angle partially ordered — an angle built from a
+    // NaN compares unordered, exactly as the NaN does.
 public:
     [[nodiscard]] friend constexpr bool operator==(angle const&, angle const&) = default;
+    [[nodiscard]] friend constexpr auto operator<=>(angle const&, angle const&) = default;
 
     // arithmetic (1D vector space; no wrap-around)
 public:
@@ -106,6 +113,27 @@ public:
     [[nodiscard]] friend constexpr angle operator*(angle a, T s) { return make_from_radians(a._radians * s); }
     [[nodiscard]] friend constexpr angle operator*(T s, angle a) { return make_from_radians(a._radians * s); }
     [[nodiscard]] friend constexpr angle operator/(angle a, T s) { return make_from_radians(a._radians / s); }
+
+    constexpr angle& operator+=(angle b)
+    {
+        _radians += b._radians;
+        return *this;
+    }
+    constexpr angle& operator-=(angle b)
+    {
+        _radians -= b._radians;
+        return *this;
+    }
+    constexpr angle& operator*=(T s)
+    {
+        _radians *= s;
+        return *this;
+    }
+    constexpr angle& operator/=(T s)
+    {
+        _radians /= s;
+        return *this;
+    }
 
 private:
     T _radians = {};

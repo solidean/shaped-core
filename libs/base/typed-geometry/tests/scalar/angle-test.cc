@@ -5,6 +5,7 @@
 #include <typed-geometry/scalar/constants.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
+#include <compare>
 #include <type_traits>
 
 static_assert(std::is_trivially_copyable_v<tg::angle_f>, "angle should be trivially copyable");
@@ -44,6 +45,54 @@ TEST("tg angle - arithmetic")
     CHECK(tgtest::approx((a * 3.0f).degree(), 90.0f));
     CHECK(tgtest::approx((3.0f * a).degree(), 90.0f));
     CHECK(tgtest::approx((b / 2.0f).degree(), 30.0f));
+
+    SECTION("compound assignment matches the binary forms")
+    {
+        auto c = a;
+        c += b;
+        CHECK(tgtest::approx(c.degree(), 90.0f));
+        c -= b;
+        CHECK(tgtest::approx(c.degree(), 30.0f));
+        c *= 3.0f;
+        CHECK(tgtest::approx(c.degree(), 90.0f));
+        c /= 3.0f;
+        CHECK(tgtest::approx(c.degree(), 30.0f));
+    }
+}
+
+TEST("tg angle - ordering")
+{
+    auto const a = tg::angle_f::make_from_degree(30);
+    auto const b = tg::angle_f::make_from_degree(60);
+
+    SECTION("orders by the underlying value")
+    {
+        CHECK(a < b);
+        CHECK(b > a);
+        CHECK(a <= a);
+        CHECK(a >= a);
+        CHECK(!(a > b));
+    }
+
+    SECTION("a full turn is greater, not equal — angle never wraps")
+    {
+        // The whole point of the type is that it is a unit-checked number, not a modular [0, 2pi) value.
+        CHECK(tg::angle_f::make_from_degree(370) > tg::angle_f::make_from_degree(10));
+        CHECK(tg::angle_f::make_from_degree(370) != tg::angle_f::make_from_degree(10));
+    }
+
+    SECTION("clamping, which is what an ordering is for")
+    {
+        auto const limit = tg::angle_f::make_from_degree(45);
+        auto const clamped = b > limit ? limit : b;
+        CHECK(tgtest::approx(clamped.degree(), 45.0f));
+    }
+
+    SECTION("a float angle is partially ordered, like the float it holds")
+    {
+        static_assert(std::is_same_v<decltype(a <=> b), std::partial_ordering>);
+        CHECK((a <=> b) == std::partial_ordering::less);
+    }
 }
 
 TEST("tg angle - trigonometry")
