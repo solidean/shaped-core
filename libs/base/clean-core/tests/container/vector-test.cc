@@ -3,7 +3,6 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 
-#include <optional>
 #include <vector>
 
 using namespace cc::primitive_defines;

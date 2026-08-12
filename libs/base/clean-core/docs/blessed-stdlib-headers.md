@@ -5,16 +5,19 @@ The repo guideline is [Standard Library & Dependencies](../../../../docs/coding-
 A small set of standard headers is **blessed**: re-creating them is infeasible or pointless.
 They are thin wrappers around compiler/runtime machinery rather than data structures we want to own.
 
-Blessing has two tiers, because "we will not reimplement this" and "call it directly" are different claims:
+Blessing has three tiers, because "we will not reimplement this", "call it directly" and "nothing better exists yet" are different claims:
 
 | Header               | Direct use | Why                                                                     |
 |----------------------|-----------|-------------------------------------------------------------------------|
 | `<type_traits>`      | yes       | Thin wrappers around compiler intrinsics; no value in re-wrapping.      |
 | `<typeinfo>`         | yes       | `typeid` / `std::type_info` are language-level RTTI, not reimplementable.|
 | `<typeindex>`        | yes       | `std::type_index` — the hashable/orderable handle over `std::type_info`. |
+| `<concepts>`         | yes       | The standard concepts are spellings of compiler-known relations; same argument as `<type_traits>`. |
 | `<initializer_list>` | yes       | Required by the language for braced-init-list constructors.             |
+| `<utility>`          | yes       | Structured bindings need `std::tuple_size` / `std::tuple_element` specializations, and only this header declares them. |
 | `<compare>`          | yes       | Required by the language for `operator<=>`: the comparison categories are what it returns, and `= default` needs them too. Name `std::strong_ordering` (or `weak_`/`partial_`) in the return type; everything else about ordering stays in `cc::`. |
-| `<chrono>`           | yes       | Wall/monotonic clocks are OS facilities, and the unit-safe `duration`/`time_point` algebra is exactly what we would rewrite. Use `steady_clock` for elapsed time, never `system_clock` (it can jump). A `cc::` time vocabulary may still land later for the *formatting* / serialization side. |
+| `<chrono>`           | for now   | Wall/monotonic clocks are OS facilities, and the unit-safe `duration`/`time_point` algebra is exactly what we would rewrite. Use `steady_clock` for elapsed time, never `system_clock` (it can jump). A `cc::` time vocabulary is still expected — this is tier 3. |
+| `<variant>` `<tuple>` `<limits>` `<algorithm>` `<thread>` | for now | Tier 3: `cc::variant` / `cc::tuple` are declared but unimplemented, and there is no `cc::` limits, algorithm library or thread type yet. Nothing better exists to reach for today. |
 | `<atomic>`           | **no — via [`cc::atomic`](../src/clean-core/thread/atomic.hh)** | `std::atomic` maps to compiler/hardware atomics, so we do not reimplement it — with threads `cc::atomic` *is* `std::atomic`. But a build can have no threads at all (`CC_HAS_THREADS == 0`), and there the counts should be plain loads and stores. Only a `cc::` seam can drop the atomicity; a hand-written `std::atomic` stays a `lock xadd` no flag can reach. |
 
 **Tier 1 — blessed to include and call.** Use them directly.
@@ -23,6 +26,10 @@ Blessing has two tiers, because "we will not reimplement this" and "call it dire
 The header may leak through our public includes — `clean-core/thread/atomic.hh` includes `<atomic>`, and that is fine.
 But code outside its `cc::` wrapper must not name the `std::` facility.
 `cc::atomic` / `cc::atomic_ref` / `cc::atomic_flag` / `cc::atomic_thread_fence` / `cc::memory_order` cover every use clean-core has.
+
+**Tier 3 — allowed because nothing better exists yet.**
+Not an endorsement of the header, only an admission that `cc::` has no answer for it today.
+Each one moves to the deny list the moment its replacement lands, and the call sites move with it.
 
 **The include half is enforced.**
 [`.shaped-lint.yml`](../.shaped-lint.yml) carries the machine-checked list, and shaped-linter's `blessed-includes` rule reports every angle include nothing above it blesses.

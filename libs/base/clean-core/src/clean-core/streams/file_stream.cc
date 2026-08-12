@@ -2,7 +2,6 @@
 #include <clean-core/common/utility.hh> // cc::move, cc::max
 #include <clean-core/streams/file_stream.hh>
 
-#include <cstring> // std::memmove
 
 namespace cc
 {

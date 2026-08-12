@@ -5,7 +5,6 @@
 #include <clean-core/thread/async_thread_pool.hh>
 #include <nexus/test.hh>
 
-#include <memory>
 
 #if CC_HAS_THREADS
 #include <chrono>

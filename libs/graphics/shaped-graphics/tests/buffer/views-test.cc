@@ -4,7 +4,6 @@
 #include <shaped-graphics/resource/views.hh>
 
 #include <memory>
-#include <variant> // std::get — the erased raw_view is a variant; buffer views live in its raw_buffer_view arm
 
 using namespace cc::primitive_defines;
 

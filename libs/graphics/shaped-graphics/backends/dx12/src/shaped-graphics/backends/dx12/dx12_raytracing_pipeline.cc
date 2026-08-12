@@ -5,7 +5,6 @@
 #include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
 
 #include <cstring>
-#include <string>
 
 namespace sg::backend::dx12
 {

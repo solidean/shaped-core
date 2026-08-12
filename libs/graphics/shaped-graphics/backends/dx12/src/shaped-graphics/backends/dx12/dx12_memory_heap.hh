@@ -5,7 +5,6 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory/memory_heap.hh>
 
-#include <memory>
 
 /// dx12 memory_heap: a GPU-resident ID3D12Heap (DEFAULT, buffers-only) that placed buffers sub-allocate into via CreatePlacedResource.
 /// Reports per-buffer requirements from GetResourceAllocationInfo.

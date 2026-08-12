@@ -1,12 +1,11 @@
 #pragma once
 
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
-
-#include <array>
 
 /// A command allocator tagged with the queue type it was created for.
 /// The type is fixed at creation — D3D12 requires it to match the lists recorded onto it — so the allocator must be routed back to that queue's free pool.
@@ -87,5 +86,5 @@ private:
         cc::vector<ComPtr<ID3D12GraphicsCommandList>> free_lists;   // closed, ready to reset + reuse
     };
 
-    std::array<cc::mutex<per_queue_pool>, queue_count> _by_queue;
+    cc::fixed_array<cc::mutex<per_queue_pool>, queue_count> _by_queue;
 };

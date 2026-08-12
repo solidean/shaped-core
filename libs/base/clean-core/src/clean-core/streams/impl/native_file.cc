@@ -16,7 +16,6 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstring> // std::strerror
 
 #endif
 

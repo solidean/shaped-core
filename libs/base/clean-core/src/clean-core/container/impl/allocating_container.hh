@@ -6,7 +6,7 @@
 
 #include <cstring> // std::memcpy (push_back_range fast path)
 #include <initializer_list>
-#include <new>
+#include <new> // std::hardware_destructive_interference_size
 
 
 /// Mixin implementing the common "contiguous container over cc::allocation<T>" surface area.

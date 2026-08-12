@@ -99,7 +99,11 @@ A library never edits the root to make room for itself.
 ## The generated baseline block
 
 `uv run dev.py lint bless-includes --write` fills the block at the end of each config with an `allow-include` for every include the tree below it still needs.
-It exists so the rule could be turned on without first cleaning the tree: what a library includes today is written down, and the entries then get curated away one at a time.
+It exists to get a config started: what a library includes today is written down, and the entries then get curated into scoped, argued ones.
+
+**No config in the repo carries a block today** — they were all curated away, which is the state to keep them in.
+A library-wide `allow-include` with `reason: baseline` says only that the library exists; the entry that earns its place names *which* files may include the header and *why*.
+Run the generator when a new library appears, or after a sweep, and read its output as a to-do list rather than an answer.
 
 Everything between the markers belongs to the generator and is rewritten on every run.
 Everything above them is a human's and is never touched — so **curating means moving an entry out of the block**, or deleting it and fixing the include.

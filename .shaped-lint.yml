@@ -4,15 +4,22 @@
 # Why we avoid std:: at all: docs/coding-guidelines.md, section "Standard Library & Dependencies".
 #
 # What sits here is what holds for every library.
-# A blessing only one library needs belongs in that library's file, and is written there rather than widened into this one.
+# A blessing only one library needs belongs in that library's file, scoped to the files that need it, and is written there rather than widened into this one.
 
 rules:
-  # ---- blessed to include and to call ----
+  # =========================================================================================================
+  # Blessed to include and to call
+  # =========================================================================================================
   # The two tiers, and the argument for each header, are libs/base/clean-core/docs/blessed-stdlib-headers.md's.
+  # What they share: the language or the compiler owns the facility, so a cc:: wrapper would wrap nothing.
 
   - kind: allow-include
     value: <type_traits>
     reason: thin wrappers around compiler intrinsics, and there is no value in re-wrapping them
+
+  - kind: allow-include
+    value: <concepts>
+    reason: the standard concepts are spellings of compiler-known relations, same argument as <type_traits>
 
   - kind: allow-include
     value: <initializer_list>
@@ -27,29 +34,89 @@ rules:
     reason: typeid and its hashable handle are language-level RTTI, not something to reimplement
 
   - kind: allow-include
-    value: <chrono>
-    reason: OS clocks plus unit-safe duration algebra — use steady_clock for elapsed time, never system_clock
+    value: <utility>
+    reason: structured bindings need std::tuple_size / std::tuple_element specializations, which only this header declares
 
-  # ---- denied, with the replacement named ----
+  # =========================================================================================================
+  # No cc:: equivalent yet — allowed until one lands, then migrate
+  # =========================================================================================================
+  # These are NOT endorsements. Each is here because there is nothing better to reach for today.
+  # When the cc:: replacement lands, the entry moves to the deny block below and the call sites move with it.
+
+  - kind: allow-include
+    value: <chrono>
+    reason: no cc:: time vocabulary yet — OS clocks plus unit-safe duration algebra. Use steady_clock for elapsed time, never system_clock
+
+  - kind: allow-include
+    value: [<variant>, <tuple>]
+    reason: cc::variant and cc::tuple are declared but not implemented (clean-core/container/) — migrate once they are
+
+  - kind: allow-include
+    value: <limits>
+    reason: no cc:: numeric limits yet
+
+  - kind: allow-include
+    value: <algorithm>
+    reason: no cc:: algorithm library yet
+
+  - kind: allow-include
+    value: <thread>
+    reason: no cc:: thread type — clean-core/thread/thread.hh is helpers only. Prefer cc::threaded_actor or cc::async over a raw thread either way
+
+  # =========================================================================================================
+  # Denied, with the replacement named
+  # =========================================================================================================
   # A deny is not redundant with the default: "not blessed" cannot point anywhere, and a reason can.
-  # These are the containers with a cc:: counterpart that nothing in the tree reaches for today, so the pointer lands before the first use rather than after it.
+  # A library that genuinely needs one of these re-allows it in its own file, scoped to the files that do — which is where the deviation stays visible.
 
   - kind: deny-include
-    value: [<map>, <set>, <deque>, <forward_list>, <stack>, <queue>]
+    value: [<vector>, <array>, <list>]
+    reason: use cc::vector, cc::array (heap) or cc::fixed_array (inline)
+
+  - kind: deny-include
+    value: [<map>, <set>, <unordered_map>, <unordered_set>, <deque>, <forward_list>, <stack>, <queue>]
     reason: use cc::map / cc::set, or a cc::vector — see libs/base/clean-core/cheat-sheet.md
 
   - kind: deny-include
-    value: [<sstream>, <iomanip>, <ostream>, <istream>, <streambuf>]
-    reason: use cc::format / cc::string_stream — clean-core/string/format.hh and clean-core/streams/
+    value: [<string>, <string_view>]
+    reason: use cc::string / cc::string_view
 
   - kind: deny-include
-    value: <functional>
-    reason: use cc::function_ref (non-owning) or cc::unique_function (owning)
+    value: <optional>
+    reason: use cc::optional — clean-core/error/optional.hh
+
+  - kind: deny-include
+    value: <memory>
+    reason: use cc::unique_ptr / cc::shared_ptr — clean-core/memory/
 
   - kind: deny-include
     value: <span>
     reason: use cc::span
 
   - kind: deny-include
-    value: <shared_mutex>
-    reason: use cc::mutex — clean-core/thread/mutex.hh
+    value: <functional>
+    reason: use cc::function_ref (non-owning) or cc::unique_function (owning)
+
+  - kind: deny-include
+    value: [<format>, <sstream>, <iomanip>, <ostream>, <istream>, <streambuf>]
+    reason: use cc::format / cc::format_to — clean-core/string/format.hh
+
+  - kind: deny-include
+    value: [<iostream>, <fstream>]
+    reason: use cc::print / cc::println / cc::eprintln, and clean-core/streams/ for files
+
+  - kind: deny-include
+    value: [<mutex>, <shared_mutex>, <condition_variable>]
+    reason: use cc::mutex — clean-core/thread/mutex.hh owns both the data and the lock protecting it
+
+  - kind: deny-include
+    value: <atomic>
+    reason: use cc::atomic — clean-core/thread/atomic.hh, the seam that drops atomicity when CC_HAS_THREADS is 0
+
+  - kind: deny-include
+    value: [<cstddef>, <cstdint>]
+    reason: use clean-core/fwd.hh, which declares the sized aliases (u32, isize, byte, …)
+
+  - kind: deny-include
+    value: [<stdexcept>, <exception>]
+    reason: we do not throw — return a cc::result instead
