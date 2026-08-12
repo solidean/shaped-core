@@ -231,6 +231,14 @@ sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if no
 sv.compare(o);  sv == o;  sv < o;                       // lexicographic by byte (no locale/collation)
 sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
 
+#include <clean-core/string/glob.hh>             // path globbing (shaped-linter configs, nexus' file filters)
+cc::glob_normalize_path(p);               // -> cc::string: '\'->'/', repeated/trailing slashes dropped, /c/x = C:\x = c:/x
+cc::glob_matches(pattern, path, {});      // options are NOT defaulted; {} = exact + case-sensitive, both sides already normalized
+cc::glob_matches(pat, path, cc::glob_option::normalize | cc::glob_option::ignore_case);   // cc::flags<cc::glob_option>
+// '?' one char, '*' a run — neither crosses '/'; '**' does, and the '/' after it is optional ("src/**/x" matches "src/x").
+// A pattern ending in '/' means the subtree. Nothing is anchored for you: match a suffix with a leading "**/".
+// Normalize once yourself when one side is reused across many comparisons; the option redoes both sides per call.
+
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 #include <clean-core/string/to_debug_string.hh>  // cc::to_debug_string(v, cfg = {}) -> diagnostics string
 // to_debug_string: quotes strings/chars, prints pointers as ptr(0xHEX), recurses into ranges [..] and tuples (..).

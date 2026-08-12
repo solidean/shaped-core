@@ -34,7 +34,8 @@ class BinaryListing:
     name: str
     eligible_count: int
     eligible_alias_count: int  # matched aliases (a filter can select an alias with no eligible plain test)
-    tests: list[dict]  # raw per-test records: name, bucket, enabled, name_matches, eligible, ...
+    filter_mode: str  # how the runner read the filter: "name" (substring) or "file" (glob over the source file)
+    tests: list[dict]  # raw per-test records: name, file, bucket, enabled, filter_matches, eligible, ...
 
 
 def _launcher(preset: Preset, artifact: Path) -> list[str]:
@@ -79,6 +80,7 @@ def query_listing(
         name=target.name,
         eligible_count=int(data.get("eligible_count", 0)),
         eligible_alias_count=int(data.get("eligible_alias_count", 0)),
+        filter_mode=str(data.get("filter_mode", "name")),
         tests=list(data.get("tests", [])),
     )
 
@@ -102,14 +104,16 @@ def _partial_ratio(needle: str, haystack: str) -> float:
     return best
 
 
-def _suggest(pattern: str, names: list[str]) -> list[str]:
-    """Up to three test names close to `pattern`, for a "did you mean".
+def _suggest(pattern: str, names: list[str], *, whole: bool = False) -> list[str]:
+    """Up to three candidates close to `pattern`, for a "did you mean".
 
     Test names are descriptive sentences, so a short filter is rarely similar to a whole name.
     Each name is scored by how closely the pattern aligns with a window of it, and only strong, near-substring matches are kept, so an unrelated pattern yields nothing.
+    `whole` is for candidates a filter is meant to match in full — a filename is one.
+    It drops the window pass, and demands a closer whole-string match, because every filename here ends in `-test.cc` and that shared tail alone scores near the normal cutoff.
     """
-    hits = difflib.get_close_matches(pattern, names, n=3, cutoff=0.6)
-    if hits:
+    hits = difflib.get_close_matches(pattern, names, n=3, cutoff=0.75 if whole else 0.6)
+    if hits or whole:
         return hits
 
     pat = pattern.lower()
@@ -118,24 +122,33 @@ def _suggest(pattern: str, names: list[str]) -> list[str]:
     return [name for _, name in scored[:3]]
 
 
-def _diagnose(test_name: str, zero_listings: list[BinaryListing]) -> str:
+def _diagnose(test_name: str, zero_listings: list[BinaryListing], extra_args: list[str]) -> str:
     """Build the failure message when a filter matched no eligible test anywhere.
 
-    Prefers a targeted fix when the name *did* match a test excluded by its bucket or disabled status, and otherwise suggests the closest test names.
+    Prefers a targeted fix when the filter *did* match a test excluded by its bucket or disabled status.
+    Otherwise it suggests the closest candidates — test names, or source filenames once the runner fell back to file matching.
+    `extra_args` is read only for the `--match-*` pins, which decide what the message may claim was tried.
     """
     matched_but_excluded = [
         t
         for lst in zero_listings
         for t in lst.tests
-        if t.get("name_matches") and not t.get("eligible")
+        if t.get("filter_matches") and not t.get("eligible")
     ]
 
     n = len(zero_listings)
     binaries = "binary" if n == 1 else "binaries"
-    lines = [f"no test matches {test_name!r} in any of the {n} test {binaries}."]
+    # The runner reports how it ended up reading the filter, so the message and the suggestions follow that rather than guessing from the pattern.
+    # A pinned mode is the one case where only one of the two was ever tried.
+    by_file = any(lst.filter_mode == "file" for lst in zero_listings)
+    if "--match-files" in extra_args:
+        how = "by file"
+    else:
+        how = "by name or by file" if by_file else "by name"
+    lines = [f"no test matches {test_name!r} {how} in any of the {n} test {binaries}."]
 
     if matched_but_excluded:
-        lines.append("some tests match the name but are excluded:")
+        lines.append("some tests match the filter but are excluded:")
         seen: set[str] = set()
         for t in matched_but_excluded:
             name = t.get("name", "?")
@@ -151,8 +164,17 @@ def _diagnose(test_name: str, zero_listings: list[BinaryListing]) -> str:
                 lines.append(f"  - {name!r} is in the {bucket!r} bucket; {hint}")
         return "\n".join(lines)
 
-    all_names = sorted({t.get("name", "") for lst in zero_listings for t in lst.tests if t.get("name")})
-    suggestions = _suggest(test_name, all_names)
+    # Under file matching the filter is compared against source files, so suggest filenames — a test name would be no help.
+    if by_file:
+        needle = test_name.replace("\\", "/").rstrip("/*").rsplit("/", 1)[-1]
+        candidates = sorted(
+            {f.replace("\\", "/").rsplit("/", 1)[-1] for lst in zero_listings for t in lst.tests if (f := t.get("file"))}
+        )
+    else:
+        needle = test_name
+        candidates = sorted({t.get("name", "") for lst in zero_listings for t in lst.tests if t.get("name")})
+
+    suggestions = _suggest(needle, candidates, whole=by_file)
     if suggestions:
         lines.append("did you mean:")
         lines.extend(f"  - {s!r}" for s in suggestions)
@@ -197,4 +219,4 @@ def select_eligible_binaries(
 
     if runnable:
         return runnable, None
-    return [], _diagnose(test_name, zero_listings)
+    return [], _diagnose(test_name, zero_listings, extra_args)

@@ -100,11 +100,15 @@ TEST("config resolver - a relative path still reaches the working directory's co
 
 TEST("config resolver - windows separators resolve like posix ones")
 {
+    // The tree is keyed by the canonical spelling cc::glob_normalize_path produces — forward slashes, lower-case drive.
+    // Every way of writing the same file must reach it, since the resolver is fed paths from a command line, a compile database and git alike.
     fake_tree tree;
-    tree.files[cc::string("C:/repo/.shaped-lint.yml")] = cc::string(k_deny_atomic);
+    tree.files[cc::string("c:/repo/.shaped-lint.yml")] = cc::string(k_deny_atomic);
 
     auto r = tree.resolver();
     CHECK(r.resolve("C:\\repo\\libs\\a\\src\\x.hh").checks_includes());
+    CHECK(r.resolve("c:/repo/libs/a/src/x.hh").checks_includes());
+    CHECK(r.resolve("/c/repo/libs/a/src/x.hh").checks_includes());
 }
 
 TEST("config resolver - a config that does not parse is an error, not an empty policy")

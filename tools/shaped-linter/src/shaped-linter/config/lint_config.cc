@@ -5,8 +5,8 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/glob.hh>
 #include <shaped-linter/config/config_parser.hh>
-#include <shaped-linter/config/glob.hh>
 
 namespace scl
 {
@@ -41,7 +41,7 @@ cc::optional<cc::string_view> path_under(cc::string_view base, cc::string_view p
 bool any_glob_matches(cc::span<cc::string const> patterns, cc::string_view path)
 {
     for (auto const& p : patterns)
-        if (glob_matches(p, path))
+        if (cc::glob_matches(p, path, {}))
             return true;
     return false;
 }

@@ -34,16 +34,34 @@ Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc](../
 | `--guide-benchmarks` | Selects the *guide_benchmark* bucket (perf benchmarks; see [perf-results.md](../../../../docs/guides/perf-results.md)). Not a Catch2 flag |
 | `--perf-json <file>` | Writes recorded `nx::guide` metrics to `<file>` (additive). Not a Catch2 flag |
 | `--list-tests-json <file>` | Writes a JSON listing of every registered test (with eligibility under the other args) to `<file>` — `-` means stdout — then exits 0 without running anything. Used by `dev.py test` to pre-select binaries. Not a Catch2 flag |
-| Any other arg | Treated as a test name filter (see below) |
+| `--match-files` | Reads the filters as globs over the tests' source files, skipping name matching. Not a Catch2 flag |
+| `--match-names` | Reads the filters as test names only, without the file fallback. Not a Catch2 flag |
+| Any other arg | Treated as a filter (see below) |
 
-### Test name filters
+### Filters
 
-Unrecognized positional args are treated as test name filters, matched by substring against test names.
+Unrecognized positional args are treated as filters, matched by substring against test names.
 Multiple filters may be passed as one comma-separated argument — nexus splits on `,` before storing them, matching the Catch2 convention.
 
 A filter that equals a test name **exactly** can reach past the eligibility gates, which is what runs a disabled test, or one from another bucket.
 Crossing a bucket that way additionally requires that no bucket flag was given; the disabled gate has no such condition.
 A substring filter never opens either gate.
+
+### The file fallback
+
+When no filter matches any test or alias **name**, the filters are re-read as globs over the tests' source files — the paths `cc::source_location` recorded at registration, so absolute ones.
+`function_ref-test.cc` then selects every test declared in that file, and `libs/base/clean-core/tests/memory/*` selects a directory's worth.
+
+The rules are `cc::glob_matches`': `?` is one character, `*` a run not crossing `/`, and `**` one that does.
+On top of that a filter that is not already anchored also matches as a path *suffix*, which is what lets a bare filename or a repo-relative fragment reach an absolute path.
+A filter naming a directory stands for its subtree.
+Separators are normalized (`\` and `/` are the same, and git-bash's `/c/x` is `C:\x`), and matching folds case.
+
+A file match selects exactly like a substring filter does — it is **never** an exact name, so it opens neither the disabled nor the bucket gate.
+`dev.py test hash-benchmark.cc` therefore reports that the file's benchmarks are in the `guide_benchmark` bucket rather than running them; `--guide-benchmarks hash-benchmark.cc` runs them.
+
+The fallback is decided once per binary, by `resolve_filter_mode`, before anything queries a filter — so the schedule and the `--list-tests-json` listing always agree.
+`--match-files` and `--match-names` pin the reading instead of letting it fall back.
 
 ### Buckets and disabled tests
 
@@ -76,7 +94,8 @@ Both live in `test_schedule_config::is_eligible`, shared by `would_run` and the 
 In the Catch2 XML compat modes, filter strings are also unescaped: `\[` becomes `[`.
 Catch2 uses `\[` to escape square brackets in tag-filter syntax; nexus has no tags, so it strips the backslash and the literal `[` can still match a test name.
 
-`*` has no special meaning: filters are plain substrings, so `bench*` matches a literal `*`.
+`*` has no special meaning **to name matching**: names are plain substrings, so `bench*` matches a literal `*`.
+It is a wildcard only once the filter is read as a file glob.
 
 (`test_schedule_config`'s filter and eligibility predicates, in [schedule.cc](../src/nexus/tests/schedule.cc))
 

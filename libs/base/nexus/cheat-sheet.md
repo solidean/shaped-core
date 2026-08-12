@@ -152,6 +152,8 @@ TEST("sg backend - vulkan")
 ```bash
 # NEVER run the *-test binary directly — always go through the repo driver:
 uv run dev.py test "group - what"        # auto-build + run matching test(s); substring match, comma-OR
+uv run dev.py test vector-test.cc        # matching no name, the filter is retried as a glob over the tests' source files
+uv run dev.py test "libs/base/**/tests/memory/*"   # …so a path or a directory selects everything declared under it
 uv run dev.py test                       # build + run the whole suite
 # Diagnose a failure with the repo_tools MCP `test_diag` (dev.py prints the exact selector).
 ```
@@ -162,8 +164,10 @@ uv run dev.py test                       # build + run the whole suite
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --perf-json <file> (write recorded-metric sidecar).
+// --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
+//   still just a filter, so the disabled and bucket gates hold — only an exact test NAME opens those.
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,
-//   name_matches, eligible) plus an "aliases" array, the resolved config (filters, selected_bucket,
+//   filter_matches, eligible) plus an "aliases" array, the resolved config (filters, filter_mode, selected_bucket,
 //   allow_cross_bucket_naming, run_disabled_tests) and eligible_count / eligible_alias_count, under the rest of
 //   the args, then exit 0. Used by `dev.py test` to pre-select binaries. "-" means stdout.
 ```

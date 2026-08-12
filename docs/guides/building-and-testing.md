@@ -41,6 +41,7 @@ uv run dev.py <command> [options]
 ```bash
 uv run dev.py test                  # build + run the full suite
 uv run dev.py test "<pattern>"      # run just tests whose name matches (or a whole *-test binary)
+uv run dev.py test vector-test.cc   # a pattern matching no name is retried against the tests' source files
 uv run dev.py test -t clean-core-test
 uv run dev.py build                 # build everything
 uv run dev.py build -t nexus        # build one target
@@ -57,6 +58,30 @@ The others are skipped without ever emitting a "did not select any tests" error.
 If the filter matches **nothing in any binary**, the run fails loudly with a diagnostic: the closest test names ("did you mean …"), or, when a name matched but was excluded, the fix.
 That fix is to name a disabled test exactly, or to pass the bucket flag for a `manual` / `guide_benchmark` test.
 A full sweep (no filter) is unchanged: every binary runs, and an empty one is a failure.
+
+### Selecting by file
+
+A pattern that matches no test *name* anywhere in a binary is retried as a **glob over the tests' source files**.
+So you can select the file you are editing, instead of recalling what the tests in it are called.
+
+```bash
+uv run dev.py test function_ref-test.cc                        # a bare filename
+uv run dev.py test "libs/base/clean-core/tests/memory/*"       # a globbed path — quote it
+uv run dev.py test libs/base/clean-core/tests/memory           # a directory means its subtree
+uv run dev.py test C:\Projects\shaped-core\libs\base\nexus\tests\test-check-render-test.cc
+```
+
+Separators are interchangeable (`\` and `/`, and git-bash's `/c/…` is the same drive as `C:\…`), and matching folds case.
+A pattern that is not anchored also matches as a path suffix, which is what makes a bare filename work against the absolute path the compiler recorded.
+`*` stays inside one path segment and `**` crosses them, as everywhere else in the repo.
+
+A file match is a *filter*, not an override: it selects exactly the tests an equivalent list of names would, so the bucket and disabled gates still hold — only an **exact test name** opens those.
+So `dev.py test hash-benchmark.cc` reports that the file's benchmarks are in the `guide_benchmark` bucket, and `dev.py test hash-benchmark.cc --guide-benchmarks` runs them.
+
+`--match-files` and `--match-names` (forwarded straight to the runner) pin the reading when the fallback guesses wrong — `--match-files vector` never tries names.
+
+Under bash a pattern like `tests/memory/*` is expanded by the shell into many arguments; those arrive as several filters, which are OR'd, so the selection comes out the same.
+Quoting it keeps the glob for nexus to interpret, which is what you want for `**`.
 
 ## Presets
 

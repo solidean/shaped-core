@@ -25,6 +25,14 @@ nx::test_schedule_config config_from(cc::span<char const* const> args)
 {
     return nx::test_schedule_config::create_from_args(int(args.size()), const_cast<char**>(args.data()));
 }
+
+// A config parsed from `args` and settled against `reg`, exactly as nx::run does before it schedules or lists.
+nx::test_schedule_config resolved_config(cc::span<char const* const> args, nx::test_registry const& reg)
+{
+    auto cfg = config_from(args);
+    cfg.resolve_filter_mode(reg);
+    return cfg;
+}
 } // namespace
 
 TEST("export - xml_escape replaces the five predefined entities")
@@ -60,7 +68,7 @@ TEST("export - junit report has correct aggregate attributes and per-test cases"
     CHECK(xml.contains("<failure message="));
 }
 
-TEST("schedule - would_run honors buckets and disabled, name_matches ignores them")
+TEST("schedule - would_run honors buckets and disabled, filter_matches ignores them")
 {
     auto reg = make_axis_registry();
     auto const& alpha = reg.declarations[0];
@@ -71,9 +79,9 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
     {
         char const* const args[] = {"prog"};
         auto const cfg = config_from(args);
-        CHECK(cfg.name_matches(alpha));
-        CHECK(cfg.name_matches(beta));
-        CHECK(cfg.name_matches(gamma));
+        CHECK(cfg.filter_matches(alpha));
+        CHECK(cfg.filter_matches(beta));
+        CHECK(cfg.filter_matches(gamma));
         CHECK(cfg.would_run(alpha));
         CHECK(!cfg.would_run(beta));
         CHECK(!cfg.would_run(gamma));
@@ -83,8 +91,8 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
     {
         char const* const args[] = {"prog", "beta"};
         auto const cfg = config_from(args);
-        CHECK(!cfg.name_matches(alpha));
-        CHECK(cfg.name_matches(beta));
+        CHECK(!cfg.filter_matches(alpha));
+        CHECK(cfg.filter_matches(beta));
         CHECK(cfg.would_run(beta)); // exact name match pulls in the disabled test
         CHECK(!cfg.would_run(alpha));
     }
@@ -94,8 +102,8 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
     {
         char const* const args[] = {"prog", "et"};
         auto const cfg = config_from(args);
-        CHECK(cfg.name_matches(beta)); // substring matches the name
-        CHECK(!cfg.would_run(beta));   // ...but the disabled gate still excludes it
+        CHECK(cfg.filter_matches(beta)); // substring matches the name
+        CHECK(!cfg.would_run(beta));     // ...but the disabled gate still excludes it
     }
 
     // The same, per-test, for the bucket axis: "amm" is a substring of the manual test "gamma" but not its
@@ -103,8 +111,8 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
     {
         char const* const args[] = {"prog", "amm"};
         auto const cfg = config_from(args);
-        CHECK(cfg.name_matches(gamma)); // substring matches the name
-        CHECK(!cfg.would_run(gamma));   // ...but the bucket gate still excludes it
+        CHECK(cfg.filter_matches(gamma)); // substring matches the name
+        CHECK(!cfg.would_run(gamma));     // ...but the bucket gate still excludes it
     }
 
     // An EXACT name crosses the bucket, the same way it enables a disabled test.
@@ -120,8 +128,95 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
     {
         char const* const args[] = {"prog", "--guide-benchmarks", "alpha"};
         auto const cfg = config_from(args);
-        CHECK(cfg.name_matches(alpha));
+        CHECK(cfg.filter_matches(alpha));
         CHECK(!cfg.would_run(alpha));
+    }
+}
+
+// The registry these tests build records THIS file as every declaration's location, so the filters below are the real thing:
+// whatever spelling the compiler was invoked with, an absolute path with backslashes included.
+TEST("schedule - a filter matching no test name falls back to the source file")
+{
+    auto const reg = make_axis_registry();
+    auto const& alpha = reg.declarations[0];
+    auto const& beta = reg.declarations[1];  // disabled
+    auto const& gamma = reg.declarations[2]; // manual bucket
+
+    // A bare filename selects every test declared in that file.
+    {
+        char const* const args[] = {"prog", "test-export-test.cc"};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(cfg.matching_files);
+        CHECK(cfg.filter_matches(alpha));
+
+        // A file match is a filter, not an override: the disabled and bucket gates still hold.
+        CHECK(cfg.would_run(alpha));
+        CHECK(!cfg.would_run(beta));
+        CHECK(!cfg.would_run(gamma));
+    }
+
+    // The absolute path the declaration itself carries.
+    {
+        char const* const args[] = {"prog", alpha.location.file_name()};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(cfg.matching_files);
+        CHECK(cfg.filter_matches(alpha));
+    }
+
+    // A directory stands for its subtree, spelled either way and in any case.
+    for (auto const* const pattern :
+         {"libs/base/nexus/tests", "libs\\base\\nexus\\tests", "nexus/tests/*", "TEST-EXPORT-TEST.CC"})
+    {
+        char const* const args[] = {"prog", pattern};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(cfg.filter_matches(alpha));
+    }
+
+    // A pattern that is neither a name nor a file matches nothing — the fallback does not widen the selection.
+    {
+        char const* const args[] = {"prog", "no-such-file.cc"};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(cfg.matching_files);
+        CHECK(!cfg.filter_matches(alpha));
+    }
+}
+
+TEST("schedule - the fallback only fires when no name matched")
+{
+    auto const reg = make_axis_registry();
+    auto const& alpha = reg.declarations[0];
+
+    // A name match wins outright, even though the same filter would also select files.
+    {
+        char const* const args[] = {"prog", "alpha"};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(!cfg.matching_files);
+        CHECK(cfg.filter_matches(alpha));
+    }
+
+    // A full sweep has nothing to fall back from.
+    {
+        char const* const args[] = {"prog"};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(!cfg.matching_files);
+    }
+
+    // --match-names pins names, so a filename selects nothing.
+    {
+        char const* const args[] = {"prog", "--match-names", "test-export-test.cc"};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(cfg.mode == nx::filter_mode::name);
+        CHECK(!cfg.matching_files);
+        CHECK(!cfg.filter_matches(alpha));
+    }
+
+    // --match-files pins files, so a test name selects nothing.
+    {
+        char const* const args[] = {"prog", "--match-files", "alpha"};
+        auto const cfg = resolved_config(args, reg);
+        CHECK(cfg.mode == nx::filter_mode::file);
+        CHECK(cfg.matching_files);
+        CHECK(!cfg.filter_matches(alpha));
     }
 }
 

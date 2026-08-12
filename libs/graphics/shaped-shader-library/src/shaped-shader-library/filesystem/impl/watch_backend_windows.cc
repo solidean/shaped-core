@@ -44,11 +44,19 @@ constexpr DWORD k_notify_filter = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CH
                                 | FILE_NOTIFY_CHANGE_CREATION;
 
 /// One watched directory: its handle, the read in flight, and the sink it feeds.
+///
+/// `overlapped` and `buffer` belong to the kernel for as long as a read is in flight, so this object outlives
+/// its subscription whenever one is: `cancelled` marks it dead to everyone, and the run loop is what finally
+/// drops it, on the completion that proves the kernel is done writing.
 struct dir_watch
 {
     HANDLE handle = INVALID_HANDLE_VALUE;
     OVERLAPPED overlapped = {};
     std::shared_ptr<slib::impl::watch_slot> slot;
+
+    // Both are guarded by the backend's state mutex.
+    bool read_in_flight = false;
+    bool cancelled = false;
 
     alignas(DWORD) unsigned char buffer[k_buffer_bytes] = {}; // ReadDirectoryChangesW wants DWORD alignment
 };
@@ -105,22 +113,34 @@ struct dir_subscription final : slib::watch_subscription::impl_base
 
 iocp_watch_backend::~iocp_watch_backend()
 {
-    // Cancel every read still in flight before the thread goes, so nothing is left half-torn-down.
-    // Each wait below is bounded: the operation is already cancelled, we are only collecting it.
+    // Cancel whatever is left — a subscription outliving its backend is a contract violation, but a watch whose
+    // directory went away sits here with no read in flight and nobody to retire it.
     _state.lock(
         [](state& s)
         {
+            cc::vector<u64> retired;
+
+            // By value: cc::map hands back a proxy reference, and the shared_ptr copy still writes through to the watch.
             for (auto [id, w] : s.watches)
             {
-                CancelIoEx(w->handle, &w->overlapped);
+                w->cancelled = true;
 
-                DWORD bytes = 0;
-                (void)GetOverlappedResult(w->handle, &w->overlapped, &bytes, TRUE);
+                // With a read in flight the run loop retires it, on the completion CancelIoEx is about to produce.
+                if (w->read_in_flight)
+                {
+                    CancelIoEx(w->handle, &w->overlapped);
+                    continue;
+                }
+
                 CloseHandle(w->handle);
+                retired.push_back(id);
             }
-            s.watches.clear();
+
+            for (auto const id : retired)
+                s.watches.erase(id);
         });
 
+    // The run loop leaves only once every cancelled read has come back, so the quit packet is a request, not a cut.
     PostQueuedCompletionStatus(_iocp, 0, k_quit_key, nullptr);
     _thread.join();
     CloseHandle(_iocp);
@@ -142,15 +162,23 @@ cc::optional<slib::watch_subscription> iocp_watch_backend::watch_dir(cc::string_
     w->handle = handle;
     w->slot = std::make_shared<slib::impl::watch_slot>(cc::move(sink));
 
+    // Registered, bound and armed under one lock, so read_in_flight cannot be stale when the first completion arrives.
+    // Both calls only *start* work — neither waits on the kernel, which is what makes holding the lock safe.
+    bool armed = false;
     auto const id = _state.lock(
         [&](state& s)
         {
             auto const fresh = s.next_id++;
             s.watches[fresh] = w;
+
+            if (CreateIoCompletionPort(handle, _iocp, ULONG_PTR(fresh), 0) != nullptr)
+                w->read_in_flight = queue_read(*w);
+
+            armed = w->read_in_flight; // read here: once the lock is gone, a completion may already have cleared it
             return fresh;
         });
 
-    if (CreateIoCompletionPort(handle, _iocp, ULONG_PTR(id), 0) == nullptr || !queue_read(*w))
+    if (!armed)
     {
         unwatch(id);
         return cc::nullopt;
@@ -165,30 +193,41 @@ void iocp_watch_backend::unwatch(u64 id)
     _state.lock(
         [&](state& s)
         {
-            if (auto* const found = s.watches.get_ptr(id); found != nullptr)
-                w = cc::move(*found);
+            auto* const found = s.watches.get_ptr(id);
+            if (found == nullptr)
+                return;
+
+            w = *found;
+            w->cancelled = true; // dead to the run loop from here: it will neither fire this sink nor re-arm the read
+
+            // A read in flight owns the OVERLAPPED and the buffer, and only the kernel can say when it is done with them.
+            // So cancel it and leave the entry standing; the run loop retires it when that cancellation completes.
+            if (w->read_in_flight)
+            {
+                CancelIoEx(w->handle, &w->overlapped);
+                return;
+            }
+
+            CloseHandle(w->handle);
             s.watches.erase(id);
         });
 
     if (w == nullptr)
         return;
 
-    // Before anything else: once this returns the sink is neither running nor callable again, which is the promise watch_subscription makes.
-    // The run loop below can no longer find this watch either.
+    // Outside the lock: cancel() blocks until an in-flight fire() has returned, and fire() runs unlocked on the run
+    // loop — waiting for it while holding the state mutex would deadlock against the very thread we are waiting for.
+    // Once it returns the sink is neither running nor callable again, which is the promise watch_subscription makes.
     w->slot->cancel();
-
-    // Cancel and *collect* rather than just CloseHandle: the OVERLAPPED and the buffer behind it die with this object.
-    // Only a completed operation is guaranteed not to be written to again.
-    CancelIoEx(w->handle, &w->overlapped);
-
-    DWORD bytes = 0;
-    (void)GetOverlappedResult(w->handle, &w->overlapped, &bytes, TRUE);
-    CloseHandle(w->handle);
 }
 
 void iocp_watch_backend::run()
 {
     cc::set_current_thread_name("slib fs watch");
+
+    // The quit packet is a request to leave once every cancelled read has reported back.
+    // Leaving earlier would strand buffers the kernel still owns, which is what the destructor must not do.
+    bool quitting = false;
 
     while (true)
     {
@@ -197,21 +236,47 @@ void iocp_watch_backend::run()
         OVERLAPPED* overlapped = nullptr;
         BOOL const ok = GetQueuedCompletionStatus(_iocp, &bytes, &key, &overlapped, INFINITE);
 
-        if (key == k_quit_key)
-            break;
-
+        // A completion ends the read that produced it — the cancelled ones included, which is what makes this the
+        // one place a dir_watch can be dropped without racing the kernel over its buffer.
         std::shared_ptr<dir_watch> w;
-        _state.lock(
+        auto const drained = _state.lock(
             [&](state& s)
             {
-                if (auto* const found = s.watches.get_ptr(u64(key)); found != nullptr)
-                    w = *found;
+                if (key != k_quit_key)
+                {
+                    if (auto* const found = s.watches.get_ptr(u64(key)); found != nullptr)
+                    {
+                        (*found)->read_in_flight = false;
+
+                        if ((*found)->cancelled)
+                        {
+                            CloseHandle((*found)->handle);
+                            s.watches.erase(u64(key));
+                        }
+                        else
+                            w = *found;
+                    }
+                }
+
+                return s.watches.empty();
             });
 
-        // A completion for a watch that has since been unsubscribed.
-        // Its sink is already silenced and its handle closed, so there is nobody left to tell.
-        if (w == nullptr)
+        if (key == k_quit_key)
+        {
+            quitting = true;
+            if (drained)
+                break;
             continue;
+        }
+
+        // Either a watch that has since been unsubscribed — its sink is already silenced, so there is nobody left to
+        // tell — or the last cancelled one, which the destructor is waiting on.
+        if (w == nullptr)
+        {
+            if (quitting && drained)
+                break;
+            continue;
+        }
 
         // Fire either way.
         // `bytes == 0` means the buffer overflowed and the OS dropped the details; a read that failed outright means the directory went out from under us.
@@ -226,10 +291,10 @@ void iocp_watch_backend::run()
         _state.lock(
             [&](state& s)
             {
-                // Under the lock, so a concurrent unwatch cannot close the handle between the check and the call.
-                // If it already has, the watch is simply no longer here.
-                if (s.watches.get_ptr(u64(key)) != nullptr)
-                    (void)queue_read(*w);
+                // Under the lock, so a concurrent unwatch cannot cancel between the check and the call.
+                // If it already has, the watch is either gone or marked, and re-arming it would resurrect a read nobody will collect.
+                if (auto* const found = s.watches.get_ptr(u64(key)); found != nullptr && !(*found)->cancelled)
+                    (*found)->read_in_flight = queue_read(*w);
             });
     }
 }

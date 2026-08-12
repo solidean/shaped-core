@@ -47,7 +47,8 @@ That is because several prose judgements are block-level: whether a line is a sh
 * **`report/`** — the diagnostic renderer: `snippet` (the line-numbered source view with its carets), `renderer` (a finding, and a whole run, as text).
   Plus `style` (the presentation knobs) and `reporter` (the write to stdout).
 * **`cli/`** — `options` (the parsed command line and the usage text) and `changed_lines` (the `--changed-lines` spec `--dirty-only` passes in).
-* **`config/`** — the per-library policy: the `.shaped-lint.yml` reader (`config_parser` over a `config_value` arena), the typed `lint_config` a rule reads, and the `glob` matcher.
+* **`config/`** — the per-library policy: the `.shaped-lint.yml` reader (`config_parser` over a `config_value` arena), and the typed `lint_config` a rule reads.
+  Glob matching itself is clean-core's (`cc::glob_matches` / `cc::glob_normalize_path`).
   Plus `config_resolver`, which walks up from a file and merges what it finds — see [configuration](configuration.md).
 
 `src/` is the framework a rule stands on; the rules themselves live outside it, one folder each — see [coding-guidelines](coding-guidelines.md#a-rule-is-a-folder).

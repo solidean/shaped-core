@@ -11,7 +11,7 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
   Covers signature matching, addressing a single instance, aliases, and the orphan check.
 - [fuzz-testing](fuzz-testing.md) — `nx::fuzz`, the API-sequence fuzzer: typed operations, invariants, shrinking, and emitted regression code.
   The shared-state section is required reading before fuzzing over a GPU context or any other resource your operations close over.
-- [catch2-runner-compat](catch2-runner-compat.md) — the CLI layer: which Catch2 v3 flags nexus accepts, how IDE discovery works, buckets and filters, and the JUnit and JSON side-outputs.
+- [catch2-runner-compat](catch2-runner-compat.md) — the CLI layer: which Catch2 v3 flags nexus accepts, how IDE discovery works, buckets, name and file filters, and the JUnit and JSON side-outputs.
 - [stdlib-migration](stdlib-migration.md) — the remaining `std::` usages and what each is waiting on, so the move onto clean-core can finish as clean-core grows.
 
 ## Elsewhere

@@ -288,7 +288,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 |----------------------------------|------------------------------------------------------------------|
 | Build & test reference           | [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md) |
 | Run the full suite               | `uv run dev.py test`                                              |
-| Run one or a batch of tests      | `uv run dev.py test "<pattern>"`                                  |
+| Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |

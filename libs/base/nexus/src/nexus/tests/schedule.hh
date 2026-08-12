@@ -16,11 +16,32 @@ struct nx::test_instance
     cc::vector<cc::vector<cc::string>> section_scopes;
 };
 
+namespace nx
+{
+// How the positional filters are read.
+// A file filter is a glob over the test's source file — the path the compiler saw, so an absolute one works too.
+// It selects like a name filter does: bucket and disabled rules still apply, because only an *exact test name* opens those.
+enum class filter_mode
+{
+    name,
+    file,
+    name_or_file, // names first, and file globs only when no filter matched any name
+};
+
+} // namespace nx
+
 struct nx::test_schedule_config
 {
     cc::vector<cc::string> filters;
     cc::vector<cc::string> section_filters;
     bool run_disabled_tests = false;
+
+    // How to read `filters`; --match-files / --match-names pin it, and name_or_file is the default.
+    filter_mode mode = filter_mode::name_or_file;
+
+    // The resolved answer for name_or_file, written only by resolve_filter_mode.
+    // A config that never resolves stays on names, so an embedder building one by hand keeps today's behavior.
+    bool matching_files = false;
 
     // selected_bucket is the bucket an automatic sweep selects; nx::config::test_bucket documents the set.
     // allow_cross_bucket_naming records that no explicit bucket flag was given, so an exactly-named test may still be pulled in from another bucket.
@@ -44,12 +65,14 @@ struct nx::test_schedule_config
     // The listing reports every registered test plus whether it would_run() under the rest of the parsed args, so a caller can pre-select binaries.
     cc::string list_tests_json_file;
 
-    // True if the test's name passes the filters alone: filters empty, or some non-empty filter is a substring of the name.
-    // Bucket and disabled status are ignored, which is what distinguishes "name didn't match" from "matched but excluded".
-    bool name_matches(test_declaration const& decl) const;
+    // True if the test passes the filters alone: filters empty, or some non-empty filter matches.
+    // A filter matches as a substring of the test name, or — once resolve_filter_mode selected files — as a glob over its source file.
+    // Bucket and disabled status are ignored, which is what distinguishes "filter didn't match" from "matched but excluded".
+    bool filter_matches(test_declaration const& decl) const;
 
     // True if some non-empty filter equals the test name *exactly*, never as a substring.
     // An exact name is what pulls in an otherwise-excluded disabled test, or one from another bucket.
+    // Names only, whatever the filter mode: a file glob never unlocks a disabled or out-of-bucket test.
     // Always false when filters is empty.
     bool name_matches_exact(test_declaration const& decl) const;
 
@@ -59,20 +82,25 @@ struct nx::test_schedule_config
     // Filters are not applied here; would_run combines the two.
     bool is_eligible(test_declaration const& decl, bool named_exactly) const;
 
-    // True if the test would be scheduled under this config: is_eligible() for its bucket and disabled status, AND name_matches().
+    // True if the test would be scheduled under this config: is_eligible() for its bucket and disabled status, AND filter_matches().
     // This is exactly the predicate test_schedule::create uses for a directly named test.
     // An alias routes through is_eligible with the alias name as the key instead.
     bool would_run(test_declaration const& decl) const;
 
-    // True if some non-empty filter is a substring of the alias name.
+    // True if some non-empty filter is a substring of the alias name — or a glob over the alias' source file, in file mode.
     // Always false when filters is empty: a full sweep already runs every driver unscoped, invoking every invocable, so expanding aliases too would double-run them.
     // An alias therefore only takes effect under an explicit filter.
-    bool alias_matches(test_alias const& alias) const;
+    bool alias_filter_matches(test_alias const& alias) const;
 
     // True if some non-empty filter equals the alias name *exactly*.
     // An exact alias name is what pulls its fragments' drivers in across a bucket, or enables a disabled driver; a substring filter does not.
     // Always false when filters is empty.
     bool alias_matches_exact(test_alias const& alias) const;
+
+    // Settles filter_mode::name_or_file against `registry`: when no filter matches any test or alias *name*, the filters are re-read as file globs.
+    // Run it once, after create_from_args and before the first filter query — the schedule and the JSON listing must see the same answer.
+    // A no-op for the pinned modes, and for an empty filter set.
+    void resolve_filter_mode(test_registry const& registry);
 
     static test_schedule_config create_from_args(int argc, char** argv);
 };

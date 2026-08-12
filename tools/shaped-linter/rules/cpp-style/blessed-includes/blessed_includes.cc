@@ -1,7 +1,7 @@
 #include "blessed_includes.hh"
 
 #include <clean-core/string/format.hh>
-#include <shaped-linter/config/glob.hh>
+#include <clean-core/string/glob.hh>
 #include <shaped-linter/lex/directive.hh>
 
 namespace scl
@@ -33,7 +33,7 @@ void check(lint_context& ctx)
     if (!ctx.config.checks_includes())
         return;
 
-    auto const path = normalize_path(ctx.source.path());
+    auto const path = cc::glob_normalize_path(ctx.source.path());
 
     for (auto const& t : ctx.tokens.tokens)
     {

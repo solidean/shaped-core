@@ -35,7 +35,7 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
     // must still be selected, so this count is reported alongside eligible_count (dev.py OR's the two).
     int eligible_alias_count = 0;
     for (auto const& alias : registry.aliases)
-        if (config.alias_matches(alias))
+        if (config.alias_filter_matches(alias))
             ++eligible_alias_count;
 
     cc::string out;
@@ -46,6 +46,8 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
         out.appendf("{}\"{}\"", i == 0 ? "" : ", ", json_escape(config.filters[i]));
     out += "],\n";
 
+    // The *resolved* reading of those filters, so a caller can say why nothing matched.
+    out.appendf("  \"filter_mode\": \"{}\",\n", config.matching_files ? "file" : "name");
     out.appendf("  \"selected_bucket\": \"{}\",\n", bucket_name(config.selected_bucket));
     out.appendf("  \"allow_cross_bucket_naming\": {},\n", config.allow_cross_bucket_naming);
     out.appendf("  \"run_disabled_tests\": {},\n", config.run_disabled_tests);
@@ -67,9 +69,9 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
         bool const eligible = !invocable && config.would_run(decl);
 
         out.appendf("    {{\"name\": \"{}\", \"file\": \"{}\", \"line\": {}, \"bucket\": \"{}\", \"enabled\": {}, "
-                    "\"seed\": {}, \"invocable\": {}, \"name_matches\": {}, \"eligible\": {}}}",
+                    "\"seed\": {}, \"invocable\": {}, \"filter_matches\": {}, \"eligible\": {}}}",
                     json_escape(decl.name), json_escape(decl.location.file_name()), decl.location.line(),
-                    bucket_name(tc.bucket), tc.enabled, tc.seed, invocable, config.name_matches(decl), eligible);
+                    bucket_name(tc.bucket), tc.enabled, tc.seed, invocable, config.filter_matches(decl), eligible);
     }
     out += first ? "]\n" : "\n  ]\n";
 
@@ -82,9 +84,9 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
         first_alias = false;
 
         out.appendf("    {{\"name\": \"{}\", \"file\": \"{}\", \"line\": {}, \"fragment_count\": {}, "
-                    "\"name_matches\": {}}}",
+                    "\"filter_matches\": {}}}",
                     json_escape(alias.name), json_escape(alias.location.file_name()), alias.location.line(),
-                    alias.fragments.size(), config.alias_matches(alias));
+                    alias.fragments.size(), config.alias_filter_matches(alias));
     }
     out += first_alias ? "]\n" : "\n  ]\n";
 
