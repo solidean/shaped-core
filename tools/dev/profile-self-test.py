@@ -172,9 +172,14 @@ def test_trace_separates_driver_from_fan_out() -> None:
     check(slices["a.cc"]["pid"] == slices["b.cc"]["pid"], "and the fan-out shares the other")
     check(slices["check"]["pid"] != slices["a.cc"]["pid"], "the two never mix")
 
-    check(slices["check"]["tid"] == 0 and slices["all"]["tid"] == 1,
+    # Tids are offset out of the small-integer range (see _tid), so identity is what matters, not the number.
+    rows_by_tid = {(e["pid"], e["tid"]): e["args"]["name"]
+                   for e in doc["traceEvents"] if e.get("name") == "thread_name"}
+    check(rows_by_tid[(slices["check"]["pid"], slices["check"]["tid"])] == "depth 0",
           "driver rows are nesting depth, so the viewer draws the call stack")
-    check({slices["a.cc"]["tid"], slices["b.cc"]["tid"]} == {0, 1},
+    check(rows_by_tid[(slices["all"]["pid"], slices["all"]["tid"])] == "depth 1",
+          "with the step inside it one row down")
+    check(slices["a.cc"]["tid"] != slices["b.cc"]["tid"],
           "two concurrent compiles take two lanes of their own process")
 
     rows = {e["args"]["name"] for e in doc["traceEvents"] if e.get("name") == "thread_name"}
@@ -357,6 +362,44 @@ def test_summary_separates_work_from_wall_clock() -> None:
           "an empty profile summarizes to nothing at all")
 
 
+def test_track_ids_cannot_be_folded_together() -> None:
+    """No slice may sit on tid 0, and no tid may equal a pid — either one silently merges two tracks.
+
+    A viewer folds `tid: 0` onto the process's main thread and treats `tid == pid` as that main thread.
+    Numbering lanes from zero therefore dumped every lane-0 slice into the row of whichever lane matched its pid.
+    One lane per process then showed unrelated jobs overlapping, while the rest looked correct.
+    """
+    jobs = [
+        driver("check", "invocation", 0.0, 9.0),
+        driver("all", "build", 0.5, 8.0),
+        # Two concurrent runs of work, so the fan-out occupies lanes 0 and 1.
+        job("a.cc", "compile", 1.0, 5.0),
+        job("b.cc", "compile", 1.0, 5.0),
+        job("c.cc", "compile", 1.0, 5.0),
+    ]
+    profile.lay_out(jobs, mode="global")
+    doc = profile.to_chrome_trace(jobs)
+
+    pids = {e["pid"] for e in doc["traceEvents"]}
+    tids = {e["tid"] for e in doc["traceEvents"]}
+    check(0 not in tids, "nothing is emitted on tid 0")
+    check(not (tids & pids), f"no tid doubles as a pid, got overlap {tids & pids}")
+
+    # The one that actually bit: a lane-0 slice must not share a track with any other lane's.
+    slices = [e for e in doc["traceEvents"] if e["ph"] == "X"]
+    tracks = {(e["pid"], e["tid"]) for e in slices}
+    check(len(tracks) == 5, f"two driver depths plus one track per concurrent compile, got {len(tracks)}")
+
+    lane_of = {e["name"]: e["tid"] for e in slices}
+    check(len({lane_of["a.cc"], lane_of["b.cc"], lane_of["c.cc"]}) == 3,
+          "three concurrent compiles stay on three distinct tracks")
+    check(lane_of["check"] != lane_of["a.cc"], "and the driver's rows never merge with the fan-out's")
+
+    # Row labels are what a reader sees, so they must still be the plain lane numbers.
+    rows = {e["args"]["name"] for e in doc["traceEvents"] if e.get("name") == "thread_name"}
+    check(rows == {"depth 0", "depth 1", "lane 0", "lane 1", "lane 2"}, f"rows stay readable, got {rows}")
+
+
 def test_exported_tracks_are_strictly_monotone() -> None:
     """No track may carry two overlapping slices, or the viewer nests them and the lane reads as a staircase.
 
@@ -426,6 +469,7 @@ TESTS = [
     test_summary_separates_work_from_wall_clock,
     test_chrome_round_trip,
     test_trace_separates_driver_from_fan_out,
+    test_track_ids_cannot_be_folded_together,
     test_exported_tracks_are_strictly_monotone,
     test_empty_trace,
     test_zero_length_job_stays_visible,

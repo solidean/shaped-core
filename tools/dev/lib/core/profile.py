@@ -467,6 +467,14 @@ def to_document(jobs: list[Job], *, lane_mode: str, track_count: int, argv: list
     }
 
 
+# Track ids are deliberately pushed out of the small-integer range instead of being the lane number.
+# A viewer folds `tid: 0` onto the process's main thread, and takes the thread whose `tid == pid` to *be* that main thread.
+# Numbering lanes from zero therefore merged every lane-0 slice into the row of whichever lane happened to equal its pid.
+# Exactly one lane per process then showed unrelated jobs overlapping, while every other lane looked fine.
+def _tid(pid: int, lane: int) -> int:
+    return pid * 10_000 + lane + 1
+
+
 def to_chrome_trace(jobs: list[Job], *, argv: list[str] | None = None) -> dict:
     """Render laid-out jobs as Chrome Trace Event Format, which https://ui.perfetto.dev loads directly.
 
@@ -485,18 +493,18 @@ def to_chrome_trace(jobs: list[Job], *, argv: list[str] | None = None) -> dict:
 
     events: list[dict] = []
     for g in groups:
-        events.append({"ph": "M", "pid": pid_of[g], "tid": 0, "name": "process_name",
+        events.append({"ph": "M", "pid": pid_of[g], "tid": _tid(pid_of[g], 0), "name": "process_name",
                        "args": {"name": g or EXTERNAL_GROUP}})
     for g, lane in sorted({(j.group, j.lane) for j in jobs}):
         row = f"depth {lane}" if g == DRIVER_GROUP else f"lane {lane}"
-        events.append({"ph": "M", "pid": pid_of[g], "tid": lane, "name": "thread_name",
+        events.append({"ph": "M", "pid": pid_of[g], "tid": _tid(pid_of[g], lane), "name": "thread_name",
                        "args": {"name": row}})
 
     for j in sorted(jobs, key=lambda j: (j.start, -j.end)):
         events.append({
             "ph": "X",
             "pid": pid_of[j.group],
-            "tid": max(j.lane, 0),
+            "tid": _tid(pid_of[j.group], max(j.lane, 0)),
             "name": j.name,
             "cat": j.type,
             "ts": round((j.start - t0) * 1e6),
