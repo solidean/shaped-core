@@ -4,8 +4,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
-
-#include <memory>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 
 namespace sg::backend::dx12
 {

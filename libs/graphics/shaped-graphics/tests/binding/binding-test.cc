@@ -4,10 +4,10 @@
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
-#include <memory>
 #include <type_traits>
 
 using namespace cc::primitive_defines;

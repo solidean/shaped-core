@@ -7,7 +7,6 @@
 #include <shaped-graphics/fwd.hh>
 
 #include <atomic>
-#include <memory>
 #include <type_traits>
 
 /// The pollable completion handle behind a bytes_future.

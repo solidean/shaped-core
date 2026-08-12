@@ -1,9 +1,8 @@
 #include <nexus/test.hh>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
-
-#include <memory>
 
 // Pure value / type tests: pixel_format helpers, texture_description shape, and the concept-gated texture<Traits> surface.
 // No GPU needed — real texture creation lives in texture-create-test.cc, whose INVOCABLE_TESTs run against each backend.

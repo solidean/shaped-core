@@ -39,6 +39,11 @@ Switching the typedefs over is what would keep sg inside the `cc` vocabulary, an
 So `std::shared_ptr` remains the one sanctioned `std::` ownership type in sg.
 A new handle follows the existing pattern; do not invent a second ownership mechanism.
 
+**`<memory>` is reached through [fwd.hh](../src/shaped-graphics/fwd.hh), never included directly.**
+The smart pointers are sg's own vocabulary rather than an incidental dependency: a handle *is* a `std::shared_ptr`, and a command list *is* a `std::unique_ptr`.
+So the header that declares that vocabulary is the one place that opens `<memory>`.
+Both backend `fwd.hh`s and every library above sg get it from there, and `.shaped-lint.yml` scopes the blessing to that single file so a stray direct include is a finding.
+
 ## `context` / `command_list` are mutable drivers; resources are shared-immutable
 
 - **Mutable drivers** — `context` and `command_list`, stateful and single-threaded.

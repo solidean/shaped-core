@@ -4,8 +4,6 @@
 #include <shaped-graphics/memory/allocation_info.hh>
 #include <shaped-graphics/types.hh>
 
-#include <memory>
-
 /// Backend memory requirements for placing a resource into a memory_heap, returned by the memory_requirements_for_* queries.
 /// Feed both fields to the external allocator that picks the offset.
 struct sg::memory_requirements

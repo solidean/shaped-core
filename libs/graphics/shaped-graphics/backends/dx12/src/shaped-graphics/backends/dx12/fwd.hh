@@ -1,8 +1,6 @@
 #pragma once
 
-#include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg
-
-#include <memory>
+#include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg, and sg's door to <memory>
 
 /// Forward declarations for the DirectX 12 backend.
 

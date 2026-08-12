@@ -1,8 +1,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/bytes_future.hh>
-
-#include <memory>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 
 using namespace cc::primitive_defines;
 

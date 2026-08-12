@@ -9,8 +9,6 @@
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <memory>
-
 namespace sg::backend::dx12
 {
 struct dx12_query_heap_lease;

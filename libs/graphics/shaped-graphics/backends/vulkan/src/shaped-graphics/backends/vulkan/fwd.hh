@@ -1,6 +1,6 @@
 #pragma once
 
-#include <memory>
+#include <shaped-graphics/fwd.hh> // sg's door to <memory>, which the context's command-list methods need
 
 /// Forward declarations for the Vulkan backend.
 

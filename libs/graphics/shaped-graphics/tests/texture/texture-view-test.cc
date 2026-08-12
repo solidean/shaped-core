@@ -1,9 +1,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/resource/views.hh>
-
-#include <memory>
 
 // Pure tests for texture views: the `as_*_view` factories on texture<Traits> build the right strongly-typed descriptor, which erases to a `raw_view` with shape `texture`.
 // Each factory takes a shape-specific parameter bag, `Traits::*_params`, naming only the axes that shape has.

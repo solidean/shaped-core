@@ -25,7 +25,6 @@
 #include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
-#include <memory>
 
 /// Creation config for the dx12 context.
 /// The flags are independent.

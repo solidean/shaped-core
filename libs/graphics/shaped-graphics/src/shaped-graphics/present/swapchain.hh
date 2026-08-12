@@ -5,8 +5,6 @@
 #include <shaped-graphics/resource/views.hh> // render_target_view — the acquire_backbuffer result
 #include <shaped-graphics/types.hh>
 
-#include <memory>
-
 namespace sg
 {
 /// How presentation paces frames against the display's vertical blank.

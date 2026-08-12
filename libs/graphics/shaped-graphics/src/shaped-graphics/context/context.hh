@@ -20,8 +20,6 @@
 #include <shaped-graphics/routine/routine_registry.hh>
 #include <shaped-graphics/types.hh>
 
-#include <memory>
-
 /// Mutable entry point to a graphics backend: the factory for command lists and GPU resources.
 /// Abstract — a backend subclasses it (e.g. sg::backend::vulkan::vulkan_context), and you obtain one from that backend's sg::create_<backend>_context(config).
 /// Must outlive every command list and resource it creates.

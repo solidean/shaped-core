@@ -4,8 +4,6 @@
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <memory>
-
 /// Result of a `cmd.query.record_gpu_timestamp()` — a pending read of one GPU timestamp.
 /// A small, copyable value type, the query analogue of bytes_future.
 ///

@@ -11,6 +11,7 @@ rules:
   - kind: allow-include
     value: <memory>
     reason: every sg *_handle IS a std::shared_ptr, and a polymorphic command_list is held by std::unique_ptr — the deviation docs/coding-guidelines.md argues for, and cc::shared_ptr does not yet carry the weak_ptr and aliasing-ctor uses this needs
+    files: src/shaped-graphics/fwd.hh
 
   # =========================================================================================================
   # The SDK gates
