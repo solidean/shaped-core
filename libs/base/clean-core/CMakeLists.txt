@@ -27,6 +27,7 @@ add_library(clean-core
     src/clean-core/string/string.cc
     src/clean-core/string/string_view.cc
     src/clean-core/string/conversion.cc
+    src/clean-core/string/glob.cc
     src/clean-core/container/vector.cc
     src/clean-core/container/byte_stream_builder.cc
     src/clean-core/container/key_value_cache.cc
@@ -112,6 +113,7 @@ target_sources(clean-core
     src/clean-core/string/format.hh
     src/clean-core/string/print.hh
     src/clean-core/string/conversion.hh
+    src/clean-core/string/glob.hh
 
     src/clean-core/function/function_ref.hh
     src/clean-core/function/unique_function.hh
@@ -270,6 +272,7 @@ if(SC_BUILD_TESTS)
 
         tests/string/conversion-test.cc
         tests/string/format-test.cc
+        tests/string/glob-test.cc
         tests/string/print-test.cc
         tests/string/string-test.cc
         tests/string/string_view-test.cc

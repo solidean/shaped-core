@@ -66,7 +66,7 @@ struct scl::lint_config
     bool checks_includes() const { return !include_directives.empty(); }
 
     /// Decide one include for one file.
-    /// `file_path` must already be normalized (see `normalize_path`); `include` is the spelling as written,
+    /// `file_path` must already be normalized (see `cc::glob_normalize_path`); `include` is the spelling as written,
     /// brackets included (`<atomic>`), and is lowercased here.
     include_decision classify_include(cc::string_view file_path, cc::string_view include) const;
 };

@@ -4,7 +4,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
-#include <shaped-linter/config/glob.hh>
+#include <clean-core/string/glob.hh>
 
 namespace scl
 {
@@ -86,7 +86,7 @@ lint_config const& config_resolver::for_directory(cc::string_view dir)
 
 lint_config const& config_resolver::resolve(cc::string_view file_path)
 {
-    auto const normalized = normalize_path(file_path);
+    auto const normalized = cc::glob_normalize_path(file_path);
     auto const dir = parent_of(normalized);
 
     static lint_config const empty;
