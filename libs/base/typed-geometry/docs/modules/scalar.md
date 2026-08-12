@@ -5,7 +5,7 @@
 ## What this module is
 
 `scalar/` is the bottom of typed-geometry, and owns everything about the **element type `T`** the geometric types are generic over.
-That is the capability seam (`scalar_traits`), the scalar free functions built on it (`one`, `sqrt`, `sin`, `cos`, `sin_cos`, `atan2`), and constants such as `pi`.
+That is the capability seam (`scalar_traits`), the scalar free functions built on it (`one`, `sqrt`, `abs`, `sin`, `cos`, `sin_cos`, `atan2`, `pow`, `log`, `round`), and constants such as `pi`.
 Scalar-like *newtypes* that are still one number in spirit belong here too — `angle` today.
 It must not depend on `linalg` or anything above it — geometric types are instantiated over scalar types, never the other way around.
 
@@ -45,8 +45,9 @@ Geometric code asking "is this the additive or multiplicative identity?" must go
 
 ### Which types count as scalars
 
-`f32`/`f64` are fully featured: sqrt plus trigonometry.
-**Every integer type** gets `one`/`is_zero`/`is_one` from a single constrained specialization, including `signed char` and `unsigned char`, which are genuine small integers.
+`f32`/`f64` are fully featured: sqrt, abs, trigonometry, exponentials and rounding.
+**Every integer type** gets `one`/`is_zero`/`is_one` plus `abs` from a single constrained specialization, including `signed char` and `unsigned char`, which are genuine small integers.
+Integers claim no rounding: `round`/`floor`/`ceil` on one is the identity, so asking for it means the caller meant a float.
 **Plain `char` is deliberately excluded** — it models text, not a number.
 It falls through to the capability-less primary template, so arithmetic-geometry over `char` is a hard compile error.
 `bool` is a scalar, but a degenerate one, and has its own specialization (`one() == true`, `is_zero(b) == !b`).
@@ -65,6 +66,18 @@ The forward functions (`sin`/`cos`/`tan`/`sin_cos`, and the reciprocals `sec`/`c
 The inverse ones (`asin`/`acos`/`atan`/`atan2`) *return* one.
 Each forward function exists as a member (`a.sin()`) and as a free function (`tg::sin(a)`), the free form delegating to the member so there is one implementation.
 The raw `scalar_traits` kernels still work in plain radian `T`: the angle typing is added only at the public layer, so a new scalar type never has to know about `angle`.
+
+### Capabilities are grouped, and rounding returns the scalar
+
+The `has_*` flags name families rather than single functions, so a new scalar opts into a coherent set at a time.
+Today: `has_sqrt`, `has_abs`, `has_trigonometry`, `has_exponential` (`pow`/`exp`/`log`) and `has_rounding` (`round`/`floor`/`ceil`).
+A scalar that can do one member of a family can essentially always do the rest, and a per-function flag would multiply the seam without buying precision.
+
+`round`/`floor`/`ceil` return the **scalar** type, not an integer.
+An integer result forces a width choice tg has no basis to make, and the `f32` → `i32` narrowing is exactly the step a caller should be writing out (`int(tg::round(x))`).
+
+`pow` takes base and exponent as the *same* `T`.
+A mixed-type overload would silently promote, which is how a `f32` pipeline quietly becomes `f64` — the cast belongs at the call site.
 
 ## See also
 
