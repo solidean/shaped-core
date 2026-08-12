@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import console
 from .models import Preset, StepResult
-from .profile import TypeStat
+from .profile import ProfileSummary, TypeStat
 
 
 def rel(p: Path, root: Path) -> str:
@@ -80,24 +80,38 @@ def summarize_build(
 # Profile
 # ---------------------------------------------------------------------------
 
-def print_profile_summary(stats: list[TypeStat], path: str) -> None:
-    """Print where the run's time went, one row per job type, heaviest first.
+def _profile_row(s: TypeStat, *, with_par: bool) -> str:
+    row = f"  {s.type:<14}{s.count:>7}{fmt_dur(s.total_s):>11}{fmt_dur(s.span_s):>11}"
+    return f"{row}{s.parallelism:>6.1f}x" if with_par else row
+
+
+def print_profile_summary(summary: ProfileSummary, path: str) -> None:
+    """Print where the run's time went: the leaf work first, then the containers around it.
+
+    The split is what makes the numbers addable.
+    Leaf rows are disjoint, so `all leaves` is a real total; a container's time is its children's, and mixing the two makes `invocation` look like the expensive part when it is only the outermost one.
 
     Two time columns, because they answer different questions.
     `sum` adds every job up, so 32 compilers running for a second each read as 32 seconds of work.
     `span` counts overlap once, so the same 32 read as one — the wall clock that type is actually responsible for, and the column to read when deciding what to make faster.
-    `par` is their ratio: 1.0 is serial, and higher is how many jobs of that type ran at once on average.
+    `par` is their ratio: 1.0 is serial, and higher is how many ran at once on average.
     """
-    if not stats:
+    if not summary.count:
         return
 
-    total = stats[-1] # summarize() appends the `all` row last
-    print(console.dim(f"\nProfile written to {path} ({total.count} job(s))"), file=sys.stderr)
-    print(console.dim(f"  {'type':<14}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"), file=sys.stderr)
-    for s in stats:
-        line = (f"  {s.type:<14}{s.count:>7}{fmt_dur(s.total_s):>11}{fmt_dur(s.span_s):>11}"
-                f"{s.parallelism:>6.1f}x")
-        print(console.dim(line) if s is not total else line, file=sys.stderr)
+    print(console.dim(f"\nProfile written to {path} ({summary.count} job(s))"), file=sys.stderr)
+
+    total = summary.leaves[-1] if summary.leaves else None
+    print(console.dim(f"  {'leaf jobs':<14}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"), file=sys.stderr)
+    for s in summary.leaves:
+        line = _profile_row(s, with_par=True)
+        print(line if s is total else console.dim(line), file=sys.stderr)
+
+    if summary.containers:
+        print(console.dim(f"\n  {'containers':<14}{'count':>7}{'sum':>11}{'span':>11}"
+                          "   (time already counted above)"), file=sys.stderr)
+        for s in summary.containers:
+            print(console.dim(_profile_row(s, with_par=False)), file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------

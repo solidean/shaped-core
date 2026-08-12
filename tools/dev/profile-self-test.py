@@ -38,8 +38,12 @@ def check(condition: bool, what: str) -> None:
         print(f"  ok: {what}")
 
 
-def job(name: str, type: str, start: float, end: float) -> profile.Job:
-    return profile.Job(name=name, type=type, start=start, end=end)
+def job(name: str, type: str, start: float, end: float, origin: str = "external") -> profile.Job:
+    return profile.Job(name=name, type=type, start=start, end=end, origin=origin)
+
+
+def driver(name: str, type: str, start: float, end: float) -> profile.Job:
+    return profile.Job(name=name, type=type, start=start, end=end, origin="driver")
 
 
 def no_lane_double_books(jobs: list[profile.Job], epsilon: float) -> None:
@@ -115,7 +119,7 @@ def test_per_type_pools_are_independent() -> None:
 
     jobs = [job("tu", "compile", 0.0, 1.0), job("suite", "test", 0.0, 1.0)]
     profile.allocate_lanes(jobs, mode="global", epsilon=0.0)
-    check({j.group for j in jobs} == {"all"}, "under global every job shares one pool")
+    check({j.group for j in jobs} == {profile.EXTERNAL_GROUP}, "under global every job shares one pool")
     check({j.lane for j in jobs} == {0, 1}, "and overlapping jobs are pushed apart")
 
 
@@ -146,6 +150,169 @@ def test_chrome_round_trip() -> None:
     check(named == {"configure", "compile"}, f"each pool is labelled, got {named}")
 
 
+def test_trace_separates_driver_from_fan_out() -> None:
+    """The driver's nested timeline and the fanned-out work are two processes, driver first."""
+    jobs = [
+        driver("check", "invocation", 0.0, 10.0),
+        driver("all", "build", 1.0, 9.0),
+        job("a.cc", "compile", 2.0, 8.0),
+        job("b.cc", "compile", 2.0, 8.0),
+    ]
+    profile.lay_out(jobs, mode="global")
+    doc = profile.to_chrome_trace(jobs)
+
+    processes = {e["pid"]: e["args"]["name"] for e in doc["traceEvents"] if e.get("name") == "process_name"}
+    check(set(processes.values()) == {profile.DRIVER_GROUP, profile.EXTERNAL_GROUP},
+          f"exactly two processes, got {set(processes.values())}")
+    check(processes[min(processes)] == profile.DRIVER_GROUP,
+          "the driver process is emitted first, so it lands on top")
+
+    slices = {e["name"]: e for e in doc["traceEvents"] if e["ph"] == "X"}
+    check(slices["check"]["pid"] == slices["all"]["pid"], "driver jobs share one process")
+    check(slices["a.cc"]["pid"] == slices["b.cc"]["pid"], "and the fan-out shares the other")
+    check(slices["check"]["pid"] != slices["a.cc"]["pid"], "the two never mix")
+
+    check(slices["check"]["tid"] == 0 and slices["all"]["tid"] == 1,
+          "driver rows are nesting depth, so the viewer draws the call stack")
+    check({slices["a.cc"]["tid"], slices["b.cc"]["tid"]} == {0, 1},
+          "two concurrent compiles take two lanes of their own process")
+
+    rows = {e["args"]["name"] for e in doc["traceEvents"] if e.get("name") == "thread_name"}
+    check(rows == {"depth 0", "depth 1", "lane 0", "lane 1"}, f"rows say which layout they are, got {rows}")
+
+    check(slices["all"]["args"]["leaf"] is False, "a container is marked as such in the viewer's args")
+    check(slices["a.cc"]["args"]["leaf"] is True, "and a leaf likewise")
+
+
+def test_classify_finds_containers() -> None:
+    """A driver span enclosing another job is an aggregate; overlap alone never is."""
+    outer = driver("outer", "build", 0.0, 10.0)
+    inner = job("inner", "compile", 1.0, 2.0)
+    profile.classify([outer, inner])
+    check(outer.aggregate and not outer.is_leaf, "a step containing another job is an aggregate")
+    check(inner.is_leaf, "and what it contains stays a leaf")
+
+    a, b = driver("a", "t", 0.0, 2.0), driver("b", "t", 1.0, 3.0)
+    profile.classify([a, b])
+    check(a.is_leaf and b.is_leaf, "partial overlap is not containment — neither encloses the other")
+
+    lone = driver("lone", "t", 0.0, 1.0)
+    profile.classify([lone])
+    check(lone.is_leaf, "a single job encloses nothing")
+
+    # Identical intervals are peers.
+    # Calling either one the container would drop the other out of the leaf table.
+    twin_a, twin_b = driver("twin-a", "t", 0.0, 1.0), driver("twin-b", "t", 0.0, 1.0)
+    profile.classify([twin_a, twin_b])
+    check(twin_a.is_leaf and twin_b.is_leaf, "jobs sharing an interval are both leaves")
+
+    # The realistic version: a whole batch landing on one clock tick, inside a step that really does contain them.
+    batch = [job(f"tu{i}", "compile", 1.0, 2.0) for i in range(32)]
+    step = driver("build", "build", 0.0, 3.0)
+    profile.classify([step, *batch])
+    check(all(b.is_leaf for b in batch), "every job of an identical batch stays a leaf")
+    check(step.aggregate, "and the step around them is still the container")
+
+    # Touching, not nesting: a sibling starting exactly when the previous ended.
+    first, second = driver("first", "t", 0.0, 1.0), driver("second", "t", 1.0, 2.0)
+    profile.classify([first, second])
+    check(first.is_leaf and second.is_leaf, "back-to-back siblings are both leaves")
+
+
+def test_concurrent_fan_out_never_contains_itself() -> None:
+    """A long compile enclosing a short one is two cores, not structure — external jobs are always leaves.
+
+    Reading that overlap as containment would file most of a build's fan-out under `containers`, leaving the leaf table reporting a fraction of the real work.
+    """
+    slow = job("slow.cc", "compile", 0.0, 6.0)
+    quick = job("quick.cc", "compile", 1.0, 1.4)
+    step = driver("all", "build", 0.0, 7.0)
+    profile.classify([step, slow, quick])
+
+    check(slow.is_leaf, "the long compile is not a container, however much it spans")
+    check(quick.is_leaf, "and neither is the one inside its window")
+    check(step.aggregate, "only the driver step that spawned them is")
+
+    summary = profile.summarize([step, slow, quick])
+    compiles = next(s for s in summary.leaves if s.type == "compile")
+    check(compiles.count == 2, f"both compiles reach the leaf table, got {compiles.count}")
+    check(abs(compiles.total_s - 6.4) < 1e-9, f"with their full sum, got {compiles.total_s}")
+
+
+def test_driver_depth_follows_the_call_stack() -> None:
+    """Driver jobs nest exactly, so depth must reproduce the call stack that produced them."""
+    invocation = driver("check", "invocation", 0.0, 100.0)
+    gate = driver("test", "check-gate", 1.0, 90.0)
+    build = driver("all", "build", 2.0, 50.0)
+    sibling = driver("suite", "test", 60.0, 80.0)
+    edge = job("tu.cc", "compile", 3.0, 4.0)
+
+    jobs = [invocation, gate, build, sibling, edge]
+    tracks = profile.lay_out(jobs, mode="global")
+
+    check(invocation.depth == 0, f"the outermost span is depth 0, got {invocation.depth}")
+    check(gate.depth == 1, f"the gate inside it is depth 1, got {gate.depth}")
+    check(build.depth == 2, f"the build inside that is depth 2, got {build.depth}")
+    check(sibling.depth == 2, f"a later sibling of the build is also depth 2, got {sibling.depth}")
+
+    check(all(j.group == profile.DRIVER_GROUP for j in (invocation, gate, build, sibling)),
+          "every driver job belongs to the driver group")
+    check(all(j.lane == j.depth for j in (invocation, gate, build, sibling)),
+          "and its track is its depth, not an allocated lane")
+
+    check(edge.group == profile.EXTERNAL_GROUP, "the harvested edge belongs to the external group")
+    check(edge.lane == 0, f"and is laned independently of the step that spawned it, got lane {edge.lane}")
+    check(tracks == 4, f"three driver depths plus one external lane, got {tracks}")
+
+
+def test_adjacent_siblings_stay_siblings() -> None:
+    """Two spans recorded back to back are siblings, even when the first appears to end a hair late.
+
+    Timestamps are taken at span entry and exit, and the rounding between them can leave the previous span ending marginally after the next begins.
+    Unwinding on that alone would bury every following sibling one row deeper than it belongs.
+    """
+    parent = driver("check", "invocation", 0.0, 10.0)
+    first = driver("fingerprint", "fingerprint", 1.0, 2.0)
+    second = driver("discover", "discover", 2.0 - 1e-5, 3.0)
+    third = driver("env", "env", 3.5, 4.0)
+    profile.classify([parent, first, second, third])
+
+    check(parent.depth == 0, "the enclosing span is still depth 0")
+    check(first.depth == 1, f"the first child is depth 1, got {first.depth}")
+    check(second.depth == 1, f"and a sibling overlapping it by a hair stays depth 1, got {second.depth}")
+    check(third.depth == 1, f"as does a cleanly separated later sibling, got {third.depth}")
+
+    # A genuine child must still nest, so the tolerance above cannot have flattened everything.
+    real_child = driver("inner", "configure", 1.2, 1.4)
+    profile.classify([parent, first, real_child])
+    check(real_child.depth == 2, f"a span truly inside another is deeper, got {real_child.depth}")
+
+
+def test_split_summary_does_not_double_count() -> None:
+    """The whole point of the split: leaf rows are addable, containers are not mixed in."""
+    jobs = [
+        driver("check", "invocation", 0.0, 10.0),
+        driver("all", "build", 0.0, 8.0),
+        driver("relwithdebinfo", "env", 8.0, 9.0),
+        job("a.cc", "compile", 1.0, 5.0),
+        job("b.cc", "compile", 1.0, 5.0),
+    ]
+    summary = profile.summarize(jobs)
+
+    leaf_types = {s.type for s in summary.leaves}
+    container_types = {s.type for s in summary.containers}
+    check("compile" in leaf_types and "env" in leaf_types, "real work is a leaf, whatever its origin")
+    check(container_types == {"invocation", "build"}, f"only enclosing spans are containers, got {container_types}")
+    check(not (leaf_types & container_types), "no type appears in both tables")
+
+    total = summary.leaves[-1]
+    check(total.type == "all leaves", "the leaf table ends with its own total")
+    check(total.count == 3, f"which counts only leaves, got {total.count}")
+    check(abs(total.total_s - 9.0) < 1e-9, f"summing 4+4+1 leaf seconds, got {total.total_s}")
+    check(abs(total.span_s - 5.0) < 1e-9, f"spanning 1..5 plus 8..9, got {total.span_s}")
+    check(summary.count == 5, "the header count still covers every job")
+
+
 def test_union_span_counts_overlap_once() -> None:
     """The span column is the whole point of the summary, so its overlap merging has to be exact."""
     check(profile.union_span([]) == 0.0, "nothing spans no time")
@@ -168,24 +335,26 @@ def test_union_span_counts_overlap_once() -> None:
 
 
 def test_summary_separates_work_from_wall_clock() -> None:
-    """Fanned-out work must show a large sum against a small span; the `all` row carries the run."""
-    jobs = [job(f"tu{i}", "compile", 0.0, 1.0) for i in range(8)]
-    jobs.append(job("build", "build", 0.0, 1.2))
-    stats = profile.summarize(jobs)
+    """Fanned-out work must show a large sum against a small span — that gap is the parallelism."""
+    jobs = [job(f"tu{i}", "compile", i * 0.1, i * 0.1 + 1.0) for i in range(8)]
+    jobs.append(job("suite", "test", 5.0, 7.0))
+    summary = profile.summarize(jobs)
 
-    compile_row = next(s for s in stats if s.type == "compile")
+    compile_row = next(s for s in summary.leaves if s.type == "compile")
     check(compile_row.count == 8, "every job of a type is counted")
-    check(compile_row.total_s == 8.0, f"sum adds each job's duration, got {compile_row.total_s}")
-    check(compile_row.span_s == 1.0, f"span counts the concurrent second once, got {compile_row.span_s}")
-    check(abs(compile_row.parallelism - 8.0) < 1e-9, "and their ratio is the parallelism")
+    check(abs(compile_row.total_s - 8.0) < 1e-9, f"sum adds each job's duration, got {compile_row.total_s}")
+    check(abs(compile_row.span_s - 1.7) < 1e-9, f"span counts the overlap once, got {compile_row.span_s}")
+    check(compile_row.parallelism > 4.0, "so their ratio reports the fan-out")
 
-    total = stats[-1]
-    check(total.type == "all", "the run-wide row comes last, where the printer expects it")
-    check(total.count == 9, "it counts every job regardless of type")
-    check(total.span_s == 1.2, f"and spans the whole run, got {total.span_s}")
-    check(stats[0].total_s >= stats[1].total_s, "types are ordered heaviest first")
+    serial_row = next(s for s in summary.leaves if s.type == "test")
+    check(abs(serial_row.parallelism - 1.0) < 1e-9, "a lone job is exactly 1.0x")
 
-    check(profile.summarize([]) == [], "an empty profile summarizes to nothing at all")
+    check(summary.leaves[0].total_s >= summary.leaves[1].total_s, "types are ordered heaviest first")
+    check(summary.leaves[-1].type == "all leaves", "and the total lands last, where the printer expects it")
+
+    empty = profile.summarize([])
+    check(empty.count == 0 and not empty.leaves and not empty.containers,
+          "an empty profile summarizes to nothing at all")
 
 
 def test_empty_trace() -> None:
@@ -209,9 +378,15 @@ TESTS = [
     test_epsilon_coalesces,
     test_container_precedes_contained,
     test_per_type_pools_are_independent,
+    test_classify_finds_containers,
+    test_concurrent_fan_out_never_contains_itself,
+    test_driver_depth_follows_the_call_stack,
+    test_adjacent_siblings_stay_siblings,
+    test_split_summary_does_not_double_count,
     test_union_span_counts_overlap_once,
     test_summary_separates_work_from_wall_clock,
     test_chrome_round_trip,
+    test_trace_separates_driver_from_fan_out,
     test_empty_trace,
     test_zero_length_job_stays_visible,
 ]
