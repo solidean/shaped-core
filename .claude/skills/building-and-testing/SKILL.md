@@ -46,11 +46,17 @@ Everything below is session judgement; the mechanisms, flags and artifact format
 - **`--preset` is a PER-SUBCOMMAND flag — it goes AFTER the subcommand.**
   `uv run dev.py test --preset release-clang`, *not* `dev.py --preset … test`.
   Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs` and `--colored` / `--plain` go before it; everything else goes after.
+  The `--profile*` flags are the exception: they bind on either side.
   Getting it wrong is an argparse error rather than a wrong build, so it costs a round trip, not an answer.
 
 - **Touching `CC_ASSERT`-gated code? Build a `release-*` preset too.**
   The default `relwithdebinfo-*` preset has assertions on and only a `release-*` preset has them off, so a change that compiles under the default can still fail the assertions-off branch.
   A member referenced only inside a `CC_ASSERT` is the classic case.
+
+- **A slow build or `check` is a question for `--profile`, not for guesswork.**
+  `uv run dev.py check --fix --profile .tmp/dev-profile/check.json --profile-type chrome-tracing` records every subprocess, compile edge, lint job and in-process phase.
+  The result loads straight into <https://ui.perfetto.dev>, or into `analyze_trace`.
+  The step banners only time whole steps, so the costs that actually surprise you — per-TU compiles, the MSVC env capture, the per-binary test probes — are invisible without it.
 
 - **A crash shows up as a non-zero exit and a failure XML.**
   dev.py synthesizes a JUnit result from each binary's exit code, so a binary that crashes before printing anything is still reported as failed.

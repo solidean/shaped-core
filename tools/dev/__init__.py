@@ -7,7 +7,7 @@ docs/dev-py-driver.md is the design behind both.
 
 from __future__ import annotations
 
-from .lib.core import console, report
+from .lib.core import console, profile, report
 from .lib.core.archive import archive_diag, archive_logs
 from .lib.core.logs import merge_junit, ninja_built_count
 from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
@@ -15,6 +15,9 @@ from .lib.core.process import configure_mirroring, emsdk_env, find_emsdk_root, r
 from .lib.pipeline.build import build
 from .lib.pipeline.cmake import remove_build_dir
 from .lib.pipeline.configure import configure, ensure_configured
+from .lib.pipeline.diagjobs import BuildMark
+from .lib.pipeline.diagjobs import harvest as harvest_build_jobs
+from .lib.pipeline.diagjobs import mark as mark_build
 from .lib.pipeline.eligibility import select_eligible_binaries
 from .lib.pipeline.test import test
 from .lib.project.compdb import find_entry, load_entries, suggest_files
@@ -74,7 +77,11 @@ __all__ = [
     "build",
     "clangd",
     "console",
+    "profile",
     "report",
+    "BuildMark",
+    "mark_build",
+    "harvest_build_jobs",
     "Check",
     "list_checks",
     "run_checks",

@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from . import console
+from . import console, profile
 from .logs import report_capture, step_log_paths
 from .models import Preset, StepResult
 
@@ -220,9 +220,11 @@ def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, s
     Emscripten presets get the emsdk environment; every other preset falls back to the MSVC environment on Windows, and to None elsewhere.
     None means "inherit the parent env unchanged"; a returned dict is a full environment, ready to hand straight to run_step.
     """
-    if preset.is_emscripten:
-        return emsdk_env(emsdk_path)
-    return msvc_env(preset.toolset, preset.arch)
+    # Profiled because the MSVC path shells out to vswhere and VsDevCmd.bat, once per preset, and that is charged to nothing in the step banners.
+    with profile.span(preset.name, type="env"):
+        if preset.is_emscripten:
+            return emsdk_env(emsdk_path)
+        return msvc_env(preset.toolset, preset.arch)
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +388,14 @@ def run_step(
 
     stdout_path, stderr_path = step_log_paths(build_dir, step_type, name)
 
+    # A child that knows how to profile needs to be told where to leave its fragment, and an explicit
+    # env would otherwise drop the variable — an MSVC environment is rebuilt from VsDevCmd output, not inherited.
+    fragment = profile.fragment_env()
+    if fragment and env is not None:
+        env = {**env, **fragment}
+
     start = time.perf_counter()
+    started_at = time.time()
     timed_out = False
     asked = False
     with open(stdout_path, "w", encoding="utf-8", errors="replace") as out_f, \
@@ -434,6 +443,10 @@ def run_step(
     report_capture(stderr_path)
 
     returncode = 124 if timed_out else proc.returncode
+    profile.record(
+        name or step_type, type=step_type, start=started_at, end=started_at + duration_s,
+        extra={"returncode": returncode, "timed_out": timed_out, "command": cmd},
+    )
     result = StepResult(
         step_type=step_type,
         name=name or step_type,

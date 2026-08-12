@@ -224,8 +224,9 @@ def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tup
     done = 0
 
     def one(f: Path) -> subprocess.CompletedProcess:
-        return subprocess.run(base_cmd + [str(f)], cwd=str(ROOT), stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        with dev.profile.span(dev.report.rel(f, ROOT), type="clang-tidy"):
+            return subprocess.run(base_cmd + [str(f)], cwd=str(ROOT), stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         futures = {ex.submit(one, f): f for f in files}
@@ -270,6 +271,10 @@ def main() -> None:
                              "concurrent edits to a shared header.")
     parser.add_argument("files", nargs="*", help="Specific .cc files to lint (default: discover)")
     args = parser.parse_args()
+
+    # dev.py sees this whole run as one opaque lint step, so the per-file fan-out below records itself.
+    # A no-op unless the parent asked for a profile.
+    dev.profile.configure_from_env()
 
     build_dir = Path(args.build_dir).resolve() if args.build_dir else _default_build_dir()
     if build_dir is None:

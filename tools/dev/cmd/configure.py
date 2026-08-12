@@ -18,6 +18,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(p)
     a.build_overrides(p)
     a.emsdk(p)
+    a.profile(p)
     return p
 
 

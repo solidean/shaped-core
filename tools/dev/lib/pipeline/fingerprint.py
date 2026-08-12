@@ -11,12 +11,19 @@ import hashlib
 import os
 from pathlib import Path
 
+from ..core import profile
+
 _SKIP_DIRS = {"build", "extern", ".git", "__pycache__"}
 _SOURCE_SUFFIXES = (".cc", ".hh")
 
 
 def compute(root: Path) -> str:
     """Hash cmake inputs + source-file listing for the whole repo."""
+    with profile.span("fingerprint", type="fingerprint"):
+        return _compute(root)
+
+
+def _compute(root: Path) -> str:
     h = hashlib.sha256()
 
     cmake_files: list[Path] = []

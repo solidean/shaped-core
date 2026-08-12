@@ -97,6 +97,7 @@ The default is chosen by platform:
 Override with `--preset`. **It is a per-subcommand flag — it goes *after* the subcommand** (`uv run dev.py test --preset release-clang`).
 `--emsdk-path` (for WASM) is likewise per-subcommand.
 Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs`, and `--colored` / `--plain` are global, before the subcommand.
+The `--profile*` flags of [Profiling a run](#profiling-a-run) are the one exception to the split: they are declared both globally and per-subcommand, so they bind on either side.
 Presets accept comma-lists, repeated flags, and shell-style wildcards, and dev.py operates on all that match:
 
 ```bash
@@ -191,6 +192,7 @@ For each step it:
 - captures stdout/stderr to `build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt`,
 - writes a JSON sidecar in the build dir (`configure.json` / `build.json` / `test.json`),
 - writes a per-binary JUnit `*.results.xml` next to each test binary,
+- and, with `--profile`, adds that step to a run-wide job profile ([Profiling a run](#profiling-a-run)),
 
 then prints a one-line trace per step plus a pass/fail summary.
 On failure it prints the exact diagnostic selector to run.
@@ -341,6 +343,92 @@ uv run dev.py info compile-command libs/base/clean-core/src/clean-core/common/as
 The target argument to `build-flags` / `link-flags` accepts comma-lists, repeated values, and shell-style wildcards (`"clean-core*"`), like `--target` elsewhere.
 Use `--preset` to inspect a specific configuration.
 
+## Profiling a run
+
+`--profile FILE` records **where a dev.py invocation's wall-clock time went** and writes it out on exit, pass or fail.
+It answers the question the per-step trace cannot.
+A `build` line saying `7534 ms` does not say which translation units those 7.5 seconds went into, or how much of the run never reached the compiler at all.
+
+```bash
+uv run dev.py check --fix --profile .tmp/dev-profile/check.json --profile-type chrome-tracing
+uv run dev.py build --profile .tmp/dev-profile/build.json
+```
+
+Unlike every other flag here, `--profile` / `--profile-type` / `--profile-lanes` bind **on either side of the subcommand**.
+Profiling is cross-cutting, and demanding a position for it is friction with no upside.
+
+Every profiled run prints its own summary, so the common question is answered without opening anything:
+
+```
+Profile written to .tmp/dev-profile/check.json (1918 job(s))
+  type            count        sum       span    par
+  compile          1751   2560.5 s     85.5 s  30.0x
+  invocation          1    135.4 s    135.4 s   1.0x
+  check-gate          5    135.4 s    135.4 s   1.0x
+  build               5     86.9 s     86.9 s   1.0x
+  test               52     33.9 s     33.9 s   1.0x
+  link               63     11.2 s      4.4 s   2.5x
+  env                 8      8.8 s      8.8 s   1.0x
+  all              1918   2976.8 s    135.4 s  22.0x
+```
+
+**`sum` and `span` answer different questions, and `span` is the one to act on.**
+`sum` adds every job up, so 1751 compiles read as 2560 s of work.
+`span` counts overlap once, so the same 1751 read as the 85.5 s of wall clock they are actually responsible for.
+`par` is the ratio — 1.0 is serial, and above that is how many jobs of that type ran at once on average.
+A type with a large `sum` and a small `span` is already parallel and not the thing to fix; a type whose `span` is close to the `all` row's is.
+
+`env` above is a worked example: 8.8 s of a 135 s run, at `1.0x`, spent re-deriving the same MSVC environment.
+
+### What becomes a job
+
+A **job** is one thing with a wall-clock start and an end.
+Five sources feed the profile, and none of them needs the build reconfigured:
+
+| type | one job per | where it comes from |
+|------|-------------|---------------------|
+| `configure` / `build` / `test` / `lint` / `format` / `run` | captured subprocess | `run_step`, the single choke point every child goes through |
+| `compile` / `link` | translation unit, and linked binary | the `<output>.diag.json` sidecars `diag-launcher` already writes next to every artifact |
+| `clang-tidy` | linted `.cc` | the gate runner's own thread pool, reported back through a fragment file |
+| `check-gate` | pre-commit gate | the `check` registry |
+| `env` / `git` / `discover` / `fingerprint` / `probe` / `prereq` / `crossrefs` | in-process phase | spans around the work that spends real time without spawning a step |
+
+That last row is the reason to reach for this at all.
+MSVC environment capture, `git status`, repo fingerprinting and the per-binary `--list-tests-json` probes are charged to nothing in the step trace.
+On a multi-preset `check` they add up.
+
+Compile and link jobs are harvested by diffing the sidecars against a mark taken before each build step, so an up-to-date build contributes none and only what actually rebuilt is timed.
+Emscripten presets have no launcher and fall back to the tail of `.ninja_log`, whose edge times are relative to the ninja invocation and are anchored against the step's own end.
+That is slightly less exact, and the only path for WASM.
+
+### Lanes
+
+Nothing here has a thread or a core to attribute a job to, so lanes are **reconstructed**: jobs are sorted by start and greedily packed into the fewest lanes their overlap requires.
+A containing job sorts ahead of what it contains, so a build step lands in a lower lane than its compile edges and the result reads as a flame chart.
+
+`--profile-lanes global` (the default) packs every job into one pool, which is the most compact view.
+`--profile-lanes per-type` gives each job type its own pool, and each pool becomes its own labelled track in the trace — worth it once one kind of work is what you are actually chasing.
+
+### Formats, and composing runs
+
+`--profile-type jobs` (the default) writes the raw records: `name`, `type`, `start`, `end`, `extra`, plus the allocated `lane` for convenience.
+`--profile-type chrome-tracing` converts them to Chrome Trace Event Format, which <https://ui.perfetto.dev> loads directly and `analyze_trace` reads too.
+
+Times are **absolute epoch seconds**, so profiles from separate invocations compose without renormalizing:
+
+```bash
+uv run dev.py profiling merge .tmp/dev-profile/*.json --out .tmp/dev-profile/all.json --type chrome-tracing
+```
+
+Lanes are re-allocated over the whole merged set, and a single input is therefore also the converter — record once as `jobs`, render it as a trace whenever.
+
+The pure half of this — lane allocation and the trace export — has its own invariant test.
+A lane that double-books two overlapping jobs would make parallel work read as serial, and nothing else would notice:
+
+```bash
+uv run tools/dev/profile-self-test.py
+```
+
 ## Tests (nexus)
 
 Test executables follow the convention `<lib>-test` and are built on **nexus**, which is Catch2 v3 CLI–compatible.
@@ -408,9 +496,12 @@ It stays available for manually ASan-checking exception-free code paths.
   The log spells that out, because the report announces a fatal fault that never really happened.
 - `--merged-xml-report FILE` / `--no-xml-reports` (on `test`) — merge per-binary XML into one file, or skip XML entirely.
   Per-binary XML is on by default and is what `test_diag` reads, so you usually need neither.
+- `--profile FILE`, with `--profile-type` and `--profile-lanes` — record where the run's wall clock went; see [Profiling a run](#profiling-a-run).
+  The only flags that bind on either side of the subcommand.
 
 ## Related
 
 - [.claude/skills/building-and-testing/SKILL.md](../../.claude/skills/building-and-testing/SKILL.md) — the skill this doc backs.
 - [prose.md](prose.md) — `dev.py lint`'s prose half: `prose-apply`, `prose-stats`, and reworking a surface.
+- [profiling.md](profiling.md) — the *other* profiling: what the CPU spent running our C++, rather than what the build spent producing it.
 - [docs/coding-guidelines.md](../coding-guidelines.md) — how to write the code you're building.

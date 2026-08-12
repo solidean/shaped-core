@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import console
 from .models import Preset, StepResult
+from .profile import TypeStat
 
 
 def rel(p: Path, root: Path) -> str:
@@ -73,6 +74,30 @@ def summarize_build(
         ),
         file=sys.stderr,
     )
+
+
+# ---------------------------------------------------------------------------
+# Profile
+# ---------------------------------------------------------------------------
+
+def print_profile_summary(stats: list[TypeStat], path: str) -> None:
+    """Print where the run's time went, one row per job type, heaviest first.
+
+    Two time columns, because they answer different questions.
+    `sum` adds every job up, so 32 compilers running for a second each read as 32 seconds of work.
+    `span` counts overlap once, so the same 32 read as one — the wall clock that type is actually responsible for, and the column to read when deciding what to make faster.
+    `par` is their ratio: 1.0 is serial, and higher is how many jobs of that type ran at once on average.
+    """
+    if not stats:
+        return
+
+    total = stats[-1] # summarize() appends the `all` row last
+    print(console.dim(f"\nProfile written to {path} ({total.count} job(s))"), file=sys.stderr)
+    print(console.dim(f"  {'type':<14}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"), file=sys.stderr)
+    for s in stats:
+        line = (f"  {s.type:<14}{s.count:>7}{fmt_dur(s.total_s):>11}{fmt_dur(s.span_s):>11}"
+                f"{s.parallelism:>6.1f}x")
+        print(console.dim(line) if s is not total else line, file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------

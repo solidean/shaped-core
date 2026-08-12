@@ -1,6 +1,6 @@
 """Shared argparse fragments reused across command subparsers.
 
-A command owns its own subparser; these keep the flags several of them share — preset selection, the build-dir overrides, the emsdk path — defined once.
+A command owns its own subparser; these keep the flags several of them share — preset selection, the build-dir overrides, the emsdk path, the profiling flags — defined once.
 """
 
 from __future__ import annotations
@@ -33,6 +33,29 @@ def build_overrides(p: argparse.ArgumentParser) -> None:
         "--build-dir", metavar="PATH", default=None,
         help="Use this build directory instead of build/<preset> (relative to the repo root, "
              "or absolute). For a fully custom layout; single preset only.",
+    )
+
+
+def profile(p: argparse.ArgumentParser) -> None:
+    """The profiling flags, repeated per subcommand so they bind on either side of it.
+
+    `SUPPRESS` is load-bearing: a normal default would have the subparser write its own None over a value given before the subcommand.
+    dev.py declares the same three flags globally, and these only shadow them when actually passed.
+    """
+    p.add_argument(
+        "--profile", metavar="FILE", default=argparse.SUPPRESS,
+        help="Write a job profile of this run to FILE: one record per subprocess, compile "
+             "edge, lint job and in-process phase, with lanes allocated for overlap.",
+    )
+    p.add_argument(
+        "--profile-type", choices=("jobs", "chrome-tracing"), default=argparse.SUPPRESS,
+        help="Profile format: 'jobs' (default) is the raw records, 'chrome-tracing' converts "
+             "them to a trace https://ui.perfetto.dev loads directly.",
+    )
+    p.add_argument(
+        "--profile-lanes", choices=("global", "per-type"), default=argparse.SUPPRESS,
+        help="Lane allocation: 'global' (default) packs every job into one pool, 'per-type' "
+             "gives each job type its own pool and its own track in the trace.",
     )
 
 

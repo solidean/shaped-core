@@ -29,6 +29,8 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core import profile
+
 # Top-level repo dirs a repo-root-relative link or comment token may start with.
 # A token starting with one of these is resolved repo-root-relative.
 # Anything else is treated as relative to the referencing file, then to the repo root as a fallback — which is how a bare root file (CLAUDE.md, dev.py) resolves.
@@ -387,7 +389,9 @@ def check_crossrefs(root: Path) -> CrossRefResult:
 
     md_files: list[Path] = []
     src_files: list[Path] = []
-    for path in list_files(root):
+    with profile.span("git ls-files", type="git"):
+        listed = list_files(root)
+    for path in listed:
         if path.suffix == ".md":
             md_files.append(path)
         elif is_source(path):
@@ -396,10 +400,12 @@ def check_crossrefs(root: Path) -> CrossRefResult:
     offenders: list[str] = []
     md_refs = 0
     src_refs = 0
-    for md in sorted(md_files):
-        md_refs += check_md_links(md, root, offenders)
-    for src in sorted(src_files):
-        src_refs += check_source_refs(src, root, offenders)
+    with profile.span("markdown links", type="crossrefs"):
+        for md in sorted(md_files):
+            md_refs += check_md_links(md, root, offenders)
+    with profile.span("source references", type="crossrefs"):
+        for src in sorted(src_files):
+            src_refs += check_source_refs(src, root, offenders)
 
     return CrossRefResult(
         offenders=offenders,

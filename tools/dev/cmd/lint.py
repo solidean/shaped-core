@@ -25,6 +25,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     ct = lint_sub.add_parser("clang-tidy", help="Run the clang-tidy whitelist gates (must be zero to commit)")
     a.preset(ct)
+    a.profile(ct)
     ct.add_argument("--dirty-only", action="store_true",
                     help="Only lint git-dirty/untracked .cc sources (the next commit's files)")
     ct.add_argument("--fix", action="store_true", help="Let clang-tidy apply its fixes in place")
@@ -33,12 +34,14 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     sl = lint_sub.add_parser("shaped", help="Run shaped-linter — our own rules over code and prose (tools/shaped-linter)")
     a.preset(sl)
+    a.profile(sl)
     sl.add_argument("--dirty-only", action="store_true",
                     help="Only lint the next commit's files, and for prose rules only its changed lines")
     sl.add_argument("--fix", action="store_true", help="Let shaped-linter apply its suggested fixes in place")
 
     pa = lint_sub.add_parser("prose-apply", help="Apply a prose plan — many comment/doc rewrites in one pass")
     a.preset(pa)
+    a.profile(pa)
     pa.add_argument("plan", help="Plan file to apply (conventionally under .tmp/)")
     pa.add_argument("--dry-run", action="store_true", help="Validate the plan and report, but write nothing")
     pa.add_argument("--stats", action="store_true",
@@ -46,11 +49,13 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     ps = lint_sub.add_parser("prose-stats", help="Report how much prose files carry — lines and words, per file and total")
     a.preset(ps)
+    a.profile(ps)
     ps.add_argument("paths", nargs="+", help="Files or directories to measure (a directory is walked for lintable sources)")
 
     bi = lint_sub.add_parser("bless-includes",
                              help="Fill each .shaped-lint.yml's generated block with the includes the tree still needs blessed")
     a.preset(bi)
+    a.profile(bi)
     bi.add_argument("--write", action="store_true", help="Rewrite the generated blocks in place, rather than printing them")
     return p
 

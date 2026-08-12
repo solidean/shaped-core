@@ -24,6 +24,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     run_p = cov_sub.add_parser("run", help="Build + run instrumented tests, then merge & report")
     a.preset(run_p)
+    a.profile(run_p)
     run_p.add_argument("--target", "-t", action="append",
                        help="Test binary target(s): comma-list, repeatable, wildcards")
     run_p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
@@ -36,12 +37,14 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     merge_p = cov_sub.add_parser("merge", help="Combine several presets' coverage into one report")
     a.preset(merge_p)
+    a.profile(merge_p)
     merge_p.add_argument("--output", "-o", metavar="DIR",
                          help="Output directory (default: build/coverage-merged)")
     merge_p.add_argument("--html", action="store_true", help="Also write an llvm-cov HTML report")
 
     report_p = cov_sub.add_parser("report", help="Re-post-process existing coverage (no test run)")
     a.preset(report_p)
+    a.profile(report_p)
     report_p.add_argument("--html", action="store_true", help="Also write an llvm-cov HTML report")
     return p
 

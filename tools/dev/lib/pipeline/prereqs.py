@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ..core import profile
+
 # Preset name fragments for cross-targets that never use these (host-side) dependencies.
 _NON_NATIVE = ("wasm", "emscripten", "web", "android", "ios")
 
@@ -71,7 +73,8 @@ def _ensure(
         return  # already installed at the pinned release — fast path
 
     print(f"{name}: {doing} (set {skip_env}=1 to skip) ...", file=sys.stderr)
-    result = subprocess.run([sys.executable, str(script)], cwd=root)
+    with profile.span(name, type="prereq", extra={"script": script_name}):
+        result = subprocess.run([sys.executable, str(script)], cwd=root)
     if result.returncode != 0:
         print(
             f"{name}: {script_name} failed — {dependent} will be skipped. "
