@@ -1,6 +1,8 @@
 #include "schedule.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/span.hh>
+#include <clean-core/string/glob.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 
@@ -15,6 +17,55 @@ namespace
 std::string_view as_sv(cc::string_view s)
 {
     return std::string_view(s.data(), size_t(s.size()));
+}
+
+// Does one glob select `path`? Both sides are already normalized, and matching folds case — a path is a path,
+// and the recorded file is spelled however the compiler was invoked.
+//
+// A pattern is also tried as a path *suffix*, which is what lets a bare filename or a repo-relative fragment
+// select against the absolute path a test declaration carries.
+// A pattern naming no wildcard tail additionally stands for its subtree, so a directory selects everything under it.
+bool path_matches_glob(cc::string_view pattern, cc::string_view path)
+{
+    // Both sides are normalized by their callers — once per filter and once per test, rather than once per pairing.
+    constexpr auto k_options = cc::flags(cc::glob_option::ignore_case);
+
+    auto const p = cc::glob_normalize_path(pattern);
+    if (p.empty())
+        return false;
+
+    auto const anchored = cc::string("**/") + p;
+    if (cc::glob_matches(p, path, k_options) || cc::glob_matches(anchored, path, k_options))
+        return true;
+
+    if (!cc::string_view(p).ends_with('*'))
+        return cc::glob_matches(p + "/**", path, k_options) || cc::glob_matches(anchored + "/**", path, k_options);
+
+    return false;
+}
+
+// True if any non-empty filter selects `file`, the source path a declaration recorded.
+bool any_file_matches(cc::span<cc::string const> filters, char const* file)
+{
+    if (file == nullptr)
+        return false;
+
+    auto const path = cc::glob_normalize_path(file);
+    for (auto const& filter : filters)
+        if (!filter.empty() && path_matches_glob(filter, path))
+            return true;
+
+    return false;
+}
+
+// True if any non-empty filter is a substring of `name`.
+bool any_name_matches(cc::span<cc::string const> filters, cc::string_view name)
+{
+    for (auto const& filter : filters)
+        if (!filter.empty() && name.contains(filter))
+            return true;
+
+    return false;
 }
 
 // Element-wise equality of two section paths (cc::vector has no operator==).
@@ -67,6 +118,18 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         {
             config.selected_bucket = config::test_bucket::guide_benchmark;
             explicit_bucket = true;
+            continue;
+        }
+        // Read the filters as file globs over the tests' source files, skipping name matching entirely.
+        else if (arg == "--match-files")
+        {
+            config.mode = filter_mode::file;
+            continue;
+        }
+        // Read the filters as test names only, without the file-glob fallback.
+        else if (arg == "--match-names")
+        {
+            config.mode = filter_mode::name;
             continue;
         }
         // Check for section filter flag
@@ -167,22 +230,16 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     return config;
 }
 
-bool nx::test_schedule_config::name_matches(test_declaration const& decl) const
+bool nx::test_schedule_config::filter_matches(test_declaration const& decl) const
 {
     if (filters.empty())
         return true;
 
-    for (auto const& filter : filters)
-    {
-        if (filter.empty())
-            continue;
+    if (matching_files)
+        return any_file_matches(filters, decl.location.file_name());
 
-        // Simple substring match for now
-        if (decl.name.contains(filter))
-            return true;
-    }
-
-    return false;
+    // Simple substring match for now
+    return any_name_matches(filters, decl.name);
 }
 
 bool nx::test_schedule_config::name_matches_exact(test_declaration const& decl) const
@@ -214,25 +271,19 @@ bool nx::test_schedule_config::is_eligible(test_declaration const& decl, bool na
 
 bool nx::test_schedule_config::would_run(test_declaration const& decl) const
 {
-    return is_eligible(decl, name_matches_exact(decl)) && name_matches(decl);
+    return is_eligible(decl, name_matches_exact(decl)) && filter_matches(decl);
 }
 
-bool nx::test_schedule_config::alias_matches(test_alias const& alias) const
+bool nx::test_schedule_config::alias_filter_matches(test_alias const& alias) const
 {
     // Empty filters = a full sweep, which already runs every driver unscoped; do not expand aliases then.
     if (filters.empty())
         return false;
 
-    for (auto const& filter : filters)
-    {
-        if (filter.empty())
-            continue;
+    if (matching_files)
+        return any_file_matches(filters, alias.location.file_name());
 
-        if (alias.name.contains(filter))
-            return true;
-    }
-
-    return false;
+    return any_name_matches(filters, alias.name);
 }
 
 bool nx::test_schedule_config::alias_matches_exact(test_alias const& alias) const
@@ -241,6 +292,29 @@ bool nx::test_schedule_config::alias_matches_exact(test_alias const& alias) cons
         if (!filter.empty() && cc::string_view(alias.name) == cc::string_view(filter))
             return true;
     return false;
+}
+
+void nx::test_schedule_config::resolve_filter_mode(test_registry const& registry)
+{
+    if (mode != filter_mode::name_or_file)
+    {
+        matching_files = mode == filter_mode::file;
+        return;
+    }
+
+    // A full sweep has nothing to fall back from.
+    if (filters.empty())
+        return;
+
+    for (auto const& decl : registry.declarations)
+        if (any_name_matches(filters, decl.name))
+            return;
+
+    for (auto const& alias : registry.aliases)
+        if (any_name_matches(filters, alias.name))
+            return;
+
+    matching_files = true;
 }
 
 nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, test_registry const& registry)
@@ -274,7 +348,7 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
     //  - its exact (driver, section path) is already in the driver's scope set (two aliases sharing a fragment).
     for (auto const& alias : registry.aliases)
     {
-        if (!config.alias_matches(alias))
+        if (!config.alias_filter_matches(alias))
             continue;
 
         bool const named_exactly = config.alias_matches_exact(alias);

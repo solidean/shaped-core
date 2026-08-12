@@ -127,6 +127,10 @@ int nx::run(int argc, char** argv)
     // listing or scheduling, so aliases are visible even when we only list/discover tests and never run them.
     nx::run_setup_callbacks(registry);
 
+    // Settle name-vs-file matching once, before anything queries a filter: the listing below and the schedule must agree.
+    // Aliases are registered by then, so a filter naming one counts as a name match and suppresses the file fallback.
+    config.resolve_filter_mode(registry);
+
     // Handle Catch2 XML discovery mode for TestMate integration
     if (config.is_catch2_xml_discovery)
     {

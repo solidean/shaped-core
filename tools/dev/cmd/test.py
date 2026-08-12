@@ -32,7 +32,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     xml_group.add_argument("--no-xml-reports", action="store_true",
                            help="Do not write any JUnit XML result files (per-binary XML is on by default)")
     p.add_argument("test_name", nargs="?",
-                   help="Specific test name or binary to run (auto-discovers the binary)")
+                   help="Test name, binary, or source file to run (auto-discovers the binary). "
+                        "A pattern matching no test name is retried as a glob over the tests' source files, "
+                        "so 'vector-test.cc' or 'libs/base/clean-core/tests/memory/*' select by file.")
     # Args dev.py does not recognize are forwarded verbatim to the test binary, collected by the top-level parse_known_args into args.runner_args.
     # `-c <section>` scopes into a section or instance, repeated to descend a path.
     # An optional leading `--` is dropped, and dev.py's own options still bind wherever they sit relative to the test name.

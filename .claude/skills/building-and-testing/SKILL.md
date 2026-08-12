@@ -12,6 +12,7 @@ Run it from the repo root via `uv`, with **no output piping**.
 
 ```bash
 uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
+uv run dev.py test <file>.cc     # …a pattern matching no test name selects by source file instead
 uv run dev.py test               # build + run the full suite
 uv run dev.py build -t <target>  # build one target
 uv run dev.py run <target> [args…]  # build + run a NON-test executable (a tool, a sample)
@@ -60,3 +61,5 @@ Everything below is session judgement; the mechanisms, flags and artifact format
 - Scope `build_diag` / `test_diag` to the right build with the selector dev.py printed: `base_path=` for builds, `path=…*.results.xml` for tests.
 - `test_diag … errors_only=true`, with a larger `limit`, expands every failure.
 - The positional `<pattern>` is a test-name substring applied across binaries, or the exact name of a whole `*-test` binary.
+  A pattern that matches no name anywhere is retried as a glob over the tests' **source files**, so `vector-test.cc`, `libs/base/clean-core/tests/memory` or an absolute path all select.
+  That is a filter like any other: it does not open the disabled or bucket gates, so a file of benchmarks still needs `--manual` / `--guide-benchmarks`.
