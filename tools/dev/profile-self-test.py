@@ -357,6 +357,45 @@ def test_summary_separates_work_from_wall_clock() -> None:
           "an empty profile summarizes to nothing at all")
 
 
+def test_exported_tracks_are_strictly_monotone() -> None:
+    """No track may carry two overlapping slices, or the viewer nests them and the lane reads as a staircase.
+
+    The input here deliberately overlaps in all three ways that reach the exporter: within the lane epsilon, across clocks, and wholly contained.
+    """
+    jobs = [
+        # Within the lane epsilon, which allocation tolerates on purpose.
+        job("a", "compile", 0.0, 1.0),
+        job("b", "compile", 1.0 - 5e-5, 2.0),
+        # A wider skew, as a merged profile from another clock would carry.
+        job("c", "compile", 2.0 - 0.004, 3.0),
+        # Fully contained, which trimming alone cannot resolve.
+        job("d", "compile", 3.0, 4.0),
+        job("e", "compile", 3.1, 3.2),
+    ]
+    profile.lay_out(jobs, mode="global")
+    doc = profile.to_chrome_trace(jobs)
+
+    tracks: dict[tuple[int, int], list[dict]] = {}
+    for e in doc["traceEvents"]:
+        if e.get("ph") == "X":
+            tracks.setdefault((e["pid"], e["tid"]), []).append(e)
+
+    for (pid, tid), slices in tracks.items():
+        slices.sort(key=lambda e: e["ts"])
+        for previous, current in zip(slices, slices[1:]):
+            check(
+                previous["ts"] + previous["dur"] <= current["ts"],
+                f"track {pid}/{tid}: {previous['name']!r} still runs into {current['name']!r}",
+            )
+            check(previous["dur"] >= 1, f"{previous['name']!r} kept a clickable width")
+
+    check(sum(len(s) for s in tracks.values()) == 5, "and no slice was dropped to achieve it")
+
+    starts = {e["name"]: e["ts"] for e in doc["traceEvents"] if e.get("ph") == "X"}
+    check(starts["a"] == 0, "the first slice still starts where it did")
+    check(starts["c"] > starts["b"], "and ordering is preserved throughout")
+
+
 def test_empty_trace() -> None:
     """Nothing recorded is a valid profile, not a crash."""
     doc = profile.to_chrome_trace([])
@@ -387,6 +426,7 @@ TESTS = [
     test_summary_separates_work_from_wall_clock,
     test_chrome_round_trip,
     test_trace_separates_driver_from_fan_out,
+    test_exported_tracks_are_strictly_monotone,
     test_empty_trace,
     test_zero_length_job_stays_visible,
 ]

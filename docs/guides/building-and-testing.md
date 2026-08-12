@@ -426,6 +426,14 @@ A trace has **two processes**, because the two halves of a run are shaped differ
 
 The two are always allocated independently, so a compile edge is never pushed down a row by the step that spawned it, and either block can be collapsed in the viewer to look at the other.
 
+Every track is **strictly ordered** in the emitted trace, which matters more than it sounds.
+A viewer nests two slices on one track the moment they overlap by a single microsecond, drawing the second as a sub-row of the first.
+One rounding artefact therefore turns a clean lane into a staircase that reads as a broken layout.
+Timestamps come from a monotonic counter anchored once to the wall clock, rather than from the system clock.
+Windows quantizes the latter to ~15 ms, which is coarse enough to order two sequential steps wrongly.
+On top of that the exporter trims any overlap that remains, since a merged profile mixes clocks it cannot control.
+Only the rendered slice is adjusted, never a recorded job, so the summary's numbers stay exact.
+
 `--profile-lanes global` (the default) packs the fan-out into one pool.
 `--profile-lanes per-type` gives each fanned-out job type its own pool and its own track — worth it once one kind of work is what you are chasing.
 The `dev.py` process is unaffected either way, since depth is not a thing to allocate.

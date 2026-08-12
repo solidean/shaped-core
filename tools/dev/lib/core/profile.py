@@ -39,6 +39,23 @@ ENV_FRAGMENT_DIR = "SC_DEV_PROFILE_DIR"
 # Two steps that end and start "at the same time" differ by microseconds of Python bookkeeping, and a lane per such pair would bury the real parallelism.
 DEFAULT_LANE_EPSILON_S = 1e-4
 
+# One wall-clock reading, anchored to the monotonic counter — see `now`.
+_EPOCH_WALL = time.time()
+_EPOCH_PERF = time.perf_counter()
+
+
+def now() -> float:
+    """Absolute epoch seconds, read off the monotonic counter rather than the system clock.
+
+    Every job dev.py times itself must come from here.
+    `time.time()` is coarse on Windows, where successive calls land on the same ~15 ms tick.
+    Pairing a start read from it with a precisely measured duration lets one step's computed end land milliseconds *after* the next step's start.
+    Two strictly sequential test binaries then overlap, and a trace viewer draws the second nested inside the first.
+
+    Anchoring once keeps the whole driver timeline internally consistent and strictly ordered, while staying absolute so it still merges against the compile sidecars' own timestamps.
+    """
+    return _EPOCH_WALL + (time.perf_counter() - _EPOCH_PERF)
+
 FORMATS = ("jobs", "chrome-tracing")
 LANE_MODES = ("global", "per-type")
 
@@ -219,11 +236,11 @@ _NULL_SPAN = _NullSpan()
 
 @contextmanager
 def _timed_span(name: str, type: str, extra: dict | None):
-    start = time.time()
+    start = now()
     try:
         yield
     finally:
-        record(name, type=type, start=start, end=time.time(), extra=extra)
+        record(name, type=type, start=start, end=now(), extra=extra)
 
 
 def span(name: str, *, type: str, extra: dict | None = None):
@@ -487,10 +504,42 @@ def to_chrome_trace(jobs: list[Job], *, argv: list[str] | None = None) -> dict:
             "args": {"type": j.type, "leaf": j.is_leaf, "start_epoch": round(j.start, 6), **j.extra},
         })
 
+    _make_tracks_monotone(events)
+
     doc: dict = {"displayTimeUnit": "ms", "traceEvents": events}
     if argv:
         doc["otherData"] = {"argv": " ".join(argv)}
     return doc
+
+
+def _make_tracks_monotone(events: list[dict]) -> None:
+    """Square up overlaps within each track, so every track in the emitted trace is strictly ordered.
+
+    A viewer nests two slices on one track the moment they overlap by a single microsecond, and draws the second as a sub-row of the first.
+    One stray microsecond therefore turns a clean lane into a staircase, which reads as a bug in the layout rather than the rounding it is.
+
+    Sources of that last microsecond survive any amount of care upstream.
+    The lane epsilon tolerates a hair of overlap on purpose, compile sidecars are stamped by another process's clock, and a merged profile mixes clocks from different runs outright.
+    So the fix belongs here, at the point of rendering.
+
+    Only the rendered slice moves, never a recorded job — every number in the summary comes from the jobs themselves.
+    An earlier slice is trimmed rather than a later one shifted, so each slice still starts when it really started, and nothing shrinks below 1 us.
+    """
+    tracks: dict[tuple[int, int], list[dict]] = {}
+    for e in events:
+        if e.get("ph") == "X":
+            tracks.setdefault((e["pid"], e["tid"]), []).append(e)
+
+    for slices in tracks.values():
+        slices.sort(key=lambda e: (e["ts"], -e["dur"]))
+        for previous, current in zip(slices, slices[1:]):
+            overlap = previous["ts"] + previous["dur"] - current["ts"]
+            if overlap <= 0:
+                continue
+            previous["dur"] = max(1, previous["dur"] - overlap)
+            # Trimming cannot clear an overlap wider than the slice itself, so give up ground and push the later one instead.
+            if previous["ts"] + previous["dur"] > current["ts"]:
+                current["ts"] = previous["ts"] + previous["dur"]
 
 
 # ---------------------------------------------------------------------------

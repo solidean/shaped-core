@@ -395,7 +395,7 @@ def run_step(
         env = {**env, **fragment}
 
     start = time.perf_counter()
-    started_at = time.time()
+    started_at = profile.now() # not time.time(): its granularity would let sequential steps overlap
     timed_out = False
     asked = False
     with open(stdout_path, "w", encoding="utf-8", errors="replace") as out_f, \
