@@ -1,3 +1,4 @@
+#include <clean-core/fwd.hh> // offsetof
 #include <nexus/test.hh>
 #include <shaped-graphics/raster/blend_state.hh>
 #include <shaped-graphics/raster/depth_stencil_state.hh>
@@ -5,8 +6,6 @@
 #include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-graphics/raster/rasterization_state.hh>
 #include <shaped-graphics/raster/vertex_input.hh>
-
-#include <cstddef> // offsetof
 
 using namespace cc::primitive_defines;
 

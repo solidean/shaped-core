@@ -1,3 +1,4 @@
+#include <clean-core/error/exception.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_debug_string.hh>
 #include <nexus/test.hh>
@@ -5,7 +6,6 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <stdexcept>
 #include <string>
 
 TEST("check - basic CHECK passes on true expression")

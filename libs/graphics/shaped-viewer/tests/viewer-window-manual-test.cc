@@ -7,9 +7,10 @@
 #include <shaped-rendering/window.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
+#include <typed-geometry/scalar/angle.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::sin / tg::cos
 
 #include <chrono>
-#include <cmath>
 #include <variant>
 
 // Interactive demo: a random cloud of flat-shaded PBR triangles, ray-traced into a view target and blitted
@@ -44,8 +45,11 @@ struct fly_camera
 
     [[nodiscard]] tg::vec3f forward() const
     {
-        auto const cp = std::cos(pitch);
-        return tg::vec3f(std::sin(yaw) * cp, std::sin(pitch), std::cos(yaw) * cp).normalized();
+        // Radians reach trigonometry as a tg::angle, never as a bare float — tg::sin / tg::cos take nothing else.
+        auto const y = tg::angle_f::make_from_radians(yaw);
+        auto const p = tg::angle_f::make_from_radians(pitch);
+        auto const cp = tg::cos(p);
+        return tg::vec3f(tg::sin(y) * cp, tg::sin(p), tg::cos(y) * cp).normalized();
     }
 
     [[nodiscard]] tg::vec3f right() const { return tg::dual(tg::cross(tg::vec3f(0, 1, 0), forward())).normalized(); }

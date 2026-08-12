@@ -1,12 +1,12 @@
 #include "crash_handler.hh"
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/platform/stacktrace.hh>
 
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 
 #if CC_HAS_STACKTRACE
 #endif
@@ -81,7 +81,7 @@ void report_frame(DWORD64 address, SYMBOL_INFO* sym, IMAGEHLP_LINE64* line) noex
         // `module+offset` still finds the frame in a disassembly, which is the difference between a usable report and a column of bare addresses.
         // That is exactly the case a release-build hang produces.
         IMAGEHLP_MODULE64 module;
-        std::memset(&module, 0, sizeof(module));
+        cc::memset(&module, 0, sizeof(module));
         module.SizeOfStruct = sizeof(module);
         auto const base = SymGetModuleBase64(GetCurrentProcess(), address);
         if (base != 0 && SymGetModuleInfo64(GetCurrentProcess(), base, &module))
@@ -105,7 +105,7 @@ void walk_thread(HANDLE thread) noexcept
     }
 
     CONTEXT ctx;
-    std::memset(&ctx, 0, sizeof(ctx));
+    cc::memset(&ctx, 0, sizeof(ctx));
     ctx.ContextFlags = CONTEXT_FULL;
     if (!GetThreadContext(thread, &ctx))
     {
@@ -115,7 +115,7 @@ void walk_thread(HANDLE thread) noexcept
     }
 
     STACKFRAME64 frame;
-    std::memset(&frame, 0, sizeof(frame));
+    cc::memset(&frame, 0, sizeof(frame));
 #if defined(_M_ARM64) || defined(__aarch64__)
     DWORD const machine = IMAGE_FILE_MACHINE_ARM64;
     frame.AddrPC.Offset = ctx.Pc;
@@ -138,7 +138,7 @@ void walk_thread(HANDLE thread) noexcept
     sym->MaxNameLen = MAX_SYM_NAME;
 
     IMAGEHLP_LINE64 line;
-    std::memset(&line, 0, sizeof(line));
+    cc::memset(&line, 0, sizeof(line));
     line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
     for (int depth = 0; depth < k_max_frames; ++depth)
@@ -170,7 +170,7 @@ void report_other_thread_stacks() noexcept
     SymInitialize(GetCurrentProcess(), nullptr, TRUE);
 
     THREADENTRY32 entry;
-    std::memset(&entry, 0, sizeof(entry));
+    cc::memset(&entry, 0, sizeof(entry));
     entry.dwSize = sizeof(entry);
 
     bool any = false;

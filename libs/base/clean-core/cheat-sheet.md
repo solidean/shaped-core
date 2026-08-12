@@ -281,6 +281,9 @@ r.or_throw();                             // -> T&& or throws cc::result_excepti
 r.with_context("while parsing");          // chain context (E = any_error); also with_context_lazy
 CC_RETURN_IF_ERROR(expr);                 // early-return the error from the current function
 // cc::any_error: with_context(msg), site(), to_string(), has_stacktrace() — move-only, type-erased.
+
+#include <clean-core/error/exception.hh>  // the blessed route to <exception> / <stdexcept>; declares nothing itself
+// Return a result; where something is genuinely exceptional (a lost device, or_throw), throw through this header.
 ```
 
 ## Callables
@@ -346,6 +349,8 @@ cc::is_power_of_two(x);  cc::align_up(v, align);  cc::align_down(v, align);  cc:
 cc::int_div_round_up(n, d);  cc::wrapped_increment(pos, max);
 cc::invoke(f, args...);                   // calls callables AND member pointers uniformly
 cc::offset_size{.offset=o, .size=n};  cc::start_end{.start=a, .end=b};   // named-range args (span/string subview/replace)
+cc::memcpy(dst, src, n);  cc::memmove(dst, src, n);  cc::memset(dst, v, n);  cc::memcmp(a, b, n);  // <cstring>'s, blessed here
+// NOT strlen / strcmp: cc::string_view(cstr) walks it once and knows .size(), and two views compare with ==.
 CC_DEFER { cleanup(); };                  // run at scope exit — CAPTURES BY REFERENCE
 cc::overloaded{ [](int){}, [](float){} }; // combine callables into one overload set (for visit)
 

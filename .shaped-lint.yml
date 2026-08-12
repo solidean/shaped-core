@@ -87,7 +87,7 @@ rules:
 
   - kind: deny-include
     value: <memory>
-    reason: use cc::unique_ptr / cc::shared_ptr — clean-core/memory/
+    reason: use cc::unique_ptr / cc::shared_ptr — clean-core/memory/. cc::shared_ptr is not feature-complete yet (no weak_ptr, no aliasing ctor), so a library that needs what is missing overrides this with the gap named
 
   - kind: deny-include
     value: <span>
@@ -115,8 +115,20 @@ rules:
 
   - kind: deny-include
     value: [<cstddef>, <cstdint>]
-    reason: use clean-core/fwd.hh, which declares the sized aliases (u32, isize, byte, …)
+    reason: use clean-core/fwd.hh — it declares the sized aliases (u32, isize, byte, …) and pulls in offsetof / std::size_t with them
 
   - kind: deny-include
     value: [<stdexcept>, <exception>]
-    reason: we do not throw — return a cc::result instead
+    reason: prefer returning a cc::result; where something is genuinely exceptional, reach the std types through clean-core/error/exception.hh
+
+  - kind: deny-include
+    value: <cstring>
+    reason: use cc::memcpy / cc::memmove / cc::memset / cc::memcmp — clean-core/common/utility.hh. For strlen and strcmp use a cc::string_view instead, which knows its size and compares with ==
+
+  - kind: deny-include
+    value: <cmath>
+    reason: go through tg — tg::sin / tg::cos take a tg::angle, and tg::sqrt and friends dispatch on scalar_traits, which a std:: call cannot
+
+  - kind: deny-include
+    value: [<Windows.h>, <windows.h>]
+    reason: use clean-core/platform/win32_sanitized.hh — it defines NOMINMAX, brackets the `byte` typedef and is safe to include on any platform

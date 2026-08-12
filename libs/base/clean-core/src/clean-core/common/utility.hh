@@ -906,6 +906,22 @@ namespace cc
 ///   cc::memcpy(buffer, "hello", 6);
 using std::memcpy;
 
+/// Copy bytes from source to destination, where the two MAY overlap.
+/// Reach for cc::memcpy where they provably cannot — it is the faster of the two.
+using std::memmove;
+
+/// Fill count bytes at dest with `value`, converted to unsigned char.
+/// dest must point to at least count writable bytes.
+using std::memset;
+
+/// Compare count bytes of two objects, returning <0, 0 or >0.
+/// The comparison is over the raw bytes: padding counts, so two equal objects of a padded type may differ here.
+using std::memcmp;
+
+// Deliberately NOT re-exported: strlen and strcmp.
+// A cc::string_view constructed from a `char const*` already walks it once and then knows its size, and
+// comparing two of them is `==`. Both are better answers than the C ones, so those stay denied outright.
+
 // =========================================================================================================
 // Scope utilities
 // =========================================================================================================

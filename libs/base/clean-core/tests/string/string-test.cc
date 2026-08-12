@@ -3,7 +3,6 @@
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
-#include <cstring>
 
 using namespace cc::primitive_defines;
 
@@ -122,7 +121,7 @@ TEST("string - construction")
     {
         char const* large = "this is a very long string that exceeds SSO capacity for sure";
         cc::string s = cc::string(large);
-        CHECK(s.size() == std::strlen(large));
+        CHECK(s.size() == cc::string_view(large).size());
         CHECK(s == cc::string_view{large});
     }
 
@@ -137,8 +136,8 @@ TEST("string - construction")
     SECTION("pointer + size construction - large")
     {
         char const* str = "this is a very long string that exceeds SSO capacity for sure";
-        cc::string s = cc::string(str, isize(std::strlen(str)));
-        CHECK(s.size() == std::strlen(str));
+        cc::string s = cc::string(str, cc::string_view(str).size());
+        CHECK(s.size() == cc::string_view(str).size());
         CHECK(s == cc::string_view{str});
     }
 
@@ -153,7 +152,7 @@ TEST("string - construction")
     SECTION("pointer range construction - large")
     {
         char const* str = "this is a very long string that exceeds SSO capacity for sure";
-        auto const len = std::strlen(str);
+        auto const len = cc::string_view(str).size();
         cc::string s = cc::string(str, str + len);
         CHECK(s.size() == len);
         CHECK(s == cc::string_view{str});
@@ -294,7 +293,7 @@ TEST("string - factory methods")
         CHECK(s == cc::string_view{"hello"});
         // Should have null terminator already materialized
         CHECK(s.data()[5] == '\0');
-        CHECK(std::strcmp(s.data(), "hello") == 0);
+        CHECK(cc::string_view(s.data()) == "hello");
     }
 
     SECTION("create_copy_c_str_materialized - empty string")
@@ -313,7 +312,7 @@ TEST("string - factory methods")
         CHECK(s == sv);
         // Should have null terminator already materialized
         CHECK(s.data()[sv.size()] == '\0');
-        CHECK(std::strcmp(s.data(), "this is a very long string that exceeds SSO capacity for sure") == 0);
+        CHECK(cc::string_view(s.data()) == "this is a very long string that exceeds SSO capacity for sure");
     }
 
     SECTION("create_copy_c_str_materialized - at SSO boundary")
@@ -666,7 +665,7 @@ TEST("string - c_str_materialize")
     {
         cc::string s = cc::string("hello");
         auto const* cstr = s.c_str_materialize();
-        CHECK(std::strcmp(cstr, "hello") == 0);
+        CHECK(cc::string_view(cstr) == "hello");
         CHECK(cstr[5] == '\0');
     }
 
@@ -674,7 +673,7 @@ TEST("string - c_str_materialize")
     {
         cc::string s;
         auto const* cstr = s.c_str_materialize();
-        CHECK(std::strcmp(cstr, "") == 0);
+        CHECK(cc::string_view(cstr) == "");
         CHECK(cstr[0] == '\0');
     }
 
@@ -682,7 +681,7 @@ TEST("string - c_str_materialize")
     {
         cc::string s = cc::string::create_filled(39, 'a');
         auto const* cstr = s.c_str_materialize();
-        CHECK(std::strlen(cstr) == 39);
+        CHECK(cc::string_view(cstr).size() == 39);
         // After materialization, should have transitioned to heap
         CHECK(cstr[39] == '\0');
     }
@@ -691,7 +690,7 @@ TEST("string - c_str_materialize")
     {
         cc::string s = cc::string("this is a very long string that exceeds SSO capacity for sure");
         auto const* cstr = s.c_str_materialize();
-        CHECK(std::strcmp(cstr, "this is a very long string that exceeds SSO capacity for sure") == 0);
+        CHECK(cc::string_view(cstr) == "this is a very long string that exceeds SSO capacity for sure");
     }
 
     SECTION("c_str_materialize - multiple calls")
@@ -699,8 +698,8 @@ TEST("string - c_str_materialize")
         cc::string s = cc::string("test");
         auto const* cstr1 = s.c_str_materialize();
         auto const* cstr2 = s.c_str_materialize();
-        CHECK(std::strcmp(cstr1, "test") == 0);
-        CHECK(std::strcmp(cstr2, "test") == 0);
+        CHECK(cc::string_view(cstr1) == "test");
+        CHECK(cc::string_view(cstr2) == "test");
     }
 }
 

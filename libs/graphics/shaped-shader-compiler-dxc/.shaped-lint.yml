@@ -19,8 +19,3 @@ rules:
     value: [<string>, <vector>]
     reason: "TODO: DXC's C++ API takes std::wstring arguments and returns std::vector; migrate the parts that are ours to cc::"
     files: src/**
-
-  - kind: allow-include
-    value: <cstddef>
-    reason: offsetof over the end-to-end tests' vertex structs, a language macro this header is the standard home of
-    files: tests/**

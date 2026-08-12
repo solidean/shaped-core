@@ -1,6 +1,7 @@
 #include "string.hh"
 
-#include <cstring>
+#include <clean-core/common/utility.hh>
+
 
 using namespace cc::primitive_defines;
 
@@ -17,7 +18,7 @@ void cc::string::initialize_heap_from_data(char const* str, isize const len, mem
     auto const byte_size = cc::align_up(len, data_heap::alloc_alignment());
     auto alloc = cc::allocation<char>::create_empty_bytes(byte_size, byte_size, data_heap::alloc_alignment(), resource);
 
-    std::memcpy(alloc.obj_start, str, size_t(len));
+    cc::memcpy(alloc.obj_start, str, size_t(len));
     alloc.obj_end = alloc.obj_start + len;
 
     _data.heap = data_heap::create_from_allocation(cc::move(alloc));
@@ -149,7 +150,7 @@ void cc::string::materialize_heap(isize const min_back_capacity)
     // always in bounds, and reading small_capacity bytes from the saved union stays within data_blocks on
     // any pointer size.
     static_assert(data_heap::alloc_alignment() >= 64);
-    std::memcpy(alloc.obj_start, &data_copy, small_capacity);
+    cc::memcpy(alloc.obj_start, &data_copy, small_capacity);
     alloc.obj_end = alloc.obj_start + small_sz;
 
     _data.heap = data_heap::create_from_allocation(cc::move(alloc));
@@ -175,7 +176,7 @@ void cc::string::materialize_heap_front(isize const front_capacity, isize const 
     // Copy only the live bytes rather than a fixed small_capacity block: at offset front_capacity a
     // full-width copy could run past alloc_end.
     // small_sz bytes always fit, since [front_capacity, front_capacity + small_sz) lies within the allocation.
-    std::memcpy(alloc.obj_start, &data_copy, size_t(small_sz));
+    cc::memcpy(alloc.obj_start, &data_copy, size_t(small_sz));
     alloc.obj_end = alloc.obj_start + small_sz;
 
     _data.heap = data_heap::create_from_allocation(cc::move(alloc));
@@ -192,11 +193,11 @@ void cc::string::demote_to_small()
     auto const sz = _data.heap.size();
     auto const res = resource();
     char buf[small_capacity];
-    std::memcpy(buf, _data.heap.data(), size_t(sz));
+    cc::memcpy(buf, _data.heap.data(), size_t(sz));
 
     // Free the heap allocation, then re-establish small mode and restore the bytes.
     _data.heap.~data_heap();
     initialize_small_empty(res);
-    std::memcpy(_data.small.data, buf, size_t(sz));
+    cc::memcpy(_data.small.data, buf, size_t(sz));
     _data.small.size = u8(sz);
 }

@@ -1,15 +1,14 @@
 #pragma once
 
-#include <clean-core/common/hash.hh> // cc::make_hash_finalized
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/thread/mutex.hh>
 
-#include <memory>        // std::shared_ptr, std::make_shared
-#include <unordered_map> // TODO: migrate to cc::map
+#include <memory> // std::shared_ptr, std::make_shared
 
 /// A tiered get-or-create cache: key_value_cache over a stack of key_value_provider tiers.
 /// The tier interface is the extension seam for on-disk / networked caches; only an in-memory tier ships today.
@@ -31,27 +30,9 @@ struct cc::key_value_provider
     virtual ~key_value_provider() = default;
 };
 
-namespace cc
-{
-
-namespace impl
-{
-/// std::unordered_map hasher routed through cc's finalized hashing — lets cc::hash128 and any
-/// cc-hashable key be a map key without needing a std::hash specialization.
-template <class K>
-struct cc_key_hash
-{
-    [[nodiscard]] size_t operator()(K const& k) const { return size_t(cc::make_hash_finalized(k)); }
-};
-} // namespace impl
-
-} // namespace cc
-
-/// In-memory tier backed by std::unordered_map.
+/// In-memory tier backed by cc::map.
 /// Eviction is crude: apply_bookkeeping clears the whole map once it exceeds max_entries.
 /// Subclass for a smarter policy.
-///
-/// TODO: migrate std::unordered_map -> cc::map.
 template <class K, class V, class Hash>
 struct cc::in_memory_key_value_provider final : key_value_provider<K, V>
 {
@@ -59,23 +40,22 @@ struct cc::in_memory_key_value_provider final : key_value_provider<K, V>
 
     [[nodiscard]] cc::optional<V> try_get(K const& key) override
     {
-        auto const it = _map.find(key);
-        if (it == _map.end())
-            return cc::nullopt;
-        return it->second;
+        if (auto const* v = _map.get_ptr(key))
+            return *v;
+        return cc::nullopt;
     }
 
-    void set(K const& key, V const& value) override { _map.insert_or_assign(key, value); }
+    void set(K const& key, V const& value) override { _map[key] = value; }
 
     void apply_bookkeeping() override
     {
-        if (isize(_map.size()) > _max_entries)
+        if (_map.size() > _max_entries)
             _map.clear();
     }
 
 private:
     isize _max_entries = 0;
-    std::unordered_map<K, V, Hash> _map;
+    cc::map<K, V, Hash> _map;
 };
 
 /// Thread-safe, layered key-value cache.

@@ -49,9 +49,14 @@ rules:
     files: src/clean-core/platform/source_location.hh
 
   - kind: allow-include
-    value: [<stacktrace>, <cstddef>]
+    value: <stacktrace>
     reason: cc::stacktrace wraps std::stacktrace where the toolchain has it
     files: src/clean-core/platform/stacktrace.hh
+
+  - kind: allow-include
+    value: [<stdexcept>, <exception>]
+    reason: the blessed route the rest of the repo reaches these two through, so the include sits in one place
+    files: src/clean-core/error/exception.hh
 
   - kind: allow-include
     value: <new>
@@ -78,15 +83,8 @@ rules:
 
   - kind: allow-include
     value: <cstring>
-    reason: memcpy / memcmp on raw bytes, with no cc:: equivalent — these ARE the byte-level primitives
-    files:
-      - src/clean-core/common/utility.hh
-      - src/clean-core/container/byte_stream_builder.hh
-      - src/clean-core/container/impl/allocating_container.hh
-      - src/clean-core/streams/impl/stream.hh
-      - src/clean-core/string/string.hh
-      - src/clean-core/string/string.cc
-      - src/clean-core/error/crash_handler.cc
+    reason: this file IS the seam — cc::memcpy and its siblings are aliases declared here, and everyone else goes through them
+    files: src/clean-core/common/utility.hh
 
   - kind: allow-include
     value: <charconv>
@@ -198,16 +196,6 @@ rules:
       - src/clean-core/container/pinned_data.hh
       - src/clean-core/thread/threaded_actor.hh
 
-  - kind: allow-include
-    value: <unordered_map>
-    reason: "TODO: cc::map has landed, key_value_cache has not migrated — see the note in its header"
-    files: src/clean-core/container/key_value_cache.hh
-
-  - kind: allow-include
-    value: <iterator>
-    reason: "TODO: std::begin / std::end for the generic to_debug_string overloads, until cc:: has a range vocabulary"
-    files: src/clean-core/string/to_debug_string.hh
-
   # =========================================================================================================
   # The tests
   # =========================================================================================================
@@ -217,11 +205,6 @@ rules:
   - kind: allow-include
     value: [<vector>, <string>, <string_view>, <array>, <list>, <memory>]
     reason: the std:: counterparts these tests compare cc:: types against, and convert to and from
-    files: tests/**
-
-  - kind: allow-include
-    value: [<stdexcept>, <exception>]
-    reason: a throwing type is how the exception-safety and result tests produce a failure
     files: tests/**
 
   - kind: allow-include
@@ -235,6 +218,6 @@ rules:
     files: tests/thread/threaded_actor-test.cc
 
   - kind: allow-include
-    value: [<cstdio>, <cstdlib>, <cstring>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>]
+    value: [<cstdio>, <cstdlib>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>]
     reason: the C runtime and the intrinsics the benchmarks and platform tests measure against
     files: tests/**

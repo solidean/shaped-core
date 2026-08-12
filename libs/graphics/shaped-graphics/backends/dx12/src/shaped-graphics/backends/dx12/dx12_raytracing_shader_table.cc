@@ -10,7 +10,6 @@
 #include <shaped-graphics/context/upload.hh>
 #include <shaped-graphics/types.hh>
 
-#include <cstring>
 
 namespace sg::backend::dx12
 {
@@ -65,7 +64,7 @@ cc::result<dx12_raytracing_shader_table_handle> dx12_raytracing_shader_table::cr
         isize offset = start;
         for (auto h : handles)
         {
-            std::memcpy(image.data() + offset, ids[isize(u32(h))].bytes, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+            cc::memcpy(image.data() + offset, ids[isize(u32(h))].bytes, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
             offset += stride;
         }
     };

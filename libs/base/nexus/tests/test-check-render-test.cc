@@ -1,3 +1,4 @@
+#include <clean-core/error/exception.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
@@ -5,7 +6,6 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <stdexcept>
 
 // How a failing check RENDERS; the counts are covered by test-check-test.cc.
 // What is under test here is the text a developer actually sees: `test_error::expanded`, which is what both exporters serialize.

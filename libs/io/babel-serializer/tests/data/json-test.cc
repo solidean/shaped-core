@@ -5,7 +5,6 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
-#include <cstring> // std::memmove, std::memcpy
 
 using namespace cc::primitive_defines;
 
@@ -33,14 +32,14 @@ private:
         auto& self = *static_cast<chunked_reader*>(ctx);
         auto* const base = self._buffer;
         auto const leftover = isize(end - curr);
-        std::memmove(base, curr, size_t(leftover));
+        cc::memmove(base, curr, size_t(leftover));
 
         auto const room = isize(sizeof(self._buffer)) - leftover;
         auto const want = cc::min(self._chunk, room);
         auto const avail = self._data.size() - self._pos;
         auto const n = cc::min(want, avail);
         if (n > 0)
-            std::memcpy(base + leftover, self._data.data() + self._pos, size_t(n));
+            cc::memcpy(base + leftover, self._data.data() + self._pos, size_t(n));
         self._pos += n;
 
         curr = base;

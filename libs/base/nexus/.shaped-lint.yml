@@ -8,15 +8,6 @@
 
 rules:
   # =========================================================================================================
-  # The type identity a test registry is built on
-  # =========================================================================================================
-
-  - kind: allow-include
-    value: <typeindex>
-    reason: a test, an alias and an invocable are keyed by type, and std::type_index is the hashable handle for that
-    files: src/**
-
-  # =========================================================================================================
   # Platform APIs, each in the one TU that speaks to that OS
   # =========================================================================================================
 
@@ -34,11 +25,6 @@ rules:
     value: [<intrin.h>, <x86intrin.h>]
     reason: rdtsc and the serializing fences the timing baseline is measured with
     files: src/nexus/bench/impl/baseline.hh
-
-  - kind: allow-include
-    value: <exception>
-    reason: the fuzzer catches whatever an operation throws, so it names the base type
-    files: src/nexus/fuzz/machine.cc
 
   # =========================================================================================================
   # Waiting on a cc:: replacement — see docs/stdlib-migration.md
@@ -64,19 +50,9 @@ rules:
     reason: "TODO: cc::map has landed, the schedule and registry have not migrated"
     files: src/**
 
-  - kind: allow-include
-    value: <cstring>
-    reason: memcmp over the invocable argument bytes, with no cc:: equivalent
-    files: src/nexus/tests/invoke_tests.cc
-
   # =========================================================================================================
   # The tests
   # =========================================================================================================
-
-  - kind: allow-include
-    value: [<stdexcept>, <exception>]
-    reason: a throwing type is how these tests make a check, a section or a fuzz run fail on purpose
-    files: tests/**
 
   - kind: allow-include
     value: [<string>, <vector>]

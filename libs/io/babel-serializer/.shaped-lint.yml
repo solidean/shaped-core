@@ -18,15 +18,7 @@ rules:
 
   - kind: allow-include
     value: <charconv>
-    reason: from_chars is what a number is parsed with, and it is the whole point of these readers being fast
+    reason: "TODO: from_chars is what a number is parsed with, and being fast is the point of these readers — migrate once a cc:: from-string lands"
     files:
       - src/babel-serializer/data/json.cc
       - src/babel-serializer/geometry/obj.cc
-
-  - kind: allow-include
-    value: <cstring>
-    reason: memcpy over the parsed byte window, with no cc:: equivalent
-    files:
-      - src/babel-serializer/data/sqlite.cc
-      - src/babel-serializer/image/impl/stb_backend.cc
-      - tests/**

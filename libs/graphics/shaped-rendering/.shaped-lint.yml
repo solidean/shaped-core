@@ -7,13 +7,3 @@ rules:
   - kind: allow-include
     value: <memory>
     reason: sg's handles ARE std::shared_ptr, so anything holding one names it — see shaped-graphics/docs/coding-guidelines.md
-
-  - kind: allow-include
-    value: <cstddef>
-    reason: offsetof over ImDrawVert, a language macro this header is the standard home of
-    files: src/shaped-rendering/imgui_routine.cc
-
-  - kind: allow-include
-    value: <cstring>
-    reason: memcpy over Dear ImGui's own vertex buffers, with no cc:: equivalent
-    files: src/shaped-rendering/impl/imgui_draw_math.cc

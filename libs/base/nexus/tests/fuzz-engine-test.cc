@@ -1,3 +1,4 @@
+#include <clean-core/error/exception.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/fuzz/fuzz.hh>
 #include <nexus/test.hh>
@@ -5,7 +6,6 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <stdexcept>
 
 // Exercises the recommended SECTION workflow: setup in the outer TEST, a SECTION to fuzz, and a SECTION pinning a known behavior.
 // This invariant always holds, so the fuzz SECTION passes.

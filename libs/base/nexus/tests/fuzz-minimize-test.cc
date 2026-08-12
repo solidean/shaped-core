@@ -1,8 +1,8 @@
+#include <clean-core/error/exception.hh>
 #include <clean-core/math/random.hh>
 #include <nexus/fuzz/fuzz.hh>
 #include <nexus/test.hh>
 
-#include <stdexcept>
 
 namespace
 {

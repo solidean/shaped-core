@@ -3,10 +3,7 @@
 # The root's entries apply here too; what follows extends them, and the last matching entry decides.
 # See tools/shaped-linter/docs/configuration.md.
 #
-# sv's own sources reach for nothing outside cc:: and tg:: — the entries below are its manual tests alone.
+# sv reaches for nothing outside cc:: and tg::, its tests included, so this file has no entries.
+# That is the state to keep it in: a new one here is a claim that sv needs something the libraries below it do not provide.
 
-rules:
-  - kind: allow-include
-    value: <cmath>
-    reason: the camera paths these manual tests fly are spelled with sin / cos directly, rather than through a tg:: helper
-    files: tests/**
+rules: []

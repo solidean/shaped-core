@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/fwd.hh> // offsetof
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -7,8 +8,6 @@
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::tan
-
-#include <cstddef> // offsetof
 
 using namespace cc::primitive_defines;
 
