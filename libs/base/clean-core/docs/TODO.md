@@ -17,4 +17,10 @@ Add entries as we discover them, and remove them as they land.
 ## container
 
 - **The stubs.**
-  `ringbuffer`, `bitset`, `fixed_bitset`, `tuple`, `variant` and `disjoint_set` are declared but not implemented.
+  `bitset`, `fixed_bitset` and `disjoint_set` are declared but not implemented.
+- **`ringbuffer` adoption and extraction.**
+  It holds its `cc::allocation<T>` as a raw byte handle, so neither `create_from_allocation` nor `extract_allocation` exists yet.
+  Adoption can take the largest power of two at or below the incoming capacity; extraction needs the content linearized first, or a check that it already is.
+- **Grow `tuple` and `variant`.**
+  The first version deliberately left out converting construction from another `tuple<Us...>`, `tuple_cat`, `variant`'s `operator<=>` and multi-variant visitation.
+  A `to_string` hidden friend for `variant` is missing too — it would drag `to_debug_string.hh` into a container header, so a `variant` currently debug-prints as a raw byte dump.

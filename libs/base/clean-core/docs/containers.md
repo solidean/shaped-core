@@ -30,6 +30,22 @@ Owning, inline — the elements live in the container object, so a local one nev
 `fixed_vector` encodes the cap in the type, so going past it is a bug that trips; `small_vector` treats `N` as a hint and allocates instead.
 `N` is also a *minimum* for `small_vector` — the inline buffer grows to fill the struct footprint, so `inline_capacity()` is `>= N`.
 
+Queues — a wrap-around slot array, so push and pop are O(1) at **both** ends and nothing ever shifts:
+
+| type | capacity | grows | reach for it when |
+|---|---|---|---|
+| `ringbuffer<T>` | runtime, always a power of two | at both ends | a FIFO, a work queue, a double-ended queue on the heap |
+| `fixed_ringbuffer<T, N>` | exactly `N`, compile-time | never | a fixed history window, or a queue that must not allocate |
+
+The power-of-two capacity is what makes the heap ring's wrap a mask rather than a modulo, so a requested capacity is rounded up.
+`fixed_ringbuffer` takes any `N`, since a compile-time capacity wraps with one compare-and-subtract instead.
+
+Both are **not contiguous** once the content wraps, which is what separates them from every other owning container here.
+There is no `data()` and no pointer iterator: `segments()` hands out the up to two contiguous runs, and `linearize()` rearranges the content into one.
+
+`push_back_overwriting` / `push_front_overwriting` drop the element at the opposite end instead of growing, which is how a ring spells "keep the newest N".
+There is deliberately no `cc::deque`: the storage strategy is load-bearing enough that it splits into separate types, `ringbuffer` here and `devector` for a contiguous double-ended store.
+
 Non-owning views — the viewed storage must outlive them, except where noted:
 
 | type | views | reach for it when |
@@ -50,11 +66,36 @@ Associative — separate chaining over power-of-two buckets:
 | `set<T>` | membership only; it is a `map<T, unit>` and inherits every property below |
 
 `byte_stream_builder`, `key_value_cache` and `pair` also live in `container/` and are documented in their own headers.
-`bitset`, `fixed_bitset`, `ringbuffer`, `tuple`, `variant` and `disjoint_set` are **empty stubs** — the headers exist so `fwd.hh` can name them, and nothing is implemented.
+`bitset`, `fixed_bitset` and `disjoint_set` are **empty stubs** — the headers exist so `fwd.hh` can name them, and nothing is implemented.
+
+### Heterogeneous — `tuple` and `variant`
+
+`tuple<Ts...>` is a product type and `variant<Ts...>` a sum type.
+`tuple` is **index-based**: it has `get<I>` and no `get<T>`, so duplicate element types are fine and none of `std::`'s type-uniqueness rules apply.
+`variant` goes the other way — its alternatives must be **pairwise distinct**, enforced by a static_assert, which is what lets it be keyed on type.
+
+Alongside `visit`, a `variant` alternative can be named directly.
+`is<T>()` asks, `as<T>()` asserts and forwards the value category, `try_as<T>()` hands out a pointer that is null on a different alternative.
+`take<T>()` and `try_take<T>()` move the alternative out.
+A `T` that is not an alternative does not compile, rather than being a `false`.
+`take` leaves the variant **valid**, holding a moved-from alternative at the same index — the same state its own move constructor leaves behind.
+
+Both are **trivially copyable and trivially destructible whenever every element or alternative is**.
+For `tuple` that costs nothing to maintain: its elements are plain base classes, so every special member stays implicit.
+`variant` builds on a recursive union and hand-writes its special members only for the non-trivial case, the way `optional` and `result` do.
+
+`variant` models **no valueless state** — `index()` is always in range.
+That holds because assignment destroys the active alternative and constructs the new one in its place, which is not exception-safe: an alternative whose move constructor can throw is not supported.
+Default construction takes alternative 0, and the value constructor accepts **exact type matches only**, so `variant<bool, string> v = "hi"` is a compile error rather than a silent `bool`.
+Use `create_emplaced<I>` — a prvalue factory, so it works for immovable alternatives — whenever a conversion is intended.
+
+`tuple` and `pair` both **value-initialize** on default construction.
+
+Still open: converting construction between tuples, `tuple_cat`, `variant`'s `operator<=>` and multi-variant visitation.
 
 ## What `T` must be
 
-The **owning** containers require an object type that is not `const`: `array`, `vector`, `unique_array`, `unique_vector`, `small_vector`, `fixed_vector`.
+The **owning** containers require an object type that is not `const`: `array`, `vector`, `unique_array`, `unique_vector`, `small_vector`, `fixed_vector`, `ringbuffer`, `fixed_ringbuffer`.
 References, functions and `void` are rejected, and so is `T const` — a container that constructs and destroys elements has to be able to write them.
 `map` applies the same requirement to `K` and to `V` separately.
 
@@ -68,14 +109,14 @@ Which operations then remain available is per-type.
 `map` and `set` accept immovable `K` and `V` because nodes are heap-allocated and never move.
 Any container that reallocates needs `T` to be move-constructible before it can grow.
 
-`small_vector` additionally requires `N >= 1`; `fixed_vector` and `fixed_array` allow `N == 0` as a permanently empty container.
+`small_vector` additionally requires `N >= 1`; `fixed_vector`, `fixed_array` and `fixed_ringbuffer` allow `N == 0` as a permanently empty container.
 
 ## Indexing and bounds
 
 **Every runtime index is checked with `CC_ASSERT`, which means checked in debug and `relwithdebinfo` and unchecked in `release`** (unless `CC_ENABLE_ASSERT_IN_RELEASE` is defined).
 An out-of-range index in a release build is undefined behavior, not a trap — the check is a development aid, not a safety guarantee.
 This covers `operator[]`, the `remove_at*` / `remove_from_to*` / subspan ranges, and the `pop_at*` family.
-The types that check: `vector`, `array`, `unique_*`, `small_vector`, `fixed_vector`, `span`, `strided_span`, `pinned_data`.
+The types that check: `vector`, `array`, `unique_*`, `small_vector`, `fixed_vector`, `ringbuffer`, `fixed_ringbuffer`, `span`, `strided_span`, `pinned_data`.
 `front`/`back` assert on those too, but **not** on `fixed_array`, whose accessors are unchecked.
 
 The `*_clamped` variants are the deliberate exception.
@@ -104,6 +145,10 @@ What moves them differs per family, and the difference is the reason to pick one
 * **`fixed_vector`** never reallocates, so growth is always safe.
   Removal is not: the order-preserving `remove_at` / `remove_from_to` shift the tail down, and `remove_at_unordered` moves the last element into the hole.
   References to elements after the removal point then refer to a different element.
+* **`ringbuffer` and `fixed_ringbuffer`** never shift an element, which is a stronger guarantee than any of the above.
+  A reference survives pushes and pops at either end, and dies only when the element itself is removed.
+  The heap ring adds exactly one other way to lose one: growth, which the `_stable` members never trigger.
+  `linearize()` is the exception on both — it moves whatever it had to move.
 * **`map` and `set`** keep nodes heap-allocated and never move them, so element references survive unrelated insertions, erasures and growth — a rehash only relinks node pointers.
   That is `K&` and `V&` for a map, and `T const&` for a set.
   Their **entries and iterators** do not survive: any structural mutation invalidates those.

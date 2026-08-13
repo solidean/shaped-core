@@ -76,15 +76,15 @@ wsys->has_clipboard_text();
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
-    if (auto const* k = std::get_if<sr::key_event>(&e.payload))
+    if (auto const* k = e.try_as_key())
         k->scancode;    // sr::scancode — PHYSICAL position; WASD stays WASD on AZERTY
         k->character;   // char32_t — layout-mapped codepoint, 0 if unprintable; for ctrl+Z-style shortcuts
         k->modifiers;   // sr::key_modifiers bit set; has_all(k->modifiers, ctrl | shift)
         k->is_down;  k->is_repeat;
-    if (auto const* t = std::get_if<sr::text_event>(&e.payload))  t->text;        // cc::string, UTF-8
-    if (auto const* m = std::get_if<sr::mouse_move_event>(&e.payload))    m->cursor_pos, m->delta;  // pos2f, vec2f
-    if (auto const* b = std::get_if<sr::mouse_button_event>(&e.payload))  b->button, b->is_down, b->cursor_pos;
-    if (auto const* w = std::get_if<sr::mouse_wheel_event>(&e.payload))   w->delta;  // ticks, may be fractional
+    if (auto const* t = e.try_as_text())  t->text;        // cc::string, UTF-8
+    if (auto const* m = e.try_as_mouse_move())    m->cursor_pos, m->delta;  // pos2f, vec2f
+    if (auto const* b = e.try_as_mouse_button())  b->button, b->is_down, b->cursor_pos;
+    if (auto const* w = e.try_as_mouse_wheel())   w->delta;  // ticks, may be fractional
 }
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
@@ -101,7 +101,8 @@ win->start_text_input();              // begin text_events + IME for this window
 - **Wheel deltas are fractional** on trackpads; the platform's inverted-scroll flag is already applied.
 - **Positions are `tg::pos2f`, motions `tg::vec2f`** — `pos - pos` gives the `vec` between them.
   tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
-- **`input_event::payload` is `std::variant` only until `cc::variant` exists** — the alternatives are the API.
+- **`input_event::payload` is a `cc::variant`**, and the `try_as_*` accessors above are one-liners over its `try_as<T>()`.
+  Reach for them, or for `payload.visit(...)` with one handler per alternative for an exhaustive dispatch.
 
 ## Dear ImGui
 

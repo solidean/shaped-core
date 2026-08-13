@@ -64,7 +64,9 @@ bool to_debug_string_append_elem(string& s, T const& v, debug_string_config cons
 template <class T, std::size_t... I>
 void to_debug_string_append_tuple(string& s, T const& v, debug_string_config const& cfg, std::index_sequence<I...>)
 {
-    (void)(cc::impl::to_debug_string_append_elem(s, std::get<I>(v), cfg) && ...);
+    using std::get; // the std overloads by ordinary lookup, cc::pair's and cc::tuple's hidden friend by ADL
+
+    (void)(cc::impl::to_debug_string_append_elem(s, get<I>(v), cfg) && ...);
 }
 } // namespace impl
 

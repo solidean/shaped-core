@@ -57,7 +57,7 @@ TEST("sg views - uniform view")
     CHECK(v.size_in_bytes == sizeof(particle));
     CHECK(sg::uniform_buffer_view<particle>::access == sg::view_class::uniform);
 
-    auto const raw = std::get<sg::raw_buffer_view>(v.to_raw());
+    auto const raw = sg::as_buffer_view(v.to_raw());
     CHECK(raw.access == sg::view_class::uniform);
     CHECK(raw.shape == sg::view_shape::uniform_block);
     CHECK(raw.buffer == buf);
@@ -84,7 +84,7 @@ TEST("sg views - readonly structured view")
     CHECK(whole.offset_in_bytes == 0);
     CHECK(whole.element_count == 20);
 
-    auto const raw = std::get<sg::raw_buffer_view>(whole.to_raw());
+    auto const raw = sg::as_buffer_view(whole.to_raw());
     CHECK(raw.access == sg::view_class::readonly);
     CHECK(raw.shape == sg::view_shape::structured);
     CHECK(raw.element_count == 20);
@@ -95,7 +95,7 @@ TEST("sg views - readonly structured view")
     auto const sub = sg::buffer<u32>::from_raw(buf).as_readonly_buffer({.offset = 64, .size = 3});
     CHECK(sub.offset_in_bytes == 64 * sizeof(u32));
     CHECK(sub.element_count == 3);
-    CHECK(std::get<sg::raw_buffer_view>(sub.to_raw()).stride_in_bytes == sizeof(u32));
+    CHECK(sg::as_buffer_view(sub.to_raw()).stride_in_bytes == sizeof(u32));
 
     // A non-256-aligned element offset is rejected (element 2 -> byte 8).
     CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readonly_buffer({.offset = 2, .size = 3}));
@@ -108,7 +108,7 @@ TEST("sg views - readwrite structured view")
     auto const v = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer();
     CHECK(v.element_count == 4);
 
-    auto const raw = std::get<sg::raw_buffer_view>(v.to_raw());
+    auto const raw = sg::as_buffer_view(v.to_raw());
     CHECK(raw.access == sg::view_class::readwrite);
     CHECK(raw.shape == sg::view_shape::structured);
     CHECK(raw.stride_in_bytes == sizeof(particle));
@@ -150,7 +150,7 @@ TEST("sg views - implicit conversion to raw_view")
     // The typed view converts implicitly to the erased form a backend consumes.
     sg::raw_view const rv = sg::buffer<u32>::from_raw(buf).as_readonly_buffer();
     CHECK(sg::shape_of(rv) == sg::view_shape::structured);
-    CHECK(std::get<sg::raw_buffer_view>(rv).element_count == 16);
+    CHECK(sg::as_buffer_view(rv).element_count == 16);
 }
 
 TEST("sg views - empty buffer yields empty view")
@@ -264,7 +264,7 @@ TEST("sg views - raw_buffer_view arm + raw_view -> typed leaf")
 {
     auto const buf = make_buffer(sizeof(particle) * 4, sg::buffer_usage::readonly_buffer);
     sg::raw_view const rv = sg::buffer<particle>::from_raw(buf).as_readonly_buffer();
-    auto const arm = std::get<sg::raw_buffer_view>(rv);
+    auto const arm = sg::as_buffer_view(rv);
 
     // Arm -> leaf (you supply T); matches the original.
     CHECK(arm.as_readonly<particle>().element_count == 4);

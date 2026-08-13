@@ -7,7 +7,6 @@
 #include <shaped-rendering/window.hh>
 
 #include <type_traits>
-#include <variant>
 
 namespace sr
 {
@@ -376,9 +375,9 @@ void imgui_context::process_events(window_system const& wsys)
         //
         // Only *consecutive* ones, and only within the same window:
         // that never moves a position across the button or wheel event that follows it, which is the ordering the trickle exists to preserve.
-        if (std::holds_alternative<mouse_move_event>(events[i].payload)        //
-            && i + 1 < events.size()                                           //
-            && std::holds_alternative<mouse_move_event>(events[i + 1].payload) //
+        if (events[i].try_as_mouse_move() != nullptr        //
+            && i + 1 < events.size()                        //
+            && events[i + 1].try_as_mouse_move() != nullptr //
             && events[i].window == events[i + 1].window)
             continue;
 
@@ -404,7 +403,7 @@ void imgui_context::process_event(input_event const& event)
         return cursor_pos + tg::vec2f(float(origin[0]), float(origin[1]));
     };
 
-    std::visit(
+    event.payload.visit(
         [&](auto const& e)
         {
             using event_type = std::decay_t<decltype(e)>;
@@ -448,8 +447,7 @@ void imgui_context::process_event(input_event const& event)
                 // so restating it costs a frame of scroll latency for nothing.
                 io.AddMouseWheelEvent(e.delta[0], e.delta[1]);
             }
-        },
-        event.payload);
+        });
 }
 
 bool imgui_context::wants_keyboard() const

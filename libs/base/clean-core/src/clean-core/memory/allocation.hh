@@ -101,6 +101,7 @@ struct cc::memory_resource
 /// - custom_resource == nullptr means the global default memory resource.
 ///
 /// Ring buffers with wrap-around are deliberately not representable here: once data wraps, the live region is segmented and no longer one contiguous window.
+/// cc::ringbuffer therefore holds an allocation as a pure byte handle, keeping obj_start == obj_end and managing its elements' lifetimes itself.
 template <class T>
 struct cc::allocation
 {

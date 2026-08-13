@@ -70,7 +70,6 @@ Windowing:
   imgui gamepad navigation will want it — a one-line flip, kept off today so Linux needs no libudev/evdev.
 - HiDPI: sizes are queried in pixels, but `SDL_WINDOW_HIGH_PIXEL_DENSITY` is not requested, so logical and pixel sizes are identical.
   Revisit with a per-monitor-DPI UI.
-- `input_event::payload` is a `std::variant` because [`cc::variant`](../../../base/clean-core/src/clean-core/container/variant.hh) is a declared-but-empty stub.
   Switch it over when clean-core grows a real one — the alternatives are the API, the holder is not.
 - IME composition is not covered: a synthetic `SDL_EVENT_TEXT_INPUT` exercises delivery and the copy, but a real round trip through a platform input method needs an IME and a person.
 - Gamepad input needs `SDL_JOYSTICK`, which is off in [extern/sdl3/CMakeLists.txt](../../../../extern/sdl3/CMakeLists.txt).

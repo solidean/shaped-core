@@ -16,6 +16,8 @@ Two design commitments follow from that, and everything else in this document is
 - **Capture by default.** Child output goes to disk and the terminal gets a terse summary, so every step leaves a machine-readable record — JSON sidecars and JUnit XML — rather than scrollback.
   That record is the contract `build_diag` / `test_diag` read against, which is why the loop is always *run `dev.py`, then diagnose from the sidecars*, never *re-run with more flags and squint*.
   The flags that override it, and the exact artifact names, are the [guide](guides/building-and-testing.md)'s.
+  The job profile is that commitment turned sideways.
+  The sidecars each describe one step, while `--profile` records the run *across* steps — the only place a wall-clock question can be answered.
 - **Collection-oriented.** Presets and targets are selected with comma-lists, repeated flags and wildcards, and configure, build and test operate on *lists* rather than one at a time.
   A toolset matrix is one invocation.
 
@@ -47,7 +49,7 @@ It is grouped by responsibility, with a strict one-way dependency direction — 
 
 | group        | what lives there                                                  | depends on            |
 |--------------|-------------------------------------------------------------------|-----------------------|
-| `core`       | models, console, logs, process, archive, report                   | —                     |
+| `core`       | models, console, logs, process, archive, report, profile          | —                     |
 | `project`    | presets, targets, compdb, flags (CMake File API)                  | core                  |
 | `toolchain`  | toolset, llvm_tools, clangd, disasm, doctor                       | core, project         |
 | `pipeline`   | cmake, configure, build, test, fingerprint, eligibility, prereqs  | core, project, toolchain |
@@ -71,7 +73,8 @@ def run(args, ctx): ...       # do the work, using the facade + ctx
 
 A command owns its full CLI surface, so its flags live next to its logic and copying or adapting a command means touching one file.
   Commands with subcommands — `coverage`, `pgo`, `info`, `diagnose`, `lint`, `assembly`, `profiling` — build their nested subparsers inside their own `add_parser` and branch inside their own `run`.
-Shared argparse fragments — `--preset`, the build-dir overrides, `--emsdk-path` — live in [cmd/args.py](../tools/dev/cmd/args.py) so they are defined once.
+Shared argparse fragments — `--preset`, the build-dir overrides, `--emsdk-path`, the profiling flags — live in [cmd/args.py](../tools/dev/cmd/args.py) so they are defined once.
+The profiling fragment is the one that also has a global twin in `dev.py`, and its `SUPPRESS` defaults are what keep the two from overwriting each other.
 
 **`dev.py` — policy and wiring.** What is left is small and readable.
 The module docstring names the two things only this file answers and points at the rest; `dev.py --help` is the user-facing CLI surface.

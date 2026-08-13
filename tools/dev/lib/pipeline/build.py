@@ -9,11 +9,13 @@ Public API:
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from pathlib import Path
 
-from . import cmake
+from . import cmake, diagjobs
 from .configure import ensure_configured
+from ..core import profile
 from ..core.logs import ninja_built_count, step_fields, write_sidecar
 from ..core.models import Preset, StepResult
 from ..core.process import env_for_preset, run_step
@@ -56,6 +58,8 @@ def build(
         to_build = targets if targets else [None]
         preset_results: list[StepResult] = []
         for target in to_build:
+            # Marked before the step because the compile sidecars accumulate across builds, and only the ones this step rewrote are ours.
+            build_mark = diagjobs.mark(preset.build_dir) if profile.enabled() else None
             result = run_step(
                 cmake.build_command(preset.build_dir, target, keep_going=keep_going),
                 step_type="build",
@@ -67,6 +71,8 @@ def build(
                 verbose=verbose,
                 summary_extra=_build_extra,
             )
+            if build_mark is not None:
+                profile.add_jobs(diagjobs.harvest(preset.build_dir, build_mark, ended_at=time.time()))
             preset_results.append(result)
             if not result.ok:
                 break  # stop this preset on first build failure

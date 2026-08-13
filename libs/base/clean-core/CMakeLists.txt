@@ -89,6 +89,7 @@ target_sources(clean-core
     src/clean-core/container/key_value_cache.hh
     src/clean-core/container/byte_stream_builder.hh
     src/clean-core/container/ringbuffer.hh
+    src/clean-core/container/fixed_ringbuffer.hh
     src/clean-core/container/bitset.hh
     src/clean-core/container/fixed_bitset.hh
     src/clean-core/container/disjoint_set.hh
@@ -99,6 +100,7 @@ target_sources(clean-core
     src/clean-core/container/strided_span.hh
     src/clean-core/container/pinned_data.hh
     src/clean-core/container/impl/allocating_container.hh
+    src/clean-core/container/impl/ringbuffer_container.hh
 
     src/clean-core/sequence/sequence.hh
 
@@ -258,6 +260,8 @@ if(SC_BUILD_TESTS)
         tests/memory/shared_ptr-test.cc
 
         tests/container/array-test.cc
+        tests/container/tuple-test.cc
+        tests/container/variant-test.cc
         tests/container/fixed-array-test.cc
         tests/container/small_vector-test.cc
         tests/container/fixed_vector-test.cc
@@ -265,6 +269,8 @@ if(SC_BUILD_TESTS)
         tests/container/strided_span-test.cc
         tests/container/pinned_data-test.cc
         tests/container/vector-test.cc
+        tests/container/ringbuffer-test.cc
+        tests/container/fixed_ringbuffer-test.cc
         tests/container/map-test.cc
         tests/container/set-test.cc
         tests/container/byte_stream_builder-test.cc

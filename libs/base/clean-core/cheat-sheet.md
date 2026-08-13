@@ -80,6 +80,26 @@ v.clear();  v.fill(x);  auto a = v.extract_allocation();
 cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, data, begin/end, size()
 auto& [a, b, c] = fa;                              // tuple protocol: get<I>(), structured bindings
 
+#include <clean-core/container/pair.hh>            // cc::pair<T, U> — aggregate .first/.second, ==/<=>/hash
+#include <clean-core/container/tuple.hh>           // cc::tuple<Ts...> — INDEX-based access only (no get<T>)
+auto t = cc::tuple{1, 2.5f, cc::string("hi")};     // CTAD decays; default ctor VALUE-initializes (like pair)
+t.get<0>();  get<0>(t);                            // member or free; both forward the value category
+auto& [a2, b2, c2] = t;                            // structured bindings
+t.emplace<2>("bye");                               // destroys element 2, constructs in place (no move needed)
+t == t;  t < t;  cc::make_hash(t);                 // element-wise ==, lexicographic <=>, structural hash
+cc::apply(f, t);                                   // spreads elements as arguments (works on pair/fixed_array too)
+
+#include <clean-core/container/variant.hh>         // cc::variant<Ts...> — alternatives must be PAIRWISE DISTINCT
+cc::variant<int, cc::string> v = 42;               // value ctor takes EXACT type matches only
+v.emplace<1>("hi");  v.index();                    // index-based mutation; index() is always valid
+v.visit([](int i){ … }, [](cc::string& s){ … });   // handlers are combined into one overload set
+v.is<cc::string>();                                // -> bool; a non-alternative T does not compile
+v.as<cc::string>();                                // -> string& / string const& / string&&; asserts on a different one
+v.try_as<cc::string>();                            // -> string* / string const*; null on a different one (no rvalue overload)
+v.take<cc::string>();                              // -> string, moved out; v stays valid, holds a moved-from string
+v.try_take<cc::string>();                          // -> optional<string>; nullopt on a different one
+cc::variant<int, immovable>::create_emplaced<1>(7);// prvalue, so immovable alternatives work
+
 #include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, N-min inline (SVO)
 cc::small_vector<int, 4> sv;                       // 48 B here; N is a MINIMUM inline cap; over-aligned T OK
 sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop_back/clear/resize/reserve
@@ -90,6 +110,22 @@ sv.inline_capacity();                              // actual inline cap >= N (au
 cc::fixed_vector<int, 4> fv;                       // never allocates; pushing past N ASSERTS (no heap spill)
 fv.push_back(1); fv.emplace_back(2);               // mirrors vector, minus reserve*/shrink_to_fit/extract_allocation
 fv.full();  fv.capacity();                         // -> bool;  -> N (static constexpr)
+
+#include <clean-core/container/ringbuffer.hh>     // cc::ringbuffer<T> — O(1) push/pop at BOTH ends, grows
+auto rb = cc::ringbuffer<int>::create_with_capacity(64); // capacity is ALWAYS a power of two (rounded up)
+rb.push_back(1);  rb.push_front(0);                // symmetric; emplace_/try_/_stable/_overwriting variants too
+rb.pop_front();  rb.pop_back();                    // -> T (nodiscard); remove_front/_back drop it, remove_*_n(k)
+rb.try_pop_front();                                // -> optional<T>; nullopt when empty (the drain-loop spelling)
+rb.push_back_overwriting(2);                       // full => drops the front instead of growing (newest-N window)
+rb[0];  rb.front();  rb.back();                    // index 0 is the FRONT; no data(), the content can WRAP
+auto [s0, s1] = rb.segments();                     // -> pair<span<T>,span<T>>; s1 empty unless wrapped
+rb.linearize();                                    // -> span<T> over all of it; no-op when not wrapped
+rb.push_back_stable(3);                            // asserts instead of growing => references stay valid
+rb.reserve(5); rb.capacity();                      // -> 8: reserve is exact, a push doubles instead
+
+#include <clean-core/container/fixed_ringbuffer.hh> // cc::fixed_ringbuffer<T, N> — inline, any N, never allocates
+cc::fixed_ringbuffer<float, 128> hist;             // same API minus reserve/shrink_to_fit/_stable (always stable)
+hist.push_back_overwriting(dt);                    // the fixed-size history window; push_back would ASSERT when full
 ```
 
 ## Associative
@@ -694,7 +730,13 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   (binding a temporary is UB). `CC_DEFER` captures by reference — keep captured
   state alive.
 - **`create_uninitialized` requires a trivial `T`.**
-- **Not yet implemented (stubs — don't reach for these):** `ringbuffer`, `bitset`, `fixed_bitset`, `tuple`, `variant`, and `disjoint_set`.
+- **`cc::tuple` and `cc::pair` default-construct their elements VALUE-initialized**, unlike `cc::vector`'s uninitialized resizes.
+- **`cc::variant` has no valueless state**, not even after `take<T>()` — that leaves a moved-from alternative behind, at the same index.
+  Assignment destroys the active alternative before constructing the new one, so an alternative whose move constructor throws is not supported.
+  Duplicate alternatives are a static_assert, since access is keyed on type.
+- **A ringbuffer is the one owning container that is NOT contiguous** — no `data()`, no pointer iterator, and its iterator is a real (random-access) type.
+  Its heap capacity is always a power of two, so `create_with_capacity(100)` gives you 128.
+- **Not yet implemented (stubs — don't reach for these):** `bitset`, `fixed_bitset`, and `disjoint_set`.
   Check the header before relying on one.
 - **`CC_FLAG_ENUM_INDEXED` / `CC_FLAG_ENUM_BITMASK` go at GLOBAL scope and take the namespace as their first argument** — they open that namespace themselves.
   The enum must therefore live in one, and there is no `operator~`: `without()` is the set subtraction every complement was being used for.

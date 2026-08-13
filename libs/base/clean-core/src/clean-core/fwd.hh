@@ -114,6 +114,9 @@ inline constexpr bool enable_borrowed_range = false;
 template <class T, class ContainerT>
 struct allocating_container;
 
+template <class T, class ContainerT, class IndexT>
+struct ringbuffer_container;
+
 template <class T>
 struct pinned_data;
 
@@ -159,6 +162,10 @@ class byte_stream_builder;
 
 template <class T>
 struct ringbuffer;
+template <class T, isize N>
+struct fixed_ringbuffer;
+template <class T, class RingT>
+struct ringbuffer_iterator;
 
 template <class... Ts>
 struct tuple;

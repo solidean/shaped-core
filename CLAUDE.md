@@ -298,6 +298,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
 | Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Read hardware performance counters | `uv run dev.py profiling counters` ([docs/guides/profiling.md](docs/guides/profiling.md)) |
+| Find where a build/test/check run's time goes | `uv run dev.py check --fix --profile <file> --profile-type chrome-tracing` ([profiling a run](docs/guides/building-and-testing.md#profiling-a-run)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
 | Run the clang-tidy gates         | `uv run dev.py lint clang-tidy` (`--dirty-only` in `check`; gates in [tools/lint/clang-tidy-gates.yml](tools/lint/clang-tidy-gates.yml)) |
 | Run shaped-linter's own rules    | `uv run dev.py lint shaped [--dirty-only] [--fix]` ([readme](tools/shaped-linter/readme.md)) |

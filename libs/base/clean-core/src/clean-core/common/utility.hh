@@ -470,7 +470,7 @@ struct cc::overloaded : Fs...
 /// Usage:
 ///   cc::void_function{}();           // returns void
 ///   cc::void_function{}(1, 2, 3);    // returns void
-///   std::visit(cc::void_function{}, variant);  // ignores all alternatives
+///   my_variant.visit(cc::void_function{});     // ignores all alternatives
 struct cc::void_function
 {
     template <class... Args>

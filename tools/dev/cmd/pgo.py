@@ -26,22 +26,27 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     run_p = pgo_sub.add_parser("run", help="Full pipeline: instrument -> train -> optimize -> measure")
     a.preset(run_p)
+    a.profile(run_p)
     _add_timeout(run_p)
     run_p.add_argument("--no-measure", action="store_true",
                        help="Stop after the optimized build; skip the baseline-vs-PGO measurement")
 
     inst_p = pgo_sub.add_parser("instrument", help="Build the instrumented (-fprofile-generate) preset")
     a.preset(inst_p)
+    a.profile(inst_p)
 
     train_p = pgo_sub.add_parser("train", help="Run guide benchmarks on the instrumented build, merge profile")
     a.preset(train_p)
+    a.profile(train_p)
     _add_timeout(train_p)
 
     opt_p = pgo_sub.add_parser("optimize", help="Build the optimized (-fprofile-use) preset from the profile")
     a.preset(opt_p)
+    a.profile(opt_p)
 
     meas_p = pgo_sub.add_parser("measure", help="Run guide benchmarks on baseline + PGO and diff metrics")
     a.preset(meas_p)
+    a.profile(meas_p)
     _add_timeout(meas_p)
     return p
 

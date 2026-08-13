@@ -192,6 +192,16 @@ def main() -> None:
     parser.add_argument("--collect-logs", metavar="FILE", default=None,
                         help="On exit (pass or fail), bundle all captured run logs and step sidecars "
                              "under build/ into a zip at FILE — last-resort raw diagnostics for CI.")
+    # Also declared per-subcommand in cmd/args.py, so these bind on either side of the command name.
+    parser.add_argument("--profile", metavar="FILE", default=None,
+                        help="Write a job profile of this run to FILE: one record per subprocess, "
+                             "compile edge, lint job and in-process phase, with lanes allocated for overlap.")
+    parser.add_argument("--profile-type", choices=("jobs", "chrome-tracing"), default="jobs",
+                        help="Profile format: 'jobs' (default) is the raw records, 'chrome-tracing' "
+                             "converts them to a trace https://ui.perfetto.dev loads directly.")
+    parser.add_argument("--profile-lanes", choices=("global", "per-type"), default="global",
+                        help="Lane allocation: 'global' (default) packs every job into one pool, "
+                             "'per-type' gives each job type its own pool and its own track.")
     color_group = parser.add_mutually_exclusive_group()
     color_group.add_argument("--colored", action="store_true",
                              help="Force colored output (default: auto-detect by terminal)")
@@ -213,10 +223,17 @@ def main() -> None:
     args.runner_args = forwarded
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
     dev.configure_mirroring(mirror_test_output=args.mirror_test_output)
+    if args.profile:
+        dev.profile.configure(
+            args.profile, fmt=args.profile_type, lane_mode=args.profile_lanes,
+            argv=["dev.py", *sys.argv[1:]],
+        )
 
-    # atexit fires on SystemExit too, so the archive is written however the command exits — a failed build or test included.
-    if args.collect_logs:
+    # atexit fires on SystemExit too, so these are written however the command exits — a failed build or test included.
+    if args.collect_logs or args.profile:
         import atexit
+
+    if args.collect_logs:
 
         def _emit_log_archive() -> None:
             try:
@@ -227,8 +244,19 @@ def main() -> None:
 
         atexit.register(_emit_log_archive)
 
+    if args.profile:
+
+        def _emit_profile() -> None:
+            try:
+                dev.report.print_profile_summary(dev.profile.write(), args.profile)
+            except OSError as e:
+                print(f"warning: failed to write profile {args.profile}: {e}", file=sys.stderr)
+
+        atexit.register(_emit_profile)
+
     ctx = cmd.Context(root=ROOT, policy=build_policy())
-    commands[args.command].run(args, ctx)
+    with dev.profile.span(args.command, type="invocation", extra={"argv": sys.argv[1:]}):
+        commands[args.command].run(args, ctx)
 
 
 if __name__ == "__main__":

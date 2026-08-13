@@ -13,6 +13,7 @@ import sys
 from tools import dev
 from tools.dev import console
 
+from . import args as a
 from .context import Context
 
 NAME = "check"
@@ -20,6 +21,7 @@ NAME = "check"
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run the pre-commit checks, in registry order (lint, format, crossrefs, test)")
+    a.profile(p)
     p.add_argument("names", nargs="*", help="Specific check(s) to run (default: all)")
     p.add_argument("--fix", action="store_true",
                    help="Let fixable checks apply unambiguous fixes (e.g. clang-format -i)")

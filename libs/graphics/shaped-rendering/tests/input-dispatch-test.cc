@@ -65,7 +65,7 @@ TEST("sr - an event is routed to the window it names")
     CHECK(wsys->events()[0].window == b.get());
     CHECK(wsys->events()[0].window != a.get());
 
-    auto const* const k = std::get_if<sr::key_event>(&wsys->events()[0].payload);
+    auto const* const k = wsys->events()[0].try_as_key();
     REQUIRE(k != nullptr);
     CHECK(k->scancode == scancode::k);
     CHECK(k->is_down);
@@ -94,9 +94,9 @@ TEST("sr - events keep their order across windows")
     CHECK(wsys->events()[1].window == b.get());
     CHECK(wsys->events()[2].window == a.get());
 
-    CHECK(std::get<sr::key_event>(wsys->events()[0].payload).scancode == scancode::num_1);
-    CHECK(std::get<sr::key_event>(wsys->events()[1].payload).scancode == scancode::num_2);
-    CHECK(std::get<sr::key_event>(wsys->events()[2].payload).scancode == scancode::num_3);
+    CHECK(wsys->events()[0].try_as_key()->scancode == scancode::num_1);
+    CHECK(wsys->events()[1].try_as_key()->scancode == scancode::num_2);
+    CHECK(wsys->events()[2].try_as_key()->scancode == scancode::num_3);
 }
 
 TEST("sr - each poll replaces the previous frame's events")
@@ -137,7 +137,7 @@ TEST("sr - modifiers carry forward from key events onto mouse events")
     wsys->poll_events();
 
     REQUIRE(wsys->events().size() == 2);
-    auto const* const b = std::get_if<sr::mouse_button_event>(&wsys->events()[1].payload);
+    auto const* const b = wsys->events()[1].try_as_mouse_button();
     REQUIRE(b != nullptr);
     CHECK(has_all(b->modifiers, key_modifiers::shift));
     CHECK(b->button == mouse_button::left);
@@ -162,7 +162,7 @@ TEST("sr - committed text arrives as its own event, copied")
     wsys->poll_events();
 
     REQUIRE(wsys->events().size() == 1);
-    auto const* const t = std::get_if<sr::text_event>(&wsys->events()[0].payload);
+    auto const* const t = wsys->events()[0].try_as_text();
     REQUIRE(t != nullptr);
     CHECK(t->text == "héllo");
 

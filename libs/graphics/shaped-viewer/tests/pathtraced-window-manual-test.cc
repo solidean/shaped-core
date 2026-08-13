@@ -11,7 +11,6 @@
 #include <typed-geometry/scalar/angle.hh>
 
 #include <chrono>
-#include <variant>
 
 using namespace cc::primitive_defines;
 
@@ -58,7 +57,7 @@ struct fly_camera
 
     void handle(sr::input_event const& e, sr::window& win)
     {
-        if (auto const* const k = std::get_if<sr::key_event>(&e.payload))
+        if (auto const* const k = e.try_as_key())
         {
             auto const down = k->is_down;
             switch (k->scancode)
@@ -93,7 +92,7 @@ struct fly_camera
                 break;
             }
         }
-        else if (auto const* const b = std::get_if<sr::mouse_button_event>(&e.payload))
+        else if (auto const* const b = e.try_as_mouse_button())
         {
             if (b->button == sr::mouse_button::right)
             {
@@ -101,7 +100,7 @@ struct fly_camera
                 win.set_relative_mouse_mode(looking); // capture the cursor while looking
             }
         }
-        else if (auto const* const m = std::get_if<sr::mouse_move_event>(&e.payload))
+        else if (auto const* const m = e.try_as_mouse_move())
         {
             if (looking)
             {

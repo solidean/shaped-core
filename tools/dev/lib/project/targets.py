@@ -10,6 +10,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from ..core import profile
 from ..core.models import Target
 
 
@@ -109,14 +110,15 @@ def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
 
 def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
     """Enumerate all CMake targets for the given build, with artifact paths."""
-    targets = [
-        Target(
-            name=name,
-            kind=data.get("type", "UNKNOWN"),
-            artifact=_primary_artifact(data, build_dir),
-        )
-        for name, data in load_target_models(build_dir, build_type).items()
-    ]
+    with profile.span(build_dir.name, type="discover"):
+        targets = [
+            Target(
+                name=name,
+                kind=data.get("type", "UNKNOWN"),
+                artifact=_primary_artifact(data, build_dir),
+            )
+            for name, data in load_target_models(build_dir, build_type).items()
+        ]
     targets.sort(key=lambda t: t.name)
     return targets
 
