@@ -276,16 +276,9 @@ struct sr::input_event
     cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
 
     /// The payload as one specific kind, or null when the event was a different one.
-    [[nodiscard]] key_event const* try_as_key() const { return impl_try_as<key_event>(); }
-    [[nodiscard]] text_event const* try_as_text() const { return impl_try_as<text_event>(); }
-    [[nodiscard]] mouse_move_event const* try_as_mouse_move() const { return impl_try_as<mouse_move_event>(); }
-    [[nodiscard]] mouse_button_event const* try_as_mouse_button() const { return impl_try_as<mouse_button_event>(); }
-    [[nodiscard]] mouse_wheel_event const* try_as_mouse_wheel() const { return impl_try_as<mouse_wheel_event>(); }
-
-private:
-    template <class T>
-    [[nodiscard]] T const* impl_try_as() const
-    {
-        return payload.visit([](T const& e) { return &e; }, [](auto const&) -> T const* { return nullptr; });
-    }
+    [[nodiscard]] key_event const* try_as_key() const { return payload.try_as<key_event>(); }
+    [[nodiscard]] text_event const* try_as_text() const { return payload.try_as<text_event>(); }
+    [[nodiscard]] mouse_move_event const* try_as_mouse_move() const { return payload.try_as<mouse_move_event>(); }
+    [[nodiscard]] mouse_button_event const* try_as_mouse_button() const { return payload.try_as<mouse_button_event>(); }
+    [[nodiscard]] mouse_wheel_event const* try_as_mouse_wheel() const { return payload.try_as<mouse_wheel_event>(); }
 };

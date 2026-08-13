@@ -192,42 +192,33 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
 /// The buffer arm, or null when the erased view holds a different one.
 [[nodiscard]] inline raw_buffer_view const* try_as_buffer_view(raw_view const& v)
 {
-    return v.visit([](raw_buffer_view const& a) { return &a; },
-                   [](auto const&) -> raw_buffer_view const* { return nullptr; });
+    return v.try_as<raw_buffer_view>();
 }
 /// The texture arm, or null when the erased view holds a different one.
 [[nodiscard]] inline raw_texture_view const* try_as_texture_view(raw_view const& v)
 {
-    return v.visit([](raw_texture_view const& a) { return &a; },
-                   [](auto const&) -> raw_texture_view const* { return nullptr; });
+    return v.try_as<raw_texture_view>();
 }
 /// The tlas arm, or null when the erased view holds a different one.
 [[nodiscard]] inline raw_tlas_view const* try_as_tlas_view(raw_view const& v)
 {
-    return v.visit([](raw_tlas_view const& a) { return &a; },
-                   [](auto const&) -> raw_tlas_view const* { return nullptr; });
+    return v.try_as<raw_tlas_view>();
 }
 
 /// The buffer arm; the erased view must hold one.
 [[nodiscard]] inline raw_buffer_view const& as_buffer_view(raw_view const& v)
 {
-    auto const* a = sg::try_as_buffer_view(v);
-    CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
-    return *a;
+    return v.as<raw_buffer_view>();
 }
 /// The texture arm; the erased view must hold one.
 [[nodiscard]] inline raw_texture_view const& as_texture_view(raw_view const& v)
 {
-    auto const* a = sg::try_as_texture_view(v);
-    CC_ASSERT(a != nullptr, "raw_view does not hold a texture arm");
-    return *a;
+    return v.as<raw_texture_view>();
 }
 /// The tlas arm; the erased view must hold one.
 [[nodiscard]] inline raw_tlas_view const& as_tlas_view(raw_view const& v)
 {
-    auto const* a = sg::try_as_tlas_view(v);
-    CC_ASSERT(a != nullptr, "raw_view does not hold a tlas arm");
-    return *a;
+    return v.as<raw_tlas_view>();
 }
 
 /// The access class the erased view carries — the active arm's (a tlas is always acceleration_structure).

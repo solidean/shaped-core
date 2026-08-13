@@ -89,9 +89,9 @@ static_assert(!std::is_move_constructible_v<cc::variant<int, immovable>>);
 static_assert(!std::is_copy_constructible_v<cc::variant<int, immovable>>);
 
 // the index tag fills the storage's tail padding instead of adding bytes
-static_assert(sizeof(cc::variant<u8, u8>) == 2);
+static_assert(sizeof(cc::variant<u8, i8>) == 2);
 static_assert(sizeof(cc::variant<u32, u8>) == 8);
-static_assert(sizeof(cc::variant<u32, u32>) == 8);
+static_assert(sizeof(cc::variant<u32, i32>) == 8);
 
 static_assert(cc::variant<int, float>::alternative_count == 2);
 static_assert(std::is_same_v<cc::variant<int, float>::alternative_t<1>, float>);
@@ -100,8 +100,6 @@ static_assert(std::is_same_v<cc::variant<int, float>::alternative_t<1>, float>);
 static_assert(std::is_constructible_v<cc::variant<int, cc::string>, int>);
 static_assert(!std::is_constructible_v<cc::variant<int, cc::string>, char const*>);
 static_assert(!std::is_constructible_v<cc::variant<int, cc::string>, float>);
-// ... and stays out of the way when the alternative is duplicated
-static_assert(!std::is_constructible_v<cc::variant<int, int>, int>);
 
 TEST("variant - construction")
 {
@@ -134,16 +132,6 @@ TEST("variant - construction")
         CHECK(v.index() == 1);
         CHECK(v.visit([](int i) { return i; }, [](immovable const& m) { return m.value; }) == 7);
     }
-
-    SECTION("duplicate alternatives stay distinct")
-    {
-        auto const a = cc::variant<int, int>::create_emplaced<0>(5);
-        auto const b = cc::variant<int, int>::create_emplaced<1>(5);
-        CHECK(a.index() == 0);
-        CHECK(b.index() == 1);
-        CHECK(a != b);
-        CHECK(cc::make_hash(a) != cc::make_hash(b));
-    }
 }
 
 TEST("variant - visitation")
@@ -173,7 +161,7 @@ TEST("variant - visitation")
 
     SECTION("returning a reference, and mutating through it")
     {
-        auto v = cc::variant<int, int>::create_emplaced<0>(1);
+        auto v = cc::variant<int>(1);
         auto& r = v.visit([](int& i) -> int& { return i; });
         r = 9;
         CHECK(v.visit([](int i) { return i; }) == 9);
@@ -191,6 +179,79 @@ TEST("variant - visitation")
         auto const m
             = cc::move(v).visit([](int) { return move_only(); }, [](move_only&& x) { return move_only(cc::move(x)); });
         CHECK(m.value == 5);
+    }
+}
+
+TEST("variant - type-based access")
+{
+    SECTION("is, as and try_as pick the alternative out by type")
+    {
+        auto const v = cc::variant<int, cc::string>(cc::string("hi"));
+        CHECK(v.is<cc::string>());
+        CHECK(!v.is<int>());
+        CHECK(v.as<cc::string>() == "hi");
+        CHECK(*v.try_as<cc::string>() == "hi");
+        CHECK(v.try_as<int>() == nullptr);
+    }
+
+    SECTION("as forwards the variant's value category")
+    {
+        auto v = cc::variant<int, cc::string>(cc::string("hi"));
+        auto const& cv = v;
+
+        static_assert(std::is_same_v<decltype(v.as<cc::string>()), cc::string&>);
+        static_assert(std::is_same_v<decltype(cv.as<cc::string>()), cc::string const&>);
+        static_assert(std::is_same_v<decltype(cc::move(v).as<cc::string>()), cc::string&&>);
+
+        v.as<cc::string>() = "bye";
+        CHECK(cv.as<cc::string>() == "bye");
+
+        auto const moved = cc::move(v).as<cc::string>();
+        CHECK(moved == "bye");
+    }
+
+    SECTION("try_as keeps constness")
+    {
+        auto v = cc::variant<int, float>(2.5f);
+        auto const& cv = v;
+
+        static_assert(std::is_same_v<decltype(v.try_as<float>()), float*>);
+        static_assert(std::is_same_v<decltype(cv.try_as<float>()), float const*>);
+
+        *v.try_as<float>() = 3.5f;
+        CHECK(*cv.try_as<float>() == 3.5f);
+    }
+
+    SECTION("take moves out and leaves the variant valid")
+    {
+        auto v = cc::variant<int, move_only>::create_emplaced<1>(5);
+
+        auto const m = v.take<move_only>();
+        CHECK(m.value == 5);
+
+        // the variant keeps its index and now holds a moved-from alternative
+        CHECK(v.index() == 1);
+        CHECK(v.is<move_only>());
+        CHECK(v.as<move_only>().value == -1);
+    }
+
+    SECTION("try_take yields nullopt for a different alternative")
+    {
+        auto v = cc::variant<int, cc::string>(cc::string("hi"));
+        CHECK(!v.try_take<int>().has_value());
+        CHECK(v.is<cc::string>()); // the failed take left it untouched
+
+        auto const s = v.try_take<cc::string>();
+        CHECK(s.has_value());
+        CHECK(s.value() == "hi");
+        CHECK(v.is<cc::string>());
+    }
+
+    SECTION("naming a different alternative asserts")
+    {
+        auto v = cc::variant<int, cc::string>(42);
+        CHECK_ASSERTS((void)v.as<cc::string>());
+        CHECK_ASSERTS((void)v.take<cc::string>());
     }
 }
 

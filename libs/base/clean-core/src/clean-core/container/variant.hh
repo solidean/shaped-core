@@ -4,6 +4,7 @@
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/impl/small_size_type.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/fwd.hh>
 
 #include <type_traits>
@@ -109,8 +110,10 @@ struct variant_index_tag
 
 /// Sum type holding exactly one of the alternatives Ts, discriminated by index.
 /// There is NO valueless state: index() is always in [0, alternative_count).
-/// Access is by VISITATION only - there is deliberately no get<I> and no get<T>, so duplicate alternatives
-/// are perfectly fine and nothing here is keyed on type.
+/// The alternatives must be PAIRWISE DISTINCT, which is what lets everything here be keyed on type.
+/// Access is either by visitation - one handler per alternative, exhaustive - or by naming the alternative's
+/// type: is<T>, as<T>, try_as<T>, take<T>, try_take<T>.
+/// A T that is not an alternative is a compile error rather than a false is<T>().
 /// Trivially copyable and trivially destructible whenever every alternative is.
 /// Assignment destroys the active alternative and constructs the new one in its place, which is not
 /// exception-safe - an alternative whose move constructor can throw is not supported, since we do not
@@ -118,6 +121,8 @@ struct variant_index_tag
 /// Usage:
 ///   cc::variant<int, cc::string> v = 42;
 ///   v.emplace<1>("hello");
+///   if (auto const* s = v.try_as<cc::string>())
+///       use(*s);
 ///   auto s = v.visit([](int i) { return cc::to_string(i); },
 ///                    [](cc::string const& s) { return s; });
 template <class... Ts>
@@ -128,6 +133,8 @@ struct cc::variant
                   "variant alternatives must be object types (no references, void or functions)");
     static_assert((!std::is_const_v<Ts> && ...),
                   "variant alternatives must not be const - they are constructed and destroyed in place");
+    static_assert(((cc::impl::variant_exact_count<Ts, Ts...> == 1) && ...),
+                  "variant alternatives must be pairwise distinct - access is keyed on type");
 
 private:
     using storage_t = cc::impl::variant_storage<Ts...>;
@@ -172,6 +179,76 @@ public:
             });
     }
 
+    // type-based access
+public:
+    /// True when T is the active alternative.
+    /// T must be one of the alternatives - asking for an unrelated type does not compile.
+    template <class T>
+        requires(cc::impl::variant_exact_count<T, Ts...> == 1)
+    [[nodiscard]] constexpr bool is() const
+    {
+        return _index == index_t(cc::impl::variant_exact_index<T, Ts...>());
+    }
+
+    /// The active alternative, which must be T.
+    /// Yields T&, T const& or T&& to match the variant's own value category.
+    template <class T>
+        requires(cc::impl::variant_exact_count<T, Ts...> == 1)
+    [[nodiscard]] constexpr auto&& as(this auto&& self)
+    {
+        constexpr std::size_t idx = cc::impl::variant_exact_index<T, Ts...>();
+
+        using self_t = decltype(self);
+        CC_ASSERT(self._index == index_t(idx), "variant holds a different alternative");
+        return cc::impl::variant_alternative<idx>(static_cast<self_t&&>(self)._storage);
+    }
+
+    /// A pointer to the active alternative, or null when the variant holds a different one.
+    /// A pointer rather than an optional, so nothing is copied on the way out.
+    /// There is deliberately no rvalue overload - the pointer would outlive the temporary it points into.
+    template <class T>
+        requires(cc::impl::variant_exact_count<T, Ts...> == 1)
+    [[nodiscard]] constexpr T* try_as() &
+    {
+        constexpr std::size_t idx = cc::impl::variant_exact_index<T, Ts...>();
+        return _index == index_t(idx) ? &cc::impl::variant_alternative<idx>(_storage) : nullptr;
+    }
+
+    template <class T>
+        requires(cc::impl::variant_exact_count<T, Ts...> == 1)
+    [[nodiscard]] constexpr T const* try_as() const&
+    {
+        constexpr std::size_t idx = cc::impl::variant_exact_index<T, Ts...>();
+        return _index == index_t(idx) ? &cc::impl::variant_alternative<idx>(_storage) : nullptr;
+    }
+
+    /// Moves the active alternative, which must be T, out by value.
+    /// The variant stays valid and keeps its index - it now holds a moved-from T, exactly as a moved-from
+    /// variant does.
+    /// There is no valueless state to fall into.
+    template <class T>
+        requires(cc::impl::variant_exact_count<T, Ts...> == 1 && std::is_move_constructible_v<T>)
+    [[nodiscard]] constexpr T take()
+    {
+        constexpr std::size_t idx = cc::impl::variant_exact_index<T, Ts...>();
+
+        CC_ASSERT(_index == index_t(idx), "variant holds a different alternative");
+        return T(cc::move(cc::impl::variant_alternative<idx>(_storage)));
+    }
+
+    /// take, but nullopt instead of an assert when the variant holds a different alternative.
+    /// An optional rather than a pointer here, since the value has to be moved somewhere anyway.
+    template <class T>
+        requires(cc::impl::variant_exact_count<T, Ts...> == 1 && std::is_move_constructible_v<T>)
+    [[nodiscard]] constexpr cc::optional<T> try_take()
+    {
+        constexpr std::size_t idx = cc::impl::variant_exact_index<T, Ts...>();
+
+        if (_index != index_t(idx))
+            return cc::nullopt;
+        return cc::optional<T>(cc::move(cc::impl::variant_alternative<idx>(_storage)));
+    }
+
     // construction
 public:
     /// Default-constructs alternative 0, since there is no empty state to fall back to.
@@ -184,7 +261,7 @@ public:
     /// Constructs the one alternative whose type is EXACTLY U, after stripping cv and references.
     /// Deliberately exact rather than best-match: variant<bool, cc::string> never silently takes a string
     /// literal as bool, and an ambiguous or merely convertible argument is a compile error instead.
-    /// Reach for create_emplaced<I> when the alternative is duplicated or a conversion is intended.
+    /// Reach for create_emplaced<I> when a conversion is intended.
     template <class U>
         requires(cc::impl::variant_exact_count<std::remove_cvref_t<U>, Ts...> == 1)
     constexpr variant(U&& value) : _index(index_t(cc::impl::variant_exact_index<std::remove_cvref_t<U>, Ts...>()))
@@ -292,7 +369,6 @@ public:
     // comparison
 public:
     /// Equal when the indices match and the active alternatives compare equal.
-    /// Two alternatives of the same type sitting at different indices therefore never compare equal.
     [[nodiscard]] friend constexpr bool operator==(variant const& lhs, variant const& rhs)
         requires((requires(Ts const& v) { bool(v == v); }) && ...)
     {

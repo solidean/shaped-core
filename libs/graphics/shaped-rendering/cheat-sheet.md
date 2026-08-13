@@ -101,8 +101,8 @@ win->start_text_input();              // begin text_events + IME for this window
 - **Wheel deltas are fractional** on trackpads; the platform's inverted-scroll flag is already applied.
 - **Positions are `tg::pos2f`, motions `tg::vec2f`** — `pos - pos` gives the `vec` between them.
   tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
-- **`input_event::payload` is a `cc::variant`**, so it has no type-based `get`.
-  Reach for the `try_as_*` accessors above, or `payload.visit(...)` with one handler per alternative for an exhaustive dispatch.
+- **`input_event::payload` is a `cc::variant`**, and the `try_as_*` accessors above are one-liners over its `try_as<T>()`.
+  Reach for them, or for `payload.visit(...)` with one handler per alternative for an exhaustive dispatch.
 
 ## Dear ImGui
 

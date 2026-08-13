@@ -83,7 +83,7 @@ rules:
 
   - kind: deny-include
     value: [<variant>, <tuple>]
-    reason: use cc::variant / cc::tuple — clean-core/container/. Both are index-based only, so visit the variant and reach for get<I> on the tuple; there is no get<T> on either
+    reason: use cc::variant / cc::tuple — clean-core/container/. cc::tuple is index-based only (get<I>, no get<T>); cc::variant requires distinct alternatives and is accessed by visit or by type (is<T> / as<T> / try_as<T> / take<T>)
 
   - kind: deny-include
     value: <memory>

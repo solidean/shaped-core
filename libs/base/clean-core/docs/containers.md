@@ -54,9 +54,15 @@ Associative — separate chaining over power-of-two buckets:
 
 ### Heterogeneous — `tuple` and `variant`
 
-`tuple<Ts...>` is a product type and `variant<Ts...>` a sum type, and both are deliberately **index-based**.
-`tuple` has `get<I>` and no `get<T>`; `variant` has visitation and no element access at all, by index or by type.
-Duplicate types are therefore fine in both, and neither carries the type-uniqueness rules `std::` has to.
+`tuple<Ts...>` is a product type and `variant<Ts...>` a sum type.
+`tuple` is **index-based**: it has `get<I>` and no `get<T>`, so duplicate element types are fine and none of `std::`'s type-uniqueness rules apply.
+`variant` goes the other way — its alternatives must be **pairwise distinct**, enforced by a static_assert, which is what lets it be keyed on type.
+
+Alongside `visit`, a `variant` alternative can be named directly.
+`is<T>()` asks, `as<T>()` asserts and forwards the value category, `try_as<T>()` hands out a pointer that is null on a different alternative.
+`take<T>()` and `try_take<T>()` move the alternative out.
+A `T` that is not an alternative does not compile, rather than being a `false`.
+`take` leaves the variant **valid**, holding a moved-from alternative at the same index — the same state its own move constructor leaves behind.
 
 Both are **trivially copyable and trivially destructible whenever every element or alternative is**.
 For `tuple` that costs nothing to maintain: its elements are plain base classes, so every special member stays implicit.
@@ -65,7 +71,7 @@ For `tuple` that costs nothing to maintain: its elements are plain base classes,
 `variant` models **no valueless state** — `index()` is always in range.
 That holds because assignment destroys the active alternative and constructs the new one in its place, which is not exception-safe: an alternative whose move constructor can throw is not supported.
 Default construction takes alternative 0, and the value constructor accepts **exact type matches only**, so `variant<bool, string> v = "hi"` is a compile error rather than a silent `bool`.
-Use `create_emplaced<I>` — a prvalue factory, so it works for immovable alternatives — whenever the alternative is duplicated or a conversion is intended.
+Use `create_emplaced<I>` — a prvalue factory, so it works for immovable alternatives — whenever a conversion is intended.
 
 `tuple` and `pair` both **value-initialize** on default construction.
 

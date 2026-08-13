@@ -49,7 +49,7 @@
 // Caveat: unthreaded, on_message and the hooks run on the *calling* thread, so a blocking handler stalls it.
 // The "blocking only stalls this actor" property holds in threaded mode only.
 //
-// Note: messages are stored in a cc::variant<Msg...>, so the message types must be pairwise distinct.
+// Note: messages are stored in a cc::variant<Msg...>, which enforces that the message types are pairwise distinct.
 // The polymorphic impl is held by std::unique_ptr, because cc::unique_ptr forbids the upcast/downcast this needs.
 
 namespace cc

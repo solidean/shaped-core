@@ -89,10 +89,15 @@ t.emplace<2>("bye");                               // destroys element 2, constr
 t == t;  t < t;  cc::make_hash(t);                 // element-wise ==, lexicographic <=>, structural hash
 cc::apply(f, t);                                   // spreads elements as arguments (works on pair/fixed_array too)
 
-#include <clean-core/container/variant.hh>         // cc::variant<Ts...> — VISITATION only (no get at all)
+#include <clean-core/container/variant.hh>         // cc::variant<Ts...> — alternatives must be PAIRWISE DISTINCT
 cc::variant<int, cc::string> v = 42;               // value ctor takes EXACT type matches only
 v.emplace<1>("hi");  v.index();                    // index-based mutation; index() is always valid
 v.visit([](int i){ … }, [](cc::string& s){ … });   // handlers are combined into one overload set
+v.is<cc::string>();                                // -> bool; a non-alternative T does not compile
+v.as<cc::string>();                                // -> string& / string const& / string&&; asserts on a different one
+v.try_as<cc::string>();                            // -> string* / string const*; null on a different one (no rvalue overload)
+v.take<cc::string>();                              // -> string, moved out; v stays valid, holds a moved-from string
+v.try_take<cc::string>();                          // -> optional<string>; nullopt on a different one
 cc::variant<int, immovable>::create_emplaced<1>(7);// prvalue, so immovable alternatives work
 
 #include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, N-min inline (SVO)
@@ -710,8 +715,9 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   state alive.
 - **`create_uninitialized` requires a trivial `T`.**
 - **`cc::tuple` and `cc::pair` default-construct their elements VALUE-initialized**, unlike `cc::vector`'s uninitialized resizes.
-- **`cc::variant` has no valueless state and no `get`** — visit it.
+- **`cc::variant` has no valueless state**, not even after `take<T>()` — that leaves a moved-from alternative behind, at the same index.
   Assignment destroys the active alternative before constructing the new one, so an alternative whose move constructor throws is not supported.
+  Duplicate alternatives are a static_assert, since access is keyed on type.
 - **Not yet implemented (stubs — don't reach for these):** `ringbuffer`, `bitset`, `fixed_bitset`, and `disjoint_set`.
   Check the header before relying on one.
 - **`CC_FLAG_ENUM_INDEXED` / `CC_FLAG_ENUM_BITMASK` go at GLOBAL scope and take the namespace as their first argument** — they open that namespace themselves.
