@@ -391,7 +391,10 @@ Reading it as structure would file most of a build's fan-out under `containers`,
 `par` is the ratio — 1.0 is serial, and above that is how many ran at once on average.
 A type with a large `sum` and a small `span` is already parallel and not the thing to fix; a type whose `span` approaches the run's is.
 
-`env` above is a worked example: 8.8 s of a 135 s run, at `1.0x`, spent re-deriving the same MSVC environment.
+`env` is the worked example, and it is what the summary above was captured before.
+8.8 s of a 135 s run at `1.0x`, all of it re-deriving the same MSVC environment, because configure and build each asked for it independently once per preset.
+It is cached on `(toolset, arch)` now and shows up as a single capture, so a run like that one reads `env 1 2.6 s`.
+[notes/build-times.md](../notes/build-times.md) carries that measurement and the others it came with — read it before optimizing anything here, since it says which scenario each cost belongs to.
 
 ### What becomes a job
 

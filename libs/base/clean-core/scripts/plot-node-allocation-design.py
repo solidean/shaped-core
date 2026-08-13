@@ -5,6 +5,9 @@
 # ///
 """Run the node-allocation design benchmark and plot the fast-path variants.
 
+The benchmark is compiled out in the tree: set CC_BENCH_NODE_ALLOCATION_DESIGN to 1
+at the top of tests/benchmarks/node-allocation-design-benchmark.cc before running this.
+
 Executes `bench-node-design (fast-path variants)` via dev.py (or parses a captured
 run with --input), medians the 3 runs per (variant, size), and writes two SVGs:
 throughput in M alloc+free pairs/s and in GB/s, versus allocation size (log2 X).
@@ -61,6 +64,13 @@ def capture_benchmark(preset: str, target: str) -> str:
         sys.stderr.write(proc.stdout)
         sys.stderr.write(proc.stderr)
         raise SystemExit(f"benchmark run failed (exit {proc.returncode})")
+    if "RESULT," not in proc.stdout:
+        # The likely cause by far, and the failure it would otherwise become — an empty plot — says nothing.
+        raise SystemExit(
+            f"{TEST_NAME!r} produced no RESULT rows.\n"
+            f"The benchmark is compiled out in the tree: set CC_BENCH_NODE_ALLOCATION_DESIGN to 1 in\n"
+            f"libs/base/clean-core/tests/benchmarks/node-allocation-design-benchmark.cc and rerun."
+        )
     return proc.stdout
 
 

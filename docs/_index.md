@@ -18,6 +18,13 @@ Library-local docs live next to their library, under `libs/<category>/<lib>/docs
 - [dev-py-driver.md](dev-py-driver.md) — the design behind the `dev.py` driver and its `tools/dev/` layers, and how to extend it or adapt it downstream.
   Rationale, not a how-to — usage lives in the building-and-testing guide.
 
+## Notes
+
+Findings we want to keep, but that are not a guide to anything.
+
+- [notes/build-times.md](notes/build-times.md) — where a `dev.py check` spends its time, and the cold / semi-cold / warm scenarios it splits into.
+  Also what was measured before deciding on unity builds and prebuilt extern.
+
 ## Guides
 
 [guides/_index.md](guides/_index.md) lists all ten; the ones most often wanted:
