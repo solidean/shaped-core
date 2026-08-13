@@ -16,8 +16,12 @@ Add entries as we discover them, and remove them as they land.
 
 ## container
 
-- **The stubs.**
-  `bitset`, `fixed_bitset` and `disjoint_set` are declared but not implemented.
+- **The stub.**
+  `disjoint_set` is declared but not implemented.
+- **`bitset` printing and allocation interop.**
+  Neither bit set has a `to_string`: it would drag `cc::string` into a container header, the way `variant`'s missing one does.
+  The bit order is already decided — **index 0 leftmost**, since a bit set is an indexed bit array rather than a number.
+  `cc::bitset` also cannot yet adopt or extract its `cc::allocation<u64>`.
 - **`ringbuffer` adoption and extraction.**
   It holds its `cc::allocation<T>` as a raw byte handle, so neither `create_from_allocation` nor `extract_allocation` exists yet.
   Adoption can take the largest power of two at or below the incoming capacity; extraction needs the content linearized first, or a check that it already is.

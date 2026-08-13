@@ -126,6 +126,27 @@ rb.reserve(5); rb.capacity();                      // -> 8: reserve is exact, a 
 #include <clean-core/container/fixed_ringbuffer.hh> // cc::fixed_ringbuffer<T, N> — inline, any N, never allocates
 cc::fixed_ringbuffer<float, 128> hist;             // same API minus reserve/shrink_to_fit/_stable (always stable)
 hist.push_back_overwriting(dt);                    // the fixed-size history window; push_back would ASSERT when full
+
+#include <clean-core/container/bitset.hh>          // cc::bitset — runtime bit count, heap u64 words
+auto bs = cc::bitset::create_defaulted(n);         // n unset bits; create_filled(n, true) / create_with_capacity(n)
+bs.set(i);  bs.set(i, on);  bs.unset(i);  bs.toggle(i);  // bs[i] -> bool (const) / a cc::bit_ref PROXY (mutable)
+bs.set_all();  bs.set_all(on);  bs.unset_all();    // unset_all keeps size(); clear() makes size() 0
+bs.set_range(start, count);                        // word-wise; unset_range/toggle_range too
+bs.any_set();  bs.none_set();  bs.all_set();       // NO empty() on purpose — it would read as none_set()
+bs.set_bit_count();  bs.unset_bit_count();         // -> isize
+bs.find_first_set();  bs.find_last_set();          // -> isize, -1 if none; find_first_unset/find_last_unset too
+for (auto i : bs.set_indices()) {}                 // one step per SET bit, not per bit; unset_indices() likewise
+bs.set_all_of(o);  bs.retain_all_of(o);            // union / intersection, IN PLACE; asserts equal size()
+bs.unset_all_of(o);  bs.toggle_all_of(o);          // difference / symmetric difference; no |&^~ operators at all
+bs.has_all(o);  bs.has_any(o);  bs.is_disjoint(o);  bs.intersection_bit_count(o);
+cc::bitset::create_union_of(a, b);                 // + create_intersection_of/_difference_of/_symmetric_difference_of
+bs.push_back(true);  bs.pop_back();                // -> bool (nodiscard); remove_back() drops it
+bs.resize_to_filled(n, value);  bs.reserve(n);  bs.shrink_to_fit();
+
+#include <clean-core/container/fixed_bitset.hh>    // cc::fixed_bitset<N> — inline, constexpr, never allocates
+cc::fixed_bitset<8> mask;                          // 1 BYTE (smallest word covering N); all-zero, unlike fixed_vector
+template <cc::fixed_bitset<8> Mask> void f();      // structural: usable as a non-type template parameter
+mask = cc::fixed_bitset<8>::create_from_u64(0b1011);  // N <= 64 only; .to_u64() back
 ```
 
 ## Associative
@@ -736,8 +757,12 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   Duplicate alternatives are a static_assert, since access is keyed on type.
 - **A ringbuffer is the one owning container that is NOT contiguous** — no `data()`, no pointer iterator, and its iterator is a real (random-access) type.
   Its heap capacity is always a power of two, so `create_with_capacity(100)` gives you 128.
-- **Not yet implemented (stubs — don't reach for these):** `bitset`, `fixed_bitset`, and `disjoint_set`.
-  Check the header before relying on one.
+- **A bit set is NOT a container of addressable bools** — the mutable `operator[]` yields a `cc::bit_ref` proxy, so `auto b = bs[i]` keeps tracking the bitset and `bool b = bs[i]` is the snapshot.
+  There is no `begin()`/`end()` over bools; `set_indices()` is the iteration, and it costs one step per set bit.
+- **Every two-bitset operation asserts an equal `size()`**, and there are no `|` / `&` / `^` / `~` operators — that precondition is too implicit for an operator.
+  `unset_all()` zeroes the bits, `clear()` (bitset only) makes `size()` zero, and `empty()` deliberately does not exist.
+- **Not yet implemented (stub — don't reach for it):** `disjoint_set`.
+  Check the header before relying on it.
 - **`CC_FLAG_ENUM_INDEXED` / `CC_FLAG_ENUM_BITMASK` go at GLOBAL scope and take the namespace as their first argument** — they open that namespace themselves.
   The enum must therefore live in one, and there is no `operator~`: `without()` is the set subtraction every complement was being used for.
 - **Pick the encoding deliberately — nothing detects it for you.**
