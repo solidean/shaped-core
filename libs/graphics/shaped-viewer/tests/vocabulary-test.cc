@@ -4,13 +4,17 @@
 #include <shaped-viewer/camera.hh>
 #include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/light.hh>
+#include <shaped-viewer/mesh.hh>
 #include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_ids.hh>
+#include <shaped-viewer/triangle_geometry.hh>
 #include <shaped-viewer/view_id.hh>
 #include <shaped-viewer/viewer_definition.hh>
+#include <typed-geometry/geometry/primitives/triangle.hh>
 #include <typed-geometry/linalg/pos.hh>
+#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 #include <typed-geometry/linalg/vec.hh>
 
 #include <type_traits>
@@ -161,6 +165,149 @@ TEST("sv - area_light_gpu::from lays out the rect and its emitting face")
         CHECK(sv::area_light{}.emission[1] < 0);
         CHECK(sv::area_light{}.emission[2] < 0);
     }
+}
+
+TEST("sv - geometry holds both triangle layouts behind one type")
+{
+    auto const positions
+        = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0), tg::pos3f(1, 1, 0)};
+    auto const indices = cc::vector<u32>{0, 1, 2, 1, 3, 2};
+
+    auto const raw = sv::triangle_geometry::create_from_triangles(
+        cc::vector<tg::triangle3f>{tg::triangle3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0))});
+    CHECK(!raw.is_indexed());
+    CHECK(raw.vertex_count() == 3); // one triangle unpacks to three positions, sharing its storage
+    CHECK(raw.triangle_count() == 1);
+    CHECK(raw.positions[1] == tg::pos3f(1, 0, 0));
+
+    auto const indexed = sv::triangle_geometry::create_from_indexed_triangles(positions, indices);
+    CHECK(indexed.is_indexed());
+    CHECK(indexed.vertex_count() == 4);
+    // Two triangles over four vertices — the triangle count follows the index buffer, not the positions.
+    CHECK(indexed.triangle_count() == 2);
+
+    CHECK(sv::triangle_geometry{}.is_empty());
+}
+
+TEST("sv - geometry carries the resource_data content key across unchanged")
+{
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto const indices = cc::vector<u32>{0, 1, 2};
+    auto const triangles = cc::vector<tg::triangle3f>{tg::triangle3f(positions[0], positions[1], positions[2])};
+
+    // The manager caches on the hash alone, so authoring through geometry must key identically to the payload types.
+    // A triangle list and the loose positions behind it are the same bytes, so they must also be the same key.
+    CHECK(sv::triangle_geometry::create_from_triangles(triangles).hash == sv::triangle_data::create(positions).hash);
+    CHECK(sv::triangle_geometry::create_from_indexed_triangles(positions, indices).hash
+          == sv::indexed_triangle_data::create(positions, indices).hash);
+
+    auto const g = sv::triangle_geometry::create_from_indexed_triangles(positions, indices);
+    auto const data = sv::indexed_triangle_data::from(g);
+    CHECK(data.hash == g.hash);
+    CHECK(data.positions.data() == g.positions.data()); // the bridge shares the pin, it does not copy
+}
+
+TEST("sv - a mesh attribute is typed, pinned and content-hashed")
+{
+    auto const normals = cc::vector<tg::vec3f>{tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1), tg::vec3f(0, 1, 0)};
+
+    auto const a = sv::mesh_attribute::create("normal", sv::attribute_frequency::per_vertex, normals);
+    CHECK(a.name == "normal");
+    CHECK(a.format == sv::attribute_format::of_vector(sv::scalar_type::f32, 3)); // deduced from the element type
+    CHECK(a.element_count() == 3);
+    CHECK(a.elements_as<tg::vec3f>()[2] == tg::vec3f(0, 1, 0));
+
+    // Equal contents under a different name are still the same bytes: the hash is over the payload only.
+    CHECK(sv::mesh_attribute::create("n", sv::attribute_frequency::per_corner, normals).hash == a.hash);
+    CHECK(sv::mesh_attribute::create("normal", sv::attribute_frequency::per_vertex,
+                                     cc::vector<tg::vec3f>{tg::vec3f(1, 0, 0)})
+              .hash
+          != a.hash);
+}
+
+TEST("sv - attribute_format spans scalars, vectors and matrices")
+{
+    static_assert(sv::attribute_format_of<f32>.is_scalar());
+    static_assert(sv::attribute_format_of<tg::vec3f>.is_vector());
+    static_assert(sv::attribute_format_of<tg::mat3f>.is_matrix());
+
+    // The point of scalar + dimensionality: a combination nobody enumerated still has a format.
+    static_assert(sv::attribute_format_of<tg::vec4<u8>> == sv::attribute_format::of_vector(sv::scalar_type::u8, 4));
+    static_assert(sv::attribute_format_of<tg::vec4<u8>>.size_bytes() == 4);
+
+    // tg::mat is <C, R, T>, so a 4x3 matrix has 3 rows in 4 columns.
+    static_assert(sv::attribute_format_of<tg::mat<4, 3, f32>>
+                  == sv::attribute_format::of_matrix(sv::scalar_type::f32, 3, 4));
+    static_assert(sv::attribute_format_of<tg::mat<4, 3, f32>>.size_bytes() == 48);
+    static_assert(sv::attribute_format_of<tg::mat<4, 3, f32>>.component_count() == 12);
+
+    // A position is stored as the vector its components form.
+    static_assert(sv::attribute_format_of<tg::pos3f> == sv::attribute_format_of<tg::vec3f>);
+
+    CHECK(sv::scalar_type_size(sv::scalar_type::f64) == 8);
+    CHECK(sv::attribute_format{}.size_bytes() == 4); // a default format is one f32
+
+    auto const uvs = cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)};
+    auto const a = sv::mesh_attribute::create("uv", sv::attribute_frequency::per_corner, uvs);
+    CHECK(a.format.size_bytes() == 8);
+    CHECK(a.element_count() == 3);
+}
+
+TEST("sv - mesh parameters keep their type")
+{
+    auto const scale = sv::parameter_value::of(2.5f);
+    auto const tint = sv::parameter_value::of(tg::vec3f(1, 0, 0));
+    auto const on = sv::parameter_value::of(true);
+
+    // Parameters are typed by the same attribute_format an attribute's elements are.
+    CHECK(scale.format == sv::attribute_format_of<f32>);
+    CHECK(tint.format == sv::attribute_format_of<tg::vec3f>);
+    CHECK(on.format == sv::attribute_format::of_scalar(sv::scalar_type::boolean));
+
+    CHECK(scale.as<f32>() == 2.5f);
+    CHECK(tint.as<tg::vec3f>() == tg::vec3f(1, 0, 0));
+    CHECK(on.as<bool>());
+    CHECK(sv::parameter_value::of(i32(-7)).as<i32>() == -7);
+
+    // holds<T>() is what a material asks before reading — a same-width different-type read is still a miss.
+    CHECK(scale.holds<f32>());
+    CHECK(!scale.holds<i32>());
+    CHECK(!scale.holds<tg::vec3f>());
+
+    // Any scalar type, and vectors up to the inline budget.
+    CHECK(sv::parameter_value::of(tg::vec4<f64>(1, 2, 3, 4)).as<tg::vec4<f64>>()[3] == 4.0);
+    CHECK(sv::parameter_value{}.format == sv::attribute_format_of<f32>); // a default parameter is one f32
+}
+
+TEST("sv - a mesh carries the data its material draws it with")
+{
+    auto m = sv::mesh{.name = "quad"};
+    m.geometry = sv::triangle_geometry::create_from_triangles(
+        cc::vector<tg::triangle3f>{tg::triangle3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0))});
+    m.attributes.push_back(
+        sv::mesh_attribute::create("normal", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec3f>{tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1)}));
+    m.parameters.push_back({.name = "fade", .value = sv::parameter_value::of(0.5f)});
+    m.textures.push_back({.name = "albedo", .texture = sv::texture_id(3)});
+
+    // The lists are the material's input, keyed by name; the mesh only holds them.
+    REQUIRE(m.attributes.size() == 1);
+    CHECK(m.attributes[0].name == "normal");
+    CHECK(m.attributes[0].element_count() == 3);
+    REQUIRE(m.parameters.size() == 1);
+    CHECK(m.parameters[0].name == "fade");
+    CHECK(m.parameters[0].value.as<f32>() == 0.5f);
+    REQUIRE(m.textures.size() == 1);
+    CHECK(m.textures[0].texture == sv::texture_id(3));
+
+    // An unauthored mesh draws, casts and receives — the empty flag set would draw nothing.
+    CHECK(m.is_visible());
+    CHECK(m.flags.has(sv::mesh_flag::casts_shadow));
+    CHECK(m.material == sv::material_id::invalid); // no material library mints ids yet
+
+    // Copying shares the pinned payload rather than duplicating the buffers.
+    auto const copy = m;
+    CHECK(copy.geometry.positions.data() == m.geometry.positions.data());
 }
 
 TEST("sv - gpu_boolean packs a bool into one 32-bit lane")

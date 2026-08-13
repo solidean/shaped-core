@@ -22,6 +22,16 @@ enum class material_set_id : u32
     invalid = u32(-1)
 };
 
+/// Names ONE material definition — how a mesh is drawn — rather than a per-triangle array of them.
+///
+/// This is the thin handle an `sv::mesh` carries: the definition lives outside the mesh and is shared across many.
+/// It is what gives a mesh's attributes, parameters, textures and flags their meaning.
+/// No manager mints these yet — the material library is still to come — so a mesh only ever carries `invalid` today.
+enum class material_id : u32
+{
+    invalid = u32(-1)
+};
+
 enum class tlas_id : u32
 {
     invalid = u32(-1)

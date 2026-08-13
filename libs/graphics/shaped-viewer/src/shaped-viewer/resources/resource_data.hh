@@ -1,11 +1,14 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/hash128.hh> // cc::hash128
 #include <clean-core/common/utility.hh> // cc::forward, cc::move
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/pbr_material.hh>
+#include <shaped-viewer/triangle_geometry.hh>
 #include <typed-geometry/linalg/pos.hh>
 
 // What a caller hands a resource manager: the payload plus the content hash that identifies it.
@@ -29,8 +32,16 @@ struct sv::triangle_data
     [[nodiscard]] static triangle_data create(Positions&& positions)
     {
         cc::pinned_data<tg::pos3f const> pinned = cc::make_pinned_data(cc::forward<Positions>(positions));
-        auto const hash = cc::hash128::create(pinned.span().as_bytes(), 0x4358345);
+        auto const hash = cc::hash128::create(pinned.span().as_bytes(), impl::position_hash_seed);
         return {.positions = cc::move(pinned), .hash = hash};
+    }
+
+    /// The payload for an authored geometry, sharing its pin and its key rather than re-hashing.
+    /// `g` must not be indexed — use indexed_triangle_data::from for that layout.
+    [[nodiscard]] static triangle_data from(triangle_geometry const& g)
+    {
+        CC_ASSERT(!g.is_indexed(), "geometry is indexed - use indexed_triangle_data::from");
+        return {.positions = g.positions, .hash = g.hash};
     }
 };
 
@@ -51,12 +62,19 @@ struct sv::indexed_triangle_data
     {
         cc::pinned_data<tg::pos3f const> pinned_positions = cc::make_pinned_data(cc::forward<Positions>(positions));
         cc::pinned_data<u32 const> pinned_indices = cc::make_pinned_data(cc::forward<Indices>(indices));
-        auto const hash_positions = cc::hash128::create(pinned_positions.span().as_bytes(), 0x4358345);
-        auto const hash_indices = cc::hash128::create(pinned_indices.span().as_bytes(), 0x623435);
         // The two buffers are separate allocations, so the combined hash is over the digests, not over concatenated contents.
-        cc::hash128 const digests[] = {hash_positions, hash_indices};
-        auto const hash = cc::hash128::create(cc::span<cc::hash128 const>(digests).as_bytes(), 0);
+        auto const hash
+            = impl::combine_digests(cc::hash128::create(pinned_positions.span().as_bytes(), impl::position_hash_seed),
+                                    cc::hash128::create(pinned_indices.span().as_bytes(), impl::index_hash_seed));
         return {.positions = cc::move(pinned_positions), .indices = cc::move(pinned_indices), .hash = hash};
+    }
+
+    /// The payload for an authored geometry, sharing its pins and its key rather than re-hashing.
+    /// `g` must be indexed — use triangle_data::from for a raw triangle list.
+    [[nodiscard]] static indexed_triangle_data from(triangle_geometry const& g)
+    {
+        CC_ASSERT(g.is_indexed(), "geometry is a raw triangle list - use triangle_data::from");
+        return {.positions = g.positions, .indices = g.indices, .hash = g.hash};
     }
 };
 
@@ -72,7 +90,7 @@ struct sv::material_data
     [[nodiscard]] static material_data create(Materials&& materials)
     {
         cc::pinned_data<pbr_material const> pinned = cc::make_pinned_data(cc::forward<Materials>(materials));
-        auto const hash = cc::hash128::create(pinned.span().as_bytes(), 0x523453);
+        auto const hash = cc::hash128::create(pinned.span().as_bytes(), impl::material_hash_seed);
         return {.materials = cc::move(pinned), .hash = hash};
     }
 };

@@ -16,6 +16,7 @@ It is the top of the graphics stack and the intended home for Shaped Code's visu
 
 ```text
 viewer_definition / view / scene_item   [in progress]  the per-frame description (camera, items, settings, id, size)
+mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh: triangle_geometry (raw or indexed, pinned + hashed) plus named attributes, a material id, flags, parameters and textures
 resource managers (mesh / material)     [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
 resource data (triangle / indexed / material)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
 pathtrace_routine                        [in progress]  the DXR GI trace the view_renderer drives: TLAS + dispatch_rays into a UAV target
