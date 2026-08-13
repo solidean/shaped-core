@@ -129,3 +129,4 @@ uv run dev.py --mirror-test-output test "nexus bench - 2d traversal cache effect
 - [disassembly.md](disassembly.md) — the static side: read the emitted codegen, and with `dev.py assembly trace` see which path an invocation actually ran plus the data it touched.
   That gives a cache footprint the counters here quantify but do not localize.
 - [perf-results.md](perf-results.md) — recording benchmark *metrics* over time (`GUIDE_BENCHMARK` + `nx::guide`), distinct from the ad-hoc per-region counters here.
+- [building-and-testing.md](building-and-testing.md#profiling-a-run) — the other thing "profiling" can mean here: `dev.py --profile` times the *build and test run itself*, not the code it produces.

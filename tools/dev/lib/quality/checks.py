@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ..core import console
+from ..core import console, profile
 
 
 @dataclass
@@ -53,7 +53,9 @@ def run_checks(
 
     def run_one(c: Check) -> None:
         print(console.dim(f"\n--- running {c.name} ---"), file=sys.stderr)
-        if not c.run(fix=fix, all_scope=all_scope, mirror=mirror, verbose=verbose):
+        with profile.span(c.name, type="check-gate"):
+            ok = c.run(fix=fix, all_scope=all_scope, mirror=mirror, verbose=verbose)
+        if not ok:
             failed.append(c.name)
 
     for c in selected:

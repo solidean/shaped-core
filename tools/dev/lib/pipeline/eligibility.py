@@ -18,6 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core import profile
 from ..core.models import Preset, Target
 
 # Artifact suffixes that are not directly runnable and must be launched via node.
@@ -65,9 +66,10 @@ def query_listing(
         cmd.append(test_name)
     cmd += ["--list-tests-json", "-", *extra_args]
     try:
-        proc = subprocess.run(
-            cmd, cwd=root, env=env, capture_output=True, text=True, timeout=timeout
-        )
+        with profile.span(target.name, type="probe", extra={"query": "--list-tests-json"}):
+            proc = subprocess.run(
+                cmd, cwd=root, env=env, capture_output=True, text=True, timeout=timeout
+            )
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:

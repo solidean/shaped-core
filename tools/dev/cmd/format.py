@@ -7,6 +7,7 @@ import sys
 
 from tools import dev
 
+from . import args as a
 from .context import Context
 
 NAME = "format"
@@ -14,6 +15,7 @@ NAME = "format"
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Format C++ sources with clang-format")
+    a.profile(p)
     p.add_argument("--check-only", action="store_true",
                    help="Report non-conforming files and exit non-zero; do not rewrite")
     p.add_argument("--dirty-only", action="store_true",

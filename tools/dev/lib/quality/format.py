@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core import console
+from ..core import console, profile
 from ..core.models import StepResult
 from ..core.process import response_file, run_step
 
@@ -112,10 +112,11 @@ def _git_dirty_files(root: Path) -> list[Path]:
     Returns absolute paths, with nonexistent entries filtered out.
     """
     try:
-        out = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=all"],
-            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-        )
+        with profile.span("git status", type="git"):
+            out = subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=all"],
+                cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
     except (OSError, subprocess.TimeoutExpired):
         return []
     if out.returncode != 0:
@@ -155,10 +156,11 @@ def changed_line_ranges(root: Path) -> dict[Path, list[tuple[int, int]]]:
     ranges: dict[Path, list[tuple[int, int]]] = {}
 
     try:
-        out = subprocess.run(
-            ["git", "diff", "--unified=0", "--no-color", "HEAD"],
-            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-        )
+        with profile.span("git diff HEAD", type="git"):
+            out = subprocess.run(
+                ["git", "diff", "--unified=0", "--no-color", "HEAD"],
+                cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            )
     except (OSError, subprocess.TimeoutExpired):
         out = None
 
@@ -186,10 +188,11 @@ def changed_line_ranges(root: Path) -> dict[Path, list[tuple[int, int]]]:
                 ranges.setdefault(current, []).append((start, start + count - 1))
 
     try:
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-        )
+        with profile.span("git ls-files --others", type="git"):
+            untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
     except (OSError, subprocess.TimeoutExpired):
         untracked = None
 

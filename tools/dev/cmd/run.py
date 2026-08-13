@@ -23,6 +23,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(p)
     a.build_overrides(p)
     a.emsdk(p)
+    a.profile(p)
     p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
     p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
     p.add_argument("--timeout", type=float, default=0.0, metavar="SECS",

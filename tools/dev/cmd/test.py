@@ -19,6 +19,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(p)
     a.build_overrides(p)
     a.emsdk(p)
+    a.profile(p)
     p.add_argument("--target", "-t", action="append",
                    help="Test binary target(s): comma-list, repeatable, wildcards")
     p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
