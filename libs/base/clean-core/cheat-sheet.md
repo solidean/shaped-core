@@ -110,6 +110,22 @@ sv.inline_capacity();                              // actual inline cap >= N (au
 cc::fixed_vector<int, 4> fv;                       // never allocates; pushing past N ASSERTS (no heap spill)
 fv.push_back(1); fv.emplace_back(2);               // mirrors vector, minus reserve*/shrink_to_fit/extract_allocation
 fv.full();  fv.capacity();                         // -> bool;  -> N (static constexpr)
+
+#include <clean-core/container/ringbuffer.hh>     // cc::ringbuffer<T> — O(1) push/pop at BOTH ends, grows
+auto rb = cc::ringbuffer<int>::create_with_capacity(64); // capacity is ALWAYS a power of two (rounded up)
+rb.push_back(1);  rb.push_front(0);                // symmetric; emplace_/try_/_stable/_overwriting variants too
+rb.pop_front();  rb.pop_back();                    // -> T (nodiscard); remove_front/_back drop it, remove_*_n(k)
+rb.try_pop_front();                                // -> optional<T>; nullopt when empty (the drain-loop spelling)
+rb.push_back_overwriting(2);                       // full => drops the front instead of growing (newest-N window)
+rb[0];  rb.front();  rb.back();                    // index 0 is the FRONT; no data(), the content can WRAP
+auto [s0, s1] = rb.segments();                     // -> pair<span<T>,span<T>>; s1 empty unless wrapped
+rb.linearize();                                    // -> span<T> over all of it; no-op when not wrapped
+rb.push_back_stable(3);                            // asserts instead of growing => references stay valid
+rb.reserve(5); rb.capacity();                      // -> 8: reserve is exact, a push doubles instead
+
+#include <clean-core/container/fixed_ringbuffer.hh> // cc::fixed_ringbuffer<T, N> — inline, any N, never allocates
+cc::fixed_ringbuffer<float, 128> hist;             // same API minus reserve/shrink_to_fit/_stable (always stable)
+hist.push_back_overwriting(dt);                    // the fixed-size history window; push_back would ASSERT when full
 ```
 
 ## Associative
@@ -718,7 +734,9 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`cc::variant` has no valueless state**, not even after `take<T>()` — that leaves a moved-from alternative behind, at the same index.
   Assignment destroys the active alternative before constructing the new one, so an alternative whose move constructor throws is not supported.
   Duplicate alternatives are a static_assert, since access is keyed on type.
-- **Not yet implemented (stubs — don't reach for these):** `ringbuffer`, `bitset`, `fixed_bitset`, and `disjoint_set`.
+- **A ringbuffer is the one owning container that is NOT contiguous** — no `data()`, no pointer iterator, and its iterator is a real (random-access) type.
+  Its heap capacity is always a power of two, so `create_with_capacity(100)` gives you 128.
+- **Not yet implemented (stubs — don't reach for these):** `bitset`, `fixed_bitset`, and `disjoint_set`.
   Check the header before relying on one.
 - **`CC_FLAG_ENUM_INDEXED` / `CC_FLAG_ENUM_BITMASK` go at GLOBAL scope and take the namespace as their first argument** — they open that namespace themselves.
   The enum must therefore live in one, and there is no `operator~`: `without()` is the set subtraction every complement was being used for.

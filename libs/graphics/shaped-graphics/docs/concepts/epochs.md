@@ -88,6 +88,7 @@ Preserve these; the rest is tuning:
 1. **One monotonic epoch fence on the main queue, signaled with the epoch value at the end of that epoch's work.** (Vulkan: a timeline semaphore; Metal: a shared event.)
 2. **Command lists cannot span epochs** — enforced per list (submitted or dropped in the epoch opened in) and in aggregate (no open lists at advance).
 3. **FIFO retire order** — oldest epoch first, drained under one lock so per-epoch cleanup happens once and in order.
+   Both backends hold that FIFO in a `cc::ringbuffer`: pushed at the back on advance, popped from the front as epochs retire.
 4. **Deferred deletion, not immediate free** — refcount→0 stages; the GPU free happens on retire.
 5. **Null handles before running finalizers**, and run finalizers *outside* the in-flight lock.
 6. **Throttle pipelining depth at advance** — default it to the swapchain back-buffer count for a windowed renderer.
@@ -100,7 +101,6 @@ dx12 additionally holds a resource back past its epoch while an async upload to 
 
 **Deferred** (see [TODO.md](../TODO.md)): the split GPU/CPU download watermarks for readback, and vulkan's async copy queue with its per-resource pending syncs.
 Also placed transient *textures*: one works today, but as a dedicated allocation auto-expired at the next epoch rather than suballocated from the transient bump heap, which is buffers-only.
-The in-flight FIFO uses a `cc::vector` drained from the front until `cc::ringbuffer` is implemented.
 
 ## See also
 

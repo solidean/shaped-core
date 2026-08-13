@@ -137,13 +137,8 @@ void dx12_context::process_completed_epochs()
     _epoch_state.lock(
         [&](dx12_epoch_state& s)
         {
-            for (auto& d : s.in_flight)
-            {
-                if (u64(d.epoch_id) > completed)
-                    break;
-                done.push_back(cc::move(d));
-            }
-            s.in_flight.remove_from_to(0, done.size());
+            while (!s.in_flight.empty() && u64(s.in_flight.front().epoch_id) <= completed)
+                done.push_back(s.in_flight.pop_front());
 
             auto const gate = [&](dx12_expiring_resource& r, cc::vector<dx12_expiring_resource>& not_ready)
             {
