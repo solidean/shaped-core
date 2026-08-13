@@ -750,12 +750,14 @@ TEST("shaped-linter - parser - follows_definition")
 
 TEST("shaped-linter - parser - enum definitions")
 {
+    // A copy, not a pointer: the tree that owns the node dies with the call, and only the spans-as-offsets survive it.
+    // Anything checking the TEXT behind a span needs the buffer too, so those sections keep their own `parsed` alive.
     auto const only_enum = [](cc::string_view source)
     {
         auto const p = parse_text(source);
         auto const es = p.nodes_of(node_kind::enum_definition);
         REQUIRE(es.size() == 1);
-        return es[0];
+        return *es[0];
     };
 
     SECTION("a scoped enum carries its name and its form")
@@ -770,14 +772,14 @@ TEST("shaped-linter - parser - enum definitions")
     }
     SECTION("`enum struct` is the scoped form too")
     {
-        CHECK(only_enum("enum struct e { a };")->enum_scoped);
+        CHECK(only_enum("enum struct e { a };").enum_scoped);
     }
     SECTION("an unscoped enum is told apart by whether it wrote an enum-base")
     {
-        CHECK(!only_enum("enum e { a };")->enum_scoped);
-        CHECK(!only_enum("enum e { a };")->enum_has_base);
-        CHECK(only_enum("enum e : u8 { a };")->enum_has_base);
-        CHECK(only_enum("enum e : cc::u8 { a };")->enum_has_base);
+        CHECK(!only_enum("enum e { a };").enum_scoped);
+        CHECK(!only_enum("enum e { a };").enum_has_base);
+        CHECK(only_enum("enum e : u8 { a };").enum_has_base);
+        CHECK(only_enum("enum e : cc::u8 { a };").enum_has_base);
     }
     SECTION("an enum-base of one identifier is a name that resolved through the enclosing scope")
     {
@@ -788,10 +790,10 @@ TEST("shaped-linter - parser - enum definitions")
     }
     SECTION("a base that resolves on its own carries no name to move")
     {
-        CHECK(only_enum("enum class e : int { a };")->enum_base_name.byte_end == 0);
-        CHECK(only_enum("enum class e : unsigned char { a };")->enum_base_name.byte_end == 0);
-        CHECK(only_enum("enum class e : cc::u8 { a };")->enum_base_name.byte_end == 0);
-        CHECK(only_enum("enum class e { a };")->enum_base_name.byte_end == 0);
+        CHECK(only_enum("enum class e : int { a };").enum_base_name.byte_end == 0);
+        CHECK(only_enum("enum class e : unsigned char { a };").enum_base_name.byte_end == 0);
+        CHECK(only_enum("enum class e : cc::u8 { a };").enum_base_name.byte_end == 0);
+        CHECK(only_enum("enum class e { a };").enum_base_name.byte_end == 0);
     }
     SECTION("the type behind an enum-base is not the enum's name")
     {
@@ -806,8 +808,8 @@ TEST("shaped-linter - parser - enum definitions")
     }
     SECTION("a trailing declarator on an enum definition is marked")
     {
-        CHECK(only_enum("enum class e : u8 { } v;")->has_declarator);
-        CHECK(!only_enum("enum class e : u8 { };")->has_declarator);
+        CHECK(only_enum("enum class e : u8 { } v;").has_declarator);
+        CHECK(!only_enum("enum class e : u8 { };").has_declarator);
     }
     SECTION("the enumerator list holds no declaration to descend into")
     {
@@ -817,9 +819,9 @@ TEST("shaped-linter - parser - enum definitions")
     }
     SECTION("where it sits is what the scope says")
     {
-        CHECK(only_enum("namespace cc { enum class e { }; }")->scope == decl_scope::namespace_scope);
-        CHECK(only_enum("struct s { enum class e { }; };")->scope == decl_scope::record_scope);
-        CHECK(only_enum("void f() { enum class e { }; }")->scope == decl_scope::function_scope);
+        CHECK(only_enum("namespace cc { enum class e { }; }").scope == decl_scope::namespace_scope);
+        CHECK(only_enum("struct s { enum class e { }; };").scope == decl_scope::record_scope);
+        CHECK(only_enum("void f() { enum class e { }; }").scope == decl_scope::function_scope);
     }
     SECTION("an enum in a parameter list leaves the function body a function body")
     {
