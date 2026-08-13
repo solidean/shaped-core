@@ -64,13 +64,14 @@ enum class scalar_type : u8
 /// The element layout of an attribute: a scalar type plus its dimensionality, so a consumer can interpret the bytes without a separate stride.
 ///
 /// Dimensionality rather than one enumerator per type, because the cross product of scalars and shapes is what a format list otherwise has to spell out.
-/// `rows` and `cols` are 1 for a scalar, `rows` alone for a vector, and both for a column-major matrix — matching tg's `mat<C, R, T>`.
+/// `dim0` and `dim1` are 1 for a scalar, `dim0` alone for a vector, and both for a column-major matrix — `dim0` the row count, `dim1` the column count, matching tg's `mat<C, R, T>`.
+/// They are numbered rather than named after rows and columns because only the matrix case has rows and columns at all.
 /// Both must be in 1..4.
 struct sv::attribute_format
 {
     sv::scalar_type scalar = scalar_type::f32;
-    int rows = 1; // todo dim0
-    int cols = 1; // todo dim1
+    int dim0 = 1;
+    int dim1 = 1;
 
     [[nodiscard]] static constexpr attribute_format of_scalar(sv::scalar_type scalar) { return {.scalar = scalar}; }
 
@@ -78,22 +79,22 @@ struct sv::attribute_format
     [[nodiscard]] static constexpr attribute_format of_vector(sv::scalar_type scalar, i32 dimension)
     {
         CC_ASSERT(dimension >= 1 && dimension <= 4, "attribute vectors are 1 to 4 components");
-        return {.scalar = scalar, .rows = u8(dimension)};
+        return {.scalar = scalar, .dim0 = u8(dimension)};
     }
 
     /// A column-major matrix of `cols` columns and `rows` rows, so `of_matrix(scalar_type::f32, 3, 3)` is a tg::mat3f.
     [[nodiscard]] static constexpr attribute_format of_matrix(sv::scalar_type scalar, i32 rows, i32 cols)
     {
         CC_ASSERT(rows >= 1 && rows <= 4 && cols >= 1 && cols <= 4, "attribute matrices are 1 to 4 rows and columns");
-        return {.scalar = scalar, .rows = u8(rows), .cols = u8(cols)};
+        return {.scalar = scalar, .dim0 = u8(rows), .dim1 = u8(cols)};
     }
 
-    [[nodiscard]] constexpr int size_bytes() const { return scalar_type_size(scalar) * rows * cols; }
-    [[nodiscard]] constexpr int component_count() const { return rows * cols; }
+    [[nodiscard]] constexpr int size_bytes() const { return scalar_type_size(scalar) * dim0 * dim1; }
+    [[nodiscard]] constexpr int component_count() const { return dim0 * dim1; }
 
-    [[nodiscard]] constexpr bool is_scalar() const { return rows == 1 && cols == 1; }
-    [[nodiscard]] constexpr bool is_vector() const { return rows > 1 && cols == 1; }
-    [[nodiscard]] constexpr bool is_matrix() const { return cols > 1; }
+    [[nodiscard]] constexpr bool is_scalar() const { return dim0 == 1 && dim1 == 1; }
+    [[nodiscard]] constexpr bool is_vector() const { return dim0 > 1 && dim1 == 1; }
+    [[nodiscard]] constexpr bool is_matrix() const { return dim1 > 1; }
 
     [[nodiscard]] friend constexpr bool operator==(attribute_format, attribute_format) = default;
 };

@@ -53,8 +53,9 @@ sv::mesh_attribute               // { string name; attribute_format format; attr
 sv::mesh_attribute::create(name, frequency, elements)       // -> mesh_attribute; format deduced from the element type, bytes pinned + hashed
 a.element_count() / a.elements_as<tg::vec3f>()              // -> isize / span<T const> (asserts if T is not what format names)
 sv::scalar_type                  // i8 i16 i32 i64 | u8 u16 u32 u64 | f32 f64 | boolean (1 byte, 0/1) — the complete set; scalar_type_size(t) -> i32 bytes
-sv::attribute_format             // { scalar_type scalar; u8 rows, cols; } — scalar + dimensionality, so every scalar/shape combination exists
-attribute_format::of_scalar(s) / of_vector(s, dim) / of_matrix(s, rows, cols)  // rows/cols in 1..4; of_matrix is column-major, matching tg::mat<C, R, T>
+sv::attribute_format             // { scalar_type scalar; int dim0, dim1; } — scalar + dimensionality, so every scalar/shape combination exists
+                                 //   dim0 alone is a vector's component count; for a matrix dim0 is its rows and dim1 its columns
+attribute_format::of_scalar(s) / of_vector(s, dim) / of_matrix(s, rows, cols)  // both dims in 1..4; of_matrix is column-major, matching tg::mat<C, R, T>
 f.size_bytes() / f.component_count() / f.is_scalar() / f.is_vector() / f.is_matrix()
 sv::attribute_format_of<T>       // the format of an element type — scalars and tg vec / pos / comp / mat over them
 sv::attribute_frequency          // per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle | per_edge (RESERVED, create asserts)
