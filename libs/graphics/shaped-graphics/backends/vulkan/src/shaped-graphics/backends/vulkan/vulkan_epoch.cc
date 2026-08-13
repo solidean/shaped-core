@@ -94,13 +94,8 @@ void vulkan_context::process_completed_epochs()
         [&](vulkan_epoch_state& s)
         {
             cc::vector<vulkan_epoch_data> out;
-            for (auto& d : s.in_flight)
-            {
-                if (u64(d.epoch_id) > completed)
-                    break;
-                out.push_back(cc::move(d));
-            }
-            s.in_flight.remove_from_to(0, out.size());
+            while (!s.in_flight.empty() && u64(s.in_flight.front().epoch_id) <= completed)
+                out.push_back(s.in_flight.pop_front());
             return out;
         });
 

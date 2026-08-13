@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/ringbuffer.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
@@ -48,7 +49,7 @@ struct sg::backend::dx12::dx12_epoch_data
 /// Guarded because a resource's refcount can hit zero — staging a deletion — on any thread, while advance/retire run on the driver thread.
 struct sg::backend::dx12::dx12_epoch_state
 {
-    cc::vector<dx12_epoch_data> in_flight;     // FIFO, oldest at the front
+    cc::ringbuffer<dx12_epoch_data> in_flight; // FIFO, oldest at the front, retired with pop_front
     cc::vector<dx12_expiring_resource> staged; // refcount-zero resources awaiting the next advance
     // Resources whose epoch has retired but whose async copy-queue work (`copy_wait`) is still pending.
     // Re-checked each process_completed_epochs sweep, and released once the copy fence catches up.

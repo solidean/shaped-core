@@ -77,8 +77,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **Epoch system.** See [concepts/epochs.md](concepts/epochs.md). Still deferred:
   - the **vulkan** async copy queue, which has neither the queue nor the per-resource pending syncs;
   - a **texture-capable transient heap** — `ctx.transient`'s bump allocator is buffers-only, so a transient texture falls back to a dedicated allocation the backend auto-expires at the next epoch.
-- **`cc::ringbuffer`:** the epoch in-flight set still uses a `cc::vector` drained from the front, which is O(n) per pop.
-  `cc::ringbuffer` now exists and is the right type for it; the switch is pending.
 - **Render routines want a shared/exclusive lock, not a mutex.**
   The model to reach is: a routine's init phases exclude every `execute`, while `execute` calls that only *read* run in parallel with each other.
   A read-only routine like `sr::blit_routine` — one that can be acquired without exclusivity — has no reason to serialize against another thread's `execute`.

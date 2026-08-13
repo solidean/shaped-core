@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/ringbuffer.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
@@ -63,7 +64,7 @@ struct sg::backend::vulkan::vulkan_command_pool_set
 /// Guarded because a resource's refcount can hit zero — staging a deletion — on any thread, while advance and retire run externally synchronized.
 struct sg::backend::vulkan::vulkan_epoch_state
 {
-    cc::vector<vulkan_epoch_data> in_flight;     // FIFO, oldest at the front
+    cc::ringbuffer<vulkan_epoch_data> in_flight; // FIFO, oldest at the front, retired with pop_front
     cc::vector<vulkan_expiring_resource> staged; // refcount-zero resources awaiting the next advance
 };
 
