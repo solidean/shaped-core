@@ -56,43 +56,45 @@ namespace babel::gltf
 // One strong enum per role, with `invalid` meaning "the file left it out".
 // Cross into the underlying int with an explicit `int(x)` at the use site.
 
-enum class buffer_index : int
+} // namespace babel::gltf
+
+enum class babel::gltf::buffer_index : int
 {
     invalid = -1
 };
-enum class buffer_view_index : int
+enum class babel::gltf::buffer_view_index : int
 {
     invalid = -1
 };
-enum class accessor_index : int
+enum class babel::gltf::accessor_index : int
 {
     invalid = -1
 };
-enum class mesh_index : int
+enum class babel::gltf::mesh_index : int
 {
     invalid = -1
 };
-enum class node_index : int
+enum class babel::gltf::node_index : int
 {
     invalid = -1
 };
-enum class scene_index : int
+enum class babel::gltf::scene_index : int
 {
     invalid = -1
 };
-enum class material_index : int
+enum class babel::gltf::material_index : int
 {
     invalid = -1
 };
-enum class texture_index : int
+enum class babel::gltf::texture_index : int
 {
     invalid = -1
 };
-enum class image_index : int
+enum class babel::gltf::image_index : int
 {
     invalid = -1
 };
-enum class sampler_index : int
+enum class babel::gltf::sampler_index : int
 {
     invalid = -1
 };
@@ -103,14 +105,14 @@ enum class sampler_index : int
 // exactly what the file said.
 
 /// Which container the bytes were in.
-enum class container : u8
+enum class babel::gltf::container : babel::u8
 {
     gltf, // a JSON document
     glb,  // the binary container
 };
 
 /// An accessor's `componentType`.
-enum class component_type : u16
+enum class babel::gltf::component_type : babel::u16
 {
     invalid = 0,
     i8 = 5120,
@@ -122,7 +124,7 @@ enum class component_type : u16
 };
 
 /// An accessor's `type`, i.e. how many components make one element.
-enum class accessor_type : u8
+enum class babel::gltf::accessor_type : babel::u8
 {
     invalid,
     scalar,
@@ -135,7 +137,7 @@ enum class accessor_type : u8
 };
 
 /// A primitive's topology.
-enum class primitive_mode : u8
+enum class babel::gltf::primitive_mode : babel::u8
 {
     points = 0,
     lines = 1,
@@ -147,7 +149,7 @@ enum class primitive_mode : u8
 };
 
 /// A bufferView's declared GPU binding; `none` when the file did not state one.
-enum class buffer_target : u16
+enum class babel::gltf::buffer_target : babel::u16
 {
     none = 0,
     array_buffer = 34962,
@@ -155,7 +157,7 @@ enum class buffer_target : u16
 };
 
 /// A material's `alphaMode`.
-enum class alpha_mode : u8
+enum class babel::gltf::alpha_mode : babel::u8
 {
     opaque,
     mask,
@@ -164,7 +166,7 @@ enum class alpha_mode : u8
 
 /// A sampler's magnification / minification filter; `none` means unspecified (the runtime chooses).
 /// The mipmap variants are only valid as a minification filter.
-enum class filter : u16
+enum class babel::gltf::filter : babel::u16
 {
     none = 0,
     nearest = 9728,
@@ -176,12 +178,15 @@ enum class filter : u16
 };
 
 /// A sampler's wrapping mode per texture axis.
-enum class wrap_mode : u16
+enum class babel::gltf::wrap_mode : babel::u16
 {
     repeat = 10497,
     clamp_to_edge = 33071,
     mirrored_repeat = 33648,
 };
+
+namespace babel::gltf
+{
 
 // document elements
 // -------------------------------------------------------------------------------------------------
@@ -513,9 +518,11 @@ namespace babel::gltf
 // import issues
 // -------------------------------------------------------------------------------------------------
 
+} // namespace babel::gltf
+
 /// Why the reader recorded an issue.
 /// None of these fails the read — a condition that would is a `cc::result` error instead.
-enum class issue_kind : u8
+enum class babel::gltf::issue_kind : babel::u8
 {
     /// The file uses a feature this reader does not implement, and it was skipped.
     /// Nothing is wrong with the file; the gap is ours.
@@ -529,8 +536,6 @@ enum class issue_kind : u8
     /// The named property fell back to its default.
     malformed,
 };
-
-} // namespace babel::gltf
 
 /// One thing the reader noticed and did not fail on.
 /// The message names the offending element by index, so it can be shown to a user as-is.

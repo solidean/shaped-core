@@ -16,19 +16,15 @@ struct nx::test_instance
     cc::vector<cc::vector<cc::string>> section_scopes;
 };
 
-namespace nx
-{
 // How the positional filters are read.
 // A file filter is a glob over the test's source file — the path the compiler saw, so an absolute one works too.
 // It selects like a name filter does: bucket and disabled rules still apply, because only an *exact test name* opens those.
-enum class filter_mode
+enum class nx::filter_mode
 {
     name,
     file,
     name_or_file, // names first, and file globs only when no filter matched any name
 };
-
-} // namespace nx
 
 struct nx::test_schedule_config
 {

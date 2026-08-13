@@ -11,8 +11,6 @@
 /// Buffers only ever use the `general` layout — layouts matter for textures.
 /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
 
-namespace sg
-{
 /// What a GPU operation does to a resource.
 /// Bit flags — combine with `|`, test with `has_all` / `has_any`.
 /// Migrates to `cc::flags` (same status as `buffer_usage`).
@@ -20,7 +18,7 @@ namespace sg
 /// Read vs write is explicit in the suffix.
 /// `is_unordered_write` marks the accesses that create a hazard needing a barrier — shader, transfer and accel writes.
 /// Color/depth *target* writes are ROP-ordered by the hardware, and are not unordered.
-enum class access_flags : u32
+enum class sg::access_flags : sg::u32
 {
     none = 0,
     uniform_read = 1u << 0,  // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
@@ -44,7 +42,7 @@ enum class access_flags : u32
 /// Pipeline stages that may perform an access — bit flags, combined with `|`.
 /// Coarse on purpose — tessellation/geometry fold into `vertex`, early/late depth into `depth_stencil_target`.
 /// That mirrors how DX12 `BARRIER_SYNC` and Vulkan `PIPELINE_STAGE_2` are typically consumed.
-enum class pipeline_stage_flags : u32
+enum class sg::pipeline_stage_flags : sg::u32
 {
     none = 0,
     draw_indirect = 1u << 0,        // DX12 EXECUTE_INDIRECT / Vk DRAW_INDIRECT
@@ -61,7 +59,7 @@ enum class pipeline_stage_flags : u32
 /// Memory layout a texture subresource is in; buffers are always `general`.
 /// Maps to DX12 `BARRIER_LAYOUT` / Vulkan `ImageLayout`.
 /// Live for textures today — dx12 transitions render targets, shader reads and copy destinations through it.
-enum class texture_layout : u32
+enum class sg::texture_layout : sg::u32
 {
     undefined,        // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
     general,          // buffers, and textures usable by any access: DX12 LAYOUT_COMMON / Vk IMAGE_LAYOUT_GENERAL
@@ -74,6 +72,9 @@ enum class texture_layout : u32
     copy_dst,         // copy dest: DX12 LAYOUT_COPY_DEST / Vk TRANSFER_DST_OPTIMAL
     present,          // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
 };
+
+namespace sg
+{
 
 // access_flags bit ops
 [[nodiscard]] constexpr access_flags operator|(access_flags a, access_flags b)

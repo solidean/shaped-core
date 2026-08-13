@@ -6,6 +6,11 @@
 namespace nx::fuzz
 {
 struct typed_value_index;
+
+// The three index roles, declared ahead of the definitions below so those can be written qualified.
+enum class type_index : int;
+enum class op_index : int;
+enum class value_index : int;
 } // namespace nx::fuzz
 
 namespace nx
@@ -23,26 +28,25 @@ struct typed_value; // the fuzz engine's value slots (see nexus/tests/typed_valu
 namespace nx::fuzz
 {
 using namespace cc::primitive_defines;
+} // namespace nx::fuzz
 
 /// Index into the machine's interned type table.
 /// `invalid` also denotes a void return.
-enum class type_index : int
+enum class nx::fuzz::type_index : int
 {
     invalid = -1
 };
 /// Index of an operation within the machine.
-enum class op_index : int
+enum class nx::fuzz::op_index : int
 {
     invalid = -1
 };
 /// Index of a value within its type's slot vector.
 /// A value equal to the current slot count means "append a new slot", which is how the reachable state grows during generation.
-enum class value_index : int
+enum class nx::fuzz::value_index : int
 {
     invalid = -1
 };
-
-} // namespace nx::fuzz
 
 /// Addresses one value in the state: which type, and which slot of that type.
 struct nx::fuzz::typed_value_index

@@ -7,20 +7,16 @@ namespace nx::config
 struct cfg;
 } // namespace nx::config
 
-namespace nx::config
-{
 // Which selection bucket a test belongs to; a test lives in exactly one.
 // An automatic sweep selects a single bucket — normal by default, manual via --manual, guide_benchmark via --guide-benchmarks.
 // An exact (non-substring) filter naming a test can also pull it in from another bucket, but only when no bucket flag was given.
 // The set is intentionally extensible.
-enum class test_bucket
+enum class nx::config::test_bucket
 {
     normal,
     manual,
     guide_benchmark,
 };
-
-} // namespace nx::config
 
 struct nx::config::cfg
 {

@@ -7,13 +7,11 @@
 /// Formats that are backend-specific, mobile-only, or absent somewhere are left out until a concrete need plus a per-backend capability query justify them
 /// (see libs/graphics/shaped-graphics/docs/concepts/textures.md).
 
-namespace sg
-{
 /// A GPU texel format.
 /// `undefined` is the null value (no format).
 /// Block-compressed (BC) formats are included but are a *runtime* capability everywhere (Vk `textureCompressionBC`, WGPU `texture-compression-bc`, Metal `supportsBCTextureCompression`) —
 /// the enumerant always maps, but a backend may still reject it on a given adapter until a capability query gates its use.
-enum class pixel_format : u16
+enum class sg::pixel_format : sg::u16
 {
     undefined,
 
@@ -81,6 +79,9 @@ enum class pixel_format : u16
     bc7_rgba_unorm,      // DX12 BC7_UNORM      / Vk BC7_UNORM_BLOCK
     bc7_rgba_unorm_srgb, // DX12 BC7_UNORM_SRGB / Vk BC7_SRGB_BLOCK
 };
+
+namespace sg
+{
 
 /// True for the depth (and depth-stencil) formats.
 [[nodiscard]] constexpr bool is_depth_format(pixel_format f)

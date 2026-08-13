@@ -30,10 +30,8 @@ namespace babel::impl
 struct json_parser; // defined in json.cc; builds a document
 }
 
-namespace babel::json
-{
 /// The JSON value categories.
-enum class node_kind : u8
+enum class babel::json::node_kind : babel::u8
 {
     null,
     boolean,
@@ -42,8 +40,6 @@ enum class node_kind : u8
     array,
     object,
 };
-
-} // namespace babel::json
 
 /// One parsed value in the document's flat node array.
 /// Not used directly — traverse via `ref`.

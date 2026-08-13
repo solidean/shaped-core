@@ -9,17 +9,15 @@
 ///   - **static** — declared on a binding_group_layout and baked into the pipeline layout's root signature;
 ///   - **dynamic** — supplied per binding_group (a `named_sampler`), written into a sampler descriptor heap.
 
-namespace sg
-{
 /// Per-axis filtering mode (minification, magnification, and between mip levels).
-enum class sampler_filter
+enum class sg::sampler_filter
 {
     nearest, ///< point sampling (GL_NEAREST / D3D POINT / Vk NEAREST)
     linear,  ///< linear interpolation (GL_LINEAR / D3D LINEAR / Vk LINEAR)
 };
 
 /// How texture coordinates outside [0, 1) are resolved, per axis.
-enum class sampler_address_mode
+enum class sg::sampler_address_mode
 {
     repeat,            ///< wrap (Vk REPEAT / D3D WRAP)
     mirror_repeat,     ///< wrap, mirroring every other tile (Vk MIRRORED_REPEAT / D3D MIRROR)
@@ -30,7 +28,7 @@ enum class sampler_address_mode
 
 /// The fixed border color used by `clamp_border` addressing.
 /// The portable set — the three every backend supports as a static sampler; an arbitrary float4 border is deferred.
-enum class sampler_border_color
+enum class sg::sampler_border_color
 {
     transparent_black, ///< (0, 0, 0, 0)
     opaque_black,      ///< (0, 0, 0, 1)
@@ -39,7 +37,7 @@ enum class sampler_border_color
 
 /// Comparison function for a comparison ("shadow") sampler — compares the fetched texel against the
 /// reference value the shader passes to `SampleCmp`. Shared with `depth_stencil_state`'s depth test.
-enum class compare_op
+enum class sg::compare_op
 {
     never,
     less,
@@ -50,8 +48,6 @@ enum class compare_op
     greater_equal,
     always,
 };
-
-} // namespace sg
 
 /// An immutable sampler state.
 /// Defaults are a trilinear repeating sampler with no anisotropy and no depth comparison — the common case.

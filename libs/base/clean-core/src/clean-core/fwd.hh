@@ -86,6 +86,8 @@ struct string_view;
 template <class... Args>
 struct format_string;
 
+enum class glob_option; // what glob_matches does beyond a byte-for-byte match (string/glob.hh)
+
 
 //
 // Views
@@ -255,6 +257,9 @@ struct threaded_actor_impl;
 // Async / dataflow
 //
 
+enum class async_error_kind : u8;  // an ordinary error, or a cancellation (thread/async_node.hh)
+enum class async_step_status : u8; // what one compute step reports back to the poll loop
+enum class async_node_state : u8;  // a node's lifecycle state, moved by CAS
 struct async_error;
 struct alignas(32) async_type_ops; // the type-erased node ops descriptor (thread/async_node.hh)
 struct async_node_base;
@@ -324,6 +329,7 @@ class file_read_write_stream_adapter;
 // Utilities
 //
 
+enum class flag_encoding; // whether an enum's values are bit indices or bit patterns (common/enum_traits.hh)
 template <class EnumT>
 struct flags;
 
@@ -345,3 +351,13 @@ struct offset_size;
 struct start_end;
 
 } // namespace cc
+
+//
+// Console
+//
+
+namespace cc::console
+{
+enum class color_mode; // whether output is colored: automatic, always, never (platform/console.hh)
+enum class color : u8; // the SGR set every terminal agrees on
+} // namespace cc::console

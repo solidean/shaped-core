@@ -19,10 +19,20 @@ struct dx12_pending_copy;
 struct dx12_texture_upload;
 struct dx12_texture_download;
 
+enum class cpu_descriptor_slot : int;  // a slot in a CPU descriptor heap (see dx12_cpu_descriptor_heap.hh)
+enum class dx12_query_heap_type : u32; // which query heap a query lives in (see dx12_query.hh)
+enum class layout_combine;             // how two texture layouts merge (see dx12_texture_access.hh)
+
+// The two fence-value newtypes this header goes on to DEFINE, named here so each definition can be written qualified.
+enum class dx12_copy_fence_value : u64;
+enum class dx12_download_fence_value : u64;
+
+} // namespace sg::backend::dx12
+
 /// Monotonic value on the async-upload completion fence (dx12_upload_async_system::_completion_fence).
 /// Its own newtype so it cannot be confused with the epoch / submission / staging fence timelines.
 /// A later direct-queue list waits on this value to see an async upload's writes; `none` means no pending upload.
-enum class dx12_copy_fence_value : u64
+enum class sg::backend::dx12::dx12_copy_fence_value : sg::u64
 {
     none = 0,
 };
@@ -30,10 +40,13 @@ enum class dx12_copy_fence_value : u64
 /// Monotonic value on the async-download completion fence (dx12_download_async_system::_completion_fence).
 /// Its own newtype so it cannot be confused with the other fence timelines.
 /// A later direct-queue list that WRITES a buffer waits on this value to know the async readback has finished reading it; `none` means no pending async download.
-enum class dx12_download_fence_value : u64
+enum class sg::backend::dx12::dx12_download_fence_value : sg::u64
 {
     none = 0,
 };
+
+namespace sg::backend::dx12
+{
 
 class dx12_context;
 class dx12_command_list;

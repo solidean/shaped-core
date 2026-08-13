@@ -9,18 +9,14 @@
 
 #include <atomic>
 
-namespace sg
-{
 /// Rank of a texture's coordinate grid — how many spatial axes it has.
 /// Array-ness, cube-ness and multisampling are orthogonal, carried separately on texture_description rather than as extra dimensions.
-enum class texture_dimension : u8
+enum class sg::texture_dimension : sg::u8
 {
     d1, ///< width only
     d2, ///< width + height
     d3, ///< width + height + depth
 };
-
-} // namespace sg
 
 /// The immutable shape of a texture: everything a backend needs to allocate the GPU resource.
 /// Shape is derived, not duplicated in redundant flags — libs/graphics/shaped-graphics/docs/concepts/textures.md has the reasoning.

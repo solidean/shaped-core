@@ -42,15 +42,15 @@ namespace sg::backend::dx12
     };
 }
 
+} // namespace sg::backend::dx12
+
 /// How two required layouts for one subresource-in-one-op combined: cleanly, into a slower fallback, or not at all — a hazard.
-enum class layout_combine
+enum class sg::backend::dx12::layout_combine
 {
     ok,       ///< a single layout serves both (or they were equal) — no cost
     degraded, ///< no specialized layout serves both, so COMMON (`general`) is used — correct but slower
     conflict, ///< the two accesses can't coexist in one op (e.g. copy-dest + sampled) — caller error
 };
-
-} // namespace sg::backend::dx12
 
 struct sg::backend::dx12::combined_layout
 {

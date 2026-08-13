@@ -52,16 +52,17 @@
 // Note: messages are stored in a cc::variant<Msg...>, which enforces that the message types are pairwise distinct.
 // The polymorphic impl is held by std::unique_ptr, because cc::unique_ptr forbids the upcast/downcast this needs.
 
-namespace cc
-{
 /// How a threaded_actor is driven, chosen at start().
-enum class threaded_actor_mode
+enum class cc::threaded_actor_mode
 {
     /// run the actor on its own thread where the platform has threads, else fall back to unthreaded
     threaded_if_possible,
     /// run no thread; drive processing via process_messages_if_unthreaded[_for_ms]()
     unthreaded,
 };
+
+namespace cc
+{
 
 // CRTP mixins (plumbing, not user-facing); the aggregate types live in fwd.hh
 template <class MessageT>

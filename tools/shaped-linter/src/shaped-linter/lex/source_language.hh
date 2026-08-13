@@ -3,16 +3,17 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-linter/fwd.hh>
 
-namespace scl
-{
 /// What a file is written in, decided from its extension alone — the engine's dispatch key.
 /// Each language has its own front end, and a rule declares which languages it applies to.
-enum class source_language : u8
+enum class scl::source_language : scl::u8
 {
     cpp,
     python,
     markdown,
 };
+
+namespace scl
+{
 
 /// The language of `path`, from its extension.
 /// Anything unrecognized — including the `<memory>` of an

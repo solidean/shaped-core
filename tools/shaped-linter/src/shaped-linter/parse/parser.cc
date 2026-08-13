@@ -154,29 +154,32 @@ struct parser_impl
     /// Records, namespaces, function bodies, nested blocks and lambda bodies are all descended.
     void parse_scope(isize begin, isize end, decl_scope scope, isize parent)
     {
-        // Which record definitions sit next to each other is what tells a rule how big a block moves out of the namespace, so the parser answers that here.
+        // Which type definitions sit next to each other is what tells a rule how big a block moves out of the namespace, so the parser answers that here.
         // Everything it does not model — a function, a macro, a preprocessor line, a nested namespace, a forward declaration — breaks the run, which is the safe direction.
         bool const track = tree.nodes[parent].kind == node_kind::namespace_definition;
 
-        bool prev_was_record = false;
+        bool prev_was_definition = false;
         isize pos = begin;
         while (pos < end && !is_eof(pos))
         {
             auto const children_before = tree.nodes[parent].children.size();
             pos = scan_one(pos, end, scope, parent);
 
-            auto const is_record = added_one_record(parent, children_before);
-            if (track && is_record && prev_was_record)
-                tree.nodes[tree.nodes[parent].children.back()].follows_record = true;
-            prev_was_record = is_record;
+            auto const is_definition = added_one_definition(parent, children_before);
+            if (track && is_definition && prev_was_definition)
+                tree.nodes[tree.nodes[parent].children.back()].follows_definition = true;
+            prev_was_definition = is_definition;
         }
     }
 
-    /// Whether the statement just scanned contributed exactly one record definition to `parent`.
-    bool added_one_record(isize parent, isize children_before) const
+    /// Whether the statement just scanned contributed exactly one record or enum definition to `parent`.
+    bool added_one_definition(isize parent, isize children_before) const
     {
         auto const& children = tree.nodes[parent].children;
-        return children.size() == children_before + 1 && tree.nodes[children.back()].kind == node_kind::record_definition;
+        if (children.size() != children_before + 1)
+            return false;
+        auto const kind = tree.nodes[children.back()].kind;
+        return kind == node_kind::record_definition || kind == node_kind::enum_definition;
     }
 
     /// Consume exactly one declaration or statement starting at `begin`; return the index just past it.
@@ -217,12 +220,15 @@ struct parser_impl
         bool paren_group_seen = false;
         bool def_head = false; // saw a type-defining keyword (class/struct/union/enum) at top level
         bool is_record = false;
+        bool is_enum = false;
+        bool enum_scoped = false;
+        isize enum_base_begin = -1; // first token of the enum-base, -1 when none was written
         // Saw something that rules this segment out as a declaration: a statement keyword, or punctuation
         // that only an expression carries.
         bool not_a_declaration = false;
         record_keyword rec_kw = record_keyword::struct_;
-        isize rec_name_index = -1;
-        bool expect_record_name = false;
+        isize def_name_index = -1; // the name a record or enum head spells
+        bool expect_def_name = false;
         isize declarator_index = -1; // last top-level identifier — the declarator-id candidate
         isize prev_top_index = -1;   // previous top-level significant token (for the neutralize check)
 
@@ -236,7 +242,7 @@ struct parser_impl
                 def_head = true;
                 is_record = true;
                 rec_kw = record_keyword_of(t.text);
-                expect_record_name = true;
+                expect_def_name = true;
                 prev_top_index = pos;
                 ++pos;
                 continue;
@@ -244,10 +250,25 @@ struct parser_impl
             if (t.is_keyword("enum"))
             {
                 def_head = true;
+                is_enum = true;
                 prev_top_index = pos;
                 ++pos;
                 if (kw(pos, "class") || kw(pos, "struct")) // `enum class` / `enum struct`
+                {
+                    enum_scoped = true;
                     ++pos;
+                }
+                expect_def_name = true;
+                continue;
+            }
+            // An enum-base ends the head's name, so the type behind the ':' is never mistaken for it — `enum : u8 { … }` stays anonymous.
+            // Whether one was written is what decides if an unscoped enum can be declared ahead of its definition at all.
+            if (is_enum && t.is_punct(":"))
+            {
+                enum_base_begin = pos + 1;
+                expect_def_name = false;
+                prev_top_index = pos;
+                ++pos;
                 continue;
             }
             if (is_statement_keyword(t))
@@ -258,7 +279,11 @@ struct parser_impl
                 if (paren_group_seen || def_head)
                 {
                     if (is_record)
-                        return finish_record(begin, pos, end, rec_kw, rec_name_index, scope, parent);
+                        return finish_record(begin, pos, end, rec_kw, def_name_index, scope, parent);
+
+                    // Only the enum's own enumerator list, never a function body that merely has an enum in its parameter list — `void f(enum e x) { }`.
+                    if (is_enum && !paren_group_seen)
+                        return finish_enum(begin, pos, end, enum_scoped, enum_base_begin, def_name_index, scope, parent);
 
                     auto after = skip_balanced(pos, "{", "}");
 
@@ -328,10 +353,10 @@ struct parser_impl
 
             if (t.is(token_kind::identifier))
             {
-                if (expect_record_name)
+                if (expect_def_name)
                 {
-                    rec_name_index = pos;
-                    expect_record_name = false;
+                    def_name_index = pos;
+                    expect_def_name = false;
                 }
                 declarator_index = pos;
             }
@@ -532,6 +557,45 @@ struct parser_impl
         tree.nodes[parent].children.push_back(id);
 
         parse_scope(open_brace + 1, body_close, decl_scope::record_scope, id);
+
+        isize j = body_close + 1;
+        while (j < end && !is_eof(j) && !punct(j, ";"))
+            ++j;
+        tree.nodes[id].has_declarator = j > body_close + 1;
+        return (j < end && punct(j, ";")) ? j + 1 : j;
+    }
+
+    /// `open_brace` is the enumerator list's '{'; `base_begin` the first token of the enum-base, or -1 when none was written.
+    /// Emit the enum_definition and consume any trailing declarator up to the terminating ';'.
+    ///
+    /// The list itself is not descended: an enumerator is not a declaration any rule models, and `= v` in one is an expression rather than an initializer.
+    isize finish_enum(isize begin,
+                      isize open_brace,
+                      isize end,
+                      bool scoped,
+                      isize base_begin,
+                      isize name_index,
+                      decl_scope scope,
+                      isize parent)
+    {
+        auto const body_close = skip_balanced(open_brace, "{", "}") - 1; // matching '}'
+
+        node en;
+        en.kind = node_kind::enum_definition;
+        en.scope = scope;
+        en.enum_scoped = scoped;
+        en.enum_has_base = base_begin >= 0;
+        // A base of exactly one identifier is an unqualified name, so it resolved through whatever scope the definition sits in.
+        // That is what a rewrite moving the definition out of its namespace has to carry along; `cc::u8`, `int` and `unsigned char` all resolve on their own and leave this empty.
+        en.enum_base_name = {.file_id = file_id};
+        if (base_begin >= 0 && base_begin == open_brace - 1 && tk(base_begin).is(token_kind::identifier))
+            en.enum_base_name = tk(base_begin).span;
+        en.name = {.file_id = file_id}; // an anonymous enum has none
+        if (name_index >= 0)
+            en.name = tk(name_index).span;
+        en.span = source_span::join(tk(begin).span, tk(body_close).span);
+        auto const id = add_node(cc::move(en));
+        tree.nodes[parent].children.push_back(id);
 
         isize j = body_close + 1;
         while (j < end && !is_eof(j) && !punct(j, ";"))

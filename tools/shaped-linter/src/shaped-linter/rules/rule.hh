@@ -28,16 +28,12 @@ struct fix;
 struct text_edit;
 } // namespace scl
 
-namespace scl
-{
-enum class severity : u8
+enum class scl::severity : scl::u8
 {
     note,
     warning,
     error,
 };
-
-} // namespace scl
 
 /// Replace the bytes of `span` with `replacement`. The unit of an automatic fix.
 /// An EMPTY span is an insertion at that offset — nothing is removed and `replacement` is spliced in.
@@ -94,9 +90,6 @@ struct scl::finding
     cc::vector<label> secondary;
 };
 
-namespace scl
-{
-
 /// The layer a rule walks.
 /// The engine builds only what some enabled rule asked for, so a cheap rule
 /// stays cheap.
@@ -105,15 +98,13 @@ namespace scl
 /// `prose` is a branch off it
 /// rather than a step further along: it is the file's comments and body text, extracted per language, and
 /// is the one layer that exists for markdown and Python too.
-enum class rule_layer : u8
+enum class scl::rule_layer : scl::u8
 {
     tokens,
     syntax_tree,
     prose,
     // semantics — later
 };
-
-} // namespace scl
 
 /// What a rule's `check` is handed: the source and what it was read as, the layers the engine built for
 /// it, and the sink to report into.

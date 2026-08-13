@@ -22,10 +22,8 @@ struct write_options;
 //   auto const img = babel::image::read(bytes).value();
 //   auto const bytes2 = babel::image::encode(img, babel::image::format::png).value();
 
-namespace babel::image
-{
 /// The image container formats babel can read and write.
-enum class format : u8
+enum class babel::image::format : babel::u8
 {
     png,
     jpg,
@@ -33,14 +31,12 @@ enum class format : u8
 
 /// Decoded sample type.
 /// Only `u8` is produced today; `u16` / `f32` are API-ready (16-bit PNG, HDR).
-enum class component : u8
+enum class babel::image::component : babel::u8
 {
     u8,
     u16,
     f32,
 };
-
-} // namespace babel::image
 
 /// Decoded pixels, row-major, top-left origin, tightly packed (row_stride == width * channels * bytes_per_component).
 struct babel::image::image

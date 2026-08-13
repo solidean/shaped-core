@@ -22,18 +22,14 @@
 /// It is documented once, on `rendering_scope`.
 /// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
 
-namespace sg
-{
 /// What happens to a target's contents at the start of a rendering scope.
 /// Set through the view's .cleared() / .preserved() / .discarded() members, not by hand.
-enum class target_op : u8
+enum class sg::target_op : sg::u8
 {
     preserve, ///< keep the existing contents
     clear,    ///< clear to a value before rendering
     discard,  ///< contents become undefined (neither loaded nor cleared)
 };
-
-} // namespace sg
 
 /// A color (render-target) target of a rendering scope: the view plus what to do with it at pass start.
 /// Build with view.cleared(color) / view.preserved() / view.discarded().

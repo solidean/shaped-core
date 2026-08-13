@@ -29,10 +29,8 @@ struct write_options;
 //   auto const img = babel::jpg::read(bytes).value();
 //   auto const stride = img.width * img.channels; // tightly packed, top-left origin
 
-namespace babel::jpg
-{
 /// Chroma subsampling of the luma plane (derived from the SOF sampling factors).
-enum class subsampling : u8
+enum class babel::jpg::subsampling : babel::u8
 {
     s444, // 4:4:4 — full chroma
     s422, // 4:2:2 — horizontal halving
@@ -41,14 +39,12 @@ enum class subsampling : u8
 };
 
 /// JFIF pixel density unit (APP0 density_units byte).
-enum class density_unit : u8
+enum class babel::jpg::density_unit : babel::u8
 {
     none, // 0 — x/y are an aspect ratio only
     dpi,  // 1 — dots per inch
     dpcm, // 2 — dots per centimeter
 };
-
-} // namespace babel::jpg
 
 /// JFIF pixel density (APP0). [populated when a JFIF APP0 marker is present]
 struct babel::jpg::density

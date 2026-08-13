@@ -9,11 +9,9 @@
 ///
 /// Pure addressing vocabulary: the access state kept per subresource lives in `barrier/subresource_state.hh`, which builds its covering partition on top of these ranges.
 
-namespace sg
-{
 /// Which plane of a possibly multi-planar texture a subresource addresses.
 /// Single-plane formats use `color`, or `depth`; depth-stencil and video formats expose several planes.
-enum class texture_aspect : u32
+enum class sg::texture_aspect : sg::u32
 {
     color,
     depth,
@@ -22,8 +20,6 @@ enum class texture_aspect : u32
     plane1,
     plane2,
 };
-
-} // namespace sg
 
 /// The size of a texture's subresource domain along each axis.
 /// `aspect_count` is the number of planes — 1 for a plain color texture, 2 for depth+stencil.

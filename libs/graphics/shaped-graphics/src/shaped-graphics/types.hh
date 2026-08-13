@@ -4,11 +4,9 @@
 
 /// Small vocabulary enums shared across the shaped-graphics public API.
 
-namespace sg
-{
 /// Coarse tag for the kind of backend behind a context — mainly to interpret raw handles from escape hatches.
 /// Not the concrete type, and not exhaustive: debug, cpu or remote backends may exist, so never switch on it as a closed set.
-enum class backend_kind
+enum class sg::backend_kind
 {
     dx12,
     vulkan,
@@ -21,7 +19,7 @@ enum class backend_kind
 /// The threading guarantees a backend's context provides.
 /// Coarse for now, and expected to gain nuance — e.g. whether concurrent command-list recording is allowed.
 /// See libs/graphics/shaped-graphics/docs/concepts/threading.md.
-enum class thread_model
+enum class sg::thread_model
 {
     single_threaded, ///< every context operation must be externally synchronized to one thread at a time
     multi_threaded,  ///< resource / command-list ops (create / submit / drop) are safe to call concurrently;
@@ -37,7 +35,7 @@ enum class thread_model
 ///
 /// Fine-grained on purpose: a backend may need every usage declared at creation, and a distinction merged here cannot be recovered downstream.
 /// A write-only buffer is deliberately not representable — that is a shader/binding access mode rather than a creation usage, and collapses into `readwrite_buffer`.
-enum class buffer_usage : u32
+enum class sg::buffer_usage : sg::u32
 {
     none = 0,
     copy_src = 1u << 0,                // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 & Metal implicit
@@ -63,6 +61,9 @@ enum class buffer_usage : u32
     // Cross-device sharing is absent on purpose: it is a memory property, so it belongs on memory_heap / allocation_info.
 };
 
+namespace sg
+{
+
 [[nodiscard]] constexpr buffer_usage operator|(buffer_usage a, buffer_usage b)
 {
     return buffer_usage(u32(a) | u32(b));
@@ -79,13 +80,15 @@ enum class buffer_usage : u32
     return (u32(usage) & u32(flag)) == u32(flag);
 }
 
+} // namespace sg
+
 /// How a texture may be used across the pipeline.
 /// Bit flags — combine with `|`, test with `has_flag`.
 /// Migrates to `cc::flags`, like `buffer_usage`.
 ///
 /// Modeled at Vulkan's granularity, one flag per `VkImageUsageFlagBit`, since Vulkan needs every usage declared at creation and D3D12 is coarser.
 /// Vulkan-only `INPUT_ATTACHMENT` / `TRANSIENT_ATTACHMENT` are omitted deliberately, having no D3D12 analogue.
-enum class texture_usage : u32
+enum class sg::texture_usage : sg::u32
 {
     none = 0,
     copy_src = 1u << 0,          // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
@@ -95,6 +98,9 @@ enum class texture_usage : u32
     render_target = 1u << 4,     // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
     depth_stencil = 1u << 5,     // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
 };
+
+namespace sg
+{
 
 [[nodiscard]] constexpr texture_usage operator|(texture_usage a, texture_usage b)
 {

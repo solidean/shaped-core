@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <nexus/fwd.hh>
 
 // Forward declarations and the logical counter vocabulary for the nx::bench benchmarking helpers.
 //
@@ -12,12 +13,17 @@ namespace nx::bench
 {
 using namespace cc::primitive_defines;
 
+// Declared ahead of the definition below so that one can be written qualified.
+enum class hw_counter : u8;
+
+} // namespace nx::bench
+
 /// A platform-independent hardware counter identity.
 ///
 /// The values here are the portable default set, and not every CPU/OS can measure every one.
 /// available_hw_counters() reports what is actually available right now.
 /// elapsed_nanoseconds and reference_cycles are the always-on baseline — wall clock plus a cheap cycle counter — and work with no PMU access at all.
-enum class hw_counter : u8
+enum class nx::bench::hw_counter : nx::u8
 {
     elapsed_nanoseconds,  ///< wall-clock time of the run (steady clock) — always available
     reference_cycles,     ///< reference cycles (x86 TSC / thread cycle time) — baseline, not the PMU cycle event
@@ -28,6 +34,9 @@ enum class hw_counter : u8
     cache_llc_references, ///< last-level-cache references
     cache_llc_misses,     ///< last-level-cache misses (miss here usually means a main-memory access)
 };
+
+namespace nx::bench
+{
 
 struct hw_counter_info;
 struct hw_counter_sample;

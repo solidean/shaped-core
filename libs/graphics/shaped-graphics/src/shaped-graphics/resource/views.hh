@@ -46,9 +46,11 @@ constexpr isize storage_buffer_size_alignment = 4; // a WGPU storage binding's s
 template <class T>
 concept uniform_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(sizeof(T)) <= max_uniform_buffer_size);
 
+} // namespace sg
+
 /// How a shader reads a view.
 /// Mirrors `buffer_usage`'s uniform / readonly / readwrite split.
-enum class view_class
+enum class sg::view_class
 {
     uniform,                ///< uniform block — constant buffer / UBO (read-only)
     readonly,               ///< read-only storage — SRV / read SSBO / sampled texture
@@ -60,7 +62,7 @@ enum class view_class
 /// How a view's bytes are laid out.
 /// `raw` is byte-addressed (element type `byte`), `structured` an array strided by the element type, `uniform_block` a single struct block.
 /// `texture` is a texel grid, whose dimension / array / cube / sample count come from the bound raw_texture's description.
-enum class view_shape
+enum class sg::view_shape
 {
     uniform_block,
     structured,
@@ -75,7 +77,7 @@ enum class view_shape
 /// A reinterpretation the view chooses, distinct from the texture's own `texture_dimension`.
 /// One slice of a 2D array is `tex_2d`, a cube face is `tex_2d`, one cube of a cube array is `cube`.
 /// Storage (UAV) views only use the non-cube, non-multisampled members.
-enum class texture_view_dimension : u8
+enum class sg::texture_view_dimension : sg::u8
 {
     tex_1d,
     tex_1d_array,
@@ -87,6 +89,9 @@ enum class texture_view_dimension : u8
     cube,
     cube_array,
 };
+
+namespace sg
+{
 
 /// A dimension a storage (UAV) view may bind as: no cube, no multisampling.
 /// A cube UAV is a 2D array, and MSAA has no UAV at all.

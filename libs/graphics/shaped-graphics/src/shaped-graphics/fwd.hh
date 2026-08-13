@@ -15,6 +15,18 @@ namespace sg
 // Vocabulary types (i32/u32/u64/isize/byte/...) available bare inside sg, not leaked globally.
 using namespace cc::primitive_defines;
 
+enum class backend_kind;            // which graphics API a context runs on (see types.hh)
+enum class thread_model;            // what a context promises about concurrent use (see types.hh)
+enum class buffer_usage : u32;      // buffer usage flags (see types.hh)
+enum class texture_aspect : u32;    // color / depth / stencil planes of a subresource (see resource/subresource.hh)
+enum class command_list_slot : int; // a recorder's slot in the per-context pool (see barrier/command_list_slot.hh)
+
+// The vocabulary enums this header goes on to DEFINE rather than only declare, named here so each definition can be written qualified.
+enum class index_format : u8;
+enum class lifetime_scope;
+enum class epoch : u64;
+enum class submission_token : u64;
+
 class context;
 class context_persistent_scope;
 class context_transient_scope;
@@ -60,13 +72,18 @@ struct tlas_instance;               // value type — one instance input to buil
 enum class accel_build_flags : u32; // build-time trade-offs (see raytracing/acceleration_structure.hh)
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
 
+} // namespace sg
+
 /// Index-buffer element width — shared by draw index buffers (index_buffer_view) and raytracing BLAS
 /// triangle indices (blas_triangles). Defined here (not just forward-declared) as a general vocabulary type.
-enum class index_format : u8
+enum class sg::index_format : sg::u8
 {
     uint16, // DX12 R16_UINT / Vk INDEX_TYPE_UINT16
     uint32, // DX12 R32_UINT / Vk INDEX_TYPE_UINT32
 };
+
+namespace sg
+{
 struct texture_description; // value type (see resource/raw_texture.hh) — input to create_raw_texture
 struct texture_region;      // value type (see resource/texture_region.hh) — a subresource byte range
 
@@ -96,16 +113,21 @@ class memory_heap;
 struct allocation_info;     // value type (see memory/allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory/memory_heap.hh)
 
+} // namespace sg
+
 /// Lifetime mode of a resource — a hard contract, not a hint.
 /// `persistent` lives until its handles are released; `transient` expires when its epoch retires.
 /// Using a transient resource past that is a hard error, and the backend may recycle it immediately.
 /// Passed to every `create_*`; buffers carry it inside allocation_info.
 /// Both modes still get in-flight GPU hazard tracking, which is orthogonal.
-enum class lifetime_scope
+enum class sg::lifetime_scope
 {
     persistent,
     transient,
 };
+
+namespace sg
+{
 
 // Backend-neutral access-state vocabulary (see barrier/resource_access.hh / barrier/resource_access_state.hh) — the
 // shared, opt-in building blocks a backend uses to track state and emit barriers.
@@ -249,10 +271,12 @@ inline constexpr int max_color_targets = 8;
 /// 8 is WebGPU's `maxVertexBuffers`; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16.
 inline constexpr int max_vertex_buffers = 8;
 
+} // namespace sg
+
 /// Frame-level GPU lifetime token, and a direct-queue timeline value.
 /// A monotonic counter where reaching value N on the queue's epoch fence means all GPU work of epoch N has finished.
 /// See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
-enum class epoch : u64
+enum class sg::epoch : sg::u64
 {
     invalid = 0,   ///< null sentinel — "not meaningfully set"
     first = 10000, ///< first live value; deliberately high so an accidental zero-init is obviously wrong
@@ -260,12 +284,15 @@ enum class epoch : u64
 
 /// Finer-grained per-command-list completion token on the direct queue's submission fence.
 /// Monotonic, so "is this one list done?" is a single compare against the fence's completed value.
-enum class submission_token : u64
+enum class sg::submission_token : sg::u64
 {
     invalid = 0,             ///< null sentinel
     first = 30000,           ///< first live value (see epoch::first for the high-value rationale)
     not_submitted = u64(-1), ///< sentinel that always compares "not yet complete"
 };
+
+namespace sg
+{
 
 // The exception hierarchy (see exceptions.hh) — what the throwing create façades and submit/advance raise.
 class exception;

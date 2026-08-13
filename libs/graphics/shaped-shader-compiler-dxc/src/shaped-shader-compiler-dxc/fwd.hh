@@ -16,4 +16,9 @@ class shader_cache;
 struct shader_description;
 struct compile_options;
 struct preprocessed_source;
+
+// The compile_options vocabulary (see compile_options.hh).
+enum class compile_target;
+enum class shader_model;
+enum class optimization_level;
 } // namespace ssc::dxc

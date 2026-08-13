@@ -5,11 +5,9 @@
 /// Color-blend state for one render target of a raster pipeline: how a fragment's output combines with the value already in the target.
 /// Backend-neutral — each enumerator maps to the per-backend factor / op.
 
-namespace sg
-{
 /// A blend factor — the coefficient a source or destination color/alpha is multiplied by before the
 /// blend op combines them.
-enum class blend_factor
+enum class sg::blend_factor
 {
     zero,                // DX12 BLEND_ZERO           / Vk FACTOR_ZERO
     one,                 // DX12 BLEND_ONE            / Vk FACTOR_ONE
@@ -24,7 +22,7 @@ enum class blend_factor
 };
 
 /// How the weighted source and destination values are combined.
-enum class blend_op
+enum class sg::blend_op
 {
     add,              // DX12 BLEND_OP_ADD          / Vk BLEND_OP_ADD
     subtract,         // DX12 BLEND_OP_SUBTRACT     / Vk BLEND_OP_SUBTRACT      (src - dst)
@@ -36,7 +34,7 @@ enum class blend_op
 /// Which color channels a render target write touches.
 /// Bit flags — combine with `|`, test with `has_flag`.
 /// Maps to DX12 D3D12_COLOR_WRITE_ENABLE / Vk VkColorComponentFlags.
-enum class color_write_mask : u8
+enum class sg::color_write_mask : sg::u8
 {
     none = 0,
     r = 1u << 0,
@@ -45,6 +43,9 @@ enum class color_write_mask : u8
     a = 1u << 3,
     all = r | g | b | a,
 };
+
+namespace sg
+{
 
 [[nodiscard]] constexpr color_write_mask operator|(color_write_mask x, color_write_mask y)
 {

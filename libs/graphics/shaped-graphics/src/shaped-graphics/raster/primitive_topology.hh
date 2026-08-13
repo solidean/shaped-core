@@ -5,11 +5,9 @@
 /// The primitive kind a raster pipeline assembles vertices into.
 /// Baked into the pipeline, so a pipeline is built for one topology; dynamic per-draw topology is a future addition.
 
-namespace sg
-{
 /// How vertices are assembled into primitives.
 /// The concrete topology, not the coarse family: a backend derives the PSO's topology *type* (point / line / triangle) from it via `topology_type`.
-enum class primitive_topology
+enum class sg::primitive_topology
 {
     point_list,     // DX12 POINTLIST     / Vk POINT_LIST
     line_list,      // DX12 LINELIST      / Vk LINE_LIST
@@ -25,13 +23,16 @@ enum class primitive_topology
 
 /// The coarse family a topology belongs to — the granularity a dx12 PSO records (D3D12_PRIMITIVE_TOPOLOGY_TYPE).
 /// Distinct from the concrete `primitive_topology` set on the IA.
-enum class primitive_topology_type
+enum class sg::primitive_topology_type
 {
     point,
     line,
     triangle,
     patch, ///< tessellation control-point patches (any control-point count)
 };
+
+namespace sg
+{
 
 /// The coarse family `t` assembles into.
 [[nodiscard]] constexpr primitive_topology_type topology_type(primitive_topology t)

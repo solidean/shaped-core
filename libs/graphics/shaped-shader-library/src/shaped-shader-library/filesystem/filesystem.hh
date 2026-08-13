@@ -6,17 +6,13 @@
 #include <shaped-shader-library/filesystem/watch.hh>
 #include <shaped-shader-library/fwd.hh>
 
-namespace slib
-{
 /// Opaque content revision of a file.
 /// Any change to it means "reread me"; `none` means the file does not exist.
 /// Deliberately not a timestamp — a real filesystem folds mtime into it, an in-memory one just counts, so neither leaks its notion of time into the reload logic.
-enum class file_revision : u64
+enum class slib::file_revision : slib::u64
 {
     none = 0,
 };
-
-} // namespace slib
 
 /// Read-only virtual filesystem — the only way slib reaches shader sources.
 ///
