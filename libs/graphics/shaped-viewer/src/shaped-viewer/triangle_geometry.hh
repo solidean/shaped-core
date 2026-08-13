@@ -8,10 +8,6 @@
 #include <typed-geometry/geometry/primitives/triangle.hh>
 #include <typed-geometry/linalg/pos.hh>
 
-// A triangle IS its three positions, with nothing around them.
-// That is what lets create_from_triangles share the caller's buffer instead of unpacking it.
-static_assert(sizeof(tg::triangle3f) == 3 * sizeof(tg::pos3f));
-
 /// A triangle surface in either of its two layouts — a raw triangle list or an indexed one — behind one type.
 ///
 /// `indices` empty means raw: 3 consecutive positions form a triangle, so the position count must be a multiple of 3.
@@ -44,6 +40,9 @@ struct sv::triangle_geometry
     template <class Triangles>
     [[nodiscard]] static triangle_geometry create_from_triangles(Triangles&& triangles)
     {
+        // A triangle IS its three positions, with nothing around them — which is what lets the pin be reinterpreted rather than unpacked.
+        static_assert(sizeof(tg::triangle3f) == 3 * sizeof(tg::pos3f));
+
         cc::pinned_data<tg::triangle3f const> pinned = cc::make_pinned_data(cc::forward<Triangles>(triangles));
         auto positions = pinned.reinterpret_as<tg::pos3f const>();
         auto const hash = cc::hash128::create(positions.span().as_bytes(), impl::position_hash_seed);

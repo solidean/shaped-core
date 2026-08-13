@@ -61,7 +61,8 @@ sv::attribute_format_of<T>       // the format of an element type — scalars an
 sv::attribute_frequency          // per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle | per_edge (RESERVED, create asserts)
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
 sv::mesh_parameter               // { string name; parameter_value value; } — per-mesh (instance) values the material reads by name
-sv::parameter_value              // { attribute_format format; byte storage[32]; } — typed by the SAME format an attribute's elements are
+sv::parameter_value              // { attribute_format format; byte storage[max_bytes]; } — typed by the SAME format an attribute's elements are
+                                 //   parameter_value::max_bytes is 32: 4 components of 8 bytes, so every scalar and vector fits inline
 sv::parameter_value::of(x)       // -> parameter_value from any scalar or vector (matrices don't fit the inline budget and assert)
 p.holds<T>() / p.as<T>()         // -> bool / T (as asserts on the wrong type); holds<T>() is what a material asks first
 sv::mesh_texture                 // { string name; texture_id texture; } — a texture offered under a slot name the material binds
