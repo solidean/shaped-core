@@ -11,7 +11,14 @@ from .lib.core import console, profile, report
 from .lib.core.archive import archive_diag, archive_logs
 from .lib.core.logs import merge_junit, ninja_built_count
 from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
-from .lib.core.process import configure_mirroring, emsdk_env, find_emsdk_root, response_file, run_step
+from .lib.core.process import (
+    configure_mirroring,
+    emsdk_env,
+    env_for_preset,
+    find_emsdk_root,
+    response_file,
+    run_step,
+)
 from .lib.pipeline.build import build
 from .lib.pipeline.cmake import remove_build_dir
 from .lib.pipeline.configure import configure, ensure_configured
@@ -139,6 +146,7 @@ __all__ = [
     "ToolsetError",
     "configure_mirroring",
     "emsdk_env",
+    "env_for_preset",
     "find_emsdk_root",
     "response_file",
     "run_step",

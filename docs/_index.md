@@ -32,6 +32,7 @@ Findings we want to keep, but that are not a guide to anything.
 - [guides/building-and-testing.md](guides/building-and-testing.md) — drive `dev.py`, and diagnose with the `repo_tools` tools.
 - [guides/ci.md](guides/ci.md) — the GitHub Actions workflows and what each uploads.
 - [guides/prose.md](guides/prose.md) — `dev.py lint`, the prose rules in practice, and reworking a documentation surface.
+- [guides/compile-times.md](guides/compile-times.md) — `dev.py compile-time`: which headers and TUs the compiler spends its time on.
 - [guides/disassembly.md](guides/disassembly.md) — `dev.py assembly`: read the emitted codegen, or trace what one invocation actually ran.
 - [guides/profiling.md](guides/profiling.md) — hardware performance counters via `nx::bench` and `dev.py profiling`.
 - [guides/coverage.md](guides/coverage.md) — LLVM source-based coverage, and [guides/pgo.md](guides/pgo.md) — profile-guided optimization.

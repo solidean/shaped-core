@@ -37,12 +37,16 @@ def build(
     verbose: bool = False,
     emsdk_path: str | None = None,
     keep_going: bool = False,
+    one_step: bool = False,
 ) -> list[StepResult]:
     """Build `targets`, or everything when None or empty, across all presets.
 
     Returns every StepResult produced, in order.
     A failed step does not stop the remaining presets or targets, so the caller inspects the results for failures.
     `emsdk_path` points Emscripten presets at an emsdk install (see process.emsdk_env), and `keep_going` passes ninja -k 0.
+
+    One step per target by default, so each gets its own log and its own summary line.
+    `one_step` hands the whole list to a single invocation instead, which is what a large set of object targets needs: as separate steps they would build one at a time.
     """
     results: list[StepResult] = []
 
@@ -63,7 +67,10 @@ def build(
         # Per-preset environment: emsdk for Emscripten presets, MSVC env otherwise.
         env = env_for_preset(preset, emsdk_path)
 
-        to_build = targets if targets else [None]
+        if one_step and targets:
+            to_build: list = [list(targets)]
+        else:
+            to_build = targets if targets else [None]
         preset_results: list[StepResult] = []
         for target in to_build:
             # Marked before the step because the compile sidecars accumulate across builds, and only the ones this step rewrote are ours.
@@ -71,7 +78,7 @@ def build(
             result = run_step(
                 cmake.build_command(preset.build_dir, target, keep_going=keep_going),
                 step_type="build",
-                name=target or "all",
+                name=(f"{len(target)} files" if isinstance(target, list) else target) or "all",
                 build_dir=preset.build_dir,
                 cwd=root,
                 env=env,

@@ -7,7 +7,12 @@ Numbers are from one machine (24 cores, Windows 11, clang-cl 22.1.7, Ninja) and 
 
 ```bash
 uv run dev.py check --fix --profile .tmp/dev-profile/check.json --profile-type chrome-tracing
+uv run dev.py compile-time headers "libs/base/clean-core/src/clean-core/container/*.hh"
+uv run dev.py compile-time tu      "libs/**/tests/**/*.cc"
 ```
+
+`--profile` answers which *phase* is slow; `compile-time` answers which headers and TUs, once the answer is "compilation".
+[guides/compile-times.md](../guides/compile-times.md) is that tool's workflow and the traps it exists to avoid.
 
 The profile loads directly into <https://ui.perfetto.dev>, or into the `repo_tools` `analyze_trace` tool.
 The step banners only time whole steps; per-TU compiles, the MSVC env capture and the per-binary test probes are invisible without `--profile`.
@@ -114,6 +119,8 @@ Merging real files with their real compile commands, run solo:
 | 4 × clean-core container `*-test.cc` | 3.12 s | **failed to compile** | — |
 
 The marginal cost of each additional file in a merged TU is ~0.27 s against ~1.8 s standalone, so roughly **85 % of a test TU is header parsing**.
+`dev.py compile-time tu` confirms that independently and end to end: a dx12 test measures **84.6 % includes**, against **29 %** for a clean-core container test.
+So the two families want opposite fixes, and unity builds pay far more in the graphics tree than in clean-core.
 Verify any repeat of this by checking object sizes.
 The first attempt string-replaced paths that differ in separator between `compile_commands.json`'s `output` field and the command line.
 That silently no-opped, and "measured" a merged TU that was really just the first file recompiled.
@@ -134,6 +141,14 @@ Extern is 773 s of the cold run's 4529 s compile CPU, dominated by `implot_items
 `singlethreaded` is `RelWithDebInfo` + `SC_THREADS=OFF`, and no extern target sees `SC_THREADS`, so those objects are rebuilt identically for no reason.
 But sharing them properly is a superbuild — a separate configure, an install prefix, imported targets — and **it buys nothing in semi-cold**, where extern is already untouched.
 Worth doing for cold, not worth confusing with the day-to-day cost.
+
+**System headers, not ours, dominate the parse.**
+On a dx12 test TU the exclusive self time splits 0.32 s ours against 0.98 s system — MSVC's `<ranges>`, `<variant>` and `<xutility>`, plus `d3d12.h`, `winnt.h` and `immintrin.h`.
+That caps what include hygiene on our own headers can win at roughly a quarter of the parse cost, and it is the strongest argument for unity builds, which amortize exactly the system-header share.
+
+**A header's cost is its transitive closure, and two of clean-core's containers are outliers.**
+`key_value_cache.hh` costs 0.56 s to include and pulls in 134 files; `pinned_data.hh` costs 0.47 s across 117.
+Every other container header is 0.03–0.14 s across 12–46 files.
 
 ## Gotchas worth keeping
 

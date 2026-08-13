@@ -292,6 +292,8 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
+| Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
+| Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
 | See a function's codegen         | `uv run dev.py assembly search/show` ([disassembly](docs/guides/disassembly.md)) |
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
