@@ -1,8 +1,9 @@
 #pragma once
 
-#include <clean-core/common/assert.hh>  // CC_ASSERT (access checks on the raw -> typed recovery)
-#include <clean-core/common/utility.hh> // cc::move
-#include <clean-core/error/optional.hh> // cc::optional (try_as_* recovery)
+#include <clean-core/common/assert.hh>     // CC_ASSERT (access checks on the raw -> typed recovery)
+#include <clean-core/common/utility.hh>    // cc::move
+#include <clean-core/container/variant.hh> // cc::variant (raw_view is a sum over the per-resource payloads)
+#include <clean-core/error/optional.hh>    // cc::optional (try_as_* recovery)
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/raw_texture.hh> // render_target_view / depth_stencil_view read the texture's extent
@@ -10,7 +11,6 @@
 #include <typed-geometry/linalg/vec.hh>            // tg::vec4f (clear color builder)
 
 #include <type_traits>
-#include <variant>
 
 /// Strongly-typed resource views: a typed handle onto a resource, or a sub-range of one, read as a shader-facing binding.
 /// A routine takes exactly the view it operates on, instead of a raw resource plus an overload set.
@@ -186,28 +186,55 @@ namespace sg
 {
 
 /// The erased form every typed view converts into — a sum over the per-resource payloads.
-/// A backend `std::visit`s it, or `get_if`s an arm, to build the native descriptor; `named_view` carries one.
-/// `std::variant` for now — likely a `cc::variant` once that lands.
-using raw_view = std::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
+/// A backend `visit`s it, or reaches for one of the `try_as_*_view` arm accessors below, to build the native descriptor; `named_view` carries one.
+using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
+
+/// The buffer arm, or null when the erased view holds a different one.
+[[nodiscard]] inline raw_buffer_view const* try_as_buffer_view(raw_view const& v)
+{
+    return v.try_as<raw_buffer_view>();
+}
+/// The texture arm, or null when the erased view holds a different one.
+[[nodiscard]] inline raw_texture_view const* try_as_texture_view(raw_view const& v)
+{
+    return v.try_as<raw_texture_view>();
+}
+/// The tlas arm, or null when the erased view holds a different one.
+[[nodiscard]] inline raw_tlas_view const* try_as_tlas_view(raw_view const& v)
+{
+    return v.try_as<raw_tlas_view>();
+}
+
+/// The buffer arm; the erased view must hold one.
+[[nodiscard]] inline raw_buffer_view const& as_buffer_view(raw_view const& v)
+{
+    return v.as<raw_buffer_view>();
+}
+/// The texture arm; the erased view must hold one.
+[[nodiscard]] inline raw_texture_view const& as_texture_view(raw_view const& v)
+{
+    return v.as<raw_texture_view>();
+}
+/// The tlas arm; the erased view must hold one.
+[[nodiscard]] inline raw_tlas_view const& as_tlas_view(raw_view const& v)
+{
+    return v.as<raw_tlas_view>();
+}
 
 /// The access class the erased view carries — the active arm's (a tlas is always acceleration_structure).
 [[nodiscard]] inline view_class access_of(raw_view const& v)
 {
-    if (auto const* b = std::get_if<raw_buffer_view>(&v))
-        return b->access;
-    if (auto const* t = std::get_if<raw_texture_view>(&v))
-        return t->access;
-    return view_class::acceleration_structure;
+    return v.visit([](raw_buffer_view const& b) { return b.access; },  //
+                   [](raw_texture_view const& t) { return t.access; }, //
+                   [](raw_tlas_view const&) { return view_class::acceleration_structure; });
 }
 
 /// The layout the erased view carries: the buffer arm's `shape`, `texture` for a texture arm, `acceleration_structure` for a tlas arm.
 [[nodiscard]] inline view_shape shape_of(raw_view const& v)
 {
-    if (auto const* b = std::get_if<raw_buffer_view>(&v))
-        return b->shape;
-    if (std::holds_alternative<raw_texture_view>(v))
-        return view_shape::texture;
-    return view_shape::acceleration_structure;
+    return v.visit([](raw_buffer_view const& b) { return b.shape; },            //
+                   [](raw_texture_view const&) { return view_shape::texture; }, //
+                   [](raw_tlas_view const&) { return view_shape::acceleration_structure; });
 }
 
 } // namespace sg
@@ -321,14 +348,14 @@ struct sg::buffer_view
     {
     }
 
-    buffer_view(readonly_buffer_view<T> const& v) : buffer_view(std::get<raw_buffer_view>(v.to_raw())) {}
-    buffer_view(readwrite_buffer_view<T> const& v) : buffer_view(std::get<raw_buffer_view>(v.to_raw())) {}
+    buffer_view(readonly_buffer_view<T> const& v) : buffer_view(sg::as_buffer_view(v.to_raw())) {}
+    buffer_view(readwrite_buffer_view<T> const& v) : buffer_view(sg::as_buffer_view(v.to_raw())) {}
 
     // Only where `T` is a uniform_element.
     // The `U = T` template defers that, so `buffer_view<T>` stays well-formed for a non-uniform `T`, where naming `uniform_buffer_view<T>` would be ill-formed.
     template <class U = T>
         requires(std::is_same_v<U, T> && uniform_element<U>)
-    buffer_view(uniform_buffer_view<U> const& v) : buffer_view(std::get<raw_buffer_view>(v.to_raw()))
+    buffer_view(uniform_buffer_view<U> const& v) : buffer_view(sg::as_buffer_view(v.to_raw()))
     {
     }
 
@@ -519,14 +546,14 @@ struct sg::texture_view
     {
     }
 
-    texture_view(readonly_texture_view<Traits> const& v) : texture_view(std::get<raw_texture_view>(v.to_raw())) {}
+    texture_view(readonly_texture_view<Traits> const& v) : texture_view(sg::as_texture_view(v.to_raw())) {}
 
     // readwrite exists only for a storage dimension.
     // The `T = Traits` template defers that, so `texture_view<Traits>` stays well-formed for a cube or MS dimension.
     // Naming `readwrite_texture_view<Traits>` there would be ill-formed.
     template <class T = Traits>
         requires(std::is_same_v<T, Traits> && storage_view_dimension<Traits::dimension>)
-    texture_view(readwrite_texture_view<T> const& v) : texture_view(std::get<raw_texture_view>(v.to_raw()))
+    texture_view(readwrite_texture_view<T> const& v) : texture_view(sg::as_texture_view(v.to_raw()))
     {
     }
 
@@ -777,42 +804,42 @@ auto raw_texture_view::try_as_readwrite() const
 template <sg::view_element T>
 [[nodiscard]] readonly_buffer_view<T> as_readonly_buffer(raw_view const& v)
 {
-    auto const* a = std::get_if<raw_buffer_view>(&v);
+    auto const* a = sg::try_as_buffer_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
     return a->as_readonly<T>();
 }
 template <sg::view_element T>
 [[nodiscard]] readwrite_buffer_view<T> as_readwrite_buffer(raw_view const& v)
 {
-    auto const* a = std::get_if<raw_buffer_view>(&v);
+    auto const* a = sg::try_as_buffer_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
     return a->as_readwrite<T>();
 }
 template <sg::uniform_element T>
 [[nodiscard]] uniform_buffer_view<T> as_uniform_buffer(raw_view const& v)
 {
-    auto const* a = std::get_if<raw_buffer_view>(&v);
+    auto const* a = sg::try_as_buffer_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
     return a->as_uniform<T>();
 }
 template <sg::view_element T>
 [[nodiscard]] cc::optional<readonly_buffer_view<T>> try_as_readonly_buffer(raw_view const& v)
 {
-    if (auto const* a = std::get_if<raw_buffer_view>(&v))
+    if (auto const* a = sg::try_as_buffer_view(v))
         return a->try_as_readonly<T>();
     return {};
 }
 template <sg::view_element T>
 [[nodiscard]] cc::optional<readwrite_buffer_view<T>> try_as_readwrite_buffer(raw_view const& v)
 {
-    if (auto const* a = std::get_if<raw_buffer_view>(&v))
+    if (auto const* a = sg::try_as_buffer_view(v))
         return a->try_as_readwrite<T>();
     return {};
 }
 template <sg::uniform_element T>
 [[nodiscard]] cc::optional<uniform_buffer_view<T>> try_as_uniform_buffer(raw_view const& v)
 {
-    if (auto const* a = std::get_if<raw_buffer_view>(&v))
+    if (auto const* a = sg::try_as_buffer_view(v))
         return a->try_as_uniform<T>();
     return {};
 }
@@ -820,7 +847,7 @@ template <sg::uniform_element T>
 template <class Traits>
 [[nodiscard]] readonly_texture_view<Traits> as_readonly_texture(raw_view const& v)
 {
-    auto const* a = std::get_if<raw_texture_view>(&v);
+    auto const* a = sg::try_as_texture_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a texture arm");
     return a->as_readonly<Traits>();
 }
@@ -828,14 +855,14 @@ template <class Traits>
     requires sg::storage_view_dimension<Traits::dimension>
 [[nodiscard]] readwrite_texture_view<Traits> as_readwrite_texture(raw_view const& v)
 {
-    auto const* a = std::get_if<raw_texture_view>(&v);
+    auto const* a = sg::try_as_texture_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a texture arm");
     return a->as_readwrite<Traits>();
 }
 template <class Traits>
 [[nodiscard]] cc::optional<readonly_texture_view<Traits>> try_as_readonly_texture(raw_view const& v)
 {
-    if (auto const* a = std::get_if<raw_texture_view>(&v))
+    if (auto const* a = sg::try_as_texture_view(v))
         return a->try_as_readonly<Traits>();
     return {};
 }
@@ -843,7 +870,7 @@ template <class Traits>
     requires sg::storage_view_dimension<Traits::dimension>
 [[nodiscard]] cc::optional<readwrite_texture_view<Traits>> try_as_readwrite_texture(raw_view const& v)
 {
-    if (auto const* a = std::get_if<raw_texture_view>(&v))
+    if (auto const* a = sg::try_as_texture_view(v))
         return a->try_as_readwrite<Traits>();
     return {};
 }

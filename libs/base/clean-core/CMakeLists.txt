@@ -258,6 +258,8 @@ if(SC_BUILD_TESTS)
         tests/memory/shared_ptr-test.cc
 
         tests/container/array-test.cc
+        tests/container/tuple-test.cc
+        tests/container/variant-test.cc
         tests/container/fixed-array-test.cc
         tests/container/small_vector-test.cc
         tests/container/fixed_vector-test.cc

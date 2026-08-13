@@ -50,7 +50,32 @@ Associative — separate chaining over power-of-two buckets:
 | `set<T>` | membership only; it is a `map<T, unit>` and inherits every property below |
 
 `byte_stream_builder`, `key_value_cache` and `pair` also live in `container/` and are documented in their own headers.
-`bitset`, `fixed_bitset`, `ringbuffer`, `tuple`, `variant` and `disjoint_set` are **empty stubs** — the headers exist so `fwd.hh` can name them, and nothing is implemented.
+`bitset`, `fixed_bitset`, `ringbuffer` and `disjoint_set` are **empty stubs** — the headers exist so `fwd.hh` can name them, and nothing is implemented.
+
+### Heterogeneous — `tuple` and `variant`
+
+`tuple<Ts...>` is a product type and `variant<Ts...>` a sum type.
+`tuple` is **index-based**: it has `get<I>` and no `get<T>`, so duplicate element types are fine and none of `std::`'s type-uniqueness rules apply.
+`variant` goes the other way — its alternatives must be **pairwise distinct**, enforced by a static_assert, which is what lets it be keyed on type.
+
+Alongside `visit`, a `variant` alternative can be named directly.
+`is<T>()` asks, `as<T>()` asserts and forwards the value category, `try_as<T>()` hands out a pointer that is null on a different alternative.
+`take<T>()` and `try_take<T>()` move the alternative out.
+A `T` that is not an alternative does not compile, rather than being a `false`.
+`take` leaves the variant **valid**, holding a moved-from alternative at the same index — the same state its own move constructor leaves behind.
+
+Both are **trivially copyable and trivially destructible whenever every element or alternative is**.
+For `tuple` that costs nothing to maintain: its elements are plain base classes, so every special member stays implicit.
+`variant` builds on a recursive union and hand-writes its special members only for the non-trivial case, the way `optional` and `result` do.
+
+`variant` models **no valueless state** — `index()` is always in range.
+That holds because assignment destroys the active alternative and constructs the new one in its place, which is not exception-safe: an alternative whose move constructor can throw is not supported.
+Default construction takes alternative 0, and the value constructor accepts **exact type matches only**, so `variant<bool, string> v = "hi"` is a compile error rather than a silent `bool`.
+Use `create_emplaced<I>` — a prvalue factory, so it works for immovable alternatives — whenever a conversion is intended.
+
+`tuple` and `pair` both **value-initialize** on default construction.
+
+Still open: converting construction between tuples, `tuple_cat`, `variant`'s `operator<=>` and multi-variant visitation.
 
 ## What `T` must be
 

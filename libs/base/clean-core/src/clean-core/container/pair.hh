@@ -9,6 +9,7 @@
 /// Simple pair type holding two values of potentially different types
 /// Aggregate type with no user-defined constructors
 /// Supports structured bindings natively
+/// Default construction value-initializes both members, same as cc::tuple
 template <class T, class U>
 struct cc::pair
 {
@@ -21,8 +22,8 @@ struct cc::pair
     /// Structural hash of (first, second).
     [[nodiscard]] friend constexpr u64 hash(pair const& p) { return cc::make_hash(p.first, p.second); }
 
-    T first;
-    U second;
+    T first = {};
+    U second = {};
 
     template <std::size_t I, class P>
     [[nodiscard]] friend constexpr decltype(auto) get(P&& p) noexcept
