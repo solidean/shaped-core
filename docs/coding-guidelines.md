@@ -205,11 +205,14 @@ auto const p = tg::pos3f(x, y, z);    // prefer
   Prefer qualified names:
   ```cpp
   struct cc::string { ... };
+  enum class cc::seek_dir : u8 { ... };
   void cc::to_string(...) { ... }
   ```
   This works when the declaration already exists — which is what the `fwd.hh` above is for.
-  shaped-linter's `qualified-record-definition` enforces it for a class or struct **definition** in a header;
+  shaped-linter's `qualified-type-definition` enforces it for a class, struct or enum **definition** in a header;
   a forward declaration, `impl` and `custom` are all exempt, and functions are left to judgement.
+  An unscoped enum with no enum-base is the one type that cannot be written this way, having no opaque declaration to refer back to.
+  Give it a fixed underlying type — `enum e : u8;` in the `fwd.hh` — and the definition qualifies like everything else.
 - Use `impl` nested namespaces for implementation details that must be visible (e.g., due to inlining requirements):
   ```cpp
   namespace cc::impl

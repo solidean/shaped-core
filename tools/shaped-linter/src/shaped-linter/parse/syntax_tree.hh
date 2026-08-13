@@ -5,20 +5,19 @@
 #include <shaped-linter/fwd.hh>
 #include <shaped-linter/lex/source_span.hh>
 
-namespace scl
-{
 /// The node kinds the parser produces.
 /// Deliberately tiny: shaped-linter only parses what its rules need, treating everything else as opaque.
-enum class node_kind : u8
+enum class scl::node_kind : scl::u8
 {
     translation_unit,
     record_definition, // a class/struct/union WITH a body
+    enum_definition,   // an enum WITH an enumerator list; an opaque declaration (`enum class e : u8;`) produces no node
     variable_declaration,
     namespace_definition, // a namespace WITH a body; an alias (`namespace A = B;`) produces no node
     using_directive,      // `using namespace X::Y;` — a using-declaration or a type alias produces no node
 };
 
-enum class record_keyword : u8
+enum class scl::record_keyword : scl::u8
 {
     class_,
     struct_,
@@ -27,7 +26,7 @@ enum class record_keyword : u8
 
 /// How a declaration's initializer is spelled.
 /// `brace` is `name{…}`; `assignment` is `name = …`.
-enum class init_form : u8
+enum class scl::init_form : scl::u8
 {
     none,
     assignment,
@@ -36,21 +35,25 @@ enum class init_form : u8
 
 /// Where a variable declaration sits.
 /// Rules that care about the difference — a data member reads differently from a local — branch on this rather than on the tree shape.
-enum class decl_scope : u8
+enum class scl::decl_scope : scl::u8
 {
     namespace_scope, // file scope or a namespace body
     record_scope,    // a data member of a class/struct/union
     function_scope,  // a local — a function body, a nested block, or a lambda body
 };
-} // namespace scl
 
 /// One node in the arena tree.
 /// Fields are interpreted by `kind`:
 ///  - translation_unit / record_definition / namespace_definition: `children` are the node ids inside.
 ///  - record_definition: `rec_keyword` and `name` (the record name span; empty if anonymous).
-///    `follows_record` says the previous statement in the same scope was a record definition too, which is what makes a run of them one block to move.
+///    `follows_definition` says the previous statement in the same scope was a record or enum definition too, which is what makes a run of them one block to move.
 ///    `scope` says where it sits, so a type declared inside a function body is not mistaken for one of the namespace's.
 ///    `has_declarator` marks the `struct S { } s;` form, whose variable would change scope if the definition moved.
+///  - enum_definition: `name` (empty if anonymous), plus `follows_definition`, `scope` and `has_declarator` with the same meaning.
+///    `enum_scoped` is the `enum class` / `enum struct` form, `enum_has_base` whether an enum-base was written.
+///    Together they answer whether the enum can be declared ahead of its definition at all, which is what a qualified definition needs.
+///    `enum_base_name` is set only when the base is a single unqualified identifier — a name that resolved through the scope the definition sits in, and so cannot be moved out of it as written.
+///    The enumerator list is not descended — it holds no declaration we model.
 ///  - namespace_definition: `name` (the name as written — `a::b` for `namespace a::b`, empty when anonymous).
 ///    Its `body` is the `{…}` including the braces, which is what a rule tests an offset against.
 ///  - using_directive: `name` (the nominated namespace, `cc::primitive_defines`).
@@ -64,10 +67,17 @@ struct scl::node
 
     // record_definition
     record_keyword rec_keyword = record_keyword::struct_;
-    bool follows_record = false; // the statement right before this one was a record definition too
-    bool has_declarator = false; // `struct S { } s;` — the definition also declares a variable
 
-    // record_definition (record name) OR variable_declaration (declarator-id) OR the name a
+    // record_definition / enum_definition
+    bool follows_definition = false; // the statement right before this one was a record or enum definition too
+    bool has_declarator = false;     // `struct S { } s;` — the definition also declares a variable
+
+    // enum_definition
+    bool enum_scoped = false;   // `enum class` / `enum struct`, whose underlying type defaults to int
+    bool enum_has_base = false; // an enum-base was written — `enum class e : u8`, `enum e : u8`
+    source_span enum_base_name; // the enum-base when it is one unqualified identifier; empty for `int`, `cc::u8` or no base at all
+
+    // record_definition / enum_definition (type name) OR variable_declaration (declarator-id) OR the name a
     // namespace_definition / using_directive spells
     source_span name;
 

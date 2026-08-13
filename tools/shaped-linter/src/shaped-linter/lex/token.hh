@@ -9,13 +9,11 @@ namespace scl
 struct token;
 } // namespace scl
 
-namespace scl
-{
 /// The lexical category of a token.
 /// Punctuators/operators all share `punctuation` and are told apart
 /// by `token::text` (via `is_punct`). Trivia (whitespace/newlines/comments) is kept in the stream so
 /// spans stay gap-free, but the parser skips it.
-enum class token_kind : u8
+enum class scl::token_kind : scl::u8
 {
     end_of_file,
     unknown, // a byte we could not classify — best-effort, never fatal
@@ -43,8 +41,6 @@ enum class token_kind : u8
     indent,
     dedent,
 };
-
-} // namespace scl
 
 /// A single lexed token.
 /// Carries its source_span and a non-owning view of its spelling.

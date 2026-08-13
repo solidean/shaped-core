@@ -16,20 +16,16 @@ struct prose_stats;
 struct prose_view;
 } // namespace scl
 
-namespace scl
-{
 /// Where a run of prose came from.
 /// A rule that reads differently in a doc comment than in markdown body
 /// text branches on this; most do not care.
-enum class prose_kind : u8
+enum class scl::prose_kind : scl::u8
 {
     line_comment,  // // … or /// … in C++, # … in Python
     block_comment, // /* … */
     docstring,     // a Python triple-quoted string opening a logical line
     markdown_text, // a line of a markdown file outside any fenced code block
 };
-
-} // namespace scl
 
 /// One line of prose, with the marker already stripped.
 ///

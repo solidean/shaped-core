@@ -52,9 +52,9 @@ namespace cc { void f(thing const& t) { g(cc::u32(t.count)); } }
 ```
 
 A member declaration is one more such position.
-Defining `S` inside an open namespace is a `qualified-record-definition` finding of its own, named here because a block must account for every rule that fires on it.
+Defining `S` inside an open namespace is a `qualified-type-definition` finding of its own, named here because a block must account for every rule that fires on it.
 
-```cpp [qualified-primitive] [qualified-record-definition]
+```cpp [qualified-primitive] [qualified-type-definition]
 namespace cc { struct S { void f(); cc::u64 hash() const; }; }
 ```
 

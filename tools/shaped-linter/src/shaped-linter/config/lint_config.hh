@@ -11,16 +11,17 @@ namespace scl
 {
 struct include_decision;
 
+} // namespace scl
+
 /// What the config says about one include in one file.
 /// `unblessed` is the DEFAULT — every non-project include is denied until something allows it, and a
 /// `denied` verdict differs only in carrying a reason that names the replacement.
-enum class include_verdict : u8
+enum class scl::include_verdict : scl::u8
 {
     allowed,
     denied,
     unblessed,
 };
-} // namespace scl
 
 /// One `allow-include` / `deny-include` entry, as the file spelled it.
 ///

@@ -4,8 +4,8 @@
 #include <nexus/test.hh>
 #include <shaped-linter/rules/engine.hh>
 
-// Smoke tests for `qualified-record-definition` — the scratchpad the rule was built in, and where an interesting regression gets pinned.
-// Breadth lives in qualified_record_definition.md, next to this file.
+// Smoke tests for `qualified-type-definition` — the scratchpad the rule was built in, and where an interesting regression gets pinned.
+// Breadth lives in qualified_type_definition.md, next to this file.
 // See docs/coding-guidelines.md for which of the two a new case belongs in.
 
 using namespace scl;
@@ -19,7 +19,7 @@ cc::string fixed(cc::string_view source, isize count = 1, cc::string_view path =
     REQUIRE(found.size() == count);
     for (auto const& f : found)
     {
-        CHECK(f.rule_id == "qualified-record-definition");
+        CHECK(f.rule_id == "qualified-type-definition");
         REQUIRE(f.suggested_fix.has_value());
     }
     return apply_edits(source, collect_fix_edits(found));
@@ -29,7 +29,7 @@ cc::string fixed(cc::string_view source, isize count = 1, cc::string_view path =
 finding const& reported_only(cc::span<finding const> found)
 {
     REQUIRE(found.size() == 1);
-    CHECK(found[0].rule_id == "qualified-record-definition");
+    CHECK(found[0].rule_id == "qualified-type-definition");
     CHECK(!found[0].suggested_fix.has_value());
     CHECK(found[0].suggested_hint.has_value());
     return found[0];
@@ -41,7 +41,7 @@ void expect_none(cc::string_view source, cc::string_view path = "a.hh")
 }
 } // namespace
 
-TEST("shaped-linter - qualified-record-definition - a namespace of definitions is unwrapped whole")
+TEST("shaped-linter - qualified-type-definition - a namespace of definitions is unwrapped whole")
 {
     SECTION("one struct")
     {
@@ -55,6 +55,16 @@ TEST("shaped-linter - qualified-record-definition - a namespace of definitions i
     {
         CHECK(fixed("namespace cc\n{\nstruct a\n{\n};\nclass b\n{\n};\n}\n", 2)
               == "struct cc::a\n{\n};\nclass cc::b\n{\n};\n");
+    }
+    SECTION("the blank lines inside the braces go with them, rather than doubling up")
+    {
+        CHECK(fixed("#pragma once\n\nnamespace cc\n{\n\nstruct span\n{\n};\n\n} // namespace cc\n\nvoid f();\n")
+              == "#pragma once\n\nstruct cc::span\n{\n};\n\nvoid f();\n");
+    }
+    SECTION("a body with no blank lines to spare is untouched either side")
+    {
+        CHECK(fixed("#pragma once\n\nnamespace cc\n{\nstruct span\n{\n};\n} // namespace cc\n\nvoid f();\n")
+              == "#pragma once\n\nstruct cc::span\n{\n};\n\nvoid f();\n");
     }
     SECTION("a nested-name namespace keeps its spelling")
     {
@@ -77,7 +87,7 @@ TEST("shaped-linter - qualified-record-definition - a namespace of definitions i
     }
 }
 
-TEST("shaped-linter - qualified-record-definition - a mixed namespace is split around its records")
+TEST("shaped-linter - qualified-type-definition - a mixed namespace is split around its types")
 {
     SECTION("a function after the record keeps the namespace below it")
     {
@@ -100,10 +110,15 @@ TEST("shaped-linter - qualified-record-definition - a mixed namespace is split a
         CHECK(fixed("namespace cc\n{\nvoid f();\nstruct a\n{\n};\nstruct b\n{\n};\n}\n", 2)
               == "namespace cc\n{\nvoid f();\n} // namespace cc\n\nstruct cc::a\n{\n};\nstruct cc::b\n{\n};\n");
     }
-    SECTION("an enum stays behind, since it cannot be defined qualified")
+    SECTION("an enum joins the run beside a record, and both are qualified")
     {
-        CHECK(fixed("namespace cc\n{\nenum class e\n{\n};\nstruct s\n{\n};\n}\n")
-              == "namespace cc\n{\nenum class e\n{\n};\n} // namespace cc\n\nstruct cc::s\n{\n};\n");
+        CHECK(fixed("namespace cc\n{\nenum class e : u8\n{\n};\nstruct s\n{\n};\n}\n", 2)
+              == "enum class cc::e : cc::u8\n{\n};\nstruct cc::s\n{\n};\n");
+    }
+    SECTION("an unscoped enum with no enum-base cannot be declared ahead of itself, and ends the run")
+    {
+        CHECK(fixed("namespace cc\n{\nenum e\n{\n};\nstruct s\n{\n};\n}\n")
+              == "namespace cc\n{\nenum e\n{\n};\n} // namespace cc\n\nstruct cc::s\n{\n};\n");
     }
     SECTION("a forward declaration stays behind — a qualified name may not declare a new entity")
     {
@@ -122,7 +137,72 @@ TEST("shaped-linter - qualified-record-definition - a mixed namespace is split a
     }
 }
 
-TEST("shaped-linter - qualified-record-definition - what cannot move stays, and ends the run")
+TEST("shaped-linter - qualified-type-definition - an enum is a type like any other")
+{
+    SECTION("a bare enum-base is qualified too — it only ever resolved through the namespace")
+    {
+        CHECK(fixed("namespace sv\n{\nenum class layout_kind : u8\n{\n};\n}\n")
+              == "enum class sv::layout_kind : sv::u8\n{\n};\n");
+    }
+    SECTION("the base takes the namespace's root, where the using-directive re-exporting it sits")
+    {
+        CHECK(fixed("namespace cc::console\n{\nenum class color : u8\n{\n};\n}\n")
+              == "enum class cc::console::color : cc::u8\n{\n};\n");
+    }
+    SECTION("a base that resolves on its own is left as written")
+    {
+        CHECK(fixed("namespace cc\n{\nenum class e : int\n{\n};\n}\n") == "enum class cc::e : int\n{\n};\n");
+        CHECK(fixed("namespace cc\n{\nenum class e : unsigned char\n{\n};\n}\n")
+              == "enum class cc::e : unsigned char\n{\n};\n");
+    }
+    SECTION("an enum-base the linter cannot place is not rewritten on a guess")
+    {
+        expect_none("namespace cc\n{\nenum class e : my_alias\n{\n};\n}\n");
+    }
+    SECTION("a scoped enum needs no enum-base — `enum class e;` is a declaration the definition can refer back to")
+    {
+        CHECK(fixed("namespace cc\n{\nenum class e\n{\n};\n}\n") == "enum class cc::e\n{\n};\n");
+    }
+    SECTION("`enum struct` is the scoped form too")
+    {
+        CHECK(fixed("namespace cc\n{\nenum struct e\n{\n};\n}\n") == "enum struct cc::e\n{\n};\n");
+    }
+    SECTION("an unscoped enum fires once it has fixed its underlying type")
+    {
+        CHECK(fixed("namespace cc\n{\nenum e : u8\n{\n};\n}\n") == "enum cc::e : cc::u8\n{\n};\n");
+    }
+    SECTION("without an enum-base there is no opaque declaration to write, so it is left alone")
+    {
+        expect_none("namespace cc\n{\nenum e\n{\n};\n}\n");
+    }
+    SECTION("an anonymous enum has no name to qualify")
+    {
+        expect_none("namespace cc\n{\nenum : u8\n{\n    a\n};\n}\n");
+    }
+    SECTION("an enum definition that also declares a variable would move that variable to file scope")
+    {
+        expect_none("namespace cc\n{\nenum class e : u8\n{\n} v;\n}\n");
+    }
+    SECTION("a member enum belongs to its record, and is qualified through it")
+    {
+        CHECK(fixed("namespace cc\n{\nstruct s\n{\n    enum class e : u8\n    {\n    };\n};\n}\n")
+              == "struct cc::s\n{\n    enum class e : u8\n    {\n    };\n};\n");
+    }
+    SECTION("an enum declared inside a function body belongs to the function")
+    {
+        expect_none("namespace cc\n{\nauto make()\n{\n    enum class e : u8\n    {\n    };\n    return e{};\n}\n}\n");
+    }
+    SECTION("an opaque declaration is what the rewrite depends on, and is never itself reported")
+    {
+        expect_none("namespace cc\n{\nenum class e : u8;\nenum class f;\n}\n");
+    }
+    SECTION("an enum already defined qualified")
+    {
+        expect_none("enum class cc::e : cc::u8\n{\n};\n");
+    }
+}
+
+TEST("shaped-linter - qualified-type-definition - what cannot move stays, and ends the run")
 {
     SECTION("an anonymous record is never reported")
     {
@@ -148,7 +228,7 @@ TEST("shaped-linter - qualified-record-definition - what cannot move stays, and 
     }
 }
 
-TEST("shaped-linter - qualified-record-definition - what it leaves alone")
+TEST("shaped-linter - qualified-type-definition - what it leaves alone")
 {
     SECTION("a forward declaration is not a definition — this is what keeps fwd.hh clean")
     {

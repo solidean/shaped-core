@@ -10,10 +10,8 @@ namespace scl
 struct markdown_line;
 } // namespace scl
 
-namespace scl
-{
 /// What a markdown line is, at the only granularity the linter needs.
-enum class markdown_line_kind : u8
+enum class scl::markdown_line_kind : scl::u8
 {
     text,        // body text, a heading, a list item — anything a human reads as prose
     blank,       // empty or whitespace only; ends a paragraph
@@ -22,8 +20,6 @@ enum class markdown_line_kind : u8
     table,       // a row of a pipe table, which is data laid out in columns rather than prose
     frontmatter, // a leading --- ... --- block, delimiters included; metadata a tool consumes whole, not prose
 };
-
-} // namespace scl
 
 /// One line of the file, tagged.
 struct scl::markdown_line

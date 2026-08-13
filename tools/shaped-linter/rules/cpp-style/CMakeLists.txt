@@ -7,7 +7,7 @@ target_sources(shaped-linter-core PRIVATE
     blessed-includes/blessed_includes.cc
     default-init-assignment/default_init_assignment.cc
     qualified-primitive/qualified_primitive.cc
-    qualified-record-definition/qualified_record_definition.cc
+    qualified-type-definition/qualified_type_definition.cc
 )
 
 if(SC_BUILD_TESTS)
@@ -15,6 +15,6 @@ if(SC_BUILD_TESTS)
         blessed-includes/blessed_includes-test.cc
         default-init-assignment/default_init_assignment-test.cc
         qualified-primitive/qualified_primitive-test.cc
-        qualified-record-definition/qualified_record_definition-test.cc
+        qualified-type-definition/qualified_type_definition-test.cc
     )
 endif()

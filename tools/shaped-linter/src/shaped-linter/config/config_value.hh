@@ -5,18 +5,15 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-linter/fwd.hh>
 
-namespace scl
-{
 /// What a config node holds.
 /// Three kinds is the whole data model — the format has no numbers, booleans or nulls, and a consumer
 /// that wants one parses the scalar itself.
-enum class config_value_kind : u8
+enum class scl::config_value_kind : scl::u8
 {
     scalar,
     list,
     mapping,
 };
-} // namespace scl
 
 /// One node of a parsed config, in an arena addressed by `isize` id — the same shape as `syntax_tree`.
 ///

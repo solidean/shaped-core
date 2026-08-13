@@ -709,22 +709,24 @@ TEST("shaped-linter - parser - namespace definitions")
     }
 }
 
-TEST("shaped-linter - parser - follows_record")
+TEST("shaped-linter - parser - follows_definition")
 {
-    // Which records sit next to each other is what decides how big a block a rule moves out of a namespace.
+    // Which type definitions sit next to each other is what decides how big a block a rule moves out of a namespace.
     // Everything the parser does not model breaks the run, which is the direction that costs a fix rather than correctness.
     auto const runs = [](cc::string_view source)
     {
         auto const p = parse_text(source);
         cc::string out;
-        for (auto const* r : p.nodes_of(node_kind::record_definition))
-            out += r->follows_record ? '+' : '|';
+        for (auto const& n : p.tree.nodes)
+            if (n.kind == node_kind::record_definition || n.kind == node_kind::enum_definition)
+                out += n.follows_definition ? '+' : '|';
         return out;
     };
 
-    SECTION("a series of record definitions is one run")
+    SECTION("a series of type definitions is one run")
     {
         CHECK(runs("namespace cc { struct a { }; class b { }; union c { }; }") == "|++");
+        CHECK(runs("namespace cc { struct a { }; enum class e { }; struct b { }; }") == "|++");
     }
     SECTION("a function breaks the run, defined or merely declared")
     {
@@ -734,14 +736,96 @@ TEST("shaped-linter - parser - follows_record")
     SECTION("so does any other declaration")
     {
         CHECK(runs("namespace cc { struct a { }; struct fwd; struct b { }; }") == "||");
-        CHECK(runs("namespace cc { struct a { }; enum class e { }; struct b { }; }") == "||");
+        CHECK(runs("namespace cc { struct a { }; enum class e : u8; struct b { }; }") == "||");
         CHECK(runs("namespace cc { struct a { }; using x = int; struct b { }; }") == "||");
         CHECK(runs("namespace cc { struct a { }; int k = 3; struct b { }; }") == "||");
         CHECK(runs("namespace cc { struct a { }; namespace inner { } struct b { }; }") == "||");
     }
-    SECTION("a member record is the record's own child and joins no run")
+    SECTION("a member type is its record's own child and joins no run")
     {
         CHECK(runs("namespace cc { struct a { struct inner { }; }; struct b { }; }") == "||+");
+        CHECK(runs("namespace cc { struct a { enum class e { }; }; struct b { }; }") == "||+");
+    }
+}
+
+TEST("shaped-linter - parser - enum definitions")
+{
+    auto const only_enum = [](cc::string_view source)
+    {
+        auto const p = parse_text(source);
+        auto const es = p.nodes_of(node_kind::enum_definition);
+        REQUIRE(es.size() == 1);
+        return es[0];
+    };
+
+    SECTION("a scoped enum carries its name and its form")
+    {
+        auto const p = parse_text("enum class direction : u8 { up, down };");
+        auto const es = p.nodes_of(node_kind::enum_definition);
+        REQUIRE(es.size() == 1);
+        CHECK(p.text(es[0]->name) == "direction");
+        CHECK(es[0]->enum_scoped);
+        CHECK(es[0]->enum_has_base);
+        CHECK(p.text(es[0]->span) == "enum class direction : u8 { up, down }");
+    }
+    SECTION("`enum struct` is the scoped form too")
+    {
+        CHECK(only_enum("enum struct e { a };")->enum_scoped);
+    }
+    SECTION("an unscoped enum is told apart by whether it wrote an enum-base")
+    {
+        CHECK(!only_enum("enum e { a };")->enum_scoped);
+        CHECK(!only_enum("enum e { a };")->enum_has_base);
+        CHECK(only_enum("enum e : u8 { a };")->enum_has_base);
+        CHECK(only_enum("enum e : cc::u8 { a };")->enum_has_base);
+    }
+    SECTION("an enum-base of one identifier is a name that resolved through the enclosing scope")
+    {
+        auto const p = parse_text("enum class e : u8 { a };");
+        auto const es = p.nodes_of(node_kind::enum_definition);
+        REQUIRE(es.size() == 1);
+        CHECK(p.text(es[0]->enum_base_name) == "u8");
+    }
+    SECTION("a base that resolves on its own carries no name to move")
+    {
+        CHECK(only_enum("enum class e : int { a };")->enum_base_name.byte_end == 0);
+        CHECK(only_enum("enum class e : unsigned char { a };")->enum_base_name.byte_end == 0);
+        CHECK(only_enum("enum class e : cc::u8 { a };")->enum_base_name.byte_end == 0);
+        CHECK(only_enum("enum class e { a };")->enum_base_name.byte_end == 0);
+    }
+    SECTION("the type behind an enum-base is not the enum's name")
+    {
+        auto const p = parse_text("enum : u8 { a };");
+        auto const es = p.nodes_of(node_kind::enum_definition);
+        REQUIRE(es.size() == 1);
+        CHECK(p.text(es[0]->name) == "");
+    }
+    SECTION("an opaque declaration is no definition")
+    {
+        CHECK(parse_text("enum class e : u8;").nodes_of(node_kind::enum_definition).size() == 0);
+    }
+    SECTION("a trailing declarator on an enum definition is marked")
+    {
+        CHECK(only_enum("enum class e : u8 { } v;")->has_declarator);
+        CHECK(!only_enum("enum class e : u8 { };")->has_declarator);
+    }
+    SECTION("the enumerator list holds no declaration to descend into")
+    {
+        auto const p = parse_text("enum class e : u8 { a = 1, b = 2 };");
+        CHECK(p.brace_vars().size() == 0);
+        CHECK(p.nodes_of(node_kind::enum_definition).size() == 1);
+    }
+    SECTION("where it sits is what the scope says")
+    {
+        CHECK(only_enum("namespace cc { enum class e { }; }")->scope == decl_scope::namespace_scope);
+        CHECK(only_enum("struct s { enum class e { }; };")->scope == decl_scope::record_scope);
+        CHECK(only_enum("void f() { enum class e { }; }")->scope == decl_scope::function_scope);
+    }
+    SECTION("an enum in a parameter list leaves the function body a function body")
+    {
+        auto const p = parse_text("void f(enum e x) { int y{0}; }");
+        CHECK(p.nodes_of(node_kind::enum_definition).size() == 0);
+        CHECK(p.brace_vars_in(decl_scope::function_scope).size() == 1);
     }
 }
 
