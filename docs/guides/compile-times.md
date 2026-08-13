@@ -43,10 +43,48 @@ Every record carries the wall clock **and** a `-ftime-trace` breakdown:
 | `trace.source_s` | time inside `#include`d files |
 | `trace.ours_source_s` / `system_source_s` | **the split that decides whether include hygiene can pay at all** |
 | `trace.include_count` | distinct files entered |
-| `trace.top_headers` | the 15 costliest by exclusive self time |
+| `trace.headers` | every header entered, with its exclusive self time |
+| `trace.headers_omitted` / `headers_omitted_s` | the sub-0.5 ms tail that was dropped, and what it summed to |
 
 `ours_source_s` versus `system_source_s` is usually the first thing to look at.
 On a dx12 test TU it is 0.32 s ours against 0.98 s system (MSVC STL, Windows SDK, `d3d12.h`), which caps what cleaning up our own headers can win.
+
+## Exploring the results
+
+```bash
+uv run dev.py compile-time export .tmp/compile-time/all-*.json --csv-dir .tmp/compile-time
+```
+
+Flattens any number of reports into two **long-format** CSVs, which is the shape a pivot table and a dataframe both want.
+Reach for this when you do not yet know the question — a report answers the questions someone already had, and a pivot answers the ones you find.
+
+`records.csv` — one row per measured file:
+
+| column | |
+|---|---|
+| `path` `name` `target` `preset` `kind` | what was measured |
+| `wall_s` | end-to-end, minimum across repeats |
+| `includes_wall_s` `incl_pct` `own_s` | TU mode only: the stripped half, and the split |
+| `frontend_s` `backend_s` `source_s` `instantiate_s` | the `-ftime-trace` breakdown |
+| `ours_source_s` `system_source_s` `include_count` | the parse split, and how many files were entered |
+
+`attribution.csv` — one row per (measured file, header it pulled in):
+`preset, kind, tu_path, tu_target, header, header_name, header_self_s, is_system`.
+
+This second table is the one worth having, because it answers a question the JSON cannot express:
+
+```
+SUM(header_self_s) GROUP BY header      -- total cost of a header across the whole build
+COUNT(*)           GROUP BY header      -- how many TUs pay for it
+```
+
+A 40 ms header pulled into 200 TUs beats a 300 ms header pulled into three, and only this aggregation says so.
+`export` prints that ranking itself, so the first answer needs no spreadsheet at all.
+
+**`header_self_s` is first-include cost within one TU.**
+Include guards mean a header included second in the same TU is nearly free, and its cost lands on whichever header pulled it in first.
+For ranking aggregate cost that is the right attribution.
+For "what would I save by dropping this include from this file" it is not: the saving is zero when something else still pulls the header in.
 
 ## Flags
 

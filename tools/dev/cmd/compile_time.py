@@ -12,6 +12,7 @@ docs/guides/compile-times.md is the workflow; tools/dev/lib/perf/compile_time.py
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import platform
@@ -63,17 +64,32 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     t = csub.add_parser("tu", help="Cost of a TU, measured full and reduced to its includes")
     _common(t)
+
+    e = csub.add_parser(
+        "export",
+        help="Flatten report JSON into tidy CSV, for pivoting in a spreadsheet or dataframe",
+    )
+    e.add_argument("inputs", nargs="+", metavar="FILE", help="Report JSON(s) written by headers/tu")
+    e.add_argument("--csv-dir", metavar="DIR", default=str(_DEFAULT_OUT),
+                   help=f"Where the CSVs land (default: {_DEFAULT_OUT.as_posix()})")
+    e.add_argument("--prefix", default="", help="Filename prefix, to keep several exports side by side")
     return p
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    if args.compile_time_cmd == "export":
+        _run_export(args, ctx)
+        return
+
     presets = ctx.resolve_build_presets(args)
     mode = args.compile_time_cmd
     targets = [s.strip() for spec in (args.target or []) for s in spec.split(",") if s.strip()] or None
 
     scratch_ctx = None
     if args.keep_tus:
-        scratch = Path(args.keep_tus)
+        # Absolute, because every compile runs with cwd set to the build directory the entry names:
+        # a relative scratch path would be written here and looked for there.
+        scratch = Path(args.keep_tus).resolve()
         scratch.mkdir(parents=True, exist_ok=True)
     else:
         scratch_ctx = tempfile.TemporaryDirectory(prefix="dev-compile-time-")
@@ -107,6 +123,117 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     ok = _summarize(report, ctx, out, args.top)
     sys.exit(0 if ok else 1)
+
+
+def _run_export(args: argparse.Namespace, ctx: Context) -> None:
+    """Flatten report JSON into two long-format CSVs.
+
+    Long format rather than one wide table, because the interesting question is an aggregation the JSON cannot express:
+    a header's total cost across the build is `SUM(header_self_s) GROUP BY header`, which is one pivot over `attribution.csv` and nothing at all over the nested records.
+    """
+    reports = []
+    for raw in args.inputs:
+        path = Path(raw)
+        if not path.is_file():
+            ctx.die(f"{raw!r} is not a file")
+        try:
+            reports.append((path, json.loads(path.read_text(encoding="utf-8"))))
+        except ValueError as exc:
+            ctx.die(f"{raw!r} is not valid JSON: {exc}")
+
+    out_dir = Path(args.csv_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rec_path = out_dir / f"{args.prefix}records.csv"
+    att_path = out_dir / f"{args.prefix}attribution.csv"
+
+    rec_rows, att_rows = [], []
+    for path, report in reports:
+        mode = report.get("mode", "")
+        for block in report.get("presets", []):
+            preset = block.get("preset", "")
+            # A TU contributes two records; pair them so `incl_pct` lands on one row rather than needing a join.
+            includes = {r["path"]: r for r in block.get("records", []) if r["kind"] == "tu-includes"}
+            for rec in block.get("records", []):
+                if rec["kind"] == "tu-includes":
+                    continue
+                trace = rec.get("trace", {})
+                inc = includes.get(rec["path"], {}) if rec["kind"] == "tu-full" else {}
+                inc_wall = inc.get("wall_s", "")
+                rec_rows.append({
+                    "source": path.name,
+                    "mode": mode,
+                    "preset": preset,
+                    "kind": rec["kind"],
+                    "path": rec["path"],
+                    "name": Path(rec["path"]).name,
+                    "target": rec.get("target", ""),
+                    "ok": int(bool(rec.get("ok", True))),
+                    "wall_s": rec.get("wall_s", ""),
+                    "includes_wall_s": inc_wall,
+                    "incl_pct": (round(100.0 * inc_wall / rec["wall_s"], 1)
+                                 if inc_wall not in ("", None) and rec.get("wall_s") else ""),
+                    "own_s": (round(rec["wall_s"] - inc_wall, 4)
+                              if inc_wall not in ("", None) and rec.get("wall_s") else ""),
+                    "frontend_s": trace.get("frontend_s", ""),
+                    "backend_s": trace.get("backend_s", ""),
+                    "source_s": trace.get("source_s", ""),
+                    "ours_source_s": trace.get("ours_source_s", ""),
+                    "system_source_s": trace.get("system_source_s", ""),
+                    "instantiate_s": trace.get("instantiate_s", ""),
+                    "include_count": trace.get("include_count", ""),
+                })
+                for header in trace.get("headers", []):
+                    att_rows.append({
+                        "preset": preset,
+                        "kind": rec["kind"],
+                        "tu_path": rec["path"],
+                        "tu_target": rec.get("target", ""),
+                        "header": header["file"],
+                        "header_name": Path(header["file"]).name,
+                        "header_self_s": header["self_s"],
+                        "is_system": int(bool(header.get("system"))),
+                    })
+
+    _write_csv(rec_path, rec_rows)
+    _write_csv(att_path, att_rows)
+
+    print(f"{len(rec_rows)} record row(s)      -> {ctx.rel(rec_path)}")
+    print(f"{len(att_rows)} attribution row(s) -> {ctx.rel(att_path)}")
+    _print_attribution_preview(att_rows)
+
+
+def _write_csv(path: Path, rows: list[dict]) -> None:
+    # newline="" is required, or csv doubles the line endings on Windows.
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        if not rows:
+            return
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _print_attribution_preview(rows: list[dict]) -> None:
+    """The aggregation the second table exists for, so the first useful answer needs no spreadsheet."""
+    if not rows:
+        return
+    total: dict[str, float] = {}
+    count: dict[str, int] = {}
+    system: dict[str, bool] = {}
+    for r in rows:
+        key = r["header"]
+        total[key] = total.get(key, 0.0) + r["header_self_s"]
+        count[key] = count.get(key, 0) + 1
+        system[key] = bool(r["is_system"])
+
+    ours_s = sum(v for k, v in total.items() if not system[k])
+    sys_s = sum(v for k, v in total.items() if system[k])
+    print(f"\nattributable parse time: {ours_s:.0f} s ours, {sys_s:.0f} s system "
+          f"({100.0 * sys_s / (ours_s + sys_s):.0f}% system)")
+    print("\n  top headers by TOTAL cost across every measured TU:")
+    print(f"  {'total':>8}  {'TUs':>5}  {'each':>7}  header")
+    for key, secs in sorted(total.items(), key=lambda kv: -kv[1])[:15]:
+        tag = "sys " if system[key] else "ours"
+        print(f"  {secs:7.1f}s  {count[key]:5d}  {secs / count[key]:6.3f}s  {tag}  {Path(key).name}")
 
 
 def _measure_preset(args, ctx: Context, preset, mode: str, targets, scratch: Path) -> dict:

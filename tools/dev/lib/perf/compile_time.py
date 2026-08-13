@@ -43,6 +43,16 @@ from ..core import console
 # Continuation lines (trailing backslash) are joined onto it.
 _DIRECTIVE = re.compile(r"^\s*#")
 
+# A raw string literal, delimiter and all.
+# Test fixtures hold OBJ and markdown content whose lines start with '#', and those are not directives.
+# Scanning without removing raw strings first picks up '# a single triangle' and hands it to the compiler.
+_RAW_STRING = re.compile(r'R"([^()\\\s]{0,16})\(.*?\)\1"', re.DOTALL)
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+# Pragmas are dropped rather than kept: none of them changes which headers get included, and one that
+# must attach to a statement (#pragma clang loop ...) is a syntax error standing on its own.
+_PRAGMA = re.compile(r"^\s*#\s*pragma\b")
+
 
 @dataclass
 class Record:
@@ -87,12 +97,64 @@ class Record:
 # Command construction
 # ---------------------------------------------------------------------------
 
+def _tokenize_windows(cmd: str) -> list[str]:
+    """Split a Windows command line the way CommandLineToArgvW does.
+
+    Splitting on whitespace is wrong, and wrong quietly.
+    A define like `-DIMGUI_USER_CONFIG=\\"imgui/imgui_config.hh\\"` survives it as a token still carrying its backslashes.
+    That reaches the compiler as a literal `\\"...\\"` and fails as `expected "FILENAME"`.
+    The rule that actually applies: backslashes are literal unless they precede a quote, where 2n collapse to n and toggle nothing, and 2n+1 collapse to n plus a literal quote.
+    """
+    args: list[str] = []
+    cur: list[str] = []
+    backslashes = 0
+    in_quotes = False
+    started = False
+
+    def flush_backslashes(count: int) -> None:
+        cur.extend("\\" * count)
+
+    for ch in cmd:
+        if ch == "\\":
+            backslashes += 1
+            continue
+        if ch == '"':
+            flush_backslashes(backslashes // 2)
+            if backslashes % 2:
+                cur.append('"')
+            else:
+                in_quotes = not in_quotes
+                started = True
+            backslashes = 0
+            continue
+        flush_backslashes(backslashes)
+        backslashes = 0
+        if ch.isspace() and not in_quotes:
+            if cur or started:
+                args.append("".join(cur))
+                cur, started = [], False
+            continue
+        cur.append(ch)
+    flush_backslashes(backslashes)
+    if cur or started:
+        args.append("".join(cur))
+    return args
+
+
 def _split_command(entry: dict) -> list[str]:
     """The entry's command as argv.
 
-    compile_commands.json stores it as one string here; paths in this repo contain no spaces, and CMake writes the short 8.3 form for the compiler itself.
+    A database may carry `arguments` already split, which is always preferred over re-parsing a quoted string.
+    Otherwise the string is tokenized by the host's rules, since ninja quotes it for the shell it will run under.
     """
-    return entry["command"].split()
+    if isinstance(entry.get("arguments"), list):
+        return list(entry["arguments"])
+    cmd = entry["command"]
+    if os.name == "nt":
+        return _tokenize_windows(cmd)
+    import shlex
+
+    return shlex.split(cmd)
 
 
 def retarget(entry: dict, source: Path, obj: Path, extra: list[str]) -> list[str]:
@@ -143,7 +205,13 @@ def _trace_flags(family: str) -> list[str]:
     return ["/clang:-ftime-trace"] if os.name == "nt" and family == "clang" else ["-ftime-trace"]
 
 
-def _summarize_trace(path: Path, top: int = 15) -> dict:
+# Per-header self time below this is dropped from `headers`, with the total kept as `headers_omitted_s`.
+# A top-N cap would be the obvious alternative and is the wrong one: aggregating cost across every TU is the
+# whole point of the per-header table, and a cap silently truncates the long tail that aggregation sums up.
+_HEADER_FLOOR_S = 0.0005
+
+
+def _summarize_trace(path: Path, floor_s: float = _HEADER_FLOOR_S) -> dict:
     """Reduce a -ftime-trace capture to the fields worth keeping per record.
 
     Source spans are async begin/end pairs keyed by id and nested by inclusion, so self time is inclusive minus directly-nested children.
@@ -186,6 +254,9 @@ def _summarize_trace(path: Path, top: int = 15) -> dict:
         low = p.lower()
         return "program files" in low or "windows kits" in low or "/usr/" in low or "\\vc\\tools\\" in low
 
+    kept = {k: v for k, v in self_s.items() if v >= floor_s}
+    omitted = [v for v in self_s.values() if v < floor_s]
+
     return {
         "execute_compiler_s": round(totals.get("ExecuteCompiler", 0.0), 4),
         "frontend_s": round(totals.get("Total Frontend", 0.0), 4),
@@ -196,9 +267,11 @@ def _summarize_trace(path: Path, top: int = 15) -> dict:
         "include_count": len(self_s),
         "ours_source_s": round(sum(v for k, v in self_s.items() if not is_system(k)), 4),
         "system_source_s": round(sum(v for k, v in self_s.items() if is_system(k)), 4),
-        "top_headers": [
-            {"file": k.replace("\\", "/"), "self_s": round(v, 4), "system": is_system(k)}
-            for k, v in sorted(self_s.items(), key=lambda kv: -kv[1])[:top]
+        "headers_omitted": len(omitted),
+        "headers_omitted_s": round(sum(omitted), 4),
+        "headers": [
+            {"file": k.replace("\\", "/"), "self_s": round(v, 5), "system": is_system(k)}
+            for k, v in sorted(kept.items(), key=lambda kv: -kv[1])
         ],
     }
 
@@ -218,21 +291,28 @@ def includes_only_tu(source: Path) -> str:
     Keeping every directive rather than only `#include` lines is what makes conditional includes resolve the same way.
     An include guarded by `#if` needs its `#if`, and the `#define` the condition reads.
     Continuation lines are joined so a multi-line macro survives intact.
+    Raw string literals and block comments are removed first, since a fixture holding OBJ or markdown content has lines that open with `#` and are not directives at all.
     This is a heuristic.
     A directive whose expansion referenced dropped code still compiles, since nothing expands it, and a file that fails this way is reported rather than silently skipped.
     """
     text = source.read_text(encoding="utf-8", errors="replace")
+    # Blanked to the same line count, so a directive after a multi-line literal still stands on its own line.
+    text = _RAW_STRING.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    text = _BLOCK_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
     lines = text.splitlines()
     kept: list[str] = []
     i = 0
     while i < len(lines):
         line = lines[i]
         if _DIRECTIVE.match(line):
-            kept.append(line)
+            keep = not _PRAGMA.match(line)
+            if keep:
+                kept.append(line)
             while line.rstrip().endswith("\\") and i + 1 < len(lines):
                 i += 1
                 line = lines[i]
-                kept.append(line)
+                if keep:
+                    kept.append(line)
         i += 1
     return "\n".join(kept) + "\n"
 
@@ -287,6 +367,13 @@ def _measure(
         trace_path = obj.with_suffix(".json")
         if trace_path.is_file():
             rec.trace = _summarize_trace(trace_path)
+
+    # Scratch is cleared per measurement, not at the end.
+    # A full sweep is ~1000 compiles, and letting their objects and multi-megabyte traces pile up costs
+    # several GB of file churn that the filesystem and any on-access scanner charge back to later compiles:
+    # left in place, the same TU measures ~3x slower at the end of a 483-file sweep than on its own.
+    for leftover in (obj, obj.with_suffix(".pdb"), obj.with_suffix(".json")):
+        leftover.unlink(missing_ok=True)
     return rec
 
 
