@@ -8,8 +8,6 @@
 #include <shaped-graphics/routine/render_routine_base.hh>
 #include <shaped-graphics/routine/routine_registry.hh>
 
-#include <memory>
-
 /// Exclusive, mutable access to a render routine's per-context instance — what acquire_exclusive returns.
 /// The routine is reached through -> and *.
 ///

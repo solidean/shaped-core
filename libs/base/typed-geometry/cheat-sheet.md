@@ -311,17 +311,24 @@ tg::traits::is_finite<ObjT>;               // bool — is the point set bounded?
 #include <typed-geometry/scalar/scalar.hh>   // pulls in scalar/traits.hh + constants.hh
 tg::scalar_traits<T>;                     // specialize this to teach tg about a new scalar type
 tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr bool flags
+tg::traits::has_abs<T>;  tg::traits::has_exponential<T>;  tg::traits::has_rounding<T>;
 tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the trait (symbolic-friendly)
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
+tg::abs(x);                               // T   — constexpr; requires has_abs<T> (integers too, not bool)
 tg::sin(a); tg::cos(a); tg::tan(a);       // angle<T> -> T          — requires has_trigonometry<T>
 tg::sec(a); tg::csc(a); tg::cot(a);       // angle<T> -> T          — reciprocals (free == member a.sin()…)
 tg::sin_cos(a);                           // angle<T> -> cc::pair<T,T> {sin, cos}
 tg::asin(x); tg::acos(x); tg::atan(x);    // T -> angle<T>          — inverse trig
 tg::atan2(y, x);                          // (T, T) -> angle<T>     — requires has_trigonometry<T>
+tg::pow(base, exp);                       // (T, T) -> T            — same T both sides; requires has_exponential<T>
+tg::exp(x); tg::log(x);                   // T -> T                 — log needs x > 0
+tg::round(x); tg::floor(x); tg::ceil(x);  // T -> T                 — requires has_rounding<T>; float-only
 tg::pi<T>;                                // inline constexpr T  (scalar/constants.hh)
-// scalars: f32/f64 have sqrt+trigonometry (via std:: — see docs/TODO.md); all integer types except
-// plain `char` get one/is_zero/is_one (signed/unsigned char count; `char` does not); bool is special.
+// scalars: f32/f64 have the lot (via std:: — see docs/TODO.md); all integer types except plain `char`
+// get one/is_zero/is_one + abs (signed/unsigned char count; `char` does not); bool is special.
+// round/floor/ceil return T, not an int — narrow explicitly: int(tg::round(x)).
+// tg::abs on the most negative integer is UB — that value has no representable magnitude.
 ```
 
 ## Umbrellas

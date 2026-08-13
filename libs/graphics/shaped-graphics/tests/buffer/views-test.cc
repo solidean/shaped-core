@@ -1,9 +1,8 @@
 #include <nexus/test.hh>
+#include <shaped-graphics/fwd.hh>             // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/resource/buffer.hh> // sg::buffer<T> — exact/clamped wrapping + reinterpret_as
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/resource/views.hh>
-
-#include <memory>
 
 using namespace cc::primitive_defines;
 

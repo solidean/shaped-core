@@ -4,9 +4,8 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/query/gpu_timestamp.hh>
-
-#include <memory>
 
 namespace sg
 {

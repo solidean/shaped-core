@@ -12,7 +12,6 @@
 #include <shaped-graphics/types.hh>
 
 #include <atomic>
-#include <memory>
 
 /// A GPU-resident buffer of immutable shape — size and usage are fixed at creation, like a span over mutable GPU memory.
 /// Contents change through command lists, and there is no host-visible mapping, so transfers go through them too.

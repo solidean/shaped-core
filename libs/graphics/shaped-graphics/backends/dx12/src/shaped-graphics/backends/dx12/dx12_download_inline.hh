@@ -14,7 +14,6 @@
 #include <shaped-graphics/fwd.hh>
 
 #include <atomic>
-#include <memory>
 
 /// bytes_waiter for an inline download: ready once the download actor has copied the readback bytes into the destination.
 /// wait() can only block after the recording list has been submitted — blocking earlier would deadlock the very thread that must submit.

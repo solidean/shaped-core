@@ -8,7 +8,6 @@
 #include <shaped-graphics/resource/views.hh> // tlas_view (tlas::as_view)
 
 #include <atomic>
-#include <memory>
 
 /// Ray-tracing acceleration structures: the opaque, driver-built spatial indices the GPU traverses to find ray/geometry hits.
 /// A `blas` (bottom-level) indexes one mesh's triangles or procedural primitives.

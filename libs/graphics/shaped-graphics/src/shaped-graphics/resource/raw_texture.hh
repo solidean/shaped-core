@@ -8,7 +8,6 @@
 #include <shaped-graphics/types.hh>
 
 #include <atomic>
-#include <memory>
 
 namespace sg
 {

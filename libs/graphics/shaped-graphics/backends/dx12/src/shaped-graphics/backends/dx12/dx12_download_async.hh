@@ -13,7 +13,6 @@
 #include <shaped-graphics/resource/texture_region.hh>
 
 #include <atomic>
-#include <memory>
 
 /// bytes_waiter for an async download: ready once the copy actor has memcpy'd the readback bytes into the destination.
 /// There is no "submitted" gate, unlike the inline path — an async download is always handed to the actor.

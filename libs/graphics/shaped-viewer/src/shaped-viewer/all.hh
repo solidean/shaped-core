@@ -10,9 +10,15 @@
 #include <shaped-viewer/camera.hh>
 #include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/light.hh>
+#include <shaped-viewer/mesh.hh>
+#include <shaped-viewer/mesh_attribute.hh>
+#include <shaped-viewer/mesh_flags.hh>
+#include <shaped-viewer/mesh_parameter.hh>
+#include <shaped-viewer/mesh_texture.hh>
 #include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/render_settings.hh>
 #include <shaped-viewer/scene_item.hh>
+#include <shaped-viewer/triangle_geometry.hh>
 #include <shaped-viewer/view.hh>
 #include <shaped-viewer/view_id.hh>
 #include <shaped-viewer/viewer_definition.hh>

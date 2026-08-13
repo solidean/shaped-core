@@ -35,10 +35,17 @@ target_sources(shaped-viewer
     src/shaped-viewer/light.hh
     src/shaped-viewer/background.hh
     src/shaped-viewer/render_settings.hh
+    src/shaped-viewer/triangle_geometry.hh
+    src/shaped-viewer/mesh.hh
+    src/shaped-viewer/mesh_attribute.hh
+    src/shaped-viewer/mesh_flags.hh
+    src/shaped-viewer/mesh_parameter.hh
+    src/shaped-viewer/mesh_texture.hh
     src/shaped-viewer/scene_item.hh
     src/shaped-viewer/view.hh
     src/shaped-viewer/viewer_definition.hh
     src/shaped-viewer/resources/resource_data.hh
+    src/shaped-viewer/impl/content_hash.hh
     src/shaped-viewer/resources/resource_ids.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/impl/lru_pool.hh

@@ -6,7 +6,6 @@
 #include <shaped-graphics/fwd.hh> // sg::context
 #include <shaped-graphics/routine/render_routine_base.hh>
 
-#include <memory>
 #include <type_traits>
 
 namespace sg

@@ -7,8 +7,6 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <memory>
-
 namespace sg::backend::dx12
 {
 struct dx12_cpu_descriptor_heap;

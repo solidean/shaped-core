@@ -6,6 +6,9 @@
 
 /// Forward declarations and `*_handle` typedefs for shaped-graphics.
 /// Include it when a forward decl is all you need.
+///
+/// It is also sg's single door to `<memory>`, since the smart pointers are sg's own vocabulary: every `*_handle` IS a `std::shared_ptr`, and a command list is a `std::unique_ptr`.
+/// Code holding either — inside sg, its backends, or a library above it — includes this header rather than `<memory>`.
 
 namespace sg
 {

@@ -14,7 +14,6 @@
 #include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
-#include <memory>
 
 /// Per-backend creation config for the Vulkan context.
 /// The two flags are independent.

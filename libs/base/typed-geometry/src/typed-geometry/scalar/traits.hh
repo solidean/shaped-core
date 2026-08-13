@@ -9,7 +9,8 @@
 /// Scalar trait seam for typed-geometry.
 ///
 /// Every scalar capability is routed through tg::scalar_traits<T>, a primary template specialized per scalar type.
-/// The tg::traits::* helpers and the free functions in scalar.hh (tg::one, tg::sqrt, tg::sin, tg::cos, tg::sin_cos, tg::atan2) are thin wrappers over its entries.
+/// The tg::traits::* helpers and the free functions in scalar.hh are thin wrappers over its entries.
+/// That is tg::one, tg::sqrt, tg::abs, the trigonometry, tg::pow / tg::exp / tg::log, and tg::round / tg::floor / tg::ceil.
 /// libs/base/typed-geometry/docs/modules/scalar.md has the why.
 ///
 /// The kernels here are the *raw numeric* layer: sin/cos take a bare radian T and return T, atan2 takes two T and returns radians.
@@ -35,6 +36,9 @@ struct tg::scalar_traits
 {
     static constexpr bool has_sqrt = false;
     static constexpr bool has_trigonometry = false;
+    static constexpr bool has_exponential = false;
+    static constexpr bool has_rounding = false;
+    static constexpr bool has_abs = false;
 };
 
 // std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
@@ -44,6 +48,9 @@ struct tg::scalar_traits<cc::f32>
 {
     static constexpr bool has_sqrt = true;
     static constexpr bool has_trigonometry = true;
+    static constexpr bool has_exponential = true;
+    static constexpr bool has_rounding = true;
+    static constexpr bool has_abs = true;
 
     [[nodiscard]] static constexpr f32 one() { return 1.0f; }
     [[nodiscard]] static constexpr bool is_zero(f32 x) { return x == 0.0f; }
@@ -56,6 +63,13 @@ struct tg::scalar_traits<cc::f32>
     [[nodiscard]] static f32 acos(f32 x) { return std::acos(x); }
     [[nodiscard]] static f32 atan(f32 x) { return std::atan(x); }
     [[nodiscard]] static f32 atan2(f32 y, f32 x) { return std::atan2(y, x); }
+    [[nodiscard]] static f32 pow(f32 base, f32 exponent) { return std::pow(base, exponent); }
+    [[nodiscard]] static f32 exp(f32 x) { return std::exp(x); }
+    [[nodiscard]] static f32 log(f32 x) { return std::log(x); }
+    [[nodiscard]] static f32 round(f32 x) { return std::round(x); }
+    [[nodiscard]] static f32 floor(f32 x) { return std::floor(x); }
+    [[nodiscard]] static f32 ceil(f32 x) { return std::ceil(x); }
+    [[nodiscard]] static f32 abs(f32 x) { return std::fabs(x); }
 };
 
 template <>
@@ -63,6 +77,9 @@ struct tg::scalar_traits<cc::f64>
 {
     static constexpr bool has_sqrt = true;
     static constexpr bool has_trigonometry = true;
+    static constexpr bool has_exponential = true;
+    static constexpr bool has_rounding = true;
+    static constexpr bool has_abs = true;
 
     [[nodiscard]] static constexpr f64 one() { return 1.0; }
     [[nodiscard]] static constexpr bool is_zero(f64 x) { return x == 0.0; }
@@ -75,6 +92,13 @@ struct tg::scalar_traits<cc::f64>
     [[nodiscard]] static f64 acos(f64 x) { return std::acos(x); }
     [[nodiscard]] static f64 atan(f64 x) { return std::atan(x); }
     [[nodiscard]] static f64 atan2(f64 y, f64 x) { return std::atan2(y, x); }
+    [[nodiscard]] static f64 pow(f64 base, f64 exponent) { return std::pow(base, exponent); }
+    [[nodiscard]] static f64 exp(f64 x) { return std::exp(x); }
+    [[nodiscard]] static f64 log(f64 x) { return std::log(x); }
+    [[nodiscard]] static f64 round(f64 x) { return std::round(x); }
+    [[nodiscard]] static f64 floor(f64 x) { return std::floor(x); }
+    [[nodiscard]] static f64 ceil(f64 x) { return std::ceil(x); }
+    [[nodiscard]] static f64 abs(f64 x) { return std::fabs(x); }
 };
 
 // All integer types are scalars, `signed char` and `unsigned char` included.
@@ -86,10 +110,22 @@ struct tg::scalar_traits<T>
 {
     static constexpr bool has_sqrt = false;
     static constexpr bool has_trigonometry = false;
+    static constexpr bool has_exponential = false;
+    static constexpr bool has_rounding = false;
+    static constexpr bool has_abs = true;
 
     [[nodiscard]] static constexpr T one() { return T(1); }
     [[nodiscard]] static constexpr bool is_zero(T x) { return x == T(0); }
     [[nodiscard]] static constexpr bool is_one(T x) { return x == T(1); }
+
+    /// x must not be the type's most negative value, which has no representable magnitude.
+    [[nodiscard]] static constexpr T abs(T x)
+    {
+        if constexpr (std::is_signed_v<T>)
+            return x < T(0) ? T(-x) : x;
+        else
+            return x;
+    }
 };
 
 template <>
@@ -97,6 +133,9 @@ struct tg::scalar_traits<bool>
 {
     static constexpr bool has_sqrt = false;
     static constexpr bool has_trigonometry = false;
+    static constexpr bool has_exponential = false;
+    static constexpr bool has_rounding = false;
+    static constexpr bool has_abs = false;
 
     [[nodiscard]] static constexpr bool one() { return true; }
     [[nodiscard]] static constexpr bool is_zero(bool x) { return !x; }
@@ -115,6 +154,19 @@ inline constexpr bool has_sqrt = scalar_traits<T>::has_sqrt;
 /// true if scalar_traits<T> provides sin()/cos()/atan2() operations.
 template <class T>
 inline constexpr bool has_trigonometry = scalar_traits<T>::has_trigonometry;
+
+/// true if scalar_traits<T> provides pow()/exp()/log() operations.
+template <class T>
+inline constexpr bool has_exponential = scalar_traits<T>::has_exponential;
+
+/// true if scalar_traits<T> provides round()/floor()/ceil() operations.
+/// Integers deliberately do not: rounding one is the identity, and asking for it is a sign the caller meant a float.
+template <class T>
+inline constexpr bool has_rounding = scalar_traits<T>::has_rounding;
+
+/// true if scalar_traits<T> provides an abs() operation.
+template <class T>
+inline constexpr bool has_abs = scalar_traits<T>::has_abs;
 
 /// is the value the additive identity? Routed through scalar_traits so symbolic / bigint / ...
 /// scalars can supply a smarter test than a plain comparison.

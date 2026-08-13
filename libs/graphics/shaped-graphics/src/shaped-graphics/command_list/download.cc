@@ -1,9 +1,8 @@
 #include <clean-core/container/pinned_data.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/download.hh>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
-
-#include <memory>
 
 namespace sg
 {

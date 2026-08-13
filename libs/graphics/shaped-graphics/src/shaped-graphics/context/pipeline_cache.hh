@@ -5,8 +5,6 @@
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <memory>
-
 /// Backend-agnostic cache for group layouts, pipeline layouts, and compute + raytracing pipelines.
 /// Keyed by a cc::hash128 over the logical creation arguments, so it is independent of any backend handle identity.
 /// A second acquire with the same arguments returns the already-created handle / async node instead of rebuilding.

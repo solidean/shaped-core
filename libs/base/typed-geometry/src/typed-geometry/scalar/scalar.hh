@@ -30,6 +30,69 @@ template <class T>
     return scalar_traits<T>::sqrt(x);
 }
 
+/// magnitude, dispatched through scalar_traits<T>; only for scalars with has_abs.
+/// For an integer, x must not be the type's most negative value, which has no representable magnitude.
+template <class T>
+[[nodiscard]] constexpr T abs(T x)
+    requires(tg::traits::has_abs<T>)
+{
+    return scalar_traits<T>::abs(x);
+}
+
+// Exponentials — base and exponent share one type, so a mixed-type call needs an explicit cast rather than a silent promotion.
+// All require a scalar with has_exponential.
+
+/// base raised to exponent.
+template <class T>
+[[nodiscard]] T pow(T base, T exponent)
+    requires(tg::traits::has_exponential<T>)
+{
+    return scalar_traits<T>::pow(base, exponent);
+}
+
+/// e raised to x.
+template <class T>
+[[nodiscard]] T exp(T x)
+    requires(tg::traits::has_exponential<T>)
+{
+    return scalar_traits<T>::exp(x);
+}
+
+/// natural logarithm; x must be positive.
+template <class T>
+[[nodiscard]] T log(T x)
+    requires(tg::traits::has_exponential<T>)
+{
+    return scalar_traits<T>::log(x);
+}
+
+// Rounding — each returns the same scalar type rather than an integer, so the caller decides what to narrow to.
+// All require a scalar with has_rounding.
+
+/// nearest integral value, halfway cases away from zero.
+template <class T>
+[[nodiscard]] T round(T x)
+    requires(tg::traits::has_rounding<T>)
+{
+    return scalar_traits<T>::round(x);
+}
+
+/// largest integral value not greater than x.
+template <class T>
+[[nodiscard]] T floor(T x)
+    requires(tg::traits::has_rounding<T>)
+{
+    return scalar_traits<T>::floor(x);
+}
+
+/// smallest integral value not less than x.
+template <class T>
+[[nodiscard]] T ceil(T x)
+    requires(tg::traits::has_rounding<T>)
+{
+    return scalar_traits<T>::ceil(x);
+}
+
 // Trigonometry — the free-function forms of the angle members (a.sin() and friends).
 // Both forms exist, and these delegate, so there is a single implementation.
 // All require a scalar with has_trigonometry.

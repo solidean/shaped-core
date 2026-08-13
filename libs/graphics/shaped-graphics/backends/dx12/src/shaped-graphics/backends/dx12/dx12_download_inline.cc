@@ -12,8 +12,7 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_download.hh>
-
-#include <memory>
+#include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 
 namespace sg::backend::dx12
 {
