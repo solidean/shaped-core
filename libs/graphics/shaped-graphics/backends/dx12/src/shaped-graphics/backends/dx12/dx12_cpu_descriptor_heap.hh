@@ -13,17 +13,13 @@ struct dx12_cpu_descriptor_heap;
 struct dx12_descriptor_ref;
 } // namespace sg::backend::dx12
 
-namespace sg::backend::dx12
-{
 /// A slot index into a dx12_cpu_descriptor_heap.
 /// Strongly typed — an enum, not a bare int — so it cannot be confused with a count or another index.
 /// `invalid` is the null / heap-exhausted result of allocate().
-enum class cpu_descriptor_slot : int
+enum class sg::backend::dx12::cpu_descriptor_slot : int
 {
     invalid = -1,
 };
-
-} // namespace sg::backend::dx12
 
 /// A created RTV/DSV descriptor: the CPU handle to bind (OMSetRenderTargets / Clear*), plus the heap slot to return via the owning context's free_* when the RTV/DSV is no longer needed.
 struct sg::backend::dx12::dx12_descriptor_ref

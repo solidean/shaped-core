@@ -19,20 +19,16 @@
 // poll() drives a node's compute frame forward until it completes, fails as a value, or parks on not-ready
 // dependencies with wakeup continuations installed.
 
-namespace cc
-{
 // ============================================================================
 // async_error — the failure channel, represented as a value (not an exception)
 // ============================================================================
 
 /// Distinguishes an ordinary error from a cancellation on the async failure channel.
-enum class async_error_kind : u8
+enum class cc::async_error_kind : cc::u8
 {
     error,
     cancelled,
 };
-
-} // namespace cc
 
 /// Value carried on an async's failure channel: either a wrapped cc::any_error or a cancellation.
 /// Move-only, following cc::any_error.
@@ -72,21 +68,21 @@ private:
     cc::any_error _error;
 };
 
-namespace cc
-{
-
 // ============================================================================
 // result of a single compute step
 // ============================================================================
 
 /// What a compute frame reports after one step, once T has been stripped away for the base poll loop.
-enum class async_step_status : u8
+enum class cc::async_step_status : cc::u8
 {
     produced_value, // frame finished; typed value stored in the derived node
     produced_error, // frame finished on the failure channel; error stored in the base node
     waiting,        // frame added dependencies / asked to wait — normalize and poll them now
     yield,          // frame yielded cooperatively — reschedule and come back later
 };
+
+namespace cc
+{
 
 // ============================================================================
 // intrusive node handle: cc::shared_ptr keyed on async_node_base
@@ -486,6 +482,7 @@ static_assert(sizeof(async_dep_head) == 8, "async_dep_head must stay one word �
 // Growing it past 48 pushes async<int> into the 128 B size class (see the sizeof guards in async-test.cc).
 static_assert(sizeof(async_unresolved) == 48, "the unresolved arm must stay 48 B: frame 32 + deps 8 + conts 8");
 } // namespace impl
+} // namespace cc
 
 // ============================================================================
 // async_node_base — untemplated node state + poll loop
@@ -493,7 +490,7 @@ static_assert(sizeof(async_unresolved) == 48, "the unresolved arm must stay 48 B
 
 /// Lifecycle state of a node.
 /// Transitions are CAS-based, so a dependency completing and scheduling a node can never be lost against that node parking itself.
-enum class async_node_state : u8
+enum class cc::async_node_state : cc::u8
 {
     cold,             // 0  created, never scheduled, compute not started
     scheduled,        // 1  runnable and (logically) queued
@@ -505,8 +502,6 @@ enum class async_node_state : u8
     // 7 states -> fits 3 bits (see async_node_base's packed control word).
     // is-error is encoded in the state itself (ready_value vs ready_error), not as a separate flag.
 };
-
-} // namespace cc
 
 /// Type-erased per-async<T, E, F> operations, reached from the untemplated base — the hand-rolled replacement for a C++ vtable.
 /// One static-constexpr instance per distinct op set, keyed so it collapses across types; the node points at it from construction, and again once a frame picks F.

@@ -6,15 +6,13 @@
 #include <typed-geometry/linalg/pos.hh> // tg::pos2f
 #include <typed-geometry/linalg/vec.hh> // tg::vec2f
 
-namespace sr
-{
 /// A key by physical position on the keyboard, independent of layout.
 /// W is the key above A on QWERTY and above Q on AZERTY, so WASD stays WASD everywhere.
 /// For "which character did this produce", read key_event::character or take a text_event instead.
 ///
 /// Names describe the US-QWERTY legend, which is only a naming convention — the value is the position.
 /// Our own vocabulary of positions, not a platform scancode number: the underlying values mean nothing outside sr.
-enum class scancode : u16
+enum class sr::scancode : sr::u16
 {
     unknown = 0,
 
@@ -141,7 +139,7 @@ enum class scancode : u16
     kp_period,
 };
 
-enum class mouse_button : u8
+enum class sr::mouse_button : sr::u8
 {
     left,
     middle,
@@ -152,7 +150,7 @@ enum class mouse_button : u8
 
 /// Modifier keys held when an event was produced, as a bit set.
 /// Each covers both instances — shift is set for either shift key.
-enum class key_modifiers : u8
+enum class sr::key_modifiers : sr::u8
 {
     none = 0,
     shift = 1 << 0,
@@ -160,6 +158,9 @@ enum class key_modifiers : u8
     alt = 1 << 2,
     super = 1 << 3, ///< Windows key / Command
 };
+
+namespace sr
+{
 
 [[nodiscard]] constexpr key_modifiers operator|(key_modifiers a, key_modifiers b)
 {

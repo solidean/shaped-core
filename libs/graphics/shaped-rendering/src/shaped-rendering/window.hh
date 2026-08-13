@@ -16,15 +16,13 @@ namespace sr
 struct display_info;
 } // namespace sr
 
-namespace sr
-{
 /// The shape the mouse pointer is drawn as.
 ///
 /// One cursor is showing at a time for the whole process, so this is set on the window_system rather than on a window — see window_system::set_cursor.
 ///
 /// Every shape here is one the platform provides.
 /// A shape the platform lacks falls back to the closest one it has, which is the platform's business, not ours; nothing here fails.
-enum class cursor_shape : u8
+enum class sr::cursor_shape : sr::u8
 {
     arrow,       ///< the default pointer
     text,        ///< an I-beam, over editable text
@@ -39,8 +37,6 @@ enum class cursor_shape : u8
     resize_nesw, ///< over the bottom-left or top-right corner
     resize_nwse, ///< over the bottom-right or top-left corner
 };
-
-} // namespace sr
 
 /// How a window is created.
 /// Defaults describe a resizable, visible 1280x720 window.

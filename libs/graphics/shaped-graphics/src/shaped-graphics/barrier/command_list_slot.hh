@@ -9,16 +9,12 @@
 /// That slot keys the list's private access-state entry inside each resource it touches, so several lists can record against one resource at once without sharing state.
 /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
 
-namespace sg
-{
 /// Per-command-list index into a resource's concurrent access-state slots.
 /// Compact — lowest free index first — so a resource can index its slot storage directly.
-enum class command_list_slot : int
+enum class sg::command_list_slot : int
 {
     invalid = -1,
 };
-
-} // namespace sg
 
 /// Hands out `command_list_slot`s: a mutex-guarded 64-bit free bitmask (index = lowest clear bit), with a heap free-list overflow past 64 concurrently-open command lists.
 /// Crossing 64 emits a one-time warning, since that many concurrent recorders almost always means a command list was never submitted or dropped.

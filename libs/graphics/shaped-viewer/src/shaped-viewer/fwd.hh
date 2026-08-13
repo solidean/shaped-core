@@ -31,6 +31,8 @@ struct background;
 struct background_gpu;
 struct render_settings;
 struct scene_item;
+enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
+enum class mesh_flag;            // per-mesh rendering opt-ins (mesh_flags.hh)
 struct triangle_geometry;
 enum class scalar_type : u8;
 struct attribute_format;

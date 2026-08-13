@@ -19,6 +19,9 @@ struct symbol_error;
 class symbol_session;
 struct trace_config;
 class trace_session;
+enum class insn_category; // what a recorded instruction does (see debug/trace_record.hh)
+enum class access_region; // which region a memory access landed in
+enum class step_reason;   // why the stepper stopped where it did
 
 // report/
 class source_cache;

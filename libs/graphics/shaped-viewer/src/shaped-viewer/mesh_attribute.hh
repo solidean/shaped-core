@@ -14,11 +14,9 @@
 
 #include <type_traits>
 
-namespace sv
-{
 /// The scalar an attribute element or a parameter value is built from.
 /// This list is complete — every scalar sv stores; anything wider is a vector or a matrix of one of these.
-enum class scalar_type : u8
+enum class sv::scalar_type : sv::u8
 {
     i8,
     i16,
@@ -34,6 +32,9 @@ enum class scalar_type : u8
     /// one byte holding 0 or 1 — its own type rather than a u8, so a consumer knows it is a flag and not a small number
     boolean,
 };
+
+namespace sv
+{
 
 /// Size of one `scalar_type`, in bytes.
 [[nodiscard]] constexpr i32 scalar_type_size(scalar_type type)
@@ -99,9 +100,6 @@ struct sv::attribute_format
     [[nodiscard]] friend constexpr bool operator==(attribute_format, attribute_format) = default;
 };
 
-namespace sv
-{
-
 /// How many elements an attribute carries, i.e. what its index means.
 ///
 /// `per_vertex` indexes the geometry's position buffer, so an indexed mesh shares an element across the triangles meeting at a vertex.
@@ -112,13 +110,16 @@ namespace sv
 /// The other three index something the geometry already numbers; an edge is not numbered at all, so per-edge data needs an edge table on triangle_geometry first —
 /// the edges themselves (each naming its two vertices) plus each triangle's three edge indices, which is also what decides whether opposite half-edges share one entry.
 /// Only the mapping is missing: nothing else here changes when it lands, which is why the enumerator is spelled out now rather than renumbering later.
-enum class attribute_frequency : u8
+enum class sv::attribute_frequency : sv::u8
 {
     per_vertex,
     per_corner,
     per_triangle,
     per_edge,
 };
+
+namespace sv
+{
 
 namespace impl
 {

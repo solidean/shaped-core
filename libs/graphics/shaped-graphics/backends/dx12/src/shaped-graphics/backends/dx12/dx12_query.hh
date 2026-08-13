@@ -15,18 +15,14 @@ struct dx12_query_heap_lease;
 class dx12_query_system;
 } // namespace sg::backend::dx12
 
-namespace sg::backend::dx12
-{
 /// Logical query-heap categories the query system pools.
 /// Only timestamps exist today; occlusion / pipeline-statistics would slot in here and reuse the same lease/resolve/download machinery.
-enum class dx12_query_heap_type : u32
+enum class sg::backend::dx12::dx12_query_heap_type : sg::u32
 {
     timestamp = 0,
 
     count
 };
-
-} // namespace sg::backend::dx12
 
 /// One ID3D12QueryHeap leased exclusively by a single command list while recording, returned to the pool after submit/drop.
 /// Slots are bump-allocated via next_slot.

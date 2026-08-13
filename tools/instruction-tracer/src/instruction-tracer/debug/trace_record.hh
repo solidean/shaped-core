@@ -33,9 +33,11 @@ inline constexpr char const* gpr_names[gpr_count] = {
     "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15", //
 };
 
+} // namespace itrace
+
 /// What an instruction does to control flow.
 /// Drives branch annotation and the syscall stop.
-enum class insn_category
+enum class itrace::insn_category
 {
     other,
     conditional_branch,
@@ -45,8 +47,6 @@ enum class insn_category
     syscall,
 };
 
-} // namespace itrace
-
 /// The 16 GPRs plus rflags, sampled before an instruction.
 /// Captured with --register-diffs, any memory section or --html: the effective-address computation reads base/index registers from here.
 struct itrace::register_snapshot
@@ -55,24 +55,19 @@ struct itrace::register_snapshot
     u64 rflags = 0;
 };
 
-namespace itrace
-{
-
 /// Where a touched address lives.
 ///
 /// frame is the executing function's own stack frame: its locals, spills, and the return-address / saved-register machinery.
 /// stack is *another* function's stack — the case that matters when a stack array is passed around as a span and reached through a pointer.
 /// instructions is code memory, the instruction fetch itself, giving an I-cache footprint when opted in.
 /// heap is everything else: dynamic allocations and globals, and a global keeps its name in the access.
-enum class access_region
+enum class itrace::access_region
 {
     heap,
     frame,
     stack,
     instructions,
 };
-
-} // namespace itrace
 
 /// One memory location an instruction touched, with the effective address resolved from the register snapshot taken before the instruction ran.
 ///
@@ -151,8 +146,10 @@ inline bool diverged(recorded_instruction const& insn)
     return insn.next_rip != insn.rip + insn.length;
 }
 
+} // namespace itrace
+
 /// Why a trace stopped collecting.
-enum class step_reason
+enum class itrace::step_reason
 {
     instruction_budget,
     returned,
@@ -160,8 +157,6 @@ enum class step_reason
     exception,
     process_exited,
 };
-
-} // namespace itrace
 
 /// One resolved frame of the stack captured at function entry.
 struct itrace::stack_frame

@@ -5,16 +5,12 @@
 #include <shaped-graphics/resource/views.hh> // render_target_view — the acquire_backbuffer result
 #include <shaped-graphics/types.hh>
 
-namespace sg
-{
 /// How presentation paces frames against the display's vertical blank.
-enum class present_mode : u8
+enum class sg::present_mode : sg::u8
 {
     vsync,     ///< wait for vblank — no tearing, capped to the refresh rate (DX12 sync interval 1)
     immediate, ///< present as soon as ready — may tear, uncapped (DX12 sync interval 0 + allow-tearing)
 };
-
-} // namespace sg
 
 /// How a swapchain is created.
 /// Defaults describe a plain double-buffered vsync surface.

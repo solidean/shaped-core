@@ -30,10 +30,8 @@ struct write_options;
 //   auto const img = babel::png::read(bytes).value();
 //   auto const stride = img.width * img.channels; // tightly packed, top-left origin
 
-namespace babel::png
-{
 /// Native PNG color type (IHDR byte 25). `palette` is de-palettized to rgb/rgba by the decoder — see `channels`.
-enum class color_type : u8
+enum class babel::png::color_type : babel::u8
 {
     grey,       // 0
     rgb,        // 2
@@ -43,20 +41,18 @@ enum class color_type : u8
 };
 
 /// Native PNG interlace method (IHDR byte 28). Adam7 is decoded transparently.
-enum class interlace_method : u8
+enum class babel::png::interlace_method : babel::u8
 {
     none,  // 0
     adam7, // 1
 };
 
 /// Sample type of the decoded `pixels`. Only `u8` is produced today; `u16` (16-bit PNG) is API-ready.
-enum class component : u8
+enum class babel::png::component : babel::u8
 {
     u8,
     u16,
 };
-
-} // namespace babel::png
 
 /// One text chunk (tEXt / zTXt / iTXt). [todo] not populated yet — needs a native chunk walker.
 struct babel::png::text_entry

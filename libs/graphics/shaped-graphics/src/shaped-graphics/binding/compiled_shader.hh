@@ -12,11 +12,9 @@
 /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 /// libs/graphics/shaped-graphics/docs/shaders.md has the shader path end to end.
 
-namespace sg
-{
 /// Pipeline stage a shader runs at.
 /// Compute and the ray-tracing stages are wired; the graphics stages fill in as pipelines land.
-enum class shader_stage
+enum class sg::shader_stage
 {
     vertex,
     tessellation_control,    ///< dx12 hull (hs): the patch-constant + per-control-point stage
@@ -33,6 +31,9 @@ enum class shader_stage
     callable,
     // Future: mesh, task, ...
 };
+
+namespace sg
+{
 
 /// True for the six ray-tracing stages (raygen / closest_hit / any_hit / miss / intersection / callable).
 [[nodiscard]] constexpr bool is_raytracing_stage(shader_stage s)
@@ -57,17 +58,17 @@ enum class shader_stage
     return s == shader_stage::compute;
 }
 
+} // namespace sg
+
 /// Bytecode format of the blob — which backend can consume it.
 /// A backend-agnostic shader must record it, so a pipeline knows whether the blob is for it.
-enum class shader_format
+enum class sg::shader_format
 {
     dxil,      ///< DirectX Intermediate Language — dx12
     spirv,     ///< SPIR-V — vulkan (and others)
     metal_lib, ///< Metal library — metal
     // Future: dxbc, wgsl.
 };
-
-} // namespace sg
 
 /// Provenance of the compile — mostly a cache-invalidation / debugging aid.
 /// `signature` is a free-form string capturing the flags/defines/source identity a compiler folds into its cache key.

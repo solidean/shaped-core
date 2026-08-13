@@ -5,17 +5,15 @@
 /// Fixed-function rasterizer state baked into a raster pipeline: how primitives are filled, which faces are culled, winding, depth clipping, and a static depth bias.
 /// Backend-neutral — each field's trailing comment maps to the per-backend equivalent.
 
-namespace sg
-{
 /// How a triangle is filled.
-enum class fill_mode
+enum class sg::fill_mode
 {
     solid,     // DX12 FILL_MODE_SOLID     / Vk POLYGON_MODE_FILL
     wireframe, // DX12 FILL_MODE_WIREFRAME / Vk POLYGON_MODE_LINE
 };
 
 /// Which triangle faces are discarded before rasterization.
-enum class cull_mode
+enum class sg::cull_mode
 {
     none,  // DX12 CULL_MODE_NONE  / Vk CULL_MODE_NONE
     front, // DX12 CULL_MODE_FRONT / Vk CULL_MODE_FRONT_BIT
@@ -23,13 +21,11 @@ enum class cull_mode
 };
 
 /// The winding order that designates a triangle's front face.
-enum class front_face
+enum class sg::front_face
 {
     counter_clockwise, // DX12 FrontCounterClockwise = TRUE  / Vk FRONT_FACE_COUNTER_CLOCKWISE
     clockwise,         // DX12 FrontCounterClockwise = FALSE / Vk FRONT_FACE_CLOCKWISE
 };
-
-} // namespace sg
 
 /// The rasterizer configuration of a raster pipeline.
 /// Defaults describe the common case: solid back-face culling, counter-clockwise front faces, depth clipping on, no depth bias.

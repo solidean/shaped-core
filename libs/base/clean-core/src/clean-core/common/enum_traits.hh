@@ -13,13 +13,11 @@
 // The CC_FLAG_ENUM_* macros in clean-core/common/flags.hh are what reconcile that with an operator only ADL can find —
 // they take the enum's namespace as an argument and open it themselves.
 
-namespace cc
-{
 /// How an enum's values map onto the bits of a cc::flags.
 ///
 /// Which one an enum uses is not detectable, only declarable: nothing about `e = 4` says whether it means bit 4 or bit 2.
 /// Getting it wrong silently shifts every flag, so there is no default — each opt-in macro names one encoding outright.
-enum class flag_encoding
+enum class cc::flag_encoding
 {
     /// The value is a bit INDEX, so `enum class foo { e1, e2, e3 }` needs nothing further: e1 takes bit 0, e2 bit 1.
     /// A value always names exactly one bit.
@@ -29,7 +27,6 @@ enum class flag_encoding
     /// One value may therefore name several bits at once, which is what makes a combined `all = 0b111` possible.
     bit_mask,
 };
-} // namespace cc
 
 namespace cc::custom
 {

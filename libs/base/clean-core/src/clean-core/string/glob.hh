@@ -4,11 +4,8 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 
-namespace cc
-{
-
 /// What glob_matches does beyond a plain byte-for-byte match.
-enum class glob_option
+enum class cc::glob_option
 {
     /// Fold ASCII case on both sides.
     /// What a caller comparing against a real file system wants on Windows, and what include spellings want everywhere.
@@ -18,8 +15,6 @@ enum class glob_option
     /// Leave it off only when the caller normalized already — a config comparing one path against many, say, which would otherwise renormalize it per candidate.
     normalize,
 };
-
-} // namespace cc
 
 CC_FLAG_ENUM_INDEXED(cc, glob_option, u32);
 

@@ -4,17 +4,13 @@
 #include <shaped-viewer/resources/resource_ids.hh>
 #include <typed-geometry/linalg/mat.hh>
 
-namespace sv
-{
 /// What kind of thing a scene item is.
 /// Exactly one kind exists today; the tag is here so more kinds (point clouds, procedural primitives, volumes, …) slot in without every consumer switching on a variant yet.
 /// Lights are *not* items — a view holds them in its own typed lists (see view.hh / light.hh).
-enum class scene_item_kind : u8
+enum class sv::scene_item_kind : sv::u8
 {
     triangle_mesh,
 };
-
-} // namespace sv
 
 /// One concrete object in a view: a mesh placed into the world with a transform, shaded by a material set.
 ///

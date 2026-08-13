@@ -42,8 +42,10 @@ namespace babel::sqlite
 /// A runtime probe — callers never need a macro.
 [[nodiscard]] bool is_available();
 
+} // namespace babel::sqlite
+
 /// The dynamic type of a result column, as reported by SQLite for the current row.
-enum class column_kind : u8
+enum class babel::sqlite::column_kind : babel::u8
 {
     null,
     integer,
@@ -51,8 +53,6 @@ enum class column_kind : u8
     text,
     blob,
 };
-
-} // namespace babel::sqlite
 
 /// A non-owning view of the statement's current result row.
 /// Valid only until the next step, or until the statement dies.

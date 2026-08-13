@@ -34,11 +34,9 @@
 // CALLER CONTRACT: the stream never calls flush with a dir outside its capability — a non-seekable stream issues no seeks, a read-only stream no write-through.
 // So your flush may assert on an unsupported op rather than handle it, and an unsupported seek on a non-seekable source should return -1.
 
-namespace cc
-{
 /// Where a seek offset is measured from.
 /// The dry_* variants only compute the resulting global position; they never move curr/end or disturb the buffer.
-enum class seek_dir : u8
+enum class cc::seek_dir : cc::u8
 {
     begin,        // seek to `offset` bytes from the start
     relative,     // seek `offset` bytes from the current position; (relative, 0) is the plain flush
@@ -47,6 +45,9 @@ enum class seek_dir : u8
     dry_relative, // like relative (dry_relative, 0 == current position; also the seekability probe)
     dry_end,      // like end (dry_end, 0 == total size)
 };
+
+namespace cc
+{
 
 /// The type-erased refill / drain / seek callback every stream adapter supplies.
 /// The header comment above is the per-parameter reference, and libs/base/clean-core/docs/writing-a-stream.md is the guide.

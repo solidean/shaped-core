@@ -15,13 +15,11 @@
 /// Built through `cmd.raytracing.build_blas(...)` / `build_tlas(...)` (command_list/raytracing.hh).
 /// See libs/graphics/shaped-graphics/docs/concepts/acceleration-structures.md.
 
-namespace sg
-{
 /// Trade-offs baked into a structure at build time, which cannot change afterward.
 /// Bit flags — combine with `|`, test with `has_flag`.
 /// `fast_trace` and `fast_build` must not both be set.
 /// Migrates to `cc::flags`, same status as buffer_usage.
-enum class accel_build_flags : u32
+enum class sg::accel_build_flags : sg::u32
 {
     none = 0,
     fast_trace = 1u << 0,       ///< optimize traversal speed (the default): DX12/Vk PREFER_FAST_TRACE
@@ -30,6 +28,9 @@ enum class accel_build_flags : u32
     allow_compaction = 1u << 3, ///< BLAS only — copy to a smaller buffer later: DX12/Vk ALLOW_COMPACTION
     minimize_memory = 1u << 4,  ///< TLAS only — smaller scratch/result:     DX12/Vk MINIMIZE_MEMORY
 };
+
+namespace sg
+{
 
 [[nodiscard]] constexpr accel_build_flags operator|(accel_build_flags a, accel_build_flags b)
 {
@@ -90,20 +91,15 @@ struct sg::blas_aabbs
     bool is_opaque = true;
 };
 
-namespace sg
-{
-
 /// Winding-based triangle cull selection for a TLAS instance.
 /// `none` disables triangle culling, while `back` and `front` differ by winding — `front` flips it.
 /// The final cull also depends on the ray flags at trace time.
-enum class instance_cull_mode : u8
+enum class sg::instance_cull_mode : sg::u8
 {
     back,  ///< cull back faces (default winding) — no instance flag
     front, ///< cull front faces — sets the front-counterclockwise flag to flip winding
     none,  ///< disable triangle culling — sets the cull-disable flag
 };
-
-} // namespace sg
 
 /// One TLAS instance: places a built BLAS into the world.
 /// Holding the blas_handle is the ownership edge, so the referenced BLAS outlives every TLAS that names it.

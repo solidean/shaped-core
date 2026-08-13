@@ -9,14 +9,15 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/fwd.hh>
 
-namespace slib
-{
 /// The language a shader is authored in.
 /// A package declares one; the target format comes from the context you acquire with, so the same source can feed several backends.
-enum class shader_language
+enum class slib::shader_language
 {
     hlsl,
 };
+
+namespace slib
+{
 
 /// Resolves an `#include` to its source text, or nullopt if there is no such file.
 /// slib backs this with the package's filesystem and records every path it resolves, which is what makes a shader reload when a file it includes changes.

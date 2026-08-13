@@ -7,10 +7,8 @@
 /// Reuses `compare_op` (from sampler.hh) for the depth and stencil comparisons.
 /// Defaults describe "no depth, no stencil".
 
-namespace sg
-{
 /// What happens to a stencil value at one point of the test.
-enum class stencil_op
+enum class sg::stencil_op
 {
     keep,            // DX12 STENCIL_OP_KEEP     / Vk STENCIL_OP_KEEP
     zero,            // DX12 STENCIL_OP_ZERO     / Vk STENCIL_OP_ZERO
@@ -21,8 +19,6 @@ enum class stencil_op
     increment_wrap,  // DX12 STENCIL_OP_INCR     / Vk STENCIL_OP_INCREMENT_AND_WRAP
     decrement_wrap,  // DX12 STENCIL_OP_DECR     / Vk STENCIL_OP_DECREMENT_AND_WRAP
 };
-
-} // namespace sg
 
 /// The stencil operations + comparison for one face, front or back.
 /// `compare` tests the masked stencil value against the dynamic reference, and the ops select what to write on stencil-fail / depth-fail / pass.

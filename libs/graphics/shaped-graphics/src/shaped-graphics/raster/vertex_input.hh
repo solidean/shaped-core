@@ -9,12 +9,10 @@
 /// The vertex-input layout of a raster pipeline: how the bytes of each bound vertex buffer decode into the shader's per-vertex inputs.
 /// Two ways to build one — fill the struct explicitly, or derive it from vertex struct types with `vertex_input_layout::create<Vs...>()` (see vertex_layout_of below).
 
-namespace sg
-{
 /// The component type + count of a single vertex attribute.
 /// Deliberately small; grow it as needed.
 /// Each enumerator maps 1:1 to a DXGI / Vulkan vertex format.
-enum class vertex_attribute_format
+enum class sg::vertex_attribute_format
 {
     f32,   // DX12 R32_FLOAT          / Vk R32_SFLOAT
     vec2f, // DX12 R32G32_FLOAT       / Vk R32G32_SFLOAT
@@ -34,8 +32,6 @@ enum class vertex_attribute_format
     rgba8_unorm, // DX12 R8G8B8A8_UNORM / Vk R8G8B8A8_UNORM — packed color
     rgba8_uint,  // DX12 R8G8B8A8_UINT  / Vk R8G8B8A8_UINT
 };
-
-} // namespace sg
 
 /// One attribute pulled from a vertex buffer.
 /// It names which shader input it feeds: `semantic` + `semantic_index`, matched via reflection.

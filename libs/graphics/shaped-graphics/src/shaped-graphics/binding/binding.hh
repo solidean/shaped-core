@@ -11,11 +11,9 @@
 /// A binding is matched by name to a bound view when a binding_group is built.
 /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 
-namespace sg
-{
 /// The kind of resource a shader binding expects — the backend-agnostic reflection vocabulary, the portable stand-in for HLSL's D3D_SHADER_INPUT_TYPE.
 /// Buffer kinds map 1:1 to a view's (view_class, view_shape); see access_of / shape_of.
-enum class binding_type
+enum class sg::binding_type
 {
     uniform_buffer,              ///< uniform block   — CBV / UBO
     readonly_structured_buffer,  ///< read array of T — SRV structured / read SSBO
@@ -27,6 +25,9 @@ enum class binding_type
     sampler,                     ///< texture sampler — not a view; bound as a static or dynamic sampler
     acceleration_structure,      ///< ray-tracing TLAS — SRV addressed by GPU VA (HLSL RaytracingAccelerationStructure)
 };
+
+namespace sg
+{
 
 /// Whether a binding is a sampler rather than a resource view.
 /// A sampler binding carries no view — no access class, no layout — so it is matched to a `sampler`, not a `raw_view`.

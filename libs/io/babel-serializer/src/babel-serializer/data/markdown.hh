@@ -35,11 +35,9 @@ namespace babel::impl
 struct markdown_parser; // defined in markdown.cc; builds a document
 }
 
-namespace babel::markdown
-{
 /// The block kinds this reader produces.
 /// Leaves carry text; containers carry children.
-enum class node_kind : u8
+enum class babel::markdown::node_kind : babel::u8
 {
     document,       // the root; children are the top-level blocks
     heading,        // level 1..6; text is the heading content, `#` markers stripped
@@ -50,8 +48,6 @@ enum class node_kind : u8
     block_quote,    // children are blocks
     thematic_break, // `---` / `***` / `___`
 };
-
-} // namespace babel::markdown
 
 /// One parsed block.
 /// Not used directly — traverse via `ref`.

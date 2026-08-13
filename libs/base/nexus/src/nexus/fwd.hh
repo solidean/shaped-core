@@ -15,4 +15,11 @@ struct test_instance;        // one scheduled run of a test declaration (tests/s
 struct test_schedule;        // the runs a CLI invocation selected (tests/schedule.hh)
 struct test_schedule_config; // what the CLI arguments select (tests/schedule.hh)
 
+enum class filter_mode; // how the positional filters are read (tests/schedule.hh)
+
 } // namespace nx
+
+namespace nx::config
+{
+enum class test_bucket; // which selection bucket a test belongs to (tests/config.hh)
+} // namespace nx::config
