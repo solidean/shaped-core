@@ -117,6 +117,9 @@ struct allocating_container;
 template <class T, class ContainerT, class IndexT>
 struct ringbuffer_container;
 
+template <class ContainerT, class WordT>
+struct bitset_container;
+
 template <class T>
 struct pinned_data;
 
@@ -182,6 +185,12 @@ struct disjoint_set;
 struct bitset;
 template <isize N>
 struct fixed_bitset;
+template <class WordT>
+struct bit_ref;
+template <class WordT, bool Set>
+struct bit_index_iterator;
+template <class WordT, bool Set>
+struct bit_index_range;
 
 template <class RangeT>
 struct sequence;

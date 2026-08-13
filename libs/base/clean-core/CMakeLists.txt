@@ -101,6 +101,7 @@ target_sources(clean-core
     src/clean-core/container/pinned_data.hh
     src/clean-core/container/impl/allocating_container.hh
     src/clean-core/container/impl/ringbuffer_container.hh
+    src/clean-core/container/impl/bitset_container.hh
 
     src/clean-core/sequence/sequence.hh
 
@@ -271,6 +272,8 @@ if(SC_BUILD_TESTS)
         tests/container/vector-test.cc
         tests/container/ringbuffer-test.cc
         tests/container/fixed_ringbuffer-test.cc
+        tests/container/bitset-test.cc
+        tests/container/fixed_bitset-test.cc
         tests/container/map-test.cc
         tests/container/set-test.cc
         tests/container/byte_stream_builder-test.cc

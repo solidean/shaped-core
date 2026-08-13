@@ -65,8 +65,44 @@ Associative — separate chaining over power-of-two buckets:
 | `map<K, V>` | keys to values, with reference stability and heterogeneous lookup |
 | `set<T>` | membership only; it is a `map<T, unit>` and inherits every property below |
 
+Bit sets — a packed array of bits rather than of elements, so none of the `T`, reference or iterator rules below apply:
+
+| type | size | reach for it when |
+|---|---|---|
+| `bitset` | runtime, growable | an occupancy or visited mask whose extent is known only at run time |
+| `fixed_bitset<N>` | exactly `N`, compile-time | the count is a constant — and `fixed_bitset<8>` is then genuinely one byte |
+
 `byte_stream_builder`, `key_value_cache` and `pair` also live in `container/` and are documented in their own headers.
-`bitset`, `fixed_bitset` and `disjoint_set` are **empty stubs** — the headers exist so `fwd.hh` can name them, and nothing is implemented.
+`disjoint_set` is an **empty stub** — the header exists so `fwd.hh` can name it, and nothing is implemented.
+
+### Bit sets — `bitset` and `fixed_bitset`
+
+`fixed_bitset<N>` picks the smallest word type covering `N` (`u8` up to 8 bits, then `u16`/`u32`/`u64`, and an array of `u64` past 64),
+which is what lets it be one byte where `std::bitset<8>` is eight.
+It is fully `constexpr` and **structural** — it can serve as a non-type template parameter, which is why its `words` are public, the same trade `cc::flags` makes for its `bits`.
+Unlike the other inline containers it default-constructs to all-zero rather than leaving its storage uninitialized.
+`bitset` holds `cc::allocation<u64>` instead and sizes at run time.
+
+Three contracts differ from the rest of `container/`, deliberately:
+
+* **There is no `empty()`.** It would sit one letter from `none_set()` while meaning something else entirely.
+  The size question is `size() == 0`, and the bit question is `none_set()` / `any_set()` / `all_set()`.
+* **`clear()` keeps its container meaning** — `bitset::clear()` makes `size()` zero.
+  Zeroing the bits in place is `unset_all()`, and `fixed_bitset` consequently has no `clear()`.
+* **Every operation over two bit sets requires an equal `size()`** and asserts otherwise; for two `fixed_bitset`s a differing `N` simply does not compile.
+  Zero-extending a shorter operand would truncate under `retain_all_of` while growing nothing under `set_all_of`, and that asymmetry hides an off-by-one rather than reporting it.
+  There are no `|` / `&` / `^` / `~` operators either — that precondition is too much contract to hide behind an operator.
+  The named forms are `set_all_of` (union), `retain_all_of` (intersection), `unset_all_of` (difference) and `toggle_all_of` (symmetric difference).
+  `create_union_of` and friends cover the non-mutating case.
+
+A bit set is **not a container of addressable bools**: the non-const `operator[]` hands out a `cc::bit_ref` proxy, and there is no `begin()`/`end()` over bools.
+That is uniform across every bit set and every bit, which is precisely what `std::vector<bool>` gets wrong by being the odd one out among vectors.
+It does mean `auto b = bs[i]` captures the proxy, where `bool b = bs[i]` is the snapshot.
+`set_indices()` / `unset_indices()` are the iteration worth having: they step once per set bit rather than once per bit.
+They run on the same word-at-a-time machinery as `find_first_set` / `find_last_set` and `set_bit_count`.
+
+Bits at index `>= size()` are always zero, which is what keeps every query a plain word operation.
+Only the members that write whole words have to restore that, so it never shows up in a caller's cost.
 
 ### Heterogeneous — `tuple` and `variant`
 
