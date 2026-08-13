@@ -100,7 +100,7 @@ dx12 additionally holds a resource back past its epoch while an async upload to 
 
 **Deferred** (see [TODO.md](../TODO.md)): the split GPU/CPU download watermarks for readback, and vulkan's async copy queue with its per-resource pending syncs.
 Also placed transient *textures*: one works today, but as a dedicated allocation auto-expired at the next epoch rather than suballocated from the transient bump heap, which is buffers-only.
-The in-flight FIFO uses a `cc::vector` drained from the front until `cc::ringbuffer` is implemented.
+The in-flight FIFO still uses a `cc::vector` drained from the front; moving it to `cc::ringbuffer`, which now exists, is pending.
 
 ## See also
 

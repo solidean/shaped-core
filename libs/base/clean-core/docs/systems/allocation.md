@@ -80,9 +80,11 @@ Pass the latter as a custom resource to bypass mimalloc for one allocation.
   alignment forces a fresh allocation and a move-construct of the live objects (so `T` must be
   move-constructible on that path).
 
-- **Ring buffers are out of scope.** Once data wraps, the live region is segmented and no longer
-  matches the single contiguous `[obj_start, obj_end)` window; wrap-around containers cannot be
-  built on this handle.
+- **The live window cannot express a wrap.** Once data wraps, the live region is segmented and no
+  longer matches the single contiguous `[obj_start, obj_end)` window.
+  `cc::ringbuffer` therefore uses the handle as a **raw byte handle**: it keeps `obj_start == obj_end`,
+  so the allocation owns and frees bytes while the ring manages its elements' lifetimes itself.
+  That is also why the ring offers neither `create_from_allocation` nor `extract_allocation`.
 
 - **The handle is deliberately fat** (six members vs a minimal vector header). The extra metadata
   buys correct deallocation, pooling/reuse, realignment, and the (planned) cross-container interop.
