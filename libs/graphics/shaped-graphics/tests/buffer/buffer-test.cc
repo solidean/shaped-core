@@ -91,7 +91,7 @@ INVOCABLE_TEST("sg - typed create_buffer<T> (persistent)", (sg::context_handle c
     // Views infer the element type from T (no <particle> spelled) and carry the right stride / count.
     auto ro = buf.as_readonly_buffer();
     CHECK(ro.element_count == 1000);
-    auto raw_ro = std::get<sg::raw_buffer_view>(ro.to_raw());
+    auto raw_ro = sg::as_buffer_view(ro.to_raw());
     CHECK(raw_ro.stride_in_bytes == isize(sizeof(particle)));
     CHECK(raw_ro.element_count == 1000);
 

@@ -103,7 +103,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         view_filled[slot_index] = char(1);
 
         auto const dst = ctx._descriptor_heap.cpu_at(view_base + s.table_offset);
-        if (auto const* av = std::get_if<sg::raw_tlas_view>(&nv.view))
+        if (auto const* av = sg::try_as_tlas_view(nv.view))
         {
             auto dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
             CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
@@ -112,7 +112,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
             group->referenced.push_back(dx_tlas->_dx12_storage);
             group->hazard_views.push_back({dx_tlas->_dx12_storage, sg::view_class::acceleration_structure});
         }
-        else if (auto const* tv = std::get_if<sg::raw_texture_view>(&nv.view))
+        else if (auto const* tv = sg::try_as_texture_view(nv.view))
         {
             create_texture_view(ctx._device.Get(), *tv, dst);
             auto dx = std::dynamic_pointer_cast<dx12_texture const>(tv->texture);
@@ -122,7 +122,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         }
         else
         {
-            auto const& bv = std::get<sg::raw_buffer_view>(nv.view);
+            auto const& bv = sg::as_buffer_view(nv.view);
             create_buffer_view(ctx._device.Get(), bv, dst);
             if (bv.buffer)
             {

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/unique_ptr.hh>
@@ -14,7 +15,6 @@
 #include <memory>
 #include <thread>
 #include <type_traits>
-#include <variant>
 
 // cc::threaded_actor: an actor with its own thread and a typed message mailbox.
 // Messages are moved into the mailbox and processed one at a time, in strict global send order, on a private thread.
@@ -49,7 +49,7 @@
 // Caveat: unthreaded, on_message and the hooks run on the *calling* thread, so a blocking handler stalls it.
 // The "blocking only stalls this actor" property holds in threaded mode only.
 //
-// Note: messages are stored in a std::variant<Msg...> for now, to be replaced with a cc variant once one exists.
+// Note: messages are stored in a cc::variant<Msg...>, so the message types must be pairwise distinct.
 // The polymorphic impl is held by std::unique_ptr, because cc::unique_ptr forbids the upcast/downcast this needs.
 
 namespace cc
@@ -262,14 +262,14 @@ private:
         if (this->_is_shutting_down.load())
             return false;
 
-        this->_inbox.lock([&](cc::vector<std::variant<MessageT...>>& queue) { queue.emplace_back(cc::move(msg)); });
+        this->_inbox.lock([&](cc::vector<cc::variant<MessageT...>>& queue) { queue.emplace_back(cc::move(msg)); });
         this->_inbox_cond_var.notify_one();
         return true;
     }
 
     bool drain_inbox_messages(bool wait_on_cond_var) override
     {
-        auto const move_into_local = [&](cc::vector<std::variant<MessageT...>>& queue)
+        auto const move_into_local = [&](cc::vector<cc::variant<MessageT...>>& queue)
         {
             for (auto& msg : queue)
                 _local_inbox.push_back(cc::move(msg));
@@ -278,7 +278,7 @@ private:
 
         if (wait_on_cond_var)
             this->_inbox.wait(
-                this->_inbox_cond_var, [&](cc::vector<std::variant<MessageT...>> const& queue)
+                this->_inbox_cond_var, [&](cc::vector<cc::variant<MessageT...>> const& queue)
                 { return !queue.empty() || this->is_shutting_down(); }, move_into_local);
         else
             this->_inbox.lock(move_into_local);
@@ -288,7 +288,7 @@ private:
 
         // dispatch each message to the matching on_message(T) via overload resolution
         for (auto& msg : _local_inbox)
-            std::visit([&](auto&& alt) { _impl->on_message(cc::move(alt)); }, cc::move(msg));
+            cc::move(msg).visit([&](auto&& alt) { _impl->on_message(cc::move(alt)); });
 
         _local_inbox.clear(); // keep capacity
         return true;
@@ -297,10 +297,10 @@ private:
     // members
 private:
     /// Globally ordered inbox; one queue for all types preserves cross-type ordering.
-    cc::mutex<cc::vector<std::variant<MessageT...>>> _inbox;
+    cc::mutex<cc::vector<cc::variant<MessageT...>>> _inbox;
 
     /// Thread-local staging drained from _inbox, keeping the lock hold short.
-    cc::vector<std::variant<MessageT...>> _local_inbox;
+    cc::vector<cc::variant<MessageT...>> _local_inbox;
 
     /// std::unique_ptr, not cc::unique_ptr: ownership is polymorphic through the impl base.
     std::unique_ptr<threaded_actor_impl<MessageT...>> _impl;

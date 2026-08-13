@@ -364,15 +364,3 @@ private:
     storage_t _storage;
     index_t _index = 0;
 };
-
-namespace cc
-{
-/// Free spelling of v.visit(f), shaped like std::visit for migration sites.
-/// The member takes any number of handlers and is the spelling to prefer.
-template <class F, class VariantT>
-    requires requires { std::remove_cvref_t<VariantT>::alternative_count; }
-constexpr decltype(auto) visit(F&& f, VariantT&& v)
-{
-    return static_cast<VariantT&&>(v).visit(cc::forward<F>(f));
-}
-} // namespace cc

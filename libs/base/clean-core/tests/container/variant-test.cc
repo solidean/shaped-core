@@ -192,12 +192,6 @@ TEST("variant - visitation")
             = cc::move(v).visit([](int) { return move_only(); }, [](move_only&& x) { return move_only(cc::move(x)); });
         CHECK(m.value == 5);
     }
-
-    SECTION("free cc::visit")
-    {
-        auto const v = cc::variant<int, float>(4);
-        CHECK(cc::visit([](auto x) { return int(x); }, v) == 4);
-    }
 }
 
 TEST("variant - emplace")

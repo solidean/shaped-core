@@ -50,7 +50,7 @@ That is what imgui's multi-viewport support is built on — see [docs/imgui.md](
 
 ```cpp
 for (auto const& e : wsys->events())
-    if (auto const* k = std::get_if<sr::key_event>(&e.payload))
+    if (auto const* k = e.try_as_key())
         if (k->is_down && k->scancode == sr::scancode::escape)
             e.window->request_close();
 ```

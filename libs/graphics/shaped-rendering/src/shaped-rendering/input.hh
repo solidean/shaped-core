@@ -1,11 +1,10 @@
 #pragma once
 
+#include <clean-core/container/variant.hh> // cc::variant (input_event's payload)
 #include <clean-core/string/string.hh>
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/pos.hh> // tg::pos2f
 #include <typed-geometry/linalg/vec.hh> // tg::vec2f
-
-#include <variant>
 
 namespace sr
 {
@@ -263,7 +262,7 @@ struct sr::mouse_wheel_event
 /// Both the span and any text inside it live until the next poll_events.
 ///
 ///     for (auto const& e : wsys->events())
-///         if (auto const* k = std::get_if<sr::key_event>(&e.payload))
+///         if (auto const* k = e.try_as_key())
 ///             if (k->is_down && k->scancode == sr::scancode::escape)
 ///                 e.window->request_close();
 struct sr::input_event
@@ -272,7 +271,21 @@ struct sr::input_event
     /// Never dangles within one frame: a window destroyed mid-frame drops its events from this span.
     sr::window* window = nullptr;
 
-    /// std::variant until cc::variant is implemented (clean-core's is a declared stub today).
-    /// Switch this to cc::variant when it lands — the alternatives are the API, the holder is not.
-    std::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
+    /// What happened, as one of the five event payloads.
+    /// Visit it for an exhaustive handler, or reach for one of the `try_as_*` accessors below to pick a single kind out.
+    cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
+
+    /// The payload as one specific kind, or null when the event was a different one.
+    [[nodiscard]] key_event const* try_as_key() const { return impl_try_as<key_event>(); }
+    [[nodiscard]] text_event const* try_as_text() const { return impl_try_as<text_event>(); }
+    [[nodiscard]] mouse_move_event const* try_as_mouse_move() const { return impl_try_as<mouse_move_event>(); }
+    [[nodiscard]] mouse_button_event const* try_as_mouse_button() const { return impl_try_as<mouse_button_event>(); }
+    [[nodiscard]] mouse_wheel_event const* try_as_mouse_wheel() const { return impl_try_as<mouse_wheel_event>(); }
+
+private:
+    template <class T>
+    [[nodiscard]] T const* impl_try_as() const
+    {
+        return payload.visit([](T const& e) { return &e; }, [](auto const&) -> T const* { return nullptr; });
+    }
 };

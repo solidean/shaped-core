@@ -70,13 +70,14 @@ every view's access (a `readwrite_buffer_view` requires `readwrite_buffer`, etc.
 ## The erased `raw_view`
 
 Every typed view converts (`to_raw()`, or implicitly) into one
-[`raw_view`](../../src/shaped-graphics/resource/views.hh) — a `std::variant` over one cohesive payload per
+[`raw_view`](../../src/shaped-graphics/resource/views.hh) — a `cc::variant` over one cohesive payload per
 resource kind: `raw_buffer_view` (access + shape + buffer + byte layout), `raw_texture_view` (access +
-texture + dimension + format + range), and `raw_tlas_view` (the TLAS). A backend `std::visit`s / `get_if`s
-the active arm to build its native descriptor; `access_of(rv)` / `shape_of(rv)` read the active arm's
-access / layout (what `accepts()` checks). The type safety lives in the typed views; the raw arms are
-also the directly-usable "raw" binding vocabulary for tooling that builds bindings without the wrappers.
-(`std::variant` for now — likely a `cc::variant` once that lands.)
+texture + dimension + format + range), and `raw_tlas_view` (the TLAS). A backend `visit`s the active arm to
+build its native descriptor, or picks one out with `try_as_buffer_view(rv)` / `try_as_texture_view` /
+`try_as_tlas_view` (null on a different arm; each has an asserting `as_*_view` twin); `access_of(rv)` /
+`shape_of(rv)` read the active arm's access / layout (what `accepts()` checks). The type safety lives in
+the typed views; the raw arms are also the directly-usable "raw" binding vocabulary for tooling that builds
+bindings without the wrappers.
 
 Between the fully-typed leaves and the erased `raw_view` sits an optional **access-erased middle**.
 `buffer_view<T>` and `texture_view<Traits>` keep the resource typing — element type, view dimension — but carry the access class as a runtime field.
@@ -99,7 +100,7 @@ A mismatched buffer element type `T` still asserts, since a wrong element size i
   Both delegate to the middle for the access check and the field mapping.
 - **`raw_view` → leaf in one call.**
   The free functions `as_readonly_buffer<T>(rv)` / `as_readwrite_buffer<T>` / `as_uniform_buffer<T>` and `as_readonly_texture<Traits>` / `as_readwrite_texture<Traits>`, each with a `try_` twin.
-  Each `get_if`s the matching arm and then re-types it.
+  Each `try_as_*_view`s the matching arm and then re-types it.
   The `try_` twin fails both when the variant holds a *different* resource arm and when the access class does not match — the two ways a genuinely-erased binding can be the wrong thing.
 
 The re-type is a reinterpret: `T` / `Traits` are caller-asserted, since no element or dimension tag is stored to cross-check against.

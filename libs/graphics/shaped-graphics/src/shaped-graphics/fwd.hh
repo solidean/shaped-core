@@ -119,7 +119,7 @@ struct subresource_partition; // the tiles covering one resource's subresources
 
 // Resource views (see resource/views.hh) — value types, no handle typedefs.
 // Only the enums are declared here: the typed view templates are constrained, and `raw_view` is a
-// `std::variant` alias that cannot be forward-declared.
+// `cc::variant` alias whose arms must be complete where it is named.
 // Include resource/views.hh for the views themselves.
 enum class view_class;
 enum class view_shape;

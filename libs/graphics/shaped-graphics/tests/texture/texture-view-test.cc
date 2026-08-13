@@ -20,7 +20,7 @@ struct test_texture final : sg::raw_texture
 // Every to_raw() here yields a texture arm; pull it out of the erased raw_view variant.
 [[nodiscard]] sg::raw_texture_view rtv(sg::raw_view const& v)
 {
-    return std::get<sg::raw_texture_view>(v);
+    return sg::as_texture_view(v);
 }
 
 sg::texture_description desc_base(sg::texture_usage usage)

@@ -381,9 +381,10 @@ sg::texture_view<VT>         // access-erased middle: any access of a texture vi
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
 sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)
-sg::raw_view                 // = std::variant<raw_buffer_view, raw_texture_view, raw_tlas_view> — erased sum every typed view converts into
+sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view> — erased sum every typed view converts into
 v.to_raw()  /  (implicit)    // -> raw_view; sg::access_of(rv) / sg::shape_of(rv) read the active arm's access/shape
-// backends std::visit / get_if the arm (raw_buffer_view | raw_texture_view | raw_tlas_view) to build the native descriptor
+sg::try_as_buffer_view(rv)   // -> raw_buffer_view const*, null on a different arm (+ _texture_ / _tlas_; as_*_view asserts instead)
+// backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view) to build the native descriptor
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
 // INVERSE (erased -> typed leaf): as_* asserts (access, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
 mid.as_readonly() / as_readwrite() / as_uniform()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)

@@ -48,10 +48,6 @@ rules:
     reason: no cc:: time vocabulary yet — OS clocks plus unit-safe duration algebra. Use steady_clock for elapsed time, never system_clock
 
   - kind: allow-include
-    value: [<variant>, <tuple>]
-    reason: cc::variant and cc::tuple are declared but not implemented (clean-core/container/) — migrate once they are
-
-  - kind: allow-include
     value: <limits>
     reason: no cc:: numeric limits yet
 
@@ -84,6 +80,10 @@ rules:
   - kind: deny-include
     value: <optional>
     reason: use cc::optional — clean-core/error/optional.hh
+
+  - kind: deny-include
+    value: [<variant>, <tuple>]
+    reason: use cc::variant / cc::tuple — clean-core/container/. Both are index-based only, so visit the variant and reach for get<I> on the tuple; there is no get<T> on either
 
   - kind: deny-include
     value: <memory>
