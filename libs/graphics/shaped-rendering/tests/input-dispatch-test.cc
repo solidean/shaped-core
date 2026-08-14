@@ -65,9 +65,8 @@ TEST("sr - an event is routed to the window it names")
     CHECK(wsys->events()[0].window == b.get());
     CHECK(wsys->events()[0].window != a.get());
 
-    auto const r = wsys->events()[0].try_as_key();
-    REQUIRE(r.has_value());
-    auto const& k = *r.value();
+    REQUIRE(wsys->events()[0].is_key());
+    auto const& k = wsys->events()[0].as_key();
     CHECK(k.scancode == scancode::k);
     CHECK(k.is_down);
 }
@@ -100,7 +99,7 @@ TEST("sr - events keep their order across windows")
     CHECK(wsys->events()[2].as_key().scancode == scancode::num_3);
 }
 
-TEST("sr - asking an event for the wrong kind names the kind it was")
+TEST("sr - an event answers is_* for exactly the kind it holds")
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "w"});
@@ -112,16 +111,16 @@ TEST("sr - asking an event for the wrong kind names the kind it was")
     REQUIRE(wsys->events().size() == 1);
     auto const& ev = wsys->events()[0];
 
-    CHECK(ev.payload_name() == "key_event");
-    CHECK(ev.try_as_key().has_value());
+    CHECK(ev.is_key());
+    CHECK(!ev.is_text());
+    CHECK(!ev.is_mouse_move());
+    CHECK(!ev.is_mouse_button());
+    CHECK(!ev.is_mouse_wheel());
 
-    // Naming the kind actually held is the whole reason this is a result rather than a null pointer.
-    auto const r = ev.try_as_mouse_wheel();
-    REQUIRE(r.has_error());
-    CHECK(r.error().to_string().contains("key_event"));
-    CHECK(r.error().to_string().contains("mouse_wheel_event"));
-
-    CHECK_THROWS_AS((void)ev.as_mouse_wheel(), cc::result_exception);
+    // A visit reaches the handler for the kind held, and only that one.
+    auto visited = 0;
+    ev.payload.visit([&](key_event const&) { visited = 1; }, [&](auto const&) { visited = 2; });
+    CHECK(visited == 1);
 }
 
 TEST("sr - each poll replaces the previous frame's events")
@@ -162,9 +161,8 @@ TEST("sr - modifiers carry forward from key events onto mouse events")
     wsys->poll_events();
 
     REQUIRE(wsys->events().size() == 2);
-    auto const r = wsys->events()[1].try_as_mouse_button();
-    REQUIRE(r.has_value());
-    auto const& b = *r.value();
+    REQUIRE(wsys->events()[1].is_mouse_button());
+    auto const& b = wsys->events()[1].as_mouse_button();
     CHECK(has_all(b.modifiers, key_modifiers::shift));
     CHECK(b.button == mouse_button::left);
     CHECK(b.is_down);
@@ -188,9 +186,8 @@ TEST("sr - committed text arrives as its own event, copied")
     wsys->poll_events();
 
     REQUIRE(wsys->events().size() == 1);
-    auto const r = wsys->events()[0].try_as_text();
-    REQUIRE(r.has_value());
-    auto const& t = *r.value();
+    REQUIRE(wsys->events()[0].is_text());
+    auto const& t = wsys->events()[0].as_text();
     CHECK(t.text == "héllo");
 
     // Mutated after the drain: the event owns its text, rather than aliasing the buffer SDL pointed at.

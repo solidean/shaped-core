@@ -57,62 +57,61 @@ struct fly_camera
 
     void handle(sr::input_event const& e, sr::window& win)
     {
-        if (auto const r = e.try_as_key(); r.has_value())
-        {
-            auto const& k = *r.value();
-            auto const down = k.is_down;
-            switch (k.scancode)
+        e.payload.visit(
+            [&](sr::key_event const& k)
             {
-            case sr::scancode::w:
-                key_forward = down;
-                break;
-            case sr::scancode::s:
-                key_back = down;
-                break;
-            case sr::scancode::a:
-                key_left = down;
-                break;
-            case sr::scancode::d:
-                key_right = down;
-                break;
-            case sr::scancode::e:
-                key_up = down;
-                break;
-            case sr::scancode::q:
-                key_down = down;
-                break;
-            case sr::scancode::left_shift:
-            case sr::scancode::right_shift:
-                key_fast = down;
-                break;
-            case sr::scancode::escape:
-                if (down)
-                    win.request_close();
-                break;
-            default:
-                break;
-            }
-        }
-        else if (auto const rb = e.try_as_mouse_button(); rb.has_value())
-        {
-            auto const& b = *rb.value();
-            if (b.button == sr::mouse_button::right)
+                auto const down = k.is_down;
+                switch (k.scancode)
+                {
+                case sr::scancode::w:
+                    key_forward = down;
+                    break;
+                case sr::scancode::s:
+                    key_back = down;
+                    break;
+                case sr::scancode::a:
+                    key_left = down;
+                    break;
+                case sr::scancode::d:
+                    key_right = down;
+                    break;
+                case sr::scancode::e:
+                    key_up = down;
+                    break;
+                case sr::scancode::q:
+                    key_down = down;
+                    break;
+                case sr::scancode::left_shift:
+                case sr::scancode::right_shift:
+                    key_fast = down;
+                    break;
+                case sr::scancode::escape:
+                    if (down)
+                        win.request_close();
+                    break;
+                default:
+                    break;
+                }
+            },
+            [&](sr::mouse_button_event const& b)
             {
-                looking = b.is_down;
-                win.set_relative_mouse_mode(looking); // capture the cursor while looking
-            }
-        }
-        else if (auto const rm = e.try_as_mouse_move(); rm.has_value())
-        {
-            if (looking)
+                if (b.button == sr::mouse_button::right)
+                {
+                    looking = b.is_down;
+                    win.set_relative_mouse_mode(looking); // capture the cursor while looking
+                }
+            },
+            [&](sr::mouse_move_event const& m)
             {
-                auto const& m = *rm.value();
+                if (!looking)
+                    return;
+
                 yaw += look_speed * float(m.delta[0]);
                 pitch -= look_speed * float(m.delta[1]);
                 auto const limit = tg::angle_f::make_from_radians(1.5f); // keep just shy of straight up/down
                 pitch = pitch < -limit ? -limit : (pitch > limit ? limit : pitch);
-            }
-        }
+            },
+            [](sr::mouse_wheel_event const&) {}, [](sr::text_event const&) {});
     }
 
     /// Returns whether the camera actually moved this step (so the caller can restart the accumulation).

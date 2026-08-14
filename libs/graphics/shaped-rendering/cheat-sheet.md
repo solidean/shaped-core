@@ -76,17 +76,20 @@ wsys->has_clipboard_text();
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
-    if (auto const r = e.try_as_key(); r.has_value())  // -> cc::result<key_event const*>, never null on success
-    {
-        auto const& k = *r.value();
-        k.scancode;    // sr::scancode — PHYSICAL position; WASD stays WASD on AZERTY
-        k.character;   // char32_t — layout-mapped codepoint, 0 if unprintable; for ctrl+Z-style shortcuts
-        k.modifiers;   // sr::key_modifiers bit set; has_all(k.modifiers, ctrl | shift)
-        k.is_down;  k.is_repeat;
-    }
-    e.try_as_text();  e.try_as_mouse_move();  e.try_as_mouse_button();  e.try_as_mouse_wheel();  // same shape
-    e.as_key();       // -> key_event const&, THROWS cc::result_exception on a different kind (as_text/_mouse_*, too)
-    e.payload_name(); // -> cc::string_view, the kind held ("key_event", …) — what the errors above name
+    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event>
+
+    e.payload.visit(                   // THE way to consume an event; every handler must return the same type
+        [&](sr::key_event const& k)
+        {
+            k.scancode;    // sr::scancode — PHYSICAL position; WASD stays WASD on AZERTY
+            k.character;   // char32_t — layout-mapped codepoint, 0 if unprintable; for ctrl+Z-style shortcuts
+            k.modifiers;   // sr::key_modifiers bit set; has_all(k.modifiers, ctrl | shift)
+            k.is_down;  k.is_repeat;
+        },
+        [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
+
+    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`
+    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_* too)
 }
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)

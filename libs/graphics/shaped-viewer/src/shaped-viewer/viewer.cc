@@ -39,13 +39,14 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
 /// A key event does not, which is why the viewer remembers the last one it saw.
 [[nodiscard]] cc::optional<tg::pos2f> cursor_of(sr::input_event const& e)
 {
-    if (auto const m = e.try_as_mouse_move(); m.has_value())
-        return m.value()->cursor_pos;
-    if (auto const b = e.try_as_mouse_button(); b.has_value())
-        return b.value()->cursor_pos;
-    if (auto const w = e.try_as_mouse_wheel(); w.has_value())
-        return w.value()->cursor_pos;
-    return {};
+    using result_t = cc::optional<tg::pos2f>;
+
+    return e.payload.visit(                                                     //
+        [](sr::mouse_move_event const& m) { return result_t(m.cursor_pos); },   //
+        [](sr::mouse_button_event const& b) { return result_t(b.cursor_pos); }, //
+        [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
+        [](sr::key_event const&) { return result_t(); },                        //
+        [](sr::text_event const&) { return result_t(); });
 }
 
 [[nodiscard]] bool contains(tg::aabb2i const& r, tg::pos2f p)
@@ -385,25 +386,25 @@ void viewer::route_input()
             continue;
         if (auto const p = cursor_of(e); p.has_value())
             im.last_cursor_pos = p.value();
-        if (auto const k = e.try_as_key(); k.has_value())
-            im.last_modifiers = k.value()->modifiers;
-        if (auto const b = e.try_as_mouse_button(); b.has_value())
-            im.last_modifiers = b.value()->modifiers;
+        if (e.is_key())
+            im.last_modifiers = e.as_key().modifiers;
+        if (e.is_mouse_button())
+            im.last_modifiers = e.as_mouse_button().modifiers;
 
         // Ctrl+wheel magnifies the image under the cursor instead of moving a camera, and is consumed here so the
         // controller never also zooms.
         // It is a pure readout: nothing it writes reaches a trace, so a converged image stays converged while it is
         // inspected.
-        if (auto const w = e.try_as_mouse_wheel(); w.has_value() && sr::has_all(im.last_modifiers, zoom_modifiers))
+        if (e.is_mouse_wheel() && sr::has_all(im.last_modifiers, zoom_modifiers))
         {
-            zoom_at(im.last_cursor_pos, w.value()->delta[1]);
+            zoom_at(im.last_cursor_pos, e.as_mouse_wheel().delta[1]);
             continue;
         }
 
         // Ctrl + left-drag lifts a view the caller offered, and is consumed so the controller never also orbits it.
-        if (auto const r = e.try_as_mouse_button(); r.has_value() && r.value()->button == sr::mouse_button::left)
+        if (e.is_mouse_button() && e.as_mouse_button().button == sr::mouse_button::left)
         {
-            auto const& b = *r.value();
+            auto const& b = e.as_mouse_button();
             if (b.is_down && sr::has_all(im.last_modifiers, move_modifiers))
             {
                 begin_move(im.last_cursor_pos);

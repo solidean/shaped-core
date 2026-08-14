@@ -1,10 +1,7 @@
 #pragma once
 
 #include <clean-core/container/variant.hh> // cc::variant (input_event's payload)
-#include <clean-core/error/result.hh>      // cc::result (input_event's try_as_* accessors)
-#include <clean-core/string/format.hh>     // cc::format (their error messages)
 #include <clean-core/string/string.hh>
-#include <clean-core/string/string_view.hh>
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/pos.hh> // tg::pos2f
 #include <typed-geometry/linalg/vec.hh> // tg::vec2f
@@ -266,12 +263,13 @@ struct sr::mouse_wheel_event
 /// Both the span and any text inside it live until the next poll_events.
 ///
 ///     for (auto const& e : wsys->events())
-///         if (auto const r = e.try_as_key(); r.has_value())
-///         {
-///             auto const& k = *r.value();
-///             if (k.is_down && k.scancode == sr::scancode::escape)
-///                 e.window->request_close();
-///         }
+///         e.payload.visit(
+///             [&](sr::key_event const& k)
+///             {
+///                 if (k.is_down && k.scancode == sr::scancode::escape)
+///                     e.window->request_close();
+///             },
+///             [](auto const&) {});
 struct sr::input_event
 {
     /// The window the event went to, or null when none had focus.
@@ -279,52 +277,26 @@ struct sr::input_event
     sr::window* window = nullptr;
 
     /// What happened, as one of the five event payloads.
-    /// Visit it for an exhaustive handler, or reach for one of the `try_as_*` / `as_*` accessors below to pick a single kind out.
+    ///
+    /// Visiting it is the way to consume an event: each handler receives its payload named and typed, with no probe first.
+    /// Handlers are combined into one overload set, so a trailing `[](auto const&) {}` absorbs the kinds a handler does not care about
+    /// — spell all five instead, and a sixth event kind becomes a compile error here rather than silence.
+    /// The `is_*` / `as_*` accessors below are for what a visit cannot express: a predicate, or a loop body that must `continue`.
     cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
 
-    /// The payload as one specific kind, or an error naming the kind the event actually was.
-    /// The pointer is never null on success and points into this event, so it lives exactly as long as the event does.
-    /// Building the error allocates, so this is a branch to take per event kind, not per event.
-    [[nodiscard]] cc::result<key_event const*> try_as_key() const { return impl_try_as<key_event>("key_event"); }
-    [[nodiscard]] cc::result<text_event const*> try_as_text() const { return impl_try_as<text_event>("text_event"); }
-    [[nodiscard]] cc::result<mouse_move_event const*> try_as_mouse_move() const
-    {
-        return impl_try_as<mouse_move_event>("mouse_move_event");
-    }
-    [[nodiscard]] cc::result<mouse_button_event const*> try_as_mouse_button() const
-    {
-        return impl_try_as<mouse_button_event>("mouse_button_event");
-    }
-    [[nodiscard]] cc::result<mouse_wheel_event const*> try_as_mouse_wheel() const
-    {
-        return impl_try_as<mouse_wheel_event>("mouse_wheel_event");
-    }
+    /// Which kind the payload holds.
+    /// For a predicate — code that then wants the payload is usually a visit instead.
+    [[nodiscard]] bool is_key() const { return payload.is<key_event>(); }
+    [[nodiscard]] bool is_text() const { return payload.is<text_event>(); }
+    [[nodiscard]] bool is_mouse_move() const { return payload.is<mouse_move_event>(); }
+    [[nodiscard]] bool is_mouse_button() const { return payload.is<mouse_button_event>(); }
+    [[nodiscard]] bool is_mouse_wheel() const { return payload.is<mouse_wheel_event>(); }
 
-    /// The payload as one specific kind, throwing cc::result_exception when the event was a different one.
-    /// For code that already knows the kind — a stream you never asked the kind of wants the try_as_* twin instead.
-    [[nodiscard]] key_event const& as_key() const { return *try_as_key().or_throw(); }
-    [[nodiscard]] text_event const& as_text() const { return *try_as_text().or_throw(); }
-    [[nodiscard]] mouse_move_event const& as_mouse_move() const { return *try_as_mouse_move().or_throw(); }
-    [[nodiscard]] mouse_button_event const& as_mouse_button() const { return *try_as_mouse_button().or_throw(); }
-    [[nodiscard]] mouse_wheel_event const& as_mouse_wheel() const { return *try_as_mouse_wheel().or_throw(); }
-
-    /// The name of the kind held, as the accessors above spell it in their errors.
-    [[nodiscard]] cc::string_view payload_name() const
-    {
-        return payload.visit([](key_event const&) { return cc::string_view("key_event"); },
-                             [](text_event const&) { return cc::string_view("text_event"); },
-                             [](mouse_move_event const&) { return cc::string_view("mouse_move_event"); },
-                             [](mouse_button_event const&) { return cc::string_view("mouse_button_event"); },
-                             [](mouse_wheel_event const&) { return cc::string_view("mouse_wheel_event"); });
-    }
-
-private:
-    template <class T>
-    [[nodiscard]] cc::result<T const*> impl_try_as(cc::string_view name) const
-    {
-        if (auto const* const p = payload.try_as<T>())
-            return p;
-
-        return cc::error(cc::format("input_event holds {}, not {}", payload_name(), name));
-    }
+    /// The payload as one specific kind, which the event must hold.
+    /// Ask the matching is_* first unless the kind is already known.
+    [[nodiscard]] key_event const& as_key() const { return payload.as<key_event>(); }
+    [[nodiscard]] text_event const& as_text() const { return payload.as<text_event>(); }
+    [[nodiscard]] mouse_move_event const& as_mouse_move() const { return payload.as<mouse_move_event>(); }
+    [[nodiscard]] mouse_button_event const& as_mouse_button() const { return payload.as<mouse_button_event>(); }
+    [[nodiscard]] mouse_wheel_event const& as_mouse_wheel() const { return payload.as<mouse_wheel_event>(); }
 };
