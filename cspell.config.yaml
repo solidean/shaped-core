@@ -24,8 +24,8 @@ words:
   - Embree
   - emcc
   - emrun
-  - Emscripten
   - emscripten
+  - Emscripten
   - emsdk
   - fovy
   - fprofile
@@ -40,15 +40,15 @@ words:
   - isize
   - kondo
   - libline
-  - LPARAM
   - lparam
+  - LPARAM
   - lpfn
   - lpsz
   - LRESULT
   - mimalloc's
   - miscompiles
-  - MSVC
   - msvc
+  - MSVC
   - mtllib
   - munch
   - noprofile
@@ -66,6 +66,7 @@ words:
   - raytracing
   - readwrite
   - relwithdebinfo
+  - repr
   - rpcndr
   - rtti
   - Samp
@@ -76,14 +77,14 @@ words:
   - slib
   - slib's
   - smod
-  - SOLIDEAN
   - Solidean
+  - SOLIDEAN
   - stbd
   - stdlib
   - subresource
   - swapchain
-  - TEXCOORD
   - texcoord
+  - TEXCOORD
   - texcoords
   - tlas
   - toolsets
@@ -95,11 +96,11 @@ words:
   - vcvars
   - venv
   - vulkan
-  - WASI
   - wasi
+  - WASI
   - WNDCLASSEXW
   - workdir
-  - WPARAM
   - wparam
+  - WPARAM
 ignoreWords: []
 import: []

@@ -147,6 +147,21 @@ bs.resize_to_filled(n, value);  bs.reserve(n);  bs.shrink_to_fit();
 cc::fixed_bitset<8> mask;                          // 1 BYTE (smallest word covering N); all-zero, unlike fixed_vector
 template <cc::fixed_bitset<8> Mask> void f();      // structural: usable as a non-type template parameter
 mask = cc::fixed_bitset<8>::create_from_u64(0b1011);  // N <= 64 only; .to_u64() back
+
+#include <clean-core/container/disjoint_set.hh>   // cc::disjoint_set<IdxT> — union-find over elements 0..count-1
+auto ds = cc::disjoint_set<i32>::create_singletons(n);  // also create_with_capacity(n) / create_with_resource(res)
+ds.element_count();  ds.partition_count();  ds.capacity();  // NO size(): it wouldn't say elements or sets
+ds.merge_by_element(a, b);                         // -> bool merged (false = they were already together)
+ds.merge_by_representative(ra, rb);                // both args MUST be representatives
+ds.get_representative(e);                          // -> IdxT; NON-const, a find rewires the links it walked
+ds.are_in_same_set(a, b);  ds.size_of_set_by_element(e);    // non-const for the same reason
+ds.get_parent(e);  ds.is_representative(e);  ds.size_of_set_by_representative(r);  // const: one link, no compression
+ds.add_element();  ds.add_elements(k);             // -> IdxT first new index; each new element is a singleton
+ds.append(other);                                  // -> IdxT offset; keeps other's partitioning, merges nothing across
+ds.compute_components(out_comp_to_repr, out_elem_to_comp);  // both OVERWRITTEN, capacity reused -> no alloc on repeat
+auto const c = ds.compute_components();            // same into a fresh {component_to_representative, element_to_component}
+c.component_count();                               // -> isize; == ds.partition_count()
+ds.reserve(n);  ds.clear();  ds.reset_to_singletons(n);
 ```
 
 ## Associative
@@ -761,8 +776,9 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   There is no `begin()`/`end()` over bools; `set_indices()` is the iteration, and it costs one step per set bit.
 - **Every two-bitset operation asserts an equal `size()`**, and there are no `|` / `&` / `^` / `~` operators — that precondition is too implicit for an operator.
   `unset_all()` zeroes the bits, `clear()` (bitset only) makes `size()` zero, and `empty()` deliberately does not exist.
-- **Not yet implemented (stub — don't reach for it):** `disjoint_set`.
-  Check the header before relying on it.
+- **`disjoint_set` has no `size()`** — it would not say whether it counts elements or sets, so the two counts are `element_count()` and `partition_count()`.
+  `get_representative` and everything reaching it are **non-const**: a find rewires the links it walked.
+  Its `merge_by_representative` and `size_of_set_by_representative` assert that their arguments really are representatives.
 - **`CC_FLAG_ENUM_INDEXED` / `CC_FLAG_ENUM_BITMASK` go at GLOBAL scope and take the namespace as their first argument** — they open that namespace themselves.
   The enum must therefore live in one, and there is no `operator~`: `without()` is the set subtraction every complement was being used for.
 - **Pick the encoding deliberately — nothing detects it for you.**

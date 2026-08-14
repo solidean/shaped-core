@@ -73,7 +73,12 @@ Bit sets — a packed array of bits rather than of elements, so none of the `T`,
 | `fixed_bitset<N>` | exactly `N`, compile-time | the count is a constant — and `fixed_bitset<8>` is then genuinely one byte |
 
 `byte_stream_builder`, `key_value_cache` and `pair` also live in `container/` and are documented in their own headers.
-`disjoint_set` is an **empty stub** — the header exists so `fwd.hh` can name it, and nothing is implemented.
+
+`disjoint_set<IdxT>` is the union-find, and the odd one out here: it stores a partitioning of the indices 0 .. n-1 rather than a sequence of `T`.
+None of the `T`, reference or iterator rules below apply.
+It deliberately has no `size()` either — that name would not say whether it counts elements or sets, so the two counts are `element_count()` and `partition_count()`.
+Union by size plus path halving, which is the O(alpha(n)) amortized pair; the price is that a find rewires the links it walked, so `get_representative` and everything reaching it are non-const.
+`IdxT` is the stored index type, and an element costs two of them.
 
 ### Bit sets — `bitset` and `fixed_bitset`
 
