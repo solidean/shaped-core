@@ -274,6 +274,7 @@ if(SC_BUILD_TESTS)
         tests/container/fixed_ringbuffer-test.cc
         tests/container/bitset-test.cc
         tests/container/fixed_bitset-test.cc
+        tests/container/disjoint_set-test.cc
         tests/container/map-test.cc
         tests/container/set-test.cc
         tests/container/byte_stream_builder-test.cc
