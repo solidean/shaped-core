@@ -108,6 +108,13 @@ else()
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=0)
 endif()
 
+# EXTENDS CC rather than a higher rung: nexus/test.hh reaches only CC-tier clean-core headers plus <typeindex>,
+# so a pure clean-core test binary can take `CC NEXUS` without paying for the STL block.
+# Naming CC as the parent is also what keeps clean-core at the front of the list when NEXUS is applied alongside a taller tier.
+sc_declare_pch_tier(NEXUS EXTENDS CC HEADERS <nexus/test.hh>)
+
+sc_target_pch(nexus CC)
+
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(nexus-test
@@ -132,6 +139,10 @@ if(SC_BUILD_TESTS)
         PRIVATE
         nexus
     )
+
+    # CC rather than a bigger tier, and measured: nexus-test goes 0.63 at CC but 0.84 once the heavy STL block is added.
+    # It is the counterexample that keeps NEXUS an explicit keyword rather than something inferred from a `-test` suffix.
+    sc_target_pch(nexus-test CC)
 
     # Browser test runner (Emscripten only): nexus-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(nexus-test)

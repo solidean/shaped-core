@@ -1,16 +1,20 @@
 """Configure: run CMake configure for one or more presets.
 
 `configure` always reconfigures unless the fingerprint is current or `force` is set, and `ensure_configured` skips when nothing relevant changed.
+`ensure_configured_all` is the multi-preset form, and the one that matters for wall clock.
+A cold `check` configures four presets, each ~20 s of SDL3 feature probes, and they have no reason to wait for each other.
 
 Public API:
-    configure(presets, ...)        -> list[StepResult]
-    ensure_configured(preset, ...) -> StepResult | None
+    configure(presets, ...)            -> list[StepResult]
+    ensure_configured(preset, ...)     -> StepResult | None
+    ensure_configured_all(presets, ...) -> list[StepResult]
 """
 
 from __future__ import annotations
 
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -36,14 +40,24 @@ def _publish_compile_commands(preset: Preset) -> None:
     shutil.copyfile(src, preset.build_dir.parent / "compile_commands.json")
 
 
-def _configure_one(
-    preset: Preset, *, root: Path, mirror: bool, verbose: bool, emsdk_path: str | None = None
-) -> StepResult:
-    # Ensure the external prerequisites exist before cmake sees them; prereqs.py carries the policy.
+def _ensure_prereqs(root: Path, preset: Preset) -> None:
+    """Fetch the external prerequisites this preset needs; prereqs.py carries the policy.
+
+    Kept out of `_configure_one` so the concurrent path can run it once per preset up front:
+    four threads racing the same fetch script into the same extern/ directory would corrupt the install.
+    """
     prereqs.ensure_dxc(root, preset.name)
     prereqs.ensure_zydis(root, preset.name)
     prereqs.ensure_sdl3(root, preset.name)
     prereqs.ensure_sqlite(root, preset.name)
+
+
+def _configure_one(
+    preset: Preset, *, root: Path, mirror: bool, verbose: bool, emsdk_path: str | None = None,
+    prereqs_done: bool = False, publish: bool = True, concurrent: bool = False,
+) -> StepResult:
+    if not prereqs_done:
+        _ensure_prereqs(root, preset)
 
     # Request a File API codemodel so target discovery works after configure.
     targets.write_query(preset.build_dir)
@@ -56,15 +70,18 @@ def _configure_one(
         ),
         step_type="configure",
         build_dir=preset.build_dir,
+        name=preset.name if concurrent else None,  # concurrent banners interleave, so each must say which preset it is
         cwd=root,
         env=env,
         mirror=mirror,
         verbose=verbose,
+        profile_origin="external" if concurrent else "driver",
     )
     fp = ""
     if result.ok:
         fp = fingerprint.save(preset.build_dir, root)
-        _publish_compile_commands(preset)
+        if publish:
+            _publish_compile_commands(preset)
     write_sidecar(
         preset.build_dir,
         "configure.json",
@@ -116,3 +133,41 @@ def ensure_configured(
     if fingerprint.is_current(preset.build_dir, root):
         return None
     return _configure_one(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path)
+
+
+def ensure_configured_all(
+    presets: list[Preset], *, root: Path, mirror: bool = False, verbose: bool = False,
+    emsdk_path: str | None = None,
+) -> list[tuple[Preset, StepResult]]:
+    """Configure every stale preset in `presets`, concurrently, returning (preset, result) for each one that ran.
+
+    Presets that are already current cost nothing and are simply absent from the result.
+    The pairing is what the caller needs — a failed configure means "do not build THIS preset" — and a bare StepResult does not say which one it was.
+    The configures are independent — separate build dirs, separate CMakeFiles/CMakeTmp for try_compile — and CMake is single-threaded, so running them at once is close to free next to the serial cost.
+    Two things are deliberately NOT concurrent: the prerequisite fetches, which share extern/, and publishing build/compile_commands.json, which is one shared file and must land deterministically.
+    """
+    stale = [p for p in presets if not fingerprint.is_current(p.build_dir, root)]
+    if not stale:
+        return []
+
+    for preset in stale:
+        _ensure_prereqs(root, preset)
+
+    if len(stale) == 1:
+        return [(stale[0], _configure_one(stale[0], root=root, mirror=mirror, verbose=verbose,
+                                          emsdk_path=emsdk_path, prereqs_done=True))]
+
+    print(console.dim(f"configure: {len(stale)} presets in parallel"), file=sys.stderr)
+    with ThreadPoolExecutor(max_workers=len(stale)) as pool:
+        results = list(zip(stale, pool.map(
+            lambda p: _configure_one(p, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path,
+                                     prereqs_done=True, publish=False, concurrent=True),
+            stale,
+        )))
+
+    # clangd reads a single database, so the primary preset owns build/compile_commands.json.
+    # Serial configure gave it to whoever went last; pinning it to presets[0] is what keeps that stable now that order is not defined.
+    primary = next((p for p in presets if p.build_dir.joinpath("compile_commands.json").exists()), None)
+    if primary is not None:
+        _publish_compile_commands(primary)
+    return results

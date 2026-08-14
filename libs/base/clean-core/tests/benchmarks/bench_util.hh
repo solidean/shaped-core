@@ -1,10 +1,10 @@
 #pragma once
 
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
 
 #include <algorithm>
-#include <chrono>
 
 // Shared helpers for the clean-core micro-benchmarks under tests/benchmarks/.
 // These are guide benchmarks (GUIDE_BENCHMARK) that print timing tables and record representative points via nx::guide.
@@ -46,17 +46,15 @@ inline u64 volatile sink = 0;
 template <class Pass>
 double measure_units_per_sec(double units_per_pass, Pass&& pass)
 {
-    using clock = std::chrono::steady_clock;
-
     u64 acc = pass(); // warmup
     long long reps = 1;
     double seconds = 0;
     for (;;)
     {
-        auto const t0 = clock::now();
+        auto const t0 = cc::current_time_steady_secs();
         for (long long r = 0; r < reps; ++r)
             acc ^= pass();
-        seconds = std::chrono::duration<double>(clock::now() - t0).count();
+        seconds = cc::current_time_steady_secs() - t0;
 
         if (seconds >= 0.05 || reps >= (1ll << 24))
             break;

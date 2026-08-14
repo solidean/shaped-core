@@ -5,6 +5,12 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
 
+// COST NOTE: the STL headers below reach MSVC's <xutility>, which pulls <immintrin.h>.
+// That is the whole AVX-512 intrinsic surface — ~43 extra files, and most of this header's parse time.
+// <memory>, <string>, <string_view>, <mutex>, <system_error>, <ranges> and <chrono> all reach it.
+// <type_traits>, <utility> and <atomic> do not, and are cheap by comparison.
+// So keeping one of the first group out of a widely-included header is worth real time.
+// docs/notes/build-times.md has the measurement and the per-header table.
 #include <memory>
 #include <type_traits>
 
@@ -141,20 +147,20 @@ public:
     /// Only valid for non-const T.
     [[nodiscard]] static pinned_data create_defaulted(isize size, cc::memory_resource const* resource = nullptr)
     {
-        return create_owning(cc::array<T>::create_defaulted(static_cast<size_t>(size), resource));
+        return create_owning(cc::array<T>::create_defaulted(size, resource));
     }
 
     /// Allocates and pins size elements, each copy-constructed from value.
     /// Only valid for non-const T.
     [[nodiscard]] static pinned_data create_filled(isize size, T const& value, cc::memory_resource const* resource = nullptr)
     {
-        return create_owning(cc::array<T>::create_filled(static_cast<size_t>(size), value, resource));
+        return create_owning(cc::array<T>::create_filled(size, value, resource));
     }
 
     /// Allocates and pins size uninitialized elements (only safe for trivial T). Only valid for non-const T.
     [[nodiscard]] static pinned_data create_uninitialized(isize size, cc::memory_resource const* resource = nullptr)
     {
-        return create_owning(cc::array<T>::create_uninitialized(static_cast<size_t>(size), resource));
+        return create_owning(cc::array<T>::create_uninitialized(size, resource));
     }
 
     /// Allocates and pins a deep copy of source.

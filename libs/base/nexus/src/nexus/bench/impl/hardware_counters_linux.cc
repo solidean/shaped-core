@@ -1,6 +1,6 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/container/fixed_vector.hh>
 #include <linux/perf_event.h>
-#include <nexus/bench/impl/baseline.hh>
 #include <nexus/bench/impl/hardware_counters_backend.hh>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
@@ -88,7 +88,7 @@ cc::vector<backend_counter> backend_enumerate_counters()
 {
     cc::vector<backend_counter> out;
     out.push_back({.id = hw_counter::elapsed_nanoseconds, .available = true});
-    out.push_back({.id = hw_counter::reference_cycles, .available = has_reference_cycles()});
+    out.push_back({.id = hw_counter::reference_cycles, .available = cc::has_cycle_counter()});
 
     // Availability = can we actually open it right now (paranoid level / sandbox permitting).
     for (auto const& e : s_pmu_events)
@@ -157,11 +157,11 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
     }
 
     // Bracket the single invocation as tightly as possible.
-    auto const cycles_begin = read_reference_cycles();
-    auto const ns_begin = steady_now_ns();
+    auto const cycles_begin = cc::current_cycles();
+    auto const secs_begin = cc::current_time_steady_secs();
     body();
-    auto const ns_end = steady_now_ns();
-    auto const cycles_end = read_reference_cycles();
+    auto const secs_end = cc::current_time_steady_secs();
+    auto const cycles_end = cc::current_cycles();
 
     // Read the whole group in one shot: { nr, time_enabled, time_running, {value,id} * nr }.
     u64 raw[3 + 2 * s_max_pmu] = {};
@@ -207,12 +207,12 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
         auto const name = cc::string(logical_counter_name(c));
         if (c == hw_counter::elapsed_nanoseconds)
         {
-            out.push_back({.id = c, .name = name, .value = ns_end - ns_begin, .valid = true});
+            out.push_back({.id = c, .name = name, .value = u64((secs_end - secs_begin) * 1e9), .valid = true});
             continue;
         }
         if (c == hw_counter::reference_cycles)
         {
-            out.push_back({.id = c, .name = name, .value = cycles_end - cycles_begin, .valid = has_reference_cycles()});
+            out.push_back({.id = c, .name = name, .value = cycles_end - cycles_begin, .valid = cc::has_cycle_counter()});
             continue;
         }
 

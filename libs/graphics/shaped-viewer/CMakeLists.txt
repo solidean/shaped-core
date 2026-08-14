@@ -110,6 +110,8 @@ else()
     target_compile_definitions(shaped-viewer PRIVATE SV_HAS_DEFAULT_BACKEND=0)
 endif()
 
+sc_target_pch(shaped-viewer SG)
+
 target_compile_options(shaped-viewer
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -160,6 +162,8 @@ if(SC_BUILD_TESTS)
         shaped-viewer
         nexus
     )
+
+    sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 
     # The ray-traced view tests need a real dx12 device (create_dx12_context) and DXC to compile the shaders.
     # Both compile only where those exist; each SKIPs at runtime when the device reports no ray tracing.

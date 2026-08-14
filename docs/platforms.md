@@ -70,3 +70,13 @@ The standard **Debug / RelWithDebInfo / Release** build types should all work on
 RelWithDebInfo and Debug have `CC_ASSERT` **on**, Release **off**.
 In CI, only **Linux clang** exercises the full Debug / RelWithDebInfo / Release matrix; every other Tier-1 platform is built and tested at **RelWithDebInfo** only.
 Clang platforms additionally carry sanitizer and coverage presets — see [sanitizers](guides/building-and-testing.md#sanitizers) and [coverage.md](guides/coverage.md).
+
+**C++20 module scanning is off repo-wide** (`CMAKE_CXX_SCAN_FOR_MODULES`), because nothing here imports a module.
+Left at the default CMP0155 turns on for C++20+, whether a build pays for a per-TU scan comes down to whether a `clang-scan-deps` happens to be installed.
+CMake pairs whichever it finds with our compiler.
+The Android CI runner had one for its Linux clang jobs, and a scanner cannot read a precompiled header the NDK's clang produced, so every scan failed there.
+Turn it back on with the first `import`, and make sure the scanner matches the compiler.
+
+Every build type builds against per-target precompiled headers.
+The `nopch-*` and `debug-nopch-*` presets turn them off.
+Linux clang's CI matrix carries `nopch-linux-clang`, so a source relying on a header only the PCH supplied cannot land — see [precompiled-headers.md](guides/precompiled-headers.md).

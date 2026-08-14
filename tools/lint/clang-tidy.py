@@ -17,6 +17,9 @@ Only `.cc` translation units are linted, since the compilation database has no e
 A first-party header still surfaces diagnostics through `--header-filter`, seen via the `.cc` that includes it, but a dirty `.hh` with no dirty `.cc` in scope currently lints nothing.
 Mapping a changed header back to the TUs that include it is future work.
 
+Linting runs against a filtered copy of the compilation database with the precompiled-header flags removed, so each TU is parsed from source.
+That keeps the gate runnable on a configured-but-unbuilt tree, and keeps it able to see a missing include that a PCH's `/FI` would otherwise supply.
+
 Files are linted in parallel, one clang-tidy invocation per `.cc` across a thread pool (`-j`, default CPU count), because the built-in single-process driver is strictly sequential.
 `--fix` forces one worker, so two TUs cannot rewrite a shared header at once.
 
@@ -34,6 +37,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -187,6 +191,27 @@ def _render_grouped(groups: dict[str, list[str]], limit: int, rationales: dict[s
     return lines
 
 
+def _nopch_database(build_dir: Path, scratch: Path) -> Path:
+    """A copy of `build_dir`'s compilation database with the precompiled-header flags removed, and the directory holding it.
+
+    clang-tidy reads the database itself via `-p`, and has no way to drop a flag, so the filtering has to happen in a database it is pointed at instead.
+    Two things make that necessary rather than tidy.
+    The flags name a `.pch` that does not exist on a configured-but-unbuilt tree, and `check` lints before it builds — so every file would fail rather than lint.
+    And a `/FI`-forced header is exactly what hides a missing include, so linting against it would make the gate blind to the one thing a PCH can break.
+
+    Entries are written back as `arguments` rather than `command`, which sidesteps re-quoting an argv into a shell string.
+    """
+    entries = dev.load_entries(build_dir)
+    filtered = [
+        {k: v for k, v in e.items() if k not in ("command", "arguments")}
+        | {"arguments": dev.strip_pch_flags(dev.split_command(e))}
+        for e in entries
+    ]
+    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch / "compile_commands.json").write_text(json.dumps(filtered), encoding="utf-8")
+    return scratch
+
+
 def _sources_in_scope(build_dir: Path, *, dirty_only: bool, explicit: list[str]) -> list[Path]:
     """The `.cc` files to lint: either an explicit list or discovery, intersected with the compile DB.
 
@@ -294,9 +319,15 @@ def main() -> None:
         sys.exit(0)
 
     gates = _load_gates()
+    with tempfile.TemporaryDirectory(prefix="clang-tidy-nopch-") as scratch:
+        sys.exit(_lint(clang_tidy, files, gates, args, _nopch_database(build_dir, Path(scratch))))
+
+
+def _lint(clang_tidy: str, files: list[Path], gates: dict, args: argparse.Namespace, db_dir: Path) -> int:
+    """Run the gates over `files` against the compilation database in `db_dir`, print the result, and return the exit code."""
     base_cmd = [
         clang_tidy,
-        "-p", str(build_dir),
+        "-p", str(db_dir),
         _tidy_config_arg(gates, include_incubator=args.include_incubator),
         f"--header-filter={_header_filter_regex()}",
         "--warnings-as-errors=*",  # every whitelisted check is a gate: any firing -> non-zero exit
@@ -335,7 +366,7 @@ def main() -> None:
         print(dev.console.green("clang-tidy: OK"), file=sys.stderr)
     else:
         print(dev.console.red("clang-tidy: FAIL (gate violations above)"), file=sys.stderr)
-    sys.exit(returncode)
+    return returncode
 
 
 if __name__ == "__main__":

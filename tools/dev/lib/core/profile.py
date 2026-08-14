@@ -194,14 +194,16 @@ def fragment_env() -> dict[str, str]:
     return {ENV_FRAGMENT_DIR: str(_fragment_dir)}
 
 
-def record(name: str, *, type: str, start: float, end: float, extra: dict | None = None) -> None:
+def record(name: str, *, type: str, start: float, end: float, extra: dict | None = None,
+           origin: str = "driver") -> None:
     """Add one finished job.
 
     Safe to call from any thread, and a no-op when not recording.
+    A step that ran concurrently with its siblings must pass origin="external": the driver layout resolves depth by unwinding one call stack, which overlapping jobs have no answer for.
     """
     if not _recording:
         return
-    job = Job(name=name, type=type, start=start, end=end, extra=extra or {})
+    job = Job(name=name, type=type, start=start, end=end, extra=extra or {}, origin=origin)
     with _lock:
         _jobs.append(job)
 

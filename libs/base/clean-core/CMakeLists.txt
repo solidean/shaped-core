@@ -14,6 +14,7 @@ add_library(clean-core
     src/clean-core/common/assert.cc
     src/clean-core/common/hash.cc
     src/clean-core/common/hash128.cc
+    src/clean-core/common/time.cc
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
     src/clean-core/memory/allocation.cc
@@ -58,6 +59,7 @@ target_sources(clean-core
     src/clean-core/common/hash.hh
     src/clean-core/common/hash128.hh
     src/clean-core/common/assert.hh
+    src/clean-core/common/time.hh
     src/clean-core/common/impl/small_size_type.hh
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
@@ -68,6 +70,7 @@ target_sources(clean-core
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
     src/clean-core/platform/win32_sanitized.hh
+    src/clean-core/platform/intrinsics.hh
 
     src/clean-core/math/bit.hh
     src/clean-core/math/random.hh
@@ -218,6 +221,62 @@ if(NOT _CC_LINKER STREQUAL "" AND NOT _CC_LINKER STREQUAL "msvc")
     target_link_options(clean-core PUBLIC -fuse-ld=${_CC_LINKER})
 endif()
 
+# The PCH tiers clean-core owns. Every other library's tiers build on these, so they are declared first in the repo.
+# docs/guides/precompiled-headers.md is how to change one; the short version is that it is a measurement, not a guess.
+
+# The clean-core surface a typical TU reaches for.
+sc_declare_pch_tier(CC HEADERS
+    <clean-core/fwd.hh>
+    <clean-core/common/assert.hh>
+    <clean-core/common/macros.hh>
+    <clean-core/common/utility.hh>
+    <clean-core/common/hash.hh>
+    <clean-core/container/span.hh>
+    <clean-core/container/vector.hh>
+    <clean-core/container/array.hh>
+    <clean-core/container/map.hh>
+    <clean-core/container/set.hh>
+    <clean-core/container/pair.hh>
+    <clean-core/container/tuple.hh>
+    <clean-core/container/variant.hh>
+    <clean-core/container/small_vector.hh>
+    <clean-core/container/fixed_vector.hh>
+    <clean-core/string/string.hh>
+    <clean-core/string/string_view.hh>
+    <clean-core/string/format.hh>
+    <clean-core/error/optional.hh>
+    <clean-core/error/result.hh>
+    <clean-core/function/function_ref.hh>
+    <clean-core/function/unique_function.hh>
+    <clean-core/memory/unique_ptr.hh>
+    <clean-core/memory/shared_ptr.hh>
+    <clean-core/memory/allocation.hh>
+)
+
+# The heavy tail: threading, streams, node allocation.
+# A rung of its own because these churn most, and a given TU is least likely to need them.
+sc_declare_pch_tier(CC_ALL EXTENDS CC HEADERS
+    <clean-core/thread/mutex.hh>
+    <clean-core/thread/atomic.hh>
+    <clean-core/thread/async.hh>
+    <clean-core/thread/thread.hh>
+    <clean-core/memory/node_allocation.hh>
+    <clean-core/streams/stream.hh>
+    <clean-core/streams/file_stream.hh>
+    <clean-core/container/pinned_data.hh>
+    <clean-core/container/ringbuffer.hh>
+    <clean-core/math/random.hh>
+    <clean-core/platform/console.hh>
+    <clean-core/platform/stacktrace.hh>
+    <clean-core/sequence/sequence.hh>
+)
+
+# CC_ALL plus the expensive standard headers our containers and strings reach anyway.
+# A target that uses none of them is measurably worse off here than at CC_ALL — see shaped-linter-core.
+sc_declare_pch_tier(CC_STD EXTENDS CC_ALL STD)
+
+sc_target_pch(clean-core CC_STD) # 0.47
+
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(clean-core-test
@@ -243,6 +302,7 @@ if(SC_BUILD_TESTS)
         tests/common/invocable-test.cc
         tests/common/macros-test.cc
         tests/common/utility-test.cc
+        tests/common/time-test.cc
 
         tests/platform/console-test.cc
 
@@ -274,6 +334,7 @@ if(SC_BUILD_TESTS)
         tests/container/fixed_ringbuffer-test.cc
         tests/container/bitset-test.cc
         tests/container/fixed_bitset-test.cc
+        tests/container/disjoint_set-test.cc
         tests/container/map-test.cc
         tests/container/set-test.cc
         tests/container/byte_stream_builder-test.cc
@@ -313,6 +374,8 @@ if(SC_BUILD_TESTS)
         nexus
         xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
     )
+
+    sc_target_pch(clean-core-test CC_STD NEXUS) # 0.67
 
     # Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(clean-core-test)

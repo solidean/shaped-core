@@ -5,6 +5,12 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 
+// COST NOTE: the STL headers below reach MSVC's <xutility>, which pulls <immintrin.h>.
+// That is the whole AVX-512 intrinsic surface — ~43 extra files, and most of this header's parse time.
+// <memory>, <string>, <string_view>, <mutex>, <system_error>, <ranges> and <chrono> all reach it.
+// <type_traits>, <utility> and <atomic> do not, and are cheap by comparison.
+// So keeping one of the first group out of a widely-included header is worth real time.
+// docs/notes/build-times.md has the measurement and the per-header table.
 #include <condition_variable>
 #include <mutex>
 

@@ -29,6 +29,17 @@
 // Machine-readable rows are printed as
 //   RESULT,<variant>,<size>,<run>,<mops>,<gbps>
 // for scripts/plot-node-allocation-design.py to parse into SVGs.
+//
+// OFF IN THE TREE.
+// Flip the flag below to 1 to rerun the experiment.
+// This is a settled design study rather than a regression gate.
+// It sweeps 9 size classes across 10 variant templates, which costs ~9 s to compile — 2.2x the next-worst TU in the repo, paid on every build of every preset.
+// Being off means it rots, and that is the accepted trade.
+// If the surrounding code has drifted far enough to break this file, the conclusions it reached are due a rerun anyway.
+// docs/notes/build-times.md records the measurement behind the decision.
+#define CC_BENCH_NODE_ALLOCATION_DESIGN 0
+
+#if CC_BENCH_NODE_ALLOCATION_DESIGN
 
 #include "bench_util.hh"
 #include "node-allocation-design-refill.hh"
@@ -492,3 +503,5 @@ TEST("bench-node-design (fast-path variants)", nx::config::manual)
 
     std::fflush(stdout);
 }
+
+#endif // CC_BENCH_NODE_ALLOCATION_DESIGN

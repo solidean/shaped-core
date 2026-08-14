@@ -329,6 +329,56 @@
             }
         },
         {
+            "name": "x64-windows-clang-ninja-debug-nopch",
+            "displayName": "Debug Clang, no PCH (Ninja, Windows)",
+            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces.",
+            "inherits": "x64-windows-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+            }
+        },
+        {
+            "name": "x64-linux-clang-ninja-debug-nopch",
+            "displayName": "Debug Clang, no PCH (Ninja, Linux)",
+            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces.",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+            }
+        },
+        {
+            "name": "macos-arm-llvm-debug-nopch",
+            "displayName": "Debug Clang, no PCH (macOS ARM)",
+            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces.",
+            "inherits": "macos-arm-llvm-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+            }
+        },
+        {
+            "name": "x64-windows-clang-ninja-nopch",
+            "displayName": "No-PCH Clang (Ninja, Windows)",
+            "description": "RelWithDebInfo with precompiled headers off, for reproducing a CI no-PCH failure locally at the same optimization level.",
+            "inherits": "x64-windows-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+            }
+        },
+        {
+            "name": "x64-linux-clang-ninja-nopch",
+            "displayName": "No-PCH Clang (Ninja, Linux)",
+            "description": "RelWithDebInfo with precompiled headers off — the CI canary. A TU relying on a header only the PCH supplied compiles everywhere else and fails here.",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+            }
+        },
+        {
             "name": "x64-windows-clang-ninja-pgo-generate",
             "displayName": "PGO Generate Clang (Ninja, Windows)",
             "description": "Release build instrumented for PGO profile generation",
@@ -678,6 +728,26 @@
         {
             "name": "singlethreaded-macos-arm-llvm",
             "configurePreset": "macos-arm-llvm-singlethreaded"
+        },
+        {
+            "name": "debug-nopch-clang",
+            "configurePreset": "x64-windows-clang-ninja-debug-nopch"
+        },
+        {
+            "name": "debug-nopch-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-debug-nopch"
+        },
+        {
+            "name": "macos-arm-llvm-debug-nopch",
+            "configurePreset": "macos-arm-llvm-debug-nopch"
+        },
+        {
+            "name": "nopch-clang",
+            "configurePreset": "x64-windows-clang-ninja-nopch"
+        },
+        {
+            "name": "nopch-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-nopch"
         },
         {
             "name": "pgo-generate-clang",
