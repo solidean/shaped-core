@@ -14,6 +14,7 @@ add_library(clean-core
     src/clean-core/common/assert.cc
     src/clean-core/common/hash.cc
     src/clean-core/common/hash128.cc
+    src/clean-core/common/time.cc
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
     src/clean-core/memory/allocation.cc
@@ -58,6 +59,7 @@ target_sources(clean-core
     src/clean-core/common/hash.hh
     src/clean-core/common/hash128.hh
     src/clean-core/common/assert.hh
+    src/clean-core/common/time.hh
     src/clean-core/common/impl/small_size_type.hh
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
@@ -68,6 +70,7 @@ target_sources(clean-core
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
     src/clean-core/platform/win32_sanitized.hh
+    src/clean-core/platform/intrinsics.hh
 
     src/clean-core/math/bit.hh
     src/clean-core/math/random.hh
@@ -243,6 +246,7 @@ if(SC_BUILD_TESTS)
         tests/common/invocable-test.cc
         tests/common/macros-test.cc
         tests/common/utility-test.cc
+        tests/common/time-test.cc
 
         tests/platform/console-test.cc
 

@@ -90,6 +90,15 @@ The only lever left there is compiling less, or compiling the same thing more ch
 
 ## Fixed
 
+- **`<immintrin.h>` is gone from clean-core.**
+  `spin.hh` included it to reach `_mm_pause`, and `spin.hh` sits under `mutex.hh`, so most of the repo paid for the AVX-512 headers.
+  `clean-core/platform/intrinsics.hh` now *declares* the handful of intrinsics we use instead of including anything — the counterpart to `win32_sanitized.hh`, which includes behind guards.
+  `spin.hh` went from **45 files entered to 1**, and `wide_arith.hh` to 12.
+  Note this only removes the *direct* path: a TU that includes `<mutex>` or `<memory>` still gets them through `<xutility>`, which is the finding below.
+- **`<chrono>` is behind `cc::current_time_steady_secs` / `cc::current_cycles`** in `clean-core/common/time.hh`.
+  It was the most expensive header in the standard library at 1.16 s and 148 files, and `nexus/bench/impl/baseline.hh` had it in a *header*.
+  Only `time.cc` may include it now, enforced by clean-core's `.shaped-lint.yml`.
+
 - **The MSVC environment was captured 9 times per cold run**, ~2.6 s each — twice per preset, because configure and build each asked independently.
   It is now cached process-wide on `(toolset, arch)`, so every preset sharing a toolchain shares one capture: 23.5 s → 2.7 s.
   The cache holds its lock across the capture, not just around the dict.
@@ -145,6 +154,24 @@ Worth doing for cold, not worth confusing with the day-to-day cost.
 **System headers, not ours, dominate the parse.**
 On a dx12 test TU the exclusive self time splits 0.32 s ours against 0.98 s system — MSVC's `<ranges>`, `<variant>` and `<xutility>`, plus `d3d12.h`, `winnt.h` and `immintrin.h`.
 That caps what include hygiene on our own headers can win at roughly a quarter of the parse cost, and it is the strongest argument for unity builds, which amortize exactly the system-header share.
+
+**`<xutility>` is the root of the system-header cost on MSVC, and it pulls `<immintrin.h>`.**
+That is why `xutility`, `xstring` and the AVX-512 intrinsic headers dominate every attribution table — they are not included by anything of ours directly.
+Anything that reaches `<xutility>` inherits ~43 intrinsic headers, and the split between the STL headers is sharp:
+
+| header | cost | files | intrinsics |
+|---|--:|--:|--:|
+| `<type_traits>` | 0.079 s | 17 | 0 |
+| `<utility>` | 0.106 s | 29 | 0 |
+| `<atomic>` | 0.121 s | 38 | 1 |
+| `<string_view>` | 0.413 s | 91 | 43 |
+| `<memory>` | 0.485 s | 103 | 43 |
+| `<mutex>` | 0.586 s | 116 | 44 |
+| `<chrono>` | **1.160 s** | **148** | 45 |
+
+So the actionable rule is not "include less" but **"keep `<memory>`, `<string>`, `<string_view>`, `<mutex>`, `<system_error>`, `<ranges>` and `<chrono>` out of widely-included headers"**.
+`<type_traits>`, `<utility>` and `<atomic>` are free by comparison and need no such care.
+The clean-core headers that still cross that line carry a COST NOTE pointing back here.
 
 **A header's cost is its transitive closure, and two of clean-core's containers are outliers.**
 `key_value_cache.hh` costs 0.56 s to include and pulls in 134 files; `pinned_data.hh` costs 0.47 s across 117.
