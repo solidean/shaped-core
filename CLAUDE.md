@@ -36,6 +36,16 @@ One-liner per library:
   Its [docs/coding-guidelines.md](libs/io/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
   Namespace `babel`. Depends on clean-core + typed-geometry.
   Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
+* **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
+  Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
+  Ships **zero components** — the component set belongs entirely to the application.
+  Namespace `vdoc`. Depends on clean-core.
+  Design stage — [docs/concept.md](libs/data/versioned-document/docs/concept.md) is the design.
+  [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices, and [docs/todo/](libs/data/versioned-document/docs/todo/_index.md) the plan.
+* **`libs/data/versioned-document-file`** — the `.vdoc` save format.
+  One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
+  Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
+  Design stage — [docs/format.md](libs/data/versioned-document-file/docs/format.md) is the on-disk specification.
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan exist today (vulkan creates devices and resources but stubs its recording paths); metal/webgpu and opengl/webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
@@ -118,7 +128,11 @@ uv run dev.py check --fix        # run pre-commit checks, auto-fixing what's saf
 uv run dev.py doctor             # sanity-check the toolchain
 ```
 
-**Run `uv run dev.py lint shaped --dirty-only` once your first bigger chunk of work compiles** — don't save it for the pre-commit gate.
+**Run `uv run dev.py lint shaped --dirty-only` once your first bigger chunk of work lands** — don't save it for the pre-commit gate.
+"Bigger chunk" means the *first* substantial file, not all of them: one doc, one header, one implementation.
+This binds prose exactly as it binds code, and prose is where it is most often skipped.
+Writing several `.md` files before linting any of them turns a habit into a sweep, because the same reflex repeats in every file.
+Linting the first one calibrates the rest.
 [docs/guides/prose.md](docs/guides/prose.md) is the workflow around it, including what `--fix` will and won't do for you.
 
 **Before committing, run `uv run dev.py check --fix`** — the pre-commit gate, and manual rather than a git hook.
@@ -197,6 +211,10 @@ What binds you while writing:
 * **A short orphan line is the tell.** A line carrying only a few trailing words of the line above means you wrapped early — join them.
 * A sentence that ends mid-line, with the next point starting on that same line, is the other failure mode.
   The first words of each line must give the shape of the passage.
+  In a bullet list this shows up as `- **Lead.** Sentence one. Sentence two.` — one bold lead plus one sentence is fine, a second sentence starts a new line.
+  It is the single most common way to trip the rule, because it reads perfectly well and still hides the second point.
+* **Lint the first substantial file you write, not the fifteenth** (`uv run dev.py lint shaped --dirty-only`).
+  A prose reflex repeats itself in every file, so linting early is a correction and linting late is a sweep.
 * Front-load the surprising part.
   Preconditions, ownership, threading and edge cases outrank restating the signature.
 * `///` for type/member docs, `//` for inline.

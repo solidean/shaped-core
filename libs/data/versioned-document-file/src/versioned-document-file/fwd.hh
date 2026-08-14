@@ -1,0 +1,98 @@
+#pragma once
+
+#include <clean-core/fwd.hh>
+#include <versioned-document/fwd.hh>
+
+/// Aggregate forward declarations for versioned-document-file.
+///
+/// This header is also the API index: every name the library plans to expose is declared here, with the one line that says what it is.
+/// Nothing below is implemented yet.
+/// The on-disk shape is specified by [the format](../../docs/format.md).
+/// The milestones live with the model library, in [its todo list](../../../versioned-document/docs/todo/_index.md).
+///
+/// A `.vdoc` file holds three kinds of state, and only the first is immutable:
+///   the op DAG plus its refs and snapshots — content-addressed, verified on load, append-only
+///   the asset index over deduplicated blobs — blobs immutable, the name -> asset mapping deliberately not
+///   the workspace — disposable, discardable in its entirety without touching the document
+
+namespace vdoc::file
+{
+// Pull in the shaped-core vocabulary types (i32, u8, isize, ...) so we write them bare inside vdoc::file
+// without leaking them into the global namespace.
+using namespace cc::primitive_defines;
+} // namespace vdoc::file
+
+// ---- the store ---------------------------------------------------------------------------------
+
+namespace vdoc::file
+{
+/// One `.vdoc` file: the op DAG, the asset index, the workspace, and the ability to publish changes back.
+///
+/// The interface is the seam.
+/// A SQLite-backed store and an in-memory one satisfy it, and one conformance suite runs against both.
+class store;
+
+/// Fetches asset blob bytes on demand.
+/// Handed to whatever resolves assets for the application; the store itself never interprets a blob.
+class blob_source;
+
+/// What a caller asks to publish: ref moves plus assets and blobs.
+/// Ops are not listed — the store derives them from the refs by reachability, so an op no ref can reach cannot be published by mistake.
+struct publish_changes;
+
+/// The result of a publish — empty today, and a type rather than void so it can carry per-publish facts later.
+struct publish_result;
+} // namespace vdoc::file
+
+// ---- load diagnostics --------------------------------------------------------------------------
+//
+// Soft failures, string-free, mirroring the model library's diagnostics.
+// None of these block a load: the damaged part is dropped and reported, and the rest of the file opens.
+
+namespace vdoc::file
+{
+/// Why part of a file would not load.
+enum class load_issue_kind : u8;
+
+/// One thing that would not load, and which op or asset it concerns.
+struct load_issue;
+
+/// Everything a load found.
+struct load_report;
+} // namespace vdoc::file
+
+// ---- assets and blobs --------------------------------------------------------------------------
+//
+// An asset is a name pointing at an ordered list of parts; a part points at a blob.
+// Blobs are content-addressed and shared, so two assets that happen to hold the same bytes store them once.
+
+namespace vdoc::file
+{
+/// Content hash of a blob: a 32-byte BLAKE3 digest of the decoded bytes.
+struct blob_hash;
+
+/// One part of an asset.
+/// Order is the contract; the name is for humans reading a dump.
+struct asset_part;
+
+/// One row of the asset index: what the asset is, its parts, and its informational metadata.
+struct asset_record;
+
+/// A blob offered for storage, in whatever encoding it is stored as.
+struct blob_upload;
+} // namespace vdoc::file
+
+// ---- snapshots and workspace ---------------------------------------------------------------------
+
+namespace vdoc::file
+{
+/// A materialized document cached against an op, so loading need not replay history back to the root.
+struct snapshot_entry;
+
+/// One workspace value plus the version that describes its shape.
+/// A reader that does not know the version skips the entry rather than dropping it.
+struct workspace_value;
+
+/// One keyed workspace entry, as written to and read from the file.
+struct workspace_entry;
+} // namespace vdoc::file

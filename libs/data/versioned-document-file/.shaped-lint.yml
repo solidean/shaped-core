@@ -1,0 +1,9 @@
+# versioned-document-file's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# Empty on purpose, and expected to stay that way: the SQLite engine is reached through babel::sqlite, so no sqlite3 header is ever included here.
+# An entry blessing <sqlite3.h> in this library would mean the babel wrapper was bypassed instead of extended.
+
+rules: []

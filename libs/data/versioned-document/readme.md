@@ -1,0 +1,81 @@
+# versioned-document
+
+Structured documents that are versioned, mergeable and verifiable.
+Namespace `vdoc`. Depends on **clean-core** and nothing else.
+
+A document is entities holding components holding properties.
+The source of truth is not that document, but an immutable content-addressed DAG of **ops**; everything a reader sees is materialized from it.
+
+```cpp
+// [planned] — the shape the API is being built toward, not something you can compile today.
+auto const head = graph.add(vdoc::op_builder{}
+                                .set_parents({previous})
+                                .set(entity, my_transform{...})
+                                .build(graph));
+
+auto const raw = graph.materialize(head);          // schema-agnostic
+auto const doc = vdoc::parse(raw, policy, report); // typed, immutable, queryable
+```
+
+The library ships **zero components**.
+What a `transform` or a `material` is belongs to the application; `vdoc` owns the storage model, the merge semantics and the interpretation machinery, and nothing above them.
+
+Headers are included by their full path from `src/`, e.g. `#include <versioned-document/op_graph.hh>`.
+
+This library is at the **design stage** — the concept is complete and nothing is implemented.
+[docs/concept.md](docs/concept.md) is the design, [docs/todo/](docs/todo/_index.md) is the ordered plan to build it.
+
+## Design at a glance
+
+Four layers, kept strictly apart.
+[docs/concept.md](docs/concept.md) owns all of it.
+
+- **Ops** — an immutable, content-addressed DAG, where zero parents starts a document, one extends it and several merge.
+  Canonicalization is the producer's job, so verifying a stored op is a plain hash of the bytes as stored, never a re-serialization.
+- **The raw document** — `entity -> component -> property -> set of writes`, materialized from one or more heads, with no idea what any of it means.
+  A property normally has one value; concurrent writers that do not dominate each other leave it with several.
+- **The typed document** — interpretation: a registry of the application's component types, schema versions, deletion by convention, a conflict policy in and a diagnostics report out.
+  Parsing never refuses: whatever this build cannot understand becomes a diagnostic while the rest of the document loads.
+- **Persistence** — not here, but in [versioned-document-file](../versioned-document-file/readme.md), which stores a document, its assets and its blobs in a single `.vdoc` file.
+
+Two properties are worth knowing before reading anything else:
+
+- **The typed document is immutable** — there is no `set` on it.
+  Edits build an op and re-materialize, which is what makes a snapshot safe to hold across threads for as long as you like.
+- **Values are bytes.** A property value is a canonically-encoded binary value, so equality, hashing and "did these two writers agree" are all byte comparisons.
+
+## File organization
+
+Source lives in `src/versioned-document/`.
+Only `fwd.hh` exists so far, and it doubles as the index of every name the library plans to expose.
+
+| Planned area | What will be in it |
+|--------------|--------------------|
+| (root)       | `fwd.hh` — forward declarations and vocabulary aliases |
+| values       | `value` / `value_view` / `value_builder` — the binary value codec |
+| identity     | `entity_id` / `component_type_id` / `property_id` — interned, distinct id types |
+| ops          | `op` / `op_id` / `op_builder` / `op_graph` — the DAG and its materialization |
+| raw          | `raw_document` and the three levels below it |
+| typed        | `component_registry` / `parse_policy` / `parse_report` / `document` |
+
+[docs/structure.md](docs/structure.md) tracks what is `[done]` versus `[planned]` as the milestones land.
+
+## Building & testing
+
+Build and test through the repo driver — never run a `*-test` binary directly:
+
+```bash
+uv run dev.py build -t versioned-document
+```
+
+There is no `versioned-document-test` yet; it arrives with [milestone 1](docs/todo/milestone-1.md).
+See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.
+
+## More
+
+- [docs/concept.md](docs/concept.md) — the design, end to end, and the thing to read first.
+- [docs/decisions.md](docs/decisions.md) — every settled decision, its reasoning, and what would reopen it.
+- [docs/todo/](docs/todo/_index.md) — the milestones, in execution order.
+- [docs/structure.md](docs/structure.md) — the roadmap (`[done]` / `[planned]`).
+- [cheat-sheet.md](cheat-sheet.md) — the planned API at a glance.
+- [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows.
