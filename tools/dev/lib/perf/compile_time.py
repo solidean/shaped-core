@@ -7,14 +7,17 @@ Two questions, one engine:
   A trivial header that pulls in the world is exactly what it is meant to expose.
 - **TU cost** — compile the real TU, and separately a copy reduced to its preprocessor directives.
   The two wall clocks then bracket how much of a file is its includes.
+- **PCH value** — compile the real TU with the precompiled header its target is configured for, and again without it.
+  The ratio is what that target's tier is currently worth.
 
 Everything is end-to-end wall clock of a real `clang-cl` / `cl` / `clang` invocation with the target's real flags, because that is the number a build actually pays.
 `-ftime-trace` runs alongside and its frontend / backend / source split is folded into each record, but it never replaces the wall clock.
 It costs ~8 % to collect, and it cannot separate work done in a TU's own body from work done in its headers.
 
-Three rules this module exists to enforce, each of which silently corrupts the measurement when broken:
+Four rules this module exists to enforce, each of which silently corrupts the measurement when broken:
 
 - **Flags are inserted before the `--` separator.** CMake ends a compile command with `-c -- <source>`, and anything appended lands past it and is read as an input file.
+- **The target's precompiled-header flags are stripped.** Otherwise a header is measured against a closure that is already deserialized, and every header reads as ~0.03 s.
 - **Objects are written to a scratch directory.** Reusing the entry's `/Fo` overwrites the real build's objects.
 - **`-fsyntax-only` is not used.**
   Headers do real backend work through inline functions, template instantiations and static initializers.
@@ -23,6 +26,7 @@ Three rules this module exists to enforce, each of which silently corrupts the m
 Public API:
     measure_headers(headers, ...) -> list[Record]
     measure_tus(sources, ...)     -> list[Record]
+    measure_pch(sources, ...)     -> list[Record]
     baseline(entry, ...)          -> Record
 """
 
@@ -38,6 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core import console
+from ..project import compdb
 
 # A directive line, possibly indented.
 # Continuation lines (trailing backslash) are joined onto it.
@@ -97,73 +102,20 @@ class Record:
 # Command construction
 # ---------------------------------------------------------------------------
 
-def _tokenize_windows(cmd: str) -> list[str]:
-    """Split a Windows command line the way CommandLineToArgvW does.
-
-    Splitting on whitespace is wrong, and wrong quietly.
-    A define like `-DIMGUI_USER_CONFIG=\\"imgui/imgui_config.hh\\"` survives it as a token still carrying its backslashes.
-    That reaches the compiler as a literal `\\"...\\"` and fails as `expected "FILENAME"`.
-    The rule that actually applies: backslashes are literal unless they precede a quote, where 2n collapse to n and toggle nothing, and 2n+1 collapse to n plus a literal quote.
-    """
-    args: list[str] = []
-    cur: list[str] = []
-    backslashes = 0
-    in_quotes = False
-    started = False
-
-    def flush_backslashes(count: int) -> None:
-        cur.extend("\\" * count)
-
-    for ch in cmd:
-        if ch == "\\":
-            backslashes += 1
-            continue
-        if ch == '"':
-            flush_backslashes(backslashes // 2)
-            if backslashes % 2:
-                cur.append('"')
-            else:
-                in_quotes = not in_quotes
-                started = True
-            backslashes = 0
-            continue
-        flush_backslashes(backslashes)
-        backslashes = 0
-        if ch.isspace() and not in_quotes:
-            if cur or started:
-                args.append("".join(cur))
-                cur, started = [], False
-            continue
-        cur.append(ch)
-    flush_backslashes(backslashes)
-    if cur or started:
-        args.append("".join(cur))
-    return args
-
-
-def _split_command(entry: dict) -> list[str]:
-    """The entry's command as argv.
-
-    A database may carry `arguments` already split, which is always preferred over re-parsing a quoted string.
-    Otherwise the string is tokenized by the host's rules, since ninja quotes it for the shell it will run under.
-    """
-    if isinstance(entry.get("arguments"), list):
-        return list(entry["arguments"])
-    cmd = entry["command"]
-    if os.name == "nt":
-        return _tokenize_windows(cmd)
-    import shlex
-
-    return shlex.split(cmd)
-
-
-def retarget(entry: dict, source: Path, obj: Path, extra: list[str]) -> list[str]:
+def retarget(entry: dict, source: Path, obj: Path, extra: list[str], *, keep_pch: bool = False) -> list[str]:
     """The entry's compile command, rewritten to compile `source` into `obj`, with `extra` inserted safely.
 
     `extra` goes before the `--` separator, since everything after it is an input file rather than a flag.
     A command with no separator gets `extra` appended, which is equivalent there.
+
+    The target's precompiled-header flags are stripped first, and that is a correctness requirement rather than tidiness.
+    Left in, a header measurement compiles a synthetic TU whose whole transitive closure is already deserialized and reports ~0.03 s for every header — a plausible number, not an error.
+    So `headers` and `tu` always measure parsing from source, whether or not the preset builds with a PCH.
+    `keep_pch` is the one exception, for the `pch` mode, whose entire question is what those flags are worth.
     """
-    argv = _split_command(entry)
+    argv = compdb.split_command(entry)
+    if not keep_pch:
+        argv = compdb.strip_pch_flags(argv)
     out: list[str] = []
     placed = False
     for tok in argv:
@@ -340,6 +292,7 @@ def _measure(
     family: str,
     env: dict[str, str] | None,
     extra_flags: list[str] | None = None,
+    keep_pch: bool = False,
 ) -> Record:
     """Compile `source` `repeat` times with `entry`'s flags, keeping the fastest.
 
@@ -355,7 +308,8 @@ def _measure(
         extra = list(extra_flags or [])
         if time_trace and last:
             extra += _trace_flags(family)
-        elapsed, code, err = _run_once(retarget(entry, source, obj, extra), entry["directory"], env)
+        argv = retarget(entry, source, obj, extra, keep_pch=keep_pch)
+        elapsed, code, err = _run_once(argv, entry["directory"], env)
         if code != 0:
             rec.ok = False
             rec.error = err
@@ -432,6 +386,32 @@ def measure_tus(
         out.append(_measure(entry, stripped, path=rel, kind="tu-includes", target=target, scratch=scratch,
                             repeat=repeat, time_trace=time_trace, family=family, env=env,
                             extra_flags=[f"-I{source.parent}"]))
+    return out
+
+
+def measure_pch(
+    sources: list[tuple[Path, dict, str]], *, scratch: Path, repeat: int, family: str,
+    env: dict[str, str] | None, root: Path, progress: bool = True,
+) -> list[Record]:
+    """Measure each TU twice: with the precompiled header its target is configured for, and without it.
+
+    What this answers is "is this target's tier paying off", not "which tier is best".
+    The tiers themselves live in tools/cmake/PrecompiledHeaders.cmake and are deliberately not duplicated here — to compare two tiers, change the one in the CMake module and measure again.
+
+    The preset must be BUILT, not merely configured: the flags name a `.pch` that the target's own build produces.
+    A preset with CMAKE_DISABLE_PRECOMPILE_HEADERS=ON carries no PCH flags at all, so both halves measure the same thing and every ratio reads 1.00 — which is the expected answer there, not a bug.
+
+    Both halves run back to back on the same machine state, for the reason measure_tus does it: a ratio taken across two invocations would be swamped by the ~8 % run-to-run variance a build shows.
+    """
+    out: list[Record] = []
+    for n, (source, entry, target) in enumerate(sources, 1):
+        rel = _rel(source, root)
+        if progress:
+            print(console.dim(f"  [{n}/{len(sources)}] {rel}"), file=sys.stderr)
+        out.append(_measure(entry, source, path=rel, kind="tu-pch", target=target, scratch=scratch,
+                            repeat=repeat, time_trace=False, family=family, env=env, keep_pch=True))
+        out.append(_measure(entry, source, path=rel, kind="tu-nopch", target=target, scratch=scratch,
+                            repeat=repeat, time_trace=False, family=family, env=env))
     return out
 
 

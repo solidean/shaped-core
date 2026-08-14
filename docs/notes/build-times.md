@@ -112,10 +112,36 @@ The only lever left there is compiling less, or compiling the same thing more ch
   At 8.9 s it was the worst first-party TU in the repo by 2.2x, and it is a settled design study rather than a regression gate.
   That TU now costs 0.3 s, so it is −35 s of compile CPU per run — but only ~1.5 s of wall clock, because 1948 TUs at 24x parallelism absorb one long pole easily.
   See the tradeoff section below.
+- **Per-target precompiled headers**, which is what the 71/81 header-parsing split above was eventually spent on.
+  **Measured semi-cold, end to end: a first-party rebuild of the default preset goes 65.0 s → 34.9 s, or 54 %.**
+  That is wall clock at 24x parallelism, A/B against `nopch-clang` on the same touched tree, alternating order across two rounds and keeping the best of each.
+  It lands where the serial per-TU projection said it would (460 s → 222 s of compile CPU), which is the check that the two methods agree.
+  Measured per target, best tier: `shaped-graphics` 0.26, `shaped-graphics-dx12` 0.34, `shaped-graphics-test` 0.36, `shaped-linter-core` 0.42, `clean-core` 0.47.
+  Then `shaped-viewer-test` 0.53, `clean-core-test` 0.67, `typed-geometry-test` 0.73.
+  The ordering tracks `incl%` exactly, which is the check that this measures what it claims.
+  [guides/precompiled-headers.md](../guides/precompiled-headers.md) is the mechanism and how to re-measure a tier.
+
+  Three results are worth keeping even if the implementation changes.
+
+  **The restore cost is sublinear and small.**
+  An empty TU compiled against the PCH costs 0.052 s at 15 MB, 0.095 s at 28 MB and 0.099 s at 48 MB — roughly 3 ms/MB, then flat, because clang deserializes lazily.
+  So the question is never how big a PCH is.
+
+  **Content mismatch is the real cost.**
+  `shaped-linter-core` goes 0.42 → 0.50 and `nexus-test` 0.63 → 0.84 once the heavy STL block is added, because both are pure clean-core consumers paying to load headers they never read.
+  One uniform repo-wide PCH lands at 58 % against the tiered 48 %.
+
+  **Rebuild churn does not bite**, which was the main worry going in.
+  A PCH costs 0.9–2.5 s to build, and semi-cold rebuilds every PCH anyway.
+  Touching a clean-core header already rebuilds every dependent TU, so the PCH rebuild rides along in parallel and each TU is then ~40 % cheaper.
+  Touching a `.cc` leaves the PCH alone entirely, which is where PCH decisively beats unity — unity answers a one-file edit by rebuilding a whole blob.
 
 ## Not done, and why
 
-**Unity builds — measured, deferred.**
+**Unity builds — measured, and settled in favour of precompiled headers.**
+PCH gets 52 % of first-party compile CPU while keeping parallelism, per-file granularity, and one `compile_commands.json` entry per real TU.
+So clang-tidy, `dev.py assembly`, `build_diag` and coverage all keep working, and none of the dirty-file exclusion machinery below is needed.
+The measurement that led there is above; what follows is the unity evidence it was weighed against, kept because the two are not exclusive and unity could still be layered on later.
 The suspicion was that merging two 4 s TUs might cost 8 s rather than 5 s.
 It does not, and by a wide margin.
 Merging real files with their real compile commands, run solo:
@@ -231,7 +257,9 @@ Of clean-core's benchmark TUs, only the design sweep lacked a `GUIDE_BENCHMARK`,
 In rough order of value:
 
 - **Parallel tests.** 40 s, 20 % of a semi-cold run, at 1.0x — the largest remaining orchestration lever, and blocked on making nexus parallel.
-- **Unity builds**, as measured above: ~85 % of a test TU is header parsing, and semi-cold compile is 76 % of the run.
+- **Unity builds on top of PCH.** They are not exclusive: PCH removes duplicated *parsing*, unity would also remove duplicated *instantiation*.
+  Re-measure before assuming there is much left — the unity numbers above were taken against a no-PCH baseline that no longer exists.
+- **Tiers for the targets that inherited one rather than measuring it.** Every `sc_target_pch` call whose comment carries no ratio is a hypothesis; `dev.py compile-time pch` settles one in a minute.
 - **Overlapping the three parallel configures with the first preset's build.** Worth ~23 s, cold only.
   They currently block at the start of the test gate while the machine sits idle, and the default preset is already configured by then, so its build could start immediately.
 - **A shared extern tree**, worth ~580 s of cold compile CPU and nothing semi-cold.
@@ -240,3 +268,7 @@ In rough order of value:
 
 Take a fresh cold and semi-cold profile before changing anything — the ratios above will have moved.
 Re-check whether compile parallelism is still near core count in semi-cold, because that single number decides whether the next win is orchestration or less work.
+
+One more hazard, learned while measuring the PCH tiers: **the ~8 % variance above is the quiet case, not the worst one.**
+A busy machine inflated one measurement pass 3.2x, which read as a plausible result rather than an obvious outlier.
+`compile-time` prints an empty-TU baseline for exactly this — it is ~0.03 s on a quiet machine, and anything far above that means re-measure rather than interpret.

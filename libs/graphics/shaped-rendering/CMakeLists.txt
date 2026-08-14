@@ -54,6 +54,8 @@ target_include_directories(shaped-rendering
 # and imgui's target carries PUBLIC compile definitions that change what imgui.h declares — a consumer that missed them would see a different ImGuiIO layout than imgui.cpp was built with.
 target_link_libraries(shaped-rendering PUBLIC shaped-graphics shaped-shader-library imgui)
 
+sc_target_pch(shaped-rendering SG)
+
 target_compile_options(shaped-rendering
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -119,6 +121,8 @@ if(SC_BUILD_TESTS)
         shaped-rendering
         nexus
     )
+
+    sc_target_pch(shaped-rendering-test SG NEXUS) # 0.44
 
     if(SC_HAS_SDL3)
         # These two reach into impl/ and see SDL headers directly, so they exist only with a backend.

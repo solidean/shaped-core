@@ -70,3 +70,7 @@ The standard **Debug / RelWithDebInfo / Release** build types should all work on
 RelWithDebInfo and Debug have `CC_ASSERT` **on**, Release **off**.
 In CI, only **Linux clang** exercises the full Debug / RelWithDebInfo / Release matrix; every other Tier-1 platform is built and tested at **RelWithDebInfo** only.
 Clang platforms additionally carry sanitizer and coverage presets — see [sanitizers](guides/building-and-testing.md#sanitizers) and [coverage.md](guides/coverage.md).
+
+Every build type builds against per-target precompiled headers.
+The `nopch-*` and `debug-nopch-*` presets turn them off.
+Linux clang's CI matrix carries `nopch-linux-clang`, so a source relying on a header only the PCH supplied cannot land — see [precompiled-headers.md](guides/precompiled-headers.md).

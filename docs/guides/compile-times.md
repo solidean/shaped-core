@@ -6,11 +6,12 @@ This is the other half: once you know compilation dominates, `dev.py compile-tim
 
 [docs/notes/build-times.md](../notes/build-times.md) is the findings log these tools feed.
 
-## The two questions
+## The three questions
 
 ```bash
 uv run dev.py compile-time headers "libs/base/clean-core/src/clean-core/container/*.hh"
 uv run dev.py compile-time tu      "libs/base/clean-core/tests/container/*.cc"
+uv run dev.py compile-time pch     "libs/graphics/shaped-graphics/src/**/*.cc"
 ```
 
 **`headers`** compiles a synthetic TU whose entire body is `#include <that header>`, with the real flags of the target that owns it.
@@ -29,6 +30,15 @@ The `incl%` column is the answer:
 ```
 
 A dx12 test is 85 % includes and a clean-core container test is 29 %, which is why they want opposite fixes.
+
+**`pch`** compiles each real TU with the precompiled header its target is configured for, and again without it, and prints the ratio per TU and per target.
+That is what a target's tier is currently worth; [precompiled-headers.md](precompiled-headers.md) is how to change one.
+It builds the preset first, because the flags name a `.pch` the target's own build produces.
+
+**`headers` and `tu` strip the PCH flags; only `pch` keeps them.**
+That is a correctness requirement rather than tidiness.
+A header measured against a closure that is already deserialized reads as ~0.03 s no matter what it contains — a plausible number rather than an error, which is the worst kind of wrong.
+So `headers` and `tu` always measure parsing from source, and their numbers are comparable across a PCH and a `nopch-*` preset.
 
 ## Reading the output
 

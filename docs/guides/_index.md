@@ -11,6 +11,8 @@ Task-oriented how-tos for working in shaped-core.
   `trace` is the dynamic half — what one invocation really ran, the data it touched, and a static cost model over that.
 - [compile-times.md](compile-times.md) — `dev.py compile-time`: what a header costs to include and how much of a TU is its includes, plus `build --files` to compile a glob and nothing else.
   The tool half of [notes/build-times.md](../notes/build-times.md).
+- [precompiled-headers.md](precompiled-headers.md) — the per-target PCH tiers, why a bigger one is not automatically better, and the SDK-gate ordering rule.
+  Also the no-PCH presets that keep `/FI` from masking a missing include.
 - [profiling.md](profiling.md) — measure what the code actually cost at run time: nexus/bench hardware
   performance counters (instructions, cache misses, branch mispredicts) via `nx::bench` and
   `dev.py profiling`.

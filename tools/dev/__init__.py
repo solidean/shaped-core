@@ -27,7 +27,7 @@ from .lib.pipeline.diagjobs import harvest as harvest_build_jobs
 from .lib.pipeline.diagjobs import mark as mark_build
 from .lib.pipeline.eligibility import select_eligible_binaries
 from .lib.pipeline.test import test
-from .lib.project.compdb import find_entry, load_entries, suggest_files
+from .lib.project.compdb import find_entry, load_entries, split_command, strip_pch_flags, suggest_files
 from .lib.project.flags import extract_flags
 from .lib.project.presets import PresetError, load_presets, resolve_cache_variable, resolve_presets
 from .lib.project.targets import (
@@ -129,6 +129,8 @@ __all__ = [
     "remove_build_dir",
     "load_entries",
     "find_entry",
+    "split_command",
+    "strip_pch_flags",
     "suggest_files",
     "extract_flags",
     "Preset",

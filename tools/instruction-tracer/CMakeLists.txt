@@ -59,6 +59,9 @@ target_compile_options(instruction-tracer-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:
 # symbol_session hides dbghelp behind opaque void* handles, and only instruction_decoder.cc includes Zydis.h.
 target_link_libraries(instruction-tracer-core PUBLIC clean-core PRIVATE dbghelp zydis)
 
+sc_target_pch(instruction-tracer-core CC) # 0.59
+
+# No PCH on the single-TU targets below: a ~1 s PCH build and ~15 MB of disk to save ~0.4 s on one object is a loss.
 add_executable(instruction-tracer src/instruction-tracer/main.cc)
 target_link_libraries(instruction-tracer PRIVATE instruction-tracer-core)
 
@@ -86,4 +89,6 @@ if(SC_BUILD_TESTS)
     )
 
     target_link_libraries(instruction-tracer-test PRIVATE instruction-tracer-core nexus)
+
+    sc_target_pch(instruction-tracer-test CC NEXUS)
 endif()

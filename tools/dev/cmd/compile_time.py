@@ -2,9 +2,13 @@
 
     compile-time headers <glob>...   what including a header costs, in a TU that does nothing else
     compile-time tu <glob>...        what a TU costs, full and reduced to its includes
+    compile-time pch <glob>...       what a target's precompiled header is worth, per TU
 
-Both report end-to-end wall clock of a real compile with the target's real flags, and fold each run's `-ftime-trace` split into the JSON.
+All report end-to-end wall clock of a real compile with the target's real flags, and `headers` / `tu` fold each run's `-ftime-trace` split into the JSON.
 Serial by default, because a parallel measurement measures the machine rather than the code.
+
+`headers` and `tu` strip the target's PCH flags, so they measure parsing from source whether or not the preset builds with a PCH.
+`pch` is the mode that keeps them, and it needs the preset BUILT rather than merely configured.
 
 docs/guides/compile-times.md is the workflow; tools/dev/lib/perf/compile_time.py owns the mechanism and the traps it avoids.
 """
@@ -64,6 +68,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     t = csub.add_parser("tu", help="Cost of a TU, measured full and reduced to its includes")
     _common(t)
+
+    p_ = csub.add_parser("pch", help="What a target's precompiled header is worth: each TU with it and without")
+    _common(p_)
 
     e = csub.add_parser(
         "export",
@@ -250,20 +257,28 @@ def _measure_preset(args, ctx: Context, preset, mode: str, targets, scratch: Pat
     else:
         selected = compile_select.resolve_sources(args.patterns, entries, ctx.root, targets=targets)
         noun = "TU"
+    if mode == "pch":
+        # The PCH half compiles against a .pch the target's own build produces, so a configured-but-unbuilt preset fails every TU.
+        # Build here rather than reporting 100 % failure with a compiler error each.
+        dev.build([preset], None, root=ctx.root, mirror=args.mirror_output, verbose=args.verbose)
     if not selected:
         ctx.die(f"no {noun}(s) matched {' '.join(args.patterns)!r} in preset {preset.name!r}")
 
     env = dev.env_for_preset(preset)
     family = preset.family
     trace = not args.no_time_trace
-    n_compiles = len(selected) * args.repeat * (2 if mode == "tu" else 1)
+    n_compiles = len(selected) * args.repeat * (1 if mode == "headers" else 2)
     print(f"{preset.name}: {len(selected)} {noun}(s), {n_compiles} compile(s), serial", file=sys.stderr)
 
     base = ct.baseline(selected[0][1], scratch=scratch, repeat=args.repeat,
                        time_trace=trace, family=family, env=env)
-    measure = ct.measure_headers if mode == "headers" else ct.measure_tus
-    records = measure(selected, scratch=scratch, repeat=args.repeat, time_trace=trace,
-                      family=family, env=env, root=ctx.root)
+    if mode == "pch":
+        records = ct.measure_pch(selected, scratch=scratch, repeat=args.repeat,
+                                 family=family, env=env, root=ctx.root)
+    else:
+        measure = ct.measure_headers if mode == "headers" else ct.measure_tus
+        records = measure(selected, scratch=scratch, repeat=args.repeat, time_trace=trace,
+                          family=family, env=env, root=ctx.root)
 
     return {
         "preset": preset.name,
@@ -287,6 +302,8 @@ def _summarize(report: dict, ctx: Context, out: Path, top: int) -> bool:
 
         if report["mode"] == "headers":
             _print_headers(ok_records, top)
+        elif report["mode"] == "pch":
+            _print_pch(ok_records, top)
         else:
             _print_tus(ok_records, top)
 
@@ -309,6 +326,34 @@ def _print_headers(records: list[dict], top: int) -> None:
         t = r.get("trace", {})
         print(f"  {r['wall_s']:7.3f}s  {t.get('include_count', 0):5d}  "
               f"{t.get('ours_source_s', 0):6.2f}s  {t.get('system_source_s', 0):6.2f}s  {r['path']}")
+
+
+def _print_pch(records: list[dict], top: int) -> None:
+    """One row per TU, pairing its with-PCH and without-PCH measurements, plus the per-target totals.
+
+    The per-target ratio at the bottom is the number that decides a tier, since a tier is a property of a target rather than of one file.
+    A ratio of 1.00 across the board means the preset has precompiled headers disabled.
+    """
+    with_pch = {r["path"]: r for r in records if r["kind"] == "tu-pch"}
+    without = {r["path"]: r for r in records if r["kind"] == "tu-nopch"}
+    paired = [(p, with_pch[p], without[p]) for p in with_pch if p in without]
+    paired.sort(key=lambda row: -row[2]["wall_s"])
+
+    print(f"\n  {'no pch':>8}  {'with pch':>9}  {'ratio':>6}  {'saved':>8}  TU")
+    for path, w, n in paired[:top]:
+        ratio = w["wall_s"] / n["wall_s"] if n["wall_s"] else 0.0
+        print(f"  {n['wall_s']:7.3f}s  {w['wall_s']:8.3f}s  {ratio:5.2f}  "
+              f"{n['wall_s'] - w['wall_s']:7.3f}s  {path}")
+
+    by_target: dict[str, list[tuple[float, float]]] = {}
+    for _, w, n in paired:
+        by_target.setdefault(w.get("target", ""), []).append((n["wall_s"], w["wall_s"]))
+    if by_target:
+        print(f"\n  {'no pch':>8}  {'with pch':>9}  {'ratio':>6}  {'TUs':>4}  target")
+        for target, rows in sorted(by_target.items(), key=lambda kv: -sum(r[0] for r in kv[1])):
+            tn = sum(r[0] for r in rows)
+            tw = sum(r[1] for r in rows)
+            print(f"  {tn:7.2f}s  {tw:8.2f}s  {tw / tn if tn else 0.0:5.2f}  {len(rows):4d}  {target}")
 
 
 def _print_tus(records: list[dict], top: int) -> None:

@@ -45,6 +45,13 @@ include(Sanitizers)   # SANITIZE     — ASan/UBSan wiring (clang only)
 include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (clang only)
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
 
+# Per-target precompiled headers.
+# Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();
+# sc_finalize_pch() at the bottom of this file resolves the two together.
+# Unlike the four above this one adds no flags of its own, so its position here is convention rather than a requirement.
+# CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (the nopch-* presets) turns every application into a no-op.
+include(PrecompiledHeaders)
+
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
 # Release, but the inlining downgrade alone leaves heavily-inlined code several times slower (e.g. xxHash's
@@ -138,3 +145,7 @@ sc_finalize_web_runners()
 # Check that every declared shader package found the shaped-shader-library target. See
 # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
 sc_finalize_shader_packages()
+
+# Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
+# Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
+sc_finalize_pch()

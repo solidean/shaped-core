@@ -62,6 +62,8 @@ target_include_directories(shaped-shader-library
 # shaped-graphics provides sg::compiled_shader / sg::shader_stage / sg::context (public API surface).
 target_link_libraries(shaped-shader-library PUBLIC shaped-graphics)
 
+sc_target_pch(shaped-shader-library SG)
+
 target_compile_options(shaped-shader-library
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -103,6 +105,8 @@ if(SC_BUILD_TESTS)
     )
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)
+
+    sc_target_pch(shaped-shader-library-test SG NEXUS)
 
     # slib declares a package of its own: the codegen has to be exercised by something, and the library that
     # ships sc_add_shader_package is the honest place for it.

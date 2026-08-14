@@ -54,6 +54,12 @@ target_compile_options(shaped-linter-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:p
 # clean-core is PUBLIC: it appears in our headers (cc:: everywhere), so the exe and test inherit it.
 target_link_libraries(shaped-linter-core PUBLIC clean-core)
 
+# CC, and measured against the alternatives: shaped-linter-core goes 0.42 here but 0.50 at CC_STD,
+# because it is a pure clean-core consumer and the heavy STL block is a PCH it pays to load and never reads.
+# The rules/ subdirectories need no call of their own — they target_sources() into this target, and those sources take its PCH.
+sc_target_pch(shaped-linter-core CC)
+
+# No PCH on the single-TU targets below: a ~1 s PCH build and ~15 MB of disk to save ~0.4 s on one object is a loss.
 add_executable(shaped-linter src/shaped-linter/main.cc)
 target_link_libraries(shaped-linter PRIVATE shaped-linter-core)
 
@@ -95,6 +101,9 @@ if(SC_BUILD_TESTS)
     # reads them. A tool consuming a library is the allowed direction, and it keeps shaped-linter-core
     # itself on clean-core alone.
     target_link_libraries(shaped-linter-test PRIVATE shaped-linter-core nexus babel-serializer)
+
+    # CC_STD here where the core takes CC: the test links babel-serializer too, and measured 0.47 against 0.53 at CC.
+    sc_target_pch(shaped-linter-test CC_STD NEXUS)
 
     # The corpus lives next to each rule and is read at run time, so the test binary is told where the
     # rule tree starts; it is scanned recursively for *.md.

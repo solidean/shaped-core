@@ -42,6 +42,12 @@ target_include_directories(shaped-shader-compiler-dxc
 # kept behind the pimpl, so it links PRIVATE.
 target_link_libraries(shaped-shader-compiler-dxc PUBLIC shaped-graphics PRIVATE dxc)
 
+# Names impl/dxc_common.hh, this library's SDK gate, on the same reasoning as the dx12 backend's DX12 tier.
+# Nothing extends this tier, and nothing should: a gate belongs at the end of a header list.
+sc_declare_pch_tier(DXC EXTENDS SG HEADERS <shaped-shader-compiler-dxc/impl/dxc_common.hh>)
+
+sc_target_pch(shaped-shader-compiler-dxc DXC)
+
 target_compile_options(shaped-shader-compiler-dxc
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -58,6 +64,9 @@ if(SC_BUILD_TESTS)
     )
 
     target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-shader-compiler-dxc nexus)
+
+    # SG rather than DXC: dxc links PRIVATE above, so <dxc/dxcapi.h> is not on the test's include path.
+    sc_target_pch(shaped-shader-compiler-dxc-test SG NEXUS) # 0.59
 
     # The dx12 backend is added before this lib (root CMakeLists order), so its target exists here and can be
     # linked for a whole-chain integration test: compile HLSL -> reflect -> bind -> dispatch on WARP -> read back.
