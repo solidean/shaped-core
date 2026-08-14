@@ -49,6 +49,19 @@ struct sv::triangle_geometry
         return {.positions = cc::move(positions), .hash = hash};
     }
 
+    /// Pins `positions` as a raw triangle list — 3 consecutive positions per triangle, so the count must be a multiple
+    /// of 3 — and hashes their bytes.
+    ///
+    /// The same payload and key `triangle_data::create` produces, for a caller who holds positions rather than
+    /// `tg::triangle3f`s.
+    template <class Positions>
+    [[nodiscard]] static triangle_geometry create_from_positions(Positions&& positions)
+    {
+        cc::pinned_data<tg::pos3f const> pinned = cc::make_pinned_data(cc::forward<Positions>(positions));
+        auto const hash = cc::hash128::create(pinned.span().as_bytes(), impl::position_hash_seed);
+        return {.positions = cc::move(pinned), .hash = hash};
+    }
+
     /// Pins both buffers and combines their digests into the content hash.
     /// `indices.size()` must be a multiple of 3, and every index must be < `positions.size()`.
     template <class Positions, class Indices>

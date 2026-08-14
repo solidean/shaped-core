@@ -37,6 +37,15 @@ struct sv::perspective_projection
     f64 near_plane = 0.01;
 };
 
+/// A camera's axes in world space — where the camera frame's +x, +y and +z point.
+/// Left-handed, so `forward` points into the scene.
+struct sv::camera_basis
+{
+    tg::vec3d right;
+    tg::vec3d up;
+    tg::vec3d forward;
+};
+
 /// A dev-friendly pinhole camera: a double-precision pose (position + orientation) plus a projection.
 ///
 /// `orientation` is a unit quaternion mapping the base frame to the camera frame — it sends +x to right,
@@ -71,4 +80,7 @@ struct sv::camera
     {
         orientation = look_rotation(position, target, up);
     }
+
+    /// The world-space axes this camera looks along — what a screen-space drag has to be expressed in.
+    [[nodiscard]] camera_basis basis() const;
 };

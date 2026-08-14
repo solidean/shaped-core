@@ -57,10 +57,11 @@ struct fly_camera
 
     void handle(sr::input_event const& e, sr::window& win)
     {
-        if (auto const* const k = e.try_as_key())
+        if (auto const r = e.try_as_key(); r.has_value())
         {
-            auto const down = k->is_down;
-            switch (k->scancode)
+            auto const& k = *r.value();
+            auto const down = k.is_down;
+            switch (k.scancode)
             {
             case sr::scancode::w:
                 key_forward = down;
@@ -92,20 +93,22 @@ struct fly_camera
                 break;
             }
         }
-        else if (auto const* const b = e.try_as_mouse_button())
+        else if (auto const rb = e.try_as_mouse_button(); rb.has_value())
         {
-            if (b->button == sr::mouse_button::right)
+            auto const& b = *rb.value();
+            if (b.button == sr::mouse_button::right)
             {
-                looking = b->is_down;
+                looking = b.is_down;
                 win.set_relative_mouse_mode(looking); // capture the cursor while looking
             }
         }
-        else if (auto const* const m = e.try_as_mouse_move())
+        else if (auto const rm = e.try_as_mouse_move(); rm.has_value())
         {
             if (looking)
             {
-                yaw += look_speed * float(m->delta[0]);
-                pitch -= look_speed * float(m->delta[1]);
+                auto const& m = *rm.value();
+                yaw += look_speed * float(m.delta[0]);
+                pitch -= look_speed * float(m.delta[1]);
                 auto const limit = tg::angle_f::make_from_radians(1.5f); // keep just shy of straight up/down
                 pitch = pitch < -limit ? -limit : (pitch > limit ? limit : pitch);
             }

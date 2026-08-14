@@ -2,7 +2,7 @@
 
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/resource_ids.hh>
-#include <typed-geometry/linalg/mat.hh>
+#include <typed-geometry/transform/transform.hh>
 
 /// What kind of thing a scene item is.
 /// Exactly one kind exists today; the tag is here so more kinds (point clouds, procedural primitives, volumes, …) slot in without every consumer switching on a variant yet.
@@ -16,8 +16,10 @@ enum class sv::scene_item_kind : sv::u8
 ///
 /// It names its resources by id — `mesh` (geometry + BLAS) and `materials` (one PBR material per triangle, indexed by `PrimitiveIndex()` in the closest-hit).
 /// The view_renderer resolves both through the managers.
-/// `transform` is a standard column-major `tg::mat4f`.
-/// The renderer repacks it into the row-major 3x4 the TLAS instance wants.
+///
+/// `transform` is affine because a placement may scale or shear; build one from tg's factories
+/// (`make_rotation`, `make_translation`, `make_from_linear_mat`, …) and `tg::compose` them.
+/// The renderer reads its linear part and translation straight into the row-major 3x4 the TLAS instance wants.
 struct sv::scene_item
 {
     scene_item_kind kind = scene_item_kind::triangle_mesh;
@@ -25,5 +27,5 @@ struct sv::scene_item
     mesh_id mesh = mesh_id::invalid;
     material_set_id materials = material_set_id::invalid;
 
-    tg::mat4f transform = tg::mat4f::identity;
+    tg::affine_transform3f transform = {};
 };

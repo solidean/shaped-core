@@ -3,12 +3,12 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/mesh_attribute.hh>
-#include <shaped-viewer/mesh_flags.hh>
-#include <shaped-viewer/mesh_parameter.hh>
-#include <shaped-viewer/mesh_texture.hh>
 #include <shaped-viewer/resources/resource_ids.hh>
-#include <shaped-viewer/triangle_geometry.hh>
+#include <shaped-viewer/scene/mesh_attribute.hh>
+#include <shaped-viewer/scene/mesh_flags.hh>
+#include <shaped-viewer/scene/mesh_parameter.hh>
+#include <shaped-viewer/scene/mesh_texture.hh>
+#include <shaped-viewer/scene/triangle_geometry.hh>
 #include <typed-geometry/transform/transform.hh>
 
 /// One renderable mesh: geometry placed by a transform, drawn by a material, with everything that material may need alongside it.

@@ -6,12 +6,12 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-viewer/background.hh>
-#include <shaped-viewer/camera.hh> // camera_gpu
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/gpu_types.hh>
-#include <shaped-viewer/light.hh> // area_light_gpu
-#include <shaped-viewer/pbr_material.hh>
+#include <shaped-viewer/scene/background.hh>
+#include <shaped-viewer/scene/light.hh> // area_light_gpu
+#include <shaped-viewer/scene/pbr_material.hh>
+#include <shaped-viewer/view/camera.hh> // camera_gpu
 #include <typed-geometry/linalg/pos.hh>
 
 /// The per-view constant block the path tracer reads at b0 (the FrameConstants cbuffer in shaders/pt_common.hlsli).

@@ -45,6 +45,15 @@ TEST("sv - path-traced Cornell box (headless)")
     REQUIRE(mesh_rec != nullptr);
     REQUIRE(mat_rec != nullptr);
 
+    // The same materials as per-triangle attributes — the path scene_ref::add_mesh takes.
+    // It uploads its own set (a different content key), and re-acquiring it must hit the cache rather than upload
+    // again, since that is what keeps a per-frame add_mesh O(1).
+    auto const attributes = sv::pbr_material_attributes(box.materials);
+    auto const from_attributes = resources.materials.acquire(attributes, box.materials.size());
+    REQUIRE(resources.materials.contains(from_attributes));
+    CHECK(resources.materials.get(from_attributes).count == box.materials.size());
+    CHECK(resources.materials.acquire(attributes, box.materials.size()) == from_attributes);
+
     // One instance at identity — the Cornell box geometry is already in world space.
     auto instances = cc::vector<sg::tlas_instance>();
     instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0});

@@ -1,6 +1,6 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/atomic.hh>
-#include <shaped-viewer/light.hh>
+#include <shaped-viewer/scene/light.hh>
 #include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
 
 namespace sv

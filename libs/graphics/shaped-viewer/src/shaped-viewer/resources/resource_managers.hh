@@ -6,10 +6,10 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_ids.hh>
+#include <shaped-viewer/scene/pbr_material.hh>
 #include <typed-geometry/linalg/pos.hh>
 
 /// How much a resource manager may keep resident, and how long an unused resource lingers.
@@ -102,6 +102,15 @@ public:
     /// On a miss the set is packed to its GPU layout and uploaded into a read-only structured buffer on one command list submitted before returning.
     [[nodiscard]] material_set_id acquire(material_data const& materials);
 
+    /// The same, for per-face PBR carried as the `sv::pbr_attribute` attributes of a mesh.
+    ///
+    /// The cache key is folded from the attributes' own content hashes rather than recomputed over their bytes, so
+    /// re-acquiring an unchanged mesh every frame stays O(1) — which is what lets `scene_ref::add_mesh` do this for
+    /// the caller.
+    /// An attribute that is absent contributes `pbr_material`'s default for its field; one that is present must be
+    /// `per_triangle`, hold the element type its name documents, and carry `triangle_count` elements.
+    [[nodiscard]] material_set_id acquire(cc::span<mesh_attribute const> attributes, isize triangle_count);
+
 private:
     explicit material_manager(sg::context& ctx) : _ctx(ctx) {}
 
@@ -128,12 +137,11 @@ struct sv::scene_resources_config
 };
 
 /// The bundle of resource managers a `viewer_definition` resolves its ids against.
-/// One per scene, and passed to `sv::view_renderer::execute`.
+/// One per scene; passed to `sv::view_renderer::execute` / `sv::viewer_renderer::execute`.
 /// All three managers share the context it is created with, which must outlive it.
 ///
 /// Set per-manager budgets through the config (`scene_resources::create(ctx, {.meshes = {.budget = ...}})`).
-/// The view_renderer calls `begin_frame` for you each frame; call it yourself only if you drive resources
-/// outside a render.
+/// `begin_frame` is the caller's to run, once per frame, before the first view resolves its ids — no routine does it, because none of them knows how many more views the frame holds.
 class sv::scene_resources
 {
 public:
