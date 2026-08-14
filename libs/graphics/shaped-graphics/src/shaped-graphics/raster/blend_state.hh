@@ -72,12 +72,18 @@ struct sg::blend_component
     blend_factor source = blend_factor::one;
     blend_factor target = blend_factor::zero;
     blend_op op = blend_op::add;
+
+    [[nodiscard]] friend constexpr bool operator==(blend_component, blend_component) = default;
 };
 
 /// The color-blend equation for a render target, with separate color and alpha components — DX12 and Vulkan both blend RGB and A independently.
 /// Present on a color_target_state only when blending is enabled.
+/// Equality is what lets a pipeline cache key on a blend, since a blend is baked into the PSO while a sampler or a
+/// push constant is not.
 struct sg::blend_state
 {
     blend_component color = {};
     blend_component alpha = {};
+
+    [[nodiscard]] friend constexpr bool operator==(blend_state, blend_state) = default;
 };

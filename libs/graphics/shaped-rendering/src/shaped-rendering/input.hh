@@ -1,7 +1,10 @@
 #pragma once
 
 #include <clean-core/container/variant.hh> // cc::variant (input_event's payload)
+#include <clean-core/error/result.hh>      // cc::result (input_event's try_as_* accessors)
+#include <clean-core/string/format.hh>     // cc::format (their error messages)
 #include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/pos.hh> // tg::pos2f
 #include <typed-geometry/linalg/vec.hh> // tg::vec2f
@@ -263,9 +266,12 @@ struct sr::mouse_wheel_event
 /// Both the span and any text inside it live until the next poll_events.
 ///
 ///     for (auto const& e : wsys->events())
-///         if (auto const* k = e.try_as_key())
-///             if (k->is_down && k->scancode == sr::scancode::escape)
+///         if (auto const r = e.try_as_key(); r.has_value())
+///         {
+///             auto const& k = *r.value();
+///             if (k.is_down && k.scancode == sr::scancode::escape)
 ///                 e.window->request_close();
+///         }
 struct sr::input_event
 {
     /// The window the event went to, or null when none had focus.
@@ -273,13 +279,52 @@ struct sr::input_event
     sr::window* window = nullptr;
 
     /// What happened, as one of the five event payloads.
-    /// Visit it for an exhaustive handler, or reach for one of the `try_as_*` accessors below to pick a single kind out.
+    /// Visit it for an exhaustive handler, or reach for one of the `try_as_*` / `as_*` accessors below to pick a single kind out.
     cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
 
-    /// The payload as one specific kind, or null when the event was a different one.
-    [[nodiscard]] key_event const* try_as_key() const { return payload.try_as<key_event>(); }
-    [[nodiscard]] text_event const* try_as_text() const { return payload.try_as<text_event>(); }
-    [[nodiscard]] mouse_move_event const* try_as_mouse_move() const { return payload.try_as<mouse_move_event>(); }
-    [[nodiscard]] mouse_button_event const* try_as_mouse_button() const { return payload.try_as<mouse_button_event>(); }
-    [[nodiscard]] mouse_wheel_event const* try_as_mouse_wheel() const { return payload.try_as<mouse_wheel_event>(); }
+    /// The payload as one specific kind, or an error naming the kind the event actually was.
+    /// The pointer is never null on success and points into this event, so it lives exactly as long as the event does.
+    /// Building the error allocates, so this is a branch to take per event kind, not per event.
+    [[nodiscard]] cc::result<key_event const*> try_as_key() const { return impl_try_as<key_event>("key_event"); }
+    [[nodiscard]] cc::result<text_event const*> try_as_text() const { return impl_try_as<text_event>("text_event"); }
+    [[nodiscard]] cc::result<mouse_move_event const*> try_as_mouse_move() const
+    {
+        return impl_try_as<mouse_move_event>("mouse_move_event");
+    }
+    [[nodiscard]] cc::result<mouse_button_event const*> try_as_mouse_button() const
+    {
+        return impl_try_as<mouse_button_event>("mouse_button_event");
+    }
+    [[nodiscard]] cc::result<mouse_wheel_event const*> try_as_mouse_wheel() const
+    {
+        return impl_try_as<mouse_wheel_event>("mouse_wheel_event");
+    }
+
+    /// The payload as one specific kind, throwing cc::result_exception when the event was a different one.
+    /// For code that already knows the kind — a stream you never asked the kind of wants the try_as_* twin instead.
+    [[nodiscard]] key_event const& as_key() const { return *try_as_key().or_throw(); }
+    [[nodiscard]] text_event const& as_text() const { return *try_as_text().or_throw(); }
+    [[nodiscard]] mouse_move_event const& as_mouse_move() const { return *try_as_mouse_move().or_throw(); }
+    [[nodiscard]] mouse_button_event const& as_mouse_button() const { return *try_as_mouse_button().or_throw(); }
+    [[nodiscard]] mouse_wheel_event const& as_mouse_wheel() const { return *try_as_mouse_wheel().or_throw(); }
+
+    /// The name of the kind held, as the accessors above spell it in their errors.
+    [[nodiscard]] cc::string_view payload_name() const
+    {
+        return payload.visit([](key_event const&) { return cc::string_view("key_event"); },
+                             [](text_event const&) { return cc::string_view("text_event"); },
+                             [](mouse_move_event const&) { return cc::string_view("mouse_move_event"); },
+                             [](mouse_button_event const&) { return cc::string_view("mouse_button_event"); },
+                             [](mouse_wheel_event const&) { return cc::string_view("mouse_wheel_event"); });
+    }
+
+private:
+    template <class T>
+    [[nodiscard]] cc::result<T const*> impl_try_as(cc::string_view name) const
+    {
+        if (auto const* const p = payload.try_as<T>())
+            return p;
+
+        return cc::error(cc::format("input_event holds {}, not {}", payload_name(), name));
+    }
 };

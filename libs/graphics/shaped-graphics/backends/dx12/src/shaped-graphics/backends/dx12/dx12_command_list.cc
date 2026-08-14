@@ -206,6 +206,11 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
 
+    // dx12 binds targets with OMSetRenderTargets rather than a real render pass, so this would likely work here —
+    // but Vulkan rejects a dispatch inside a render-pass instance outright, and the barriers below would transition
+    // a still-bound target, which is exactly what end_rendering unbinds to avoid.
+    CC_ASSERT(!_in_render_pass, "dispatch must not be recorded inside a rendering scope; close the scope first");
+
     // Declare each bound group's shader accesses before the dispatch: the tracker emits any intra-list
     // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
@@ -268,6 +273,10 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
     CC_ASSERT(i64(width) * i64(height) * i64(depth) <= (i64(1) << 30), "dispatch_rays exceeds the 2^30 "
                                                                        "total-thread limit");
     CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a raytracing pipeline before dispatch_rays");
+
+    // Same rule as compute_dispatch: Vulkan forbids tracing inside a render-pass instance, and the hazard declares
+    // below would transition a target the output-merger still has bound.
+    CC_ASSERT(!_in_render_pass, "dispatch_rays must not be recorded inside a rendering scope; close the scope first");
 
     auto const* dt = dynamic_cast<dx12_raytracing_shader_table const*>(&table);
     CC_ASSERT(dt != nullptr, "raytracing_shader_table is not a dx12 shader table");

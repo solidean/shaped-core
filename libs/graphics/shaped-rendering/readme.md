@@ -50,9 +50,12 @@ That is what imgui's multi-viewport support is built on — see [docs/imgui.md](
 
 ```cpp
 for (auto const& e : wsys->events())
-    if (auto const* k = e.try_as_key())
-        if (k->is_down && k->scancode == sr::scancode::escape)
+    if (auto const r = e.try_as_key(); r.has_value())
+    {
+        auto const& k = *r.value();
+        if (k.is_down && k.scancode == sr::scancode::escape)
             e.window->request_close();
+    }
 ```
 
 Keyboard events carry both a **physical** `scancode` (position, so WASD survives AZERTY) and the layout-mapped `character`,
