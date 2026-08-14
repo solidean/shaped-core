@@ -88,6 +88,10 @@ target_compile_options(typed-geometry
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
+sc_declare_pch_tier(TG EXTENDS CC_STD HEADERS <typed-geometry/all.hh>)
+
+sc_target_pch(typed-geometry TG)
+
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(typed-geometry-test
@@ -127,6 +131,8 @@ if(SC_BUILD_TESTS)
         typed-geometry
         nexus
     )
+
+    sc_target_pch(typed-geometry-test TG NEXUS) # 0.73 — the least include-bound target measured
 
     # Browser test runner (Emscripten only): typed-geometry-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(typed-geometry-test)

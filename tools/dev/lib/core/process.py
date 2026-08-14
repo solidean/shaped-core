@@ -214,17 +214,34 @@ def emsdk_env(emsdk_path: str | None = None) -> dict[str, str] | None:
     return env
 
 
+# Captured environments, keyed by what actually determines them.
+# The MSVC key is (toolset, arch) and NOT the preset: every preset sharing a toolchain shares one capture.
+# Without this a `check` run pays ~2.6 s per call and calls twice per preset — configure and build each ask independently.
+_env_cache: dict[tuple, dict[str, str] | None] = {}
+# Held across the capture, not just around the dict.
+# The concurrent-configure path asks for the same key from several threads at once, and a lock that only guards the dict lets all of them miss and shell out anyway.
+_env_lock = threading.Lock()
+
+
 def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, str] | None:
     """Pick the subprocess environment a preset's commands need.
 
     Emscripten presets get the emsdk environment; every other preset falls back to the MSVC environment on Windows, and to None elsewhere.
     None means "inherit the parent env unchanged"; a returned dict is a full environment, ready to hand straight to run_step.
+
+    Cached process-wide, so a repeat for the same toolchain is free and only the first capture shows up as an "env" span.
+    The result must therefore stay independent of anything that changes mid-run — it is derived from the toolchain alone, never from build state.
     """
-    # Profiled because the MSVC path shells out to vswhere and VsDevCmd.bat, once per preset, and that is charged to nothing in the step banners.
-    with profile.span(preset.name, type="env"):
-        if preset.is_emscripten:
-            return emsdk_env(emsdk_path)
-        return msvc_env(preset.toolset, preset.arch)
+    key = ("emsdk", emsdk_path) if preset.is_emscripten else ("msvc", preset.toolset, preset.arch)
+    with _env_lock:
+        if key in _env_cache:
+            return _env_cache[key]
+
+        # Profiled because the MSVC path shells out to vswhere and VsDevCmd.bat, and that is charged to nothing in the step banners.
+        with profile.span(preset.name, type="env"):
+            env = emsdk_env(emsdk_path) if preset.is_emscripten else msvc_env(preset.toolset, preset.arch)
+        _env_cache[key] = env
+        return env
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +387,7 @@ def run_step(
     mirror: bool = False,
     verbose: bool = False,
     summary_extra: Callable[[StepResult], str] | None = None,
+    profile_origin: str = "driver",
 ) -> StepResult:
     """Run a subprocess as a named step and return a StepResult.
 
@@ -379,6 +397,7 @@ def run_step(
     `summary_extra`, when given, is called with the finished StepResult and its return value is appended to the summary line.
     It is skipped on timeout, and any exception it raises is swallowed.
     On timeout the process is killed and the step reports returncode 124, the conventional timeout code.
+    A caller running several steps at once must pass profile_origin="external", so the trace lays them out as lanes rather than as one nested call stack.
     """
     mirror = mirror or (_mirror_test_output and step_type == "test")
 
@@ -446,6 +465,7 @@ def run_step(
     profile.record(
         name or step_type, type=step_type, start=started_at, end=started_at + duration_s,
         extra={"returncode": returncode, "timed_out": timed_out, "command": cmd},
+        origin=profile_origin,
     )
     result = StepResult(
         step_type=step_type,

@@ -92,6 +92,14 @@ target_include_directories(shaped-graphics-dx12
 # d3dcompiler is only needed once we compile shaders (not yet).
 target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxguid)
 
+# Names dx12_common.hh, this backend's single SDK gate, rather than <d3d12.h> and friends.
+# The gate opens and closes its own `byte` bracket and keeps its clean-core headers above it, so the PCH inherits the sanitization instead of racing it.
+# Naming the SDK headers directly instead breaks 14 of 16 dx12 TUs on an ambiguous `byte` — see clean-core/platform/win32_sanitized.hh.
+# Nothing extends this tier, and nothing should: a gate belongs at the end of a header list.
+sc_declare_pch_tier(DX12 EXTENDS SG HEADERS <shaped-graphics/backends/dx12/dx12_common.hh>)
+
+sc_target_pch(shaped-graphics-dx12 DX12) # 0.34, the largest win in the repo
+
 target_compile_options(shaped-graphics-dx12
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -132,4 +140,7 @@ if(SC_BUILD_TESTS)
     )
 
     target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)
+
+    # DX12 last, so the SDK gate stays at the end of the header list.
+    sc_target_pch(shaped-graphics-dx12-test NEXUS DX12) # 0.36
 endif()
