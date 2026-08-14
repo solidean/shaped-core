@@ -1189,29 +1189,33 @@ public:
         return c;
     }
 
-    // initializes a new container_t with "size" many defaulted elements
-    [[nodiscard]] static container_t create_defaulted(size_t size, cc::memory_resource const* resource = nullptr)
+    /// Initializes a new container_t with "size" many defaulted elements.
+    /// Precondition: size >= 0.
+    [[nodiscard]] static container_t create_defaulted(isize size, cc::memory_resource const* resource = nullptr)
     {
+        CC_ASSERT(size >= 0, "container size must be non-negative");
         auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment());
         auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource);
         impl::default_create_objects_to(result.obj_end, size);
         return container_t::create_from_allocation(cc::move(result));
     }
 
-    // initializes a new container_t with "size" many elements, all copy-constructed from "value"
-    [[nodiscard]] static container_t create_filled(size_t size,
-                                                   T const& value,
-                                                   cc::memory_resource const* resource = nullptr)
+    /// Initializes a new container_t with "size" many elements, all copy-constructed from "value".
+    /// Precondition: size >= 0.
+    [[nodiscard]] static container_t create_filled(isize size, T const& value, cc::memory_resource const* resource = nullptr)
     {
+        CC_ASSERT(size >= 0, "container size must be non-negative");
         auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment());
         auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource);
         impl::fill_create_objects_to(result.obj_end, size, value);
         return container_t::create_from_allocation(cc::move(result));
     }
 
-    // initializes a new container_t with "size" many uninitialized elements (only safe for trivial types)
-    [[nodiscard]] static container_t create_uninitialized(size_t size, cc::memory_resource const* resource = nullptr)
+    /// Initializes a new container_t with "size" many uninitialized elements, which is only safe for trivial types.
+    /// Precondition: size >= 0.
+    [[nodiscard]] static container_t create_uninitialized(isize size, cc::memory_resource const* resource = nullptr)
     {
+        CC_ASSERT(size >= 0, "container size must be non-negative");
         static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable for uninitialized allocation");
         static_assert(std::is_trivially_destructible_v<T>, "T must be trivially destructible for uninitialized "
                                                            "allocation");
@@ -1232,11 +1236,13 @@ public:
         return container_t::create_from_allocation(cc::move(result));
     }
 
-    // initializes a new container_t with reserved capacity but no live objects
-    // guarantees at least "capacity" elements can be inserted without reallocation
-    // actual capacity may be larger due to cache-line alignment (alloc_alignment())
-    [[nodiscard]] static container_t create_with_capacity(size_t capacity, cc::memory_resource const* resource = nullptr)
+    /// Initializes a new container_t with reserved capacity but no live objects.
+    /// At least "capacity" elements can then be inserted without reallocation, and the actual capacity may be larger
+    /// due to cache-line alignment (alloc_alignment()).
+    /// Precondition: capacity >= 0.
+    [[nodiscard]] static container_t create_with_capacity(isize capacity, cc::memory_resource const* resource = nullptr)
     {
+        CC_ASSERT(capacity >= 0, "container capacity must be non-negative");
         auto const byte_size = cc::align_up(capacity * sizeof(T), alloc_alignment());
         return container_t::create_from_allocation(
             cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource));

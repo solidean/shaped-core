@@ -141,20 +141,20 @@ public:
     /// Only valid for non-const T.
     [[nodiscard]] static pinned_data create_defaulted(isize size, cc::memory_resource const* resource = nullptr)
     {
-        return create_owning(cc::array<T>::create_defaulted(static_cast<size_t>(size), resource));
+        return create_owning(cc::array<T>::create_defaulted(size, resource));
     }
 
     /// Allocates and pins size elements, each copy-constructed from value.
     /// Only valid for non-const T.
     [[nodiscard]] static pinned_data create_filled(isize size, T const& value, cc::memory_resource const* resource = nullptr)
     {
-        return create_owning(cc::array<T>::create_filled(static_cast<size_t>(size), value, resource));
+        return create_owning(cc::array<T>::create_filled(size, value, resource));
     }
 
     /// Allocates and pins size uninitialized elements (only safe for trivial T). Only valid for non-const T.
     [[nodiscard]] static pinned_data create_uninitialized(isize size, cc::memory_resource const* resource = nullptr)
     {
-        return create_owning(cc::array<T>::create_uninitialized(static_cast<size_t>(size), resource));
+        return create_owning(cc::array<T>::create_uninitialized(size, resource));
     }
 
     /// Allocates and pins a deep copy of source.
