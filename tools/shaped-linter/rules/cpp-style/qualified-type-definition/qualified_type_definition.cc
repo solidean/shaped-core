@@ -297,8 +297,12 @@ void check(lint_context& ctx)
 
                 // A re-exported alias is qualified with the namespace's ROOT, never with `ns_name` itself.
                 // The using-directive that re-exports it sits in that root — `cc::console::u8` would not find what `cc::u8` does.
+                //
+                // Emptiness is decided on the SPAN, never by asking the buffer for its text.
+                // Only an enum carries an enum-base, so on a record this span is absent and still default-constructed,
+                // and its file_id of 0 belongs to whichever file happened to be parsed first.
                 auto const base = ctx.tree[defs[k]].enum_base_name;
-                if (!ctx.source.span_text(base).empty())
+                if (!base.empty())
                     edits.push_back(insertion(base.byte_begin, cc::string(name_components(ns_name)[0]) + "::"));
             }
 
