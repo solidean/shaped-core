@@ -22,8 +22,8 @@ What a `transform` or a `material` is belongs to the application; `vdoc` owns th
 
 Headers are included by their full path from `src/`, e.g. `#include <versioned-document/op_graph.hh>`.
 
-This library is at the **design stage** — the concept is complete and nothing is implemented.
-[docs/concept.md](docs/concept.md) is the design, [docs/todo/](docs/todo/_index.md) is the ordered plan to build it.
+The concept is complete and the **value codec** is built; everything above it is not.
+[docs/concept.md](docs/concept.md) is the design, [docs/todo/](docs/todo/_index.md) is the ordered plan to build the rest.
 
 ## Design at a glance
 
@@ -47,12 +47,12 @@ Two properties are worth knowing before reading anything else:
 ## File organization
 
 Source lives in `src/versioned-document/`.
-Only `fwd.hh` exists so far, and it doubles as the index of every name the library plans to expose.
+`fwd.hh` doubles as the index of every name the library plans to expose, implemented or not.
 
-| Planned area | What will be in it |
+| Area | What is in it |
 |--------------|--------------------|
 | (root)       | `fwd.hh` — forward declarations and vocabulary aliases |
-| values       | `value` / `value_view` / `value_builder` — the binary value codec |
+| values       | `value` / `value_view` / `value_builder` — the binary value codec **(built)** |
 | identity     | `entity_id` / `component_type_id` / `property_id` — interned, distinct id types |
 | ops          | `op` / `op_id` / `op_builder` / `op_graph` — the DAG and its materialization |
 | raw          | `raw_document` and the three levels below it |
@@ -66,9 +66,9 @@ Build and test through the repo driver — never run a `*-test` binary directly:
 
 ```bash
 uv run dev.py build -t versioned-document
+uv run dev.py test versioned-document-test
 ```
 
-There is no `versioned-document-test` yet; it arrives with [milestone 1](docs/todo/milestone-1.md).
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.
 
 ## More

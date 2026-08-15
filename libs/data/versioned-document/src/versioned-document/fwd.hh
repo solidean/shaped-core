@@ -5,7 +5,7 @@
 /// Aggregate forward declarations for versioned-document.
 ///
 /// This header is also the API index: every name the library plans to expose is declared here, with the one line that says what it is.
-/// Nothing below is implemented yet.
+/// The value layer is implemented; everything below it is not yet.
 /// The design is [the concept](../../docs/concept.md).
 /// The milestones that land it are [the todo list](../../docs/todo/_index.md).
 ///
@@ -43,6 +43,15 @@ struct value_view;
 
 /// Builds arrays and objects incrementally, then hands out the finished encoding.
 class value_builder;
+
+/// Why bytes would not decode into a value.
+enum class value_decode_error_kind : u8;
+
+/// What was wrong, and at which byte.
+struct value_decode_error;
+
+/// Why a builder's contents would not make a value.
+enum class value_build_error : u8;
 } // namespace vdoc
 
 // ---- identifiers -------------------------------------------------------------------------------

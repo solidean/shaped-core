@@ -14,15 +14,15 @@ This document tracks *state*; it is not where the design lives.
 - The settled choices and their reasoning are [decisions.md](decisions.md).
 - The ordered plan, with acceptance criteria per step, is [todo/](todo/_index.md).
 
-Everything below is `[planned]` today.
-Nothing is implemented, and the milestone that lands each piece is named so the two documents stay in step.
+Milestones 0 and 1 have landed; everything above them is `[planned]`.
+The milestone that lands each piece is named so the two documents stay in step.
 
 ## Top-level structure
 
 ```text
 src/versioned-document/
   fwd.hh          [done]        forward declarations; also the API index
-  value           [planned]     the binary value codec                        milestone 1
+  value           [done]        the binary value codec                        milestone 1
   ids             [planned]     entity_id / component_type_id / property_id   milestone 2
   op              [planned]     op / op_id / op_builder, canonical encoding    milestone 2
   op_graph        [planned]     the DAG, reachability, materialization         milestone 2
@@ -39,26 +39,30 @@ src/versioned-document-file/
   snapshots       [planned]     snapshot caching, pruning, skeleton ops         milestone 6
 ```
 
-## Prerequisites in lower libraries [planned]
+## Prerequisites in lower libraries [done]
 
-Three lower-library gaps block the first milestones.
-Each is an addition to the library that owns the capability, not something worked around here — [todo/milestone-0.md](todo/milestone-0.md) carries the detail.
+Three lower-library gaps blocked the first milestones.
+Each was an addition to the library that owns the capability, not something worked around here — [todo/milestone-0.md](todo/milestone-0.md) carries the detail.
 
-- `[planned]` **`cc::blake3`** plus a 256-bit digest type, and the vendored `extern/blake3` behind it.
+- `[done]` **`cc::blake3`** plus a 256-bit digest type, and the vendored `extern/blake3` behind it.
   Content addressing needs a cryptographic hash; `cc::hash128` is XXH3 and cannot support verification against an untrusted peer.
-- `[planned]` **`cc::interned_string`** — process-local interning, with the rule that a raw interned id is never serialized.
-- `[planned]` **`babel::sqlite` additions** — incremental blob I/O, transaction scoping, connection configuration.
+- `[done]` **`cc::interned_string`** — process-local interning, with the rule that a raw interned id is never serialized.
+- `[done]` **`babel::sqlite` additions** — incremental blob I/O, transaction scoping, connection configuration.
 
-## versioned-document [planned]
+A fourth landed with milestone 1: `[done]` **`cc::load_bytes_le` / `cc::store_bytes_le`** and their `_be` twins, in `clean-core/common/endian.hh`.
+babel had already filed that gap with three hand-rolled copies, and the value codec would have been the fourth.
+babel's readers moved onto it in the same change, so the gap is closed rather than merely covered.
 
-### value [planned]
+## versioned-document [in progress]
+
+### value [done]
 
 The canonical binary codec: tag byte plus payload, length-prefixed containers, byte equality, decode-time canonicality enforcement.
-Design: [concept.md](concept.md#values). Lands in [milestone 1](todo/milestone-1.md).
+Design: [concept.md](concept.md#values). Landed in [milestone 1](todo/milestone-1.md).
 
-- `[planned]` **encode / decode / skip** over the eight kinds.
-- `[planned]` **`value_builder`** for arrays and objects, sorting object keys on build.
-- `[planned]` **debug text projection** — one-way, JSON-ish, for dumps and test failure output.
+- `[done]` **encode / decode / skip** over the eight kinds.
+- `[done]` **`value_builder`** for arrays and objects, sorting object keys on build.
+- `[done]` **debug text projection** — one-way, JSON-ish, for dumps and test failure output.
 
 ### ids, ops and the DAG [planned]
 

@@ -3,7 +3,7 @@
 Documentation hub for versioned-document — structured documents that are versioned, mergeable and verifiable (namespace `vdoc`).
 Start at the [readme](../readme.md) for the overview, and the [cheat-sheet](../cheat-sheet.md) for the planned API at a glance.
 
-The library is at the **design stage**: the concept is complete and nothing is implemented.
+The concept is complete and the **value codec** is built; the layers above it are not.
 
 ## Topics
 

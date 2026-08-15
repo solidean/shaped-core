@@ -76,6 +76,9 @@ Ids are interned in memory, so comparison and hashing are cheap on hot paths and
 A value is a **canonically-encoded, self-describing byte sequence**.
 Not a tree of nodes, not a variant of owning types, not JSON.
 
+This codec is not frozen: a general-purpose any-value format landing elsewhere could replace it, which would break the on-disk format rather than refactor it.
+See [decisions.md](decisions.md#the-codec-starts-in-vdoc-not-in-clean-core) for what that would and would not promise.
+
 ```text
 value := tag byte | payload
 ```
@@ -90,6 +93,9 @@ value := tag byte | payload
 | `bytes`   | `u32` byte length, then the bytes |
 | `array`   | `u32` payload byte length, `u32` element count, then the elements back to back |
 | `object`  | `u32` payload byte length, `u32` entry count, then entries; an entry is a `u32` key length, the key bytes, then the value |
+
+A length prefix counts **the bytes that follow it** — the data for `string` and `bytes`, the count field plus the entries for `array` and `object`.
+One meaning across all four kinds makes skipping a single rule, `5 + prefix`, whatever the tag — see [decisions.md](decisions.md#a-length-prefix-counts-the-bytes-that-follow-it).
 
 The container length prefixes exist so that **skipping a subtree is O(1)**, which is what makes reading one field of a large value cheap and comparing two values a length check followed by a memcmp.
 
@@ -121,6 +127,8 @@ Decoding also enforces a maximum nesting depth, so a hostile or corrupt input ca
 - **No float canonicalization.** `NaN` payloads and the two zeroes are stored as written, and two `NaN`s with different payloads are different values.
   An application that cares normalizes before writing, and doing it here would mean rewriting a caller's number behind their back.
 - **No shortest-form integers.** An integer is 8 bytes, always, so there is one encoding because there is one width.
+- **No UTF-8 validation.** Canonicality is structural, and byte equality does not care whether the bytes are text.
+  `string` says what the application means by the bytes; validating that is the application's job, exactly like float normalization — see [decisions.md](decisions.md#decoding-does-not-validate-utf-8).
 - **No hash or reference type.** Asset references are ordinary strings — see [Assets are loosely coupled](#assets-are-loosely-coupled-by-design).
 - **No round-trip obligation to JSON.** The library can *print* a value as JSON-ish text for a human, and that is a one-way debugging projection.
   JSON is the display metaphor for the model, never its storage.

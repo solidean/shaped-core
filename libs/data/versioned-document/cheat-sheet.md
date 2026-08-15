@@ -3,10 +3,9 @@
 Structured documents that are versioned, mergeable and verifiable.
 Namespace `vdoc`. Depends on clean-core only.
 
-> **Everything on this sheet is `[planned]`.**
-> Nothing here compiles today — the library is at the design stage, and only `fwd.hh` exists.
-> This sheet is the intended API surface, kept next to the design so the two are written together; the design itself is [docs/concept.md](docs/concept.md).
-> Entries move from `[planned]` to real as the [milestones](docs/todo/_index.md) land, and this banner goes when the last one does.
+> **The value codec is real; everything else on this sheet is `[planned]`.**
+> A `[planned]` section is the intended API surface, kept next to the design so the two are written together; the design itself is [docs/concept.md](docs/concept.md).
+> Entries lose their `[planned]` marking as the [milestones](docs/todo/_index.md) land, and this banner goes when the last one does.
 
 ## The flow
 
@@ -21,22 +20,40 @@ typed component edit                    op_builder{}.set(entity, comp)
 Editing needs only an `op_graph`.
 No "current head" is stored anywhere — parents are passed explicitly, which is what makes the whole edit path testable in isolation.
 
-## Values — `[planned]`
+## Values
 
 A canonically-encoded byte sequence: a tag byte plus its payload.
 Equality and hashing are over the bytes, and nothing else.
 
+> **Not frozen.** A general-purpose any-value format landing elsewhere could replace this one, which would break the `.vdoc` format rather than refactor it.
+> A migration may or may not be provided — shaped-core is still in "can break" mode.
+> See [decisions.md](docs/decisions.md#the-codec-starts-in-vdoc-not-in-clean-core).
+
 ```cpp
-auto const v = vdoc::value::of(42);              // integer
-auto const s = vdoc::value::of("wall");          // string
+#include <versioned-document/value.hh>
+#include <versioned-document/value_builder.hh>
+#include <versioned-document/value_debug.hh>
+
+auto const v = vdoc::value::of(42);              // integer; also bool / any integer / f32 / f64 / string
+auto const b = vdoc::value::of_bytes(span);      // the byte-string kind; of_null() for null
 auto const p = vdoc::value_builder::array()      // [1.0, 2.0, 3.0]
                    .push(1.0).push(2.0).push(3.0)
                    .build();
+auto const o = vdoc::value_builder::object()     // nesting is by COMPOSITION: build a sub-value, then set it
+                   .set("name", "wall").set("p", p)
+                   .build();                     // sorts keys; try_build() -> result<value, value_build_error>
 
 v.kind();                                        // vdoc::value_kind::integer
-v.as_i64();                                      // 42
+v.as_i64();                                      // 42 — as_bool / as_f64 / as_string / as_bytes; wrong kind ASSERTS
 v.bytes();                                       // cc::span<byte const> — the canonical encoding
-a == b;                                          // byte equality; there is no structural compare
+a == b;  hash(a);                                // byte equality and a byte hash; there is no structural compare
+
+o.size();  o.key_at(i);  o.element_at(i);        // element_at WALKS: O(i), not O(1)
+o.try_find("name");                              // cc::optional<value_view>; linear scan, early-exits on sorted keys
+
+vdoc::try_decode(bytes);                         // result<value_view, value_decode_error> — the ONLY route from bytes
+vdoc::skip_value(bytes);  vdoc::encoded_size(bytes);  // walk a buffer of adjacent values; input must be validated
+vdoc::to_debug_string(v);                        // one-way JSON-ish text; NOTHING may parse it back
 ```
 
 | kind | payload |
@@ -50,10 +67,17 @@ a == b;                                          // byte equality; there is no s
 | `array` | u32 payload length + u32 count + elements |
 | `object` | u32 payload length + u32 count + entries, keys sorted |
 
+A length prefix always counts **the bytes that follow it**, so skipping any length-prefixed kind is `5 + prefix`.
+
 Gotchas:
 
-- **Decoding rejects non-canonical input.** Unsorted object keys, duplicate keys, a `boolean` payload of 2 — all decode errors, because tolerating them would break byte equality.
-- **Float canonicalization is yours.** `NaN` payloads and `-0.0` are stored as written.
+- **`try_decode` is the only route from bytes.** Everything else assumes bytes that already passed it, and asserts rather than validates.
+- **Decoding rejects non-canonical input**, because tolerating it would break byte equality.
+  Structural errors: a `boolean` payload of 2, a length prefix that disagrees with its contents, trailing bytes, nesting past `value_view::max_depth` (64).
+  Ordering errors: object keys that are unsorted or duplicated.
+- **UTF-8 is not validated.** The canonicality rules are structural; `string` and `bytes` differ in intent, not in what the decoder checks.
+- **Float canonicalization is yours.** `NaN` payloads and `-0.0` are stored as written, so two `NaN`s with different payloads are different values.
+- **A value under 36 bytes does not allocate**, which is nearly all of them; past that it is heap-backed and merely slower.
 - **Bulk data is not a value.** A mesh or a texture is a blob, referenced by an asset id string.
 
 ## Identity — `[planned]`

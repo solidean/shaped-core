@@ -147,6 +147,16 @@ A `cc::value` designed for one speculative second user would be worse for both.
 **Reopen when:** a genuine second user appears.
 Then promote it, informed by two real sets of requirements instead of one and a guess.
 
+**And be honest about what that would cost.**
+A general-purpose any-value format would very likely not be byte-compatible with this one.
+So replacing `vdoc::value` would be a **breaking change to the `.vdoc` format**, not a refactor.
+Whether we would ship a migration is genuinely undecided: shaped-core is in a "can still break" mode for the foreseeable future, and nothing here promises otherwise.
+
+What we do keep is the *option*.
+The file carries a `user_version` ([format.md](../../versioned-document-file/docs/format.md#identification-and-versioning)).
+A future build can therefore tell an old encoding from a new one, and migrate in principle.
+That is a cheap door left open, not a compatibility guarantee — do not design anything on the assumption that today's value bytes will still be readable.
+
 ### No hash or reference type in the codec
 
 **Decided.** Asset references are ordinary strings.
@@ -155,6 +165,60 @@ A file is only one source of assets; built-in, procedural, remote and cached ass
 A dedicated reference type would imply the document knows how references resolve, which is precisely the coupling being avoided.
 
 **Reopen when:** nothing foreseeable.
+
+### A length prefix counts the bytes that follow it
+
+**Decided.** In all four length-prefixed kinds the `u32` prefix counts everything after itself.
+For `string` and `bytes` that is the data; for `array` and `object` it is the `u32` element count plus the entries.
+
+[concept.md](concept.md#values) left this ambiguous by saying "payload byte length" without fixing where the payload starts.
+Both readings give an O(1) skip, so the tiebreak is elsewhere.
+One meaning across all four kinds makes skipping a single rule — `5 + prefix`, whatever the tag — instead of two rules a reader has to remember apart.
+A container payload shorter than 4 is therefore invalid by construction: it could not hold its own count.
+
+**Reopen when:** never.
+This is on disk the moment a file exists.
+
+### Decoding does not validate UTF-8
+
+**Decided.** `try_decode` enforces structure, not text.
+A `string` whose bytes are not valid UTF-8 decodes.
+
+The canonicality list this format needs is the one that keeps byte equality meaningful: sorted and unique object keys, a boolean of 0 or 1, exact length prefixes, no trailing bytes, bounded depth.
+UTF-8 validity is in none of it — two values with equal bytes are equal whether or not those bytes are text.
+
+Adding the check would be a durable format rule that can never be relaxed, and it would cost a scan of every string byte on every decode.
+It would also give `string` and `bytes` different trust levels, for no gain the merge layer can use.
+What survives is the intent: `string` means the application means these bytes as text, and validating that is the application's job, exactly like float normalization.
+
+**Reopen when:** something below the application layer starts interpreting string contents.
+Nothing in the design does.
+
+### The nesting limit is 64, and it is a format constant
+
+**Decided.** `value_view::max_depth` is 64, counting the value itself as level 1.
+
+The limit exists so a corrupt or hostile input cannot drive the decoder into unbounded recursion, which means it has to be a fixed number rather than a budget.
+64 is far past anything a real component writes: a transform is two levels, a material with nested layers maybe four.
+It is also shallow enough that the decoder's recursion is trivially bounded, so the decoder stays recursive and stays checkable line by line against this document.
+
+**Reopen when:** never downward, since that would reject existing files.
+Raising it is a format change like any other.
+
+### `value_builder` has a fallible build
+
+**Decided.** `try_build()` returns `cc::result<value, value_build_error>`; `build()` asserts on the same conditions.
+
+[milestone-1.md](todo/milestone-1.md) said only that the builder "rejects a duplicate key", which an assert would also satisfy.
+An assert is wrong for the case that actually happens: an importer feeding externally-sourced key/value pairs straight into a builder.
+There a duplicate key is input to reject, not a bug to abort on.
+So the fallible form is the primitive and the asserting one is the convenience.
+
+Depth is deliberately *not* a build error.
+The builder cannot compose past `max_depth` without the decoder saying so, and a `CC_ASSERT`-gated re-decode inside `try_build` catches it in assert-enabled builds.
+That keeps an O(n·depth) walk off the release path, for a mistake no real component set can make.
+
+**Reopen when:** a caller needs the depth failure as a recoverable error rather than as a bug.
 
 ---
 

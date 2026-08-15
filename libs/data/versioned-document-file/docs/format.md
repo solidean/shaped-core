@@ -62,6 +62,10 @@ The compatibility rules:
 - **Unknown tables are ignored**, and reported as a load issue, since a newer build may have added state this one does not need.
 - **Unknown columns are ignored**, and preserved: a rewrite must never drop a column it did not understand.
 
+`user_version` also covers the **value encoding**, not just the table shapes.
+If `vdoc::value` is ever replaced by a general-purpose any-value format, that is a format break, and this is the field that lets a future build tell the two apart and migrate in principle.
+Whether a migration is written is undecided — see [decisions.md](../../versioned-document/docs/decisions.md#the-codec-starts-in-vdoc-not-in-clean-core).
+
 ---
 
 ## Schema

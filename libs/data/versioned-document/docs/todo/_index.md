@@ -26,7 +26,7 @@ Within a milestone, the work items are roughly ordered but need not be done in s
 | # | Milestone | Where |
 |---|-----------|-------|
 | 0 | [Prerequisites](milestone-0.md) **[done]** — `cc::blake3`, `cc::interned_string`, `babel::sqlite` additions | clean-core, extern, babel-serializer |
-| 1 | [The value codec](milestone-1.md) — canonical binary values, byte equality | versioned-document |
+| 1 | [The value codec](milestone-1.md) **[done]** — canonical binary values, byte equality | versioned-document |
 | 2 | [Ids, ops and the DAG](milestone-2.md) — content addressing, materialization, multi-values | versioned-document |
 | 3 | [Raw and typed documents](milestone-3.md) — interpretation, the immutable index | versioned-document |
 | 4 | [The file](milestone-4.md) — schema, load, publish, workspace, the actor | versioned-document-file |
