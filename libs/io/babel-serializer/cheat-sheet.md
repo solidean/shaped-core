@@ -219,12 +219,21 @@ Full read/write.
 bool ok = babel::sqlite::is_available();  // false if the backend wasn't compiled in (fetch-on-demand)
 
 // open: file (create if missing) / existing file read-only / :memory: / a serialized byte image
-cc::result<babel::sqlite::database> babel::sqlite::database::open(cc::string_view path);
-cc::result<babel::sqlite::database> babel::sqlite::database::open_readonly(cc::string_view path);
-cc::result<babel::sqlite::database> babel::sqlite::database::open_memory();
-cc::result<babel::sqlite::database> babel::sqlite::database::open_blob(cc::span<cc::byte const> bytes);
+cc::result<babel::sqlite::database, babel::sqlite::error> babel::sqlite::database::open(cc::string_view path);
+cc::result<babel::sqlite::database, babel::sqlite::error> babel::sqlite::database::open_readonly(cc::string_view path);
+cc::result<babel::sqlite::database, babel::sqlite::error> babel::sqlite::database::open_memory();
+cc::result<babel::sqlite::database, babel::sqlite::error> babel::sqlite::database::open_blob(cc::span<cc::byte const> bytes);
 
 auto db = babel::sqlite::database::open_memory().value(); // move-only; closes the handle on destruction
+```
+
+```cpp
+// every call reports babel::sqlite::error — a code, SQLite's own result code, and the message
+struct babel::sqlite::error { error_code code; i32 native_code; cc::string message; };
+// unknown / backend_missing / not_a_database / corrupt / busy / cannot_open / read_only / io_error / constraint / full / misuse
+e.code == babel::sqlite::error_code::busy;  // branch on the code; never match on message text
+// copyable, unlike cc::any_error — a caller can latch the first failure and still read it later
+// converts implicitly into cc::result<T, cc::any_error>, so a caller that ignores the code loses nothing
 ```
 
 ```cpp
@@ -249,7 +258,7 @@ for (auto row : stmt)            // single-pass range-for over result rows
     babel::sqlite::column_kind k = row.column_type(0); // null / integer / real / text / blob
 }
 if (!stmt.is_ok())               // a step error ends the loop silently; read it afterwards
-    use(stmt.error());
+    use(stmt.last_error());      // sqlite::error const& — named last_error so it doesn't hide the type
 
 stmt.reset();                    // re-execute (keeps bound parameters); clear_bindings() resets them to NULL
 ```
@@ -261,6 +270,12 @@ db.get_journal_mode();                                    // -> result<journal_m
 db.set_busy_timeout(250);                                 // ms a blocked write waits; 0 = do not wait
 db.set_foreign_keys(true);                                // SQLite defaults this OFF — ON DELETE CASCADE needs it
 db.get_foreign_keys();                                    // -> result<bool>
+
+// the two file-header fields the application owns; both survive a reopen and live outside any table
+db.set_application_id(0x56444F43);  // whose file this is, to anything inspecting it; SQLite never reads it
+db.get_application_id();            // -> result<i32>; 0 on a database nobody has stamped
+db.set_user_version(1);             // the format version
+db.get_user_version();              // -> result<i32>; reading it is the FIRST page read, so not_a_database surfaces here
 ```
 
 ```cpp

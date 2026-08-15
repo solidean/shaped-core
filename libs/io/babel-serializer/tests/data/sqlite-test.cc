@@ -2,6 +2,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/file_path.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -435,6 +436,121 @@ TEST("sqlite - journal mode is reported back, not assumed")
     CHECK(db.set_busy_timeout(250).has_value());
 }
 
+TEST("sqlite - a failure carries a code, not just a message")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    // Junk handed to open_blob is taken as a database image, but nothing is parsed until a page is read.
+    // So the situation surfaces at the first read rather than at the open — which is why a caller that must
+    // distinguish "not ours" from "damaged" reads a header pragma first instead of trusting a successful open.
+    byte junk[64] = {};
+    for (isize i = 0; i < isize(sizeof(junk)); ++i)
+        junk[i] = byte('x');
+    auto opened = sql::database::open_blob(junk);
+    REQUIRE(opened.has_value());
+    auto junk_db = cc::move(opened.value());
+
+    auto const first_read = junk_db.get_user_version();
+    REQUIRE(first_read.has_error());
+    CHECK(first_read.error().code == sql::error_code::not_a_database);
+    CHECK(first_read.error().native_code != 0);
+    CHECK(!first_read.error().message.empty());
+
+    auto db = make_people();
+
+    // A UNIQUE violation is a constraint, and a caller retries or reports it rather than treating it as corruption.
+    auto const duplicate = db.exec("INSERT INTO people(id, name) VALUES (1, 'ada')");
+    REQUIRE(duplicate.has_error());
+    CHECK(duplicate.error().code == sql::error_code::constraint);
+
+    // Bad SQL is the caller's bug, and lands in one bucket with the other caller-side mistakes.
+    CHECK(db.prepare("SELECT FROM WHERE nonsense").error().code == sql::error_code::misuse);
+    CHECK(db.query("SELECT * FROM no_such_table").error().code == sql::error_code::misuse);
+
+    // A missing file is a distinct situation from a damaged one.
+    CHECK(sql::database::open_readonly("./does-not-exist-shaped.sqlite").error().code == sql::error_code::cannot_open);
+}
+
+TEST("sqlite - a lock another connection holds reports busy")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    // Two connections need a real file: an in-memory database is never shared.
+    auto const path = cc::temp_file_path("babel-sqlite-busy", ".sqlite");
+
+    {
+        auto writer_r = sql::database::open(path);
+        REQUIRE(writer_r.has_value());
+        auto writer = cc::move(writer_r.value());
+        REQUIRE(writer.exec("CREATE TABLE t(id INTEGER PRIMARY KEY)").has_value());
+
+        auto other_r = sql::database::open(path);
+        REQUIRE(other_r.has_value());
+        auto other = cc::move(other_r.value());
+        REQUIRE(other.set_busy_timeout(0).has_value()); // do not wait, so the test is not a sleep
+
+        auto held = writer.begin_transaction();
+        REQUIRE(held.has_value());
+        REQUIRE(writer.exec("INSERT INTO t(id) VALUES (1)").has_value()); // takes the write lock
+
+        auto const blocked = other.exec("INSERT INTO t(id) VALUES (2)");
+        REQUIRE(blocked.has_error());
+        CHECK(blocked.error().code == sql::error_code::busy);
+    }
+
+    CHECK(cc::remove_file(path));
+}
+
+TEST("sqlite - application_id and user_version survive a reopen")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    auto const path = cc::temp_file_path("babel-sqlite-header", ".sqlite");
+    constexpr i32 vdoc_application_id = 0x56444F43; // 'VDOC', the .vdoc format's own stamp
+
+    {
+        auto created_r = sql::database::open(path);
+        REQUIRE(created_r.has_value());
+        auto created = cc::move(created_r.value());
+
+        // A database nobody has stamped reads as zero on both fields, which is how a fresh file is recognized.
+        REQUIRE(created.get_application_id().has_value());
+        CHECK(created.get_application_id().value() == 0);
+        REQUIRE(created.get_user_version().has_value());
+        CHECK(created.get_user_version().value() == 0);
+
+        REQUIRE(created.set_application_id(vdoc_application_id).has_value());
+        REQUIRE(created.set_user_version(7).has_value());
+        REQUIRE(created.exec("CREATE TABLE t(id INTEGER PRIMARY KEY)").has_value());
+    }
+
+    {
+        // Both live in the file header rather than in a table, so they come back without anything being read.
+        auto reopened_r = sql::database::open(path);
+        REQUIRE(reopened_r.has_value());
+        auto reopened = cc::move(reopened_r.value());
+
+        REQUIRE(reopened.get_application_id().has_value());
+        CHECK(reopened.get_application_id().value() == vdoc_application_id);
+        REQUIRE(reopened.get_user_version().has_value());
+        CHECK(reopened.get_user_version().value() == 7);
+    }
+
+    CHECK(cc::remove_file(path));
+}
+
 TEST("sqlite - availability contract holds in both build modes")
 {
     // Whether the backend was compiled in decides success vs. a runtime error, never a missing symbol or a crash.
@@ -460,6 +576,14 @@ TEST("sqlite - availability contract holds in both build modes")
         CHECK(db.set_busy_timeout(0).has_error());
         CHECK(db.set_foreign_keys(true).has_error());
         CHECK(db.get_foreign_keys().has_error());
+        CHECK(db.get_application_id().has_error());
+        CHECK(db.set_application_id(1).has_error());
+        CHECK(db.get_user_version().has_error());
+        CHECK(db.set_user_version(1).has_error());
+
+        // Absent-backend failures are the one situation SQLite was never asked about, so they say so.
+        CHECK(db.get_user_version().error().code == sql::error_code::backend_missing);
+        CHECK(db.get_user_version().error().native_code == 0);
 
         auto handle = sql::blob_handle();
         CHECK(handle.size() == 0);

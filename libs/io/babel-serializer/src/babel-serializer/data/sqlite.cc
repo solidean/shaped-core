@@ -22,10 +22,58 @@ namespace babel::sqlite
 {
 namespace
 {
-/// Build a "sqlite error (<code>): <message>" string from a connection's last error.
-cc::string last_error(sqlite3* db)
+/// Classify a SQLite result code into the handful of situations a caller responds to differently.
+/// The primary code is what is switched on: the extended bits refine a reason without changing the response.
+error_code code_of(int rc)
 {
-    return cc::format("sqlite error ({}): {}", sqlite3_errcode(db), sqlite3_errmsg(db));
+    switch (rc & 0xFF)
+    {
+    case SQLITE_NOTADB:
+        return error_code::not_a_database;
+    case SQLITE_CORRUPT:
+        return error_code::corrupt;
+    case SQLITE_BUSY:
+    case SQLITE_LOCKED:
+        return error_code::busy;
+    case SQLITE_CANTOPEN:
+        return error_code::cannot_open;
+    case SQLITE_READONLY:
+        return error_code::read_only;
+    case SQLITE_IOERR:
+        return error_code::io_error;
+    case SQLITE_CONSTRAINT:
+        return error_code::constraint;
+    case SQLITE_FULL:
+    case SQLITE_TOOBIG:
+        return error_code::full;
+    case SQLITE_ERROR:
+    case SQLITE_MISUSE:
+    case SQLITE_RANGE:
+        return error_code::misuse;
+    default:
+        return error_code::unknown;
+    }
+}
+
+/// Build an error from a connection's last failure.
+error error_of(sqlite3* db)
+{
+    int const rc = sqlite3_errcode(db);
+    return {.code = code_of(rc),
+            .native_code = i32(sqlite3_extended_errcode(db)),
+            .message = cc::format("sqlite error ({}): {}", rc, sqlite3_errmsg(db))};
+}
+
+/// Build an error from a result code the connection cannot be asked about — an open that handed back no handle, or an exec with its own message.
+error error_from(int rc, cc::string message)
+{
+    return {.code = code_of(rc), .native_code = i32(rc), .message = cc::move(message)};
+}
+
+/// An error our own checks raise, which SQLite was never asked about.
+error misuse_error(cc::string message)
+{
+    return {.code = error_code::misuse, .native_code = 0, .message = cc::move(message)};
 }
 
 /// The database handle a statement was prepared against — used to read its last error.
@@ -56,12 +104,12 @@ char const* sql_name_of(journal_mode mode)
 }
 
 /// Runs a PRAGMA that reports one integer, e.g. `PRAGMA foreign_keys`.
-cc::result<i64> pragma_i64(sqlite3* db, cc::string_view sql)
+cc::result<i64, error> pragma_i64(sqlite3* db, cc::string_view sql)
 {
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql.data(), int(sql.size()), &stmt, nullptr) != SQLITE_OK)
     {
-        auto msg = last_error(db);
+        auto msg = error_of(db);
         sqlite3_finalize(stmt);
         return cc::error(cc::move(msg));
     }
@@ -73,17 +121,17 @@ cc::result<i64> pragma_i64(sqlite3* db, cc::string_view sql)
     sqlite3_finalize(stmt);
 
     if (rc != SQLITE_ROW && rc != SQLITE_DONE)
-        return cc::error(last_error(db));
+        return cc::error(error_of(db));
     return value;
 }
 
 /// Runs a PRAGMA that reports one text value, copied out before the statement dies.
-cc::result<cc::string> pragma_text(sqlite3* db, cc::string_view sql)
+cc::result<cc::string, error> pragma_text(sqlite3* db, cc::string_view sql)
 {
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql.data(), int(sql.size()), &stmt, nullptr) != SQLITE_OK)
     {
-        auto msg = last_error(db);
+        auto msg = error_of(db);
         sqlite3_finalize(stmt);
         return cc::error(cc::move(msg));
     }
@@ -100,7 +148,7 @@ cc::result<cc::string> pragma_text(sqlite3* db, cc::string_view sql)
     sqlite3_finalize(stmt);
 
     if (rc != SQLITE_ROW && rc != SQLITE_DONE)
-        return cc::error(last_error(db));
+        return cc::error(error_of(db));
     return value;
 }
 } // namespace
@@ -108,16 +156,17 @@ cc::result<cc::string> pragma_text(sqlite3* db, cc::string_view sql)
 // database
 // -------------------------------------------------------------------------------------------------
 
-cc::result<database> database::open_with_flags(cc::string_view path, int flags)
+cc::result<database, error> database::open_with_flags(cc::string_view path, int flags)
 {
     auto c_path = cc::string::create_copy_of(path);
     sqlite3* db = nullptr;
     int const rc = sqlite3_open_v2(c_path.c_str_materialize(), &db, flags, nullptr);
     if (rc != SQLITE_OK)
     {
-        auto msg = db != nullptr ? last_error(db) : cc::format("sqlite error ({}): could not open database", rc);
+        auto e = db != nullptr ? error_of(db)
+                               : error_from(rc, cc::format("sqlite error ({}): could not open database", rc));
         sqlite3_close_v2(db); // sqlite3_open_v2 may hand back a handle even on failure
-        return cc::error(cc::move(msg));
+        return cc::error(cc::move(e));
     }
     return database(db);
 }
@@ -145,20 +194,20 @@ database& database::operator=(database&& other) noexcept
     return *this;
 }
 
-cc::result<database> database::open(cc::string_view path)
+cc::result<database, error> database::open(cc::string_view path)
 {
     return open_with_flags(path, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
 }
-cc::result<database> database::open_readonly(cc::string_view path)
+cc::result<database, error> database::open_readonly(cc::string_view path)
 {
     return open_with_flags(path, SQLITE_OPEN_READONLY);
 }
-cc::result<database> database::open_memory()
+cc::result<database, error> database::open_memory()
 {
     return open_with_flags(":memory:", SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
 }
 
-cc::result<database> database::open_blob(cc::span<byte const> bytes)
+cc::result<database, error> database::open_blob(cc::span<byte const> bytes)
 {
     auto opened = open_memory();
     if (opened.has_error())
@@ -169,47 +218,48 @@ cc::result<database> database::open_blob(cc::span<byte const> bytes)
     auto const n = bytes.size();
     auto* buffer = static_cast<unsigned char*>(sqlite3_malloc64(sqlite3_uint64(n > 0 ? n : 1)));
     if (buffer == nullptr)
-        return cc::error(cc::string("sqlite error: out of memory allocating the deserialize buffer"));
+        return cc::error(error_from(SQLITE_NOMEM, cc::string("sqlite error: out of memory allocating the deserialize "
+                                                             "buffer")));
     if (n > 0)
         cc::memcpy(buffer, bytes.data(), size_t(n));
 
     int const rc = sqlite3_deserialize(db._db, "main", buffer, sqlite3_int64(n), sqlite3_int64(n),
                                        SQLITE_DESERIALIZE_FREEONCLOSE | SQLITE_DESERIALIZE_RESIZEABLE);
     if (rc != SQLITE_OK)
-        return cc::error(last_error(db._db)); // FREEONCLOSE means SQLite already freed the buffer on failure
+        return cc::error(error_of(db._db)); // FREEONCLOSE means SQLite already freed the buffer on failure
     return db;
 }
 
-cc::result<cc::unit> database::exec(cc::string_view sql)
+cc::result<cc::unit, error> database::exec(cc::string_view sql)
 {
     auto c_sql = cc::string::create_copy_of(sql);
     char* errmsg = nullptr;
     int const rc = sqlite3_exec(_db, c_sql.c_str_materialize(), nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK)
     {
-        auto msg = errmsg != nullptr ? cc::format("sqlite error ({}): {}", rc, errmsg) : last_error(_db);
+        auto e = errmsg != nullptr ? error_from(rc, cc::format("sqlite error ({}): {}", rc, errmsg)) : error_of(_db);
         sqlite3_free(errmsg);
-        return cc::error(cc::move(msg));
+        return cc::error(cc::move(e));
     }
     return cc::unit{};
 }
 
-cc::result<statement> database::prepare(cc::string_view sql)
+cc::result<statement, error> database::prepare(cc::string_view sql)
 {
     sqlite3_stmt* stmt = nullptr;
     int const rc = sqlite3_prepare_v2(_db, sql.data(), int(sql.size()), &stmt, nullptr);
     if (rc != SQLITE_OK)
     {
-        auto msg = last_error(_db);
+        auto msg = error_of(_db);
         sqlite3_finalize(stmt); // typically null on error, but finalize is null-safe
         return cc::error(cc::move(msg));
     }
     if (stmt == nullptr) // empty / whitespace / comment-only SQL compiles to no statement
-        return cc::error(cc::string("sqlite error: SQL contained no statement to prepare"));
+        return cc::error(misuse_error(cc::string("sqlite error: SQL contained no statement to prepare")));
     return statement(stmt);
 }
 
-cc::result<blob_handle> database::open_blob_handle(blob_location where)
+cc::result<blob_handle, error> database::open_blob_handle(blob_location where)
 {
     auto c_db = cc::string::create_copy_of(where.db_name);
     auto c_table = cc::string::create_copy_of(where.table);
@@ -220,25 +270,25 @@ cc::result<blob_handle> database::open_blob_handle(blob_location where)
                                      c_column.c_str_materialize(), where.rowid, /*writable*/ 0, &blob);
     if (rc != SQLITE_OK)
     {
-        auto msg = last_error(_db);
+        auto msg = error_of(_db);
         sqlite3_blob_close(blob); // null on failure, but close is null-safe
         return cc::error(cc::move(msg));
     }
     return blob_handle(blob, _db);
 }
 
-cc::result<transaction> database::begin_transaction()
+cc::result<transaction, error> database::begin_transaction()
 {
     CC_RETURN_IF_ERROR(exec("BEGIN"));
     return transaction(_db);
 }
 
-cc::result<cc::unit> database::set_journal_mode(journal_mode mode)
+cc::result<cc::unit, error> database::set_journal_mode(journal_mode mode)
 {
     return exec(cc::format("PRAGMA journal_mode = {}", sql_name_of(mode)));
 }
 
-cc::result<journal_mode> database::get_journal_mode()
+cc::result<journal_mode, error> database::get_journal_mode()
 {
     auto reported = pragma_text(_db, "PRAGMA journal_mode");
     CC_RETURN_IF_ERROR(reported);
@@ -248,26 +298,51 @@ cc::result<journal_mode> database::get_journal_mode()
         if (reported.value() == cc::string_view(sql_name_of(mode)))
             return mode;
 
-    return cc::error(cc::format("sqlite: unknown journal mode '{}'", reported.value()));
+    return cc::error(misuse_error(cc::format("sqlite: unknown journal mode '{}'", reported.value())));
 }
 
-cc::result<cc::unit> database::set_busy_timeout(i32 milliseconds)
+cc::result<cc::unit, error> database::set_busy_timeout(i32 milliseconds)
 {
     if (sqlite3_busy_timeout(_db, milliseconds) != SQLITE_OK)
-        return cc::error(last_error(_db));
+        return cc::error(error_of(_db));
     return cc::unit{};
 }
 
-cc::result<cc::unit> database::set_foreign_keys(bool enabled)
+cc::result<cc::unit, error> database::set_foreign_keys(bool enabled)
 {
     return exec(enabled ? "PRAGMA foreign_keys = ON" : "PRAGMA foreign_keys = OFF");
 }
 
-cc::result<bool> database::get_foreign_keys()
+cc::result<bool, error> database::get_foreign_keys()
 {
     auto reported = pragma_i64(_db, "PRAGMA foreign_keys");
     CC_RETURN_IF_ERROR(reported);
     return reported.value() != 0;
+}
+
+cc::result<i32, error> database::get_application_id()
+{
+    auto reported = pragma_i64(_db, "PRAGMA application_id");
+    CC_RETURN_IF_ERROR(reported);
+    return i32(reported.value());
+}
+
+cc::result<cc::unit, error> database::set_application_id(i32 id)
+{
+    // A PRAGMA value cannot be bound, and this one is an integer we produce rather than caller text.
+    return exec(cc::format("PRAGMA application_id = {}", id));
+}
+
+cc::result<i32, error> database::get_user_version()
+{
+    auto reported = pragma_i64(_db, "PRAGMA user_version");
+    CC_RETURN_IF_ERROR(reported);
+    return i32(reported.value());
+}
+
+cc::result<cc::unit, error> database::set_user_version(i32 version)
+{
+    return exec(cc::format("PRAGMA user_version = {}", version));
 }
 
 cc::vector<byte> database::serialize() const
@@ -320,58 +395,58 @@ statement& statement::operator=(statement&& other) noexcept
     return *this;
 }
 
-cc::result<cc::unit> statement::bind(i32 index, i64 value)
+cc::result<cc::unit, error> statement::bind(i32 index, i64 value)
 {
     if (sqlite3_bind_int64(_stmt, index, value) != SQLITE_OK)
-        return cc::error(last_error(handle_of(_stmt)));
+        return cc::error(error_of(handle_of(_stmt)));
     return cc::unit{};
 }
 
-cc::result<cc::unit> statement::bind(i32 index, double value)
+cc::result<cc::unit, error> statement::bind(i32 index, double value)
 {
     if (sqlite3_bind_double(_stmt, index, value) != SQLITE_OK)
-        return cc::error(last_error(handle_of(_stmt)));
+        return cc::error(error_of(handle_of(_stmt)));
     return cc::unit{};
 }
 
-cc::result<cc::unit> statement::bind(i32 index, cc::string_view value)
+cc::result<cc::unit, error> statement::bind(i32 index, cc::string_view value)
 {
     if (sqlite3_bind_text(_stmt, index, value.data(), int(value.size()), SQLITE_TRANSIENT) != SQLITE_OK)
-        return cc::error(last_error(handle_of(_stmt)));
+        return cc::error(error_of(handle_of(_stmt)));
     return cc::unit{};
 }
 
-cc::result<cc::unit> statement::bind(i32 index, cc::span<byte const> value)
+cc::result<cc::unit, error> statement::bind(i32 index, cc::span<byte const> value)
 {
     if (sqlite3_bind_blob(_stmt, index, value.data(), int(value.size_bytes()), SQLITE_TRANSIENT) != SQLITE_OK)
-        return cc::error(last_error(handle_of(_stmt)));
+        return cc::error(error_of(handle_of(_stmt)));
     return cc::unit{};
 }
 
-cc::result<cc::unit> statement::bind_null(i32 index)
+cc::result<cc::unit, error> statement::bind_null(i32 index)
 {
     if (sqlite3_bind_null(_stmt, index) != SQLITE_OK)
-        return cc::error(last_error(handle_of(_stmt)));
+        return cc::error(error_of(handle_of(_stmt)));
     return cc::unit{};
 }
 
-cc::result<bool> statement::next()
+cc::result<bool, error> statement::next()
 {
     int const rc = sqlite3_step(_stmt);
     if (rc == SQLITE_ROW)
         return true;
     if (rc == SQLITE_DONE)
         return false;
-    return cc::error(last_error(handle_of(_stmt)));
+    return cc::error(error_of(handle_of(_stmt)));
 }
 
-cc::result<cc::unit> statement::reset()
+cc::result<cc::unit, error> statement::reset()
 {
     _at_end = false;
     _ok = true;
     _error = {};
     if (sqlite3_reset(_stmt) != SQLITE_OK)
-        return cc::error(last_error(handle_of(_stmt)));
+        return cc::error(error_of(handle_of(_stmt)));
     return cc::unit{};
 }
 
@@ -392,7 +467,7 @@ void statement::_advance()
     if (rc != SQLITE_DONE)
     {
         _ok = false;
-        _error = last_error(handle_of(_stmt));
+        _error = error_of(handle_of(_stmt));
     }
 }
 
@@ -437,32 +512,32 @@ isize blob_handle::size() const
     return _blob != nullptr ? isize(sqlite3_blob_bytes(_blob)) : 0;
 }
 
-cc::result<cc::unit> blob_handle::read_at(isize offset, cc::span<byte> out)
+cc::result<cc::unit, error> blob_handle::read_at(isize offset, cc::span<byte> out)
 {
     if (_blob == nullptr)
-        return cc::error(cc::string("sqlite error: reading from a closed blob handle"));
+        return cc::error(misuse_error(cc::string("sqlite error: reading from a closed blob handle")));
 
     // Checked here rather than left to SQLite, so the message names the range instead of reporting SQLITE_ERROR.
     auto const total = size();
     if (offset < 0 || out.size() < 0 || offset + out.size() > total)
-        return cc::error(cc::format("sqlite error: blob read [{}, {}) is outside the {}-byte value", offset,
-                                    offset + out.size(), total));
+        return cc::error(misuse_error(cc::format("sqlite error: blob read [{}, {}) is outside the {}-byte value",
+                                                 offset, offset + out.size(), total)));
 
     if (out.empty())
         return cc::unit{};
 
     if (sqlite3_blob_read(_blob, out.data(), int(out.size()), int(offset)) != SQLITE_OK)
-        return cc::error(last_error(_db));
+        return cc::error(error_of(_db));
     return cc::unit{};
 }
 
-cc::result<cc::unit> blob_handle::reopen(i64 rowid)
+cc::result<cc::unit, error> blob_handle::reopen(i64 rowid)
 {
     if (_blob == nullptr)
-        return cc::error(cc::string("sqlite error: reopening a closed blob handle"));
+        return cc::error(misuse_error(cc::string("sqlite error: reopening a closed blob handle")));
 
     if (sqlite3_blob_reopen(_blob, rowid) != SQLITE_OK)
-        return cc::error(last_error(_db));
+        return cc::error(error_of(_db));
     return cc::unit{};
 }
 
@@ -493,19 +568,19 @@ transaction& transaction::operator=(transaction&& other) noexcept
     return *this;
 }
 
-cc::result<cc::unit> transaction::commit()
+cc::result<cc::unit, error> transaction::commit()
 {
     if (_db == nullptr)
-        return cc::error(cc::string("sqlite error: committing a transaction that is already finished"));
+        return cc::error(misuse_error(cc::string("sqlite error: committing a transaction that is already finished")));
 
     char* errmsg = nullptr;
     int const rc = sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK)
     {
         // Still live, so the destructor rolls back — a failed commit must not read as a silent success.
-        auto msg = errmsg != nullptr ? cc::format("sqlite error ({}): {}", rc, errmsg) : last_error(_db);
+        auto e = errmsg != nullptr ? error_from(rc, cc::format("sqlite error ({}): {}", rc, errmsg)) : error_of(_db);
         sqlite3_free(errmsg);
-        return cc::error(cc::move(msg));
+        return cc::error(cc::move(e));
     }
 
     _db = nullptr;
@@ -585,11 +660,14 @@ namespace babel::sqlite
 {
 namespace
 {
-// The one message every entry point reports when the backend is absent.
-cc::string unavailable()
+// The one error every entry point reports when the backend is absent.
+// backend_missing rather than a code, because no call reached SQLite for one to come back from.
+error unavailable()
 {
-    return cc::string("SQLite support was not compiled in (the extern/sqlite backend was not fetched; see "
-                      "SC_SKIP_SQLITE)");
+    return {.code = error_code::backend_missing,
+            .native_code = 0,
+            .message = cc::string("SQLite support was not compiled in (the extern/sqlite backend was not fetched; see "
+                                  "SC_SKIP_SQLITE)")};
 }
 } // namespace
 
@@ -598,56 +676,72 @@ database::~database() = default;
 database::database(database&&) noexcept = default;
 database& database::operator=(database&&) noexcept = default;
 
-cc::result<database> database::open(cc::string_view)
+cc::result<database, error> database::open(cc::string_view)
 {
     return cc::error(unavailable());
 }
-cc::result<database> database::open_readonly(cc::string_view)
+cc::result<database, error> database::open_readonly(cc::string_view)
 {
     return cc::error(unavailable());
 }
-cc::result<database> database::open_memory()
+cc::result<database, error> database::open_memory()
 {
     return cc::error(unavailable());
 }
-cc::result<database> database::open_blob(cc::span<byte const>)
+cc::result<database, error> database::open_blob(cc::span<byte const>)
 {
     return cc::error(unavailable());
 }
 
-cc::result<cc::unit> database::exec(cc::string_view)
+cc::result<cc::unit, error> database::exec(cc::string_view)
 {
     return cc::error(unavailable());
 }
-cc::result<statement> database::prepare(cc::string_view)
+cc::result<statement, error> database::prepare(cc::string_view)
 {
     return cc::error(unavailable());
 }
-cc::result<blob_handle> database::open_blob_handle(blob_location)
+cc::result<blob_handle, error> database::open_blob_handle(blob_location)
 {
     return cc::error(unavailable());
 }
-cc::result<transaction> database::begin_transaction()
+cc::result<transaction, error> database::begin_transaction()
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> database::set_journal_mode(journal_mode)
+cc::result<cc::unit, error> database::set_journal_mode(journal_mode)
 {
     return cc::error(unavailable());
 }
-cc::result<journal_mode> database::get_journal_mode()
+cc::result<journal_mode, error> database::get_journal_mode()
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> database::set_busy_timeout(i32)
+cc::result<cc::unit, error> database::set_busy_timeout(i32)
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> database::set_foreign_keys(bool)
+cc::result<cc::unit, error> database::set_foreign_keys(bool)
 {
     return cc::error(unavailable());
 }
-cc::result<bool> database::get_foreign_keys()
+cc::result<bool, error> database::get_foreign_keys()
+{
+    return cc::error(unavailable());
+}
+cc::result<i32, error> database::get_application_id()
+{
+    return cc::error(unavailable());
+}
+cc::result<cc::unit, error> database::set_application_id(i32)
+{
+    return cc::error(unavailable());
+}
+cc::result<i32, error> database::get_user_version()
+{
+    return cc::error(unavailable());
+}
+cc::result<cc::unit, error> database::set_user_version(i32)
 {
     return cc::error(unavailable());
 }
@@ -666,11 +760,11 @@ isize blob_handle::size() const
 {
     return 0;
 }
-cc::result<cc::unit> blob_handle::read_at(isize, cc::span<byte>)
+cc::result<cc::unit, error> blob_handle::read_at(isize, cc::span<byte>)
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> blob_handle::reopen(i64)
+cc::result<cc::unit, error> blob_handle::reopen(i64)
 {
     return cc::error(unavailable());
 }
@@ -679,7 +773,7 @@ transaction::~transaction() = default;
 transaction::transaction(transaction&&) noexcept = default;
 transaction& transaction::operator=(transaction&&) noexcept = default;
 
-cc::result<cc::unit> transaction::commit()
+cc::result<cc::unit, error> transaction::commit()
 {
     return cc::error(unavailable());
 }
@@ -697,32 +791,32 @@ statement::~statement() = default;
 statement::statement(statement&&) noexcept = default;
 statement& statement::operator=(statement&&) noexcept = default;
 
-cc::result<cc::unit> statement::bind(i32, i64)
+cc::result<cc::unit, error> statement::bind(i32, i64)
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> statement::bind(i32, double)
+cc::result<cc::unit, error> statement::bind(i32, double)
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> statement::bind(i32, cc::string_view)
+cc::result<cc::unit, error> statement::bind(i32, cc::string_view)
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> statement::bind(i32, cc::span<byte const>)
+cc::result<cc::unit, error> statement::bind(i32, cc::span<byte const>)
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> statement::bind_null(i32)
+cc::result<cc::unit, error> statement::bind_null(i32)
 {
     return cc::error(unavailable());
 }
 
-cc::result<bool> statement::next()
+cc::result<bool, error> statement::next()
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> statement::reset()
+cc::result<cc::unit, error> statement::reset()
 {
     return cc::error(unavailable());
 }
