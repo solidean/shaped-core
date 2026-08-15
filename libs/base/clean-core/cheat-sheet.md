@@ -631,6 +631,7 @@ cc::singlethreaded_scheduler sched;  int v = sched.blocking_get(root);  // mirro
 cc::optional<...> o = sched.try_blocking_get(root);  // st: nullopt if pumped out but not ready (see async.md
                                                      // "Multi-scheduler correctness"); pool's try_ returns result
 cc::async_worker_scope scope(sched);   // bind scheduler to this thread (blocking_get does this itself)
+cc::async_no_worker_scope unbound;     // UNbind: run foreign code without its work landing in YOUR queue
 root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump; interleave external push here
 sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)
 

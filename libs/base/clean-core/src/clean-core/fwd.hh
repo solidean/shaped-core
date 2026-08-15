@@ -269,6 +269,7 @@ struct async_node_traits;
 }
 struct async_scheduler;
 struct async_worker_scope;
+struct async_no_worker_scope;
 struct singlethreaded_scheduler;
 struct async_thread_pool;
 struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)

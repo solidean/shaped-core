@@ -206,6 +206,14 @@ That is why the default worker count is one *fewer* than the hardware concurrenc
 It has no peers, so it never publishes work and a graph's nodes cannot run concurrently however many cores sit idle.
 That is what makes the whole system testable without threads.
 
+`async_no_worker_scope` is the other direction: for its lifetime the calling thread has **no** scheduler bound.
+That is an ordinary state — a foreign thread has never had one — and the scope only makes it reachable from inside a worker.
+
+It is what a host driving foreign code inside its own graph needs.
+Left bound, a node that code schedules lands in the *host's* queue and is run later, outside the lifetime of everything its frame captured.
+Nexus unbinds around every test body for exactly that reason ([parallel-execution](../../../nexus/docs/parallel-execution.md)).
+A node created inside the scope still routes to the installed default pool, exactly as it would on a thread that never had a scheduler.
+
 For a self-contained graph, the free functions build a throwaway scheduler for you.
 The verbose names are deliberate — this is a test/debug convenience, not how real work gets scheduled:
 

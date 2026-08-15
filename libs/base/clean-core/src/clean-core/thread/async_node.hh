@@ -182,6 +182,25 @@ private:
     async_scheduler* _previous = nullptr;
 };
 
+/// RAII unbind: for its lifetime the calling thread has NO scheduler bound, whatever it had before.
+///
+/// The state it restores is an ordinary one — a foreign thread has never had a scheduler bound — so this only makes it reachable from inside a worker.
+/// It is what a host driving foreign code inside its own graph needs: work that code schedules must not land in the host's queue, to be run later, out of its owner's lifetime.
+/// A node created here still routes to the installed default pool, exactly as it would on a thread that never had a scheduler.
+struct cc::async_no_worker_scope
+{
+    async_no_worker_scope();
+    ~async_no_worker_scope();
+
+    async_no_worker_scope(async_no_worker_scope const&) = delete;
+    async_no_worker_scope(async_no_worker_scope&&) = delete;
+    async_no_worker_scope& operator=(async_no_worker_scope const&) = delete;
+    async_no_worker_scope& operator=(async_no_worker_scope&&) = delete;
+
+private:
+    async_scheduler* _previous = nullptr;
+};
+
 /// The default scheduler: a LIFO stack pumped on the calling thread, driving everything inline.
 /// No global lock, and no thread ever blocks.
 ///

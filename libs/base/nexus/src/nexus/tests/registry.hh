@@ -19,6 +19,13 @@ struct test_declaration;
 struct test_registry;
 } // namespace nx
 
+namespace nx::impl
+{
+// Where an ASYNC_TEST body deposits the graph it wants nexus to await.
+// Opaque here on purpose: this header is reached by every test TU, and only execute.cc needs to know what an async handle is.
+struct async_test_sink;
+} // namespace nx::impl
+
 struct nx::test_declaration
 {
     cc::string name;
@@ -27,6 +34,12 @@ struct nx::test_declaration
 
     // Ordinary (nullary) tests: `signature` is empty and `function` is the body.
     cc::unique_function<void()> function;
+
+    // ASYNC_TEST bodies: the body runs and hands the graph it wants awaited to the sink.
+    // `function` is left invalid; nexus/async-test.hh is the only thing that fills this in.
+    cc::unique_function<void(impl::async_test_sink&)> async_function;
+
+    [[nodiscard]] bool is_async() const { return async_function.is_valid(); }
 
     // Invocable tests (INVOCABLE_TEST): `signature` is the decayed argument-type list, the invoke_tests join key.
     // `invocable_function` runs the body with args sourced from typed_value slots, and `function` is left invalid.
@@ -66,6 +79,11 @@ struct nx::test_registry
                          config::cfg test_config,
                          cc::unique_function<void()> function,
                          cc::source_location loc = cc::source_location::current());
+
+    void add_async_declaration(cc::string name,
+                               config::cfg test_config,
+                               cc::unique_function<void(impl::async_test_sink&)> async_function,
+                               cc::source_location loc = cc::source_location::current());
 
     void add_invocable_declaration(cc::string name,
                                    config::cfg test_config,

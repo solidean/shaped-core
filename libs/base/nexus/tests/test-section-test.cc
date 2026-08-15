@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-TEST("test sections - basics")
+TEST("test sections - basics", no_scheduler)
 {
     int counter_a = 0;
     int counter_b = 0;
@@ -47,7 +47,7 @@ TEST("test sections - basics")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test sections - basics nested")
+TEST("test sections - basics nested", no_scheduler)
 {
     int counter_a = 0;
     int counter_b = 0;
@@ -89,7 +89,7 @@ TEST("test sections - basics nested")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test sections - canonical preorder + counts on a richer tree")
+TEST("test sections - canonical preorder + counts on a richer tree", no_scheduler)
 {
     int counter_root = 0;
     int counter_a = 0;
@@ -173,7 +173,7 @@ TEST("test sections - canonical preorder + counts on a richer tree")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test sections - distinct dynamic sections in a loop, preorder stable")
+TEST("test sections - distinct dynamic sections in a loop, preorder stable", no_scheduler)
 {
     int n = 4;
     int counter_root = 0;
@@ -210,7 +210,7 @@ TEST("test sections - distinct dynamic sections in a loop, preorder stable")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test sections - dynamic loop with nested subsections, preorder and counts")
+TEST("test sections - dynamic loop with nested subsections, preorder and counts", no_scheduler)
 {
     int n = 3;
     int counter_root = 0;
@@ -260,7 +260,7 @@ TEST("test sections - dynamic loop with nested subsections, preorder and counts"
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test sections - conditionally active subsections across runs (all reachable)")
+TEST("test sections - conditionally active subsections across runs (all reachable)", no_scheduler)
 {
     int counter_root = 0;
     std::vector<std::string> log;
@@ -320,7 +320,7 @@ TEST("test sections - conditionally active subsections across runs (all reachabl
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test sections - discovered-but-vanishing subsection => failure but no infinite loop")
+TEST("test sections - discovered-but-vanishing subsection => failure but no infinite loop", no_scheduler)
 {
     int visits_outer = 0;
     int visits_once = 0;
@@ -363,7 +363,7 @@ TEST("test sections - discovered-but-vanishing subsection => failure but no infi
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("test sections - duplicate sibling section names => immediate error")
+TEST("test sections - duplicate sibling section names => immediate error", no_scheduler)
 {
     int first = 0;
     int second = 0;
@@ -399,7 +399,7 @@ TEST("test sections - duplicate sibling section names => immediate error")
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("test sections - failure in one leaf still allows siblings to run")
+TEST("test sections - failure in one leaf still allows siblings to run", no_scheduler)
 {
     std::vector<std::string> log;
 
@@ -436,7 +436,7 @@ TEST("test sections - failure in one leaf still allows siblings to run")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("test sections - exception inside one leaf doesn't corrupt scheduling")
+TEST("test sections - exception inside one leaf doesn't corrupt scheduling", no_scheduler)
 {
     std::vector<std::string> log;
 
@@ -473,7 +473,7 @@ TEST("test sections - exception inside one leaf doesn't corrupt scheduling")
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("test sections - early-abort-style macro (REQUIRE) terminates path but not schedule")
+TEST("test sections - early-abort-style macro (REQUIRE) terminates path but not schedule", no_scheduler)
 {
     int after_require = 0;
     int visited_ok = 0;
@@ -508,7 +508,7 @@ TEST("test sections - early-abort-style macro (REQUIRE) terminates path but not 
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("test sections - nested conditionals with subsections active at different times")
+TEST("test sections - nested conditionals with subsections active at different times", no_scheduler)
 {
     int n = 2;
     int counter_root = 0;
@@ -562,7 +562,7 @@ TEST("test sections - nested conditionals with subsections active at different t
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test sections - leaf sections with no checks are considered failing")
+TEST("test sections - leaf sections with no checks are considered failing", no_scheduler)
 {
     int visited_empty_leaf = 0;
     int visited_valid_leaf = 0;
@@ -599,7 +599,7 @@ TEST("test sections - leaf sections with no checks are considered failing")
     CHECK(exec.count_total_checks() == 1);
 }
 
-TEST("test sections - CC_ASSERT_ALWAYS failure in root after subsections executes on all paths")
+TEST("test sections - CC_ASSERT_ALWAYS failure in root after subsections executes on all paths", no_scheduler)
 {
     int visited_a = 0;
     int visited_b = 0;
@@ -650,7 +650,7 @@ TEST("test sections - CC_ASSERT_ALWAYS failure in root after subsections execute
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("test sections - filter single top-level section")
+TEST("test sections - filter single top-level section", no_scheduler)
 {
     int counter_a = 0;
     int counter_b = 0;
@@ -695,7 +695,7 @@ TEST("test sections - filter single top-level section")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test sections - filter nested section path")
+TEST("test sections - filter nested section path", no_scheduler)
 {
     int counter_outer = 0;
     int counter_sa = 0;
@@ -756,7 +756,7 @@ TEST("test sections - filter nested section path")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test sections - filter parent section runs all children")
+TEST("test sections - filter parent section runs all children", no_scheduler)
 {
     int counter_sa = 0;
     int counter_sb = 0;
@@ -810,7 +810,7 @@ TEST("test sections - filter parent section runs all children")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test sections - filter with deeper nesting")
+TEST("test sections - filter with deeper nesting", no_scheduler)
 {
     int counter_a = 0;
     int counter_b = 0;
@@ -862,7 +862,7 @@ TEST("test sections - filter with deeper nesting")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test sections - no filter runs all sections")
+TEST("test sections - no filter runs all sections", no_scheduler)
 {
     int counter_a = 0;
     int counter_b = 0;

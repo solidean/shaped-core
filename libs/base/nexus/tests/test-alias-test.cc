@@ -68,7 +68,7 @@ TEST("aliases - setup API selects invocables by decayed signature and records al
     CHECK(reg.aliases[0].fragments[0].driver == s.find_test("driver"));
 }
 
-TEST("aliases - a filter matching an alias expands to one scoped instance")
+TEST("aliases - a filter matching an alias expands to one scoped instance", no_scheduler)
 {
     int ran_a = 0;
     int ran_b = 0;
@@ -110,7 +110,7 @@ TEST("aliases - a filter matching an alias expands to one scoped instance")
     CHECK(exec.executions[0].nested[0].instance.declaration->name == "childB");
 }
 
-TEST("aliases - a multi-fragment alias runs each fragment scoped to its own driver")
+TEST("aliases - a multi-fragment alias runs each fragment scoped to its own driver", no_scheduler)
 {
     std::vector<std::string> ran_under;
 
@@ -146,7 +146,7 @@ TEST("aliases - a multi-fragment alias runs each fragment scoped to its own driv
     CHECK(exec.executions[1].nested[0].instance.declaration->name == "shared");
 }
 
-TEST("aliases - many aliases of one driver collapse into a single scoped run")
+TEST("aliases - many aliases of one driver collapse into a single scoped run", no_scheduler)
 {
     // The "sg -" case: one backend driver, several invocables, an alias per invocable.
     // A filter matching the alias names but NOT the driver name must schedule the driver ONCE, with every matched path in its scope set, never once per alias.
@@ -243,7 +243,7 @@ TEST("aliases - a full sweep (no filter) does not expand aliases")
     CHECK(schedule.instances[0].section_scopes.empty());
 }
 
-TEST("aliases - a driver selected directly by name subsumes its alias fragments (no double run)")
+TEST("aliases - a driver selected directly by name subsumes its alias fragments (no double run)", no_scheduler)
 {
     int ran = 0;
 
@@ -269,7 +269,7 @@ TEST("aliases - a driver selected directly by name subsumes its alias fragments 
     CHECK(ran == 1); // "child" runs exactly once, not once per driver + once per fragment
 }
 
-TEST("aliases - a broad filter over drivers and aliases runs each invocable once per backend")
+TEST("aliases - a broad filter over drivers and aliases runs each invocable once per backend", no_scheduler)
 {
     int ran = 0;
 
@@ -300,7 +300,7 @@ TEST("aliases - a broad filter over drivers and aliases runs each invocable once
     CHECK(ran == 2); // once under each backend driver, never twice on the same one
 }
 
-TEST("aliases - a substring filter does not reach a manual driver through its alias")
+TEST("aliases - a substring filter does not reach a manual driver through its alias", no_scheduler)
 {
     // Aliases are filters, not a bucket escape hatch: reaching a manual driver through one of its aliases takes
     // the alias's exact name, exactly as reaching the driver directly takes the driver's. Otherwise a bare

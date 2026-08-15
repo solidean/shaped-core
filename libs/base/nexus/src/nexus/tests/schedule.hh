@@ -9,6 +9,10 @@ struct nx::test_instance
 {
     test_declaration const* declaration = nullptr;
 
+    // The registry this declaration came from, and the one nx::invoke_tests searches from inside its body.
+    // Carried per instance rather than per run: tests execute concurrently, so "the registry of the current run" cannot live in a thread-local.
+    test_registry const* registry = nullptr;
+
     // Section scopes for this instance: a set of allowed section paths, and a section or dispatched invocable runs if it matches ANY of them.
     // Empty means fall back to the run-global config.section_filters.
     // Every matched alias fragment sharing a driver is grouped into one instance's scope set, so the driver body runs exactly once however many of its aliases matched.
@@ -44,6 +48,11 @@ struct nx::test_schedule_config
     // is_eligible below applies both, and is the one place those rules live.
     nx::config::test_bucket selected_bucket = nx::config::test_bucket::normal;
     bool allow_cross_bucket_naming = false;
+    // Upper bound on how many tests may run at once, --jobs N.
+    // 1 drives them one at a time in schedule order — today's behavior, and the default until the repo has been swept at -jN.
+    // A test asking for own_pool(n) names its own width instead, and is unaffected.
+    int jobs = 1;
+
     bool is_catch2_xml_discovery = false;
     bool report_catch2_xml_results = false;
     bool verbose = false;

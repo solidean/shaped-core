@@ -27,6 +27,19 @@ TEST("bench x", nx::config::manual)      //   nx::config::manual    — never sw
 TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RNG seed
 // Multiple configs compose: TEST("x", nx::config::disabled, nx::config::seed(7)) { }
 
+// Concurrency configs — see docs/parallel-execution.md. A run is a graph of cc::async nodes, capped by --jobs.
+TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
+TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all
+TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — nothing bound; REQUIRED to nest nx::execute_tests
+TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-worker pool, shared per count
+// Exclusion is an ORDERING edge, not a lock: holders run in schedule order, which is reproducible by design.
+
+#include <nexus/async-test.hh>           // separate header: TEST pays nothing for the async templates
+ASYNC_TEST("cache - resolves a miss")    // body returns cc::shared_async<cc::unit>; nexus awaits it
+{                                        //   the returned root must be COLD — that stamp is what attributes its checks
+    return cc::make_async_lazy<cc::unit>(/* ... CHECK inside the graph lands on THIS test ... */);
+}                                        //   no SECTION inside an async body; a graph error fails the test by name
+
 // Buckets: every test is in one bucket — normal (default), manual, or guide_benchmark. A sweep selects one
 // bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
@@ -186,6 +199,8 @@ uv run dev.py test                       # build + run the whole suite
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --perf-json <file> (write recorded-metric sidecar).
+// --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency. DEFAULT IS 1, and -j1 runs
+//   them one at a time in schedule order rather than on a pool of one. See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
 //   still just a filter, so the disabled and bucket gates hold — only an exact test NAME opens those.
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,

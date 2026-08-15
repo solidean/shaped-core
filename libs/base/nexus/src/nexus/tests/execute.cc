@@ -9,10 +9,13 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
+#include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
-#include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
+#include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
+#include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/check.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/section.hh>
@@ -22,6 +25,13 @@
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
+
+/// The graph an ASYNC_TEST body hands back.
+/// Opaque to every header, so only this file ever names an async type on the declaration path.
+struct nx::impl::async_test_sink
+{
+    cc::shared_async<cc::unit> root;
+};
 
 namespace nx
 {
@@ -137,6 +147,13 @@ struct test_context
     // A check arriving later comes from work that outlived the test, and is reported as an orphan naming it — see run_test_body's leak check.
     cc::atomic<bool> is_finished = {false};
 
+    // False for an ASYNC_TEST: the section tree is replay state, and the body of an async test runs exactly once.
+    bool allows_sections = true;
+
+    // Where --verbose trace lines go: the top-level execution's buffer, shared with every context nested under it.
+    // Never null while a body runs.
+    cc::string* verbose_sink = nullptr;
+
     // the first section we close becomes the current "leaf" section
     // after a run, all checks & errors are associated to the current leaf
     test_section* leaf_section = nullptr;
@@ -160,10 +177,24 @@ struct test_duplicate_section
     cc::source_location location;
 };
 
-// Owns the running tests' contexts, innermost last, and nothing more.
-// LOOKUP goes through the ambient chain (current_context) — see impl/test_ambient.hh for why a stack read is the wrong answer once work runs off the test's own thread.
-// Held by pointer because the ambient links point INTO these contexts, and a nested test growing a vector of values would reallocate them out from under it.
-thread_local cc::vector<cc::unique_ptr<test_context>> g_context_stack;
+// Contexts whose BODY this thread is currently inside, innermost last.
+// Non-owning: ownership belongs to whoever runs the body, because a body that can suspend outlives any single stack frame.
+// Entered once per body poll rather than once per test, so a body resuming on another thread is still recognized as its own there.
+//
+// This stack answers only "is this MY body".
+// LOOKUP of which test a check belongs to goes through the ambient chain (current_context) instead.
+// impl/test_ambient.hh has why a stack read is the wrong answer once work runs off the test's own thread.
+thread_local cc::vector<test_context*> g_body_stack;
+
+/// Marks the calling thread as running `ctx`'s body for as long as it lives.
+struct scoped_body
+{
+    explicit scoped_body(test_context* ctx) { g_body_stack.push_back(ctx); }
+    ~scoped_body() { g_body_stack.remove_back(); }
+
+    scoped_body(scoped_body const&) = delete;
+    scoped_body& operator=(scoped_body const&) = delete;
+};
 
 /// The test a check reported right here belongs to, or null if there is none.
 /// Reads the ambient chain, so it is correct on a pool worker driving this test's nodes, and equally correct when this thread is driving some OTHER test's stolen node.
@@ -176,22 +207,63 @@ test_context* current_context()
 ///
 /// Finer than comparing threads, and deliberately so.
 /// A test thread sitting in blocking_get steals and polls OTHER tests' nodes, and those are not its control flow even though they are its thread.
-/// Being the innermost context on this thread's stack is exactly the condition that excludes them.
+/// Being the innermost body this thread is inside is exactly the condition that excludes them.
 bool is_own_test_body(test_context const* ctx)
 {
-    return !g_context_stack.empty() && g_context_stack.back().get() == ctx;
+    return !g_body_stack.empty() && g_body_stack.back() == ctx;
 }
 
-// Registry that nx::invoke_tests queries during the current execute_tests run (so a run over a local registry
-// dispatches within that same registry). Saved/restored around execute_tests to support nesting.
-thread_local nx::test_registry const* g_active_registry = nullptr;
+// What each thread is running right now, read by the crash-context hook report_running_test.
+//
+// One slot per thread rather than one global: with tests in parallel a single slot names whichever test wrote last, which is exactly the wrong one to blame.
+// A crash context may not allocate and may not lock, so the slots are a fixed array of raw pointer + length, claimed once per thread and never freed.
+// A thread past the slot count is simply not reported — losing a name in a crash report beats growing a table inside one.
+constexpr int max_running_test_slots = 64;
 
-// Plain globals tracking the currently running test, read by the crash-context hook report_running_test.
-// Kept as a raw pointer plus length so the hook needs no allocation and no cc::string access.
-// Updated just before each test or section runs.
-char const* g_running_test_data = nullptr;
-int g_running_test_size = 0;
-int g_running_test_section = 0;
+struct running_test_slot
+{
+    char const* name_data = nullptr;
+    int name_size = 0;
+    int section = 0;
+};
+
+running_test_slot g_running_tests[max_running_test_slots];
+cc::atomic<int> g_running_slots_claimed = {0};
+thread_local int g_running_slot = -1;
+
+/// This thread's crash-context slot, or null once the table is full.
+running_test_slot* running_test_slot_for_this_thread()
+{
+    if (g_running_slot < 0)
+        g_running_slot = g_running_slots_claimed.fetch_add(
+            1, cc::memory_order_relaxed); // may land past the end, which is the "no slot" answer below
+    if (g_running_slot >= max_running_test_slots)
+        return nullptr;
+    return &g_running_tests[g_running_slot];
+}
+
+/// Publishes what this thread is running, restoring the enclosing test's entry on the way out.
+/// Restoring is what keeps a driver named after one of its dispatched children finishes.
+struct scoped_running_test
+{
+    explicit scoped_running_test(running_test_slot* slot) : _slot(slot)
+    {
+        if (_slot != nullptr)
+            _saved = *_slot;
+    }
+    ~scoped_running_test()
+    {
+        if (_slot != nullptr)
+            *_slot = _saved;
+    }
+
+    scoped_running_test(scoped_running_test const&) = delete;
+    scoped_running_test& operator=(scoped_running_test const&) = delete;
+
+private:
+    running_test_slot* _slot = nullptr;
+    running_test_slot _saved;
+};
 
 // Checks that found no test context at all — process-global, because by definition no test owns them.
 //
@@ -259,11 +331,11 @@ bool is_section_allowed(cc::span<test_section* const> curr_section,
     return false;
 }
 
-/// Push a context and return it — the caller installs it as the ambient, which is what makes it findable.
-test_context* test_execute_begin(nx::test_execution& execution,
-                                 nx::test_schedule_config const& config,
-                                 cc::span<cc::vector<cc::string> const> section_scopes,
-                                 int filter_offset)
+/// Build a context for one execution — the caller owns it, and installs it as the ambient, which is what makes it findable.
+cc::unique_ptr<test_context> test_execute_begin(nx::test_execution& execution,
+                                                nx::test_schedule_config const& config,
+                                                cc::span<cc::vector<cc::string> const> section_scopes,
+                                                int filter_offset)
 {
     // Filled field by field rather than with a designated initializer: the off-thread spill makes test_context immovable, so it has to be built in place.
     auto owned = cc::make_unique<test_context>();
@@ -276,20 +348,24 @@ test_context* test_execute_begin(nx::test_execution& execution,
     ctx.root_section->location = execution.instance.declaration->location;
     ctx.curr_section.push_back(ctx.root_section.get());
 
-    g_context_stack.push_back(cc::move(owned));
-    return &ctx;
+    // The ambient here is still the DISPATCHING test's context — this one is installed by the caller, just after us.
+    // So a nested execution inherits its ancestor's sink, and only a top-level one owns a buffer.
+    auto const* const parent = current_context();
+    ctx.verbose_sink = parent != nullptr ? parent->verbose_sink : &execution.verbose_output;
+
+    return owned;
 }
 
-/// Finalize the innermost context into its execution and drop it.
-/// Reads the stack rather than the ambient: the scope naming this context is already gone by the time we run, precisely so nothing can look it up while it is being destroyed.
+/// Finalize `owned` into its execution and drop it.
+/// The ambient scope naming this context is already gone by the time we run, precisely so nothing can look it up while it is being destroyed.
 ///
 /// `keep_alive` is set when async work outlived the test and still carries a link naming this context.
 /// It is then kept rather than destroyed, so that work reports an orphan instead of writing into freed memory.
-void test_execute_end(bool keep_alive)
+void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
 {
-    CC_ASSERT(!g_context_stack.empty(), "should be properly balanced");
+    CC_ASSERT(owned != nullptr, "should always have a context to finalize");
 
-    auto& ctx = *g_context_stack.back();
+    auto& ctx = *owned;
     CC_ASSERT(ctx.execution != nullptr, "should always have a valid execution");
 
     // Fold in what was reported off the test's own thread.
@@ -317,8 +393,6 @@ void test_execute_end(bool keep_alive)
 
     ctx.is_finished.store(true, cc::memory_order_release);
 
-    auto owned = cc::move(g_context_stack.back());
-    g_context_stack.remove_back();
     if (keep_alive)
         g_leaked_contexts.lock([&](cc::vector<cc::unique_ptr<test_context>>& kept) { kept.push_back(cc::move(owned)); });
 }
@@ -477,6 +551,210 @@ void report_orphan_check(impl::check_result result, cc::string_view why)
         });
 }
 
+/// Install the assertion handler a test body runs under: a failing CC_ASSERT reports exactly as a failing REQUIRE does.
+auto scoped_test_assertion_handler()
+{
+    return cc::impl::scoped_assertion_handler(
+        [](cc::impl::assertion_info const& info)
+        {
+            nx::impl::report_check_result({
+                .kind = impl::check_kind::require,
+                .op = impl::cmp_op::assert_fail,
+                .expr = info.expression,
+                .passed = false,
+                .diagnostic = info.message,
+                .location = info.location,
+            });
+        });
+}
+
+/// Run one scheduled instance's body to completion, resolving its effective section scopes first.
+///
+/// Effective scopes: the instance's own grouped set (alias-expanded), else the run-global -c path presented as a single scope, else none (run everything).
+/// The storage is built here rather than at schedule time, so it lives exactly as long as the body call it feeds.
+void run_scheduled_instance(nx::test_execution& execution, nx::test_schedule_config const& config)
+{
+    cc::vector<cc::vector<cc::string>> global_scope;
+    cc::span<cc::vector<cc::string> const> section_scopes;
+    if (!execution.instance.section_scopes.empty())
+        section_scopes = execution.instance.section_scopes;
+    else if (!config.section_filters.empty())
+    {
+        global_scope.push_back(config.section_filters);
+        section_scopes = global_scope;
+    }
+
+    nx::impl::run_test_body(
+        execution, config, [&] { execution.instance.declaration->function(); }, section_scopes,
+        /*filter_offset=*/0);
+}
+
+/// Record that a test ended with async work still carrying its context.
+///
+/// That work will run during a LATER test and report there, so it is interference rather than cleanup someone else will do.
+/// Reported as a failure naming this test, which is the policy cc deliberately leaves to us.
+void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl, i32 outstanding)
+{
+    ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
+    ctx.off_thread_errors.lock(
+        [&](cc::vector<test_error>& errors)
+        {
+            errors.push_back(test_error{
+                .expr = cc::format("\"{}\" left async work running", decl.name),
+                .location = decl.location,
+                .extra_lines = {"the work carries this test's context and would report into the next test's "
+                                "run — await or cancel it"},
+                .expanded = cc::format("{} async item(s) still carry this test's context", outstanding),
+            });
+        });
+}
+
+/// What one ASYNC_TEST carries across the polls of its wrapper node.
+struct async_test_state
+{
+    nx::test_execution* execution = nullptr;
+    nx::test_schedule_config const* config = nullptr;
+
+    cc::unique_ptr<test_context> ctx;
+
+    // The ONE ambient link naming this test, made in the first poll and kept alive here for the rest of the node's life.
+    // One link, not one per poll, because the leak check counts what still holds it.
+    cc::async_ambient_handle ambient;
+
+    cc::shared_async<cc::unit> root;
+    std::chrono::high_resolution_clock::time_point started_at;
+    bool started = false;
+};
+
+/// Run an ASYNC_TEST body to its return under `ctx`, and take the graph it handed back.
+/// Null if the body threw before producing one.
+cc::shared_async<cc::unit> run_async_prologue(test_context& ctx, nx::test_declaration const& decl)
+{
+    auto* const crash_slot = running_test_slot_for_this_thread();
+    scoped_running_test const published(crash_slot);
+    if (crash_slot != nullptr)
+        *crash_slot = running_test_slot{.name_data = decl.name.data(), .name_size = int(decl.name.size()), .section = 0};
+
+    scoped_body const own_body(&ctx);
+
+    // Unbound exactly as a synchronous body is: whatever the body schedules for itself stays its own business.
+    // Only the root it RETURNS is handed to the run's scheduler, and that happens after this returns.
+    cc::async_no_worker_scope const unbound;
+
+    nx::impl::async_test_sink sink;
+    try
+    {
+        auto _ = scoped_test_assertion_handler();
+        decl.async_function(sink);
+    }
+    catch (test_require_failed const&) // NOLINT(bugprone-empty-catch)
+    {
+        // already recorded by report_check_result; the throw only aborts the body
+    }
+    catch (test_skipped const&) // NOLINT(bugprone-empty-catch)
+    {
+        // already counted as a passing check; the throw only aborts the body
+    }
+    catch (std::exception const& e)
+    {
+        ctx.errors.push_back(test_error{
+            .expr = cc::format("uncaught exception: {}", e.what()),
+            .location = decl.location,
+            .extra_lines = {},
+            .expanded = cc::format("uncaught exception: {}", e.what()),
+        });
+    }
+    catch (...)
+    {
+        ctx.errors.push_back(test_error{
+            .expr = "uncaught unknown exception",
+            .location = decl.location,
+            .extra_lines = {},
+            .expanded = "uncaught unknown exception",
+        });
+    }
+    return cc::move(sink.root);
+}
+
+/// Fold an async test's outcome into its execution and drop its context.
+void finish_async_test(async_test_state& state)
+{
+    auto& ctx = *state.ctx;
+    auto const& decl = *state.execution->instance.declaration;
+
+    // The graph's failure channel is a TEST failure, never an error we pass on — see execute_tests on why a test node must resolve to a value.
+    if (state.root != nullptr)
+    {
+        if (auto const* const err = state.root->error_ptr(); err != nullptr)
+        {
+            auto const what = err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string();
+            ctx.errors.push_back(test_error{
+                .expr = cc::format("the test's async graph failed: {}", what),
+                .location = decl.location,
+                .extra_lines = {},
+                .expanded = cc::format("async graph resolved to an error: {}", what),
+            });
+        }
+    }
+
+    // No section replay here, so everything the body's own thread reported belongs to the root section.
+    auto& sec = *ctx.root_section;
+    sec.duration_seconds
+        = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - state.started_at).count();
+    sec.executed_checks += cc::exchange(ctx.executed_checks, 0);
+    sec.failed_checks += cc::exchange(ctx.failed_checks, 0);
+    sec.errors.push_back_range(cc::exchange(ctx.errors, {}));
+
+    // Drop the root before counting: a ready node carries no context, but whatever it left behind still does.
+    state.root = {};
+
+    // `ambient` holds exactly one reference; anything beyond it is work that outlived the test still naming it.
+    auto const* const link = static_cast<cc::async_ambient_link const*>(state.ambient.head());
+    auto const outstanding = link != nullptr ? link->refs.load(cc::memory_order_acquire) - 1 : 0;
+    auto const leaked = outstanding > 0;
+    if (leaked)
+        note_leaked_async_work(ctx, decl, outstanding);
+
+    test_execute_end(cc::move(state.ctx), leaked);
+}
+
+/// Drive one poll of an async test's wrapper node.
+/// Waiting while the body's graph is still running; resolved once the test has been finalized.
+cc::async_step_status step_async_test(async_test_state& state, cc::async_context<cc::unit>& actx)
+{
+    if (!state.started)
+    {
+        state.started = true;
+        state.started_at = std::chrono::high_resolution_clock::now();
+        state.ctx = test_execute_begin(*state.execution, *state.config, {}, /*filter_offset=*/0);
+        state.ctx->allows_sections = false;
+
+        auto const& decl = *state.execution->instance.declaration;
+
+        // The link this test is known by.
+        // Pushed and popped inside this one poll, which is the only shape async_ambient_scope allows, and kept alive past it by `ambient`.
+        cc::async_ambient_scope const scope(nx::impl::test_ambient_tag(), state.ctx.get());
+        state.ambient = cc::async_ambient_handle();
+
+        state.root = run_async_prologue(*state.ctx, decl);
+
+        // Scheduling a COLD node stamps the calling thread's ambient onto it as its resume token — this scope.
+        // That single stamp is what makes every check the graph reports find this test, from whichever worker polls it,
+        // and it also reaches the cold nodes the graph drives inline, since those inherit their driver's context.
+        if (state.root != nullptr)
+        {
+            CC_ASSERT(state.root->is_cold(), "an ASYNC_TEST must return a cold graph — see nexus/async-test.hh");
+            state.root->schedule();
+        }
+    }
+
+    if (state.root != nullptr && !actx.require(state.root))
+        return actx.wait_for_dependencies();
+
+    finish_async_test(state);
+    return actx.resolve_to_value(cc::unit{}); // terminal: nothing may follow it
+}
+
 /// Take everything the sink holds, leaving it empty for whatever runs next.
 /// Taking rather than reading is what makes nesting work: an inner execute_tests claims what it produced, so the outer run does not report it twice.
 void drain_orphan_checks(nx::test_schedule_execution& into)
@@ -498,6 +776,8 @@ nx::impl::raii_section_opener nx::impl::test_open_section(cc::string name, cc::s
     auto* const ctx_ptr = current_context();
     CC_ASSERT(ctx_ptr != nullptr, "SECTION must be used inside a running test");
     auto& ctx = *ctx_ptr;
+    CC_ASSERT(ctx.allows_sections, "SECTION is not available in an ASYNC_TEST: the section tree is replay state, and "
+                                   "an async body runs once");
 
     // The section tree is single-threaded replay state — the whole test body re-runs once per section path, which only the test's own thread does.
     // So this is a framework misuse rather than something to serialize, and it is reported as one.
@@ -607,9 +887,19 @@ nx::impl::scoped_check_capture::~scoped_check_capture()
     g_check_capture = nullptr;
 }
 
+void nx::impl::submit_test_async(async_test_sink& sink, cc::shared_async<cc::unit> root)
+{
+    CC_ASSERT(root != nullptr, "an ASYNC_TEST body must return a valid async");
+    CC_ASSERT(sink.root == nullptr, "an ASYNC_TEST body must hand back exactly one graph");
+    sink.root = cc::move(root);
+}
+
 nx::test_registry const* nx::impl::active_registry()
 {
-    return g_active_registry;
+    auto const* const ctx = current_context();
+    if (ctx == nullptr || ctx->execution == nullptr)
+        return nullptr;
+    return ctx->execution->instance.registry;
 }
 
 bool nx::impl::is_declaration_active(nx::test_declaration const* decl)
@@ -675,17 +965,26 @@ cc::span<cc::vector<cc::string> const> nx::impl::current_section_scopes()
 
 void nx::impl::report_running_test() noexcept
 {
-    if (g_running_test_data == nullptr || g_running_test_size <= 0)
+    // Every running test, not just this thread's: under -jN the faulting thread is often not the interesting one.
+    auto const claimed = cc::min(g_running_slots_claimed.load(cc::memory_order_relaxed), max_running_test_slots);
+    auto reported = 0;
+    for (auto i = 0; i < claimed; ++i)
     {
-        std::fputs("running test: <none>\n", stderr);
-        return;
+        auto const& slot = g_running_tests[i];
+        if (slot.name_data == nullptr || slot.name_size <= 0)
+            continue;
+
+        std::fputs(reported == 0 ? "running test: \"" : "   also running: \"", stderr);
+        std::fwrite(slot.name_data, 1, size_t(slot.name_size), stderr);
+        std::fputc('"', stderr);
+        if (slot.section > 0)
+            std::fprintf(stderr, " (section %d)", slot.section);
+        std::fputc('\n', stderr);
+        ++reported;
     }
-    std::fputs("running test: \"", stderr);
-    std::fwrite(g_running_test_data, 1, size_t(g_running_test_size), stderr);
-    std::fputc('"', stderr);
-    if (g_running_test_section > 0)
-        std::fprintf(stderr, " (section %d)", g_running_test_section);
-    std::fputc('\n', stderr);
+
+    if (reported == 0)
+        std::fputs("running test: <none>\n", stderr);
 }
 
 void nx::impl::record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better)
@@ -868,56 +1167,50 @@ void nx::impl::run_test_body(nx::test_execution& execution,
     auto const& decl = *execution.instance.declaration;
 
     // Set up test context for check reporting
-    auto* const ctx_ptr = test_execute_begin(execution, config, section_scopes, filter_offset);
-    auto& ctx = *ctx_ptr;
+    auto owned_ctx = test_execute_begin(execution, config, section_scopes, filter_offset);
+    auto& ctx = *owned_ctx;
 
     // Installing the context as the ambient is what makes a check find this test, from this thread or any other.
     // The scope closes before test_execute_end, so nothing can look the context up while it is being destroyed.
     auto leaked_async_work = false;
     {
-        cc::async_ambient_scope const test_ambient(nx::impl::test_ambient_tag(), ctx_ptr);
+        cc::async_ambient_scope const test_ambient(nx::impl::test_ambient_tag(), &ctx);
+        scoped_body const own_body(&ctx); // this thread is inside ctx's body from here until the replay loop ends
+
+        auto* const crash_slot = running_test_slot_for_this_thread();
+        scoped_running_test const published(crash_slot);
 
         // Execute the test body, re-running it once per section-exploration pass
         auto section_num = 0;
         auto should_continue = true;
         while (should_continue)
         {
-            // CAUTION: a test is allowed to run nested tests, thus growing the context stack here
+            // CAUTION: a test is allowed to run nested tests, thus growing the body stack here
             ctx.exec_count++;
             ctx.leaf_section = nullptr;
             ctx.root_section->next_open_section = nullptr;
 
             // publish the running test for the crash-context hook (points a fatal fault at this test)
-            g_running_test_data = decl.name.data();
-            g_running_test_size = int(decl.name.size());
-            g_running_test_section = section_num;
+            if (crash_slot != nullptr)
+                *crash_slot = running_test_slot{
+                    .name_data = decl.name.data(),
+                    .name_size = int(decl.name.size()),
+                    .section = section_num,
+                };
 
             if (config.verbose)
             {
                 if (section_num == 0)
-                    cc::println("  - start \"{}\"", decl.name);
+                    *ctx.verbose_sink += cc::format("  - start \"{}\"\n", decl.name);
                 else
-                    cc::println("  - start \"{}\" section {}", decl.name, section_num);
+                    *ctx.verbose_sink += cc::format("  - start \"{}\" section {}\n", decl.name, section_num);
             }
             section_num++;
             auto const t_section_start = std::chrono::high_resolution_clock::now();
 
             try
             {
-                auto _ = cc::impl::scoped_assertion_handler(
-                    [](cc::impl::assertion_info const& info)
-                    {
-                        // failing assertion has same semantics as REQUIRE -> it aborts
-                        nx::impl::report_check_result({
-                            .kind = impl::check_kind::require,
-                            .op = impl::cmp_op::assert_fail,
-                            .expr = info.expression,
-                            .passed = false,
-                            .diagnostic = info.message,
-                            .location = info.location,
-                        });
-                    });
-
+                auto _ = scoped_test_assertion_handler(); // a failing CC_ASSERT aborts the body like a REQUIRE
                 body();
             }
             catch (test_require_failed const&) // NOLINT(bugprone-empty-catch)
@@ -983,36 +1276,25 @@ void nx::impl::run_test_body(nx::test_execution& execution,
             }
         }
 
-        // Async work still carrying this test's context after its body is done is interference, not cleanup someone else will do:
-        // it will run during a LATER test and report there.
-        // Reported as a failure naming this test, which is the policy cc deliberately leaves to us.
         if (test_ambient.outstanding() != 0)
         {
             leaked_async_work = true;
-            ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
-            ctx.off_thread_errors.lock(
-                [&](cc::vector<test_error>& errors)
-                {
-                    errors.push_back(test_error{
-                        .expr = cc::format("\"{}\" left async work running", decl.name),
-                        .location = decl.location,
-                        .extra_lines = {"the work carries this test's context and would report into the next test's "
-                                        "run — await or cancel it"},
-                        .expanded
-                        = cc::format("{} async item(s) still carry this test's context", test_ambient.outstanding()),
-                    });
-                });
+            note_leaked_async_work(ctx, decl, test_ambient.outstanding());
         }
     }
 
+    // test_execute_end drops (or parks) the context, so take the sink while it is still ours to read.
+    auto* const verbose_sink = ctx.verbose_sink;
+
     // Clean up test context (finalizes execution.root)
-    test_execute_end(leaked_async_work);
+    test_execute_end(cc::move(owned_ctx), leaked_async_work);
 
     if (config.verbose)
     {
         double const duration_ms = execution.root.duration_seconds * 1000.0;
-        cc::println("    ... in {:.2f} ms ({} checks, {} failed checks, {} errors)", duration_ms,
-                    execution.root.executed_checks, execution.root.failed_checks, execution.root.errors.size());
+        *verbose_sink
+            += cc::format("    ... in {:.2f} ms ({} checks, {} failed checks, {} errors)\n", duration_ms,
+                          execution.root.executed_checks, execution.root.failed_checks, execution.root.errors.size());
     }
 }
 
@@ -1025,38 +1307,227 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         cc::println("executing {} tests", schedule.instances.size());
     }
 
-    // Make this schedule's registry the one nx::invoke_tests queries (save/restore for nested execute_tests).
-    auto* const prev_registry = g_active_registry;
-    g_active_registry = schedule.registry;
-    CC_DEFER
+    // A run stands up its own scheduler, and schedulers do not nest: one bound here would be an st scheduler inside whatever is already driving.
+    // So a test that runs its own execute_tests — nexus' own meta-tests — must ask for nx::no_scheduler.
+    CC_ASSERT(cc::async_scheduler::current_or_null() == nullptr, "execute_tests may not run under a scheduler; a test "
+                                                                 "that nests a run must declare nx::no_scheduler");
+
+    // Pre-sized and written by index, never appended to.
+    // Report order is then the SCHEDULE's, whatever order the tests actually ran in, and the slot a running test writes into cannot be reallocated out from under it.
+    result.executions.resize_to_defaulted(schedule.instances.size());
+
+    // Partition by scheduler mode, in first-appearance order.
+    // Each partition is one graph under one scheduler, run as its own phase — schedulers do not nest, so they cannot overlap.
+    // Phases being sequential is also what makes exclusivity ACROSS modes free: only within-phase pairs need an edge.
+    struct run_phase
     {
-        g_active_registry = prev_registry;
+        nx::config::scheduler_mode mode = nx::config::scheduler_mode::shared;
+        int threads = 0;
+        cc::vector<isize> indices;
     };
+    cc::vector<run_phase> phases;
 
-    for (auto const& instance : schedule.instances)
+    for (isize i = 0; i < schedule.instances.size(); ++i)
     {
+        auto const& instance = schedule.instances[i];
         CC_ASSERT(instance.declaration != nullptr, "instances must be valid");
-        CC_ASSERT(instance.declaration->function.is_valid(), "ordinary instances must have a nullary body");
-        test_execution execution;
+        CC_ASSERT(instance.declaration->function.is_valid() || instance.declaration->is_async(),
+                  "ordinary instances must have a nullary or an async body");
+        CC_ASSERT(!instance.declaration->is_async()
+                      || instance.declaration->test_config.scheduler != nx::config::scheduler_mode::none,
+                  "an ASYNC_TEST cannot use no_scheduler: nothing would drive the graph it returns");
+        auto& execution = result.executions[i];
         execution.instance = instance;
+        if (execution.instance.registry == nullptr)
+            execution.instance.registry = schedule.registry; // a hand-built schedule may only name the registry once
 
-        // Effective scopes: the instance's own grouped set (alias-expanded), else the run-global -c path
-        // presented as a single scope, else none (run everything). All three storages outlive run_test_body.
-        cc::vector<cc::vector<cc::string>> global_scope;
-        cc::span<cc::vector<cc::string> const> section_scopes;
-        if (!execution.instance.section_scopes.empty())
-            section_scopes = execution.instance.section_scopes;
-        else if (!config.section_filters.empty())
+        auto const mode = instance.declaration->test_config.scheduler;
+        auto const threads = instance.declaration->test_config.scheduler_threads;
+        auto* phase = static_cast<run_phase*>(nullptr);
+        for (auto& p : phases)
+            if (p.mode == mode && p.threads == threads)
+            {
+                phase = &p;
+                break;
+            }
+        if (phase == nullptr)
         {
-            global_scope.push_back(config.section_filters);
-            section_scopes = global_scope;
+            phases.push_back(run_phase{.mode = mode, .threads = threads, .indices = {}});
+            phase = &phases.back();
+        }
+        phase->indices.push_back(i);
+    }
+
+    for (auto const& phase : phases)
+    {
+        // No scheduler means no graph: with nothing to schedule a node would only wrap a call, and this is the one mode
+        // that must leave the calling thread unbound, so a test nesting its own run finds nothing above it.
+        if (phase.mode == nx::config::scheduler_mode::none)
+        {
+            for (auto const i : phase.indices)
+                run_scheduled_instance(result.executions[i], config);
+            continue;
         }
 
-        nx::impl::run_test_body(
-            execution, config, [&] { instance.declaration->function(); }, section_scopes,
-            /*filter_offset=*/0);
+        // own_pool names its own width; everything else is capped by the run's --jobs.
+        auto const jobs = phase.mode == nx::config::scheduler_mode::own_pool ? phase.threads : config.jobs;
 
-        result.executions.push_back(cc::move(execution));
+        // One node per test — the graph IS the phase, and which thread picks up which test is the scheduler's business.
+        // A test node ALWAYS resolves to a value, never to an error: exclusivity is a dependency edge between test nodes, so an error here would propagate into every test ordered behind this one.
+        // run_test_body already contains everything a body can throw.
+        //
+        // Exclusion is an ORDERING EDGE, not a lock: a test requires the last holder of each tag it carries, and becomes that tag's new tail.
+        // Every edge therefore points backwards in schedule order, so the result is a DAG by construction — no admission control, no deadlock, and no starvation to guard against.
+        // The price is that holders of a tag run in schedule order rather than in any order, which is a reproducibility win.
+        cc::vector<cc::shared_async<cc::unit>> test_nodes;
+        test_nodes.reserve(phase.indices.size());
+
+        struct tag_tail
+        {
+            cc::string_view tag;
+            cc::shared_async<cc::unit> node;
+        };
+        cc::vector<tag_tail> tag_tails;
+
+        // A no-arg exclusive() is a barrier: it follows everything before it, and everything after follows it.
+        // Tracking the window since the last barrier keeps a barrier's edge count to the tests it actually has to wait for.
+        cc::shared_async<cc::unit> last_barrier;
+        cc::vector<cc::shared_async<cc::unit>> nodes_since_barrier;
+
+        for (auto const i : phase.indices)
+        {
+            auto* const execution = &result.executions[i];
+            auto const& test_config = execution->instance.declaration->test_config;
+            CC_ASSERT(test_config.exclusion_tag_count <= nx::config::max_exclusion_tags,
+                      "a test asked for more exclusion tags than nx::config::max_exclusion_tags holds");
+
+            cc::vector<cc::shared_async<cc::unit>> predecessors;
+            if (test_config.exclusive_global)
+            {
+                predecessors = nodes_since_barrier;
+                if (predecessors.empty() && last_barrier != nullptr)
+                    predecessors.push_back(last_barrier);
+            }
+            else
+            {
+                // Everything follows the last barrier, tagged or not — that is what "runs alone" means.
+                if (last_barrier != nullptr)
+                    predecessors.push_back(last_barrier);
+                for (auto t = 0; t < test_config.exclusion_tag_count; ++t)
+                {
+                    auto const tag = cc::string_view(test_config.exclusion_tags[t]);
+                    for (auto const& tail : tag_tails)
+                        if (tail.tag == tag)
+                        {
+                            predecessors.push_back(tail.node);
+                            break;
+                        }
+                }
+            }
+
+            auto node = cc::make_async_lazy<cc::unit>(
+                [execution, &config, predecessors = cc::move(predecessors),
+                 async_state = cc::unique_ptr<async_test_state>()](
+                    cc::async_context<cc::unit>& actx) mutable -> cc::async_step_status
+                {
+                    if (!predecessors.empty())
+                    {
+                        auto all_ready = true;
+                        for (auto const& p : predecessors)
+                            all_ready = actx.require(p) && all_ready; // never short-circuit: every one must be registered
+                        if (!all_ready)
+                            return actx.wait_for_dependencies();
+                        predecessors.clear(); // done with them, and a held handle pins its whole subgraph alive
+                    }
+
+                    // An async test suspends, so it needs state across polls and a finalize that runs on whichever poll finishes it.
+                    if (execution->instance.declaration->is_async())
+                    {
+                        if (async_state == nullptr)
+                            async_state = cc::make_unique<async_test_state>(
+                                async_test_state{.execution = execution, .config = &config});
+                        return step_async_test(*async_state, actx);
+                    }
+
+                    // The run's scheduler drives TESTS, never the work inside one.
+                    // Left bound, a node the body schedules would land in our queue, and we would run it after the test — outside the lifetime of everything it captured.
+                    // Unbound, a test sees exactly the thread it always saw: nothing above it, and its own graphs driven by its own scheduler.
+                    {
+                        cc::async_no_worker_scope const unbound;
+                        run_scheduled_instance(*execution, config);
+                    }
+                    return actx.resolve_to_value(cc::unit{}); // terminal: nothing may follow it
+                });
+
+            if (test_config.exclusive_global)
+            {
+                last_barrier = node;
+                nodes_since_barrier.clear();
+                tag_tails.clear(); // every tag's tail is now the barrier, which everything after already follows
+            }
+            else
+            {
+                nodes_since_barrier.push_back(node);
+                for (auto t = 0; t < test_config.exclusion_tag_count; ++t)
+                {
+                    auto const tag = cc::string_view(test_config.exclusion_tags[t]);
+                    auto* existing = static_cast<tag_tail*>(nullptr);
+                    for (auto& tail : tag_tails)
+                        if (tail.tag == tag)
+                        {
+                            existing = &tail;
+                            break;
+                        }
+                    if (existing != nullptr)
+                        existing->node = node;
+                    else
+                        tag_tails.push_back(tag_tail{.tag = tag, .node = node});
+                }
+            }
+
+            test_nodes.push_back(cc::move(node));
+        }
+
+        if (jobs <= 1)
+        {
+            // Serial: drive one node at a time, so the run order IS the schedule order.
+            // Not a fan-out join with an st scheduler — a join picks whichever pending dependency it likes, and a chain of edges
+            // would drive the whole schedule depth-first past the inline depth cap.
+            cc::singlethreaded_scheduler scheduler;
+            for (auto const& node : test_nodes)
+            {
+                auto const completed = scheduler.try_blocking_get(node).has_value();
+                CC_ASSERT(completed, "a test node is self-contained, so driving it here must complete it");
+                CC_UNUSED(completed);
+            }
+            continue;
+        }
+
+        // Parallel: one join requiring every test node, driven on a pool.
+        // Requires everything again on each poll rather than assuming a wake means all-ready — idempotent, and it costs one pass over a vector we already hold.
+        auto const join = cc::make_async_lazy<cc::unit>(
+            [nodes = cc::move(test_nodes)](cc::async_context<cc::unit>& actx) -> cc::async_step_status
+            {
+                auto all_ready = true;
+                for (auto const& n : nodes)
+                    all_ready = actx.require(n) && all_ready; // never short-circuit: every dependency must be registered
+                if (!all_ready)
+                    return actx.wait_for_dependencies();
+                return actx.resolve_to_value(cc::unit{});
+            });
+
+        // One fewer worker than the job count: the thread blocking here participates as one.
+        cc::async_thread_pool pool(jobs - 1);
+        auto const outcome = pool.try_blocking_get(join);
+        CC_ASSERT(outcome.has_value(), "the test graph is self-contained, so driving it here must complete it");
+        CC_UNUSED(outcome);
+    }
+
+    // Flush the buffered per-test traces in schedule order, so --verbose reads the same however the tests ran.
+    if (config.verbose)
+    {
+        for (auto const& execution : result.executions)
+            cc::print(execution.verbose_output);
     }
 
     drain_orphan_checks(result);

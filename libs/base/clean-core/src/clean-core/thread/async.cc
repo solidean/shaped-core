@@ -115,6 +115,16 @@ cc::async_worker_scope::~async_worker_scope()
     cc::impl::async_tls().scheduler = _previous;
 }
 
+cc::async_no_worker_scope::async_no_worker_scope() : _previous(cc::impl::async_tls().scheduler)
+{
+    cc::impl::async_tls().scheduler = nullptr;
+}
+
+cc::async_no_worker_scope::~async_no_worker_scope()
+{
+    cc::impl::async_tls().scheduler = _previous;
+}
+
 void cc::singlethreaded_scheduler::enqueue(async_node_ptr node)
 {
     _queue.push_back(cc::move(node));

@@ -22,7 +22,7 @@ using cc::async_context;
 // Not gated on CC_HAS_THREADS as a whole: without threads the pool drives graphs inline on the caller, and the answers must be identical either way.
 // Only what genuinely needs a second thread is gated.
 
-TEST("threaded check - a check inside a pool-driven node counts towards its test")
+TEST("threaded check - a check inside a pool-driven node counts towards its test", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("worker_check", {},
@@ -47,7 +47,7 @@ TEST("threaded check - a check inside a pool-driven node counts towards its test
     CHECK(exec.orphan_checks == 0);
 }
 
-TEST("threaded check - a failing check inside a pool-driven node fails its test")
+TEST("threaded check - a failing check inside a pool-driven node fails its test", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("worker_check_fails", {},
@@ -70,7 +70,7 @@ TEST("threaded check - a failing check inside a pool-driven node fails its test"
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("threaded check - a REQUIRE inside a node fails the test and resolves the node on the error channel")
+TEST("threaded check - a REQUIRE inside a node fails the test and resolves the node on the error channel", no_scheduler)
 {
     nx::test_registry reg;
     bool node_errored = false;
@@ -98,7 +98,7 @@ TEST("threaded check - a REQUIRE inside a node fails the test and resolves the n
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("threaded check - a section cannot be opened off the test's own thread")
+TEST("threaded check - a section cannot be opened off the test's own thread", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("worker_section", {},
@@ -125,7 +125,7 @@ TEST("threaded check - a section cannot be opened off the test's own thread")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("threaded check - a guide metric from a node lands on its test")
+TEST("threaded check - a guide metric from a node lands on its test", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("worker_metric", {},
@@ -149,7 +149,7 @@ TEST("threaded check - a guide metric from a node lands on its test")
     CHECK(exec.executions[0].metrics[0].name == "from-a-worker");
 }
 
-TEST("threaded check - a test that leaks async work fails, naming itself")
+TEST("threaded check - a test that leaks async work fails, naming itself", no_scheduler)
 {
     nx::test_registry reg;
     cc::singlethreaded_scheduler sched; // queued work stays queued until someone drains it
@@ -169,7 +169,7 @@ TEST("threaded check - a test that leaks async work fails, naming itself")
     CHECK(exec.count_failed_tests() == 1); // leaked work would report into whatever runs next — that is interference
 }
 
-TEST("threaded check - a node of one test driven inside another is never billed to the wrong one")
+TEST("threaded check - a node of one test driven inside another is never billed to the wrong one", no_scheduler)
 {
     // The case a thread-local stack cannot get right: "consumer" drives a node belonging to "producer", on its own thread, with its own test on its own stack.
     // A stack read would bill it to consumer.
@@ -209,7 +209,7 @@ TEST("threaded check - a node of one test driven inside another is never billed 
 }
 
 #if CC_HAS_THREADS
-TEST("threaded check - a check on a bare thread is an orphan, and fails the run")
+TEST("threaded check - a check on a bare thread is an orphan, and fails the run", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("bare_thread", {},
@@ -229,7 +229,7 @@ TEST("threaded check - a check on a bare thread is an orphan, and fails the run"
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("threaded check - attributed_to_current_test rescues a bare thread")
+TEST("threaded check - attributed_to_current_test rescues a bare thread", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("attributed_thread", {},
@@ -248,7 +248,7 @@ TEST("threaded check - attributed_to_current_test rescues a bare thread")
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("threaded check - a REQUIRE on an attributed bare thread records instead of throwing")
+TEST("threaded check - a REQUIRE on an attributed bare thread records instead of throwing", no_scheduler)
 {
     nx::test_registry reg;
     bool past_require = false;

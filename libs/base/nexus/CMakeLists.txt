@@ -124,6 +124,8 @@ if(SC_BUILD_TESTS)
         tests/test-check-test.cc
         tests/test-check-render-test.cc
         tests/test-threaded-check-test.cc
+        tests/test-parallel-test.cc
+        tests/test-async-test.cc
         tests/test-export-test.cc
         tests/test-registry-test.cc
         tests/test-section-test.cc
