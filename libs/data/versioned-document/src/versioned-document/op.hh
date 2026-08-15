@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/hash256.hh>
+#include <clean-core/common/utility.hh> // cc::sentinel, for the assignment cursor's end
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -155,21 +156,16 @@ public:
 
     // range-for support: the cursor is its own iterator, so `for (auto const a : op.assignments())` reads naturally
 public:
-    struct sentinel
-    {
-    };
-
     [[nodiscard]] assignment operator*() const { return get(); }
     assignment_cursor& operator++()
     {
         advance();
         return *this;
     }
-    [[nodiscard]] friend bool operator==(assignment_cursor const& c, sentinel) { return c.at_end(); }
-    [[nodiscard]] friend bool operator!=(assignment_cursor const& c, sentinel) { return !c.at_end(); }
+    [[nodiscard]] friend bool operator==(assignment_cursor const& c, cc::sentinel) { return c.at_end(); }
 
     [[nodiscard]] assignment_cursor begin() const { return *this; }
-    [[nodiscard]] sentinel end() const { return {}; }
+    [[nodiscard]] cc::sentinel end() const { return {}; }
 
 private:
     cc::span<byte const> _bytes;
@@ -192,6 +188,16 @@ struct vdoc::op
     /// Absent only on a skeleton op left behind by pruning.
     cc::optional<op_payload> payload;
 
+    /// A **skeleton op**: an id and its parents, with its content pruned away.
+    ///
+    /// Pruning attaches a snapshot to an op and deletes the history behind it, but the rows cannot simply go: a
+    /// surviving op names its parents by id, and a DAG with dangling parent ids is a broken graph.
+    /// So the entries stay, emptied out — reachability, merges and child walks all still work, and only the content
+    /// is gone.
+    ///
+    /// A skeleton is **unverifiable by construction**, since there are no bytes to hash.
+    /// It is not an op whose content is empty: metadata() reads null and assignments() is at_end() either way, so a
+    /// caller that needs the distinction asks here rather than inferring it from a zero count.
     [[nodiscard]] bool is_skeleton() const { return !payload.has_value(); }
 
     /// The op's metadata, or the null value on a skeleton.

@@ -9,6 +9,9 @@ project(versioned-document LANGUAGES CXX)
 add_library(versioned-document
     src/versioned-document/fwd.cc
     src/versioned-document/op.cc
+    src/versioned-document/op_builder.cc
+    src/versioned-document/op_graph.cc
+    src/versioned-document/raw_document.cc
     src/versioned-document/value.cc
     src/versioned-document/value_builder.cc
     src/versioned-document/value_debug.cc
@@ -25,6 +28,9 @@ target_sources(versioned-document
     src/versioned-document/fwd.hh
     src/versioned-document/ids.hh
     src/versioned-document/op.hh
+    src/versioned-document/op_builder.hh
+    src/versioned-document/op_graph.hh
+    src/versioned-document/raw_document.hh
     src/versioned-document/value.hh
     src/versioned-document/value_builder.hh
     src/versioned-document/value_debug.hh
@@ -60,6 +66,8 @@ if(SC_BUILD_TESTS)
         tests/ids-test.cc
         tests/op-test.cc
         tests/op-fuzz-test.cc
+        tests/op_builder-test.cc
+        tests/op_graph-test.cc
         tests/value-test.cc
         tests/value-fuzz-test.cc
     )
