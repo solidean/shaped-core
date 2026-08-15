@@ -305,7 +305,8 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
-| Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
+| Benchmark / compare two implementations | a `nx::config::manual` test — never swept, needs no CHECK, prints its own table ([sort-benchmark.cc](libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model). A microbenchmark harness in nexus is still TODO |
+| Record a tracked metric for PGO  | `GUIDE_BENCHMARK` + `nx::guide` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Read hardware performance counters | `uv run dev.py profiling counters` ([docs/guides/profiling.md](docs/guides/profiling.md)) |
 | Find where a build/test/check run's time goes | `uv run dev.py check --fix --profile <file> --profile-type chrome-tracing` ([profiling a run](docs/guides/building-and-testing.md#profiling-a-run)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |

@@ -54,6 +54,8 @@ target_sources(clean-core
     src/clean-core/common/macros.hh
     src/clean-core/common/utility.hh
     src/clean-core/common/traits.hh
+    src/clean-core/common/range_traits.hh
+    src/clean-core/common/compare.hh
     src/clean-core/common/enum_traits.hh
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
@@ -107,6 +109,13 @@ target_sources(clean-core
     src/clean-core/container/impl/bitset_container.hh
 
     src/clean-core/sequence/sequence.hh
+
+    src/clean-core/algorithm/index_swap_range.hh
+    src/clean-core/algorithm/permutation.hh
+    src/clean-core/algorithm/search.hh
+    src/clean-core/algorithm/sort.hh
+    src/clean-core/algorithm/sort_async.hh
+    src/clean-core/algorithm/impl/sort_impl.hh
 
     src/clean-core/string/string.hh
     src/clean-core/string/string_view.hh
@@ -292,9 +301,11 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/node-allocation-design-benchmark.cc
         tests/benchmarks/node-allocation-design-refill.cc
         tests/benchmarks/file-stream-benchmark.cc
+        tests/benchmarks/sort-benchmark.cc
 
         # tests grouped by topic, mirroring src/clean-core/
         tests/common/assert-test.cc
+        tests/common/compare-test.cc
         tests/common/flags-test.cc
         tests/common/hash-test.cc
         tests/common/hash-types-test.cc
@@ -305,6 +316,12 @@ if(SC_BUILD_TESTS)
         tests/common/time-test.cc
 
         tests/platform/console-test.cc
+
+        tests/algorithm/sort-test.cc
+        tests/algorithm/select-test.cc
+        tests/algorithm/search-test.cc
+        tests/algorithm/permutation-test.cc
+        tests/algorithm/sort-async-test.cc
 
         tests/math/bit-test.cc
         tests/math/random-test.cc

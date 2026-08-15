@@ -1,11 +1,11 @@
 #include "trace_stats.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 
-#include <algorithm> // std::sort: rank the table by cost, with a name tie-break for a stable order
 
 namespace itrace
 {
@@ -273,23 +273,23 @@ stats_summary collect_stats(cc::span<trace const> traces)
         }
     }
 
-    std::sort(summary.rows.begin(), summary.rows.end(),
-              [](symbol_stats const& a, symbol_stats const& b)
-              {
-                  if (a.instructions != b.instructions)
-                      return a.instructions > b.instructions;
-                  return a.symbol.compare(b.symbol) < 0;
-              });
+    cc::sort(summary.rows,
+             [](symbol_stats const& a, symbol_stats const& b)
+             {
+                 if (a.instructions != b.instructions)
+                     return a.instructions > b.instructions;
+                 return a.symbol.compare(b.symbol) < 0;
+             });
 
-    std::sort(summary.slow_ops.begin(), summary.slow_ops.end(),
-              [](slow_op const& a, slow_op const& b)
-              {
-                  if (a.count != b.count)
-                      return a.count > b.count;
-                  if (auto const c = a.mnemonic.compare(b.mnemonic); c != 0)
-                      return c < 0;
-                  return a.symbol.compare(b.symbol) < 0;
-              });
+    cc::sort(summary.slow_ops,
+             [](slow_op const& a, slow_op const& b)
+             {
+                 if (a.count != b.count)
+                     return a.count > b.count;
+                 if (auto const c = a.mnemonic.compare(b.mnemonic); c != 0)
+                     return c < 0;
+                 return a.symbol.compare(b.symbol) < 0;
+             });
 
     return summary;
 }

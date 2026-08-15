@@ -1,9 +1,9 @@
 #include "alias.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/string_view.hh>
 
-#include <algorithm> // std::sort: stable alias/fragment order for reproducible listings
 
 using namespace cc::primitive_defines;
 
@@ -61,17 +61,17 @@ void nx::run_setup_callbacks(test_registry& registry)
 
     // Stable order: aliases by name, and each alias's fragments by driver name then section path.
     // Listing and expansion order then do not depend on static-init or callback registration order.
-    std::sort(registry.aliases.begin(), registry.aliases.end(), [](test_alias const& a, test_alias const& b)
-              { return cc::string_view(a.name) < cc::string_view(b.name); });
+    cc::sort(registry.aliases, [](test_alias const& a, test_alias const& b)
+             { return cc::string_view(a.name) < cc::string_view(b.name); });
 
     for (auto& alias : registry.aliases)
-        std::sort(alias.fragments.begin(), alias.fragments.end(),
-                  [](alias_fragment const& a, alias_fragment const& b)
-                  {
-                      auto const an = a.driver != nullptr ? cc::string_view(a.driver->name) : cc::string_view();
-                      auto const bn = b.driver != nullptr ? cc::string_view(b.driver->name) : cc::string_view();
-                      if (an != bn)
-                          return an < bn;
-                      return section_path_less(a.section_path, b.section_path);
-                  });
+        cc::sort(alias.fragments,
+                 [](alias_fragment const& a, alias_fragment const& b)
+                 {
+                     auto const an = a.driver != nullptr ? cc::string_view(a.driver->name) : cc::string_view();
+                     auto const bn = b.driver != nullptr ? cc::string_view(b.driver->name) : cc::string_view();
+                     if (an != bn)
+                         return an < bn;
+                     return section_path_less(a.section_path, b.section_path);
+                 });
 }

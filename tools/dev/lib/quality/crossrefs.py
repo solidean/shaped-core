@@ -56,7 +56,12 @@ MD_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]*)\)")
 
 # A path-like token ending in .md, used to find doc references inside comments.
 # The stem must end in a name character and carry no glob marker in front, so the `*.md` of a pathspec written up in a comment is not read as a path.
-DOC_TOKEN_RE = re.compile(r"(?<![*?\[])[\w.\-/]*[\w\-]\.md")
+#
+# The lookbehind also excludes the token characters themselves, so a rejected start cannot simply slide one character right.
+# Without that a guarded token is refused at its first character and then matched from its second, and the report names a path nobody wrote.
+# `[` is deliberately NOT guarded: whole `[text](target)` links are excluded by span in check_source_refs, which is the
+# precise version of what guarding `[` was approximating, and a bracketed token that is not a link is a reference like any other.
+DOC_TOKEN_RE = re.compile(r"(?<![\w.\-/*?])[\w.\-/]*[\w\-]\.md")
 
 # Extensions a markdown link inside a *comment* may point at without naming a directory.
 # A target with none of these and no `/` is not a path, which is what keeps a C++ comment's `a[i](b)` out of the scan.
@@ -343,19 +348,28 @@ def check_source_refs(src_path: Path, root: Path, offenders: list[str]) -> int:
     for lineno, comment in source_comments(src_path):
         loc = f"{rel_src}:{lineno}"
         # Byte ranges the link form already accounted for, so a `[text](…)` link is not counted a second time as a bare token.
+        # This spans the WHOLE link, text included: only the target is a reference, and the text is free to be a label that
+        # merely looks like a path — `[docs/coding-guidelines.md](docs/coding-guidelines.md)` is one link, not two references.
+        # Consuming the target alone would leave that label to the bare-token pass, which resolves it relative to the
+        # source file rather than to the link, and reports a break that is not one.
         consumed: list[tuple[int, int]] = []
 
         for m in MD_LINK_RE.finditer(comment):
             raw = m.group(1).strip()
-            if not raw or is_external(raw):
+            if not raw:
+                continue
+            if is_external(raw):
+                consumed.append((m.start(), m.end()))
                 continue
             target = raw.split(" ", 1)[0].split("\t", 1)[0]
             path_part, _, fragment = target.partition("#")
             path_part = urllib.parse.unquote(path_part)
             if not path_part or not looks_like_path(path_part):
+                # Not a reference at all — a C++ comment's `a[i](b)`. Leave the span to the bare-token pass, which
+                # still has to see any real doc path written inside those brackets.
                 continue
 
-            consumed.append((m.start(1), m.end(1)))
+            consumed.append((m.start(), m.end()))
             checked += 1
             wants_dir = path_part.endswith("/")
             resolved = resolve_doc_token(path_part, src_path, root, wants_dir=wants_dir)

@@ -17,6 +17,8 @@ clean-core/
   memory/       # allocation, node_allocation, shared_ptr (+ impl/)
   container/    # array/vector families, map, set, span, strided_span, … (+ impl/)
   sequence/     # the lazy ranges API (early prototype)
+  algorithm/    # index_swap_range (the seam) + sort, sort_async, selection, partition, search, permutation (+ impl/)
+                # comparator vocabulary is common/compare.hh
   string/       # string, string_view, char_predicates, format, formatter, print, to_string, to_debug_string, conversion
   function/     # function_ref, unique_function
   error/        # optional, result, crash_handler
@@ -36,6 +38,8 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   The placeholder grammar, the `cc::custom::formatter<T>` protocol, and what the compile-time check does and does not cover.
 - [sequence](sequence.md) — `cc::sequence`, the lazy forward cursor over a range.
   An early prototype: the doc separates the reductions that work today from the design the rest of the API is intended to follow.
+- [sorting](sorting.md) — `cc::sort` and its family: pdqsort driven purely by index get + index swap, which is what lets one call permute several ranges at once.
+  What the swap-only rule buys and costs, why a comparator that is not a strict weak ordering now asserts, and how to write your own `index_swap_range` adapter.
 - [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers clean-core is allowed to depend on directly, and why.
 - [customization-points](customization-points.md) — the `cc::custom::` trait + hidden-friend protocol that operations like hashing use to let types opt in.
   Enum traits are the tier-1-only case, and why the `CC_FLAG_ENUM_*` macros take the enum's namespace as an argument.
@@ -49,6 +53,8 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   mimalloc leads at every size and is only mildly `/Ob1`-sensitive.
 - [benchmarks/file-stream-benchmark](benchmarks/file-stream-benchmark.md) — the file stream adapters vs `std::fstream` across a granularity sweep.
   ~11×/16× faster single-byte via the buffer window, narrowing to parity as records grow.
+- [benchmarks/sort-benchmark](benchmarks/sort-benchmark.md) — `cc::sort` vs `std::sort` across input shapes, element types and sizes.
+  2.5× ahead on large random input and up to 9.9× on patterned input, against a consistent ~2× loss at n = 16 random — which is what the swap-only rule costs.
 - [benchmarks/async-benchmark](benchmarks/async-benchmark.md) — the four `cc::async` benchmarks: the per-node tax on one thread, and where a born-ready node's ~40 ns goes.
   Plus pool scaling across five fork-join shapes, and the leaf size at which fork-join overhead stops dominating.
 
