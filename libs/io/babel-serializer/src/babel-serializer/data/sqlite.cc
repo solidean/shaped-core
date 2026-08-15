@@ -418,7 +418,13 @@ cc::result<cc::unit, error> statement::bind(i32 index, cc::string_view value)
 
 cc::result<cc::unit, error> statement::bind(i32 index, cc::span<byte const> value)
 {
-    if (sqlite3_bind_blob(_stmt, index, value.data(), int(value.size_bytes()), SQLITE_TRANSIENT) != SQLITE_OK)
+    // An EMPTY span still binds an empty blob, never NULL.
+    // sqlite3_bind_blob reads a null pointer as "bind NULL", and an empty container's data() is legitimately null — so
+    // without this, binding an empty blob into a NOT NULL column fails for a value the caller did supply.
+    static constexpr byte empty = {};
+    auto const* data = value.data() != nullptr ? value.data() : &empty;
+
+    if (sqlite3_bind_blob(_stmt, index, data, int(value.size_bytes()), SQLITE_TRANSIENT) != SQLITE_OK)
         return cc::error(error_of(handle_of(_stmt)));
     return cc::unit{};
 }

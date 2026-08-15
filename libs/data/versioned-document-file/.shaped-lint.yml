@@ -15,4 +15,7 @@ rules:
       - src/versioned-document-file/store.cc
       - src/versioned-document-file/impl/store_memory.hh
       - src/versioned-document-file/impl/store_memory.cc
+      - src/versioned-document-file/impl/sqlite_actor.hh
+      - src/versioned-document-file/impl/store_sqlite.hh
+      - src/versioned-document-file/impl/store_sqlite.cc
       - tests/**

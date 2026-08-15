@@ -1,0 +1,62 @@
+#pragma once
+
+#include <babel-serializer/data/sqlite.hh>
+#include <versioned-document-file/impl/sqlite_schema.hh>
+#include <versioned-document-file/impl/store_io.hh>
+
+/// The reader and writer over a live connection — the only place in this library that talks to a database.
+///
+/// Both are constructed on the actor thread, over the actor's own connection, and never leave it.
+
+namespace vdoc::file::impl
+{
+/// Reads whole tables out of a connection.
+///
+/// Every statement NAMES ITS COLUMNS, and there is no `SELECT *` anywhere.
+/// That is not a style preference: it is what makes a column a newer build added survive an open-modify-save cycle,
+/// because nothing on the read or write path can address it.
+class sqlite_reader final : public store_reader
+{
+public:
+    sqlite_reader(babel::sqlite::database& db, schema_scan scan) : _db(db), _scan(cc::move(scan)) {}
+
+    [[nodiscard]] cc::result<cc::vector<blob_row>> read_blobs() override;
+    [[nodiscard]] cc::result<cc::vector<chunk_summary>> read_chunk_summaries() override;
+    [[nodiscard]] cc::result<cc::vector<asset_row>> read_assets() override;
+    [[nodiscard]] cc::result<cc::vector<op_row>> read_ops() override;
+    [[nodiscard]] cc::result<cc::vector<ref_row>> read_refs() override;
+    [[nodiscard]] cc::result<cc::vector<snapshot_row>> read_snapshots() override;
+    [[nodiscard]] cc::result<cc::vector<workspace_row>> read_workspace() override;
+    [[nodiscard]] cc::result<cc::vector<meta_row>> read_meta() override;
+
+    [[nodiscard]] cc::span<cc::string const> unknown_tables() const override { return _scan.unknown_tables; }
+    [[nodiscard]] cc::span<cc::string const> unknown_columns() const override { return _scan.unknown_columns; }
+
+private:
+    babel::sqlite::database& _db;
+    schema_scan _scan;
+};
+
+/// Writes one publish into a connection, as one transaction.
+///
+/// The transaction lives here rather than in the caller, so that this writer dying — for any reason, on any path — rolls it back.
+/// There is no route to an observable half-publish.
+class sqlite_writer final : public store_writer
+{
+public:
+    explicit sqlite_writer(babel::sqlite::database& db) : _db(db) {}
+
+    [[nodiscard]] cc::result<cc::unit> begin() override;
+    [[nodiscard]] cc::result<cc::unit> insert_op(op_row const& row) override;
+    [[nodiscard]] cc::result<cc::optional<i64>> insert_blob(blob_row const& row) override;
+    [[nodiscard]] cc::result<cc::unit> insert_chunk(chunk_row const& row) override;
+    [[nodiscard]] cc::result<cc::unit> upsert_asset(asset_row const& row) override;
+    [[nodiscard]] cc::result<cc::unit> upsert_ref(ref_row const& row) override;
+    [[nodiscard]] cc::result<cc::unit> upsert_workspace(workspace_row const& row) override;
+    [[nodiscard]] cc::result<cc::unit> commit() override;
+
+private:
+    babel::sqlite::database& _db;
+    cc::optional<babel::sqlite::transaction> _transaction;
+};
+} // namespace vdoc::file::impl

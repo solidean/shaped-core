@@ -170,26 +170,36 @@ INVOCABLE_TEST("vdoc::file - unknown tables and columns survive an open-modify-s
 
     medium->add_unknown_table("future_state");
     medium->add_unknown_column("ops", "future_flag");
-    auto const before = medium->snapshot_bytes();
 
     {
         auto const s = open_or_fail(*medium);
 
         // Reported, so a caller can see this build did not understand everything.
-        CHECK(s->report().contains(load_issue_kind::unknown_table));
-        CHECK(s->report().contains(load_issue_kind::unknown_column));
+        auto const* table = s->report().find_first(load_issue_kind::unknown_table);
+        auto const* column = s->report().find_first(load_issue_kind::unknown_column);
+        REQUIRE(table != nullptr);
+        REQUIRE(column != nullptr);
+        CHECK(table->name == "future_state");
+        CHECK(column->name == "ops.future_flag");
 
         publish_sample(*s, history);
         s->close();
     }
 
-    // The forward-compatibility promise, tested rather than asserted: a rewrite never drops what it did not understand.
-    auto const after = medium->snapshot_bytes();
-    auto const before_text = cc::string_view(reinterpret_cast<char const*>(before.data()), before.size());
-    auto const after_text = cc::string_view(reinterpret_cast<char const*>(after.data()), after.size());
-    CHECK(after_text.contains("unknown-table future_state id"));
-    CHECK(after_text.contains("unknown-column ops.future_flag"));
-    CHECK(before_text.contains("unknown-table future_state id"));
+    // The forward-compatibility promise, tested rather than asserted.
+    // A whole open-modify-save cycle ran over both, and they are still here to be reported again — which is what "a
+    // rewrite never drops what it did not understand" means from the outside.
+    auto const reopened = open_or_fail(*medium);
+    auto const* table = reopened->report().find_first(load_issue_kind::unknown_table);
+    auto const* column = reopened->report().find_first(load_issue_kind::unknown_column);
+    REQUIRE(table != nullptr);
+    REQUIRE(column != nullptr);
+    CHECK(table->name == "future_state");
+    CHECK(column->name == "ops.future_flag");
+
+    // And the document written across that cycle is intact.
+    CHECK(reopened->ops().size() == history.ops.size());
+    reopened->close();
 }
 
 INVOCABLE_TEST("vdoc::file - a workspace write never makes a document look unsaved", (store_impl const& impl))
@@ -247,8 +257,6 @@ INVOCABLE_TEST("vdoc::file - flushing writes only the dirty keys", (store_impl c
         s->close();
     }
 
-    auto const before = medium->snapshot_bytes();
-
     {
         // Only "a/one" is touched, so "b/two" is not in any statement at all — which is what keeps a key a newer
         // build wrote and this one never touched unclobbered.
@@ -259,13 +267,8 @@ INVOCABLE_TEST("vdoc::file - flushing writes only the dirty keys", (store_impl c
         s->close();
     }
 
-    auto const after = medium->snapshot_bytes();
-    auto const after_text = cc::string_view(reinterpret_cast<char const*>(after.data()), after.size());
-    auto const before_text = cc::string_view(reinterpret_cast<char const*>(before.data()), before.size());
-    CHECK(before_text != after_text); // a/one did change
-    CHECK(after_text.contains("ws b/two 1"));
-
     auto const reopened = open_or_fail(*medium);
+    CHECK(reopened->workspace().size() == 2); // the untouched key is still there, at its original value
     auto const one = reopened->try_get_workspace("a/one", 1);
     auto const two = reopened->try_get_workspace("b/two", 1);
     REQUIRE(one.has_value());

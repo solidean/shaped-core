@@ -14,11 +14,21 @@ TEST("vdoc::file - the in-memory store")
     nx::invoke_tests("in-memory", vdoc::file::test::in_memory_impl());
 }
 
+TEST("vdoc::file - the sqlite store")
+{
+    auto const impl = vdoc::file::test::sqlite_impl();
+    if (!impl.is_available())
+        SKIP("the SQLite backend was not compiled in");
+    else
+        nx::invoke_tests("sqlite", impl);
+}
+
 /// Defines, per conformance test, an alias that runs it on both arms.
 /// So `dev.py test "<name>"` selects one behaviour and checks it everywhere it has to hold.
 NX_TEST_SETUP(nx::setup& s)
 {
-    auto const drivers = {cc::pair<cc::string_view, cc::string_view>("vdoc::file - the in-memory store", "in-memory")};
+    auto const drivers = {cc::pair<cc::string_view, cc::string_view>("vdoc::file - the in-memory store", "in-memory"),
+                          cc::pair<cc::string_view, cc::string_view>("vdoc::file - the sqlite store", "sqlite")};
 
     for (auto const* invocable : s.invocables_with<vdoc::file::test::store_impl>())
     {

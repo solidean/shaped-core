@@ -39,8 +39,13 @@ class blob_source;
 /// Ops are not listed — the store derives them from the refs by reachability, so an op no ref can reach cannot be published by mistake.
 struct publish_changes;
 
-/// The result of a publish — empty today, and a type rather than void so it can carry per-publish facts later.
+/// What a publish actually had to write.
+/// Both counts are zero for a publish that was already durable, which is what idempotence looks like from the outside.
 struct publish_result;
+
+/// The two halves of an open: the store, and when its load finished.
+/// Separate because the CALLER must own the store from the first instant — an actor that held the last reference would tear itself down.
+struct open_result;
 } // namespace vdoc::file
 
 // ---- load diagnostics --------------------------------------------------------------------------

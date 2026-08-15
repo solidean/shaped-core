@@ -89,6 +89,9 @@ namespace vdoc::file::test
 /// The in-memory arm.
 [[nodiscard]] store_impl in_memory_impl();
 
+/// The SQLite arm, over a real file in the OS temp directory.
+[[nodiscard]] store_impl sqlite_impl();
+
 /// Waits for `async` and moves the outcome out.
 ///
 /// Unthreaded it is already resolved on return from the call that made it, because every entry point pumps before handing one back;

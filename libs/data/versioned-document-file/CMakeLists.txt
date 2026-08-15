@@ -14,6 +14,10 @@ add_library(versioned-document-file
     src/versioned-document-file/impl/load.cc
     src/versioned-document-file/impl/publish.cc
     src/versioned-document-file/impl/store_memory.cc
+    src/versioned-document-file/impl/sqlite_schema.cc
+    src/versioned-document-file/impl/sqlite_io.cc
+    src/versioned-document-file/impl/sqlite_actor.cc
+    src/versioned-document-file/impl/store_sqlite.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -64,6 +68,7 @@ if(SC_BUILD_TESTS)
         tests/assets-test.cc
         tests/diagnostics-test.cc
         tests/conformance/store_fixture.cc
+        tests/conformance/sqlite_medium.cc
         tests/conformance/drivers.cc
         tests/conformance/conformance-test.cc
     )

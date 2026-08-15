@@ -37,7 +37,24 @@ namespace vdoc::file
 /// sizeof(T) of the static type, which a derived store would land inside.
 /// The same clean-core gap shaped-graphics and shaped-shader-library name, and the one entry in our .shaped-lint.yml.
 using store_handle = std::shared_ptr<store>;
+
 } // namespace vdoc::file
+
+/// The two halves of an open: the store, and when its load finished.
+///
+/// They are separate because the CALLER must own the store from the first instant.
+/// The actor may only ever hold a borrowed pointer to it: an actor that held the last reference would destroy the store
+/// — and with it the actor — on the actor's own thread, which is a join against itself.
+/// Handing the handle back synchronously makes that impossible by construction rather than by care.
+struct vdoc::file::open_result
+{
+    /// Usable immediately, and EMPTY until `loaded` is ready.
+    store_handle store;
+
+    /// Ready once the load finished.
+    /// A hard failure rides its error channel, and leaves the store empty.
+    cc::shared_async<cc::unit> loaded;
+};
 
 /// A materialized document cached against an op, so loading need not replay history back to the root.
 ///
@@ -120,6 +137,19 @@ class vdoc::file::store : public std::enable_shared_from_this<store>
 {
     // opening
 public:
+    /// Opens a `.vdoc` file, creating it if the path does not exist.
+    ///
+    /// Returns at once, having touched no disk: opening, checking the schema and loading all run on the store's own actor.
+    /// The store comes back immediately and is empty until `open_result::loaded` is ready.
+    /// A hard failure rides that async's error channel; everything else is a load issue and the store opens anyway.
+    [[nodiscard]] static open_result open(cc::string_view path);
+
+    /// Whether file-backed storage was compiled in at all.
+    ///
+    /// A runtime probe, never a macro: false makes open() report the absence rather than making any declaration
+    /// disappear, and it is what a test SKIPs on.
+    [[nodiscard]] static bool is_file_storage_available();
+
     /// An unsaved new document, over an image it owns alone.
     /// Its state dies with it, which is what "unsaved" means.
     [[nodiscard]] static store_handle create_in_memory();
