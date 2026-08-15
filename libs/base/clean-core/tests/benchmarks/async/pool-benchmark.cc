@@ -32,7 +32,6 @@
 #include <nexus/guide.hh>
 #include <nexus/test.hh>
 
-#include <algorithm>
 #include <cstdio>
 #include <type_traits>
 
@@ -155,13 +154,13 @@ CC_DONT_INLINE void serial_quicksort(cc::span<i32> d)
 {
     if (d.size() <= qsort_cutoff)
     {
-        std::sort(d.begin(), d.end());
+        cc::sort(d);
         return;
     }
     isize const s = hoare_partition(d);
     if (s <= 0 || s >= d.size()) // degenerate split (all-equal run): fall back rather than recurse forever
     {
-        std::sort(d.begin(), d.end());
+        cc::sort(d);
         return;
     }
     serial_quicksort(d.subspan(cc::start_end{0, s}));
@@ -211,13 +210,13 @@ cc::shared_async<i64> async_quicksort(cc::span<i32> d)
             {
                 if (d.size() <= qsort_cutoff)
                 {
-                    std::sort(d.begin(), d.end());
+                    cc::sort(d);
                     return actx.success(i64(0));
                 }
                 isize const s = hoare_partition(d);
                 if (s <= 0 || s >= d.size())
                 {
-                    std::sort(d.begin(), d.end());
+                    cc::sort(d);
                     return actx.success(i64(0));
                 }
                 l = async_quicksort(d.subspan(cc::start_end{0, s}));

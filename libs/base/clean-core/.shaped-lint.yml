@@ -231,3 +231,8 @@ rules:
     value: [<cstdio>, <cstdlib>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>]
     reason: the C runtime and the intrinsics the benchmarks and platform tests measure against
     files: tests/**
+
+  - kind: allow-include
+    value: <algorithm>
+    reason: std::sort is the baseline cc::sort is measured against, which is the whole point of this file
+    files: tests/benchmarks/sort-benchmark.cc
