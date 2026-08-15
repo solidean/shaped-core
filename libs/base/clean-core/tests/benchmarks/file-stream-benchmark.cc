@@ -11,14 +11,14 @@
 #include "bench_util.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh> // cc::print / cc::format
 #include <clean-core/string/string.hh>
 #include <nexus/guide.hh>
 #include <nexus/test.hh>
 
-#include <filesystem> // OS temp dir + remove (no cc filesystem yet)
-#include <fstream>    // the std baseline under test
+#include <fstream> // the std baseline under test
 #include <string>
 
 using namespace cc::primitive_defines;
@@ -30,7 +30,8 @@ constexpr isize max_chunk = 64 * 1024;         // largest bulk chunk
 
 std::string temp_path(char const* name)
 {
-    return (std::filesystem::temp_directory_path() / name).string();
+    auto const path = cc::temp_file_path(name);
+    return std::string(path.data(), size_t(path.size()));
 }
 
 // --- cc single-byte fast path: straight through the exposed window, refill/drain only when it fills --------
@@ -152,9 +153,8 @@ struct paths
     [[nodiscard]] cc::string_view cc_view() const { return cc::string_view(cc_file.c_str()); }
     void remove() const
     {
-        std::error_code ec;
-        std::filesystem::remove(cc_file, ec);
-        std::filesystem::remove(std_file, ec);
+        (void)cc::remove_file(cc::string_view(cc_file.data(), isize(cc_file.size())));
+        (void)cc::remove_file(cc::string_view(std_file.data(), isize(std_file.size())));
     }
 };
 

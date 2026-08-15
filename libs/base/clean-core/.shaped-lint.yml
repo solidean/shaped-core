@@ -124,7 +124,14 @@ rules:
   - kind: allow-include
     value: <cerrno>
     reason: errno is how the POSIX file API reports failure
-    files: src/clean-core/streams/impl/native_file.cc
+    files:
+      - src/clean-core/streams/impl/native_file.cc
+      - src/clean-core/platform/file_path.cc
+
+  - kind: allow-include
+    value: [<cstdio>, <cstdlib>]
+    reason: std::remove deletes a file and std::getenv names the temp directory; POSIX offers no other route to either
+    files: src/clean-core/platform/file_path.cc
 
   - kind: allow-include
     value: <iostream>
@@ -162,6 +169,7 @@ rules:
       - src/clean-core/common/assert.cc
       - src/clean-core/platform/console.cc
       - src/clean-core/streams/impl/native_file.cc
+      - src/clean-core/platform/file_path.cc
 
   - kind: allow-include
     value: <fcntl.h>

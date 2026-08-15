@@ -685,6 +685,8 @@ cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root
 #include <clean-core/string/conversion.hh>
 cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> surrogate pair; bad -> U+FFFD
                                                   // NOT NUL-terminated (push_back(u'\0') if you need it)
+cc::string u8 = cc::utf16_to_utf8(u16);           // pair -> astral code point; an unpaired surrogate -> U+FFFD
+                                                  // takes a span, since a wide OS string is rarely NUL-terminated
 ```
 
 ## Platform
@@ -702,6 +704,13 @@ cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> su
                                                    // reach <rpcndr.h> past WIN32_LEAN_AND_MEAN.
 #include <clean-core/platform/native.hh>
 cc::demangle_symbol(symbol)                        // cc::string — human-readable C++ symbol name
+
+#include <clean-core/platform/file_path.hh>       // where scratch files go, and how to unmake one
+cc::temp_directory_path();                          // cc::string — no trailing separator; "." where none is named
+cc::temp_file_path(prefix, suffix = "");            // "<temp>/<prefix>-<pid>-<counter><suffix>" — CREATES NOTHING
+cc::remove_file(path);                              // true == gone, which includes never having been there
+                                                    // NOT a filesystem layer: no mkdir, no iteration, no metadata,
+                                                    // no path arithmetic. Reading and writing are the file streams'.
 
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)

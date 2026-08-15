@@ -60,3 +60,66 @@ cc::vector<char16_t> cc::utf8_to_utf16(cc::string_view utf8)
 
     return out;
 }
+
+cc::string cc::utf16_to_utf8(cc::span<char16_t const> utf16)
+{
+    cc::string out;
+    out.reserve_back(utf16.size());
+
+    isize const count = utf16.size();
+
+    auto const emit = [&](u32 cp)
+    {
+        if (cp < 0x80)
+            out += char(cp);
+        else if (cp < 0x800)
+        {
+            out += char(0xC0 | (cp >> 6));
+            out += char(0x80 | (cp & 0x3F));
+        }
+        else if (cp < 0x10000)
+        {
+            out += char(0xE0 | (cp >> 12));
+            out += char(0x80 | ((cp >> 6) & 0x3F));
+            out += char(0x80 | (cp & 0x3F));
+        }
+        else
+        {
+            out += char(0xF0 | (cp >> 18));
+            out += char(0x80 | ((cp >> 12) & 0x3F));
+            out += char(0x80 | ((cp >> 6) & 0x3F));
+            out += char(0x80 | (cp & 0x3F));
+        }
+    };
+
+    isize i = 0;
+    while (i < count)
+    {
+        u32 const unit = u32(utf16[i]);
+
+        if (unit >= 0xD800 && unit <= 0xDBFF) // high surrogate: needs a low one to follow
+        {
+            u32 const low = i + 1 < count ? u32(utf16[i + 1]) : 0;
+            if (low >= 0xDC00 && low <= 0xDFFF)
+            {
+                emit(0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00));
+                i += 2;
+                continue;
+            }
+            emit(0xFFFD); // unpaired high surrogate
+            i += 1;
+        }
+        else if (unit >= 0xDC00 && unit <= 0xDFFF) // a low surrogate with no high one before it
+        {
+            emit(0xFFFD);
+            i += 1;
+        }
+        else
+        {
+            emit(unit);
+            i += 1;
+        }
+    }
+
+    return out;
+}

@@ -20,6 +20,7 @@ add_library(clean-core
     src/clean-core/common/blake3.cc
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
+    src/clean-core/platform/file_path.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
@@ -73,6 +74,7 @@ target_sources(clean-core
 
     src/clean-core/platform/native.hh
     src/clean-core/platform/console.hh
+    src/clean-core/platform/file_path.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
     src/clean-core/platform/win32_sanitized.hh
@@ -257,6 +259,7 @@ if(SC_BUILD_TESTS)
         tests/common/utility-test.cc
 
         tests/platform/console-test.cc
+        tests/platform/file_path-test.cc
 
         tests/math/bit-test.cc
         tests/math/random-test.cc
