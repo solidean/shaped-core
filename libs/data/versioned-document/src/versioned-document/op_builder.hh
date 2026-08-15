@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <versioned-document/component.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/op_graph.hh>
 
@@ -31,6 +32,33 @@ public:
     /// worth surfacing rather than silently resolving, and an op may not carry a path twice in any case.
     op_builder& set_raw(property_path const& path, value v);
     op_builder& set_raw(entity_id entity, component_type_id component, property_id property, value v);
+
+    /// Stages a whole component: stamps `$schema_version`, then lets `component_traits<C>::write` emit the rest.
+    ///
+    /// Stamping happens here rather than in write, so there is one stamp site and a component author cannot forget it
+    /// — component_writer rejects the sigil outright.
+    /// The diff underneath is set_raw's, so an unchanged component emits no assignments at all, stamp included.
+    template <class ComponentT>
+    op_builder& set(entity_id entity, ComponentT const& c)
+    {
+        static_assert(is_component<ComponentT>, "specialize vdoc::component_traits<C> first - see "
+                                                "docs/concept.md#components-belong-to-the-application");
+
+        auto const type = impl::component_type_of<ComponentT>();
+        set_raw(entity, type, reserved::schema_version(), value::of(component_traits<ComponentT>::schema_version));
+
+        auto writer = component_writer::create_for(*this, entity, type);
+        component_traits<ComponentT>::write(c, writer);
+        return *this;
+    }
+
+    /// Deletion, which is an ordinary assignment and never a removal.
+    ///
+    /// Something is dead only if `$alive` is unambiguously false, so writing true here is how an undelete is spelled.
+    op_builder& set_alive(entity_id entity, component_type_id component, bool alive);
+
+    /// Entity-level deletion: `$alive` on the `$entity` component type, which drops the whole entity.
+    op_builder& set_entity_alive(entity_id entity, bool alive);
 
     /// Materializes the touched entities as seen from this op's parents, and emits only what actually differs.
     ///

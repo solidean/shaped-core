@@ -34,6 +34,16 @@ vdoc::op_builder& vdoc::op_builder::set_raw(entity_id entity, component_type_id 
     return set_raw(property_path{.entity = entity, .component = component, .property = property}, cc::move(v));
 }
 
+vdoc::op_builder& vdoc::op_builder::set_alive(entity_id entity, component_type_id component, bool alive)
+{
+    return set_raw(entity, component, reserved::alive(), value::of(alive));
+}
+
+vdoc::op_builder& vdoc::op_builder::set_entity_alive(entity_id entity, bool alive)
+{
+    return set_alive(entity, reserved::entity(), alive);
+}
+
 vdoc::op vdoc::op_builder::build(op_graph const& graph) const
 {
     auto parents = _parents;

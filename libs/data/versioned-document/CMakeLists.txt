@@ -7,6 +7,7 @@ project(versioned-document LANGUAGES CXX)
 #
 # Each milestone in docs/todo/ adds its own sources here.
 add_library(versioned-document
+    src/versioned-document/component.cc
     src/versioned-document/fwd.cc
     src/versioned-document/op.cc
     src/versioned-document/op_builder.cc
@@ -27,6 +28,7 @@ target_sources(versioned-document
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
+    src/versioned-document/component.hh
     src/versioned-document/fwd.hh
     src/versioned-document/ids.hh
     src/versioned-document/op.hh
@@ -67,6 +69,7 @@ if(SC_BUILD_TESTS)
     add_executable(versioned-document-test
         tests/main.cc
 
+        tests/component-test.cc
         tests/ids-test.cc
         tests/op-test.cc
         tests/op-fuzz-test.cc
