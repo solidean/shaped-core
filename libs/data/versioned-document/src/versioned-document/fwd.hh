@@ -85,6 +85,13 @@ struct op_id;
 /// One property assignment — the unit an op is made of.
 struct assignment;
 
+/// Which encoding an op's assignment blob uses, as its leading tag byte.
+/// The tag is what lets the assignment encoding change without touching the hashing rule.
+enum class assignment_encoding : u8;
+
+/// Walks an op's assignments in place, so materialization never builds a per-op vector.
+class assignment_cursor;
+
 /// The exact bytes a store persists for an op, and the only thing op_id commits to.
 struct op_payload;
 

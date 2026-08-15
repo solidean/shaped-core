@@ -316,6 +316,20 @@ An oracle has to be correct by inspection, and "correct modulo a chain cover" is
 
 **Reopen when:** profiling shows the state copy at merges dominating, which is a question about representation rather than about the rule.
 
+### Metadata is any canonical value, not necessarily an object
+
+**Decided.** `try_decode_op` requires the metadata blob to be a canonically encoded value, and checks nothing else about it.
+`op_builder` writes an object, and a decoder still accepts whatever kind it is handed.
+
+The sketch in [milestone-2.md](todo/milestone-2.md) said "an object", which would have been a second format rule to enforce.
+Nothing interprets metadata, so constraining its kind buys no safety.
+Enforcing it now would also make relaxing it later a **forward-compatibility break**, since builds predating the relaxation would reject files they could otherwise carry unharmed.
+
+That asymmetry is the general rule here, and it is worth stating once: a decoder that rejects more than it must costs compatibility, and a decoder that rejects less can always tighten later.
+Canonicality is different, and non-negotiable — it is what makes equality byte equality, so it stays enforced.
+
+**Reopen when:** something starts interpreting metadata, which would make its shape load-bearing.
+
 ### An unknown assignment encoding tag is a decode error
 
 **Decided.** `try_decode_op` rejects an assignment blob whose leading tag it does not know, with an error naming the tag.

@@ -25,7 +25,7 @@ Depends on milestones 0 and 1.
 
 ```text
 op_payload {
-    metadata_bytes      an encoded value (object); informational, but hashed
+    metadata_bytes      an encoded value; informational, but hashed
     assignment_bytes    a one-byte encoding tag, then the assignments
 }
 op {
