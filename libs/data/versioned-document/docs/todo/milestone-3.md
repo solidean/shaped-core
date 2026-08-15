@@ -1,5 +1,43 @@
 # Milestone 3 — Raw and typed documents
 
+**Status: done.**
+Landed as `parse_report.hh/.cc`, `parse_policy.hh/.cc`, `component.hh/.cc`, `document.hh/.cc` and `parse.hh/.cc`, plus `op_builder::set` and the two `set_alive` overloads.
+Tested by `component-test`, `document-test`, `parse-test` and `parser-test`.
+
+The sketch below is what was built; five things settled during implementation, each recorded in [decisions.md](../decisions.md) where it changes the design rather than merely the code:
+
+- **A component's `parse` is handed a `property_reader`, not a `raw_component`** — [decisions.md](../decisions.md#component_traitsparse-is-handed-a-property_reader-not-a-raw_component).
+  §5 wants the multi-value rules in exactly one place, and the sketch's signature made reimplementing them the easy path.
+- **`write` does not stamp `$schema_version`** — [decisions.md](../decisions.md#op_builderset-stamps-schema_version-and-component_writer-rejects-the-sigil).
+  §1's table said it did.
+  `op_builder::set` stamps once instead, and `component_writer::set` asserts on the sigil, so a component author cannot write a reserved name at all.
+- **`$alive` and `$schema_version` never reach `resolve_multi_value`** — [decisions.md](../decisions.md#alive-and-schema_version-never-reach-resolve_multi_value).
+  Read through the normal helper, a contested `$alive` would be handed to the policy, and a policy resolving it to false would make a thing vanish.
+- **`set_alive` / `set_entity_alive` on `op_builder`**, beyond the sketch.
+  Without them every application spells the reserved path by hand through `set_raw`, which is the convention drift `reserved::` exists to prevent.
+- **The document arena is vdoc-local and marked temporary** — [decisions.md](../decisions.md#the-document-arena-is-vdoc-local-until-clean-core-grows-one).
+  clean-core has the `cc::memory_resource` seam but no bump resource behind it, and this is the second hand-rolled copy in the tree.
+
+Five more things emerged in the code and are worth carrying forward:
+
+- **The parser is selection then construction, not count then fill.**
+  The first shape counted silently and filed every diagnostic while filling, which loses exactly the components that never get a column.
+  A type whose every instance is skipped for an unknown version was silently dropped.
+  Selection now decides everything structural and files every structural diagnostic; construction consumes what selection recorded and files none of its own.
+  The two cannot disagree because only one of them decides.
+- **An absent `$schema_version` is version 0, never "unknown."**
+  The sketch does not say, and "unknown" would make every hand-written `set_raw` document unloadable.
+  0 is below any real component's version, so it never skips.
+- **`unsupported_component_type` is filed once per type, not once per occurrence**, with an empty entity id.
+  Per-occurrence would emit one diagnostic per entity on a large document, and "reports exactly the missing types" is what the acceptance test asks for.
+- **Two concurrent ops writing identical bytes under identical parents are the same op.**
+  `graph.add` is keyed by content hash, so the agreed-multi-value case needs the two ops to differ somewhere — metadata, in the test.
+  That is milestone 2's "add is not append" meeting milestone 3's tests, and it is easy to write a test that silently proves nothing instead.
+- **Entities that survive with zero known components stay in the entity table.**
+  They exist and they are alive; a document that dropped them would lose information the raw document has.
+
+Two clean-core gaps this milestone worked around and did not close: a bump `cc::memory_resource`, and `cc::binary_search` / `cc::lower_bound` — this library now hand-rolls its fourth sorted search.
+
 **Goal.** Interpretation: the component protocol, the parse policy and report, the reserved conventions, and the immutable typed index an application actually queries.
 
 **Why here.** With milestone 2 the storage model is complete and inert.
@@ -36,8 +74,8 @@ An application declares a component by specializing `component_traits<C>`:
 ```text
 type_name       cc::string_view, stable, e.g. "Transform"
 schema_version  i32, bumped when the stored shape changes
-write(C, writer)              state -> properties, stamping $schema_version
-parse(raw, entity, policy, report) -> cc::optional<C>
+write(C, writer)         state -> properties; op_builder::set stamps $schema_version around it
+parse(reader) -> cc::optional<C>
 ```
 
 `parse` returning empty means **drop this component**.
@@ -142,12 +180,13 @@ Nothing implements it in v1; nothing may make it impossible either.
 ## API surface this lands
 
 ```text
-vdoc::component_traits / is_component / component_schema / component_registry
-vdoc::parse_policy / default_parse_policy
+vdoc::component_traits / is_component / component_schema / component_registry / component_writer
+vdoc::property_reader / parse_policy / default_parse_policy
 vdoc::diagnostic_kind / diagnostic / agreed_multi_value / parse_report
-vdoc::parse
+vdoc::parse / vdoc::is_alive
 vdoc::document
-vdoc::reserved::*    the $-prefixed names, as constants
+vdoc::reserved::*    the $-prefixed names; functions, since an interned id cannot be constexpr
+vdoc::op_builder::set / set_alive / set_entity_alive
 ```
 
 ## Tests

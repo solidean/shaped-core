@@ -14,7 +14,7 @@ This document tracks *state*; it is not where the design lives.
 - The settled choices and their reasoning are [decisions.md](decisions.md).
 - The ordered plan, with acceptance criteria per step, is [todo/](todo/_index.md).
 
-Milestones 0 through 2 have landed; everything above them is `[planned]`.
+Milestones 0 through 3 have landed; everything above them is `[planned]`.
 The milestone that lands each piece is named so the two documents stay in step.
 
 ## Top-level structure
@@ -27,9 +27,11 @@ src/versioned-document/
   op              [done]        op / op_id / op_builder, canonical encoding    milestone 2
   op_graph        [done]        the DAG, reachability, materialization         milestone 2
   raw_document    [done]        the untyped materialized document              milestone 2
-  component       [planned]     traits, registry, schema                       milestone 3
-  parse           [planned]     policy, report, diagnostics, the parser        milestone 3
-  document        [planned]     the typed immutable index                      milestone 3
+  component       [done]        traits, registry, schema, component_writer     milestone 3
+  parse_report    [done]        diagnostics and agreed multi-values            milestone 3
+  parse_policy    [done]        property_reader and the policy seam            milestone 3
+  parse           [done]        default_parse_policy and the parser            milestone 3
+  document        [done]        the typed immutable index                      milestone 3
 
 src/versioned-document-file/
   fwd.hh          [done]        forward declarations; also the API index
@@ -53,7 +55,7 @@ A fourth landed with milestone 1: `[done]` **`cc::load_bytes_le` / `cc::store_by
 babel had already filed that gap with three hand-rolled copies, and the value codec would have been the fourth.
 babel's readers moved onto it in the same change, so the gap is closed rather than merely covered.
 
-## versioned-document [in progress]
+## versioned-document [done]
 
 ### value [done]
 
@@ -75,14 +77,16 @@ Design: [concept.md](concept.md#ops-and-content-addressing). Landed in [mileston
 - `[done]` **materialization** of one head or several, with multi-values preserved.
 - `[done]` **dominance by propagated superseded sets**, resolving overwrites without any global ancestor query.
 
-### interpretation [planned]
+### interpretation [done]
 
 The typed layer: registry, traits, policy, report, and the immutable index.
-Design: [concept.md](concept.md#interpretation). Lands in [milestone 3](todo/milestone-3.md).
+Design: [concept.md](concept.md#interpretation). Landed in [milestone 3](todo/milestone-3.md).
 
-- `[planned]` **`default_parse_policy`** — the conventions: registry lookup, `$alive` deletion, local-closure conflict resolution.
-- `[planned]` **schema versioning** — stamping, migration, and skipping an unknown version with a diagnostic.
-- `[planned]` **the query surface** — `get`, single-type iteration, and multi-type sorted-merge joins.
+- `[done]` **`default_parse_policy`** — the conventions: registry lookup, `$alive` deletion, local-closure conflict resolution.
+- `[done]` **schema versioning** — stamping, migration, and skipping an unknown version with a diagnostic.
+- `[done]` **the query surface** — `get`, single-type iteration, and multi-type sorted-merge joins.
+- `[done]` **the multi-value rules in one place** — `property_reader::try_get`, which is what a component's parse is handed.
+- `[done]` **selection and construction split**, so every structural diagnostic is filed once and the two phases cannot disagree.
 
 ## versioned-document-file [planned]
 

@@ -40,7 +40,7 @@ One-liner per library:
   Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
   Ships **zero components** — the component set belongs entirely to the application.
   Namespace `vdoc`. Depends on clean-core.
-  The value codec is built; the layers above it are not — [docs/concept.md](libs/data/versioned-document/docs/concept.md) is the design.
+  The in-memory library is complete; persistence is versioned-document-file — [docs/concept.md](libs/data/versioned-document/docs/concept.md) is the design.
   [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices, and [docs/todo/](libs/data/versioned-document/docs/todo/_index.md) the plan.
 * **`libs/data/versioned-document-file`** — the `.vdoc` save format.
   One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.

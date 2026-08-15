@@ -347,6 +347,56 @@ At that point the question is whether tag-1-only builds must relay tag-2 ops, an
 
 ---
 
+## Interpretation
+
+### `component_traits::parse` is handed a `property_reader`, not a `raw_component`
+
+**Decided.** A component's `parse` receives a `property_reader`, which carries the entity, the component type, the resolved schema version, the policy and the report.
+Its `try_get` is the only place the multi-value rules exist.
+
+The sketch had `parse(raw_component const&, entity_id, parse_policy const&, parse_report&)`.
+That signature makes reimplementing the collapse the path of least resistance: the obvious thing to write is `raw.try_get("x")->single()`, which asserts on exactly the case the rules are for.
+Rules that live in one place stay in one place only if the easy path goes through them.
+
+`reader.raw()` is still there as an escape hatch for a component that must iterate what it was not told about.
+Its existence is the argument for the default rather than against it: coming through it means owning the rules yourself, and that is now a visible act.
+
+**Reopen when:** a real component needs the untyped shape often enough that `raw()` stops reading as an exception.
+
+### `$alive` and `$schema_version` never reach `resolve_multi_value`
+
+**Decided.** Both reserved properties are read straight off `raw_property::writers`, never through `property_reader::try_get`, so a policy is never asked to pick between their writers.
+
+A policy that resolved a contested `$alive` to false would make a thing vanish, which is the one failure this design refuses — resurrecting is recoverable and vanishing is not.
+A policy that resolved a contested `$schema_version` would hand a component's `parse` a version nobody wrote, and migration would run against a shape that never existed.
+Both are skipped instead: a contested `$alive` stays alive with a diagnostic, and a contested version skips the component with one.
+
+**Reopen when:** nothing.
+A policy voting on the library's own conventions is the failure mode, not a feature.
+
+### `op_builder::set` stamps `$schema_version`, and `component_writer` rejects the sigil
+
+**Decided.** `write` does not stamp its version; `op_builder::set<C>` does, once, before calling it.
+`component_writer::set` asserts on any `$`-prefixed property name.
+
+The sketch had `write` stamp, which is one more thing every component author must remember and one more place the stamp can be wrong.
+With one stamp site the invariant is structural, and with the sigil rejected outright a component author cannot write a reserved name even deliberately.
+`set_alive` and `set_entity_alive` on the builder are what deletion is spelled with, for the same reason — otherwise every application hand-writes the reserved path and the convention drifts.
+
+**Reopen when:** nothing.
+
+### The document arena is vdoc-local until clean-core grows one
+
+**Decided.** `vdoc::impl::document_arena` is a bump allocator behind a `cc::memory_resource`, declared and defined entirely inside `document.cc`.
+
+clean-core has the `cc::memory_resource` seam but no bump resource behind it, and a document wants exactly one: build cheaply, free in a single release.
+This is the **second** hand-rolled copy in the tree — `cc::impl::intern_shard` is the first — which is the point at which it should be written once, in the library that owns the capability.
+It is not written there yet only because the document's own layout was still moving; the seam is already the right shape, so the migration is a deletion rather than a refactor.
+
+**Reopen when:** clean-core grows a bump `cc::memory_resource` next to `cc::system_memory_resource`. Then this copy goes.
+
+---
+
 ## Hashing
 
 ### BLAKE3, over 32-byte ids — with a standing reservation
