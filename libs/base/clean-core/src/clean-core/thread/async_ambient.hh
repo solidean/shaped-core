@@ -57,6 +57,27 @@ inline void async_ambient_release(void* a)
         async_ambient_free(l);
 }
 
+/// Install `a` as the calling thread's ambient for a scope, restoring the previous head on the way out.
+/// A null `a` installs nothing, so a node with no context inherits whatever is driving it.
+///
+/// Unlike async_ambient_scope this takes NO reference: the caller owns one for the duration, and the whole point is to be free on the poll hot path.
+/// Restoring from `_previous` rather than from the source is load-bearing where poll() uses it — the node the ambient came from can be destroyed before the scope ends.
+struct async_ambient_poll_scope
+{
+    explicit async_ambient_poll_scope(void* a) : _previous(async_tls().ambient)
+    {
+        if (a != nullptr)
+            async_tls().ambient = a;
+    }
+    ~async_ambient_poll_scope() { async_tls().ambient = _previous; }
+
+    async_ambient_poll_scope(async_ambient_poll_scope const&) = delete;
+    async_ambient_poll_scope& operator=(async_ambient_poll_scope const&) = delete;
+
+private:
+    void* _previous = nullptr;
+};
+
 /// Point `slot` at `a`, adjusting counts.
 /// The compare is what keeps the repeat writers free: a node's context is written at every hand-off, and after the first those all store the same word, so only the first pays the atomics.
 inline void async_ambient_store(void*& slot, void* a)

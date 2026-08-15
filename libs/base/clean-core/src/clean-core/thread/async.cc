@@ -159,6 +159,11 @@ void cc::async_node_base::schedule()
             return;
         }
 
+        // Ambient write site 1 of 3: a COLD node is being handed to a queue, so it takes the context of whoever hands it over.
+        // Deliberately not the `blocked` case, which is a wake — see the ambient section in libs/base/clean-core/docs/systems/async.md.
+        if (s == async_node_state::cold)
+            impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+
         // cold or blocked -> make runnable (we route exactly once, below, after releasing the lock)
         store_state(async_node_state::scheduled);
     }
@@ -181,6 +186,9 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
             set_wake();
             return;
         }
+
+        if (s == async_node_state::cold) // see schedule(): the same write site, on the explicit-target path
+            impl::async_ambient_store(ambient(), impl::async_tls().ambient);
 
         store_state(async_node_state::scheduled);
         do_submit = true;
@@ -233,6 +241,12 @@ void cc::async_node_base::reschedule_self()
     {
         lock_scope g(this);
         CC_ASSERT(load_state(cc::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
+
+        // Ambient write site 2 of 3, and the easiest to overlook.
+        // A node driven INLINE as someone's dependency was never scheduled, so it carries no context yet; without this it would come back off the queue with none.
+        // Unconditional rather than cold-only: we are running, so the installed context IS this node's, and a repeat store writes the same word.
+        impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+
         store_state_clear_wake(async_node_state::scheduled);
     }
     route_after_schedule();
@@ -615,6 +629,17 @@ void cc::async_node_base::poll()
 
     unsubscribe_all(); // re-evaluate dependencies from scratch this turn
 
+    // Install this node's ambient context, if it has one, for the whole poll — the frame, anything it calls, and any node it spawns.
+    //
+    // Read it into a LOCAL now, while the arm is guaranteed alive.
+    // A frame resolves re-entrantly, so by the time the invoke returns the arm is gone and `ambient()` would read the value built over it; `this` may be freed outright.
+    // ambient_scope therefore restores from its own stack copy and never touches the node again.
+    //
+    // A node with no token falls straight through and inherits the driver's context.
+    // That is the eager depth-first drive: a dependency polled inline belongs to the subtree driving it, and a 512-node chain pays ONE install rather than 512.
+    void* const installed = ambient();
+    impl::async_ambient_poll_scope const ambient_scope(installed);
+
     async_context_base ctx;
     ctx.current = this;
     ctx.scheduler = async_scheduler::current_or_null();
@@ -666,6 +691,10 @@ void cc::async_node_base::poll()
                     clear_wake(); // a dependency woke us mid-subscribe: don't park, re-evaluate
                 else
                 {
+                    // Ambient write site 3 of 3: we are about to leave this stack, and whoever re-polls us must resume under the context we suspended in.
+                    // Same reasoning as the yield above — we are running, so `installed` is ours.
+                    impl::async_ambient_store(ambient(), installed);
+
                     store_state(async_node_state::blocked);
                     parked = true;
                 }

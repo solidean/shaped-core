@@ -7,7 +7,8 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/fwd.hh>
-#include <clean-core/memory/shared_ptr.hh> // cc::shared_ptr / cc::weak_ptr (intrusive node handles)
+#include <clean-core/memory/shared_ptr.hh>    // cc::shared_ptr / cc::weak_ptr (intrusive node handles)
+#include <clean-core/thread/async_ambient.hh> // the ambient context word each unresolved arm carries
 #include <clean-core/thread/atomic.hh>
 
 // Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency and
@@ -478,9 +479,12 @@ struct async_unresolved
 
     async_unresolved() = default;
 
-    /// deps + conts free their own list nodes and cells.
+    /// Releases the ambient reference; deps + conts free their own list nodes and cells.
     /// The frame is NOT ours — it is a sibling object in the payload, and async_node_base::destroy_frame ends it.
-    ~async_unresolved() = default;
+    ///
+    /// This is the single release site, and it covers all three ways an arm ends: resolved with a value, resolved with an error, and torn down cold or parked.
+    /// Pairing it with the write sites here rather than at those three call sites is what makes the count exactly-once by construction.
+    ~async_unresolved() { impl::async_ambient_release(ambient); }
 
     // Declaring the destructor suppresses the implicit move ctor, which the two heads would otherwise supply.
     // Nothing moves an arm — it is placement-constructed in the payload and stays there — so make that explicit rather than leave it a side effect.

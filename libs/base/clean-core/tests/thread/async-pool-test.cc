@@ -2,6 +2,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <nexus/test.hh>
 
@@ -36,6 +37,8 @@ cc::shared_async<i64> build_sum_tree(int depth)
     auto right = build_sum_tree(depth - 1);
     return cc::make_async_lazy([](i64 l, i64 r) { return l + r; }, left, right);
 }
+
+CC_ASYNC_AMBIENT_TAG(pool_tag)
 
 } // namespace
 
@@ -353,3 +356,34 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
         CHECK(pool.blocking_get(root_st) == expected);
     }
 }
+
+#if CC_HAS_THREADS
+TEST("async - a node woken across threads still runs under its own ambient context")
+{
+    // Needs real threads: the point is that the context comes from the node's own arm and never from the worker
+    // that happens to pick it up, so the dependent must be re-polled somewhere other than where it parked.
+    cc::async_thread_pool pool(4);
+    cc::scoped_default_async_pool as_default(pool);
+
+    int scope_value = 7;
+    auto gate = cc::make_async_manual<i64>();
+    auto dependent = cc::make_async_lazy<i64>(
+        [](i64) -> i64
+        {
+            auto* const v = cc::async_ambient_lookup(pool_tag());
+            return v == nullptr ? 0 : *static_cast<int*>(v);
+        },
+        gate);
+
+    {
+        cc::async_ambient_scope const s(pool_tag(), &scope_value);
+        dependent->schedule_on(pool); // parks on the manual node, on some worker
+    }
+    // The scope is gone from THIS thread, and it was never installed on any worker.
+
+    std::thread pusher([&] { gate->push_value(1); }); // completes it from a thread with nothing bound at all
+    pusher.join();
+
+    CHECK(pool.blocking_get(dependent) == scope_value);
+}
+#endif
