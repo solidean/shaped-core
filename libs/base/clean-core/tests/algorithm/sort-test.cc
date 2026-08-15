@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/fixed_array.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/math/random.hh>

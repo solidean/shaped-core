@@ -25,7 +25,7 @@ namespace cc
 {
 /// Below this a subproblem is finished by the ordinary synchronous sort instead of being spawned.
 ///
-/// Swept, not guessed — see docs/benchmarks/sort-benchmark.md.
+/// Swept, not guessed — see [sort-benchmark](../../../docs/benchmarks/sort-benchmark.md).
 /// Speedup rises monotonically as the cutoff falls (1024 measured best at 7.2x, 16384 at 6.7x), so this sits one
 /// step off the measured optimum: 4096 keeps a quarter of 1024's task count for about 3% less speedup.
 inline constexpr isize sort_async_default_cutoff = 4 * 1024;
