@@ -1,5 +1,27 @@
 # Milestone 1 — The value codec
 
+**Status: done.**
+Landed as `value.hh`, `value_builder.hh` and `value_debug.hh`, with the first `versioned-document-test`.
+Five things the sketch below either left open or got wrong, each recorded in [decisions.md](../decisions.md):
+
+- **A length prefix counts the bytes that FOLLOW it**, in all four length-prefixed kinds.
+  The table below says "payload byte length" without fixing where the payload starts, and both readings give an O(1) skip.
+  One meaning across all four makes skipping a single rule — see [decisions.md](../decisions.md#a-length-prefix-counts-the-bytes-that-follow-it).
+- **Decoding does not validate UTF-8.**
+  Canonicality here is structural, and byte equality does not care whether the bytes are text — [decisions.md](../decisions.md#decoding-does-not-validate-utf-8).
+- **`value_builder` has a fallible `try_build`**, with the asserting `build` on top of it.
+  "Rejects a duplicate key" below would be satisfied by an assert, which is the wrong answer for an importer feeding external data straight in.
+  The reasoning is in [decisions.md](../decisions.md#value_builder-has-a-fallible-build).
+- **The depth limit is 64**, which item 6's "pick a fixed limit" delegated — [decisions.md](../decisions.md#the-nesting-limit-is-64-and-it-is-a-format-constant).
+- **The codec grew clean-core rather than hand-rolling against it.**
+  Little-endian scalar loads were the one thing missing, so [`cc::load_bytes_le`](../../../../base/clean-core/src/clean-core/common/endian.hh) and its family landed there instead.
+  babel had already filed that gap with three hand-rolled copies, and its readers moved onto the new primitives in the same change.
+
+One implementation pitfall is worth carrying forward, because milestone 2 sorts by the same rule:
+`cc::string_view::compare` widens `char` to a **signed** int, so it cannot order object keys.
+A key byte >= 0x80 sorts before an ASCII one under it, and the builder would emit bytes its own decoder rejects.
+`vdoc::impl::compare_key_bytes` is the single definition the builder sorts by and the decoder validates against, and a test pins it.
+
 **Goal.** `vdoc::value`: a canonically-encoded binary value where equality is byte equality, and decoding refuses anything non-canonical.
 
 **Why first.** Everything above this rests on byte equality.
