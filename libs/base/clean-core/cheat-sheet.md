@@ -551,6 +551,19 @@ cc::is_sorted(values);  cc::is_sorted_by(values, key);              // -> bool, 
 cc::is_strictly_sorted(values);  cc::is_strictly_sorted_by(v, key); // same, but no two elements may be equivalent
 ```
 
+Rearranging by position rather than by comparison — all swap-only, so it composes with the rest:
+
+```cpp
+#include <clean-core/algorithm/permutation.hh>
+cc::reverse(values);                       // in place
+cc::rotate(values, k);                     // left by k, so values[k] ends up first; k is NORMALIZED (any value legal)
+cc::apply_permutation(values, indices);    // values[i] <- what indices[i] pointed at (a GATHER, matching sort_indices)
+                                           // CONSUMES indices, leaving it the identity — that is what buys O(n)
+cc::invert_permutation(indices);           // in place; a sort order becomes RANKS. Index type must be SIGNED.
+cc::reverse_ex(start, size, range);  cc::rotate_ex(start, size, k, range);   // seam forms
+cc::apply_permutation_ex(size, indices, range);   // + a _multi range => permute parallel arrays in step
+```
+
 Binary search over an already-ordered range.
 `_in_sorted` is a contract marker: O(log n) against a precondition YOU must meet.
 

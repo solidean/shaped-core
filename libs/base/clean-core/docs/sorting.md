@@ -127,6 +127,19 @@ A size of 0 means absent and the offset is then the insertion point, so one call
 `partition_point` is the only name without the suffix, and that is not an oversight.
 Its precondition is *partitioned with respect to the predicate*, which is strictly weaker than sorted — an `_in_sorted` there would be a lie.
 
+## Rearranging by position
+
+[algorithm/permutation.hh](../src/clean-core/algorithm/permutation.hh) holds `reverse`, `rotate`, `apply_permutation` and `invert_permutation`.
+All four are swap-only, so the no-parking rule survives intact — cycle-following moves an element straight to where it belongs rather than through a hole.
+
+`apply_permutation` **consumes its index array**, leaving it as the identity.
+That is not an accident of the implementation, it is the price of guaranteed O(n).
+The spelling that preserves the indices has to re-walk each cycle to find where an element currently lives, and goes quadratic on the worst permutation.
+The array it consumes is a scratch array anyway — `sort_indices` is what produces it.
+
+It is a **gather**: `values[i]` ends up holding what `indices[i]` pointed at, which is the direction `sort_indices` hands you.
+`invert_permutation` is how you get the other direction, and inverting a sort order is what turns it into ranks.
+
 ## Where the boundary with cc::sequence runs
 
 **`algorithm/` permutes a range, or searches an ordered one.**
