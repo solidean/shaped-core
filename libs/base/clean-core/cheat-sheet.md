@@ -539,15 +539,19 @@ cc::is_sorted(values);  cc::is_sorted_by(values, key);              // -> bool, 
 cc::is_strictly_sorted(values);  cc::is_strictly_sorted_by(v, key); // same, but no two elements may be equivalent
 ```
 
-The seam underneath, for data that is not a range — an SoA view, a GPU-side handle array, a proxy:
+The seam underneath, for data that is not a range — an SoA view, a GPU-side handle array, a proxy.
+Its own header, so partitioning and the orderedness queries cost nothing of the pdqsort machinery:
 
 ```cpp
+#include <clean-core/algorithm/index_swap_range.hh>   // sort.hh includes this; the reverse is not true
 cc::index_swap_range<R>                    // concept: r.element_get(i) + r.element_swap(a, b). NO size().
 cc::as_index_swap_range(values);           // + _by(values, key), _multi(keys, vals...), _multi_by(key, vals...)
-cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 cc::partition_ex(start, size, is_right, range); // is_right takes an INDEX
 cc::is_sorted_ex(start, size, range, cmp);      // + is_strictly_sorted_ex
 // an adapter must be trivially copyable and cheap — it is copied down the recursion (sort_ex static-asserts it).
+
+#include <clean-core/algorithm/sort.hh>
+cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 ```
 
 ## Sequence (lazy ranges — early prototype, see [sequence](docs/sequence.md))

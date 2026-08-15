@@ -54,6 +54,7 @@ target_sources(clean-core
     src/clean-core/common/macros.hh
     src/clean-core/common/utility.hh
     src/clean-core/common/traits.hh
+    src/clean-core/common/range_traits.hh
     src/clean-core/common/enum_traits.hh
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
@@ -108,6 +109,7 @@ target_sources(clean-core
 
     src/clean-core/sequence/sequence.hh
 
+    src/clean-core/algorithm/index_swap_range.hh
     src/clean-core/algorithm/sort.hh
     src/clean-core/algorithm/impl/sort_impl.hh
 

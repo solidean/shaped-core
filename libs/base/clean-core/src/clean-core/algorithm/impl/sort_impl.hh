@@ -103,16 +103,6 @@ struct sort_index_compare
     }
 };
 
-/// Lifts an element predicate to an index predicate, reading through the range being permuted.
-template <class RangeT, class PredF>
-struct sort_element_predicate
-{
-    RangeT range;
-    PredF* pred;
-
-    constexpr bool operator()(isize i) const { return bool(cc::invoke(*pred, range.element_get(i))); }
-};
-
 // =========================================================================================================
 // Small sorts
 // =========================================================================================================

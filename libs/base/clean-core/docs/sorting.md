@@ -3,6 +3,10 @@
 `cc::sort` and its family, in [algorithm/sort.hh](../src/clean-core/algorithm/sort.hh).
 The [cheat sheet](../cheat-sheet.md) lists the whole surface; this page is the one idea behind it and how to extend it.
 
+The seam itself lives one header lower, in [algorithm/index_swap_range.hh](../src/clean-core/algorithm/index_swap_range.hh),
+together with everything that needs nothing but the seam: the adapters, `partition_by` / `partition_ex`, and the orderedness queries.
+`sort.hh` includes it and adds the pdqsort machinery on top, which is why reaching for a partition does not cost you a sort.
+
 ## The one idea: get and swap, never park
 
 Every sort here is driven through two operations on indices:
