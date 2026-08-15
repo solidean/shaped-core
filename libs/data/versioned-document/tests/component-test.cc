@@ -184,6 +184,24 @@ TEST("vdoc - set_alive writes the reserved path, and set_entity_alive writes it 
         CHECK(a.value.as_bool() == false);
 }
 
+TEST("vdoc - the remove and restore shorthands are exactly the set_alive calls they stand for")
+{
+    auto const graph = op_graph();
+    auto const e = entity_id::of("wall-17");
+    auto const type = component_type_id::of("Transform");
+
+    auto const removed = vdoc::op_builder{}.remove_component(e, type).remove_entity(e).build(graph);
+    auto const set_false = vdoc::op_builder{}.set_alive(e, type, false).set_entity_alive(e, false).build(graph);
+    CHECK(removed.id == set_false.id);
+
+    auto const restored = vdoc::op_builder{}.restore_component(e, type).restore_entity(e).build(graph);
+    auto const set_true = vdoc::op_builder{}.set_alive(e, type, true).set_entity_alive(e, true).build(graph);
+    CHECK(restored.id == set_true.id);
+
+    // Restoring something nothing removed still writes the property, because `$alive` absent already means alive.
+    CHECK(paths_of(restored).size() == 2);
+}
+
 TEST("vdoc - a mesh writes and re-reads its asset through the traits")
 {
     auto graph = op_graph();

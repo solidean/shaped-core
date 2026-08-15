@@ -111,7 +111,9 @@ auto const head2 = graph.add(cc::move(op));               // keyed by content ha
 - **A multi-valued path always emits**, even when every surviving writer holds identical bytes — that op is how a conflict is resolved.
 - Staging one path twice asserts: two code paths writing one property is a bug, not an update.
 - `.set(entity, my_transform{...})` writes a whole component, stamping `$schema_version` for you.
-- `.set_alive(entity, component, false)` / `.set_entity_alive(entity, false)` spell deletion, which is an ordinary write.
+- `.remove_component(entity, component)` / `.remove_entity(entity)` spell deletion, which is an ordinary write and never a removal.
+  `.restore_component` / `.restore_entity` undo one; all four are shorthands for `.set_alive` / `.set_entity_alive`.
+- **Restoring only means anything against a stored `false`** — `$alive` absent already means alive, so restoring something nobody removed writes a property that says exactly the default.
 
 ## Reading
 

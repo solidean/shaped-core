@@ -13,8 +13,9 @@ The sketch below is what was built; five things settled during implementation, e
   `op_builder::set` stamps once instead, and `component_writer::set` asserts on the sigil, so a component author cannot write a reserved name at all.
 - **`$alive` and `$schema_version` never reach `resolve_multi_value`** — [decisions.md](../decisions.md#alive-and-schema_version-never-reach-resolve_multi_value).
   Read through the normal helper, a contested `$alive` would be handed to the policy, and a policy resolving it to false would make a thing vanish.
-- **`set_alive` / `set_entity_alive` on `op_builder`**, beyond the sketch.
+- **`set_alive` / `set_entity_alive` on `op_builder`**, beyond the sketch, with `remove_component` / `restore_component` / `remove_entity` / `restore_entity` as shorthands over them.
   Without them every application spells the reserved path by hand through `set_raw`, which is the convention drift `reserved::` exists to prevent.
+  The shorthands exist because deletion is the common direction and a bare `false` at a call site reads backwards.
 - **The document arena is vdoc-local and marked temporary** — [decisions.md](../decisions.md#the-document-arena-is-vdoc-local-until-clean-core-grows-one).
   clean-core has the `cc::memory_resource` seam but no bump resource behind it, and this is the second hand-rolled copy in the tree.
 
@@ -186,7 +187,7 @@ vdoc::diagnostic_kind / diagnostic / agreed_multi_value / parse_report
 vdoc::parse / vdoc::is_alive
 vdoc::document
 vdoc::reserved::*    the $-prefixed names; functions, since an interned id cannot be constexpr
-vdoc::op_builder::set / set_alive / set_entity_alive
+vdoc::op_builder::set / set_alive / set_entity_alive / remove_* / restore_*
 ```
 
 ## Tests

@@ -145,7 +145,7 @@ TEST("vdoc - $alive false drops the component and leaves its siblings")
                            b.set(e, transform{.x = 1});
                            b.set(e, mesh{.asset = "brick"});
                        });
-    head = commit(graph, head, [&](op_builder& b) { b.set_alive(e, component_type_id::of("Mesh"), false); });
+    head = commit(graph, head, [&](op_builder& b) { b.remove_component(e, component_type_id::of("Mesh")); });
 
     auto const registry = full_registry();
     auto const policy = default_parse_policy::create_with_registry(registry);
@@ -172,7 +172,7 @@ TEST("vdoc - $alive false on $entity drops the whole entity")
                            b.set(e, transform{.x = 1});
                            b.set(f, transform{.x = 2});
                        });
-    head = commit(graph, head, [&](op_builder& b) { b.set_entity_alive(e, false); });
+    head = commit(graph, head, [&](op_builder& b) { b.remove_entity(e); });
 
     auto const registry = full_registry();
     auto const policy = default_parse_policy::create_with_registry(registry);
@@ -191,8 +191,8 @@ TEST("vdoc - a later write undeletes")
     auto const e = entity_id::of("wall-17");
 
     auto head = commit(graph, [&](op_builder& b) { b.set(e, transform{.x = 1}); });
-    head = commit(graph, head, [&](op_builder& b) { b.set_entity_alive(e, false); });
-    head = commit(graph, head, [&](op_builder& b) { b.set_entity_alive(e, true); });
+    head = commit(graph, head, [&](op_builder& b) { b.remove_entity(e); });
+    head = commit(graph, head, [&](op_builder& b) { b.restore_entity(e); });
 
     auto const registry = full_registry();
     auto const policy = default_parse_policy::create_with_registry(registry);
@@ -209,8 +209,8 @@ TEST("vdoc - a contested $alive keeps the thing alive and files contested_alive"
     auto const e = entity_id::of("wall-17");
 
     auto const base = commit(graph, [&](op_builder& b) { b.set(e, transform{.x = 1}); });
-    auto const dead = commit(graph, base, [&](op_builder& b) { b.set_entity_alive(e, false); });
-    auto const alive = commit(graph, base, [&](op_builder& b) { b.set_entity_alive(e, true); });
+    auto const dead = commit(graph, base, [&](op_builder& b) { b.remove_entity(e); });
+    auto const alive = commit(graph, base, [&](op_builder& b) { b.restore_entity(e); });
 
     op_id const heads[] = {dead, alive};
 

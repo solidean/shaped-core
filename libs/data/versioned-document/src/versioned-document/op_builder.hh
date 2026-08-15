@@ -60,6 +60,21 @@ public:
     /// Entity-level deletion: `$alive` on the `$entity` component type, which drops the whole entity.
     op_builder& set_entity_alive(entity_id entity, bool alive);
 
+    /// Shorthands for the two set_alive calls, so a call site says what it means rather than passing a bool.
+    ///
+    /// Restoring only means anything against a stored false — `$alive` absent already means alive, so restoring
+    /// something that was never removed writes a property that says exactly the default.
+    op_builder& remove_component(entity_id entity, component_type_id component)
+    {
+        return set_alive(entity, component, false);
+    }
+    op_builder& restore_component(entity_id entity, component_type_id component)
+    {
+        return set_alive(entity, component, true);
+    }
+    op_builder& remove_entity(entity_id entity) { return set_entity_alive(entity, false); }
+    op_builder& restore_entity(entity_id entity) { return set_entity_alive(entity, true); }
+
     /// Materializes the touched entities as seen from this op's parents, and emits only what actually differs.
     ///
     /// The diff has four cases, and the last is the one worth knowing:
