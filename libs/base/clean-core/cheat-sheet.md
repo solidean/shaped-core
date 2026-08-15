@@ -551,6 +551,22 @@ cc::is_sorted(values);  cc::is_sorted_by(values, key);              // -> bool, 
 cc::is_strictly_sorted(values);  cc::is_strictly_sorted_by(v, key); // same, but no two elements may be equivalent
 ```
 
+Binary search over an already-ordered range.
+`_in_sorted` is a contract marker: O(log n) against a precondition YOU must meet.
+
+```cpp
+#include <clean-core/algorithm/search.hh>
+cc::partition_point(values, pred);           // -> isize; first index where a MONOTONE pred goes false
+                                             //    precondition is "partitioned by pred", weaker than sorted => no suffix
+cc::first_at_least_in_sorted(values, x);     // -> isize  (std::lower_bound); size() when everything is below
+cc::first_greater_in_sorted(values, x);      // -> isize  (std::upper_bound)
+cc::find_in_sorted(values, x);               // -> cc::optional<isize>; an index, so finding + using is ONE search
+cc::find_range_in_sorted(values, x);         // -> cc::offset_size; ALL equivalents. size 0 = absent,
+                                             //    and offset is then the insertion point
+// all take an optional comparator, which must be the one the range is ordered by.
+// Scanning an UNordered range is cc::sequence's job (.find / .any / .count_if), not this header's.
+```
+
 The seam underneath, for data that is not a range — an SoA view, a GPU-side handle array, a proxy.
 Its own header, so partitioning and the orderedness queries cost nothing of the pdqsort machinery:
 

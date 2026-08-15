@@ -111,6 +111,7 @@ target_sources(clean-core
     src/clean-core/sequence/sequence.hh
 
     src/clean-core/algorithm/index_swap_range.hh
+    src/clean-core/algorithm/search.hh
     src/clean-core/algorithm/sort.hh
     src/clean-core/algorithm/impl/sort_impl.hh
 
@@ -316,6 +317,7 @@ if(SC_BUILD_TESTS)
 
         tests/algorithm/sort-test.cc
         tests/algorithm/select-test.cc
+        tests/algorithm/search-test.cc
 
         tests/math/bit-test.cc
         tests/math/random-test.cc

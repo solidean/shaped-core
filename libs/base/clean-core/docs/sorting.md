@@ -113,10 +113,38 @@ Three rules bind an adapter:
 The last argument to `sort_ex` is the subrange predicate, `should_sort(start, size)`.
 `cc::constant_function<true>{}` sorts everything; anything else prunes, which is how `cc::sort_at` is built out of the same call.
 
+## Searching a sorted range
+
+[algorithm/search.hh](../src/clean-core/algorithm/search.hh) is the other half of the topic.
+It holds `partition_point`, `first_at_least_in_sorted`, `first_greater_in_sorted`, `find_in_sorted` and `find_range_in_sorted`.
+It permutes nothing, so it needs plain indexing rather than the seam.
+
+Two spellings there are deliberate.
+`find_in_sorted` returns a `cc::optional<isize>` rather than a bool, because a bool makes you search twice to use what you found.
+`find_range_in_sorted` returns a `cc::offset_size` and *never* an optional.
+A size of 0 means absent and the offset is then the insertion point, so one call answers "is it there", "where is it" and "where does it go".
+
+`partition_point` is the only name without the suffix, and that is not an oversight.
+Its precondition is *partitioned with respect to the predicate*, which is strictly weaker than sorted — an `_in_sorted` there would be a lie.
+
+## Where the boundary with cc::sequence runs
+
+**`algorithm/` permutes a range, or searches an ordered one.**
+**[`cc::sequence`](sequence.md) scans an unordered one.**
+
+So `find`, `count`, `any_of`, `min_element` and friends are `cc::sequence`'s and are not coming here.
+The one `find` that does live here is `find_in_sorted`.
+It earns its place by being O(log n) against a precondition rather than O(n) against none — which is exactly what the `_in_sorted` suffix announces.
+
+Having both would be the worst outcome: two spellings of the same verb, differing only in a precondition the reader has to remember.
+
 ## What is not here yet
 
 * **`stable_sort`** — it needs an auxiliary buffer, which the no-parking rule forbids.
   `sort_indices` covers most of what it is wanted for.
-* **`lower_bound` / `upper_bound` / `binary_search`** — the natural neighbours, planned for an `algorithm/search.hh`.
 * **A parallel `sort_async*` family** — the swap-only design makes the fan-out natural: disjoint subranges, no merge step.
   It reshapes the driver rather than wrapping it, so it gets its own header.
+* **`merge` and the sorted set operations** — union, intersection, difference over two ordered ranges.
+  A later slice.
+* **A heap API** (`push_heap` / `pop_heap`).
+  If we want one it is a `cc::binary_heap` container, not loose algorithms.
