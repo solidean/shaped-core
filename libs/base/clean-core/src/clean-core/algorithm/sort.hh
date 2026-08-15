@@ -202,6 +202,32 @@ void sort_stable_by(RangeT&& values, KeyF&& key, CompareF&& compare = {})
         values, [&](auto const& a, auto const& b) { return bool(compare(cc::invoke(key, a), cc::invoke(key, b))); });
 }
 
+/// Sorts `values`, drops the duplicates and shrinks it to what is left, returning the new size.
+///
+/// The sort + unique + erase idiom as one call, and the reason cc::is_strictly_sorted exists to check it.
+/// Not stable, and it says nothing about WHICH of several equivalent elements survives — cc::sort_stable first,
+/// then cc::dedup_sorted_ex, if that matters.
+///
+///   auto const n = cc::sort_and_dedup(ids);   // ids is now sorted, unique and n long
+///
+/// Takes a container: it must be able to shrink itself.
+/// For a view, sort it and call cc::dedup_sorted_ex.
+template <class RangeT, class CompareF = cc::default_less>
+isize sort_and_dedup(RangeT&& values, CompareF&& compare = {})
+{
+    static_assert(cc::indexed_range<RangeT>, "cc::sort_and_dedup takes an indexed range");
+    static_assert(
+        requires(RangeT& r) { r.resize_down_to(isize(0)); },
+        "cc::sort_and_dedup shrinks its argument, so it takes a container rather than a view — sort a "
+        "view and call cc::dedup_sorted_ex instead");
+
+    cc::sort(values, compare);
+
+    isize const new_size = cc::dedup_sorted_ex(0, isize(values.size()), cc::as_index_swap_range(values), compare);
+    values.resize_down_to(new_size);
+    return new_size;
+}
+
 // =========================================================================================================
 // Selection
 // =========================================================================================================

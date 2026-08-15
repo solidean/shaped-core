@@ -544,6 +544,9 @@ cc::sort_indices(order, keys);             // permutes `order`, keys untouched; 
 cc::sort_stable(values);  cc::sort_stable_by(values, key);   // equal elements keep their order.
                                            // ALLOCATES n indices — never an element buffer, so no-parking survives
 
+cc::sort_and_dedup(values);                // -> isize new size; sorts, drops duplicates, SHRINKS the container
+                                           // (needs resize_down_to; for a view: sort + cc::dedup_sorted_ex)
+
 cc::partition_by(values, is_right);        // -> isize first index of the "right" block; O(n), not stable
 cc::sort_at(values, idx);                  // element idx as a full sort would leave it; O(n) even worst case (+ _by)
 cc::sort_window(values, {.offset, .size}); // that whole window, sorted; O(n + size log size); may run past the end (+ _by)
@@ -591,6 +594,7 @@ cc::index_swap_range<R>                    // concept: r.element_get(i) + r.elem
 cc::as_index_swap_range(values);           // + _by(values, key), _multi(keys, vals...), _multi_by(key, vals...)
 cc::partition_ex(start, size, is_right, range); // is_right takes an INDEX
 cc::is_sorted_ex(start, size, range, cmp);      // + is_strictly_sorted_ex
+cc::dedup_sorted_ex(start, size, range, cmp);   // -> isize surviving count; compacts runs, does NOT shrink
 // an adapter must be trivially copyable and cheap — it is copied down the recursion (sort_ex static-asserts it).
 
 #include <clean-core/algorithm/sort.hh>

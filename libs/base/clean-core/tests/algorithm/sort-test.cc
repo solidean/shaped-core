@@ -585,3 +585,68 @@ TEST("sort_stable - descending, and an empty range")
     cc::sort_stable(empty);
     CHECK(empty.empty());
 }
+
+TEST("sort_and_dedup - sorted, unique, and shrunk to the returned size")
+{
+    cc::random rng(20);
+
+    for (isize const n : {isize(0), isize(1), isize(1000)})
+    {
+        SECTION("n = {}", n)
+        {
+            for (i32 const distinct : {1, 5, 1000})
+            {
+                SECTION("{} distinct values", distinct)
+                {
+                    auto values = cc::vector<i32>::create_defaulted(n);
+                    for (isize i = 0; i < n; ++i)
+                        values[i] = rng.uniform(0, distinct - 1);
+
+                    // how many distinct values are actually present, counted without the thing under test
+                    auto seen = cc::set<i32>();
+                    for (auto const v : values)
+                        seen.insert(v);
+                    isize const expected = isize(seen.size());
+
+                    auto const new_size = cc::sort_and_dedup(values);
+
+                    CHECK(new_size == expected);
+                    CHECK(isize(values.size()) == expected); // it shrank, not just reported
+                    CHECK(cc::is_strictly_sorted(values));
+                    for (auto const v : values)
+                        CHECK(seen.contains(v));
+                }
+            }
+        }
+    }
+}
+
+TEST("sort_and_dedup - a descending comparator")
+{
+    auto values = cc::vector<i32>{3, 1, 3, 2, 1, 2};
+    auto const new_size = cc::sort_and_dedup(values, cc::default_greater{});
+
+    CHECK(new_size == 3);
+    CHECK(values[0] == 3);
+    CHECK(values[1] == 2);
+    CHECK(values[2] == 1);
+}
+
+TEST("dedup_sorted_ex - keeps parallel ranges in step")
+{
+    // deliberately pre-sorted by key, with the tags saying which element each survivor was
+    auto keys = cc::vector<i32>{1, 1, 1, 2, 3, 3};
+    auto tags = cc::vector<i32>{0, 1, 2, 3, 4, 5};
+
+    auto const new_size = cc::dedup_sorted_ex(0, 6, cc::as_index_swap_range_multi(keys, tags));
+
+    CHECK(new_size == 3);
+    CHECK(keys[0] == 1);
+    CHECK(keys[1] == 2);
+    CHECK(keys[2] == 3);
+
+    // the survivor of each run is the first one, and its tag came along
+    CHECK(tags[0] == 0);
+    CHECK(tags[1] == 3);
+    CHECK(tags[2] == 4);
+}

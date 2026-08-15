@@ -222,6 +222,43 @@ template <class RangeT, class KeyF, class CompareF = cc::default_less>
     return cc::is_sorted_ex(0, isize(values.size()), cc::as_index_swap_range_by(values, key), compare);
 }
 
+// =========================================================================================================
+// Deduplication
+// =========================================================================================================
+
+/// Compacts the runs of equivalent elements in an ALREADY-ORDERED [start, start + size) down to one each,
+/// and returns how many survive.
+///
+/// The survivors occupy [start, start + result); what ends up in the tail is unspecified, though every element
+/// is still there — this permutes, it does not destroy, so a container has to shrink itself afterwards.
+/// cc::sort_and_dedup is that whole idiom in one call.
+///
+/// `values` must be ordered by `compare`, or equivalent elements that are not adjacent survive separately.
+/// Runs in O(size) and is swap-only.
+template <class RangeT, class CompareF = cc::default_less>
+constexpr isize dedup_sorted_ex(isize start, isize size, RangeT range, CompareF&& compare = {})
+{
+    static_assert(cc::index_swap_range<RangeT>, "cc::dedup_sorted_ex takes an index_swap_range — see "
+                                                "cc::as_index_swap_range");
+    CC_ASSERT(size >= 0, "size must be >= 0");
+
+    if (size == 0)
+        return 0;
+
+    isize last_kept = start;
+    for (isize probe = start + 1; probe < start + size; ++probe)
+    {
+        // ordered, so "not equivalent to the last survivor" is just "the last survivor compares before it"
+        if (compare(range.element_get(last_kept), range.element_get(probe)))
+        {
+            ++last_kept;
+            if (last_kept != probe)
+                range.element_swap(last_kept, probe);
+        }
+    }
+    return last_kept - start + 1;
+}
+
 /// True when `values` is ordered by `compare` and holds no two equivalent elements.
 template <class RangeT, class CompareF = cc::default_less>
 [[nodiscard]] constexpr bool is_strictly_sorted(RangeT&& values, CompareF&& compare = {})
