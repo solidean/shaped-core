@@ -142,6 +142,28 @@ struct cc::default_equal
     }
 };
 
+/// Default transparent ordering for the sorting algorithms: a < b.
+/// Must be a strict weak ordering over the values it is used on — the sorts rely on that for termination.
+struct cc::default_less
+{
+    template <class A, class B>
+    [[nodiscard]] constexpr bool operator()(A const& a, B const& b) const
+    {
+        return a < b;
+    }
+};
+
+/// The reversed default ordering, i.e. what sorts descending.
+/// Spelled b < a so that only operator< is required, matching default_less.
+struct cc::default_greater
+{
+    template <class A, class B>
+    [[nodiscard]] constexpr bool operator()(A const& a, B const& b) const
+    {
+        return b < a;
+    }
+};
+
 namespace cc
 {
 

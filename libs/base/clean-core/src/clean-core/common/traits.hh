@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
 
+#include <concepts>
 #include <type_traits>
 #include <typeindex>
 #include <typeinfo>
@@ -11,6 +12,15 @@ namespace cc
 {
 template <class R, class... A>
 struct signature;
+
+/// A range that knows its size and can be subscripted by an index — what sorting, shuffling and picking take.
+/// Subscripting must accept an isize, and size() must convert to one.
+/// Says nothing about contiguity or iterators: a strided_span models this, and so does a hand-written proxy.
+template <class R>
+concept indexed_range = requires(R& r, isize i) {
+    { r.size() } -> std::convertible_to<isize>;
+    r[i];
+};
 } // namespace cc
 
 // Compile-time signature reflection for arbitrary callables.

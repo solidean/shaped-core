@@ -108,6 +108,9 @@ target_sources(clean-core
 
     src/clean-core/sequence/sequence.hh
 
+    src/clean-core/algorithm/sort.hh
+    src/clean-core/algorithm/impl/sort_impl.hh
+
     src/clean-core/string/string.hh
     src/clean-core/string/string_view.hh
     src/clean-core/string/char_predicates.hh
@@ -292,6 +295,7 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/node-allocation-design-benchmark.cc
         tests/benchmarks/node-allocation-design-refill.cc
         tests/benchmarks/file-stream-benchmark.cc
+        tests/benchmarks/sort-benchmark.cc
 
         # tests grouped by topic, mirroring src/clean-core/
         tests/common/assert-test.cc
@@ -305,6 +309,9 @@ if(SC_BUILD_TESTS)
         tests/common/time-test.cc
 
         tests/platform/console-test.cc
+
+        tests/algorithm/sort-test.cc
+        tests/algorithm/quickselect-test.cc
 
         tests/math/bit-test.cc
         tests/math/random-test.cc

@@ -151,6 +151,11 @@ struct small_vector;
 // compares with operator==.
 struct default_hash;
 struct default_equal;
+
+// Default transparent orderings for the sorting algorithms (common/utility.hh), both built on operator<.
+struct default_less;
+struct default_greater;
+
 template <class K, class V, class Hash = default_hash, class KeyEqual = default_equal>
 struct map;
 template <class T, class Hash = default_hash, class KeyEqual = default_equal>
@@ -196,6 +201,16 @@ struct bit_index_range;
 
 template <class RangeT>
 struct sequence;
+
+// The virtual ranges the sorting algorithms permute (algorithm/sort.hh), built by cc::as_index_swap_range*.
+template <class RangeT>
+struct index_swap_range_of;
+template <class RangeT, class KeyF>
+struct index_swap_range_by;
+template <class KeyRangeT, class... RangeTs>
+struct index_swap_range_multi;
+template <class KeyF, class... RangeTs>
+struct index_swap_range_multi_by;
 
 
 //
