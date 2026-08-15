@@ -1,6 +1,7 @@
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
+#include <clean-core/thread/impl/async_tls.hh>
 
 using namespace cc::primitive_defines;
 
@@ -16,13 +17,12 @@ using namespace cc::primitive_defines;
 //   * the lock is never held across the user compute frame;
 //   * continuations are weak_ptrs, so a wake can never touch a dependent torn down concurrently.
 
+// The one per-thread block the async runtime reads (impl/async_tls.hh).
+// thread_local even without threads: a single-threaded build just has one slot.
+thread_local cc::impl::async_tls_block cc::impl::s_async_tls = {};
+
 namespace
 {
-// The scheduler bound to the calling thread, set by async_worker_scope.
-// thread_local even without threads: a single-threaded build just has one slot.
-// nullptr => no worker scope active.
-thread_local cc::async_scheduler* s_current_scheduler = nullptr;
-
 // Process-wide default scheduler for compute nodes that cannot run on the current thread.
 // Read-mostly, installed once at startup.
 // Atomic so installation is visible to worker threads without extra synchronization.
@@ -67,13 +67,12 @@ void cont_free_cell(cc::impl::async_cont_cell* c)
 
 // Per-worker recursion depth of the eager depth-first dep drive, where poll() calls a dependency's poll().
 // Caps the native stack at graph depth; past the cap we fall back to subscribe+park, which uses no extra stack.
-thread_local int s_inline_depth = 0;
 constexpr int async_max_inline_depth = 128;
 
 struct inline_depth_guard
 {
-    inline_depth_guard() { ++s_inline_depth; }
-    ~inline_depth_guard() { --s_inline_depth; }
+    inline_depth_guard() { ++cc::impl::async_tls().inline_depth; }
+    ~inline_depth_guard() { --cc::impl::async_tls().inline_depth; }
     inline_depth_guard(inline_depth_guard const&) = delete;
     inline_depth_guard& operator=(inline_depth_guard const&) = delete;
 };
@@ -85,13 +84,14 @@ struct inline_depth_guard
 
 cc::async_scheduler& cc::async_scheduler::current()
 {
-    CC_ASSERT(s_current_scheduler != nullptr, "no async worker scope active on this thread");
-    return *s_current_scheduler;
+    auto* const s = cc::impl::async_tls().scheduler;
+    CC_ASSERT(s != nullptr, "no async worker scope active on this thread");
+    return *s;
 }
 
 cc::async_scheduler* cc::async_scheduler::current_or_null()
 {
-    return s_current_scheduler;
+    return cc::impl::async_tls().scheduler;
 }
 
 void cc::async_scheduler::set_default(async_scheduler* sched)
@@ -104,14 +104,14 @@ cc::async_scheduler* cc::async_scheduler::default_or_null()
     return s_default_scheduler.load(cc::memory_order_acquire);
 }
 
-cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(s_current_scheduler)
+cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(cc::impl::async_tls().scheduler)
 {
-    s_current_scheduler = &scheduler;
+    cc::impl::async_tls().scheduler = &scheduler;
 }
 
 cc::async_worker_scope::~async_worker_scope()
 {
-    s_current_scheduler = _previous;
+    cc::impl::async_tls().scheduler = _previous;
 }
 
 void cc::singlethreaded_scheduler::enqueue(async_node_ptr node)
@@ -630,7 +630,7 @@ void cc::async_node_base::poll()
             // We fall back to subscribe+park only when the picked dep cannot be completed inline, or the depth cap is hit.
             // Inline-impossible means a manual/push node, one already running on another worker, or one whose own deps aren't ready.
             // Subscription is therefore the exception, not the rule.
-            if (s_inline_depth < async_max_inline_depth)
+            if (cc::impl::async_tls().inline_depth < async_max_inline_depth)
             {
                 async_node_base* const pick = deps().first(); // non-null: deps() is not empty
 
