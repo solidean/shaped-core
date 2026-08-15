@@ -55,6 +55,7 @@ target_sources(clean-core
     src/clean-core/common/utility.hh
     src/clean-core/common/traits.hh
     src/clean-core/common/range_traits.hh
+    src/clean-core/common/compare.hh
     src/clean-core/common/enum_traits.hh
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
@@ -301,6 +302,7 @@ if(SC_BUILD_TESTS)
 
         # tests grouped by topic, mirroring src/clean-core/
         tests/common/assert-test.cc
+        tests/common/compare-test.cc
         tests/common/flags-test.cc
         tests/common/hash-test.cc
         tests/common/hash-types-test.cc

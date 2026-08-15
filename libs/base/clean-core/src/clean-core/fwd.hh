@@ -152,9 +152,14 @@ struct small_vector;
 struct default_hash;
 struct default_equal;
 
-// Default transparent orderings for the sorting algorithms (common/utility.hh), both built on operator<.
+// Comparator vocabulary for the ordering algorithms (common/compare.hh).
+// default_less / default_greater are both built on operator<; compare_by builds a lexicographic one from projections.
 struct default_less;
 struct default_greater;
+template <class ProjF>
+struct descending_projection;
+template <class... ProjFs>
+struct lexicographic_comparator;
 
 template <class K, class V, class Hash = default_hash, class KeyEqual = default_equal>
 struct map;

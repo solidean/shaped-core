@@ -18,6 +18,7 @@ clean-core/
   container/    # array/vector families, map, set, span, strided_span, … (+ impl/)
   sequence/     # the lazy ranges API (early prototype)
   algorithm/    # index_swap_range (the seam) + sort, selection, partition (+ impl/)
+                # comparator vocabulary is common/compare.hh
   string/       # string, string_view, char_predicates, format, formatter, print, to_string, to_debug_string, conversion
   function/     # function_ref, unique_function
   error/        # optional, result, crash_handler

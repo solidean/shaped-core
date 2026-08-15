@@ -511,6 +511,18 @@ cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const>
 hash(h128);                                // hidden-friend customization point -> low limb (u64)
 ```
 
+## Comparators
+
+```cpp
+#include <clean-core/common/compare.hh>    // what the ordering algorithms take as `compare`
+cc::default_less{}   cc::default_greater{} // a < b / b < a; transparent, only operator< required
+cc::compare_by(p1, p2, ...);               // lexicographic: order by p1, break ties with p2, and so on
+cc::descending(p);                         // reverses just that one projection inside a compare_by
+// each projection goes through cc::invoke, so &type::member works; each is re-evaluated per comparison.
+// A comparator must be a STRICT WEAK ORDERING — the sorts assert on one that is not.
+cc::sort(entries, cc::compare_by(&entry::group, cc::descending(&entry::score), &entry::name));
+```
+
 ## Sorting & selection (see [sorting](docs/sorting.md))
 
 pdqsort driven purely by index get + index swap — nothing is ever parked in a temporary, which is what lets one call permute several ranges at once.
@@ -519,7 +531,7 @@ Takes any **indexed range** (`size()` + `operator[]`): vector, array, span, stri
 ```cpp
 #include <clean-core/algorithm/sort.hh>
 cc::sort(values);                          // ascending; deterministic, NOT stable; O(n log n) worst case
-cc::sort(values, cc::default_greater{});   // cc::default_less / cc::default_greater live in common/utility.hh
+cc::sort(values, cc::default_greater{});   // cc::default_less / cc::default_greater live in common/compare.hh
 cc::sort(values, [](auto& a, auto& b) { return a.score < b.score; });
 cc::sort_by(values, &entry::key);          // key fn / pointer-to-member / pointer-to-member-function
 cc::sort_descending(values);  cc::sort_by_descending(values, key);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/compare.hh>
 #include <clean-core/common/range_traits.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/tuple.hh>

@@ -3,6 +3,7 @@
 #include <clean-core/algorithm/impl/sort_impl.hh>
 #include <clean-core/algorithm/index_swap_range.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/compare.hh>
 #include <clean-core/common/range_traits.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>

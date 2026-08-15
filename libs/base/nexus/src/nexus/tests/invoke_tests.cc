@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/compare.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
@@ -67,17 +68,9 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
         if (decl.is_invocable() && signatures_equal(decl.signature, signature))
             matches.push_back(&decl);
 
-    cc::sort(matches,
-             [](test_declaration const* a, test_declaration const* b)
-             {
-                 if (a->name != b->name)
-                     return cc::string_view(a->name) < cc::string_view(b->name);
-                 auto const file_a = cc::string_view(a->location.file_name());
-                 auto const file_b = cc::string_view(b->location.file_name());
-                 if (file_a != file_b)
-                     return file_a < file_b;
-                 return a->location.line() < b->location.line();
-             });
+    cc::sort(matches, cc::compare_by([](test_declaration const* d) { return cc::string_view(d->name); },
+                                     [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
+                                     [](test_declaration const* d) { return d->location.line(); }));
 
     for (auto const* decl : matches)
     {

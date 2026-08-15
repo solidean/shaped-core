@@ -64,6 +64,15 @@ If a sort asserts with *comparison function is not a strict weak ordering*, the 
 
 The usual causes: `<=` where `<` was meant, comparing floats that can be NaN, or a comparator whose answer depends on state that changes during the sort.
 
+`cc::compare_by` in [common/compare.hh](../src/clean-core/common/compare.hh) builds one out of projections and is a strict weak ordering by construction:
+
+```cpp
+cc::sort(entries, cc::compare_by(&entry::group, cc::descending(&entry::score), &entry::name));
+```
+
+It falls through to the next projection only on a tie, so equivalence means equivalent under *every* projection — which is exactly the "neither comes first" the partitions need.
+`cc::descending` reverses one projection; `cc::default_greater` reverses the whole value.
+
 ## Writing your own adapter
 
 `cc::vector` deliberately does **not** model `cc::index_swap_range` — an adapter over it does.
