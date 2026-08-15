@@ -10,6 +10,10 @@ add_library(versioned-document-file
     src/versioned-document-file/fwd.cc
     src/versioned-document-file/diagnostics.cc
     src/versioned-document-file/assets.cc
+    src/versioned-document-file/store.cc
+    src/versioned-document-file/impl/load.cc
+    src/versioned-document-file/impl/publish.cc
+    src/versioned-document-file/impl/store_memory.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -24,6 +28,9 @@ target_sources(versioned-document-file
     src/versioned-document-file/diagnostics.hh
     src/versioned-document-file/assets.hh
     src/versioned-document-file/workspace.hh
+    src/versioned-document-file/rows.hh
+    src/versioned-document-file/memory_image.hh
+    src/versioned-document-file/store.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -56,6 +63,9 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/assets-test.cc
         tests/diagnostics-test.cc
+        tests/conformance/store_fixture.cc
+        tests/conformance/drivers.cc
+        tests/conformance/conformance-test.cc
     )
 
     # babel-serializer is linked for the test fixture alone, which fabricates a damaged file on purpose.

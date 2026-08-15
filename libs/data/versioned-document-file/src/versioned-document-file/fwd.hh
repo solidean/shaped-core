@@ -81,11 +81,32 @@ struct asset_record;
 struct blob_upload;
 } // namespace vdoc::file
 
+// ---- the storage rows ----------------------------------------------------------------------------
+//
+// One struct per table, holding exactly the columns the format names, in the column types it names.
+// Untyped on purpose: this is what a reader hands back BEFORE anything is verified, and a row that will not decode still has to be reportable.
+
+namespace vdoc::file
+{
+struct op_row;
+struct ref_row;
+struct snapshot_row;
+struct asset_row;
+struct blob_row;
+struct chunk_row;
+
+/// What a load learns about one blob's chunks without ever reading a payload.
+struct chunk_summary;
+
+struct workspace_row;
+struct meta_row;
+} // namespace vdoc::file
+
 // ---- the in-memory backing ----------------------------------------------------------------------
 
 namespace vdoc::file
 {
-/// The whole of an in-memory store's state, in plain structs mirroring the file's tables.
+/// The whole of an in-memory store's state, in the same rows a file holds.
 ///
 /// It outlives the store that wrote it, which is what lets a caller — and the conformance suite — close and reopen one exactly like a file.
 struct memory_image;
