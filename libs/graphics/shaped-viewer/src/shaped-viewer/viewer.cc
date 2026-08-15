@@ -215,9 +215,11 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     // The viewer creates and owns its shader library, registering sv's and sr's packages plus a DXC compiler when available.
     // Only one library may exist per process.
     auto shader_library = cc::make_unique<slib::shader_library>();
+#if SLIB_HAS_DXC
     auto compiler = slib::create_dxc_compiler();
     if (compiler.has_value())
         shader_library->add_compiler(cc::move(compiler.value()));
+#endif
     shader_library->add_package(sv::shader_package());
     shader_library->add_package(sr::shader_package());
 

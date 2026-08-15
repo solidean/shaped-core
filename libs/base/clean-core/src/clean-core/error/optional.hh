@@ -129,7 +129,13 @@ public:
 
     /// Constructs an optional holding the given value; conditionally explicit.
     /// Forwarding constructor: perfect-forwards the value into internal storage.
+    ///
+    /// Must never claim an optional of its own type.
+    /// Without that constraint it out-ranks the copy constructor for a NON-const lvalue — `U` deduces to `optional&`,
+    /// an exact match where the copy constructor needs a qualification conversion — and the copy then tries to build a
+    /// `T` from an `optional<T>`.
     template <class U = std::remove_cv_t<T>>
+        requires(!std::is_same_v<std::remove_cvref_t<U>, optional>)
     explicit(!std::is_convertible_v<U, T>) constexpr optional(U&& value) : _has_value(true) // NOLINT
     {
         new (cc::placement_new, &_storage.value) T(cc::forward<U>(value));
