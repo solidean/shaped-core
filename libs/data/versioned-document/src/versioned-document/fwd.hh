@@ -156,6 +156,13 @@ struct component_schema;
 template <class ComponentT>
 struct component_traits;
 
+/// The sink a component's write emits its properties into, bound to one entity and one component type.
+class component_writer;
+
+/// Reads one component's properties, applying the multi-value rules exactly once.
+/// What a component's parse is handed, and the only supported way to read a property.
+class property_reader;
+
 /// How to interpret a raw document: which components are known, which entities are alive, how genuine conflicts resolve.
 class parse_policy;
 
@@ -177,4 +184,17 @@ struct parse_report;
 
 /// The typed document: an immutable index, built once, queried many times, shareable as a snapshot.
 class document;
+
+/// Interprets a raw document into a typed one.
+/// Never fails: everything questionable lands in the report.
+[[nodiscard]] document parse(raw_document const& raw, parse_policy const& policy, parse_report& report);
 } // namespace vdoc
+
+namespace vdoc::impl
+{
+/// The bump allocator a document's storage lives in — vdoc-local and temporary, see document.cc.
+class document_arena;
+
+/// Drives one parse, and the only thing that fills a document.
+class parser;
+} // namespace vdoc::impl

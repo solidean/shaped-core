@@ -5,12 +5,14 @@ project(versioned-document LANGUAGES CXX)
 # Knows nothing about what a component means — the component set belongs entirely to the application.
 # See readme.md and docs/concept.md.
 #
-# Only fwd.hh exists so far; each milestone in docs/todo/ adds its own sources here.
+# Each milestone in docs/todo/ adds its own sources here.
 add_library(versioned-document
     src/versioned-document/fwd.cc
     src/versioned-document/op.cc
     src/versioned-document/op_builder.cc
     src/versioned-document/op_graph.cc
+    src/versioned-document/parse_policy.cc
+    src/versioned-document/parse_report.cc
     src/versioned-document/raw_document.cc
     src/versioned-document/value.cc
     src/versioned-document/value_builder.cc
@@ -30,6 +32,8 @@ target_sources(versioned-document
     src/versioned-document/op.hh
     src/versioned-document/op_builder.hh
     src/versioned-document/op_graph.hh
+    src/versioned-document/parse_policy.hh
+    src/versioned-document/parse_report.hh
     src/versioned-document/raw_document.hh
     src/versioned-document/value.hh
     src/versioned-document/value_builder.hh
@@ -68,6 +72,7 @@ if(SC_BUILD_TESTS)
         tests/op-fuzz-test.cc
         tests/op_builder-test.cc
         tests/op_graph-test.cc
+        tests/parse-test.cc
         tests/value-test.cc
         tests/value-fuzz-test.cc
     )
