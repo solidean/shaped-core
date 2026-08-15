@@ -1,5 +1,21 @@
 # Milestone 4 — The file
 
+**Status: done.**
+Landed as `diagnostics`, `assets`, `workspace`, `rows`, `memory_image`, `store`, and the `impl/` half.
+That half is the shared loader and publisher, the in-memory arm, and the SQLite arm with its schema, its I/O and its actor.
+The conformance suite runs on both implementations, under both `SC_THREADS` settings.
+
+Four departures from what is written below, each argued where it is recorded:
+
+- **`open()` hands the caller the store synchronously**, and reports the load through a separate async.
+  An actor holding the last reference to the store would destroy it — and with it the actor — on the actor's own thread, which is a join against itself.
+  Nothing touches the disk on the calling thread either way, so "no caller-visible API blocks on storage" still holds.
+- **`.shaped-lint.yml` is no longer empty**: it blesses `<memory>` for the polymorphic store handle.
+  The clause's intent survives — no sqlite type appears anywhere, and babel::sqlite is still extended rather than bypassed.
+  The letter of it does not, so the acceptance below is corrected rather than quietly ignored.
+- **A snapshot is opaque here.** It round-trips byte for byte, and `encoding` is the seam milestone 6's decoder attaches to.
+- **The store gained three things neither this file nor format.md named**: `add_op`, `try_get_workspace(key, version)`, and counts on `publish_result`.
+
 **Goal.** `versioned-document-file`: the `.vdoc` SQLite format, loading and verification, refs, publishing, the workspace side table, and the actor that owns the connection.
 
 **Why here.** The model is complete and testable without persistence, which is exactly why persistence comes after it.
@@ -112,7 +128,8 @@ One set of tests, parametrized over both implementations, using nexus's invocabl
 ## Acceptance
 
 - Both store implementations pass one identical conformance suite.
-- No sqlite type appears anywhere in this library — [its `.shaped-lint.yml`](../../../versioned-document-file/.shaped-lint.yml) is still empty.
+- No sqlite type appears anywhere in this library, and [its `.shaped-lint.yml`](../../../versioned-document-file/.shaped-lint.yml) carries nothing but the named clean-core gap.
+  An entry blessing `<sqlite3.h>` would still mean the babel wrapper was bypassed instead of extended, and there is none.
 - No caller-visible API blocks on storage.
 - A publish is atomic; there is no observable half-published state.
 - A workspace write never makes a document look unsaved.

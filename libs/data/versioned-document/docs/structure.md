@@ -35,10 +35,23 @@ src/versioned-document/
 
 src/versioned-document-file/
   fwd.hh          [done]        forward declarations; also the API index
-  store           [planned]     open / load / verify / refs / publish / close   milestone 4
-  workspace       [planned]     the disposable side table                       milestone 4
-  assets          [planned]     asset index, parts, blob store, blob_source     milestone 5
-  snapshots       [planned]     snapshot caching, pruning, skeleton ops         milestone 6
+  diagnostics     [done]        load_issue_kind, load_issue, load_report        milestone 4
+  rows            [done]        one struct per table, untyped                   milestone 4
+  memory_image    [done]        the in-memory backing, in the same rows         milestone 4
+  store           [done]        open / load / verify / refs / publish / close   milestone 4
+  workspace       [done]        the disposable side table                       milestone 4
+  assets          [partial]     the vocabulary and the load path; the machinery  milestone 5
+  snapshots       [partial]     carried opaquely; caching and pruning            milestone 6
+
+src/versioned-document-file/impl/
+  store_io        [done]        the reader/writer seam, and the publish job     milestone 4
+  load            [done]        the one loader, shared by both implementations  milestone 4
+  publish         [done]        the one publisher, shared the same way          milestone 4
+  store_memory    [done]        the in-memory arm, and the suite's oracle       milestone 4
+  sqlite_schema   [done]        the DDL, the pragmas, the shape check           milestone 4
+  sqlite_io       [done]        the only file that talks to a database          milestone 4
+  sqlite_actor    [done]        the actor that owns the connection              milestone 4
+  store_sqlite    [done]        the file arm                                    milestone 4
 ```
 
 ## Prerequisites in lower libraries [done]

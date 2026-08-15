@@ -6,8 +6,9 @@ A `.vdoc` file is a single SQLite database holding a document's whole history, t
 The model it stores is [versioned-document](../../versioned-document/docs/concept.md)'s; read that first.
 This document is the authority on the bytes.
 
-Everything here is `[planned]` — the specification is complete, the implementation is not.
-[milestone-4](../../versioned-document/docs/todo/milestone-4.md) through [milestone-6](../../versioned-document/docs/todo/milestone-6.md) build it.
+The schema, the load path, publishing and the workspace are implemented; assets, blobs and snapshots are carried but not yet populated or decoded.
+[milestone-4](../../versioned-document/docs/todo/milestone-4.md) landed the first.
+[milestone-5](../../versioned-document/docs/todo/milestone-5.md) and [milestone-6](../../versioned-document/docs/todo/milestone-6.md) land the rest.
 
 ---
 
@@ -60,7 +61,9 @@ The compatibility rules:
 - An **equal or lower** version opens, and missing tables are created.
   An old shape that cannot be read forward is reported as a specific error, never left to fail obscurely several statements later.
 - **Unknown tables are ignored**, and reported as a load issue, since a newer build may have added state this one does not need.
-- **Unknown columns are ignored**, and preserved: a rewrite must never drop a column it did not understand.
+- **Unknown columns are ignored**, reported, and preserved: a rewrite must never drop a column it did not understand.
+  Preservation is structural rather than a step.
+  Every statement names its own columns, there is no `SELECT *`, and no rewrite or table rebuild exists — so a column this build does not know cannot be addressed by anything on either path.
 
 `user_version` also covers the **value encoding**, not just the table shapes.
 If `vdoc::value` is ever replaced by a general-purpose any-value format, that is a format break, and this is the field that lets a future build tell the two apart and migrate in principle.
@@ -220,8 +223,9 @@ Unknown keys are preserved untouched.
 2. Read `blobs` and `blob_chunk` **metadata only** — never a payload.
    `LENGTH()` on a blob column is answered from the row header, and there is one chunk row per large span, so this stays cheap on a multi-gigabyte file.
 3. Read `assets`, filling in blob-side facts from step 2, and flagging assets whose blobs are missing or incomplete.
-4. Read `ops`, decoding and **verifying every one**.
+4. Read `ops`, decoding and **verifying every one**, then check each op's parents against what the file actually held.
 5. Read `refs`, `snapshots`, `workspace`, `meta`.
+   A snapshot is carried **opaquely** — its op, its `required` flag, its `encoding` and its bytes — and nothing decodes one until milestone 6 attaches a decoder behind that seam.
 
 **Soft failures never block a load.**
 A corrupt op is dropped and reported, landing on exactly the same downstream path as a pruned one — which is what makes that path get exercised rather than rotting.
@@ -234,10 +238,14 @@ Load issues are string-free: a kind plus the id it concerns.
 | `op_hash_mismatch` | the bytes do not hash to the stored id — corruption or tampering |
 | `missing_parent` | an op names a parent not in the file; informational, and normal after pruning |
 | `missing_snapshot` | a snapshot row would not decode |
+| `dangling_ref` | a ref names an op not in the file, usually one this load dropped; the ref is kept anyway |
+| `asset_decode_failed` | an asset's `parts` blob would not decode, or is not the array of part objects it must be |
 | `asset_blob_missing` | an asset names a content hash with no blob row |
 | `asset_blob_incomplete` | the blob row exists but its chunks do not all |
 | `unknown_encoding` | a blob names an encoding this build does not have |
-| `unknown_table` | a table this build does not know; ignored |
+| `workspace_decode_failed` | a workspace row's value would not decode; the row is left in place |
+| `unknown_table` | a table this build does not know; ignored, and left untouched |
+| `unknown_column` | a column this build does not know on a table it does know; ignored, and preserved |
 
 The hard failures, by contrast, stop the open: not a SQLite database, unreadable, a `user_version` from the future, or a *required* snapshot that will not decode.
 

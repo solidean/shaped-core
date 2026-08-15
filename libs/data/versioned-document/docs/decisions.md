@@ -475,6 +475,14 @@ Where that wrapper lacks something the format needs — incremental blob I/O, tr
 Reaching around it to `sqlite3.h` would put a third-party type in a second library and split ownership of the engine across two places.
 Growing the lower library is the repo's standing preference, and this is a clean instance of it.
 
+Milestone 4 grew it twice more.
+`babel::sqlite::error` carries a result code, because a file that is not a database, a database that is damaged and a lock somebody else holds are three different situations.
+Matching on message text to tell them apart is not a mechanism.
+And `database` gained the `application_id` / `user_version` accessors, which is how a `.vdoc` file identifies itself and how a version from the future is refused.
+
+The store's own `.shaped-lint.yml` does carry one entry — `<memory>`, for the polymorphic store handle, which is a clean-core gap and the third library to file it.
+No sqlite header appears anywhere, which is the clause that was ever load-bearing.
+
 **Reopen when:** nothing.
 
 ### One actor owns the connection
@@ -483,6 +491,41 @@ Growing the lower library is the repo's standing preference, and this is a clean
 
 A SQLite connection is not a shared resource, and the alternative — a mutex around a connection touched from arbitrary threads — puts I/O latency on whichever caller is unlucky.
 An actor makes the ownership a fact of the structure rather than a convention, and gives the store one thread to serialize its writes on.
+
+**Reopen when:** nothing.
+
+### The store hands itself back synchronously, and reports the load separately
+
+**Decided.** `store::open` returns the handle and a `cc::shared_async` that is ready once the load finished, rather than an async that resolves to the handle.
+
+The caller must own the store from the first instant, because the actor may only ever borrow a pointer to it.
+An actor that held the last reference would destroy the store — and with it the actor — on the actor's own thread, which is a join against itself.
+Handing the handle back makes that impossible by construction rather than by care, and nothing touches the disk on the calling thread either way.
+
+The alternative — the actor owning the store until the open resolves — was written first and deadlocked on the very first hard failure it was asked to report.
+
+**Reopen when:** clean-core grows a way to tear an actor down from its own thread, which is not obviously a thing anyone should want.
+
+### The in-memory store writes into a detachable image, and has no actor
+
+**Decided.** The in-memory arm writes into a `memory_image` the caller owns, and completes its hooks inline.
+
+The image outliving the store is what makes close-and-reopen mean the same thing on both arms: the load runs again, with its decoding, its verification and its issues.
+Without it the in-memory arm could only ever test the write path, and the load path — where the interesting failures live — would be exercised on one implementation instead of two.
+That is the difference between an oracle and a shortcut.
+
+It has no actor because the connection an actor exists to own exclusively is the thing this arm does not have.
+A thread per unsaved document would buy nothing and would put a second scheduler under a suite that exists to be deterministic.
+Its `on_pump` reports nothing left, which is exactly what a threaded build's actor reports, so no caller can tell them apart.
+
+**Reopen when:** nothing.
+
+### A failed publish un-claims its ops
+
+**Decided.** The durable-op set is an optimization for computing a delta, and a publish that failed removes what it had added to it.
+
+Without that, a set that is too large would make the optimization *required* for correctness: the next publish would skip ops that were never written, and the failure would become silent data loss.
+With it, a set that is too small costs a rewrite and nothing else — which is the only kind of wrongness an optimization is allowed to have.
 
 **Reopen when:** nothing.
 

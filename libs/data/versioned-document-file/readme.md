@@ -5,20 +5,20 @@ Namespace `vdoc::file`.
 Depends on **versioned-document** (the model) and **babel-serializer** (the SQLite engine, linked privately).
 
 ```cpp
-// [planned] — the shape the API is being built toward, not something you can compile today.
-auto file = vdoc::file::store::open("project.vdoc");
+auto [file, loaded] = vdoc::file::store::open("project.vdoc");  // returns at once, having touched no disk
 
 auto const& graph = file->ops();           // the whole DAG, loaded and verified
-auto const  head  = file->refs()["main"];  // a named head
+auto const  head  = file->refs().get("main");  // a named head
 
 file->publish({.refs = {{"main", new_head}}});  // ops derived from the refs by reachability
 ```
 
 One file is one shareable unit: send it to someone and they have the document, its history and its embedded content.
-The op DAG loads eagerly and completely; blobs load lazily through a [`blob_source`](src/versioned-document-file/fwd.hh).
+The op DAG loads eagerly and completely; blobs load lazily through a [`blob_source`](src/versioned-document-file/store.hh).
 
-This library is at the **design stage** — nothing is implemented.
-[docs/format.md](docs/format.md) specifies the on-disk shape, and the plan to build it lives with the model library, in [versioned-document/docs/todo/](../versioned-document/docs/todo/_index.md).
+The store, the loader, publishing and the workspace are implemented.
+Assets, blobs and snapshots have their tables, their vocabulary and their load path, and are populated and decoded in [milestones 5 and 6](../versioned-document/docs/todo/_index.md).
+[docs/format.md](docs/format.md) specifies the on-disk shape.
 
 ## The one thing to know first
 
@@ -47,29 +47,34 @@ That is the escape hatch that makes the format usable for real content work rath
 
 ## File organization
 
-Source lives in `src/versioned-document-file/`.
-Only `fwd.hh` exists so far, and it doubles as the index of every name the library plans to expose.
+Public headers live in `src/versioned-document-file/`, and `fwd.hh` doubles as the index of every name the library exposes.
 
-| Planned area | What will be in it |
-|--------------|--------------------|
-| (root)       | `fwd.hh` — forward declarations and vocabulary aliases |
-| store        | `store` — open, load, publish, close; plus the in-memory and SQLite implementations behind it |
-| assets       | `asset_record` / `asset_part` / `blob_hash` / `blob_upload` / `blob_source` |
-| workspace    | `workspace_value` / `workspace_entry` |
-| diagnostics  | `load_issue_kind` / `load_issue` / `load_report` |
+| File | What is in it |
+|------|---------------|
+| `fwd.hh`          | forward declarations and vocabulary aliases |
+| `store`           | `store`, `store_handle`, `open_result`, `publish_changes`, `publish_result`, `snapshot_entry`, `blob_source` |
+| `assets`          | `blob_hash` / `asset_part` / `asset_record` / `blob_upload` |
+| `workspace`       | `workspace_value` / `workspace_entry` |
+| `diagnostics`     | `load_issue_kind` / `load_issue` / `load_report` |
+| `rows`            | one struct per table, untyped — what a reader hands back before anything is verified |
+| `memory_image`    | the in-memory backing, in those same rows |
+
+`impl/` is private, and is the only place `babel::sqlite` is included.
+The loader and the publisher live there once and serve both implementations; the SQLite half is its schema, its I/O, its actor and the store over them.
 
 ## Building & testing
 
 ```bash
 uv run dev.py build -t versioned-document-file
+uv run dev.py test "versioned-document-file-test"
 ```
 
-There is no `versioned-document-file-test` yet; it arrives with [milestone 4](../versioned-document/docs/todo/milestone-4.md).
+The conformance suite is the centre of that binary: one set of tests, parametrized over both store implementations, so selecting a behaviour by name checks it on each.
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.
 
 ## More
 
 - [docs/format.md](docs/format.md) — the on-disk specification: tables, columns, encodings, and the compatibility rules.
 - [docs/_index.md](docs/_index.md) — this library's documentation hub.
-- [cheat-sheet.md](cheat-sheet.md) — the planned API at a glance.
+- [cheat-sheet.md](cheat-sheet.md) — the API at a glance.
 - [versioned-document/docs/concept.md](../versioned-document/docs/concept.md) — the model this persists.
