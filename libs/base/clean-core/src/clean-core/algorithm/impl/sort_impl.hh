@@ -568,6 +568,131 @@ constexpr void sort_pivot_median_of_medians(isize start, isize size, RangeT rang
         range.element_swap(start, start + groups / 2);
 }
 
+/// What one pdqsort iteration left behind: the two subranges that still want sorting.
+///
+/// All-zero means nothing is left — small-sorted, heapsorted, finished off by partial insertion, or pruned away
+/// by `should_sort`.
+/// `left` is recursed into and `tail` looped on, which is what the sequential driver does; a parallel one hands
+/// them to two tasks, which is sound because everything reaching across the pivot has already happened.
+struct sort_step_result
+{
+    isize left_start = 0;
+    isize left_size = 0;
+    isize tail_start = 0;
+    isize tail_size = 0;
+    isize bad_allowed = 0;
+    bool tail_leftmost = false;
+};
+
+/// One iteration of the pdqsort driver: pick a pivot, partition, report what is left.
+///
+/// Extracted so the sequential and the parallel driver share it rather than drifting apart — sort_loop is a
+/// loop around this, and cc::sort_async spawns around it.
+/// Everything touching BOTH partitions finishes before this returns: break_patterns reaches across the pivot,
+/// and so does the partial-insertion probe.
+/// That is precisely what makes the two reported subranges safe to hand to two threads.
+///
+/// CC_FORCE_INLINE is load-bearing rather than a hint.
+/// Left to itself the compiler emits this out of line, and sort_loop then pays a real call per iteration where
+/// it used to be one fused loop — which measured.
+template <sort_fallback Fallback, class RangeT, class CompareF, class ShouldSortF>
+CC_FORCE_INLINE constexpr sort_step_result sort_step(isize start,
+                                                     isize size,
+                                                     RangeT range,
+                                                     CompareF& compare,
+                                                     ShouldSortF& should_sort,
+                                                     isize bad_allowed,
+                                                     bool leftmost)
+{
+    if (size <= sort_insertion_threshold)
+    {
+        if (leftmost)
+            impl::sort_insertion(start, size, range, compare);
+        else
+            impl::sort_insertion_unguarded(start, size, range, compare);
+        return {};
+    }
+
+    isize const end = start + size;
+    isize const half = size / 2;
+
+    bool use_median_of_medians = false;
+    if constexpr (Fallback == sort_fallback::median_of_medians)
+        use_median_of_medians = bad_allowed <= 0;
+
+    if (use_median_of_medians)
+    {
+        impl::sort_pivot_median_of_medians(start, size, range, compare);
+    }
+    else if (size > sort_ninther_threshold)
+    {
+        impl::sort_order3(start, start + half, end - 1, range, compare);
+        impl::sort_order3(start + 1, start + half - 1, end - 2, range, compare);
+        impl::sort_order3(start + 2, start + half + 1, end - 3, range, compare);
+        impl::sort_order3(start + half - 1, start + half, start + half + 1, range, compare);
+        range.element_swap(start, start + half);
+    }
+    else
+    {
+        impl::sort_order3(start + half, start, end - 1, range, compare);
+    }
+
+    // the element just before the range equals the pivot, so every element equal to it belongs left of here
+    if (!leftmost && !compare(range.element_get(start - 1), range.element_get(start)))
+    {
+        isize const pivot_pos = impl::sort_partition_left(start, size, range, compare);
+
+        sort_step_result r;
+        r.tail_start = pivot_pos + 1;
+        r.tail_size = end - r.tail_start;
+        r.bad_allowed = bad_allowed;
+        r.tail_leftmost = false; // it was already false to reach this branch
+        if (!should_sort(r.tail_start, r.tail_size))
+            r.tail_size = 0;
+        return r;
+    }
+
+    bool already_partitioned = false;
+    isize pivot_pos = 0;
+    if constexpr (sort_use_block_partition<RangeT>)
+        pivot_pos = impl::sort_partition_right_blocks(start, size, range, compare, already_partitioned);
+    else
+        pivot_pos = impl::sort_partition_right(start, size, range, compare, already_partitioned);
+
+    isize const left_size = pivot_pos - start;
+    isize const right_size = end - (pivot_pos + 1);
+
+    if (left_size < size / 8 || right_size < size / 8)
+    {
+        --bad_allowed;
+        if constexpr (Fallback == sort_fallback::heap)
+        {
+            if (bad_allowed <= 0)
+            {
+                impl::sort_heapsort(start, size, range, compare);
+                return {};
+            }
+        }
+
+        impl::sort_break_patterns(start, left_size, pivot_pos, right_size, range);
+    }
+    else if (already_partitioned                                               //
+             && impl::sort_partial_insertion(start, left_size, range, compare) //
+             && impl::sort_partial_insertion(pivot_pos + 1, right_size, range, compare))
+    {
+        return {}; // both halves were nearly sorted and now fully are, whatever `should_sort` asked for
+    }
+
+    sort_step_result r;
+    r.left_start = start;
+    r.left_size = should_sort(start, left_size) ? left_size : 0;
+    r.tail_start = pivot_pos + 1;
+    r.tail_size = should_sort(r.tail_start, right_size) ? right_size : 0;
+    r.bad_allowed = bad_allowed;
+    r.tail_leftmost = false;
+    return r;
+}
+
 /// The pdqsort driver: pick a pivot, partition, recurse into the left half and loop on the right.
 /// `should_sort` prunes whole subranges, which is what turns the same machinery into a selection.
 /// `leftmost` states that no element before `start` is known to bound the range from below.
@@ -582,6 +707,8 @@ constexpr void sort_loop(isize start,
 {
     while (true)
     {
+        // the small-sort leaf is handled here rather than through sort_step, which would cost it a whole
+        // sort_step_result round trip — it is the most frequently reached path in the whole sort
         if (size <= sort_insertion_threshold)
         {
             if (leftmost)
@@ -591,82 +718,20 @@ constexpr void sort_loop(isize start,
             return;
         }
 
-        isize const end = start + size;
-        isize const half = size / 2;
+        auto const step = impl::sort_step<Fallback>(start, size, range, compare, should_sort, bad_allowed, leftmost);
 
-        bool use_median_of_medians = false;
-        if constexpr (Fallback == sort_fallback::median_of_medians)
-            use_median_of_medians = bad_allowed <= 0;
+        // the left recursion takes the CURRENT leftmost, not the tail's
+        if (step.left_size > 0)
+            impl::sort_loop<Fallback>(step.left_start, step.left_size, range, compare, should_sort, step.bad_allowed,
+                                      leftmost);
 
-        if (use_median_of_medians)
-        {
-            impl::sort_pivot_median_of_medians(start, size, range, compare);
-        }
-        else if (size > sort_ninther_threshold)
-        {
-            impl::sort_order3(start, start + half, end - 1, range, compare);
-            impl::sort_order3(start + 1, start + half - 1, end - 2, range, compare);
-            impl::sort_order3(start + 2, start + half + 1, end - 3, range, compare);
-            impl::sort_order3(start + half - 1, start + half, start + half + 1, range, compare);
-            range.element_swap(start, start + half);
-        }
-        else
-        {
-            impl::sort_order3(start + half, start, end - 1, range, compare);
-        }
-
-        // the element just before the range equals the pivot, so every element equal to it belongs left of here
-        if (!leftmost && !compare(range.element_get(start - 1), range.element_get(start)))
-        {
-            isize const pivot_pos = impl::sort_partition_left(start, size, range, compare);
-
-            start = pivot_pos + 1;
-            size = end - start;
-            if (!should_sort(start, size))
-                return;
-            continue;
-        }
-
-        bool already_partitioned = false;
-        isize pivot_pos = 0;
-        if constexpr (sort_use_block_partition<RangeT>)
-            pivot_pos = impl::sort_partition_right_blocks(start, size, range, compare, already_partitioned);
-        else
-            pivot_pos = impl::sort_partition_right(start, size, range, compare, already_partitioned);
-
-        isize const left_size = pivot_pos - start;
-        isize const right_size = end - (pivot_pos + 1);
-
-        if (left_size < size / 8 || right_size < size / 8)
-        {
-            --bad_allowed;
-            if constexpr (Fallback == sort_fallback::heap)
-            {
-                if (bad_allowed <= 0)
-                {
-                    impl::sort_heapsort(start, size, range, compare);
-                    return;
-                }
-            }
-
-            impl::sort_break_patterns(start, left_size, pivot_pos, right_size, range);
-        }
-        else if (already_partitioned                                               //
-                 && impl::sort_partial_insertion(start, left_size, range, compare) //
-                 && impl::sort_partial_insertion(pivot_pos + 1, right_size, range, compare))
-        {
-            return; // both halves were nearly sorted and now fully are, whatever `should_sort` asked for
-        }
-
-        if (should_sort(start, left_size))
-            impl::sort_loop<Fallback>(start, left_size, range, compare, should_sort, bad_allowed, leftmost);
-
-        start = pivot_pos + 1;
-        size = right_size;
-        leftmost = false;
-
-        if (!should_sort(start, size))
+        if (step.tail_size <= 0)
             return;
+
+        start = step.tail_start;
+        size = step.tail_size;
+        bad_allowed = step.bad_allowed;
+        leftmost = step.tail_leftmost;
     }
 }
 
