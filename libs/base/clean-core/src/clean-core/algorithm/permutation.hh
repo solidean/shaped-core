@@ -78,6 +78,63 @@ constexpr void rotate(RangeT&& values, isize count)
 }
 
 // =========================================================================================================
+// Stable partitioning
+// =========================================================================================================
+
+/// Permutes [start, start + size) into a left block where `is_right(i)` is false and a right block where it is
+/// true, keeping the original relative order WITHIN each block.
+///
+/// Returns the first index of the right block, exactly as cc::partition_ex does.
+/// `is_right(i)` takes an INDEX and is evaluated exactly once per element, at its original position — so a
+/// predicate that is expensive, or that reads through the range being permuted, is safe.
+///
+/// Allocates nothing: it splits, recurses and rotates the two middle blocks together.
+/// That costs O(size log size) swaps against cc::partition_ex's O(size), and O(log size) stack.
+/// Where an allocation is acceptable and size is large, cc::sort_stable_by(values, is_right) is the same
+/// answer through an index array, in O(n log n) comparisons but O(n) swaps.
+template <class IsRightF, class RangeT>
+constexpr isize partition_stable_ex(isize start, isize size, IsRightF&& is_right, RangeT range)
+{
+    static_assert(cc::index_swap_range<RangeT>, "cc::partition_stable_ex takes an index_swap_range — see "
+                                                "cc::as_index_swap_range");
+    CC_ASSERT(size >= 0, "size must be >= 0");
+
+    if (size == 0)
+        return start;
+    if (size == 1)
+        return bool(cc::invoke(is_right, start)) ? start : start + 1;
+
+    isize const half = size / 2;
+    isize const middle = start + half;
+
+    isize const left_cut = cc::partition_stable_ex(start, half, is_right, range);
+    isize const right_cut = cc::partition_stable_ex(middle, size - half, is_right, range);
+
+    // [left_cut, middle) is the left half's right block and [middle, right_cut) the right half's left block:
+    // swapping those two adjacent blocks is one rotation, and it is what keeps both blocks in order
+    cc::rotate_ex(left_cut, right_cut - left_cut, middle - left_cut, range);
+
+    return left_cut + (right_cut - middle);
+}
+
+/// Permutes `values` into a left block where `is_right(element)` is false and a right block where it is true,
+/// keeping the original relative order within each block.
+/// Returns the first index of the right block, i.e. the size of the left one.
+///
+/// cc::partition_by is the O(n) answer when that order does not matter.
+template <class RangeT, class IsRightF>
+constexpr isize partition_stable(RangeT&& values, IsRightF&& is_right)
+{
+    static_assert(cc::indexed_range<RangeT>, "cc::partition_stable takes an indexed range");
+
+    auto const range = cc::as_index_swap_range(values);
+    auto predicate
+        = impl::index_swap_element_predicate<decltype(range), std::remove_reference_t<IsRightF>>{.range = range,
+                                                                                                 .pred = &is_right};
+    return cc::partition_stable_ex(0, isize(values.size()), predicate, range);
+}
+
+// =========================================================================================================
 // Permutations
 // =========================================================================================================
 

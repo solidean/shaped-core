@@ -233,3 +233,91 @@ TEST("invert_permutation - turns a sort order into ranks")
     CHECK(order[1] == 0);
     CHECK(order[2] == 1);
 }
+
+TEST("partition_stable - splits the range and keeps the order within each block")
+{
+    cc::random rng(45);
+
+    for (isize const n : {isize(0), isize(1), isize(2), isize(17), isize(3000)})
+    {
+        SECTION("n = {}", n)
+        {
+            struct sample
+            {
+                bool goes_right = false;
+                i32 arrival = 0;
+            };
+
+            auto values = cc::vector<sample>::create_defaulted(n);
+            isize expected_left = 0;
+            for (isize i = 0; i < n; ++i)
+            {
+                bool const right = rng.uniform(0, 3) == 0; // deliberately lopsided
+                values[i] = {.goes_right = right, .arrival = i32(i)};
+                if (!right)
+                    ++expected_left;
+            }
+
+            auto const cut = cc::partition_stable(values, [](sample const& s) { return s.goes_right; });
+
+            CHECK(cut == expected_left);
+            for (isize i = 0; i < n; ++i)
+                CHECK(values[i].goes_right == (i >= cut));
+
+            // arrival order preserved inside each block, which is the whole difference from partition_by
+            for (isize i = 1; i < cut; ++i)
+                CHECK(values[i - 1].arrival < values[i].arrival);
+            for (isize i = cut + 1; i < n; ++i)
+                CHECK(values[i - 1].arrival < values[i].arrival);
+        }
+    }
+}
+
+TEST("partition_stable - all-left and all-right ranges")
+{
+    auto all_left = cc::vector<i32>{1, 2, 3};
+    CHECK(cc::partition_stable(all_left, [](i32) { return false; }) == 3);
+    CHECK(all_left[0] == 1);
+    CHECK(all_left[2] == 3);
+
+    auto all_right = cc::vector<i32>{1, 2, 3};
+    CHECK(cc::partition_stable(all_right, [](i32) { return true; }) == 0);
+    CHECK(all_right[0] == 1);
+    CHECK(all_right[2] == 3);
+}
+
+TEST("partition_stable - the predicate is evaluated exactly once per element")
+{
+    isize const n = 1000;
+    auto values = cc::vector<i32>::create_defaulted(n);
+    for (isize i = 0; i < n; ++i)
+        values[i] = i32(i);
+
+    isize calls = 0;
+    auto const cut = cc::partition_stable(values,
+                                          [&](i32 v)
+                                          {
+                                              ++calls;
+                                              return v % 3 == 0;
+                                          });
+
+    CHECK(calls == n);
+    CHECK(cut == n - (n + 2) / 3);
+}
+
+TEST("partition_stable - keeps parallel ranges in step through the seam")
+{
+    auto flags = cc::vector<i32>{1, 0, 1, 0, 0, 1};
+    auto tags = cc::vector<i32>{0, 1, 2, 3, 4, 5};
+
+    auto const range = cc::as_index_swap_range_multi(flags, tags);
+    auto const cut = cc::partition_stable_ex(0, 6, [&](isize i) { return flags[i] != 0; }, range);
+
+    CHECK(cut == 3);
+    CHECK(tags[0] == 1);
+    CHECK(tags[1] == 3);
+    CHECK(tags[2] == 4);
+    CHECK(tags[3] == 0);
+    CHECK(tags[4] == 2);
+    CHECK(tags[5] == 5);
+}

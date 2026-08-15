@@ -548,6 +548,8 @@ cc::sort_and_dedup(values);                // -> isize new size; sorts, drops du
                                            // (needs resize_down_to; for a view: sort + cc::dedup_sorted_ex)
 
 cc::partition_by(values, is_right);        // -> isize first index of the "right" block; O(n), not stable
+cc::partition_stable(values, is_right);    // same, order kept within each block; O(n log n) swaps, NO allocation
+                                           // (allocating alternative for big n: cc::sort_stable_by(v, is_right))
 cc::sort_at(values, idx);                  // element idx as a full sort would leave it; O(n) even worst case (+ _by)
 cc::sort_window(values, {.offset, .size}); // that whole window, sorted; O(n + size log size); may run past the end (+ _by)
 cc::sort_first(values, k);                 // the top-k spelling of sort_window({.offset = 0, .size = k})
@@ -567,6 +569,7 @@ cc::apply_permutation(values, indices);    // values[i] <- what indices[i] point
 cc::invert_permutation(indices);           // in place; a sort order becomes RANKS. Index type must be SIGNED.
 cc::reverse_ex(start, size, range);  cc::rotate_ex(start, size, k, range);   // seam forms
 cc::apply_permutation_ex(size, indices, range);   // + a _multi range => permute parallel arrays in step
+cc::partition_stable_ex(start, size, is_right, range);  // is_right takes an INDEX, called once per element
 ```
 
 Binary search over an already-ordered range.

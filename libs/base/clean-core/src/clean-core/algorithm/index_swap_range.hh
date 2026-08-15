@@ -169,7 +169,7 @@ constexpr isize partition_ex(isize start, isize size, IsRightF&& is_right, Range
 
 /// Permutes `values` into a left block where `is_right(element)` is false and a right block where it is true.
 /// Returns the first index of the right block, i.e. the size of the left one.
-/// Runs in O(n) and is not stable.
+/// Runs in O(n) and is not stable — cc::partition_stable keeps the order within each block, for O(n log n) swaps.
 template <class RangeT, class IsRightF>
 constexpr isize partition_by(RangeT&& values, IsRightF&& is_right)
 {

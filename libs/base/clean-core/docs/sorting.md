@@ -147,6 +147,11 @@ The array it consumes is a scratch array anyway — `sort_indices` is what produ
 It is a **gather**: `values[i]` ends up holding what `indices[i]` pointed at, which is the direction `sort_indices` hands you.
 `invert_permutation` is how you get the other direction, and inverting a sort order is what turns it into ranks.
 
+`cc::partition_stable` lives there too, because rotation is how it works: split, recurse into both halves, then rotate the two middle blocks past each other.
+That is O(n log n) swaps and O(log n) stack against `partition_by`'s O(n), and it **allocates nothing**.
+Allocating nothing is the reason to have it at all: `cc::sort_stable_by(values, is_right)` is already the allocating answer.
+Its predicate is evaluated exactly once per element, at that element's original position, so an expensive or range-reading predicate is safe.
+
 ## Where the boundary with cc::sequence runs
 
 **`algorithm/` permutes a range, or searches an ordered one.**
