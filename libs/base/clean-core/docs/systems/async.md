@@ -384,24 +384,78 @@ A node is a **16 B header** followed by a payload slot; `async<int>` is **64 B �
   `is_ready()` / `is_cold()` are lock-free acquire loads of the word.
   Both words are `cc::atomic`, so a no-threads build gets plain loads and stores here and the spinlock bit compiles away entirely — nothing can contend it (see [Without threads](#without-threads)).
 * **Payload slot (offset 16), one hand-managed union.**
-  The compute frame, the not-ready dependency set and the continuation head are **mutually exclusive with** the resolved value ⊍ error.
-  The scratch matters only before completion and the value/error only after, so they share the slot, discriminated by the node state.
-  The 48 B scratch is **frame 32 + deps 8 + conts 8**.
-  The value is built **straight into the slot** at resolution, over the frame.
-  Completion destroys the frame, steals the continuation head under the node lock, tears down the rest of the scratch, constructs the value/error, and publishes `ready` **last**.
+  The unresolved arm and the compute frame are **mutually exclusive with** the resolved value ⊍ error.
+  The arm matters only before completion and the value/error only after, so they share the slot, discriminated by the node state.
+  The 24 B arm is **ambient 8 + deps 8 + conts 8**, and the compute frame is the payload **tail** immediately after it.
+  Those three sit at fixed payload offsets 0/8/16, so the untyped base reaches all of them — and the frame — by constant offset.
+  The value is built **straight into the slot** at resolution, over the arm, and over the frame's bytes too once it is larger than 24 B.
+  Completion destroys the frame, steals the continuation head under the node lock, tears down the rest of the arm, constructs the value/error, and publishes `ready` **last**.
   A late subscriber therefore never observes `ready` before the result is in place.
   A large `T` **grows the node naturally**, with no inline cap: `async<int>` / `async<vector<T>>` / `async<string>` are one line, a bigger `T` spills onto further lines.
 * Both heads are **one tagged word**: `0` is empty, bit 0 clear is a single inline entry in the high bits, bit 0 set is a slab-backed spill list (nodes are 64-aligned, so the low bits are free).
   The common single-dependency / single-dependent case therefore pays no allocation.
   The continuation head's entries are weak, and its inline slot holds its one weak count by hand (`weak_ptr::adopt` / `release`).
   A second dependent, and every one-shot completion latch, promotes that entry into the list.
-* **The compute frame is stored inline** in the scratch's 32 B, which fits the closures the sugar builds — the wrapper's captured `f` plus its `shared_async` dependency handles.
+* **The compute frame is stored inline** in the payload tail, which on a one-line node leaves it **24 B** — the wrapper's captured `f` plus its `shared_async` dependency handles.
+  The rule of thumb is `sizeof(captures) + 8·(dependency count) <= 24`.
   It is constructed once, invoked, and destroyed **in place**, never moved, so parking is free and an immovable frame works (`make_async_lazy_emplace`).
   Running and destroying it are two more `async_type_ops` entries, keyed per frame type.
-  A closure over 32 B falls back to a boxed one-pointer `cc::unique_function`, which itself fits the slot.
+  A closure that does not fit falls back to a boxed one-pointer `cc::unique_function`, which itself always fits.
+  Two things about that budget are easy to trip over.
+  It is **type-dependent** — a bigger `T` or `E` widens the payload and the frame slot with it, so the *same* closure can box under `async<int>` and stay inline under `async<big_thing>`.
+  And its alignment ceiling is **8, not 16**: the payload is 16-aligned at node offset 16, so a frame at payload + 24 sits at absolute offset 40, and an over-aligned closure is boxed.
+  Ask `async<T, E>::frame_fits_inline<F>` rather than restating the numbers — a hand-copied budget goes stale silently, and a silent spill is an allocation per task.
 
 The **semantics and the public API are the contract**.
 The node layout is not, and can change under the hood as the system matures without breaking callers.
+
+## Ambient context
+
+One opaque word rides the graph, so code anywhere inside a frame can ask **"which logical task is this work part of?"**.
+Two consumers want that.
+A test runner attributes a `CHECK` to the right test when tests run concurrently, and a profiler attributes pool time to logical scopes rather than to whichever worker happened to run a node.
+cc never learns what is in the word — composition is the tag chain in [`async_ambient.hh`](../../src/clean-core/thread/async_ambient.hh), which is where the API lives.
+
+```cpp
+CC_ASYNC_AMBIENT_TAG(my_tag)                          // address-unique, per consumer
+
+cc::async_ambient_scope const s(my_tag(), &my_state); // push; RAII, LIFO
+auto* const v = cc::async_ambient_lookup(my_tag());   // from anywhere inside a frame
+```
+
+**Attribution is drive-site.**
+
+> A subtree driven from one scheduler work item is billed entirely to that item's context.
+> A node inline-driven inside another node's poll is billed to that node's context, transitively.
+
+A node stores the context only as a **resume token**, so a suspended computation resumes under the context it suspended in.
+The token is written **once**, by a thread executing or creating the node — never by one merely waking it.
+That exclusion is load-bearing rather than an optimization.
+Without it a shared dependency completing under B would stamp B onto A's private continuation, and propagate through A's whole remaining subgraph.
+
+There are exactly three write sites, all inside the per-node spinlock those paths already take:
+
+| Transition | Where |
+|---|---|
+| **cold** → scheduled (never `blocked` → scheduled, which is a wake) | `schedule()`, `schedule_on()` |
+| running → **blocked** (park) | `poll()`'s park point |
+| running → scheduled (yield) | `reschedule_self()` |
+
+The yield site is the easy one to forget: an inline-driven node was never scheduled, so it holds no token, and without that write it comes back off the queue with none.
+
+`poll()` installs the token for the whole poll, and **only if the node has one**.
+A node without one falls through and inherits its driver's context — which is what makes the eager depth-first drive pay one install for a 512-node chain rather than 512.
+Node creation costs nothing at all: no TLS read, no store, so born-ready, manual and lazy-then-inline-driven nodes never touch the word.
+
+**Lifetime is safe, not merely checked.**
+Links are refcounted and hold their parent strongly, so retaining a head retains the whole chain and a lookup can never reach a freed link.
+The arm holds one reference, released in `~async_unresolved` — one site covering resolve-value, resolve-error and cold/parked teardown, so the count is exactly-once by construction.
+A **resolved node therefore carries no context at all**, since the token lives in the arm that resolution destroys.
+
+That is what makes **prewarming legal**: work started under a scope that ends before the work does keeps its context alive rather than dangling.
+cc deliberately does not assert on it.
+A consumer wanting the stricter rule reads `async_ambient_scope::outstanding()` and decides for itself what a leak means.
+A test runner in particular wants a reported failure naming the test, not the abort a cc-side assert would give it.
 
 ## Cost
 
