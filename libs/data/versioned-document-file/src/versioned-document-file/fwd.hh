@@ -5,8 +5,7 @@
 
 /// Aggregate forward declarations for versioned-document-file.
 ///
-/// This header is also the API index: every name the library plans to expose is declared here, with the one line that says what it is.
-/// Nothing below is implemented yet.
+/// This header is also the API index: every name the library exposes is declared here, with the one line that says what it is.
 /// The on-disk shape is specified by [the format](../../docs/format.md).
 /// The milestones live with the model library, in [its todo list](../../../versioned-document/docs/todo/_index.md).
 ///
@@ -80,6 +79,16 @@ struct asset_record;
 
 /// A blob offered for storage, in whatever encoding it is stored as.
 struct blob_upload;
+} // namespace vdoc::file
+
+// ---- the in-memory backing ----------------------------------------------------------------------
+
+namespace vdoc::file
+{
+/// The whole of an in-memory store's state, in plain structs mirroring the file's tables.
+///
+/// It outlives the store that wrote it, which is what lets a caller — and the conformance suite — close and reopen one exactly like a file.
+struct memory_image;
 } // namespace vdoc::file
 
 // ---- snapshots and workspace ---------------------------------------------------------------------

@@ -4,9 +4,12 @@ project(versioned-document-file LANGUAGES CXX)
 # The `.vdoc` save format: one SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets and their blobs, and a disposable workspace.
 # See readme.md and docs/format.md.
 #
-# Only fwd.hh exists so far; milestones 4 through 6 in ../versioned-document/docs/todo/ add the sources here.
+# Milestone 4 lands the store, its two implementations and the loader; assets and snapshots follow in milestones 5 and 6.
+# See ../versioned-document/docs/todo/.
 add_library(versioned-document-file
     src/versioned-document-file/fwd.cc
+    src/versioned-document-file/diagnostics.cc
+    src/versioned-document-file/assets.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -18,6 +21,9 @@ target_sources(versioned-document-file
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
     src/versioned-document-file/fwd.hh
+    src/versioned-document-file/diagnostics.hh
+    src/versioned-document-file/assets.hh
+    src/versioned-document-file/workspace.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -44,5 +50,17 @@ target_compile_options(versioned-document-file
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# The versioned-document-file-test executable arrives with milestone 4, together with the conformance suite both store implementations must pass.
-# See ../versioned-document/docs/todo/milestone-4.md.
+if(SC_BUILD_TESTS)
+    # The conformance suite is the centre of this binary: one set of tests, parametrized over both store implementations.
+    add_executable(versioned-document-file-test
+        tests/main.cc
+        tests/assets-test.cc
+        tests/diagnostics-test.cc
+    )
+
+    # babel-serializer is linked for the test fixture alone, which fabricates a damaged file on purpose.
+    # No library source here includes it, which is what keeps .shaped-lint.yml free of a sqlite entry.
+    target_link_libraries(versioned-document-file-test PRIVATE versioned-document-file babel-serializer nexus)
+
+    sc_add_nexus_web_runner(versioned-document-file-test)
+endif()
