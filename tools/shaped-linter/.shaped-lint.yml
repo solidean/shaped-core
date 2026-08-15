@@ -8,14 +8,6 @@
 
 rules:
   - kind: allow-include
-    value: <algorithm>
-    reason: std::sort while cc:: has no algorithm library — findings are ordered before rendering, and the corpus files before running
-    files:
-      - src/shaped-linter/report/renderer.cc
-      - src/shaped-linter/report/snippet.cc
-      - tests/rules/corpus-test.cc
-
-  - kind: allow-include
     value: <filesystem>
     reason: walking the rule tree for corpus files, in the test binary only — the linter itself is handed its paths
     files: tests/rules/corpus-test.cc
