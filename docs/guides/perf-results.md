@@ -1,9 +1,16 @@
 # Perf Results: guide benchmarks & the `.perf.json` contract
 
-nexus can record named performance metrics from a benchmark and emit them as a machine-readable sidecar.
-This is the reusable convention behind [pgo.md](pgo.md)'s training and speedup report, but it stands on its own.
-Any library, or a downstream app, can expose stable and comparable performance numbers this way.
+nexus can record named performance metrics and emit them as a machine-readable sidecar.
+This is the convention behind [pgo.md](pgo.md)'s training and speedup report: a small, stable set of numbers tracked across builds.
+Any library, or a downstream app, can expose its own numbers the same way.
 Back to [guides](_index.md).
+
+> **This is not the benchmarking framework.**
+> A guide benchmark is a *tracking signal* — a handful of representative points, watched over time and consumed by `dev.py pgo`.
+> It is the wrong tool for the question "is my new implementation faster than the old one", which wants many configurations, a baseline to compare against, and a table you read once.
+> Write that as a plain `nx::config::manual` test, which never runs in a sweep and may print whatever it likes —
+> [sort-benchmark.cc](../../libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model.
+> A real microbenchmark harness in nexus is still to be written; until then, `bench_util.hh`'s adaptive timers are what the existing benchmarks share.
 
 ## Writing a guide benchmark
 
