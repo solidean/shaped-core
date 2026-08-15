@@ -1,5 +1,6 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/exception.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
@@ -385,5 +386,23 @@ TEST("async - a node woken across threads still runs under its own ambient conte
     pusher.join();
 
     CHECK(pool.blocking_get(dependent) == scope_value);
+}
+
+TEST("async - a throwing frame on a worker does not take the process down")
+{
+    // Needs real threads: a worker loop has no handler of its own, so an escaping exception would leave worker_main via std::thread and terminate the process outright.
+    // Containment happens per node, in poll.
+    cc::async_thread_pool pool(4);
+
+    auto root = cc::make_async_lazy<i64>(
+        [](async_context<i64>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("worker boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto const r = pool.try_blocking_get(root);
+    REQUIRE(r.has_error());
+    CHECK(r.error().underlying().to_string().contains("worker boom"));
 }
 #endif

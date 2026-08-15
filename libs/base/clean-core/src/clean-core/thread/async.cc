@@ -1,3 +1,4 @@
+#include <clean-core/error/exception.hh> // std::exception, to classify one that escaped a compute frame
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
@@ -583,6 +584,29 @@ cc::async_error cc::impl::async_error_propagate(async_error const& e)
     return async_error::make_error(cc::any_error(e.underlying().to_string()));
 }
 
+cc::async_error cc::custom::async_error_from_exception_trait<cc::async_error>::make(cc::string_view message)
+{
+    return async_error::make_error(cc::any_error(cc::string(message)));
+}
+
+#ifdef CC_HAS_CPP_EXCEPTIONS
+cc::string cc::impl::async_describe_current_exception()
+{
+    try
+    {
+        throw; // rethrow the in-flight exception, purely to classify it by type
+    }
+    catch (std::exception const& e)
+    {
+        return cc::string("exception escaped an async frame: ") + e.what();
+    }
+    catch (...)
+    {
+        return cc::string("a non-std::exception value escaped an async frame");
+    }
+}
+#endif
+
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
 {
     lock_scope g(this);
@@ -621,6 +645,42 @@ void cc::async_node_base::teardown_payload()
 // ============================================================================
 // async_node_base — the poll loop (never blocks)
 // ============================================================================
+
+cc::async_step_status cc::async_node_base::invoke_frame_step(async_context_base& ctx)
+{
+    CC_ASSERT(ops()->frame_invoke != nullptr, "polled a node without a compute frame");
+#ifdef CC_HAS_CPP_EXCEPTIONS
+    try
+    {
+        return ops()->frame_invoke(frame_storage(), ctx);
+    }
+    catch (...)
+    {
+        // The frame threw AFTER resolving, which resolve's `delete this;` rule already forbids in its milder form.
+        // The frame is destroyed and the node may be freed outright, so nothing here may touch it — not even ops().
+        // The exception is dropped; produced_error only tells poll() to return without looking at us.
+        if (ctx.step_resolved())
+        {
+            CC_ASSERT(false, "an async frame threw AFTER resolving — resolve is terminal, so the exception is dropped");
+            return async_step_status::produced_error;
+        }
+
+        // No lock is held across the frame, and the node is still `running`, so this is the identical transition resolve_to_error would have made from inside it.
+        // `this` may be freed the moment it returns.
+        if (auto const resolve_exception = ops()->frame_resolve_exception)
+        {
+            resolve_exception(this);
+            return async_step_status::produced_error;
+        }
+
+        CC_ASSERT(false, "an async frame threw, but its error type cannot represent an exception — specialize "
+                         "cc::custom::async_error_from_exception_trait<E>, or catch inside the frame");
+        throw; // nothing can fail the node, so leave the pre-existing behaviour rather than corrupt its state
+    }
+#else
+    return ops()->frame_invoke(frame_storage(), ctx);
+#endif
+}
 
 void cc::async_node_base::poll()
 {
@@ -711,8 +771,8 @@ void cc::async_node_base::poll()
 
         // Run the compute step with the frame in place -- it is never moved, so parking is free and a stateful (mutable) closure picks up where it left off.
         // If it resolves, with a value OR an error, it has already destroyed itself: finish_value / finish_error builds the result over the frame's own slot.
-        CC_ASSERT(ops()->frame_invoke != nullptr, "polled a node without a compute frame");
-        switch (ops()->frame_invoke(frame_storage(), ctx))
+        // A frame that throws instead is failed on its error channel by invoke_frame_step, so it too arrives here as produced_error.
+        switch (invoke_frame_step(ctx))
         {
         case async_step_status::produced_value:
         case async_step_status::produced_error:

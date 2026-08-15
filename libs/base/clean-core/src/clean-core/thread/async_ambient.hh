@@ -62,14 +62,22 @@ inline void async_ambient_release(void* a)
 ///
 /// Unlike async_ambient_scope this takes NO reference: the caller owns one for the duration, and the whole point is to be free on the poll hot path.
 /// Restoring from `_previous` rather than from the source is load-bearing where poll() uses it — the node the ambient came from can be destroyed before the scope ends.
+///
+/// It also carries the poll-depth counter behind cc::async_is_polling.
+/// Not because depth is an ambient concern, but because this is the one scope every poll already constructs, so tracking it costs no further TLS resolution and no new site to keep in sync.
 struct async_ambient_poll_scope
 {
     explicit async_ambient_poll_scope(void* a) : _previous(async_tls().ambient)
     {
+        ++async_tls().poll_depth;
         if (a != nullptr)
             async_tls().ambient = a;
     }
-    ~async_ambient_poll_scope() { async_tls().ambient = _previous; }
+    ~async_ambient_poll_scope()
+    {
+        --async_tls().poll_depth;
+        async_tls().ambient = _previous;
+    }
 
     async_ambient_poll_scope(async_ambient_poll_scope const&) = delete;
     async_ambient_poll_scope& operator=(async_ambient_poll_scope const&) = delete;
@@ -115,7 +123,75 @@ namespace cc
 {
     return async_ambient_lookup_in(async_current_ambient(), tag);
 }
+
+/// True while this thread is inside async_node_base::poll, at any depth.
+///
+/// What it answers is whether a THROW from here has somewhere to land: poll contains an escaping exception and fails the node on its error channel.
+/// Outside a poll the same throw would escape a pool worker's thread function and terminate the process, so a consumer reporting from arbitrary threads
+/// — nexus' REQUIRE is the motivating one — must record instead.
+[[nodiscard]] inline bool async_is_polling()
+{
+    return impl::async_tls().poll_depth > 0;
+}
 } // namespace cc
+
+/// A chain head captured from one thread so it can be re-installed on another, retained for as long as it is held.
+///
+/// cc::async does this for you: a node carries its context to whichever worker drives it.
+/// This is the manual door, for a thread cc never sees — one a consumer started itself, or a callback arriving on a library's own thread.
+/// Copyable and cheap: a pointer plus a refcount bump.
+struct cc::async_ambient_handle
+{
+    /// Capture the calling thread's ambient chain head; null if there is none.
+    async_ambient_handle() : _head(async_current_ambient()) { impl::async_ambient_retain(_head); }
+
+    async_ambient_handle(async_ambient_handle const& rhs) : _head(rhs._head) { impl::async_ambient_retain(_head); }
+    async_ambient_handle(async_ambient_handle&& rhs) noexcept : _head(rhs._head) { rhs._head = nullptr; }
+    async_ambient_handle& operator=(async_ambient_handle const& rhs)
+    {
+        impl::async_ambient_retain(rhs._head); // before the release, so self-assignment is safe
+        impl::async_ambient_release(_head);
+        _head = rhs._head;
+        return *this;
+    }
+    async_ambient_handle& operator=(async_ambient_handle&& rhs) noexcept
+    {
+        if (this != &rhs)
+        {
+            impl::async_ambient_release(_head);
+            _head = rhs._head;
+            rhs._head = nullptr;
+        }
+        return *this;
+    }
+    ~async_ambient_handle() { impl::async_ambient_release(_head); }
+
+    /// The captured chain head, for async_ambient_lookup_in.
+    [[nodiscard]] void* head() const { return _head; }
+
+private:
+    void* _head = nullptr;
+};
+
+/// Install a captured head as the calling thread's ambient for a scope, restoring the previous one on the way out.
+///
+/// Takes no reference of its own: `handle` holds one, and must outlive the scope.
+/// A handle that captured nothing installs nothing, so the thread keeps whatever it already had.
+struct cc::async_ambient_install_scope
+{
+    explicit async_ambient_install_scope(async_ambient_handle const& handle) : _previous(impl::async_tls().ambient)
+    {
+        if (handle.head() != nullptr)
+            impl::async_tls().ambient = handle.head();
+    }
+    ~async_ambient_install_scope() { impl::async_tls().ambient = _previous; }
+
+    async_ambient_install_scope(async_ambient_install_scope const&) = delete;
+    async_ambient_install_scope& operator=(async_ambient_install_scope const&) = delete;
+
+private:
+    void* _previous = nullptr;
+};
 
 /// RAII push/pop of an ambient scope, and the ONLY supported way to install a link.
 ///

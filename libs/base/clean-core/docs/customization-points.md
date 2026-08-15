@@ -1,6 +1,6 @@
 # Customization points
 
-How a clean-core operation lets a type opt into custom behavior — hashing, formatting and enum traits today.
+How a clean-core operation lets a type opt into custom behavior — hashing, formatting, enum traits and async failure channels today.
 The mechanism centers on the `cc::custom::` namespace and is broadly uniform across operations, so learning it for one teaches you most of the rest.
 The per-operation variations are small, and the note under "The tiers" has them.
 (Hub: [_index.md](_index.md).)
@@ -104,6 +104,17 @@ CC_FLAG_ENUM_INDEXED(app, shape, u32);
 One macro at one site, and the enum's own header never stays open around the operators.
 That is the direction the codebase wants generally: forward-declare, then define as `struct cc::flags` rather than reopening a namespace.
 Writing the specialization by hand, with no macro at all, is the supported path for an enum you cannot annotate at its definition.
+
+## Worked example: an async failure channel
+
+`cc::custom::async_error_from_exception_trait<E>` in [thread/async.hh](../src/clean-core/thread/async.hh) is how a `cc::async<T, E>` failure channel opts into exception containment.
+It says the channel can represent an exception that escaped a compute frame.
+Tier 1 only, and again not by preference: `E` is frequently an enum, so tiers 2 and 3 do not exist for it.
+
+Its primary is deliberately **defined but empty**, so a channel that declares nothing is *detected* as absent rather than being a hard error.
+That is the difference from enum traits, whose primary answers a default.
+There is no sensible default failure value for an arbitrary `E`, so cc must tell "no mapping" apart from "a mapping", and it reports the missing one at runtime instead.
+[async.md](systems/async.md#exceptions-escaping-a-frame) owns what happens either way.
 
 ## Adding a new customizable operation
 

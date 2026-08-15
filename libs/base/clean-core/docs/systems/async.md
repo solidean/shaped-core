@@ -12,6 +12,8 @@ Headers: [`async.hh`](../../src/clean-core/thread/async.hh) (public, templated) 
 
 An `async<T, E>` is an eventual `result<T, E>` produced by a **compute frame**: a callable or state machine polled through an `async_context<T, E>`.
 Failure and cancellation are **values** — the default `async_error` carries both — not exceptions or out-of-band control flow.
+An exception that escapes a frame is *converted* into one of those values rather than propagating.
+So a node is a value/error machine from the outside, whatever runs inside it — see [Exceptions escaping a frame](#exceptions-escaping-a-frame).
 
 ```cpp
 auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; });
@@ -146,6 +148,35 @@ Two layers, two contracts:
 **Propagation strategy (`impl::async_error_propagate`).** A shared node's `any_error` must never be moved out, so copying an error out of one uses a per-`E` hook.
 A copyable custom `E` is **copied**; the default move-only `async_error` is **re-materialized from its message**, which does not preserve the context chain.
 Heterogeneous-`E` propagation is not wired into the sugar — bridge it by hand in a raw frame.
+
+### Exceptions escaping a frame
+
+**A frame that throws instead of resolving fails its own node on `E`.**
+`poll()` catches it, and the node reaches `ready_error` through the same transition `resolve_to_error` would have made.
+The frame is destroyed, its captures released, dependents woken, dependencies unsubscribed.
+The error's kind is always `error`, never `cancelled` — cancellation is a deliberate cooperative outcome, an exception is a failure.
+
+Containment is not politeness.
+Left to escape, the exception would leave the node `running` forever, parking every dependent permanently, and would unwind out of a pool worker's thread function straight into `std::terminate`.
+
+The default `async_error` carries the message: a `std::exception`'s `what()`, or a fixed text for anything else.
+A custom `E` opts in by specializing the trait, and one that does not is a **runtime** diagnostic — an assert, then the pre-existing rethrow — never a compile error:
+
+```cpp
+template <>
+struct cc::custom::async_error_from_exception_trait<my_err>
+{
+    static my_err make(cc::string_view message) { return my_err{cc::string(message)}; }
+};
+```
+
+Two corollaries of the terminal-resolve rule above:
+
+* **A frame must not throw after resolving.** The frame is gone and the node may already be freed, so there is nothing left to fail; the exception is dropped, with an assert.
+* Throwing is a *legal* way to fail, not the cheap one — it costs an unwind plus a message allocation, against an in-place construct for `resolve_to_error`.
+
+Not covered: an allocation failure inside the poll machinery itself, and, on MSVC, SEH faults such as an access violation.
+The handler is C++ EH only, which is what keeps a hardware fault from being swallowed as an error value.
 
 ## Driving (the scheduler seam)
 
@@ -456,6 +487,10 @@ That is what makes **prewarming legal**: work started under a scope that ends be
 cc deliberately does not assert on it.
 A consumer wanting the stricter rule reads `async_ambient_scope::outstanding()` and decides for itself what a leak means.
 A test runner in particular wants a reported failure naming the test, not the abort a cc-side assert would give it.
+
+`cc::async_is_polling()` sits alongside, on the same per-thread block.
+It answers whether a **throw from here has somewhere to land**: inside a poll it becomes the node's error, outside one it escapes a worker's thread function and terminates.
+That is the question a consumer reporting from arbitrary threads has to answer before it throws, and knowing the ambient context does not answer it.
 
 ## Cost
 

@@ -546,6 +546,13 @@ struct alignas(32) cc::async_type_ops
     async_step_status (*frame_invoke)(void* frame, async_context_base& ctx);
     void (*frame_destroy)(void* frame);
 
+    /// Fail this node on its error channel from the exception currently being handled — see async_node_base::invoke_frame_step.
+    /// Called only from inside a catch handler, and only while the node is still unresolved.
+    ///
+    /// Null when E declares no exception mapping (cc::custom::async_error_from_exception_trait), which is a runtime diagnostic rather than a compile error.
+    /// Keyed on E alone: building the error needs no T, since finish_error_emplace<E> is typed by E only.
+    void (*frame_resolve_exception)(async_node_base* node);
+
     cc::node_class_index class_index; // concrete async<T, E> size class (free_storage frees by it)
 };
 
@@ -560,6 +567,11 @@ namespace impl
 /// Keyed on U alone, so the ops descriptor collapses across types (see impl::async_type_ops_for).
 template <class U>
 void async_typed_teardown(async_node_base* n);
+
+/// Resolve `n` on its failure channel E from the exception being handled, defined in async.hh.
+/// Declared here for the same reason: it reaches the protected finish_error_emplace.
+template <class E>
+void async_frame_resolve_current_exception(async_node_base* n);
 } // namespace impl
 
 } // namespace cc
@@ -841,6 +853,7 @@ private:
     bool try_subscribe(async_node_base* dependent); // on the dep: subscribe unless already ready
     void route_after_schedule();                    // enqueue exactly once after a cold/blocked -> scheduled transition
     void reschedule_self();
+    async_step_status invoke_frame_step(async_context_base& ctx); // one compute step, with the frame's exceptions contained
 
     // packed control word (_state_and_ops) — the low 5 bits tag the 32-aligned ops pointer
 private:
@@ -925,7 +938,9 @@ private:
     friend struct async_context; // typed context reaches finish_value* / finish_error*
     template <class U>
     friend void impl::async_typed_teardown(async_node_base*); // reaches value_storage for the typed dtor
-    friend struct impl::async_node_traits;                    // reaches the intrusive counts / ops / teardown_payload
+    template <class E>
+    friend void impl::async_frame_resolve_current_exception(async_node_base*); // reaches finish_error_emplace
+    friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
 
     /// Intrusive refcount (async_node_traits): strong owners in the high half, weak in the low half — continuation cells plus the strong owners' collective one.
     /// Born 1/1 by init_control.

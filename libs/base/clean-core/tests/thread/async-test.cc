@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/exception.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
@@ -999,4 +1000,181 @@ TEST("async - a raw frame that transforms a dependency error does NOT auto-propa
     REQUIRE(outcome.has_value()); // the graph completed
     REQUIRE(outcome.value().has_value());
     CHECK(outcome.value().value() == -1); // the frame chose a value; no error propagated
+}
+
+// ============================================================================
+// exceptions escaping a compute frame
+// ============================================================================
+
+namespace
+{
+struct msg_err // a custom channel that opts into exception containment, via the specialization below
+{
+    cc::string msg;
+};
+} // namespace
+
+template <>
+struct cc::custom::async_error_from_exception_trait<msg_err>
+{
+    static msg_err make(cc::string_view message) { return msg_err{cc::string(message)}; }
+};
+
+// The null slot is what keeps a channel with no mapping compiling — my_err above is exactly that case.
+static_assert(cc::impl::async_frame_except_ptr<cc::async_error>() != nullptr, "the default channel maps exceptions");
+static_assert(cc::impl::async_frame_except_ptr<msg_err>() != nullptr, "an opted-in custom channel maps exceptions");
+static_assert(cc::impl::async_frame_except_ptr<my_err>() == nullptr, "a channel with no mapping gets a null slot");
+
+TEST("async - a frame throwing std::exception resolves on the error channel")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value()); // the graph completed rather than deadlocking
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().underlying().to_string().contains("boom")); // what() is preserved
+    CHECK(!outcome.value().error().is_cancelled()); // a throw is a failure, never a cancellation
+}
+
+TEST("async - a frame throwing a non-std value still fails the node")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw 42;
+            return ctx.success(0); // unreachable
+        });
+
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().has_error());
+}
+
+TEST("async - a throwing frame leaves the node terminal, not stuck running")
+{
+    // The regression this guards: without containment the node stays `running` forever, so every dependent parks
+    // permanently and a second drive can never make progress.
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+
+    (void)cc::try_async_blocking_get_singlethreaded(a);
+    CHECK(a->is_ready());
+    CHECK(a->has_error());
+    CHECK(!a->is_cold());
+
+    auto const again = cc::try_async_blocking_get_singlethreaded(a); // a terminal node is readable again
+    REQUIRE(again.has_value());
+    CHECK(again.value().has_error());
+}
+
+TEST("async - a throwing frame releases its captures at resolution")
+{
+    int live = 0;
+    auto a = cc::make_async_lazy<int>(
+        [guard = live_counter(&live)](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+    CHECK(live == 1);
+
+    (void)cc::try_async_blocking_get_singlethreaded(a);
+    CHECK(live == 0); // destroy_frame ran on the error path too, while the handle is still alive
+}
+
+TEST("async - a throwing dependency propagates its error without unwinding the dependent")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("dep exploded");
+            return ctx.success(0); // unreachable
+        });
+
+    bool ran = false;
+    auto b = cc::make_async_lazy(
+        [&](int x)
+        {
+            ran = true;
+            return x + 1;
+        },
+        a);
+
+    // b drives a inline, so containing the throw per node is what keeps b's own poll on its feet.
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(b);
+    REQUIRE(outcome.has_value());
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().underlying().to_string().contains("dep exploded"));
+    CHECK(!ran); // the auto-propagation short-circuit skipped b's function
+    CHECK(b->is_ready());
+}
+
+TEST("async - a frame throwing on a later poll unsubscribes its dependencies")
+{
+    auto m = cc::make_async_manual<int>();
+    auto a = cc::make_async_lazy<int>(
+        [m](async_context<int>& ctx) -> cc::async_step_status
+        {
+            if (!ctx.require(m))
+                return ctx.wait_for_dependencies();
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto sched = cc::singlethreaded_scheduler();
+    cc::async_worker_scope const ws(sched);
+    a->schedule();
+    sched.drain();
+    CHECK(!a->is_ready()); // parked on m
+
+    m->push_value(1);
+    sched.drain();
+
+    REQUIRE(a->has_error());
+    CHECK(a->pending_dependency_count() == 0);
+    CHECK(m->continuation_count() == 0);
+}
+
+TEST("async - a custom channel can opt into exception containment")
+{
+    auto a = cc::make_async_lazy<int, msg_err>(
+        [](async_context<int, msg_err>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("custom boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value());
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().msg.contains("custom boom"));
+}
+
+TEST("async - a frame that throws AFTER resolving keeps its value")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            auto const s = ctx.success(7);
+            throw std::runtime_error("too late");
+            return s; // unreachable
+        });
+
+    // Resolving is terminal, so there is nothing left to fail and the exception is dropped — asserted, not silent.
+    // The drive is spelled twice because CHECK_ASSERTS does not execute its expression at all once assertions are compiled out.
+#if CC_ASSERT_ENABLED
+    CHECK_ASSERTS(cc::try_async_blocking_get_singlethreaded(a));
+#else
+    (void)cc::try_async_blocking_get_singlethreaded(a);
+#endif
+    CHECK(a->has_value());
 }

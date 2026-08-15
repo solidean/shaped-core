@@ -21,6 +21,7 @@ struct async_tls_block
     void* ambient = nullptr;        // head of the ambient context chain (async_ambient.hh); null => no scope active
     void* current_worker = nullptr; // async_thread_pool::worker running this thread's loop; null on foreign threads
     int inline_depth = 0;           // recursion depth of the eager depth-first dep drive
+    int poll_depth = 0;             // how many polls this thread is inside; see cc::async_is_polling
 };
 
 /// Defined in async.cc.

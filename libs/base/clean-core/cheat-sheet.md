@@ -617,6 +617,10 @@ actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  a
 // offset 0, so resolving destroys the running closure. Never touch captures or ctx after — `return actx.success(v);`.
 // State DOES persist across polls (the frame is never moved). *_emplace args must not alias the frame's captures
 // (nor a dep's value they pin) — they are forwarded by reference; the by-value resolves are always safe.
+// A frame that THROWS is contained: poll fails the node on E (async_error carries what()), so it is never stuck
+// `running` and never terminates a worker. Throwing AFTER resolving is the one unsupported case (asserts, dropped).
+template <> struct cc::custom::async_error_from_exception_trait<my_err>  // custom E opts in; without it: assert+rethrow
+{ static my_err make(cc::string_view message) { return my_err{cc::string(message)}; } };
 // INLINE FRAME BUDGET: 24 B on a one-line node, i.e. sizeof(captures) + 8*(dep count) <= 24; anything over is
 // heap-boxed (an alloc per node). Type-dependent — a big T/E widens it — and only 8-aligned, so ask, don't assume:
 static_assert(cc::async<int>::frame_fits_inline<my_frame>);   // the real predicate; a copied number goes stale
@@ -650,6 +654,8 @@ cc::async_ambient_scope const s(my_tag(), &my_state); // push; RAII and strictly
 void* v = cc::async_ambient_lookup(my_tag());         // walk the calling thread's chain; null if absent
 void* v2 = cc::async_ambient_lookup_in(head, my_tag());  // same, from a head you already hold (no TLS)
 s.link();  s.outstanding();      // this scope's chain head / how much async work still carries it (racy; diagnostics)
+cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
+                                 // or escape a worker thread and terminate — the question before reporting by throw
 // DRIVE-SITE: a subtree driven from one work item is billed to that item's context, and an inline-driven dep
 // inherits its driver's. A node stores it only as a resume token, written once when it is queued/parked/yielded —
 // never by a thread merely WAKING it, so a shared dep completing under B cannot contaminate A's continuation.
