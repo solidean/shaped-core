@@ -222,6 +222,112 @@ That keeps an O(n·depth) walk off the release path, for a mistake no real compo
 
 ---
 
+## Ops and the DAG
+
+### The op retains its bytes and decodes on demand
+
+**Decided.** An `op` holds `op_id`, its parents, and an `optional<op_payload>` of the producer's `metadata_bytes` and `assignment_bytes`.
+`metadata()` and `assignments()` are decoded views over those bytes; nothing decoded is stored.
+
+[milestone-2.md](todo/milestone-2.md) originally sketched an op carrying decoded `metadata` and `assignments` *plus* an optional payload.
+That is a fourth copy of state already present three times.
+It also corresponds to nothing storage hands back.
+[format.md](../../versioned-document-file/docs/format.md#ops--the-dag) stores the metadata and the assignments as two separate blobs, with no single payload column anywhere.
+The combined form would therefore have to be synthesized, which is re-serialization wearing a different hat.
+
+Inverting it makes [the no-re-serialization rule](concept.md#the-op-is-its-bytes) structural rather than remembered.
+An op holding only decoded assignments would leave verification hashing `encode(decode(bytes))`.
+A future change to a formatter, an integer width or an ordering would then turn every good stored op in the wild into a mismatch, and a mismatch is indistinguishable from tampering.
+With the bytes retained there is no encoder near a loaded op for such a change to reach.
+
+It also buys the properties compatibility rests on.
+An op is storable and relayable without being interpretable, write-back is lossless by construction, and an op assigning to unknown component types round-trips byte-identically.
+
+`optional` then means exactly one thing — the op was pruned — instead of doubling as "we did not keep the bytes".
+
+**Reopen when:** never for the verification rule.
+The *representation* could change — an arena shared across an `op_graph` rather than per-op buffers — as long as the bytes are what is retained and no encoder is reachable from a load.
+
+### `op_id` orders by its canonical 32 bytes
+
+**Decided.** `op_id::compare_bytes` — a memcmp over the 32 canonical bytes — is the single ordering used for the parent sort, `raw_property` ordering, and the parse policy's "smallest op id wins".
+
+`cc::hash256` has a defaulted `<=>` that orders four `u64` limbs, each assembled little-endian from the byte sequence.
+It is total and run-stable, so it looks usable, and it is *not* the order of the 32 bytes.
+
+The parent sort feeds the hash preimage.
+A third-party reader implementing the format from [concept.md](concept.md#the-producer-canonicalizes-the-hash-just-hashes-bytes) would sort by bytes.
+It would produce a different parent order, and compute a different `op_id` for identical content.
+Once files exist that break cannot be fixed by either side.
+
+The same argument covers ids: [`cc::interned_string`](../../../base/clean-core/src/clean-core/string/interned_string.hh) deliberately has no `operator<`, and only `compare_bytes` is reproducible.
+`compare_identity` is a pointer order that differs every run, and must not be reachable from anything that reaches output.
+
+**Reopen when:** nothing.
+This is a wire-format property.
+
+### A multi-valued property always differs
+
+**Decided.** `op_builder::build` emits an assignment for a path with two or more surviving writers, even when every one of them holds byte-identical bytes.
+
+The diff exists to skip writes that would change nothing, and a multi-valued path is not a value that could equal the desired one — it is two independent writes.
+
+It is also the only way a conflict is ever resolved through the normal edit path.
+[concept.md](concept.md#multi-values) says a later op that writes the path resolves it back to a single value, and that later op is this one.
+A user who sees `10` and sets `10` must be able to collapse it.
+The agreed-multi-value side channel exists precisely as a tidy-up hint for this write, and diffing it away would make the channel dead.
+
+Concluding "both writers said 10, so the current value is 10" is the collapse [the interpretation layer](concept.md#writers-that-agree-still-conflict-structurally) owns.
+Making the storage layer's diff depend on writers agreeing would be the same category error as sub-value merging.
+
+Idempotency survives: the emitted op collapses the path, so a second `build` against it sees one equal writer and emits nothing.
+
+**Reopen when:** nothing at the storage layer.
+A higher layer may of course offer "resolve only if they disagree" as a user-facing choice.
+
+### Dominance is resolved by propagating a superseded set, not by ancestor queries
+
+**Decided.** Materialization walks in topological order carrying two writer sets per path — `surviving` and `superseded`.
+Applying op X to path p does `superseded |= surviving`, then `surviving = {X}`.
+Merging parents unions both sets from every side, then drops from `surviving` anything in the combined `superseded`.
+
+The obvious alternative is a global ancestor test — "is any other writer of p a descendant of this one".
+Doing that exactly on a DAG needs reachability bitsets at O(n²) memory, or a chain decomposition or 2-hop labelling whose worst case is no better than a walk.
+An interval label is an exact ancestor test only on a *tree*, which is the trap that makes this look cheaper than it is.
+
+The superseded set avoids the question entirely, because each parent's ancestor set is ancestor-closed.
+A dominating pair therefore always lands wholly inside one parent, so a domination fact that exists globally always exists locally in some branch.
+That is what makes the local union sound for nested diamonds, criss-cross merges and n-ary merges alike.
+
+`superseded` is monotone and may only be unioned forward.
+Dropping an entry because no side currently lists it as surviving resurrects a dominated writer, and that is the failure this design is most likely to be broken by later.
+
+It may be dropped *wholesale* at an articulation point, where one live state remains in the sweep.
+**That justification is per-sweep and does not survive being stored.**
+[milestone-6.md](todo/milestone-6.md#1-snapshot-terminated-materialization) works out why a persisted snapshot needs a strictly stronger condition, and what each snapshot kind does instead.
+
+This pass is also the oracle milestone 6's snapshot cache is checked against, which is a second reason to prefer it.
+An oracle has to be correct by inspection, and "correct modulo a chain cover" is not.
+
+**Reopen when:** profiling shows the state copy at merges dominating, which is a question about representation rather than about the rule.
+
+### An unknown assignment encoding tag is a decode error
+
+**Decided.** `try_decode_op` rejects an assignment blob whose leading tag it does not know, with an error naming the tag.
+
+The tag exists so the assignment encoding can change without touching the hashing rule, and a build that predates tag 2 genuinely cannot read a tag-2 op's assignments.
+The alternative is holding such an op as verifiable-but-uninterpretable, so it could still be stored, verified and relayed.
+That is representable under the byte-first shape, and is deliberately not taken yet.
+
+Forward compatibility in this design lives one layer up.
+The entity/component set is where applications evolve indefinitely, and the op encoding is meant to stay fixed.
+So spending complexity on relaying ops nobody can decode buys a compatibility axis [compatibility.md](compatibility.md) does not depend on.
+
+**Reopen when:** a tag 2 is actually proposed.
+At that point the question is whether tag-1-only builds must relay tag-2 ops, and the byte-first op has kept that door open.
+
+---
+
 ## Hashing
 
 ### BLAKE3, over 32-byte ids — with a standing reservation

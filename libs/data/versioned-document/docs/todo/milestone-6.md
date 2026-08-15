@@ -25,6 +25,35 @@ That is the difference between a document that stays fast for years and one that
 - **A snapshot must be indistinguishable from the replay it replaces.**
   That is the property everything else here rests on, and it is what the tests below check exhaustively.
 
+**A `raw_document` is not enough to resume a walk from.** This is the trap this whole item has to be built around.
+
+Materialization propagates two writer sets per path, `surviving` and `superseded`, and a `raw_document` keeps only the first.
+So a snapshot that drops `superseded` loses exactly what the merge rule needs.
+Stop at S with `surviving = {L}, superseded = {R}`, let a branch arrive carrying `surviving = {R}`, and the merge reports `{L, R}`.
+That is a fabricated multi-value, in the one case the equivalence tests are built to generate.
+
+**Milestone 2's articulation-point rule does not transfer here, and assuming it does is the subtle way to get this wrong.**
+
+That rule clears `superseded` where exactly one live state remains *in the current sweep*, which is sound because every op still to be processed descends from that point.
+A persisted snapshot outlives its sweep, and the ops that will exist later are not the ops that existed then.
+Concretely: A writes p, X descends from A and also writes p, and X is an articulation point, so a snapshot at X records `surviving = {X}` with nothing superseded.
+A user later branches from A — still present, since a droppable snapshot prunes nothing — and builds B, which does not write p.
+Materializing `merge(X, B)` unions `{X}` with `{A}` and has nothing left to suppress A with.
+
+The two predicates answer different questions.
+Within a sweep it is "no op *already in this DAG* can present a stale branch"; for a stored snapshot it is "no op *that will ever exist* can".
+The second is strictly stronger, and only pruning makes it true.
+
+So the two snapshot kinds get different answers, which is why `required` is not merely a lifetime flag:
+
+- **`required = 0`, the droppable cache** — cache the **materialization state**, `superseded` included, and project the `raw_document` out of it.
+  It is in-memory and derived, so the extra set costs memory it is already allowed to drop at any moment, and the eligibility question disappears entirely.
+- **`required = 1`, load-bearing** — history behind it is pruned, so nothing behind it can write anything and no future branch can reach past it.
+  There `superseded` is genuinely empty rather than merely cleared, and the `raw_document` *is* the state.
+
+Note the wording that must not creep back in: at an articulation point `superseded` is **droppable**, not "provably empty".
+It is empty there only because milestone 2 clears it, so justifying the clearing by the emptiness is circular.
+
 ### 2. Persisted snapshots
 
 The `snapshots` table from milestone 4, now populated.
@@ -42,6 +71,11 @@ Attach a snapshot to an op, mark it required, delete the ops behind it.
 
 What remains where an op was is a **skeleton op**: its id and its parents, with no payload.
 The DAG keeps its shape, so reachability, merges and child walks all still work; only the content is gone.
+
+**Deleting the row instead would change what the document says.**
+Ancestry is defined over ops that are present, so removing a mid-history op severs the path through it.
+Two writes that were ordered become concurrent, and materialization manufactures a multi-value nobody authored.
+That is the concrete reason the skeleton exists, and it is a semantic change caused by a storage-layer operation — which is why it gets a test rather than a comment.
 
 Trade-offs, stated where a user can see them: less storage and faster loading, against losing deep history and shortening the range over which two replicas can still synchronize.
 Pruning is always optional, and never automatic.

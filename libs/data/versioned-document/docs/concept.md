@@ -155,11 +155,18 @@ An op is a set of property assignments, plus its parents, plus free-form metadat
 
 ```text
 op {
-    parents:     [op_id, ...]
-    metadata:    value                        author, timestamp, description — informational only
-    assignments: [(entity, component, property, value), ...]
+    id:      op_id                            a 32-byte BLAKE3 digest of everything below
+    parents: [op_id, ...]                     verbatim, in the op's own order
+    payload: optional {                       absent only on a skeleton op left behind by pruning
+        metadata_bytes:    an encoded value   author, timestamp, description — informational only
+        assignment_bytes:  a tag byte, then the assignments
+    }
 }
 ```
+
+**An op holds the producer's bytes, and nothing else.**
+`metadata` and `assignments` are decoded *views* over those bytes, produced on demand and stored nowhere.
+That is a correctness property rather than a memory optimization — [The op is its bytes](#the-op-is-its-bytes) is why.
 
 Metadata never affects document semantics.
 It is committed to by the hash — so it cannot be altered after the fact — but nothing interprets it.
@@ -190,6 +197,29 @@ An unknown tag is a decode error naming the tag, not a corruption report.
 
 The builder's canonical order is: parents sorted and deduplicated, assignments sorted by `(entity, component, property)`, and no path assigned twice within one op.
 Identical content therefore produces an identical `op_id`, whatever order the caller supplied.
+
+Sorting is by **canonical bytes** throughout — the id strings, and for parents the 32 digest bytes.
+Neither an interned id nor a digest's in-memory representation may order anything that reaches the hash, or two machines would disagree on the same content.
+
+### The op is its bytes
+
+An op retains what it was read as, and decodes on demand.
+It does not keep a decoded assignment list beside those bytes, because holding both means holding two representations that can disagree.
+
+The rule above is what forces this.
+If an op held only decoded assignments, verification would have no choice but to hash `encode(decode(bytes))`.
+That is re-serialization under a different name, with every failure mode the rule exists to prevent.
+Keeping the bytes makes the guarantee structural: there is no encoder anywhere near a loaded op, so no future change to one can reach it.
+
+Three things follow, and the third is the one worth reading twice:
+
+- **An op *could* be stored and relayed without being interpretable.** Byte retention is what would let a build hand on an op whose assignment encoding it cannot read.
+  Today it does not: an unknown assignment encoding tag is a decode error.
+  [decisions.md](decisions.md#an-unknown-assignment-encoding-tag-is-a-decode-error) records why that door is left open rather than walked through.
+- **Write-back is lossless by construction.** Nothing is dropped on save, because nothing was rewritten.
+- **An op assigning to component types this build has never heard of round-trips byte-identically.**
+  Not by convention, and not because some layer takes care to preserve it — there is simply no code path that could alter it.
+  This is the mechanism underneath cross-version and cross-application compatibility, and [compatibility.md](compatibility.md) is where the consequences are worked out.
 
 ### Ops write only what changed
 
@@ -462,6 +492,9 @@ Older software opens documents written by newer software.
 Unsupported components are isolated and reported; supported ones work normally; nothing is dropped on write-back, because nothing was rewritten.
 
 Teams on different builds keep collaborating, which is the entire reason the storage format holds no schema.
+The same property lets two *different applications* share one document while each understands only its own half of the component set.
+
+[compatibility.md](compatibility.md) works all of that out: the three kinds of compatibility, the four mechanisms that produce them, what an application owes in return, and where the guarantee ends.
 
 ### Pruning
 

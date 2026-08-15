@@ -9,6 +9,8 @@ The concept is complete and the **value codec** is built; the layers above it ar
 
 - [concept.md](concept.md) — the design, end to end, and the authority on what the library is and why it is shaped this way.
   The four layers, the value codec, content addressing, the multi-value model, interpretation, assets, and what deliberately lives outside a document.
+- [compatibility.md](compatibility.md) — what a document guarantees across builds *and across applications*, and what an application owes in return.
+  Backward, forward, and the partial case two different applications sharing one document actually live in.
 - [decisions.md](decisions.md) — every settled decision, its reasoning, and what would reopen it.
   Read this before proposing a change that contradicts one.
 - [structure.md](structure.md) — the roadmap: what is `[done]` versus `[planned]`, and which milestone lands each piece.

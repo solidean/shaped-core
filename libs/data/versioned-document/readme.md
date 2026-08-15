@@ -38,11 +38,13 @@ Four layers, kept strictly apart.
   Parsing never refuses: whatever this build cannot understand becomes a diagnostic while the rest of the document loads.
 - **Persistence** — not here, but in [versioned-document-file](../versioned-document-file/readme.md), which stores a document, its assets and its blobs in a single `.vdoc` file.
 
-Two properties are worth knowing before reading anything else:
+Three properties are worth knowing before reading anything else:
 
 - **The typed document is immutable** — there is no `set` on it.
   Edits build an op and re-materialize, which is what makes a snapshot safe to hold across threads for as long as you like.
 - **Values are bytes.** A property value is a canonically-encoded binary value, so equality, hashing and "did these two writers agree" are all byte comparisons.
+- **Two applications can share a document while each understands only its own half of it.**
+  Not just old-versus-new builds — see [docs/compatibility.md](docs/compatibility.md).
 
 ## File organization
 
@@ -74,6 +76,7 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 ## More
 
 - [docs/concept.md](docs/concept.md) — the design, end to end, and the thing to read first.
+- [docs/compatibility.md](docs/compatibility.md) — what a document guarantees across builds and across applications, and what an application owes in return.
 - [docs/decisions.md](docs/decisions.md) — every settled decision, its reasoning, and what would reopen it.
 - [docs/todo/](docs/todo/_index.md) — the milestones, in execution order.
 - [docs/structure.md](docs/structure.md) — the roadmap (`[done]` / `[planned]`).
