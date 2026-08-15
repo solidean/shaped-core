@@ -188,6 +188,9 @@ class document;
 /// Interprets a raw document into a typed one.
 /// Never fails: everything questionable lands in the report.
 [[nodiscard]] document parse(raw_document const& raw, parse_policy const& policy, parse_report& report);
+
+/// Whether something is alive, by the unambiguously-false rule; a contested `$alive` stays alive plus a diagnostic.
+[[nodiscard]] bool is_alive(raw_component const& raw, property_path const& path, parse_report& report);
 } // namespace vdoc
 
 namespace vdoc::impl

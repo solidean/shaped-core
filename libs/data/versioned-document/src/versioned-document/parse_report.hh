@@ -12,8 +12,9 @@
 /// the raw document together recover the specifics, so a message can be written in any language later without
 /// anything being re-parsed.
 ///
-/// Both lists come out in document order — entity, then component type, then property, all by id bytes — because the
-/// parser walks the raw document's sorted vectors.
+/// Both lists come out in a fixed order, because the parser only ever walks vectors sorted by id bytes: first what
+/// selection found, entity by entity; then the unsupported types, by type; then what reading properties found, one
+/// component type at a time.
 /// Determinism is structural here rather than merely tested.
 ///
 /// The design is [the concept](../../docs/concept.md#parsing-never-refuses).

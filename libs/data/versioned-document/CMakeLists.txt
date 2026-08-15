@@ -13,6 +13,7 @@ add_library(versioned-document
     src/versioned-document/op.cc
     src/versioned-document/op_builder.cc
     src/versioned-document/op_graph.cc
+    src/versioned-document/parse.cc
     src/versioned-document/parse_policy.cc
     src/versioned-document/parse_report.cc
     src/versioned-document/raw_document.cc
@@ -36,6 +37,7 @@ target_sources(versioned-document
     src/versioned-document/op.hh
     src/versioned-document/op_builder.hh
     src/versioned-document/op_graph.hh
+    src/versioned-document/parse.hh
     src/versioned-document/parse_policy.hh
     src/versioned-document/parse_report.hh
     src/versioned-document/raw_document.hh
@@ -79,6 +81,7 @@ if(SC_BUILD_TESTS)
         tests/op_builder-test.cc
         tests/op_graph-test.cc
         tests/parse-test.cc
+        tests/parser-test.cc
         tests/value-test.cc
         tests/value-fuzz-test.cc
     )
