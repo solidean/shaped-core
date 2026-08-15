@@ -454,6 +454,14 @@ cc::has_single_bit(x);  cc::bit_ceil(x);  cc::bit_floor(x);  cc::bit_width(x);
 cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
 
+#include <clean-core/common/endian.hh>            // durable formats: the byte order is the FORMAT's, never the host's
+cc::load_bytes_le<u32>(bytes, offset=0);          // -> u32; byte-wise, so buffer alignment never enters into it
+cc::load_bytes_be<f64>(bytes, offset=0);          // floats go through their bit pattern; NaN payloads and -0.0 survive
+cc::store_bytes_le<u64>(bytes, offset, v);  cc::store_bytes_be<i16>(bytes, offset, v);
+// T is an integer or float of 1/2/4/8 bytes. `bool` is REJECTED: it has no unique object representation,
+// so a stored byte other than 0 or 1 would load as a bool that is neither true nor false — store a u8 you validate.
+// offset + sizeof(T) must be in range: a CC_ASSERT, so bounds-check untrusted input BEFORE loading.
+
 #include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
 cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
 cc::add_with_carry(a, b, carry_in=0);            // -> {value, carry}; sub_with_borrow -> {value, borrow}

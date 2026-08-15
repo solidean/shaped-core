@@ -64,6 +64,7 @@ target_sources(clean-core
     src/clean-core/common/hash128.hh
     src/clean-core/common/hash256.hh
     src/clean-core/common/blake3.hh
+    src/clean-core/common/endian.hh
     src/clean-core/common/assert.hh
     src/clean-core/common/impl/small_size_type.hh
     src/clean-core/common/assert-handler.hh
@@ -250,6 +251,7 @@ if(SC_BUILD_TESTS)
         tests/common/hash128-test.cc
         tests/common/hash256-test.cc
         tests/common/blake3-test.cc
+        tests/common/endian-test.cc
         tests/common/invocable-test.cc
         tests/common/macros-test.cc
         tests/common/utility-test.cc
