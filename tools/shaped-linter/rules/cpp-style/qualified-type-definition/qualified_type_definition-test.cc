@@ -256,3 +256,20 @@ TEST("shaped-linter - qualified-type-definition - what it leaves alone")
         expect_none("struct cc::span\n{\n};\n");
     }
 }
+
+TEST("shaped-linter - qualified-type-definition - a record in a buffer that is not file 0")
+{
+    // Regression: the fix path read the enum-base's TEXT to decide whether there was one.
+    // A record has no enum-base, so that span is still default-constructed — file_id 0 — and asking a buffer
+    // whose file_id is not 0 for its text tripped "span refers to a different file".
+    //
+    // Every other test here goes through run_rules_on_text, which always uses file_id 0, so the whole suite
+    // missed it and only a real multi-file run crashed — on its second file onward.
+    auto const source = cc::string_view("namespace cc\n{\nstruct span\n{\n};\nenum class mode : u8\n{\n};\n}\n");
+    auto const buffer = source_buffer::from_text(cc::string(source), "a.hh", 7);
+
+    auto const found = run_rules(buffer);
+    REQUIRE(found.size() == 2);
+    for (auto const& f : found)
+        CHECK(f.rule_id == "qualified-type-definition");
+}
