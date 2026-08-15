@@ -18,9 +18,14 @@ Five things the sketch below either left open or got wrong, each recorded in [de
   babel had already filed that gap with three hand-rolled copies, and its readers moved onto the new primitives in the same change.
 
 One implementation pitfall is worth carrying forward, because milestone 2 sorts by the same rule:
-`cc::string_view::compare` widens `char` to a **signed** int, so it cannot order object keys.
+`cc::string_view::compare` widened `char` to a **signed** int, so it could not order object keys.
 A key byte >= 0x80 sorts before an ASCII one under it, and the builder would emit bytes its own decoder rejects.
 `vdoc::impl::compare_key_bytes` is the single definition the builder sorts by and the decoder validates against, and a test pins it.
+
+**Corrected during milestone 2:** that was a bug in clean-core rather than a fact to work around, and filing it here instead of fixing it let it resurface.
+`cc::string_view::compare` and everything built on it now order by unsigned byte value.
+`compare_key_bytes` survives only as a thin name over it, because the format is defined in terms of that order.
+The second occurrence was worse than the first: entity ids are arbitrary application strings, and their sort feeds the op hash.
 
 **Goal.** `vdoc::value`: a canonically-encoded binary value where equality is byte equality, and decoding refuses anything non-canonical.
 

@@ -90,9 +90,9 @@ inline constexpr byte null_encoding = byte(u8(value_kind::null));
 /// Orders two object keys the way the format defines: ascending by BYTE value, negative / zero / positive.
 /// This is the one definition of that order — the builder sorts by it and the decoder validates against it, so they cannot drift.
 ///
-/// Not cc::string_view::compare, which widens char to a SIGNED int.
-/// Under that order a key byte >= 0x80 sorts before an ASCII one, so any object with a non-ASCII key would be built
-/// in an order its own decoder rejects.
+/// A thin name over cc::string_view::compare, kept because the format is defined in terms of this order.
+/// Comparing `char` directly is signed on our platforms, which would sort a key byte >= 0x80 before every ASCII one
+/// and build objects in an order this decoder rejects.
 [[nodiscard]] int compare_key_bytes(cc::string_view a, cc::string_view b);
 } // namespace vdoc::impl
 

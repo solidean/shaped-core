@@ -304,20 +304,7 @@ u64 vdoc::impl::hash_bytes(cc::span<byte const> b)
 
 int vdoc::impl::compare_key_bytes(cc::string_view a, cc::string_view b)
 {
-    auto const shared = a.size() < b.size() ? a.size() : b.size();
-    for (isize i = 0; i < shared; ++i)
-    {
-        auto const ca = u8(a[i]);
-        auto const cb = u8(b[i]);
-        if (ca != cb)
-            return ca < cb ? -1 : 1;
-    }
-
-    // a prefix sorts before what extends it
-    if (a.size() == b.size())
-        return 0;
-
-    return a.size() < b.size() ? -1 : 1;
+    return a.compare(b);
 }
 
 // ---- value -------------------------------------------------------------------------------------

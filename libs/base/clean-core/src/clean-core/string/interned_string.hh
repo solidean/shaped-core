@@ -67,6 +67,9 @@ public:
     /// Orders by the canonical bytes, so the result is the same in every process that interns the same strings.
     /// This is what a sorted structure whose order is saved, sent or displayed must use.
     /// Costs a memcmp, unlike everything else on this type.
+    ///
+    /// The comparison is by UNSIGNED byte value, so a non-ASCII id orders the way its bytes do rather than the way a
+    /// signed `char` would put it — which matters the moment the order reaches a file, a hash or a peer.
     [[nodiscard]] std::strong_ordering compare_bytes(interned_string rhs) const
     {
         return as_string_view().compare(rhs.as_string_view()) <=> 0;

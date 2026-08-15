@@ -144,6 +144,25 @@ TEST("interned_string - compare_bytes agrees with the viewed bytes")
     CHECK(std::is_lt(cc::interned_string().compare_bytes(a)));
 }
 
+TEST("interned_string - compare_bytes orders by unsigned byte value")
+{
+    auto table = cc::string_interner();
+
+    // 0xC3 0xA4 is 'a-umlaut' in UTF-8. Comparing char directly is SIGNED on our platforms, which would make this
+    // byte negative and sort the whole string before every ASCII one — an order no other implementation shares,
+    // and one that would reach a file the moment a sorted structure is written out.
+    auto const ascii = table.intern("z");
+    auto const high = table.intern("\xC3\xA4");
+
+    CHECK(std::is_lt(ascii.compare_bytes(high)));
+    CHECK(std::is_gt(high.compare_bytes(ascii)));
+    CHECK(cc::interned_string::by_bytes{}(ascii, high));
+
+    // and the whole family agrees, since compare_bytes is a thin name over string_view::compare
+    CHECK(ascii.as_string_view() < high.as_string_view());
+    CHECK(cc::string_view("z").compare(cc::string_view("\xC3\xA4")) < 0);
+}
+
 TEST("interned_string - compare_identity is a total order, and only that")
 {
     auto table = cc::string_interner();

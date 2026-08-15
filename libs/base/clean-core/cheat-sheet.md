@@ -300,7 +300,7 @@ sv.subview_clamped(off, len);
 sv.remove_prefix(n);  sv.remove_suffix(n);
 sv.starts_with(x);  sv.ends_with(x);  sv.contains(x);   // x = string_view or char
 sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if not found
-sv.compare(o);  sv == o;  sv < o;                       // lexicographic by byte (no locale/collation)
+sv.compare(o);  sv == o;  sv < o;                       // lexicographic by UNSIGNED byte (no locale/collation)
 sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
 
 #include <clean-core/string/interned_string.hh>  // cc::interned_string — 8-byte handle to one canonical copy
@@ -793,6 +793,8 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   Serialize `as_string_view()`, and hash durable data over those bytes — two runs will not agree on anything else.
 - **`interned_string` has no `<`, on purpose.** Everything about the type is a pointer operation except ordering by bytes, so making that cost visible beats a `<` that quietly memcmps.
   `compare_bytes` is the reproducible one and the default choice; `compare_identity` is cheaper and its order changes every run, so never persist or display anything sorted by it.
+- **String ordering is by UNSIGNED byte value**, in `string_view::compare`, the `<` family built on it, and `interned_string::compare_bytes` alike.
+  `char` is signed here, so the naive comparison would sort every byte >= 0x80 ahead of all ASCII — an order that silently disagrees with every other implementation once it reaches a file or a hash.
 - **`hash256` orders by limb, not by its 32 canonical bytes.**
   The order is total and deterministic, so it is fine as a tiebreak — it just is not the order the hex digests sort in.
   Use `to_bytes` / `from_bytes` whenever the 32 bytes themselves are what matters.

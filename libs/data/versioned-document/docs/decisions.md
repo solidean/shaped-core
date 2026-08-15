@@ -263,6 +263,11 @@ Once files exist that break cannot be fixed by either side.
 The same argument covers ids: [`cc::interned_string`](../../../base/clean-core/src/clean-core/string/interned_string.hh) deliberately has no `operator<`, and only `compare_bytes` is reproducible.
 `compare_identity` is a pointer order that differs every run, and must not be reachable from anything that reaches output.
 
+Byte order here means **unsigned** byte order.
+`cc::string_view::compare` used to widen `char`, which is signed on our platforms, so any id byte >= 0x80 sorted ahead of every ASCII one.
+Milestone 1 met this on object keys and worked around it locally; milestone 2 met it again on ids, where the sort feeds the op hash, and it was fixed in clean-core instead.
+A workaround in the caller is the wrong answer for an ordering that a wire format is defined in terms of.
+
 **Reopen when:** nothing.
 This is a wire-format property.
 

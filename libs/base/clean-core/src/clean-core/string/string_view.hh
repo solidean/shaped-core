@@ -347,13 +347,18 @@ public:
 public:
     /// Lexicographically compares this string_view with another.
     /// Returns: <0 if *this < other, 0 if equal, >0 if *this > other.
+    ///
+    /// Compares by UNSIGNED byte value, so the order is the byte order the content actually has.
+    /// `char` is signed on our platforms, so comparing it directly would sort any byte >= 0x80 before every ASCII one —
+    /// which would put UTF-8 text in an order no other implementation agrees with, this one included once the bytes are
+    /// written to a file or hashed.
     [[nodiscard]] constexpr int compare(string_view other) const
     {
         auto const min_size = _size < other._size ? _size : other._size;
         for (isize i = 0; i < min_size; ++i)
         {
             if (_data[i] != other._data[i])
-                return int(_data[i]) - int(other._data[i]);
+                return int(u8(_data[i])) - int(u8(other._data[i]));
         }
         return _size < other._size ? -1 : (_size > other._size ? 1 : 0);
     }
