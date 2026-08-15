@@ -15,10 +15,11 @@ using namespace cc::primitive_defines;
 using cc::async_context;
 
 // Node size guards.
-// The node is a 16 B header (intrusive refcount + tagged state/ops word) followed by the payload slot: max(scratch, sizeof(T), sizeof(E)).
-// It is aligned so the whole node is a 64 B line for a value up to ~48 B.
-// The value/error shares the payload with the unresolved scratch (frame + deps + continuations), and grows the node naturally for a larger T/E.
-// There is no inline cap — the value is built straight into the payload at resolution.
+// The node is a 16 B header (intrusive refcount + tagged state/ops word) followed by the payload slot: max(sizeof(T), sizeof(E), 48).
+// It is aligned so the whole node is a 64 B line for a value up to 48 B.
+// The value/error shares the payload with the unresolved side — the 24 B arm, then the compute frame — and grows the node naturally for a larger T/E.
+// There is no inline cap on the VALUE: it is built straight into the payload at resolution.
+// The frame is the part with a budget.
 static_assert(sizeof(cc::async<int>) == 64, "async<int> should be exactly one cache line");
 static_assert(sizeof(cc::async<cc::vector<int>>) == 64, "async<vector> should stay one cache line");
 static_assert(sizeof(cc::async<cc::string>) == 64, "async<string> should stay one cache line");
@@ -28,7 +29,7 @@ struct big_value // 96 B: intentionally larger than one line's payload — the n
 {
     i64 data[12] = {};
 };
-struct big_error // 64 B: a custom failure type larger than the 32 B unresolved scratch — grows the error arm
+struct big_error // 64 B: a custom failure type larger than the 48 B payload floor — grows the error arm
 {
     i64 data[8] = {};
 };
@@ -37,6 +38,45 @@ static_assert(sizeof(cc::async<big_value>) > 64, "a large value must grow the no
 // a custom E defaults to async_error; the default async<int> (== async<int, async_error>) stays one cache line
 static_assert(sizeof(cc::async<int, cc::async_error>) == 64, "async<int, async_error> should be exactly one cache line");
 static_assert(sizeof(cc::async<int, big_error>) > 64, "a large error type must grow the node onto further lines");
+
+// Payload layout guards.
+// The arm sits at payload offsets 0/8/16 (ambient, deps, conts) and the compute frame is the tail past it, so the
+// frame's budget is whatever the payload has left — which GROWS with a large T or E.
+static_assert(sizeof(cc::impl::async_unresolved) == 24, "the unresolved arm is what the frame offset is measured from");
+static_assert(alignof(cc::impl::async_unresolved) <= 8, "padding after the arm would silently shrink the frame slot");
+static_assert(cc::async<int>::frame_capacity == 24, "a one-line node has 24 B of inline frame: 48 payload - 24 arm");
+static_assert(cc::async<big_value>::frame_capacity == 72, "a big value widens the payload, and the frame slot with it");
+
+namespace
+{
+// Exactly the 24 B budget: a captured word plus two dependency handles, which is the shape the sugar builds.
+struct fitting_frame
+{
+    void* a;
+    void* b;
+    void* c;
+};
+// One word over.
+struct spilling_frame
+{
+    void* a;
+    void* b;
+    void* c;
+    void* d;
+};
+// Fits by size, but the frame starts at absolute node offset 40, so 16-alignment cannot be honoured inline.
+struct alignas(16) overaligned_frame
+{
+    void* a;
+};
+} // namespace
+static_assert(cc::async<int>::frame_fits_inline<fitting_frame>, "24 B is exactly the budget on a one-line node");
+static_assert(!cc::async<int>::frame_fits_inline<spilling_frame>, "32 B must box on a one-line node");
+static_assert(!cc::async<int>::frame_fits_inline<overaligned_frame>, "the inline slot is only 8-aligned");
+// The type-dependence, stated as a test because it is the surprising part: the SAME frame boxes under one async and
+// stays inline under another, purely because a bigger T widened the payload behind it.
+static_assert(cc::async<big_value>::frame_fits_inline<spilling_frame>,
+              "the same frame that spills under async<int> fits under a node with a big value");
 
 // async_type_ops collapse: trivially-destructible payloads of the same node size class share ONE descriptor.
 // int and float are both trivial and land in the same 64 B class -> identical ops pointer.

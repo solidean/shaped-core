@@ -53,10 +53,10 @@ U async_declval() noexcept;
 namespace impl
 {
 /// Declares the node's payload storage — the offset-16 slot the base manages, see async_node_base::payload().
-/// Raw bytes holding EITHER the unresolved scratch (frame + deps + conts) OR the resolved value ⊍ error, which share offset 0 and are discriminated by state.
-/// Sized to the larger of the scratch, sizeof(T) and sizeof(E), so a large T or E grows the node naturally.
+/// Raw bytes holding EITHER the unresolved arm followed by the compute frame, OR the resolved value ⊍ error, which share offset 0 and are discriminated by state.
+/// Sized to the larger of sizeof(T), sizeof(E) and the 48 B floor, so a large T or E grows the node naturally.
 /// Cacheline-aligned so unrelated nodes never share a line; the value/error is 16-aligned.
-/// This layer adds the typed read and teardown of the value AND the error; the base owns everything else, including the compute frame.
+/// This layer adds the typed read and teardown of the value AND the error, plus the inline-frame budget; the base owns everything else, including the frame's lifetime.
 template <class T, class E>
 struct alignas(64) async_typed_node : cc::async_node_base
 {
@@ -84,8 +84,30 @@ struct alignas(64) async_typed_node : cc::async_node_base
 
 private:
     static constexpr isize max_of(isize a, isize b) { return a > b ? a : b; }
-    static constexpr isize payload_bytes
-        = max_of(max_of(isize(sizeof(T)), isize(sizeof(E))), isize(sizeof(impl::async_unresolved)));
+
+    /// The floor that keeps async<int> one cache line: the 24 B arm plus a 24 B inline frame.
+    /// Deliberately a constant rather than sizeof(async_unresolved).
+    /// Deriving it from the arm would drop the floor to 24 the moment the arm shrank, collapsing frame_capacity to zero and boxing every frame.
+    static constexpr isize payload_floor = 48;
+
+    static constexpr isize payload_bytes = max_of(max_of(isize(sizeof(T)), isize(sizeof(E))), payload_floor);
+
+public:
+    /// Bytes the inline compute frame gets: whatever the payload has left once the unresolved arm has taken its 24.
+    /// 24 B on a 64 B node — a captured fn plus two dependency handles — and it GROWS with a large T or E, since those widen the payload.
+    ///
+    /// So the budget is type-dependent, and the same F may box under async<int> while staying inline under async<big_thing>.
+    /// Harmless, but surprising enough to be worth knowing before you go looking for why one spilled.
+    static constexpr isize frame_capacity = payload_bytes - impl::async_arm_bytes;
+
+    /// True if F is stored inline rather than boxed.
+    /// Anything larger, or over-aligned, falls back to a heap-boxed cc::unique_function — itself one 8-aligned pointer, so it always fits.
+    /// The alignment ceiling is 8 rather than 16 because the frame starts at an odd multiple of 8 (see impl::async_frame_align).
+    template <class F>
+    static constexpr bool frame_fits_inline
+        = isize(sizeof(F)) <= frame_capacity && alignof(F) <= impl::async_frame_align;
+
+private:
     alignas(16) byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
 };
 
@@ -229,13 +251,14 @@ public:
     void set_frame_emplace(Args&&... args)
     {
         if constexpr (async::template frame_fits_inline<F>)
-            this->template install_frame<F>(&impl::async_type_ops_for_frame<T, E, F>, cc::forward<Args>(args)...);
+            this->template install_frame<async::frame_capacity, F>(&impl::async_type_ops_for_frame<T, E, F>,
+                                                                   cc::forward<Args>(args)...);
         else
         {
             // too big for the inline slot: box it.
             // A cc::unique_function is one pointer, so IT fits inline, and create_from emplaces the closure into the box — an immovable F still works.
             using boxed_t = typename async::frame_type;
-            this->template install_frame<boxed_t>(
+            this->template install_frame<async::frame_capacity, boxed_t>(
                 &impl::async_type_ops_for_frame<T, E, boxed_t>,
                 boxed_t::template create_from<F>(cc::default_node_allocator(), cc::forward<Args>(args)...));
         }

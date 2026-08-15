@@ -50,13 +50,13 @@ using cc::u64;
 namespace
 {
 // make_async_lazy<i64>, but pinning the frame to the node's inline slot first.
-// Mirrors async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here.
-// If that budget ever changes, this assert is what will loudly notice.
+// Asks async<i64> for the real predicate rather than restating the budget: a hand-copied number goes stale silently,
+// and a silent spill is exactly the failure this assert exists to prevent.
 template <class F>
 [[nodiscard]] cc::shared_async<i64> spawn(F&& f)
 {
-    static_assert(sizeof(std::decay_t<F>) <= 32 && alignof(std::decay_t<F>) <= 16,
-                  "fork-join frame spilled out of the node's 32 B inline slot into a heap-boxed unique_function "
+    static_assert(cc::async<i64>::frame_fits_inline<std::decay_t<F>>,
+                  "fork-join frame spilled out of the node's inline slot into a heap-boxed unique_function "
                   "— that is an allocation per task, and it would make this a benchmark of malloc rather than of "
                   "the scheduler. The grain is a global for exactly this reason; drop a capture rather than "
                   "relaxing this.");
@@ -75,6 +75,24 @@ constexpr int floor_max_workers = 8;
 
 // Leaf cutoff of the graph currently being measured; see the header note on why this is not a capture.
 isize g_grain = 1;
+
+// Base of the one buffer every sweep point works on, set once by the harness.
+// A global for the same reason g_grain is: it keeps the fork-join frames inside the node's inline slot.
+i32* g_data = nullptr;
+
+/// A subrange of g_data as two i32 — deliberately not a cc::span.
+/// A span is 16 B, which alongside the two child handles would make the frame 32 B and spill it out of the node's 24 B inline slot; see spawn().
+struct range
+{
+    i32 off = 0;
+    i32 count = 0;
+
+    [[nodiscard]] cc::span<i32> mut() const { return cc::span<i32>(g_data + off, count); }
+    [[nodiscard]] cc::span<i32 const> get() const { return cc::span<i32 const>(g_data + off, count); }
+    [[nodiscard]] range left() const { return {.off = off, .count = count / 2}; }
+    [[nodiscard]] range right() const { return {.off = off + count / 2, .count = count - count / 2}; }
+};
+static_assert(sizeof(range) == 8, "the fork-join frames are sized around this being one word");
 
 // --- leaf work -------------------------------------------------------------------------------------------
 
@@ -107,25 +125,25 @@ CC_FORCE_INLINE i64 sum_range(cc::span<i32 const> d)
 
 // --- async fork-join graphs ------------------------------------------------------------------------------
 // Raw two-phase frames, same shape as pool-benchmark.cc: on the first poll either do the leaf work inline or spawn both children and park; on the re-poll, join.
-// `l == nullptr` is the "have I spawned yet" test, and using it instead of a step counter is what keeps these frames inside the 32 B inline slot.
+// `l == nullptr` is the "have I spawned yet" test, and using it instead of a step counter is what keeps these frames inside the 24 B inline slot.
+// The 8 B `range` rather than a 16 B span is the other half of that budget -- see the type.
 // The children are captured, which is what keeps them alive -- the pending-dependency list does not own anything.
 
-cc::shared_async<i64> async_pfor(cc::span<i32> d)
+cc::shared_async<i64> async_pfor(range rg)
 {
     return spawn(
-        [d, l = cc::shared_async<i64>(),
+        [rg, l = cc::shared_async<i64>(),
          r = cc::shared_async<i64>()](cc::async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (l == nullptr)
             {
-                if (d.size() <= g_grain)
+                if (rg.count <= g_grain)
                 {
-                    mix_range(d);
+                    mix_range(rg.mut());
                     return actx.success(i64(0));
                 }
-                isize const m = d.size() / 2;
-                l = async_pfor(d.subspan(cc::start_end{0, m}));
-                r = async_pfor(d.subspan(m));
+                l = async_pfor(rg.left());
+                r = async_pfor(rg.right());
                 (void)actx.require(l);
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
@@ -134,19 +152,18 @@ cc::shared_async<i64> async_pfor(cc::span<i32> d)
         });
 }
 
-cc::shared_async<i64> async_reduce(cc::span<i32 const> d)
+cc::shared_async<i64> async_reduce(range rg)
 {
     return spawn(
-        [d, l = cc::shared_async<i64>(),
+        [rg, l = cc::shared_async<i64>(),
          r = cc::shared_async<i64>()](cc::async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (l == nullptr)
             {
-                if (d.size() <= g_grain)
-                    return actx.success(sum_range(d));
-                isize const m = d.size() / 2;
-                l = async_reduce(d.subspan(cc::start_end{0, m}));
-                r = async_reduce(d.subspan(m));
+                if (rg.count <= g_grain)
+                    return actx.success(sum_range(rg.get()));
+                l = async_reduce(rg.left());
+                r = async_reduce(rg.right());
                 (void)actx.require(l);
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
@@ -187,6 +204,7 @@ void run_all()
 
     cc::async_thread_pool pool(p);
     auto data = make_random(max_n);
+    g_data = data.data();
 
     std::printf("GRAINCSV case,n,grain,ns_per_elem\n");
 
@@ -195,14 +213,14 @@ void run_all()
         g_grain = grain;
         for (isize n = grain; n <= max_n; n *= 2)
         {
-            auto const d = cc::span<i32>(data).subspan(cc::start_end{0, n});
+            auto const rg = range{.off = 0, .count = i32(n)};
             double const ns = 1e9
                             / bench::median_units_per_sec(double(n),
                                                           [&]
                                                           {
-                                                              auto root = async_pfor(d);
+                                                              auto root = async_pfor(rg);
                                                               (void)pool.blocking_get(root);
-                                                              return u64(d[0]);
+                                                              return u64(g_data[0]);
                                                           });
             emit("pfor", n, grain, ns);
         }
@@ -213,12 +231,12 @@ void run_all()
         g_grain = grain;
         for (isize n = grain; n <= max_n; n *= 2)
         {
-            auto const d = cc::span<i32 const>(data).subspan(cc::start_end{0, n});
+            auto const rg = range{.off = 0, .count = i32(n)};
             double const ns = 1e9
                             / bench::median_units_per_sec(double(n),
                                                           [&]
                                                           {
-                                                              auto root = async_reduce(d);
+                                                              auto root = async_reduce(rg);
                                                               return u64(pool.blocking_get(root));
                                                           });
             emit("reduce", n, grain, ns);
@@ -250,6 +268,7 @@ void run_fork_floor()
     std::printf("FLOORCSV workers,n,ns_total\n");
 
     auto data = make_random(floor_max_n);
+    g_data = data.data();
     g_grain = 1; // every element its own leaf: the graph is all fork, no work
 
     for (int w = 1; w <= w_max; ++w)
@@ -257,15 +276,15 @@ void run_fork_floor()
         cc::async_thread_pool pool(w);
         for (isize n = 1; n <= floor_max_n; ++n)
         {
-            auto const d = cc::span<i32>(data).subspan(cc::start_end{0, n});
+            auto const rg = range{.off = 0, .count = i32(n)};
             // units = 1 pass, so this reads back as total ns for the whole graph rather than per element
             double const ns = 1e9
                             / bench::median_units_per_sec(1.0,
                                                           [&]
                                                           {
-                                                              auto root = async_pfor(d);
+                                                              auto root = async_pfor(rg);
                                                               (void)pool.blocking_get(root);
-                                                              return u64(d[0]);
+                                                              return u64(g_data[0]);
                                                           });
             std::printf("FLOORCSV %d,%lld,%.3f\n", w, (long long)n, ns);
             std::fflush(stdout);
