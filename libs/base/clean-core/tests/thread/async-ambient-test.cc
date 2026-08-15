@@ -31,12 +31,21 @@ int value_b = 2;
     auto* const v = cc::async_ambient_lookup(tag_a());
     return v == nullptr ? 0 : *static_cast<int*>(v);
 }
+
+/// Neither of this file's scopes is installed.
+///
+/// Deliberately per-tag rather than `async_current_ambient() == nullptr`: the chain is SHARED across consumers.
+/// nexus has a link of its own in it, which is how a CHECK finds the test it belongs to.
+/// So a bare head is not the question; whether our tags are present is.
+bool no_scope_of_ours()
+{
+    return cc::async_ambient_lookup(tag_a()) == nullptr && cc::async_ambient_lookup(tag_b()) == nullptr;
+}
 } // namespace
 
 TEST("async-ambient - nothing installed by default")
 {
-    CHECK(cc::async_current_ambient() == nullptr);
-    CHECK(cc::async_ambient_lookup(tag_a()) == nullptr);
+    CHECK(no_scope_of_ours());
 }
 
 TEST("async-ambient - a scope installs and pops")
@@ -47,7 +56,7 @@ TEST("async-ambient - a scope installs and pops")
         CHECK(cc::async_ambient_lookup(tag_a()) == &value_a);
         CHECK(cc::async_ambient_lookup(tag_b()) == nullptr); // a miss walks the whole chain and reports absence
     }
-    CHECK(cc::async_current_ambient() == nullptr);
+    CHECK(no_scope_of_ours());
     CHECK(cc::async_ambient_lookup(tag_a()) == nullptr);
 }
 
@@ -92,8 +101,8 @@ TEST("async-ambient - a lookup can be given an explicit head")
         cc::impl::async_ambient_retain(captured); // stand in for a node carrying the context past the scope
     }
 
-    // The scope is gone and TLS is clean, but the chain the captured head names is intact.
-    CHECK(cc::async_current_ambient() == nullptr);
+    // The scope is popped, but the chain the captured head names is intact.
+    CHECK(no_scope_of_ours());
     CHECK(cc::async_ambient_lookup(tag_a()) == nullptr);
     CHECK(cc::async_ambient_lookup_in(captured, tag_a()) == &value_a);
 
@@ -136,7 +145,7 @@ TEST("async-ambient - a scope pops cleanly with work still outstanding")
         CHECK(s.outstanding() == 1);
     }
 
-    CHECK(cc::async_current_ambient() == nullptr);
+    CHECK(no_scope_of_ours());
     CHECK(cc::async_ambient_lookup_in(held, tag_a()) == &value_a); // still readable by whoever carries it
     cc::impl::async_ambient_release(held);
 }
@@ -196,7 +205,7 @@ TEST("async-ambient - a deep chain frees iteratively")
             scopes[i] = nullptr;
     }
 
-    CHECK(cc::async_current_ambient() == nullptr);
+    CHECK(no_scope_of_ours());
     CHECK(cc::async_ambient_lookup_in(head, tag_a()) == &value_a);
     cc::impl::async_ambient_release(head); // drops all `depth` links in one loop
 }
@@ -233,7 +242,7 @@ TEST("async-ambient - a lazy node outliving its creating scope is driven under t
         cc::async_ambient_scope const c0(tag_a(), &value_a);
         lazy = cc::make_async_lazy<i64>([] { return observed(); });
     }
-    CHECK(cc::async_current_ambient() == nullptr); // c0 is gone
+    CHECK(no_scope_of_ours()); // c0 is gone
 
     cc::async_ambient_scope const c1(tag_a(), &value_b);
     CHECK(cc::async_blocking_get_singlethreaded(lazy) == value_b);
@@ -273,7 +282,7 @@ TEST("async-ambient - the scope is restored after a drive")
         CHECK(cc::async_blocking_get_singlethreaded(n) == value_a);
         CHECK(cc::async_ambient_lookup(tag_a()) == &value_a); // poll() restored what it installed
     }
-    CHECK(cc::async_current_ambient() == nullptr);
+    CHECK(no_scope_of_ours());
 }
 
 TEST("async-ambient - a resolved node holds no context")
@@ -362,7 +371,7 @@ TEST("async-ambient - a yielding node keeps its context across the re-queue")
 
     // Scope gone.
     // Anything the re-poll observes now must come from the node's own token.
-    CHECK(cc::async_current_ambient() == nullptr);
+    CHECK(no_scope_of_ours());
     {
         cc::async_worker_scope const worker(sched);
         sched.run_until([&] { return parent->is_ready(); });
@@ -390,7 +399,7 @@ TEST("async-ambient - a scheduled-but-undriven node keeps its context alive")
     }
 
     // The scope is gone, but the node still carries the context — and still runs under it.
-    CHECK(cc::async_current_ambient() == nullptr);
+    CHECK(no_scope_of_ours());
     {
         cc::async_worker_scope const worker(sched);
         sched.run_until([&] { return warm->is_ready(); });

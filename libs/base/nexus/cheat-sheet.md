@@ -87,6 +87,28 @@ FAIL();  FAIL("msg");                    // unconditional hard fail
 SKIP();  SKIP("not implemented yet");    // skip the test (not counted as a failure)
 ```
 
+## Checks off the test's own thread
+
+```cpp
+#include <nexus/tests/thread_scope.hh>
+
+\ A check inside a cc::async frame is attributed automatically — the graph carries which test it belongs to.
+CHECK(x);                                  \ on a pool worker: counted against the test that scheduled the node
+
+\ A thread you start yourself carries nothing, so wrap its work:
+std::thread t(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
+auto captured = nx::capture_current_test(); \ for a thread already running: capture here, install there
+nx::test_thread_scope const s(captured);    \ ... on that thread
+```
+
+- **An unattributable check FAILS THE RUN**, passing or not — it is printed where it happens and reported as `N check(s) ran outside any test context`.
+  A check that proved nothing must not look like a pass.
+- **Off the test's own thread, `REQUIRE`/`SKIP` abort only where a throw can land.**
+  Inside an async frame it terminates that node (cc::async turns it into the node's error); on a bare thread it degrades to a recorded failure.
+- **`SECTION` is the test thread's alone** — the body is replayed once per section path, which only that thread does.
+  Opening one elsewhere is a recorded failure.
+- **Leaving async work running past the end of a test fails that test**, by name: it would otherwise report into whatever runs next.
+
 ## Chaining diagnostics (on the check_handle)
 
 ```cpp

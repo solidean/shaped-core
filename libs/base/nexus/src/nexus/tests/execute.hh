@@ -85,6 +85,12 @@ struct nx::test_schedule_execution
 {
     cc::vector<test_execution> executions;
 
+    // Checks that ran with no test to attribute them to — see report_check_result: a thread nexus never heard of, or code outside a test entirely.
+    // They belong to no test, so they fail the RUN rather than a test, however green everything else is.
+    // Drained from a process-global sink at the end of this run, so a nested execute_tests takes what it produced and the outer one sees only its own.
+    int orphan_checks = 0;
+    cc::vector<test_error> orphan_errors;
+
     // All counts recurse into dispatched (nested) executions: a dispatched instance counts as its own test.
     [[nodiscard]] int count_total_tests() const;
     [[nodiscard]] int count_failed_tests() const;
