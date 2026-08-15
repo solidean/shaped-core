@@ -8,6 +8,23 @@ This is what makes it usable — and it is where every "it depends on the applic
 The design is [concept.md](../concept.md#interpretation) and [The typed document is an immutable index](../concept.md#the-typed-document-is-an-immutable-index).
 Depends on milestone 2.
 
+## What milestone 2 left you
+
+The storage layer is complete and tested; this milestone only ever reads from it.
+Four things about its shape matter here, because each one changes what the typed layer may assume:
+
+- **`raw_document` borrows the graph's op bytes.**
+  Every `value_view` in it points into the payload of the op that wrote it, so a parse must not outlive the `op_graph` — or must copy what it keeps.
+  `document` owning an arena of its own is what resolves that, and it is already the design.
+- **Every level of the raw document is a vector sorted by canonical id bytes**, with `try_get` doing a binary search.
+  It is not a hash container, so the parser may iterate it directly and stay reproducible.
+- **`raw_property::single()` asserts when the property is multi-valued.**
+  Parsing must ask `is_multi_valued()` first, which is the point where the agreed-multi-value collapse and the conflict diagnostics belong.
+- **`op_builder::set(entity, component)` does not exist yet** — it is generic over `component_traits`, so it lands here, on top of the existing `set_raw`.
+  The diff, the canonicalization and the hashing beneath it are done and must not be reimplemented.
+
+Everything reserved (`$schema_version`, `$alive`, `$entity`) is still purely a convention: storage assigns no meaning to a `$` prefix, and this milestone is where that meaning first appears.
+
 ---
 
 ## Work items

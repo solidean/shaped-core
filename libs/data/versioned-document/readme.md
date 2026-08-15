@@ -7,13 +7,14 @@ A document is entities holding components holding properties.
 The source of truth is not that document, but an immutable content-addressed DAG of **ops**; everything a reader sees is materialized from it.
 
 ```cpp
-// [planned] — the shape the API is being built toward, not something you can compile today.
 auto const head = graph.add(vdoc::op_builder{}
-                                .set_parents({previous})
-                                .set(entity, my_transform{...})
+                                .set_parents(previous)
+                                .set_raw(path, vdoc::value::of(3))
                                 .build(graph));
 
 auto const raw = graph.materialize(head);          // schema-agnostic
+
+// [planned] — the typed layer, milestone 3
 auto const doc = vdoc::parse(raw, policy, report); // typed, immutable, queryable
 ```
 
@@ -22,7 +23,8 @@ What a `transform` or a `material` is belongs to the application; `vdoc` owns th
 
 Headers are included by their full path from `src/`, e.g. `#include <versioned-document/op_graph.hh>`.
 
-The concept is complete and the **value codec** is built; everything above it is not.
+The concept is complete, and the **storage layer** is built: values, ids, ops, the DAG and the raw document.
+The typed layer above it — components, parsing, `document` — is not.
 [docs/concept.md](docs/concept.md) is the design, [docs/todo/](docs/todo/_index.md) is the ordered plan to build the rest.
 
 ## Design at a glance
@@ -55,9 +57,9 @@ Source lives in `src/versioned-document/`.
 |--------------|--------------------|
 | (root)       | `fwd.hh` — forward declarations and vocabulary aliases |
 | values       | `value` / `value_view` / `value_builder` — the binary value codec **(built)** |
-| identity     | `entity_id` / `component_type_id` / `property_id` — interned, distinct id types |
-| ops          | `op` / `op_id` / `op_builder` / `op_graph` — the DAG and its materialization |
-| raw          | `raw_document` and the three levels below it |
+| identity     | `entity_id` / `component_type_id` / `property_id` / `property_path` — interned, distinct id types **(built)** |
+| ops          | `op` / `op_id` / `op_builder` / `op_graph` — the DAG and its materialization **(built)** |
+| raw          | `raw_document` and the three levels below it **(built)** |
 | typed        | `component_registry` / `parse_policy` / `parse_report` / `document` |
 
 [docs/structure.md](docs/structure.md) tracks what is `[done]` versus `[planned]` as the milestones land.

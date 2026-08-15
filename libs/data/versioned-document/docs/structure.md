@@ -14,7 +14,7 @@ This document tracks *state*; it is not where the design lives.
 - The settled choices and their reasoning are [decisions.md](decisions.md).
 - The ordered plan, with acceptance criteria per step, is [todo/](todo/_index.md).
 
-Milestones 0 and 1 have landed; everything above them is `[planned]`.
+Milestones 0 through 2 have landed; everything above them is `[planned]`.
 The milestone that lands each piece is named so the two documents stay in step.
 
 ## Top-level structure
@@ -23,10 +23,10 @@ The milestone that lands each piece is named so the two documents stay in step.
 src/versioned-document/
   fwd.hh          [done]        forward declarations; also the API index
   value           [done]        the binary value codec                        milestone 1
-  ids             [planned]     entity_id / component_type_id / property_id   milestone 2
-  op              [planned]     op / op_id / op_builder, canonical encoding    milestone 2
-  op_graph        [planned]     the DAG, reachability, materialization         milestone 2
-  raw_document    [planned]     the untyped materialized document              milestone 2
+  ids             [done]        entity_id / component_type_id / property_id   milestone 2
+  op              [done]        op / op_id / op_builder, canonical encoding    milestone 2
+  op_graph        [done]        the DAG, reachability, materialization         milestone 2
+  raw_document    [done]        the untyped materialized document              milestone 2
   component       [planned]     traits, registry, schema                       milestone 3
   parse           [planned]     policy, report, diagnostics, the parser        milestone 3
   document        [planned]     the typed immutable index                      milestone 3
@@ -64,14 +64,16 @@ Design: [concept.md](concept.md#values). Landed in [milestone 1](todo/milestone-
 - `[done]` **`value_builder`** for arrays and objects, sorting object keys on build.
 - `[done]` **debug text projection** — one-way, JSON-ish, for dumps and test failure output.
 
-### ids, ops and the DAG [planned]
+### ids, ops and the DAG [done]
 
 Interned id types, the canonical op encoding, BLAKE3 hashing, and the graph that holds them.
-Design: [concept.md](concept.md#ops-and-content-addressing). Lands in [milestone 2](todo/milestone-2.md).
+Design: [concept.md](concept.md#ops-and-content-addressing). Landed in [milestone 2](todo/milestone-2.md).
 
-- `[planned]` **decode-and-verify as the only route from bytes to an op**, so a loader cannot forget to check.
-- `[planned]` **`op_builder` diffing against parents**, emitting only changed properties.
-- `[planned]` **materialization** of one head or several, with multi-values preserved.
+- `[done]` **decode-and-verify as the only route from bytes to an op**, so a loader cannot forget to check.
+- `[done]` **the op holds its bytes and decodes on demand**, which is what makes "never re-serialize" structural.
+- `[done]` **`op_builder` diffing against parents**, emitting only changed properties.
+- `[done]` **materialization** of one head or several, with multi-values preserved.
+- `[done]` **dominance by propagated superseded sets**, resolving overwrites without any global ancestor query.
 
 ### interpretation [planned]
 

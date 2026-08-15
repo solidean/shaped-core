@@ -3,7 +3,8 @@
 Documentation hub for versioned-document — structured documents that are versioned, mergeable and verifiable (namespace `vdoc`).
 Start at the [readme](../readme.md) for the overview, and the [cheat-sheet](../cheat-sheet.md) for the planned API at a glance.
 
-The concept is complete and the **value codec** is built; the layers above it are not.
+The concept is complete, and the **storage layer** is built: values, ids, ops, the DAG and the raw document.
+The typed layer above it — components, parsing, `document` — is not.
 
 ## Topics
 

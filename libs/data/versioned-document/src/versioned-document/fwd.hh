@@ -5,7 +5,7 @@
 /// Aggregate forward declarations for versioned-document.
 ///
 /// This header is also the API index: every name the library plans to expose is declared here, with the one line that says what it is.
-/// The value layer is implemented; everything below it is not yet.
+/// The value, identity, op and raw-document layers are implemented; interpretation is not yet.
 /// The design is [the concept](../../docs/concept.md).
 /// The milestones that land it are [the todo list](../../docs/todo/_index.md).
 ///

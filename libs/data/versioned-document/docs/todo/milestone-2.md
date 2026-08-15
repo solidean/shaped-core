@@ -1,5 +1,33 @@
 # Milestone 2 — Ids, ops and the DAG
 
+**Status: done.**
+Landed as `ids.hh`, `op.hh/.cc`, `op_graph.hh/.cc`, `op_builder.hh/.cc` and `raw_document.hh/.cc`, with `ids-test`, `op-test`, `op-fuzz-test`, `op_graph-test` and `op_builder-test`.
+
+The sketch below was **rewritten before implementation** rather than annotated afterwards, because the op's shape changed while the milestone was still a plan.
+What the rewrite settled, each recorded in [decisions.md](../decisions.md):
+
+- **The op holds its bytes and decodes on demand.**
+  The original sketch gave it decoded `metadata` and `assignments` *plus* an optional payload — a fourth copy of state, matching nothing storage hands back.
+  See [decisions.md](../decisions.md#the-op-retains-its-bytes-and-decodes-on-demand).
+- **`op_id` orders by its canonical 32 bytes**, never by `cc::hash256`'s defaulted `<=>` — [decisions.md](../decisions.md#op_id-orders-by-its-canonical-32-bytes).
+- **A multi-valued property always differs**, so the diff emits even when the surviving writers agree — [decisions.md](../decisions.md#a-multi-valued-property-always-differs).
+- **Dominance resolves by propagating a superseded set**, not by ancestor queries — [decisions.md](../decisions.md#dominance-is-resolved-by-propagating-a-superseded-set-not-by-ancestor-queries).
+- **Metadata is any canonical value**, not necessarily an object, which the sketch had assumed — [decisions.md](../decisions.md#metadata-is-any-canonical-value-not-necessarily-an-object).
+
+Four things emerged during implementation and are worth carrying forward:
+
+- **`cc::string_view::compare` ordered by *signed* `char`**, so any byte >= 0x80 sorted ahead of all ASCII.
+  Milestone 1 met this on object keys and worked around it locally; ids are arbitrary application strings whose sort feeds the op hash, so this time it was fixed in clean-core.
+  `vdoc::impl::compare_key_bytes` survives only as a name for the format's ordering.
+- **`op_decode_error` has no `malformed_parents` or `count_mismatch`.**
+  Both were declared and turned out unreachable from this layer: a bad count surfaces as `truncated` or `trailing_bytes` first, and the parents blob is decoded by the *file* layer.
+  Milestone 4 adds the one it needs rather than inheriting dead API.
+- **`op_builder::set(entity, component)` is deliberately absent.**
+  It is generic over `component_traits`, which is milestone 3; `set_raw` is the layer beneath it and exists now.
+- **Milestone 6's snapshot-eligibility rule was corrected here**, before anything could be built on it.
+  The articulation point where superseded sets may be dropped is a *per-sweep* property and does not survive being stored.
+  [milestone-6.md](milestone-6.md#1-snapshot-terminated-materialization) works out what each snapshot kind must do instead.
+
 **Goal.** The storage model itself: interned id types, the canonical op encoding, BLAKE3 content addressing, the graph, and materialization into a `raw_document` with multi-values preserved.
 
 **Why here.** This is the layer everything durable commits to.

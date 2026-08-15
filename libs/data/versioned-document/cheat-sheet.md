@@ -3,18 +3,19 @@
 Structured documents that are versioned, mergeable and verifiable.
 Namespace `vdoc`. Depends on clean-core only.
 
-> **The value codec is real; everything else on this sheet is `[planned]`.**
+> **The storage layer is real; the typed layer above it is still `[planned]`.**
+> Values, ids, ops, the DAG and the raw document are built; components, parsing and `document` are not.
 > A `[planned]` section is the intended API surface, kept next to the design so the two are written together; the design itself is [docs/concept.md](docs/concept.md).
 > Entries lose their `[planned]` marking as the [milestones](docs/todo/_index.md) land, and this banner goes when the last one does.
 
 ## The flow
 
 ```text
-typed component edit                    op_builder{}.set(entity, comp)
+typed component edit                    op_builder{}.set(entity, comp)   [planned]
   -> diff vs parents, build an op   ->  .build(graph)              => op
   -> add to the DAG by content hash ->  graph.add(op)              => op_id
   -> materialize a head             ->  graph.materialize(head)    => raw_document
-  -> interpret into a typed document -> parse(raw, policy, report) => document
+  -> interpret into a typed document -> parse(raw, policy, report) => document  [planned]
 ```
 
 Editing needs only an `op_graph`.
@@ -80,39 +81,56 @@ Gotchas:
 - **A value under 36 bytes does not allocate**, which is nearly all of them; past that it is heap-backed and merely slower.
 - **Bulk data is not a value.** A mesh or a texture is a blob, referenced by an asset id string.
 
-## Identity — `[planned]`
+## Identity
 
 ```cpp
-auto const e = vdoc::entity_id::of("wall-17");   // interned
-e.as_string();                                    // the canonical bytes back
+auto const e = vdoc::entity_id::of("wall-17");    // interned, process-wide
+e.as_string_view();                               // the canonical bytes back
+e.compare_bytes(other);                           // -> strong_ordering; the ONLY order that reaches storage
+vdoc::entity_id::by_bytes{};                      // the matching sort predicate
+
+vdoc::property_path{.entity = e, .component = c, .property = p};   // the addressable unit
+path.compare_bytes(other);                        // entity, then component, then property — a FORMAT CONSTANT
 ```
 
 `entity_id`, `component_type_id` and `property_id` are distinct types over an interned string, so they cannot be mixed up.
 **Stay in id space on hot paths**; interned ids are process-local, so never serialize one or hash persistent data by it.
+**There is no `operator<`** — the id order feeds the op hash, so the call site names `compare_bytes` and nothing else.
 
-## Editing — `[planned]`
+## Editing
 
 ```cpp
 vdoc::op_graph graph;
 
 auto const op = vdoc::op_builder{}
-                    .set_parents({head})                  // empty = a new document
+                    .set_parents(head_span)               // empty = a new document; sorted+deduped at build
                     .set_metadata(author_and_time)        // free-form, informational, still hashed
-                    .set(entity, my_transform{...})       // generic over the component concept
+                    .set_raw(path, vdoc::value::of(3))    // or set_raw(entity, component, property, value)
                     .build(graph);                        // diffs vs parents; only changed properties
 
-auto const head2 = graph.add(op);                         // keyed by content hash; returns it
+auto const head2 = graph.add(cc::move(op));               // keyed by content hash; returns it
 ```
 
 - **`add` is not append.** It inserts by content hash and moves no head, so two identical ops collapse to one entry.
-- **`build` diffs.** Re-setting an unchanged component emits no assignments at all.
-- `set_raw(entity, component, property, value)` is the escape hatch below the typed layer.
+- **`build` diffs.** Re-setting an unchanged property emits no assignments at all.
+- **A multi-valued path always emits**, even when every surviving writer holds identical bytes — that op is how a conflict is resolved.
+- Staging one path twice asserts: two code paths writing one property is a bug, not an update.
+- `.set(entity, my_transform{...})` — generic over `component_traits` — is `[planned]` for milestone 3.
 
-## Reading — `[planned]`
+## Reading
 
 ```cpp
 auto const raw = graph.materialize(head);            // or materialize(span<op_id>) for a merge
+graph.materialize_entities(heads, entities);         // the cheap path op_builder diffs against
+graph.collect_reachable(heads);                      // the local closure; missing ops are skipped
+graph.children(id);                                  // inverted parent edges; may name ops not present
+```
 
+**A raw document borrows the graph's op bytes**, so it is valid only while those ops are still in the graph.
+
+### The typed layer — `[planned]`
+
+```cpp
 vdoc::component_registry registry;
 registry.register_component<my_transform>();
 
@@ -157,27 +175,34 @@ struct vdoc::component_traits<my_transform>
 | `$alive` | deletion; absent means alive |
 | `$entity` | a component type carrying entity-level `$alive`; no C++ struct |
 
-## Raw document — `[planned]`
+## Raw document
 
-```text
-raw_document.entities[entity_id]           -> raw_entity
-raw_entity.components[component_type_id]   -> raw_component
-raw_component.properties[property_id]      -> raw_property
-raw_property.values                        -> [ { op_id writer; value data; } ]
+```cpp
+doc.try_get(entity);                       // -> raw_entity const*, binary search by id bytes
+doc.try_get(path);                         // -> raw_property const*, null if nothing ever wrote it
+doc.property_count();                      // paths carrying at least one write
+
+prop->writers;                             // [ { op_id writer; value_view value; } ], sorted by writer bytes
+prop->is_multi_valued();                   // more than one surviving writer
+prop->single();                            // the value; ASSERTS when multi-valued
 ```
+
+Every level is a vector sorted by canonical id bytes, never a hash container, so iteration order is the same on every machine.
 
 A property normally has one value.
 Concurrent writers where neither dominates leave several, and **that includes writers who wrote identical bytes** — collapsed silently at parse time into `report.agreed_multi_values`.
 
-## Patterns & gotchas — `[planned]`
+## Patterns & gotchas
 
-- **Deletion is interpretation, not storage** — nothing is ever removed.
+- **`op_id` orders by its canonical 32 bytes**, never by `cc::hash256`'s defaulted `<=>`, which orders limbs and is a different order entirely.
+- `[planned]` **Deletion is interpretation, not storage** — nothing is ever removed.
   `$alive` false drops a component, or on `$entity` the whole entity.
   Dead only if *unambiguously* false; a contested `$alive` stays alive plus a diagnostic.
-- **Parsing never refuses.** Unknown components, unknown schema versions and unresolved conflicts become diagnostics while the rest of the document loads.
+- `[planned]` **Parsing never refuses.** Unknown components, unknown schema versions and unresolved conflicts become diagnostics while the rest of the document loads.
 - **Op ids are canonical** — identical content gives an identical id, whatever order the caller supplied.
   Never hash persistent data by a raw interned id.
 - **Verification never re-serializes.** It re-hashes the bytes as stored, so no formatting change can look like tampering.
+  The op holds those bytes and decodes on demand, so there is no encoder near a loaded op to change.
 - **A pruned parent is a skeleton op** — id and parents, no payload — and is unverifiable by construction, never a mismatch.
 - **Op ids do not commit to asset content**, so a document is reproducible only relative to an asset resolution.
   See [decisions.md](docs/decisions.md#the-asset-mapping-is-mutable-and-remapping-is-retroactive).
