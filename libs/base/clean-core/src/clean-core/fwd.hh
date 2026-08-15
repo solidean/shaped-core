@@ -88,6 +88,14 @@ struct format_string;
 
 enum class glob_option; // what glob_matches does beyond a byte-for-byte match (string/glob.hh)
 
+class interned_string; // a handle to one canonical copy of a byte sequence (string/interned_string.hh)
+class string_interner; // a table of them, for tests that want isolation from the process-wide one
+namespace impl
+{
+struct intern_entry;
+struct intern_shard;
+} // namespace impl
+
 
 //
 // Views
@@ -287,6 +295,8 @@ using shared_async = shared_ptr<async<T, E>, impl::async_node_traits>;
 //
 
 struct hash128;
+struct hash256;
+class blake3;
 
 
 //

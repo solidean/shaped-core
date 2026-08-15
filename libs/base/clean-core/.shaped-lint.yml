@@ -185,6 +185,11 @@ rules:
       - src/clean-core/common/hash128.cc
 
   - kind: allow-include
+    value: <blake3.h>
+    reason: the cryptographic hash cc::blake3 / cc::hash256 forward to
+    files: src/clean-core/common/blake3.cc
+
+  - kind: allow-include
     value: <mimalloc.h>
     reason: the allocator cc::mimalloc_resource wraps
     files: src/clean-core/memory/mimalloc_resource.cc
@@ -223,6 +228,6 @@ rules:
     files: tests/thread/threaded_actor-test.cc
 
   - kind: allow-include
-    value: [<cstdio>, <cstdlib>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>]
+    value: [<cstdio>, <cstdlib>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>, <blake3.h>]
     reason: the C runtime and the intrinsics the benchmarks and platform tests measure against
     files: tests/**

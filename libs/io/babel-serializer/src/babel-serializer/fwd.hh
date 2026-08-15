@@ -86,8 +86,12 @@ struct data;
 namespace babel::sqlite
 {
 enum class column_kind : u8;
+enum class journal_mode : u8;
 struct row;
+struct blob_location;
 class statement;
+class blob_handle;
+class transaction;
 class database;
 } // namespace babel::sqlite
 

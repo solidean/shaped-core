@@ -1,5 +1,16 @@
 # Milestone 0 — Prerequisites in lower libraries
 
+**Status: done.**
+All three landed, with three deliberate departures from the sketch below, each recorded in [decisions.md](../decisions.md):
+
+- **`cc::interned_string`'s handle carries a pointer, not a numeric id.**
+  That makes `as_string_view()` and byte-ordering direct, and satisfies "make the numeric id awkward to reach" by leaving no id to reach.
+- **It has no relational operators.**
+  Byte-ordering is the one operation on the type that is not a pointer operation, so the two orders are named methods rather than a `<` that quietly memcmps.
+  `compare_bytes` is the reproducible one; `compare_identity` is the pointer compare.
+- **BLAKE3 is considerably more than 4× XXH3** — 8.7× to 21× depending on input size.
+  [decisions.md](../decisions.md#blake3-over-32-byte-ids--with-a-standing-reservation) carries the measured table, and what it costs where the design actually hashes.
+
 **Goal.** Land the three capabilities `vdoc` needs that do not exist yet, in the libraries that own them.
 
 None of this is `vdoc` code.

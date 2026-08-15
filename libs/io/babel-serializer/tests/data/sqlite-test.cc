@@ -25,6 +25,79 @@ sql::database make_people()
     REQUIRE(db.exec("INSERT INTO people(id, name) VALUES (1, 'ada'), (2, 'grace'), (3, 'linus')").has_value());
     return db;
 }
+
+// A repeating byte pattern, so a read at an offset can be checked against the offset it came from.
+cc::vector<byte> pattern_bytes(isize length)
+{
+    cc::vector<byte> data;
+    data.resize_to_uninitialized(length);
+    for (isize i = 0; i < length; ++i)
+        data[i] = byte(i % 251);
+    return data;
+}
+
+// The .vdoc shape in miniature: blobs, chunks pointing at them, and a cascade between the two.
+// Both are rowid tables, which is what lets a chunk be reached by incremental blob I/O at all.
+sql::database make_chunks()
+{
+    auto opened = sql::database::open_memory();
+    REQUIRE(opened.has_value());
+    auto db = cc::move(opened.value());
+
+    REQUIRE(db.exec("CREATE TABLE blobs(id INTEGER PRIMARY KEY)").has_value());
+    REQUIRE(db.exec("CREATE TABLE chunks(id INTEGER PRIMARY KEY, blob_id INTEGER NOT NULL, data BLOB NOT NULL,"
+                    " FOREIGN KEY(blob_id) REFERENCES blobs(id) ON DELETE CASCADE)")
+                .has_value());
+    REQUIRE(db.exec("INSERT INTO blobs(id) VALUES (1), (2)").has_value());
+
+    auto insert_r = db.prepare("INSERT INTO chunks(id, blob_id, data) VALUES (?1, ?2, ?3)");
+    REQUIRE(insert_r.has_value());
+    auto insert = cc::move(insert_r.value());
+
+    // chunk 1 is 1000 bytes on blob 1, chunk 2 is 40 bytes on blob 2
+    for (auto const& [id, length] : {cc::pair<i64, isize>(1, 1000), cc::pair<i64, isize>(2, 40)})
+    {
+        auto const data = pattern_bytes(length);
+        REQUIRE(insert.reset().has_value());
+        REQUIRE(insert.bind(1, id).has_value());
+        REQUIRE(insert.bind(2, id).has_value());
+        REQUIRE(insert.bind(3, cc::span<byte const>(data)).has_value());
+        REQUIRE(insert.next().has_value());
+    }
+
+    return db;
+}
+
+isize count_rows(sql::database& db, cc::string_view sql)
+{
+    auto stmt_r = db.query(sql);
+    REQUIRE(stmt_r.has_value());
+    auto stmt = cc::move(stmt_r.value());
+
+    isize count = 0;
+    for (auto row : stmt)
+        count = isize(row.as_i64(0));
+    return count;
+}
+
+isize count_people(sql::database& db)
+{
+    return count_rows(db, "SELECT COUNT(*) FROM people");
+}
+isize count_chunks(sql::database& db)
+{
+    return count_rows(db, "SELECT COUNT(*) FROM chunks");
+}
+
+bool same_bytes(cc::span<byte const> a, cc::span<byte const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (isize i = 0; i < a.size(); ++i)
+        if (a[i] != b[i])
+            return false;
+    return true;
+}
 } // namespace
 
 TEST("sqlite - open, exec and query")
@@ -210,6 +283,158 @@ TEST("sqlite - error paths")
     CHECK(db.query("SELECT * FROM no_such_table").has_error());
 }
 
+TEST("sqlite - incremental blob reads")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    auto db = make_chunks();
+
+    // 1000 bytes, so a 256-byte read at offset 200 spans the boundary a chunked reader would cut at.
+    auto handle_r = db.open_blob_handle({.table = "chunks", .column = "data", .rowid = 1});
+    REQUIRE(handle_r.has_value());
+    auto handle = cc::move(handle_r.value());
+
+    CHECK(handle.size() == 1000);
+
+    auto buffer = cc::vector<byte>();
+    buffer.resize_to_defaulted(256);
+    REQUIRE(handle.read_at(200, buffer).has_value());
+    for (isize i = 0; i < buffer.size(); ++i)
+        CHECK(u8(buffer[i]) == u8((200 + i) % 251));
+
+    // the whole value in one go, and a zero-length read at the very end
+    auto whole = cc::vector<byte>();
+    whole.resize_to_defaulted(1000);
+    REQUIRE(handle.read_at(0, whole).has_value());
+    CHECK(handle.read_at(1000, cc::span<byte>()).has_value());
+
+    // a range that runs past the end is an error, not a short read
+    CHECK(handle.read_at(900, buffer).has_error());
+    CHECK(handle.read_at(-1, buffer).has_error());
+
+    // reopen walks to the next row without opening a second handle
+    REQUIRE(handle.reopen(2).has_value());
+    CHECK(handle.size() == 40);
+    REQUIRE(handle.read_at(0, cc::span<byte>(buffer.data(), 40)).has_value());
+    for (isize i = 0; i < 40; ++i)
+        CHECK(u8(buffer[i]) == u8(i % 251));
+}
+
+TEST("sqlite - a committed transaction publishes its rows")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    auto db = make_people();
+
+    {
+        auto tx_r = db.begin_transaction();
+        REQUIRE(tx_r.has_value());
+        auto tx = cc::move(tx_r.value());
+        CHECK(tx.is_open());
+
+        REQUIRE(db.exec("INSERT INTO people(id, name) VALUES (4, 'ken')").has_value());
+        REQUIRE(tx.commit().has_value());
+        CHECK(!tx.is_open());
+
+        // committing twice is an error rather than a silent no-op
+        CHECK(tx.commit().has_error());
+    }
+
+    CHECK(count_people(db) == 4);
+}
+
+TEST("sqlite - an abandoned transaction leaves the database byte-identical")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    auto db = make_people();
+    auto const before = db.serialize();
+    REQUIRE(!before.empty());
+
+    // The early return is the point: nothing here says "roll back", and the write still does not land.
+    auto const abandoned = [&]
+    {
+        auto tx_r = db.begin_transaction();
+        REQUIRE(tx_r.has_value());
+        auto tx = cc::move(tx_r.value());
+
+        REQUIRE(db.exec("INSERT INTO people(id, name) VALUES (4, 'ken')").has_value());
+        REQUIRE(db.exec("DELETE FROM people WHERE id = 1").has_value());
+        return; // tx dies here, unommitted
+    };
+    abandoned();
+
+    CHECK(count_people(db) == 3);
+    CHECK(same_bytes(db.serialize(), before));
+}
+
+TEST("sqlite - the chunk cascade follows foreign_keys")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    // OFF is SQLite's default, so a schema that depends on the cascade has to say so.
+    {
+        auto db = make_chunks();
+        auto const enabled = db.get_foreign_keys();
+        REQUIRE(enabled.has_value());
+        CHECK(!enabled.value());
+
+        REQUIRE(db.exec("DELETE FROM blobs WHERE id = 1").has_value());
+        CHECK(count_chunks(db) == 2); // orphaned, not deleted
+    }
+
+    {
+        auto db = make_chunks();
+        REQUIRE(db.set_foreign_keys(true).has_value());
+        auto const enabled = db.get_foreign_keys();
+        REQUIRE(enabled.has_value());
+        CHECK(enabled.value());
+
+        REQUIRE(db.exec("DELETE FROM blobs WHERE id = 1").has_value());
+        CHECK(count_chunks(db) == 1); // the cascade took row 1's chunk with it
+    }
+}
+
+TEST("sqlite - journal mode is reported back, not assumed")
+{
+    if (!sql::is_available())
+    {
+        CHECK(sql::database::open_memory().has_error());
+        return;
+    }
+
+    auto db = make_people();
+
+    // An in-memory database is always `memory` and cannot be talked into WAL — which is exactly why the mode is
+    // read back rather than assumed to be whatever was requested.
+    auto const initial = db.get_journal_mode();
+    REQUIRE(initial.has_value());
+    CHECK(initial.value() == sql::journal_mode::memory);
+
+    REQUIRE(db.set_journal_mode(sql::journal_mode::wal).has_value());
+    auto const after = db.get_journal_mode();
+    REQUIRE(after.has_value());
+    CHECK(after.value() == sql::journal_mode::memory);
+
+    CHECK(db.set_busy_timeout(250).has_value());
+}
+
 TEST("sqlite - availability contract holds in both build modes")
 {
     // Whether the backend was compiled in decides success vs. a runtime error, never a missing symbol or a crash.
@@ -224,5 +449,25 @@ TEST("sqlite - availability contract holds in both build modes")
         CHECK(sql::database::open_readonly("x.sqlite").has_error());
         CHECK(sql::database::open_memory().has_error());
         CHECK(sql::database::open_blob(cc::span<byte const>()).has_error());
+
+        // A database is never handed out without a backend, so a default-constructed one is what a caller would
+        // reach the new entry points through — each reports rather than crashing.
+        auto db = sql::database();
+        CHECK(db.open_blob_handle({.table = "t", .column = "c", .rowid = 1}).has_error());
+        CHECK(db.begin_transaction().has_error());
+        CHECK(db.set_journal_mode(sql::journal_mode::wal).has_error());
+        CHECK(db.get_journal_mode().has_error());
+        CHECK(db.set_busy_timeout(0).has_error());
+        CHECK(db.set_foreign_keys(true).has_error());
+        CHECK(db.get_foreign_keys().has_error());
+
+        auto handle = sql::blob_handle();
+        CHECK(handle.size() == 0);
+        CHECK(handle.read_at(0, cc::span<byte>()).has_error());
+        CHECK(handle.reopen(1).has_error());
+
+        auto tx = sql::transaction();
+        CHECK(!tx.is_open());
+        CHECK(tx.commit().has_error());
     }
 }

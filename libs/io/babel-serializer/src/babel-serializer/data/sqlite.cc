@@ -33,6 +33,76 @@ sqlite3* handle_of(sqlite3_stmt* stmt)
 {
     return sqlite3_db_handle(stmt);
 }
+
+/// The SQL spelling of a journal mode, which is also what PRAGMA journal_mode reports back.
+char const* sql_name_of(journal_mode mode)
+{
+    switch (mode)
+    {
+    case journal_mode::delete_journal:
+        return "delete";
+    case journal_mode::truncate:
+        return "truncate";
+    case journal_mode::persist:
+        return "persist";
+    case journal_mode::memory:
+        return "memory";
+    case journal_mode::wal:
+        return "wal";
+    case journal_mode::off:
+        return "off";
+    }
+    return "delete";
+}
+
+/// Runs a PRAGMA that reports one integer, e.g. `PRAGMA foreign_keys`.
+cc::result<i64> pragma_i64(sqlite3* db, cc::string_view sql)
+{
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.data(), int(sql.size()), &stmt, nullptr) != SQLITE_OK)
+    {
+        auto msg = last_error(db);
+        sqlite3_finalize(stmt);
+        return cc::error(cc::move(msg));
+    }
+
+    i64 value = 0;
+    int const rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+        value = sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+        return cc::error(last_error(db));
+    return value;
+}
+
+/// Runs a PRAGMA that reports one text value, copied out before the statement dies.
+cc::result<cc::string> pragma_text(sqlite3* db, cc::string_view sql)
+{
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.data(), int(sql.size()), &stmt, nullptr) != SQLITE_OK)
+    {
+        auto msg = last_error(db);
+        sqlite3_finalize(stmt);
+        return cc::error(cc::move(msg));
+    }
+
+    auto value = cc::string();
+    int const rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+    {
+        auto const* text = sqlite3_column_text(stmt, 0);
+        if (text != nullptr)
+            value = cc::string::create_copy_of(
+                cc::string_view(reinterpret_cast<char const*>(text), sqlite3_column_bytes(stmt, 0)));
+    }
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+        return cc::error(last_error(db));
+    return value;
+}
 } // namespace
 
 // database
@@ -137,6 +207,67 @@ cc::result<statement> database::prepare(cc::string_view sql)
     if (stmt == nullptr) // empty / whitespace / comment-only SQL compiles to no statement
         return cc::error(cc::string("sqlite error: SQL contained no statement to prepare"));
     return statement(stmt);
+}
+
+cc::result<blob_handle> database::open_blob_handle(blob_location where)
+{
+    auto c_db = cc::string::create_copy_of(where.db_name);
+    auto c_table = cc::string::create_copy_of(where.table);
+    auto c_column = cc::string::create_copy_of(where.column);
+
+    sqlite3_blob* blob = nullptr;
+    int const rc = sqlite3_blob_open(_db, c_db.c_str_materialize(), c_table.c_str_materialize(),
+                                     c_column.c_str_materialize(), where.rowid, /*writable*/ 0, &blob);
+    if (rc != SQLITE_OK)
+    {
+        auto msg = last_error(_db);
+        sqlite3_blob_close(blob); // null on failure, but close is null-safe
+        return cc::error(cc::move(msg));
+    }
+    return blob_handle(blob, _db);
+}
+
+cc::result<transaction> database::begin_transaction()
+{
+    CC_RETURN_IF_ERROR(exec("BEGIN"));
+    return transaction(_db);
+}
+
+cc::result<cc::unit> database::set_journal_mode(journal_mode mode)
+{
+    return exec(cc::format("PRAGMA journal_mode = {}", sql_name_of(mode)));
+}
+
+cc::result<journal_mode> database::get_journal_mode()
+{
+    auto reported = pragma_text(_db, "PRAGMA journal_mode");
+    CC_RETURN_IF_ERROR(reported);
+
+    for (auto const mode : {journal_mode::delete_journal, journal_mode::truncate, journal_mode::persist,
+                            journal_mode::memory, journal_mode::wal, journal_mode::off})
+        if (reported.value() == cc::string_view(sql_name_of(mode)))
+            return mode;
+
+    return cc::error(cc::format("sqlite: unknown journal mode '{}'", reported.value()));
+}
+
+cc::result<cc::unit> database::set_busy_timeout(i32 milliseconds)
+{
+    if (sqlite3_busy_timeout(_db, milliseconds) != SQLITE_OK)
+        return cc::error(last_error(_db));
+    return cc::unit{};
+}
+
+cc::result<cc::unit> database::set_foreign_keys(bool enabled)
+{
+    return exec(enabled ? "PRAGMA foreign_keys = ON" : "PRAGMA foreign_keys = OFF");
+}
+
+cc::result<bool> database::get_foreign_keys()
+{
+    auto reported = pragma_i64(_db, "PRAGMA foreign_keys");
+    CC_RETURN_IF_ERROR(reported);
+    return reported.value() != 0;
 }
 
 cc::vector<byte> database::serialize() const
@@ -272,6 +403,115 @@ statement::iterator statement::begin()
     return iterator{this};
 }
 
+// blob_handle
+// -------------------------------------------------------------------------------------------------
+
+blob_handle::~blob_handle()
+{
+    if (_blob != nullptr)
+        sqlite3_blob_close(_blob);
+}
+
+blob_handle::blob_handle(blob_handle&& other) noexcept : _blob(other._blob), _db(other._db)
+{
+    other._blob = nullptr;
+    other._db = nullptr;
+}
+
+blob_handle& blob_handle::operator=(blob_handle&& other) noexcept
+{
+    if (this != &other)
+    {
+        if (_blob != nullptr)
+            sqlite3_blob_close(_blob);
+        _blob = other._blob;
+        _db = other._db;
+        other._blob = nullptr;
+        other._db = nullptr;
+    }
+    return *this;
+}
+
+isize blob_handle::size() const
+{
+    return _blob != nullptr ? isize(sqlite3_blob_bytes(_blob)) : 0;
+}
+
+cc::result<cc::unit> blob_handle::read_at(isize offset, cc::span<byte> out)
+{
+    if (_blob == nullptr)
+        return cc::error(cc::string("sqlite error: reading from a closed blob handle"));
+
+    // Checked here rather than left to SQLite, so the message names the range instead of reporting SQLITE_ERROR.
+    auto const total = size();
+    if (offset < 0 || out.size() < 0 || offset + out.size() > total)
+        return cc::error(cc::format("sqlite error: blob read [{}, {}) is outside the {}-byte value", offset,
+                                    offset + out.size(), total));
+
+    if (out.empty())
+        return cc::unit{};
+
+    if (sqlite3_blob_read(_blob, out.data(), int(out.size()), int(offset)) != SQLITE_OK)
+        return cc::error(last_error(_db));
+    return cc::unit{};
+}
+
+cc::result<cc::unit> blob_handle::reopen(i64 rowid)
+{
+    if (_blob == nullptr)
+        return cc::error(cc::string("sqlite error: reopening a closed blob handle"));
+
+    if (sqlite3_blob_reopen(_blob, rowid) != SQLITE_OK)
+        return cc::error(last_error(_db));
+    return cc::unit{};
+}
+
+// transaction
+// -------------------------------------------------------------------------------------------------
+
+transaction::~transaction()
+{
+    // Nothing to report to: a caller that needs to know the write landed calls commit() and reads its result.
+    if (_db != nullptr)
+        sqlite3_exec(_db, "ROLLBACK", nullptr, nullptr, nullptr);
+}
+
+transaction::transaction(transaction&& other) noexcept : _db(other._db)
+{
+    other._db = nullptr;
+}
+
+transaction& transaction::operator=(transaction&& other) noexcept
+{
+    if (this != &other)
+    {
+        if (_db != nullptr)
+            sqlite3_exec(_db, "ROLLBACK", nullptr, nullptr, nullptr);
+        _db = other._db;
+        other._db = nullptr;
+    }
+    return *this;
+}
+
+cc::result<cc::unit> transaction::commit()
+{
+    if (_db == nullptr)
+        return cc::error(cc::string("sqlite error: committing a transaction that is already finished"));
+
+    char* errmsg = nullptr;
+    int const rc = sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &errmsg);
+    if (rc != SQLITE_OK)
+    {
+        // Still live, so the destructor rolls back — a failed commit must not read as a silent success.
+        auto msg = errmsg != nullptr ? cc::format("sqlite error ({}): {}", rc, errmsg) : last_error(_db);
+        sqlite3_free(errmsg);
+        return cc::error(cc::move(msg));
+    }
+
+    _db = nullptr;
+    return cc::unit{};
+}
+
 // row
 // -------------------------------------------------------------------------------------------------
 
@@ -383,9 +623,65 @@ cc::result<statement> database::prepare(cc::string_view)
 {
     return cc::error(unavailable());
 }
+cc::result<blob_handle> database::open_blob_handle(blob_location)
+{
+    return cc::error(unavailable());
+}
+cc::result<transaction> database::begin_transaction()
+{
+    return cc::error(unavailable());
+}
+cc::result<cc::unit> database::set_journal_mode(journal_mode)
+{
+    return cc::error(unavailable());
+}
+cc::result<journal_mode> database::get_journal_mode()
+{
+    return cc::error(unavailable());
+}
+cc::result<cc::unit> database::set_busy_timeout(i32)
+{
+    return cc::error(unavailable());
+}
+cc::result<cc::unit> database::set_foreign_keys(bool)
+{
+    return cc::error(unavailable());
+}
+cc::result<bool> database::get_foreign_keys()
+{
+    return cc::error(unavailable());
+}
+
 cc::vector<byte> database::serialize() const
 {
     return {};
+}
+
+// blob_handle / transaction — never constructed in this build (no database hands one out); definitions exist so the API links.
+blob_handle::~blob_handle() = default;
+blob_handle::blob_handle(blob_handle&&) noexcept = default;
+blob_handle& blob_handle::operator=(blob_handle&&) noexcept = default;
+
+isize blob_handle::size() const
+{
+    return 0;
+}
+cc::result<cc::unit> blob_handle::read_at(isize, cc::span<byte>)
+{
+    return cc::error(unavailable());
+}
+cc::result<cc::unit> blob_handle::reopen(i64)
+{
+    return cc::error(unavailable());
+}
+
+transaction::~transaction() = default;
+transaction::transaction(transaction&&) noexcept = default;
+transaction& transaction::operator=(transaction&&) noexcept = default;
+
+cc::result<cc::unit> transaction::commit()
+{
+    return cc::error(unavailable());
 }
 i64 database::last_insert_rowid() const
 {

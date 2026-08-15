@@ -12,6 +12,7 @@
 // These are the exact tag names SQLite typedefs, so `sqlite3*` / `sqlite3_stmt*` resolve without the real header.
 struct sqlite3;
 struct sqlite3_stmt;
+struct sqlite3_blob;
 
 // SQLite reader (data/).
 //
@@ -43,6 +44,46 @@ namespace babel::sqlite
 [[nodiscard]] bool is_available();
 
 } // namespace babel::sqlite
+
+/// How the connection journals, set with database::set_journal_mode.
+///
+/// The first four differ only in what happens to the rollback journal between transactions, so they trade
+/// per-transaction filesystem cost against nothing else.
+/// `wal` is a different mechanism altogether, and `off` gives up crash safety.
+enum class babel::sqlite::journal_mode : babel::u8
+{
+    /// SQLite's default: a rollback journal beside the database file, deleted at the end of every transaction.
+    /// Committing therefore costs one file deletion.
+    delete_journal, // SQLite spells this DELETE, which is a keyword here
+
+    /// The same journal, truncated to zero length instead of deleted.
+    /// Faster wherever truncating a file is cheaper than deleting and recreating it, which is most filesystems.
+    truncate,
+
+    /// The same journal again, left in place with its header zeroed.
+    /// Avoids per-transaction file creation entirely, at the cost of a journal file that stays on disk.
+    persist,
+
+    /// The rollback journal lives in RAM.
+    /// Fastest of the four, and a crash or power loss mid-transaction leaves the database corrupt — there is
+    /// nothing on disk to roll back from.
+    memory,
+
+    /// A write-ahead log: writers append pages to a `-wal` file instead of rewriting the database in place.
+    /// One writer and any number of readers proceed without blocking each other, which is what a file being
+    /// written incrementally while it is read wants.
+    ///
+    /// Unlike every other mode this is a property of the database FILE rather than the connection, so it survives
+    /// close and reopen and is seen by every connection.
+    /// Unavailable for an in-memory database, and it needs a VFS with shared-memory support — which is why
+    /// get_journal_mode exists rather than the request being assumed to have taken.
+    wal,
+
+    /// No rollback journal at all.
+    /// ROLLBACK stops meaning anything and a crash mid-transaction corrupts the database, so this is for data
+    /// that can be regenerated and nothing else.
+    off,
+};
 
 /// The dynamic type of a result column, as reported by SQLite for the current row.
 enum class babel::sqlite::column_kind : babel::u8
@@ -145,6 +186,85 @@ private:
     cc::string _error;
 };
 
+/// Which BLOB cell an incremental handle is opened over.
+/// The row is named by rowid, so the table must be a rowid table — a WITHOUT ROWID table cannot be reached this way.
+struct babel::sqlite::blob_location
+{
+    cc::string_view table;
+    cc::string_view column;
+    i64 rowid = 0;
+    cc::string_view db_name = "main";
+};
+
+/// A read handle over one BLOB cell, reading at an offset without materializing the whole value.
+/// Move-only (owns the sqlite3_blob). Obtain one from database::open_blob_handle.
+///
+/// **A write to the row invalidates the handle**, including a write through another connection.
+/// read_at then reports an error rather than stale bytes, and reopen() is how a handle is brought back to life.
+///
+/// Read-only for now: writing through a handle is a separate capability and is not implemented.
+class babel::sqlite::blob_handle
+{
+public:
+    blob_handle() = default;
+    ~blob_handle();
+    blob_handle(blob_handle&&) noexcept;
+    blob_handle& operator=(blob_handle&&) noexcept;
+    blob_handle(blob_handle const&) = delete;
+    blob_handle& operator=(blob_handle const&) = delete;
+
+    /// The size of the whole BLOB in bytes, whatever slice of it has been read.
+    [[nodiscard]] isize size() const;
+
+    /// Reads out.size() bytes starting at `offset`.
+    /// The range must lie inside the blob: a partial read is an error, never a short fill.
+    cc::result<cc::unit> read_at(isize offset, cc::span<byte> out);
+
+    /// Points the same handle at another row of the same table and column.
+    /// Cheaper than opening a new handle, which is what makes walking many rows worth doing this way.
+    cc::result<cc::unit> reopen(i64 rowid);
+
+private:
+    friend class database;
+    explicit blob_handle(sqlite3_blob* blob, sqlite3* db) : _blob(blob), _db(db) {}
+
+    sqlite3_blob* _blob = nullptr;
+    sqlite3* _db = nullptr; // for error text only; the connection outlives the handle
+};
+
+/// A scoped transaction: commit() publishes it, and anything else rolls it back.
+/// Move-only; obtain one from database::begin_transaction.
+///
+/// This is what makes a multi-table write all-or-nothing — an early return, a thrown exception or a plain forgotten
+/// commit all leave the database as it was, rather than half-written.
+///
+/// **A rollback in the destructor cannot report.** commit() is the reporting path, so a caller that needs to know
+/// the write landed must call it and read the result.
+/// Transactions do not nest: SQLite rejects a nested BEGIN, and that surfaces as an ordinary error here.
+class babel::sqlite::transaction
+{
+public:
+    transaction() = default;
+    ~transaction();
+    transaction(transaction&&) noexcept;
+    transaction& operator=(transaction&&) noexcept;
+    transaction(transaction const&) = delete;
+    transaction& operator=(transaction const&) = delete;
+
+    /// Commits, after which the transaction is inert and the destructor does nothing.
+    /// A failed commit leaves it live, so the destructor still rolls back.
+    cc::result<cc::unit> commit();
+
+    /// True while the transaction is still open — neither committed nor moved from.
+    [[nodiscard]] bool is_open() const { return _db != nullptr; }
+
+private:
+    friend class database;
+    explicit transaction(sqlite3* db) : _db(db) {}
+
+    sqlite3* _db = nullptr; // null once committed or moved from
+};
+
 /// A live SQLite database connection.
 /// Move-only: it owns the sqlite3 handle and closes it in the destructor.
 /// Full read/write: exec arbitrary SQL, prepare/query statements, run DDL and transactions.
@@ -175,6 +295,29 @@ public:
     /// Convenience: prepare a single statement ready to iterate.
     /// Same as prepare; it reads as intent at the call site.
     [[nodiscard]] cc::result<statement> query(cc::string_view sql) { return prepare(sql); }
+
+    /// Open a read handle over one BLOB cell, for reading it in pieces.
+    /// Note the neighbour: open_blob loads a whole *database* from a byte image, this opens one *value* in a row.
+    [[nodiscard]] cc::result<blob_handle> open_blob_handle(blob_location where);
+
+    /// Begin a transaction that commits on request and rolls back on anything else.
+    [[nodiscard]] cc::result<transaction> begin_transaction();
+
+    /// How the connection journals.
+    /// WAL is the mode a file written incrementally wants.
+    cc::result<cc::unit> set_journal_mode(journal_mode mode);
+    /// What the connection actually journals as — a requested mode can be refused (WAL needs a VFS that supports it),
+    /// so this is read back rather than assumed.
+    [[nodiscard]] cc::result<journal_mode> get_journal_mode();
+
+    /// How long a write blocked by another connection waits before giving up.
+    /// 0 means do not wait at all.
+    cc::result<cc::unit> set_busy_timeout(i32 milliseconds);
+
+    /// Whether foreign key constraints — and the ON DELETE CASCADE that rides on them — are enforced.
+    /// SQLite defaults this OFF, so a schema whose correctness depends on a cascade must turn it on explicitly.
+    cc::result<cc::unit> set_foreign_keys(bool enabled);
+    [[nodiscard]] cc::result<bool> get_foreign_keys();
 
     /// Serialize the main database to a contiguous byte image (round-trips through open_blob). Empty on failure.
     [[nodiscard]] cc::vector<byte> serialize() const;

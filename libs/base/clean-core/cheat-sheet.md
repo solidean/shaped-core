@@ -303,6 +303,21 @@ sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if no
 sv.compare(o);  sv == o;  sv < o;                       // lexicographic by byte (no locale/collation)
 sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
 
+#include <clean-core/string/interned_string.hh>  // cc::interned_string — 8-byte handle to one canonical copy
+cc::interned_string id = cc::intern("transform");  // process-wide table, created on first use, never destroyed
+id.as_string_view();  id.size();  id.empty();      // as_string_view is a load, not a lookup
+a == b;                                   // POINTER compare (canonical within a table); != too
+// NO relational operators: the two orders are not interchangeable, so the call site names the one it means
+a.compare_bytes(b);                       // -> strong_ordering by canonical BYTES; reproducible, costs a memcmp
+a.compare_identity(b);                    // -> strong_ordering by process-local identity; one pointer compare,
+                                          //    and a DIFFERENT order every run — only where nobody sees the order
+cc::interned_string::by_bytes{};  cc::interned_string::by_identity{};   // the matching sort predicates
+hash(id);                                 // precomputed; == hash(id.as_string_view())
+cc::interned_string{};                    // the empty string, == intern("") in any table
+cc::string_interner t;  t.intern(s);  t.size();    // caller-owned table, for tests that want isolation
+// Thread-safe: intern from any thread, no external locking (sharded internally; free when CC_HAS_THREADS == 0).
+// A caller-owned table must OUTLIVE every handle it handed out; the process-wide one has no such question.
+
 #include <clean-core/string/glob.hh>             // path globbing (shaped-linter configs, nexus' file filters)
 cc::glob_normalize_path(p);               // -> cc::string: '\'->'/', repeated/trailing slashes dropped, /c/x = C:\x = c:/x
 cc::glob_matches(pattern, path, {});      // options are NOT defaulted; {} = exact + case-sensitive, both sides already normalized
@@ -509,6 +524,18 @@ cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold ov
 cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)
 cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const> + u64 seed (content-addr IDs)
 hash(h128);                                // hidden-friend customization point -> low limb (u64)
+
+#include <clean-core/common/hash256.hh>
+cc::hash256{.l0=..,.l1=..,.l2=..,.l3=..};  // 256-bit value, four u64 limbs; ==, <=> (lex by l0..l3, NOT byte order)
+cc::hash256::create(bytes);                // = cc::blake3::create; BLAKE3-256 of a span<byte const>
+h256.to_bytes(out32);  cc::hash256::from_bytes(in32);  // the durable 32-byte form: l0 first, each limb little-endian
+hash(h256);                                // hidden-friend customization point -> l0 (u64)
+
+#include <clean-core/common/blake3.hh>    // the CRYPTOGRAPHIC hash — for content addressing, not for maps
+cc::blake3::create(bytes);                 // -> hash256, one-shot
+cc::blake3 h;  h.update(bytes);  h.finalize();  h.reset();  // streaming: hash a sequence without concatenating it
+// finalize() is const and repeatable; update() may continue after it
+// ~8-20x slower than XXH3 depending on input size (tests/benchmarks/hash-benchmark.cc measures both)
 ```
 
 ## Sequence (lazy ranges — early prototype, see [sequence](docs/sequence.md))
@@ -754,6 +781,13 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`string` / `string_view` are NOT null-terminated.**
   `data()` is not a C string — use `str.c_str_materialize()`, whose result is valid only until the next non-const operation.
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
+- **An `interned_string`'s identity is process-local and must never leave the process.**
+  Serialize `as_string_view()`, and hash durable data over those bytes — two runs will not agree on anything else.
+- **`interned_string` has no `<`, on purpose.** Everything about the type is a pointer operation except ordering by bytes, so making that cost visible beats a `<` that quietly memcmps.
+  `compare_bytes` is the reproducible one and the default choice; `compare_identity` is cheaper and its order changes every run, so never persist or display anything sorted by it.
+- **`hash256` orders by limb, not by its 32 canonical bytes.**
+  The order is total and deterministic, so it is fine as a tiebreak — it just is not the order the hex digests sort in.
+  Use `to_bytes` / `from_bytes` whenever the 32 bytes themselves are what matters.
 - **`optional` has no `operator*` / `operator->`.** Use `value()`, which
   *asserts* when empty rather than throwing.
 - **Return errors with `cc::error(...)`** — never an implicit conversion.

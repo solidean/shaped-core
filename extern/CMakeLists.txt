@@ -8,6 +8,11 @@
 option(SC_USE_VENDORED_MIMALLOC "Build the in-tree vendored mimalloc (OFF expects an external `mimalloc` target)" ON)
 option(SC_USE_VENDORED_XXHASH "Build the in-tree vendored xxHash (OFF expects an external `xxhash` target)" ON)
 
+# BLAKE3's C implementation, committed in-source (a handful of small TUs; the hand-written assembly variants are not vendored).
+# Backs cc::blake3 / cc::hash256, the cryptographic hash content addressing needs; linked PRIVATE by clean-core, so blake3.h reaches one TU.
+# Vendored rather than fetched because it is small and every build needs it — the xxHash tier, not the SQLite one.
+option(SC_USE_VENDORED_BLAKE3 "Build the in-tree vendored BLAKE3 (OFF expects an external `blake3` target)" ON)
+
 # stb single-file image libraries (stb_image + stb_image_write), committed in-source (two small headers).
 # Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
 option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an external `stb` target)" ON)
@@ -47,6 +52,10 @@ endif()
 
 if(SC_USE_VENDORED_XXHASH)
     add_subdirectory(xxhash)
+endif()
+
+if(SC_USE_VENDORED_BLAKE3)
+    add_subdirectory(blake3)
 endif()
 
 if(SC_USE_VENDORED_STB)

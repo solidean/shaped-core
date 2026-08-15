@@ -181,6 +181,28 @@ Hashing is bounded to exactly two places:
 It is **never** in the materialize path, never in a query, never in a parse, never per-frame.
 In-memory maps key on a truncated 64 bits of the digest, so the full 32 bytes cost storage and a memcmp on collision, and nothing else.
 
+**Measured, milestone 0 — the 4× was optimistic.**
+`cc::blake3` now sits beside XXH3 in [hash-benchmark.cc](../../../base/clean-core/tests/benchmarks/hash-benchmark.cc), so the ratio is a recorded number instead of an estimate.
+On an i9-12900H under `release-clang`, against XXH3-128:
+
+| input | XXH3-128 | BLAKE3 | ratio |
+|---|---|---|---|
+| 8 B | 2.35 GB/s | 0.11 GB/s | 21× |
+| 256 B — an op | 12.99 GB/s | 1.09 GB/s | 12× |
+| 64 KiB — a blob chunk | 27.11 GB/s | 3.11 GB/s | 8.7× |
+
+The ratio is two to five times worse than the 4× the reservation was accepted on, and that is the honest reading.
+BLAKE3 pays a fixed per-call cost that XXH3 does not, so the gap widens as the input shrinks.
+Note that this machine is Alder Lake, where AVX-512 is fused off — BLAKE3's widest path is unavailable, and a CPU that has it roughly doubles the 64 KiB figure.
+
+**What that costs where the design actually hashes**, which is the question the reservation asks:
+
+- **An op**, a few hundred bytes: about **270 ns**. Committing a thousand ops in one go is a quarter of a millisecond.
+- **A blob at import**, at 3.1 GB/s: a gigabyte takes about **0.3 s**, against a disk read of the same bytes that will not be faster.
+
+So the ratio got worse and the conclusion did not change: at the two places the design hashes, the absolute cost is far below anything a user perceives.
+The reservation stands as written, and this is the evidence it asked for rather than a case for reopening.
+
 **Reopen when:** BLAKE3 shows up in a profile of an ordinary open / edit / save loop.
 If it does, the design put hashing somewhere it does not belong, and the fix is to move the hashing — after which the choice of hash can be re-argued on evidence.
 
@@ -189,6 +211,16 @@ If it does, the design put hashing somewhere it does not belong, and the fix is 
 **Decided.** The interner is a `cc::` facility, not a `vdoc` one.
 
 It is general vocabulary — anything with symbolic identity wants it — and there is nothing document-specific about it.
+
+**Built in milestone 0, and the handle carries a pointer rather than a numeric id.**
+`cc::interned_string` holds the address of an entry that is never moved and never freed, so `as_string_view()` and byte-ordering are direct rather than a table lookup.
+It also settles the "never serialize the raw id" rule by construction: there is no id to write down, only a private pointer.
+Identity stays process-local, exactly as [concept.md](concept.md) says.
+
+**There is no `operator<`, and `vdoc` must pick its order explicitly.**
+`compare_bytes` is reproducible across processes and costs a memcmp; `compare_identity` is a pointer compare whose order differs every run.
+Everything whose order is written to a file, sent to a peer or shown to a person — the sorted entity table above all — takes `compare_bytes`.
+`compare_identity` is available for a scratch sort nobody observes, and using it anywhere durable would silently break determinism, which is why the type refuses to guess.
 
 **Reopen when:** nothing.
 

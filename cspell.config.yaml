@@ -7,10 +7,13 @@ words:
   - aabbs
   - Allman
   - bary
+  - behaviour
+  - blake
   - blas
   - blit
   - blits
   - closesthit
+  - collidable
   - CPPRTTI
   - CPPUNWIND
   - crossrefs
@@ -51,6 +54,7 @@ words:
   - MSVC
   - mtllib
   - munch
+  - neighbours
   - noprofile
   - numthreads
   - ORBIS
@@ -60,6 +64,7 @@ words:
   - pycache
   - pyi
   - qtcreator
+  - RAII
   - raygen
   - raygeneration
   - raytraced
@@ -67,6 +72,7 @@ words:
   - readwrite
   - relwithdebinfo
   - repr
+  - rowid
   - rpcndr
   - rtti
   - Samp
@@ -94,6 +100,7 @@ words:
   - usemtl
   - vbuf
   - vcvars
+  - vdoc
   - venv
   - vulkan
   - wasi
@@ -102,5 +109,6 @@ words:
   - workdir
   - wparam
   - WPARAM
+  - xxhash
 ignoreWords: []
 import: []

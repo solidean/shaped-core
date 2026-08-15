@@ -22,7 +22,7 @@ src/babel-serializer/
     base64     [done]          codec (both alphabets; optional padding)
     json       [done]          reader
     markdown   [done]          block-level reader (no inline parsing)
-    sqlite     [done]          live database engine (read/write; fetch-on-demand backend)
+    sqlite     [done]          live database engine (read/write, transactions, incremental blob reads; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
@@ -67,6 +67,10 @@ It shares json's flat document shape exactly, so knowing one reader is knowing t
 The first format that is not a one-shot stream parser: a live database engine behind a thin RAII wrapper, full read/write.
 See [sqlite.hh](../src/babel-serializer/data/sqlite.hh) for the shape, and [coding-guidelines.md](coding-guidelines.md) for the always-available-API rule its fetch-on-demand backend forces.
 
+- `[done]` **incremental blob I/O, transactions and connection configuration** — a read handle over one BLOB cell,
+  an RAII transaction that commits on request and rolls back otherwise, and the journal-mode / busy-timeout / `foreign_keys` pragmas.
+  Grown for `vdoc::file`, which needs to read a chunk without materializing its row and to publish a whole document in one transaction.
+- `[planned]` **writing through a blob handle** — reading is what a content store needs first; writing is a separate capability.
 - `[planned]` **typed query layer** — a compile-time-validated, typed query front end (in the spirit of `cc::format`) on top of the prepared-statement API.
 
 ### Other data formats [planned]
