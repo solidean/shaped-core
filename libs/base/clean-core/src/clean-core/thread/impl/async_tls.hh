@@ -18,6 +18,7 @@ namespace cc::impl
 struct async_tls_block
 {
     cc::async_scheduler* scheduler = nullptr; // the scheduler bound by async_worker_scope; null => no worker scope
+    void* ambient = nullptr;        // head of the ambient context chain (async_ambient.hh); null => no scope active
     void* current_worker = nullptr; // async_thread_pool::worker running this thread's loop; null on foreign threads
     int inline_depth = 0;           // recursion depth of the eager depth-first dep drive
 };
