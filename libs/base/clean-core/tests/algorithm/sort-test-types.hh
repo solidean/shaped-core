@@ -5,7 +5,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 
-// Input shapes and checkers shared by the sort and quickselect tests.
+// Input shapes and checkers shared by the sort and selection tests.
 
 namespace sort_test
 {

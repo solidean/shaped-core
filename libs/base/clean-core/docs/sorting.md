@@ -43,8 +43,9 @@ pdqsort — pattern-defeating quicksort — with every part of it, expressed ove
 * **Heapsort** once the bad-split budget is spent, which bounds a full sort at O(n log n).
   Heapsort is swap-only, so it drops straight in.
 
-`cc::quickselect` runs the same machinery with a subrange predicate that prunes everything not covering the index.
+`cc::sort_at` runs the same machinery with a subrange predicate that prunes everything not covering the index.
 Its fallback differs: a spent budget switches the pivot to a **median of medians**, which keeps a pruned run linear rather than O(n log n).
+`cc::sort_window` and `cc::sort_first` prune against a window instead of a single index — same machinery again.
 
 Deterministic, and **not stable**.
 Where stability matters, `cc::sort_indices` gives it: sorting a `0..n-1` index array breaks ties on the index, so equal keys keep their order.
@@ -96,8 +97,8 @@ Three rules bind an adapter:
   A computed key is fine; it is simply recomputed on every comparison, which is why `cc::sort_by_cached_key` exists.
 * **`element_swap(a, b)` is never called with `a == b`**, and must permute *every* range the adapter covers, or they fall out of step.
 
-The last argument to `sort_ex` is the subrange predicate.
-`cc::constant_function<true>{}` sorts everything; anything else prunes, which is how `quickselect` is built out of the same call.
+The last argument to `sort_ex` is the subrange predicate, `should_sort(start, size)`.
+`cc::constant_function<true>{}` sorts everything; anything else prunes, which is how `cc::sort_at` is built out of the same call.
 
 ## What is not here yet
 

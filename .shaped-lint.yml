@@ -91,7 +91,7 @@ rules:
 
   - kind: deny-include
     value: <algorithm>
-    reason: use clean-core/algorithm/ — cc::sort / sort_by / sort_multi / sort_indices, cc::partition_by, cc::quickselect, cc::is_sorted. Binary search and the rest of the algorithm surface are not there yet, so a library that needs one re-allows this with the gap named
+    reason: use clean-core/algorithm/ — cc::sort / sort_by / sort_multi / sort_indices, cc::partition_by, cc::sort_at / sort_window / sort_first, cc::is_sorted. Binary search and the rest of the algorithm surface are not there yet, so a library that needs one re-allows this with the gap named
 
   - kind: deny-include
     value: <functional>

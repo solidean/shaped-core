@@ -125,20 +125,21 @@ template <class KeyF, class... RangeTs>
 /// `compare(a, b)` must be a strict weak ordering and is true when a belongs before b.
 /// A comparator that is not one is a contract violation the partitions assert on, rather than memory corruption.
 ///
-/// `select(start, size)` prunes: a subrange it rejects is left unsorted, which is what makes this quickselect as well as sort.
+/// `should_sort(start, size)` prunes: a subrange it rejects is left unsorted, which is what makes this a selection as
+/// well as a sort.
 /// Pass cc::constant_function<true>{} to sort everything.
 ///
 /// Deterministic but not stable, and O(n log n) worst case.
 /// The range is copied down the recursion, so it must stay cheap — hold pointers in an adapter, not values.
-template <class RangeT, class CompareF, class SelectF>
-constexpr void sort_ex(isize start, isize size, RangeT range, CompareF&& compare, SelectF&& select)
+template <class RangeT, class CompareF, class ShouldSortF>
+constexpr void sort_ex(isize start, isize size, RangeT range, CompareF&& compare, ShouldSortF&& should_sort)
 {
     static_assert(cc::index_swap_range<RangeT>, "cc::sort_ex takes an index_swap_range — see cc::as_index_swap_range");
     static_assert(std::is_trivially_copyable_v<RangeT>, "an index_swap_range must be trivially copyable — hold "
                                                         "pointers, not values");
     CC_ASSERT(size >= 0, "size must be >= 0");
 
-    impl::sort_loop<impl::sort_fallback::heap>(start, size, range, compare, select,
+    impl::sort_loop<impl::sort_fallback::heap>(start, size, range, compare, should_sort,
                                                impl::sort_bad_partition_budget(size), true);
 }
 
@@ -342,59 +343,75 @@ constexpr isize partition_by(RangeT&& values, IsRightF&& is_right)
 /// neither side is itself sorted.
 /// Expected O(n), and O(n) worst case too: a run that keeps splitting badly switches to a median-of-medians pivot.
 /// `idx` must be a valid index.
+///
+/// A stable and an unstable sort put the same value at `idx` — they differ only in which equal-comparing element
+/// lands there, so a "stable" spelling of this would buy nothing.
+/// cc::sort_indices tiebreaks on the index if you need to name the winner.
 template <class RangeT, class CompareF = cc::default_less>
-constexpr void quickselect(RangeT&& values, isize idx, CompareF&& compare = {})
+constexpr void sort_at(RangeT&& values, isize idx, CompareF&& compare = {})
 {
-    static_assert(cc::indexed_range<RangeT>, "cc::quickselect takes an indexed range");
+    static_assert(cc::indexed_range<RangeT>, "cc::sort_at takes an indexed range");
 
     isize const size = isize(values.size());
     CC_ASSERT(0 <= idx && idx < size, "index must be inside the range");
 
-    auto select = impl::sort_index_in_range{.idx = idx};
-    impl::sort_loop<impl::sort_fallback::median_of_medians>(0, size, cc::as_index_swap_range(values), compare, select,
-                                                            impl::sort_bad_partition_budget(size), true);
+    auto should_sort = impl::sort_index_in_range{.idx = idx};
+    impl::sort_loop<impl::sort_fallback::median_of_medians>(0, size, cc::as_index_swap_range(values), compare,
+                                                            should_sort, impl::sort_bad_partition_budget(size), true);
 }
 
 template <class RangeT, class KeyF, class CompareF = cc::default_less>
-constexpr void quickselect_by(RangeT&& values, isize idx, KeyF&& key, CompareF&& compare = {})
+constexpr void sort_at_by(RangeT&& values, isize idx, KeyF&& key, CompareF&& compare = {})
 {
-    static_assert(cc::indexed_range<RangeT>, "cc::quickselect_by takes an indexed range");
+    static_assert(cc::indexed_range<RangeT>, "cc::sort_at_by takes an indexed range");
 
     isize const size = isize(values.size());
     CC_ASSERT(0 <= idx && idx < size, "index must be inside the range");
 
-    auto select = impl::sort_index_in_range{.idx = idx};
+    auto should_sort = impl::sort_index_in_range{.idx = idx};
     impl::sort_loop<impl::sort_fallback::median_of_medians>(0, size, cc::as_index_swap_range_by(values, key), compare,
-                                                            select, impl::sort_bad_partition_budget(size), true);
+                                                            should_sort, impl::sort_bad_partition_budget(size), true);
 }
 
-/// Puts the elements a full sort would place at [idx, idx + count) there, and sorts just those.
+/// Puts the elements a full sort would place in `window` there, and sorts just those.
 ///
 /// Everything before and after that window ends up in the right partition without being sorted itself.
-/// Takes O(n + count log count).
-/// idx + count may run past the end; the window is clamped to what exists.
+/// Takes O(n + window.size log window.size).
+/// The window may run past the end; it is clamped to what exists.
+///
+///   cc::sort_window(scores, {.offset = 10, .size = 5});   // ranks 10..14, in order
 template <class RangeT, class CompareF = cc::default_less>
-constexpr void quickselect_range(RangeT&& values, isize idx, isize count, CompareF&& compare = {})
+constexpr void sort_window(RangeT&& values, cc::offset_size window, CompareF&& compare = {})
 {
-    static_assert(cc::indexed_range<RangeT>, "cc::quickselect_range takes an indexed range");
-    CC_ASSERT(idx >= 0 && count >= 0, "idx and count must be >= 0");
+    static_assert(cc::indexed_range<RangeT>, "cc::sort_window takes an indexed range");
+    CC_ASSERT(window.offset >= 0 && window.size >= 0, "window offset and size must be >= 0");
 
-    auto select = impl::sort_overlaps_range{.idx = idx, .count = count};
+    auto should_sort = impl::sort_overlaps_range{.idx = window.offset, .count = window.size};
     isize const size = isize(values.size());
-    impl::sort_loop<impl::sort_fallback::median_of_medians>(0, size, cc::as_index_swap_range(values), compare, select,
-                                                            impl::sort_bad_partition_budget(size), true);
+    impl::sort_loop<impl::sort_fallback::median_of_medians>(0, size, cc::as_index_swap_range(values), compare,
+                                                            should_sort, impl::sort_bad_partition_budget(size), true);
 }
 
 template <class RangeT, class KeyF, class CompareF = cc::default_less>
-constexpr void quickselect_range_by(RangeT&& values, isize idx, isize count, KeyF&& key, CompareF&& compare = {})
+constexpr void sort_window_by(RangeT&& values, cc::offset_size window, KeyF&& key, CompareF&& compare = {})
 {
-    static_assert(cc::indexed_range<RangeT>, "cc::quickselect_range_by takes an indexed range");
-    CC_ASSERT(idx >= 0 && count >= 0, "idx and count must be >= 0");
+    static_assert(cc::indexed_range<RangeT>, "cc::sort_window_by takes an indexed range");
+    CC_ASSERT(window.offset >= 0 && window.size >= 0, "window offset and size must be >= 0");
 
-    auto select = impl::sort_overlaps_range{.idx = idx, .count = count};
+    auto should_sort = impl::sort_overlaps_range{.idx = window.offset, .count = window.size};
     isize const size = isize(values.size());
     impl::sort_loop<impl::sort_fallback::median_of_medians>(0, size, cc::as_index_swap_range_by(values, key), compare,
-                                                            select, impl::sort_bad_partition_budget(size), true);
+                                                            should_sort, impl::sort_bad_partition_budget(size), true);
+}
+
+/// Puts the `count` smallest elements first, in order, and leaves the rest merely after them.
+/// The top-k spelling of cc::sort_window; `count` may run past the end.
+///
+///   cc::sort_first(scores, 10);   // the ten best, sorted; the rest untouched beyond belonging after
+template <class RangeT, class CompareF = cc::default_less>
+constexpr void sort_first(RangeT&& values, isize count, CompareF&& compare = {})
+{
+    cc::sort_window(values, {.offset = 0, .size = count}, compare);
 }
 
 // =========================================================================================================

@@ -531,8 +531,9 @@ cc::sort_multi_by(key, cmp, xs, ys);       // key receives one element of EVERY 
 cc::sort_indices(order, keys);             // permutes `order`, keys untouched; ties break on the index => stable
 
 cc::partition_by(values, is_right);        // -> isize first index of the "right" block; O(n), not stable
-cc::quickselect(values, idx);              // element idx as a full sort would leave it; O(n) even worst case (+ _by)
-cc::quickselect_range(values, idx, count); // that whole window, sorted; O(n + count log count); may run past the end (+ _by)
+cc::sort_at(values, idx);                  // element idx as a full sort would leave it; O(n) even worst case (+ _by)
+cc::sort_window(values, {.offset, .size}); // that whole window, sorted; O(n + size log size); may run past the end (+ _by)
+cc::sort_first(values, k);                 // the top-k spelling of sort_window({.offset = 0, .size = k})
 
 cc::is_sorted(values);  cc::is_sorted_by(values, key);              // -> bool, O(n)
 cc::is_strictly_sorted(values);  cc::is_strictly_sorted_by(v, key); // same, but no two elements may be equivalent
@@ -543,7 +544,7 @@ The seam underneath, for data that is not a range — an SoA view, a GPU-side ha
 ```cpp
 cc::index_swap_range<R>                    // concept: r.element_get(i) + r.element_swap(a, b). NO size().
 cc::as_index_swap_range(values);           // + _by(values, key), _multi(keys, vals...), _multi_by(key, vals...)
-cc::sort_ex(start, size, range, cmp, select);   // select(start, size) -> bool prunes subranges (=> quickselect)
+cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 cc::partition_ex(start, size, is_right, range); // is_right takes an INDEX
 cc::is_sorted_ex(start, size, range, cmp);      // + is_strictly_sorted_ex
 // an adapter must be trivially copyable and cheap — it is copied down the recursion (sort_ex static-asserts it).

@@ -311,7 +311,7 @@ if(SC_BUILD_TESTS)
         tests/platform/console-test.cc
 
         tests/algorithm/sort-test.cc
-        tests/algorithm/quickselect-test.cc
+        tests/algorithm/select-test.cc
 
         tests/math/bit-test.cc
         tests/math/random-test.cc

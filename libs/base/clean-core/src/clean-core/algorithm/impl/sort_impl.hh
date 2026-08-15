@@ -38,7 +38,7 @@ enum class sort_fallback
     /// Heapsort the rest of the range, which bounds a full sort at O(n log n).
     heap,
 
-    /// Switch to a median-of-medians pivot, which keeps a pruned (quickselect-style) run linear.
+    /// Switch to a median-of-medians pivot, which keeps a pruned (selection-style) run linear.
     median_of_medians,
 };
 
@@ -540,9 +540,14 @@ constexpr void sort_break_patterns(isize start, isize left_size, isize pivot_pos
 // The sort itself
 // =========================================================================================================
 
-template <sort_fallback Fallback, class RangeT, class CompareF, class SelectF>
-constexpr void
-sort_loop(isize start, isize size, RangeT range, CompareF& compare, SelectF& select, isize bad_allowed, bool leftmost);
+template <sort_fallback Fallback, class RangeT, class CompareF, class ShouldSortF>
+constexpr void sort_loop(isize start,
+                         isize size,
+                         RangeT range,
+                         CompareF& compare,
+                         ShouldSortF& should_sort,
+                         isize bad_allowed,
+                         bool leftmost);
 
 /// Moves the median of medians of [start, start + size) to `start`.
 /// Costs O(size) but splits the range at worst 30/70, which is what bounds a pruned run linearly.
@@ -564,8 +569,9 @@ constexpr void sort_pivot_median_of_medians(isize start, isize size, RangeT rang
 
     if (groups > 1)
     {
-        auto select_median = impl::sort_index_in_range{.idx = start + groups / 2};
-        impl::sort_loop<sort_fallback::median_of_medians>(start, groups, range, compare, select_median, isize(0), true);
+        auto should_sort_median = impl::sort_index_in_range{.idx = start + groups / 2};
+        impl::sort_loop<sort_fallback::median_of_medians>(start, groups, range, compare, should_sort_median, isize(0),
+                                                          true);
     }
 
     if (groups / 2 != 0)
@@ -573,11 +579,16 @@ constexpr void sort_pivot_median_of_medians(isize start, isize size, RangeT rang
 }
 
 /// The pdqsort driver: pick a pivot, partition, recurse into the left half and loop on the right.
-/// `select` prunes whole subranges, which is what turns the same machinery into quickselect.
+/// `should_sort` prunes whole subranges, which is what turns the same machinery into a selection.
 /// `leftmost` states that no element before `start` is known to bound the range from below.
-template <sort_fallback Fallback, class RangeT, class CompareF, class SelectF>
-constexpr void
-sort_loop(isize start, isize size, RangeT range, CompareF& compare, SelectF& select, isize bad_allowed, bool leftmost)
+template <sort_fallback Fallback, class RangeT, class CompareF, class ShouldSortF>
+constexpr void sort_loop(isize start,
+                         isize size,
+                         RangeT range,
+                         CompareF& compare,
+                         ShouldSortF& should_sort,
+                         isize bad_allowed,
+                         bool leftmost)
 {
     while (true)
     {
@@ -621,7 +632,7 @@ sort_loop(isize start, isize size, RangeT range, CompareF& compare, SelectF& sel
 
             start = pivot_pos + 1;
             size = end - start;
-            if (!select(start, size))
+            if (!should_sort(start, size))
                 return;
             continue;
         }
@@ -654,17 +665,17 @@ sort_loop(isize start, isize size, RangeT range, CompareF& compare, SelectF& sel
                  && impl::sort_partial_insertion(start, left_size, range, compare) //
                  && impl::sort_partial_insertion(pivot_pos + 1, right_size, range, compare))
         {
-            return; // both halves were nearly sorted and now fully are, whatever `select` asked for
+            return; // both halves were nearly sorted and now fully are, whatever `should_sort` asked for
         }
 
-        if (select(start, left_size))
-            impl::sort_loop<Fallback>(start, left_size, range, compare, select, bad_allowed, leftmost);
+        if (should_sort(start, left_size))
+            impl::sort_loop<Fallback>(start, left_size, range, compare, should_sort, bad_allowed, leftmost);
 
         start = pivot_pos + 1;
         size = right_size;
         leftmost = false;
 
-        if (!select(start, size))
+        if (!should_sort(start, size))
             return;
     }
 }
