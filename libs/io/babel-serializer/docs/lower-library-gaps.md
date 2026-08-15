@@ -102,19 +102,6 @@ that produces a `cc::error` — the GLB chunk walk, the buffer trim, the bufferV
 validation pass, and `view_of` (which goes through `span::is_subspan` first, purely to get a fallible answer).
 A `try_subdata` would delete that whole class of boilerplate, here and in every future binary format.
 
-### Endian-aware scalar loaders
-
-**Wanted:** `cc::load_le<T>(cc::span<byte const>, isize offset)` and `cc::load_be<T>(...)`, byte-wise so alignment and host
-endianness never enter into it.
-
-**Why:** **three copies now live in this one library**, which is the signal the utility belongs one layer down:
-`read_be_u32` in [image/png.cc](../src/babel-serializer/image/png.cc) (PNG chunk headers), `read_be_u16` in
-[image/jpg.cc](../src/babel-serializer/image/jpg.cc) (JPEG marker segments), and `load_le_u32` in
-[geometry/gltf.cc](../src/babel-serializer/geometry/gltf.cc) (the GLB header and chunk walk).
-Every future binary format wants the fourth.
-
-**Today:** each format hand-rolls its own, identically.
-
 ### A pinned strided view
 
 **Wanted:** `pinned_data::as_strided<T>(stride)`, or a `cc::pinned_strided_data<T>` pairing a `strided_span` with a pin.
