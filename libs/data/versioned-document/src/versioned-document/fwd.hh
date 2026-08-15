@@ -69,6 +69,10 @@ struct component_type_id;
 
 /// Names a property within a component, e.g. "position".
 struct property_id;
+
+/// One property path — an entity, a component type and a property.
+/// The addressable unit of the whole system: ops assign to paths, conflicts are per path, and diffs are lists of paths.
+struct property_path;
 } // namespace vdoc
 
 // ---- ops and the DAG ---------------------------------------------------------------------------

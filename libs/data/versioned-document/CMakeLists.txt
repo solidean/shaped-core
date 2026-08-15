@@ -22,6 +22,7 @@ target_sources(versioned-document
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
     src/versioned-document/fwd.hh
+    src/versioned-document/ids.hh
     src/versioned-document/value.hh
     src/versioned-document/value_builder.hh
     src/versioned-document/value_debug.hh
@@ -54,6 +55,7 @@ if(SC_BUILD_TESTS)
     add_executable(versioned-document-test
         tests/main.cc
 
+        tests/ids-test.cc
         tests/value-test.cc
         tests/value-fuzz-test.cc
     )
