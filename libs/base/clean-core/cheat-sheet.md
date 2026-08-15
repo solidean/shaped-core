@@ -558,6 +558,19 @@ cc::is_sorted(values);  cc::is_sorted_by(values, key);              // -> bool, 
 cc::is_strictly_sorted(values);  cc::is_strictly_sorted_by(v, key); // same, but no two elements may be equivalent
 ```
 
+Sorting in parallel — its own header, since `sort.hh` must not pull in the async machinery:
+
+```cpp
+#include <clean-core/algorithm/sort_async.hh>
+auto const sorted = cc::sort_async(values);        // -> cc::shared_async<cc::unit>; NEVER SCHEDULED = NEVER SORTED
+auto const next = cc::make_async_lazy([&](cc::unit) { ... }, sorted);   // composing is the point, not the speedup
+cc::sort_async_ex(start, size, range, cmp, cutoff);  // seam form; `cutoff` exists so tests can drive the recursion
+// values must OUTLIVE it, not be resized, and not be read by anyone else — it permutes throughout.
+// The comparator is COPIED per task => must be a pure function. A non-strict-weak one is a data race here,
+// not just local corruption. ~6.9x on 31 workers for random i32 @4M; ~parity on already-ordered input.
+// No blocking convenience on purpose: pool.blocking_get asserts inside a worker of that same pool.
+```
+
 Rearranging by position rather than by comparison — all swap-only, so it composes with the rest:
 
 ```cpp

@@ -5,18 +5,23 @@
 // It is also what would justify ever adding a move-based fallback for the small sort.
 //
 // The manual sweep is the comparison; the GUIDE_BENCHMARK at the bottom records two stable points for the PGO report.
-// Run the sweep with
+// Run the sweeps with
 //   uv run dev.py test "bench-sort - cc::sort vs std::sort" --preset release-clang --timeout 0
+//   uv run dev.py test "bench-sort - sort_async" --preset release-clang --timeout 0
 
 #include "../algorithm/sort-test-types.hh"
 #include "bench_util.hh"
 
+#include <clean-core/algorithm/permutation.hh>
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/algorithm/sort_async.hh>
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/to_string.hh>
+#include <clean-core/thread/async_thread_pool.hh>
 #include <nexus/guide.hh>
 #include <nexus/test.hh>
 
@@ -200,9 +205,95 @@ TEST("bench-sort - sort_multi vs sort_indices then permute", nx::config::manual)
                                                                 return checksum_of(order);
                                                             });
 
-    std::printf("  sort_multi     %10.2f M/s\n", multi_rate / 1e6);
-    std::printf("  sort_indices   %10.2f M/s  (permutation not applied)\n", indices_rate / 1e6);
+    // the comparable number: sort the indices, then actually move the payload, which is what sort_multi did
+    double const permute_rate = bench::median_units_per_sec(double(n),
+                                                            [&]
+                                                            {
+                                                                payload = payload_source;
+                                                                for (isize i = 0; i < n; ++i)
+                                                                    order[i] = i32(i);
+                                                                cc::sort_indices(order, keys_source);
+                                                                cc::apply_permutation(payload, order);
+                                                                return checksum_of(payload);
+                                                            });
+
+    std::printf("  sort_multi                       %10.2f M/s\n", multi_rate / 1e6);
+    std::printf("  sort_indices                     %10.2f M/s  (permutation not applied)\n", indices_rate / 1e6);
+    std::printf("  sort_indices + apply_permutation %10.2f M/s\n", permute_rate / 1e6);
 }
+
+#if CC_HAS_THREADS
+// A worker sweep is meaningless without threads: the pool keeps its API but drives inline, so every row would be
+// the serial number with scheduling overhead on top.
+// The correctness of that fallback is sort-async-test.cc's.
+TEST("bench-sort - sort_async vs cc::sort", nx::config::manual)
+{
+    cc::random rng(4);
+
+    // The serial baseline is re-measured on every row rather than taken once: it doubles as a throttling canary,
+    // since a machine that clocked down mid-sweep moves both columns together.
+    auto const row = [](long long label, double serial, double parallel)
+    {
+        std::printf("  %-16lld %14.2f %14.2f %9.2f\n", label, serial / 1e6, parallel / 1e6,
+                    serial > 0 ? parallel / serial : 0.0);
+    };
+
+    int const max_workers = cc::async_thread_pool::default_worker_count();
+
+    std::printf("\nworker sweep (cutoff = %lld)\n", static_cast<long long>(cc::sort_async_default_cutoff));
+    for (auto const p : {pattern::random, pattern::sorted, pattern::few_values})
+    {
+        for (isize const n : {isize(1) << 20, isize(1) << 22})
+        {
+            auto const original = make_pattern(p, n, rng);
+            double const serial = sort_rate(original, [](cc::vector<i32>& v) { cc::sort(v); });
+
+            std::printf("\n  %s, n = %lld\n", to_name(p), static_cast<long long>(n));
+            std::printf("  %-16s %14s %14s %9s\n", "workers", "cc::sort M/s", "async M/s", "speedup");
+
+            for (int const workers : {1, 2, 4, max_workers})
+            {
+                if (workers > max_workers)
+                    continue;
+
+                // constructed outside the timed pass: spawning threads is ~100 us and would land inside it
+                cc::async_thread_pool pool(workers);
+                double const parallel = sort_rate(original,
+                                                  [&](cc::vector<i32>& v)
+                                                  {
+                                                      auto const sorted = cc::sort_async(v);
+                                                      (void)pool.blocking_get(sorted);
+                                                  });
+
+                row(workers, serial, parallel);
+            }
+        }
+    }
+
+    // What justifies the shipped sort_async_default_cutoff, which is otherwise a guess.
+    std::printf("\ncutoff sweep (random, n = %lld, %d workers)\n", static_cast<long long>(isize(1) << 22), max_workers);
+    std::printf("  %-16s %14s %14s %9s\n", "cutoff", "cc::sort M/s", "async M/s", "speedup");
+    {
+        auto const original = make_pattern(pattern::random, isize(1) << 22, rng);
+        double const serial = sort_rate(original, [](cc::vector<i32>& v) { cc::sort(v); });
+
+        cc::async_thread_pool pool(max_workers);
+        for (isize const cutoff : {isize(1024), isize(4096), isize(16384), isize(65536), isize(262144)})
+        {
+            double const parallel
+                = sort_rate(original,
+                            [&](cc::vector<i32>& v)
+                            {
+                                auto const sorted = cc::sort_async_ex(0, isize(v.size()), cc::as_index_swap_range(v),
+                                                                      cc::default_less{}, cutoff);
+                                (void)pool.blocking_get(sorted);
+                            });
+
+            row(static_cast<long long>(cutoff), serial, parallel);
+        }
+    }
+}
+#endif
 
 GUIDE_BENCHMARK("bench-sort - throughput")
 {

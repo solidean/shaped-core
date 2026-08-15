@@ -120,6 +120,37 @@ Three rules bind an adapter:
 The last argument to `sort_ex` is the subrange predicate, `should_sort(start, size)`.
 `cc::constant_function<true>{}` sorts everything; anything else prunes, which is how `cc::sort_at` is built out of the same call.
 
+## Sorting in parallel
+
+[algorithm/sort_async.hh](../src/clean-core/algorithm/sort_async.hh) is the same pdqsort fanned out across a scheduler.
+It has its own header because `thread/async.hh` is heavy, and `sort.hh` must not pull it in.
+
+```cpp
+auto const sorted = cc::sort_async(values);                                  // -> cc::shared_async<cc::unit>
+auto const next = cc::make_async_lazy([&values](cc::unit) { … }, sorted);    // composes as a dependency
+```
+
+**Composing is the point, not the raw number.**
+`cc::sort_async` never blocks and never drives itself — a scheduler does, and a handle nobody schedules is a sort that never happens.
+There is deliberately no blocking convenience either.
+`pool.blocking_get` asserts when called from a worker of that same pool, so the wrapper would be a trap that fires exactly in the composition case it exists for.
+
+The recursion is parallel but **the partition is sequential**, which is what caps the speedup.
+Measured at 6.9× on 31 workers for random `i32` at 4M, and at roughly parity for the patterns `cc::sort` already finishes in near-linear time.
+[benchmarks/sort-benchmark](benchmarks/sort-benchmark.md) has the tables and says why the ceiling sits where it does.
+
+Both drivers run the same `impl::sort_step`, so there is one copy of the pivot-and-partition logic rather than two that can drift.
+What makes a step's two subranges safe to hand to two threads is that everything reaching across the pivot — pattern-breaking, and the partial-insertion probe — has already finished when it returns.
+
+Two contracts bind the caller harder here than in `cc::sort`:
+
+* The comparator is **copied into every task**, so it must be a pure function of its two arguments.
+  A stateful one silently counts or caches per task rather than globally.
+* A comparator that is not a strict weak ordering is *worse* here.
+  The unguarded insertion sort would write one position before its subrange — a sibling task's pivot — which is a data race in release rather than the local corruption a `CC_ASSERT` catches in debug.
+
+Under `-DSC_THREADS=OFF` the pool keeps its API and drives inline, so all of this compiles and gives the same answers with no `#if` at the call site.
+
 ## Searching a sorted range
 
 [algorithm/search.hh](../src/clean-core/algorithm/search.hh) is the other half of the topic.
@@ -165,8 +196,8 @@ Having both would be the worst outcome: two spellings of the same verb, differin
 
 ## What is not here yet
 
-* **A parallel `sort_async*` family** — the swap-only design makes the fan-out natural: disjoint subranges, no merge step.
-  It reshapes the driver rather than wrapping it, so it gets its own header.
+* **`sort_async_by` / `_multi` / `_indices`** — `sort_async_ex` takes the seam, so a hand-built adapter covers `_multi` and `_indices` today.
+  A proper `_by` needs the frame to own the key function by value, for the same lifetime reason the comparator is copied — a different frame shape, not a wrapper.
 * **`merge` and the sorted set operations** — union, intersection, difference over two ordered ranges.
   A later slice.
 * **A heap API** (`push_heap` / `pop_heap`).

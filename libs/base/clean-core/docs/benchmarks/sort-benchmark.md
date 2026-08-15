@@ -59,9 +59,67 @@ Same shape, so only the headline rows:
 `wide` and `cc::string` take the non-branchless partition and hold the pivot by reference, so the block-partition win disappears and random input lands at parity.
 The pattern wins survive, because they come from the pattern-defeating machinery rather than from branchless classification.
 
+## Parallel: `cc::sort_async`
+
+A separate manual test in the same file, run with
+
+```bash
+uv run dev.py test "bench-sort - sort_async" --preset release-clang --timeout 0
+```
+
+Same machine, `i32`, against serial `cc::sort` re-measured on every row so a machine that clocks down mid-sweep moves both columns together.
+`workers` is the pool's worker count; the calling thread participates on top of it, so `1` already means two threads doing work.
+
+Speedup over serial `cc::sort`, at the shipped cutoff:
+
+| pattern | n | 1 | 2 | 4 | 31 |
+|---|---|---|---|---|---|
+| random     | 1M | 1.94 | 2.20 | 3.03 | **5.02** |
+| random     | 4M | 1.42 | 2.28 | 3.51 | **6.92** |
+| sorted     | 1M | 0.96 | 0.97 | 0.97 | 0.99 |
+| sorted     | 4M | 0.98 | 0.99 | 0.95 | 0.86 |
+| few_values | 1M | 0.90 | 0.92 | 0.92 | 0.90 |
+| few_values | 4M | 1.14 | 1.37 | 1.28 | 1.39 |
+
+Random 4M is 45.8 M/s serial against 317 M/s on 31 workers.
+
+**Only random input scales, and that is the design working as intended rather than a shortfall.**
+`sorted` and `few_values` are the patterns the pattern-defeating machinery already finishes in near-linear time, so there is no work left to spread.
+What the parallel driver adds there is scheduling, hence the 0.86–0.99.
+A caller who knows their input is nearly ordered should stay on `cc::sort`.
+
+### Why it stops at ~7×, not at ~11×
+
+The partition is sequential, so the work is Θ(n log n) while the span is the spine of partitions, n + n/2 + n/4 + … ≈ 2n.
+That bounds the speedup at roughly log₂(n)/2, which is about 11× at n = 4M — not the 3–5× a plain Amdahl reading suggests.
+
+Measured falls short of that bound for a second reason worth naming separately.
+The top few partitions are single-threaded passes over the *whole* array and are DRAM-bandwidth-bound rather than compute-bound, so they neither speed up nor overlap with anything.
+
+That distinction is what tells a future reader whether ips4o is worth the invariant it would cost.
+It parallelises exactly those top passes, and it is the one thing that could move this number.
+
+### The cutoff sweep
+
+Random, n = 4M, 31 workers.
+This is what fixes `cc::sort_async_default_cutoff`, which would otherwise be a guess.
+
+| cutoff | speedup |
+|---|---|
+| 1024   | **7.15** |
+| 4096   | 6.94 |
+| 16384  | 6.67 |
+| 65536  | 5.99 |
+| 262144 | 4.15 |
+
+Monotone: smaller is better across the whole range measured, because a finer grain is what keeps 31 workers fed.
+The shipped default is **4096**, one step off the measured optimum — it keeps a quarter of 1024's task count for about 3% less speedup, and each task costs one heap-boxed frame.
+
 ## What is not measured here
 
 * Only Windows / clang-cl.
   The insertion-sort threshold (16) and the block-partition gate were picked to be measured, not guessed, and neither has been swept yet.
 * `sort_multi` against sort-indices-then-permute has its own manual test in the same file, not tabulated here.
+* `sort_async` on anything but `i32`, and on any pattern beyond the three above.
+  A wide element type would shift the balance toward the parallel side, since it makes the serial partition more expensive without changing the scheduling cost.
 * `std::sort` is the only baseline; there is no comparison against pdqsort upstream, which would separate "our formulation" from "pdqsort itself".

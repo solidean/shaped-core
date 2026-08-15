@@ -114,6 +114,7 @@ target_sources(clean-core
     src/clean-core/algorithm/permutation.hh
     src/clean-core/algorithm/search.hh
     src/clean-core/algorithm/sort.hh
+    src/clean-core/algorithm/sort_async.hh
     src/clean-core/algorithm/impl/sort_impl.hh
 
     src/clean-core/string/string.hh
@@ -320,6 +321,7 @@ if(SC_BUILD_TESTS)
         tests/algorithm/select-test.cc
         tests/algorithm/search-test.cc
         tests/algorithm/permutation-test.cc
+        tests/algorithm/sort-async-test.cc
 
         tests/math/bit-test.cc
         tests/math/random-test.cc
