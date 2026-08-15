@@ -541,6 +541,8 @@ cc::sort_multi(cmp, keys, a, b, ...);      // sorts keys, applies the SAME permu
 cc::sort_multi_ascending(keys, a, b);  cc::sort_multi_descending(keys, a, b);   // the cmp-less spellings
 cc::sort_multi_by(key, cmp, xs, ys);       // key receives one element of EVERY range
 cc::sort_indices(order, keys);             // permutes `order`, keys untouched; ties break on the index => stable
+cc::sort_stable(values);  cc::sort_stable_by(values, key);   // equal elements keep their order.
+                                           // ALLOCATES n indices — never an element buffer, so no-parking survives
 
 cc::partition_by(values, is_right);        // -> isize first index of the "right" block; O(n), not stable
 cc::sort_at(values, idx);                  // element idx as a full sort would leave it; O(n) even worst case (+ _by)

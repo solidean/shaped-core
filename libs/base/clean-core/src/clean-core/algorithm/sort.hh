@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/impl/sort_impl.hh>
 #include <clean-core/algorithm/index_swap_range.hh>
+#include <clean-core/algorithm/permutation.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/compare.hh>
 #include <clean-core/common/range_traits.hh>
@@ -165,6 +166,40 @@ void sort_by_cached_key(RangeT&& values, KeyF&& key, CompareF&& compare = {})
         keys.push_back(cc::invoke(key, values[i]));
 
     cc::sort_multi(compare, keys, values);
+}
+
+/// Sorts an indexed range ascending, keeping equal elements in their original relative order.
+///
+/// Allocates an INDEX array, never an element buffer — so the no-parking rule survives:
+/// cc::sort_indices already breaks ties on the index, and cc::apply_permutation is swap-only.
+/// Takes O(n log n) and one allocation of n indices.
+///
+/// This is why there is no buffered merge sort here: for anything wider than an index the permutation route
+/// moves less memory, and an in-place block merge sort (WikiSort / GrailSort) buys O(1) space at 2-3x the time
+/// and a large implementation.
+template <class RangeT, class CompareF = cc::default_less>
+void sort_stable(RangeT&& values, CompareF&& compare = {})
+{
+    static_assert(cc::indexed_range<RangeT>, "cc::sort_stable takes an indexed range");
+
+    isize const size = isize(values.size());
+    auto order = cc::vector<isize>::create_defaulted(size);
+    for (isize i = 0; i < size; ++i)
+        order[i] = i;
+
+    cc::sort_indices(order, values, compare);
+    cc::apply_permutation(values, order);
+}
+
+/// Sorts an indexed range ascending by a key, keeping elements with equal keys in their original relative order.
+/// The key is evaluated on every comparison, as in cc::sort_by.
+template <class RangeT, class KeyF, class CompareF = cc::default_less>
+void sort_stable_by(RangeT&& values, KeyF&& key, CompareF&& compare = {})
+{
+    static_assert(cc::indexed_range<RangeT>, "cc::sort_stable_by takes an indexed range");
+
+    cc::sort_stable(
+        values, [&](auto const& a, auto const& b) { return bool(compare(cc::invoke(key, a), cc::invoke(key, b))); });
 }
 
 // =========================================================================================================

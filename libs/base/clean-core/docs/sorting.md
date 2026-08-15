@@ -52,7 +52,14 @@ Its fallback differs: a spent budget switches the pivot to a **median of medians
 `cc::sort_window` and `cc::sort_first` prune against a window instead of a single index — same machinery again.
 
 Deterministic, and **not stable**.
-Where stability matters, `cc::sort_indices` gives it: sorting a `0..n-1` index array breaks ties on the index, so equal keys keep their order.
+
+`cc::sort_stable` is, and it gets there without breaking the rule.
+It sorts a `0..n-1` index array — which ties on the index, hence stably — and then applies that permutation with `cc::apply_permutation`, which is swap-only.
+**The allocation is an index array, never an element buffer.**
+`cc::sort_indices` is the same machinery with the permutation left in your hands, which is what you want when several orderings share one data set.
+
+That is also why there is no buffered merge sort here.
+For anything wider than an index the permutation route moves less memory, and an in-place block merge sort (WikiSort / GrailSort) buys O(1) space at 2–3× the time and a large implementation.
 
 ## A comparator must be a strict weak ordering
 
@@ -153,8 +160,6 @@ Having both would be the worst outcome: two spellings of the same verb, differin
 
 ## What is not here yet
 
-* **`stable_sort`** — it needs an auxiliary buffer, which the no-parking rule forbids.
-  `sort_indices` covers most of what it is wanted for.
 * **A parallel `sort_async*` family** — the swap-only design makes the fan-out natural: disjoint subranges, no merge step.
   It reshapes the driver rather than wrapping it, so it gets its own header.
 * **`merge` and the sorted set operations** — union, intersection, difference over two ordered ranges.

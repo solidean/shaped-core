@@ -490,3 +490,98 @@ TEST("sort - sorts at compile time")
 
     CHECK(sorted_at_compile_time[3] == 5);
 }
+
+TEST("sort_stable - equal elements keep their original order")
+{
+    cc::random rng(17);
+
+    for (isize const n : {isize(1), isize(17), isize(1000), isize(20000)})
+    {
+        SECTION("n = {}", n)
+        {
+            // the key is deliberately narrow, so almost every element ties with many others
+            struct sample
+            {
+                i32 key = 0;
+                i32 arrival = 0;
+            };
+
+            auto values = cc::vector<sample>::create_defaulted(n);
+            for (isize i = 0; i < n; ++i)
+                values[i] = {.key = rng.uniform(0, 9), .arrival = i32(i)};
+
+            cc::sort_stable(values, [](sample const& a, sample const& b) { return a.key < b.key; });
+
+            CHECK(isize(values.size()) == n);
+            for (isize i = 1; i < n; ++i)
+            {
+                CHECK(values[i - 1].key <= values[i].key);
+
+                // within one key the arrival order must be untouched, which is the whole claim
+                if (values[i - 1].key == values[i].key)
+                    CHECK(values[i - 1].arrival < values[i].arrival);
+            }
+        }
+    }
+}
+
+TEST("sort_stable - agrees with sort on the value sequence")
+{
+    cc::random rng(18);
+
+    for (auto const p : all_patterns)
+    {
+        SECTION("{}", to_name(p))
+        {
+            auto const original = make_pattern(p, 700, rng);
+
+            auto stable = original;
+            cc::sort_stable(stable);
+
+            auto unstable = original;
+            cc::sort(unstable);
+
+            // stability picks WHICH equal element lands where, never which value does
+            for (isize i = 0; i < 700; ++i)
+                CHECK(stable[i] == unstable[i]);
+        }
+    }
+}
+
+TEST("sort_stable_by - a key projection, ties still in arrival order")
+{
+    struct sample
+    {
+        i32 key = 0;
+        i32 arrival = 0;
+    };
+
+    isize const n = 500;
+    cc::random rng(19);
+
+    auto values = cc::vector<sample>::create_defaulted(n);
+    for (isize i = 0; i < n; ++i)
+        values[i] = {.key = rng.uniform(0, 4), .arrival = i32(i)};
+
+    cc::sort_stable_by(values, &sample::key);
+
+    for (isize i = 1; i < n; ++i)
+    {
+        CHECK(values[i - 1].key <= values[i].key);
+        if (values[i - 1].key == values[i].key)
+            CHECK(values[i - 1].arrival < values[i].arrival);
+    }
+}
+
+TEST("sort_stable - descending, and an empty range")
+{
+    auto values = cc::vector<i32>{3, 1, 2};
+    cc::sort_stable(values, cc::default_greater{});
+    CHECK(values[0] == 3);
+    CHECK(values[1] == 2);
+    CHECK(values[2] == 1);
+
+    auto empty = cc::vector<i32>();
+    cc::sort_stable(empty);
+    CHECK(empty.empty());
+}
