@@ -56,6 +56,13 @@ public:
 
     /// Drops every unpinned entry.
     /// **Must be invisible**: this may change how long a materialization takes, and nothing else about it.
+    /// Turns a pinned entry back into an ordinary one, keeping its bytes.
+    ///
+    /// What a snapshot stops being load-bearing looks like from here: the materialization is still correct, so nothing
+    /// is recomputed — it simply becomes evictable again.
+    /// False where the cache does not have the entry; unpinning one that is not pinned is a no-op and true.
+    bool unpin(op_id const& id);
+
     void clear_unpinned();
 
     /// Drops everything, pins included.

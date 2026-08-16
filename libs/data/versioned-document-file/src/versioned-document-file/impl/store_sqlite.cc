@@ -27,6 +27,14 @@ cc::shared_async<snapshot_write_result> sqlite_store::on_write_snapshots(snapsho
     return promise;
 }
 
+cc::shared_async<recovery_result> sqlite_store::on_recover(recovery_job job)
+{
+    auto promise = cc::make_async_manual<recovery_result>();
+    if (!_actor->enqueue_message(recovery_request{.job = cc::move(job), .promise = promise}))
+        promise->push_error(rejected("a recovery"));
+    return promise;
+}
+
 cc::shared_async<reclaim_result> sqlite_store::on_reclaim(reclaim_job job)
 {
     auto promise = cc::make_async_manual<reclaim_result>();

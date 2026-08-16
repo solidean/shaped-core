@@ -49,6 +49,9 @@ struct reclaim_result;
 /// What a prune actually emptied.
 struct snapshot_write_result;
 
+/// What recovering history from a peer filled in, and which required snapshots it made droppable.
+struct recovery_result;
+
 /// An asset id resolved to its record plus a source to fetch its parts through.
 struct asset_resolution;
 

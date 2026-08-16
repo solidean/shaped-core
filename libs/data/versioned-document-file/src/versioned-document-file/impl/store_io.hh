@@ -101,11 +101,25 @@ public:
     /// Removing one that is not there is not an error — the outcome asked for already holds.
     [[nodiscard]] virtual cc::result<cc::unit> delete_snapshot(cc::span<byte const> op_hash) = 0;
 
+    /// Moves a snapshot's `required` flag without touching a byte of its payload.
+    ///
+    /// A demotion must not re-encode a payload that can run to gigabytes and is already correct.
+    /// A snapshot that is not there is not an error, for the same reason delete_snapshot's absence is not.
+    [[nodiscard]] virtual cc::result<cc::unit> set_snapshot_required(cc::span<byte const> op_hash, bool required) = 0;
+
     /// Empties an op's payload columns, leaving its id and its parents — a SKELETON.
     ///
     /// Deleting the row instead would sever ancestry through it, and two writes that were ordered would read as
     /// concurrent.
     [[nodiscard]] virtual cc::result<cc::unit> skeletonize_op(cc::span<byte const> op_hash) = 0;
+
+    /// Puts a SKELETON's payload back, and touches nothing else.
+    ///
+    /// The exact inverse of skeletonize_op, and deliberately not a relaxation of insert_op: publishing stays
+    /// append-only, so no publish can ever rewrite an op already stored.
+    /// Scoped to rows whose payload columns are NULL, so a row that already has bytes is left exactly as it is even
+    /// when this is called wrongly — an op that is not there, or is already full, is not an error.
+    [[nodiscard]] virtual cc::result<cc::unit> fill_op_payload(op_row const& row) = 0;
 
     [[nodiscard]] virtual cc::result<cc::unit> upsert_ref(ref_row const& row) = 0;
     [[nodiscard]] virtual cc::result<cc::unit> upsert_workspace(workspace_row const& row) = 0;
@@ -213,6 +227,32 @@ struct snapshot_write_job
 
 /// Runs one snapshot write over a writer, in one transaction.
 [[nodiscard]] cc::result<snapshot_write_result> apply_snapshot_write(store_writer& writer, snapshot_write_job const& job);
+
+/// One recovery of history received from a peer, computed on the calling thread and complete in itself.
+///
+/// Self-contained for the same reason a publish_job is: it crosses to the actor thread, so every byte here is a copy.
+///
+/// **Every op is inserted AND filled.** The insert conflicts away where the row is already there and the fill only
+/// touches NULL payload columns, so the job never has to classify an op correctly in order to be correct.
+struct recovery_job
+{
+    cc::vector<op_row> ops;
+
+    /// Snapshots whose ancestry this recovery completed, flipped from required to droppable.
+    ///
+    /// Written LAST.
+    /// A crash before them leaves a snapshot required that need not be, which costs one pinned cache entry; the
+    /// reverse order would leave a droppable snapshot standing over history that is still gone, which is data loss.
+    cc::vector<cc::vector<byte>> demoted_snapshots;
+
+    /// What the store's own graph did, carried through so the async reports one answer rather than two.
+    /// A writer cannot tell an insert from a fill after the fact, and recomputing it here is how the two would disagree.
+    isize ops_added = 0;
+    isize skeletons_filled = 0;
+};
+
+/// Runs one recovery over a writer, in one transaction.
+[[nodiscard]] cc::result<recovery_result> apply_recovery(store_writer& writer, recovery_job const& job);
 
 /// One reclamation, computed on the calling thread from the resident asset index.
 ///

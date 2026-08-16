@@ -75,7 +75,9 @@ public:
     [[nodiscard]] cc::result<cc::unit> upsert_snapshot(snapshot_row const& row,
                                                        cc::span<cc::vector<byte> const> chunks) override;
     [[nodiscard]] cc::result<cc::unit> delete_snapshot(cc::span<byte const> op_hash) override;
+    [[nodiscard]] cc::result<cc::unit> set_snapshot_required(cc::span<byte const> op_hash, bool required) override;
     [[nodiscard]] cc::result<cc::unit> skeletonize_op(cc::span<byte const> op_hash) override;
+    [[nodiscard]] cc::result<cc::unit> fill_op_payload(op_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> upsert_ref(ref_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> upsert_workspace(workspace_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> commit() override;

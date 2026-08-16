@@ -3,8 +3,6 @@
 The `.vdoc` save format: one SQLite file holding a document's history, its embedded assets, and its workspace state.
 Namespace `vdoc::file`. Depends on versioned-document and babel-serializer.
 
-> The store, the loader, publishing, the workspace, the content store and snapshots with pruning are real.
-> Recovery from an untrusted peer is what milestone 6 has left.
 > The on-disk shape is fully specified in [docs/format.md](docs/format.md).
 
 ## Opening and reading
@@ -149,6 +147,26 @@ Gotchas:
   Cycles are ordinary too.
 - **`load` never blocks and never re-enters its caller.** It may be called with a caller's lock held, so the answer always arrives later — pump your loop.
 
+## Snapshots, pruning and recovery
+
+```cpp
+vdoc::install_snapshot(file->ops(), head, file->snapshot_cache());   // explicit, in the model library
+vdoc::op_id const ops[] = {head};
+file->publish_snapshots(ops);   // -> shared_async<snapshot_write_result>; DROPPABLE rows, never a publish side effect
+
+file->prune(head);              // REQUIRED snapshot at head, every op behind it emptied to a skeleton
+```
+
+```cpp
+vdoc::received_op const batch[] = {...};                 // see versioned-document's cheat-sheet
+file->recover(batch);           // -> shared_async<recovery_result>{ops_added, skeletons_filled, snapshots_demoted}
+```
+
+- **Nothing in a batch is trusted.** Every op is re-hashed against the id this replica already expected, before any of it is stored.
+- **The batch is a set.** A partial or hostile one is refused naming the op, and the file is left byte-identical.
+- **A recovery can retire a prune boundary.** Fill in everything behind a required snapshot and it is demoted to droppable and unpinned.
+- **Until it does, the boundary binds.** An op forking below a still-required snapshot is refused unless the batch also completes that snapshot's ancestry.
+
 ## Testing against a store
 
 ```cpp
@@ -165,7 +183,8 @@ That is what makes the in-memory arm an oracle rather than a shortcut, and it is
 
 - **Only history is immutable.** Blobs are content-addressed, but the **name → asset mapping is mutable and remapping is retroactive, on purpose**.
   So **op ids do not commit to asset content** — a document is reproducible only relative to an asset resolution.
-- **A store is a seam.** The loaded state is plain members filled once at load; only keeping it in sync with storage is virtual, and that is six hooks.
+- **A store is a seam.** The loaded state is plain members filled once at load; only keeping it in sync with storage is virtual, and that is seven hooks.
+  They split by what a write can destroy: publishing appends, pruning destroys, a recovery fills a hole back in.
 - **One actor owns the connection**, and only the SQLite arm has one.
   No caller blocks on storage, and no lock is held across a read.
 - **One thread owns a store.** The API is non-blocking because storage work runs on an actor, not because several threads may call in.

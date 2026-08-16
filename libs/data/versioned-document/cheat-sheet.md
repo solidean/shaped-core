@@ -123,6 +123,7 @@ graph.materialize_entities(heads, entities);         // the cheap path op_builde
 graph.collect_reachable(heads);                      // the local closure; missing ops are skipped
 graph.children(id);                                  // inverted parent edges; may name ops not present
 graph.skeletonize(id);                               // drop an op's payload, keep its id and parents
+graph.fill_payload(id, cc::move(payload));           // the inverse; `add` leaves a skeleton a skeleton
 ```
 
 **A raw document borrows the bytes it was materialized from**, and owns none of them.
@@ -141,9 +142,29 @@ vdoc::install_snapshot_if_useful(graph, head, cache, {.min_ops_behind = 4096});
 
 cache.clear_unpinned();                              // invisible: costs speed, never a result
 cache.erase(id); cache.is_pinned(id); cache.size();
+cache.unpin(id);                                     // a snapshot that stopped being load-bearing, bytes kept
 ```
 
 A snapshot is **surviving writers only** — exactly a `raw_document` over bytes it owns, so it outlives the ops that wrote them.
+
+### Recovery from an untrusted peer
+
+```cpp
+vdoc::received_op const batch[] = {{.id = id, .parents = parents,       // spans into the RECEIVE BUFFER
+                                     .metadata_bytes = m, .assignment_bytes = a}};
+
+auto const done = vdoc::integrate(graph, batch);     // verify + apply, or change nothing
+done.error().op;                                     // the op it was refused at
+done.error().reason;                                 // malformed | parents_disagree
+done.error().decode_error;                           // hash_mismatch here means corruption or tampering
+
+vdoc::try_verify_batch(graph, batch);                // -> cc::vector<op>, storing nothing
+vdoc::apply_verified_batch(graph, cc::move(ops));    // infallible; the split a store needs to check more first
+```
+
+**No trust in the sender, at any point** — an op id commits to everything behind it, so recomputing the hashes is the whole check.
+**The batch is a set**: one bad op refuses all of it, and the graph is left exactly as it was.
+A skeleton in the graph is **filled in**; a skeleton *offered by a peer* is refused, since bytes that are not there cannot be verified.
 
 ### The typed layer
 

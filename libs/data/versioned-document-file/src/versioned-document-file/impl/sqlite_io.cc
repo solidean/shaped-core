@@ -421,12 +421,40 @@ cc::result<cc::unit> sqlite_writer::delete_snapshot(cc::span<byte const> op_hash
     return step_to_done(stmt.value());
 }
 
+cc::result<cc::unit> sqlite_writer::set_snapshot_required(cc::span<byte const> op_hash, bool required)
+{
+    // The chunks are untouched: a demotion moves a flag, and re-encoding a payload that can run to gigabytes to move
+    // one bit would be the expensive way to change nothing.
+    auto stmt = _db.prepare("UPDATE snapshots SET required = ?2 WHERE op_hash = ?1");
+    CC_RETURN_IF_ERROR(stmt);
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, op_hash));
+    CC_RETURN_IF_ERROR(stmt.value().bind(2, i64(required ? 1 : 0)));
+    return step_to_done(stmt.value());
+}
+
 cc::result<cc::unit> sqlite_writer::skeletonize_op(cc::span<byte const> op_hash)
 {
     // The row stays and keeps its parents, so ancestry through it survives; only the payload goes.
     auto stmt = _db.prepare("UPDATE ops SET metadata = NULL, assignments = NULL WHERE hash = ?1");
     CC_RETURN_IF_ERROR(stmt);
     CC_RETURN_IF_ERROR(stmt.value().bind(1, op_hash));
+    return step_to_done(stmt.value());
+}
+
+cc::result<cc::unit> sqlite_writer::fill_op_payload(op_row const& row)
+{
+    // A skeleton carries no payload, so there is nothing to put back.
+    if (!row.metadata.has_value() || !row.assignments.has_value())
+        return cc::unit{};
+
+    // `metadata IS NULL` is what makes this unable to damage a good row even when called wrongly: it reaches skeletons
+    // and nothing else, which is the guarantee an upsert on insert_op could not have offered.
+    auto stmt = _db.prepare("UPDATE ops SET metadata = ?2, assignments = ?3 WHERE hash = ?1 AND metadata IS NULL");
+    CC_RETURN_IF_ERROR(stmt);
+
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, cc::span<byte const>(row.hash)));
+    CC_RETURN_IF_ERROR(stmt.value().bind(2, cc::span<byte const>(row.metadata.value())));
+    CC_RETURN_IF_ERROR(stmt.value().bind(3, cc::span<byte const>(row.assignments.value())));
     return step_to_done(stmt.value());
 }
 

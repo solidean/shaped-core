@@ -13,6 +13,7 @@
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/workspace.hh>
 #include <versioned-document/op_graph.hh>
+#include <versioned-document/recovery.hh>
 #include <versioned-document/snapshot_cache.hh>
 
 #include <memory>
@@ -21,7 +22,7 @@
 ///
 /// **The loaded state is plain members, filled once at load; only keeping it in sync with storage is virtual.**
 /// That split is the whole seam — the two implementations share every query, every reachability computation and every
-/// diagnostic, and differ in five hooks and nothing else.
+/// diagnostic, and differ in seven hooks and nothing else.
 ///
 /// **One thread owns a store.** What makes the API non-blocking is that storage work runs on an actor, not that
 /// several threads may call in.
@@ -130,6 +131,24 @@ struct vdoc::file::snapshot_write_result
     isize ops_skeletonized = 0;
 
     [[nodiscard]] friend bool operator==(snapshot_write_result const& a, snapshot_write_result const& b) = default;
+};
+
+/// What recovering history from a peer actually did.
+///
+/// All three are zero for a batch this replica already held in full, which is what its idempotence looks like from the
+/// outside.
+struct vdoc::file::recovery_result
+{
+    /// Ops this replica did not have at all.
+    isize ops_added = 0;
+
+    /// Skeletons left by a prune whose payload the batch put back.
+    isize skeletons_filled = 0;
+
+    /// Required snapshots this recovery made unnecessary, and therefore demoted and unpinned.
+    isize snapshots_demoted = 0;
+
+    [[nodiscard]] friend bool operator==(recovery_result const& a, recovery_result const& b) = default;
 };
 
 /// What a consumer needs to fetch an asset: the record, and the source to fetch its parts through.
@@ -303,6 +322,23 @@ public:
     /// Also fails, writing nothing, where `head` is not in the graph.
     [[nodiscard]] cc::shared_async<snapshot_write_result> prune(vdoc::op_id const& head);
 
+    // recovering history from a peer
+public:
+    /// Takes history from a peer nobody trusts, verifying every op against its own bytes before storing any.
+    ///
+    /// **No trust in the sender at any point.** An op id recursively commits to everything behind it, so recomputing
+    /// the hashes is the whole check — see [recovery](../../../versioned-document/src/versioned-document/recovery.hh).
+    /// The batch is a SET: a partial or hostile one is refused naming the op, and leaves this replica exactly as it
+    /// was, in memory and in storage alike.
+    /// A skeleton this replica holds is FILLED IN, which add_op deliberately will not do.
+    ///
+    /// **Refuses a batch that would leave a live writer behind a still-required snapshot.**
+    /// A required snapshot carries no `superseded`, so an op forking below it can present a writer nothing suppresses
+    /// — the very failure prune refuses to create, arriving from the other direction.
+    /// Sending the rest of that snapshot's ancestry in the same batch is what makes such a batch acceptable, and doing
+    /// so DEMOTES the snapshot to droppable; that is why the refusal is a boundary rather than a ban.
+    [[nodiscard]] cc::shared_async<recovery_result> recover(cc::span<vdoc::received_op const> batch);
+
     // resolving assets
 public:
     /// An asset id -> its metadata, its ordered parts, and a source to fetch them through.
@@ -358,7 +394,7 @@ public:
     store(store const&) = delete;
     store& operator=(store const&) = delete;
 
-    // the seam — six hooks, and nothing else differs
+    // the seam — seven hooks, and nothing else differs
 protected:
     store() = default;
 
@@ -371,6 +407,14 @@ protected:
     /// addressing, while a prune destroys.
     /// The safest operation in the format should not share a code path with the only destructive one.
     [[nodiscard]] virtual cc::shared_async<snapshot_write_result> on_write_snapshots(impl::snapshot_write_job job) = 0;
+
+    /// Persists one already-computed recovery.
+    ///
+    /// Its own hook for the same reason pruning has one: the hooks split by what a write can DESTROY.
+    /// Publishing appends, pruning destroys, and a recovery fills a hole back in — three kinds, three hooks.
+    /// Riding on_publish is not open to it either, since a recovered op has no ref yet and would have to bypass the
+    /// reachability check that path exists for.
+    [[nodiscard]] virtual cc::shared_async<recovery_result> on_recover(impl::recovery_job job) = 0;
 
     /// Starts one blob fetch and returns at once.
     ///

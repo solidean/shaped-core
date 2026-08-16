@@ -66,6 +66,101 @@ op_row to_row(vdoc::op const& op)
     }
     return row;
 }
+
+/// The DAG as it will be once a verified batch lands, for the checks that have to run before it does.
+///
+/// A batch can only ever fill a skeleton or add an op, never move an edge, so this is the real graph with a few holes
+/// read as filled.
+struct pending_graph
+{
+    vdoc::op_graph const& graph;
+    cc::map<vdoc::op_id, vdoc::op const*> incoming;
+
+    [[nodiscard]] bool has_payload(vdoc::op_id const& id) const
+    {
+        if (incoming.contains(id))
+            return true;
+
+        auto const* const o = graph.find(id);
+        return o != nullptr && !o->is_skeleton();
+    }
+
+    [[nodiscard]] cc::span<vdoc::op_id const> parents_of(vdoc::op_id const& id) const
+    {
+        if (auto const* const* const staged = incoming.get_ptr(id))
+            return (*staged)->parents;
+
+        auto const* const o = graph.find(id);
+        return o != nullptr ? cc::span<vdoc::op_id const>(o->parents) : cc::span<vdoc::op_id const>();
+    }
+};
+
+/// Would every op behind `head` have its payload once the batch lands?
+///
+/// An ancestor that is MISSING counts as incomplete just as a skeleton does: replaying over a hole is lossy in exactly
+/// the same way, so a snapshot standing over one is still load-bearing.
+[[nodiscard]] bool ancestry_is_complete(pending_graph const& pending, vdoc::op_id const& head)
+{
+    auto seen = cc::set<vdoc::op_id>();
+    auto stack = cc::vector<vdoc::op_id>();
+    for (auto const& parent : pending.parents_of(head))
+        stack.push_back(parent);
+
+    while (!stack.empty())
+    {
+        auto const id = stack.back();
+        stack.remove_back();
+
+        if (seen.contains(id))
+            continue;
+        seen.insert(id);
+
+        if (!pending.has_payload(id))
+            return false;
+
+        for (auto const& parent : pending.parents_of(id))
+            stack.push_back(parent);
+    }
+
+    return true;
+}
+
+/// Is `head` reachable from `from` through parent edges?
+[[nodiscard]] bool descends_from(pending_graph const& pending, vdoc::op_id const& from, vdoc::op_id const& head)
+{
+    auto seen = cc::set<vdoc::op_id>();
+    auto stack = cc::vector<vdoc::op_id>();
+    stack.push_back(from);
+
+    while (!stack.empty())
+    {
+        auto const id = stack.back();
+        stack.remove_back();
+
+        if (id == head)
+            return true;
+
+        if (seen.contains(id))
+            continue;
+        seen.insert(id);
+
+        for (auto const& parent : pending.parents_of(id))
+            stack.push_back(parent);
+    }
+
+    return false;
+}
+
+/// The refusal, in the words a caller can act on.
+[[nodiscard]] cc::string describe(vdoc::integration_rejection const& rejection)
+{
+    if (rejection.reason == vdoc::integration_error::parents_disagree)
+        return cc::string("its parents are not the ones this document already holds under that id");
+
+    return rejection.decode_error == vdoc::op_decode_error::hash_mismatch
+             ? cc::string("its bytes do not hash to the id it was sent under, which means corruption or tampering")
+             : cc::string("its bytes are not a well-formed op");
+}
 } // namespace
 
 store::~store()
@@ -498,6 +593,103 @@ cc::shared_async<snapshot_write_result> store::prune(vdoc::op_id const& head)
     _snapshot_cache.install(head, cc::move(snapshot), /*pinned =*/true);
 
     auto async = on_write_snapshots(cc::move(job));
+    impl_pump_until_idle();
+    return async;
+}
+
+// recovering history from a peer
+// -------------------------------------------------------------------------------------------------
+
+cc::shared_async<recovery_result> store::recover(cc::span<vdoc::received_op const> batch)
+{
+    impl_harvest_pending();
+
+    if (_is_closed)
+        return cc::make_async_from_error<recovery_result>(
+            cc::async_error::make_error(cc::any_error(cc::string("recovering history in a closed store"))));
+
+    // Verified against today's graph and stored nowhere, so every refusal below leaves this replica exactly as it was
+    // with nothing to undo.
+    auto verified = vdoc::try_verify_batch(_ops, batch);
+    if (verified.has_error())
+        return cc::make_async_from_error<recovery_result>(cc::async_error::make_error(
+            cc::any_error(cc::format("a peer's op was refused because {}", describe(verified.error())))));
+
+    auto pending = pending_graph{.graph = _ops};
+    for (auto const& o : verified.value())
+        pending.incoming[o.id] = &o;
+
+    // A required snapshot carries no `superseded`, and that is sound only while nothing can present a writer from
+    // behind it.
+    // Completing its ancestry retires the question entirely — a replay reproduces what the snapshot holds — so the two
+    // outcomes are one rule: complete it and the snapshot is demoted, leave it incomplete and nothing may fork below it.
+    auto completed = cc::vector<vdoc::op_id>();
+    auto still_required = cc::vector<vdoc::op_id>();
+    for (auto const& [id, entry] : _snapshots)
+    {
+        if (!entry.required)
+            continue;
+
+        if (ancestry_is_complete(pending, id))
+            completed.push_back(id);
+        else
+            still_required.push_back(id);
+    }
+
+    for (auto const& o : verified.value())
+    {
+        // Filling a skeleton the prune left behind is the case this whole path exists for, and it moves no edge.
+        if (_ops.contains(o.id))
+            continue;
+
+        for (auto const& head : still_required)
+            if (!descends_from(pending, o.id, head))
+                return cc::make_async_from_error<recovery_result>(cc::async_error::make_error(cc::any_error(
+                    cc::string("a peer's op forks below a snapshot whose history is still pruned, which would leave a "
+                               "writer nothing can suppress; send the rest of that snapshot's ancestry with it"))));
+    }
+
+    auto job = impl::recovery_job();
+    for (auto const& o : verified.value())
+    {
+        // An op already held in full is already durable, so offering it again would be a write that changes nothing.
+        auto const* const existing = _ops.find(o.id);
+        if (existing != nullptr && !existing->is_skeleton())
+            continue;
+
+        job.ops.push_back(to_row(o));
+    }
+
+    std::sort(job.ops.begin(), job.ops.end(),
+              [](op_row const& a, op_row const& b)
+              {
+                  for (isize i = 0; i < a.hash.size() && i < b.hash.size(); ++i)
+                      if (a.hash[i] != b.hash[i])
+                          return a.hash[i] < b.hash[i];
+                  return a.hash.size() < b.hash.size();
+              });
+
+    auto const applied = vdoc::apply_verified_batch(_ops, cc::move(verified.value()));
+    job.ops_added = applied.ops_added;
+    job.skeletons_filled = applied.skeletons_filled;
+
+    for (auto const& row : job.ops)
+        _durable_ops.insert(vdoc::op_id::from_bytes(row.hash));
+
+    for (auto const& head : completed)
+    {
+        // The cached materialization is still exactly right — it was computed before the prune, over the very ops that
+        // just came back — so nothing is recomputed and only its standing changes.
+        _snapshots[head].required = false;
+        (void)_snapshot_cache.unpin(head);
+
+        auto hash = cc::vector<byte>();
+        hash.resize_to_uninitialized(vdoc::op_id::byte_size);
+        head.to_bytes(hash);
+        job.demoted_snapshots.push_back(cc::move(hash));
+    }
+
+    auto async = on_recover(cc::move(job));
     impl_pump_until_idle();
     return async;
 }

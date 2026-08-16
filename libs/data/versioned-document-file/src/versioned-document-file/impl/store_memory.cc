@@ -399,6 +399,19 @@ public:
         return cc::unit{};
     }
 
+    cc::result<cc::unit> set_snapshot_required(cc::span<byte const> op_hash, bool required) override
+    {
+        for (auto& existing : _staged.snapshots)
+            if (same_bytes(existing.op_hash, op_hash))
+            {
+                existing.required = required;
+                return cc::unit{};
+            }
+
+        // A snapshot that is not here is not an error, exactly as an absent one is not for delete_snapshot.
+        return cc::unit{};
+    }
+
     cc::result<cc::unit> skeletonize_op(cc::span<byte const> op_hash) override
     {
         for (auto& existing : _staged.ops)
@@ -410,6 +423,27 @@ public:
             }
 
         // An op that is not here is not an error: what was asked for already holds.
+        return cc::unit{};
+    }
+
+    cc::result<cc::unit> fill_op_payload(op_row const& row) override
+    {
+        if (!row.metadata.has_value() || !row.assignments.has_value())
+            return cc::unit{}; // a skeleton carries no payload, so there is nothing to put back
+
+        for (auto& existing : _staged.ops)
+            if (same_bytes(existing.hash, row.hash))
+            {
+                // Only a skeleton is filled, matching the file arm's `AND metadata IS NULL` — so neither arm can
+                // damage a row that already has bytes, however this is called.
+                if (!existing.metadata.has_value())
+                {
+                    existing.metadata = copy_of_optional(row.metadata);
+                    existing.assignments = copy_of_optional(row.assignments);
+                }
+                return cc::unit{};
+            }
+
         return cc::unit{};
     }
 
@@ -481,6 +515,15 @@ protected:
         if (applied.has_error())
             return cc::make_async_from_error<snapshot_write_result>(
                 cc::async_error::make_error(cc::move(applied).error()));
+        return cc::make_async_from_value(applied.value());
+    }
+
+    cc::shared_async<recovery_result> on_recover(recovery_job job) override
+    {
+        auto writer = memory_writer(*_image);
+        auto applied = apply_recovery(writer, job);
+        if (applied.has_error())
+            return cc::make_async_from_error<recovery_result>(cc::async_error::make_error(cc::move(applied).error()));
         return cc::make_async_from_value(applied.value());
     }
 

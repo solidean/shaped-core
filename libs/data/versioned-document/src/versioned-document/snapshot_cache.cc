@@ -42,6 +42,19 @@ void vdoc::snapshot_cache::clear()
     _entries.clear();
 }
 
+bool vdoc::snapshot_cache::unpin(op_id const& id)
+{
+    auto* const e = _entries.get_ptr(id);
+    if (e == nullptr)
+        return false;
+
+    e->pinned = false;
+
+    // The budget was allowed to be exceeded while this entry was pinned, so releasing it is where that debt is paid.
+    impl_trim();
+    return true;
+}
+
 bool vdoc::snapshot_cache::is_pinned(op_id const& id) const
 {
     auto const* const e = _entries.get_ptr(id);

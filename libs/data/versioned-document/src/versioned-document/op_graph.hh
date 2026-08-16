@@ -61,6 +61,17 @@ public:
     /// False where the graph does not have the op; an op that is already a skeleton is a no-op and true.
     bool skeletonize(op_id const& id);
 
+    /// Puts a payload back on a skeleton, leaving its id and its parent edges exactly where they are.
+    ///
+    /// The exact inverse of skeletonize, and what receiving history from a peer needs: `add` is idempotent by id, so
+    /// it leaves a skeleton a skeleton.
+    ///
+    /// **The payload must already have been verified against `id`**, and nothing here re-checks it — the route that
+    /// does is [recovery](recovery.hh), which is what a receiver calls.
+    /// An op that already has its payload is left alone, since content addressing makes the two byte-identical.
+    /// False where the graph does not have the op.
+    bool fill_payload(op_id const& id, op_payload payload);
+
     /// Materializes the document as of one head, or as of several merged.
     ///
     /// Materializing several heads is defined to equal materializing a merge op over them, for every property

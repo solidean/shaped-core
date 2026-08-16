@@ -21,7 +21,22 @@ namespace vdoc::file::test
 class store_medium;
 struct store_impl;
 struct sample_history;
+struct received_bytes;
 } // namespace vdoc::file::test
+
+/// One op copied out of a peer's graph, as a receive buffer would hold it.
+///
+/// **Owning, and it has to be.** vdoc::received_op views the sender's bytes, and those bytes are gone the moment the
+/// op is skeletonized — which is exactly the state every recovery test starts from.
+struct vdoc::file::test::received_bytes
+{
+    vdoc::op_id id;
+    cc::vector<vdoc::op_id> parents;
+    cc::vector<byte> metadata;
+    cc::vector<byte> assignments;
+
+    [[nodiscard]] vdoc::received_op view() const;
+};
 
 /// Where one test's document lives, for as long as that test runs.
 ///
@@ -164,6 +179,18 @@ template <class T>
 
 /// Copies the named ops out of `source` into `target`, which is what a caller does before publishing them.
 void copy_ops_into(store& target, vdoc::op_graph const& source, cc::span<vdoc::op_id const> ids);
+
+/// The named ops copied out of `source` as a peer would send them.
+///
+/// Deliberately NOT copy_ops_into: that is the trusting path, and everything below is about the one that trusts nothing.
+/// A skeleton in `source` is skipped, since a peer with no bytes has nothing to offer.
+[[nodiscard]] cc::vector<received_bytes> copy_received(vdoc::op_graph const& source, cc::span<vdoc::op_id const> ids);
+
+/// The views a batch of received_bytes hands to recover().
+[[nodiscard]] cc::vector<vdoc::received_op> views_of(cc::span<received_bytes const> batch);
+
+/// The ops in `graph` that are skeletons, sorted by id bytes — what a pruned replica is missing.
+[[nodiscard]] cc::vector<vdoc::op_id> skeleton_ids(vdoc::op_graph const& graph, cc::span<vdoc::op_id const> ids);
 
 /// The materialized document as a comparable string, so two loads can be checked against each other.
 [[nodiscard]] cc::string materialize_to_text(vdoc::op_graph const& graph, vdoc::op_id const& head);

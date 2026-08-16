@@ -18,6 +18,7 @@ add_library(versioned-document-file
     src/versioned-document-file/impl/load.cc
     src/versioned-document-file/impl/publish.cc
     src/versioned-document-file/impl/reclaim.cc
+    src/versioned-document-file/impl/recovery.cc
     src/versioned-document-file/impl/store_memory.cc
     src/versioned-document-file/impl/sqlite_schema.cc
     src/versioned-document-file/impl/sqlite_io.cc
@@ -78,6 +79,7 @@ if(SC_BUILD_TESTS)
         tests/conformance/drivers.cc
         tests/conformance/conformance-test.cc
         tests/conformance/assets-conformance-test.cc
+        tests/conformance/recovery-conformance-test.cc
         tests/conformance/snapshots-conformance-test.cc
     )
 

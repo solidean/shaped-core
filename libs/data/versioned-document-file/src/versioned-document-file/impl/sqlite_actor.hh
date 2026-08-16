@@ -55,6 +55,14 @@ struct snapshot_write_request
     cc::shared_async<snapshot_write_result> promise;
 };
 
+/// Fills in ops received from a peer, and demotes whatever required snapshots that completed.
+/// Its own message rather than a mode of publish_request, because a recovered op has no ref to be reached from.
+struct recovery_request
+{
+    recovery_job job;
+    cc::shared_async<recovery_result> promise;
+};
+
 struct workspace_request
 {
     cc::vector<workspace_entry> entries;
@@ -79,8 +87,14 @@ struct blob_request
     cc::shared_async<cc::vector<byte>> promise;
 };
 
-using sqlite_actor
-    = cc::threaded_actor<open_request, publish_request, snapshot_write_request, reclaim_request, workspace_request, blob_request, close_request>;
+using sqlite_actor = cc::threaded_actor<open_request,
+                                        publish_request,
+                                        snapshot_write_request,
+                                        recovery_request,
+                                        reclaim_request,
+                                        workspace_request,
+                                        blob_request,
+                                        close_request>;
 
 /// Creates and starts the actor.
 /// Nothing touches the disk here — the open is a message like any other.

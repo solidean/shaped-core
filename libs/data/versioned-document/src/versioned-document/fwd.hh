@@ -110,6 +110,18 @@ enum class op_decode_error : u8;
 /// The result of checking an op against its own stored bytes.
 /// A skeleton op left behind by pruning is unverifiable by construction and must never read as tampering.
 enum class op_verification : u8;
+
+/// One op exactly as a peer sent it, over the receive buffer's own bytes.
+struct received_op;
+
+/// Why a received batch was refused — malformed bytes, or parents that disagree with a held skeleton.
+enum class integration_error : u8;
+
+/// The refusal itself, naming the op that caused it.
+struct integration_rejection;
+
+/// What integrating a received batch did.
+struct integration_result;
 } // namespace vdoc
 
 // ---- the raw document --------------------------------------------------------------------------

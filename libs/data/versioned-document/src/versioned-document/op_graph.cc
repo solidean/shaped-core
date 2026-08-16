@@ -254,6 +254,20 @@ bool vdoc::op_graph::skeletonize(op_id const& id)
     return true;
 }
 
+bool vdoc::op_graph::fill_payload(op_id const& id, op_payload payload)
+{
+    auto* const o = _ops.get_ptr(id);
+    if (o == nullptr)
+        return false;
+
+    // Content addressing makes a second payload for the same id the same bytes, so a full op is left as it is rather
+    // than rewritten — and the edges never move, because filling changes no parent.
+    if (o->is_skeleton())
+        o->payload = cc::move(payload);
+
+    return true;
+}
+
 vdoc::raw_document vdoc::op_graph::materialize(op_id const& head) const
 {
     op_id const heads[] = {head};

@@ -17,6 +17,7 @@ add_library(versioned-document
     src/versioned-document/parse_policy.cc
     src/versioned-document/parse_report.cc
     src/versioned-document/raw_document.cc
+    src/versioned-document/recovery.cc
     src/versioned-document/snapshot_cache.cc
     src/versioned-document/snapshot_document.cc
     src/versioned-document/value.cc
@@ -43,6 +44,7 @@ target_sources(versioned-document
     src/versioned-document/parse_policy.hh
     src/versioned-document/parse_report.hh
     src/versioned-document/raw_document.hh
+    src/versioned-document/recovery.hh
     src/versioned-document/snapshot_cache.hh
     src/versioned-document/snapshot_document.hh
     src/versioned-document/value.hh
@@ -88,6 +90,7 @@ if(SC_BUILD_TESTS)
         tests/op_graph_corpus-test.cc
         tests/parse-test.cc
         tests/parser-test.cc
+        tests/recovery-test.cc
         tests/snapshot_cache-test.cc
         tests/value-test.cc
         tests/value-fuzz-test.cc

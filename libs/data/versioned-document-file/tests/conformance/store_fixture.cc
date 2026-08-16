@@ -378,6 +378,50 @@ void copy_ops_into(store& target, vdoc::op_graph const& source, cc::span<vdoc::o
             target.add_op(*op);
 }
 
+vdoc::received_op received_bytes::view() const
+{
+    return vdoc::received_op{.id = id, .parents = parents, .metadata_bytes = metadata, .assignment_bytes = assignments};
+}
+
+cc::vector<received_bytes> copy_received(vdoc::op_graph const& source, cc::span<vdoc::op_id const> ids)
+{
+    auto out = cc::vector<received_bytes>();
+    for (auto const& id : ids)
+    {
+        auto const* const op = source.find(id);
+        if (op == nullptr || op->is_skeleton())
+            continue;
+
+        auto const& payload = op->payload.value();
+        out.push_back(received_bytes{
+            .id = op->id,
+            .parents = cc::vector<vdoc::op_id>::create_copy_of(cc::span<vdoc::op_id const>(op->parents)),
+            .metadata = cc::vector<byte>::create_copy_of(cc::span<byte const>(payload.metadata_bytes)),
+            .assignments = cc::vector<byte>::create_copy_of(cc::span<byte const>(payload.assignment_bytes))});
+    }
+
+    return out;
+}
+
+cc::vector<vdoc::received_op> views_of(cc::span<received_bytes const> batch)
+{
+    auto out = cc::vector<vdoc::received_op>();
+    for (auto const& entry : batch)
+        out.push_back(entry.view());
+
+    return out;
+}
+
+cc::vector<vdoc::op_id> skeleton_ids(vdoc::op_graph const& graph, cc::span<vdoc::op_id const> ids)
+{
+    auto out = cc::vector<vdoc::op_id>();
+    for (auto const& id : ids)
+        if (auto const* const op = graph.find(id); op != nullptr && op->is_skeleton())
+            out.push_back(id);
+
+    return out;
+}
+
 cc::string materialize_to_text(vdoc::op_graph const& graph, vdoc::op_id const& head)
 {
     auto const raw = graph.materialize(head);

@@ -95,6 +95,9 @@ This is what stops a formatter change from ever looking like tampering.
 Both may be `NULL`, which is a **skeleton op**: a pruned parent, kept for its position in the DAG.
 A skeleton is unverifiable by construction and must be reported as such, never as a hash mismatch.
 
+The payload columns move in exactly two directions, and no others: non-NULL → NULL when a prune empties them, and NULL → non-NULL when a recovery fills them back in.
+A row that already has bytes is never rewritten, because publishing is append-only and the fill is scoped to rows whose payload is NULL.
+
 ### `refs` — named heads
 
 ```sql
@@ -383,3 +386,29 @@ Pruning is always optional, and never automatic.
 
 After a prune, materializing **without** the snapshot is lossy by construction, since the emptied ops carry nothing.
 That is what `required` means, and why deleting such a row destroys data.
+
+---
+
+## Recovering history from a peer
+
+An op id recursively commits to everything behind it, so a replica missing history can accept that history from anyone at all.
+It recomputes the hashes over the bytes as received and checks them against the ids it already expected; nothing is re-serialized, and the sender is trusted at no point.
+
+The batch is a **set**.
+Every op is verified before any of it is stored, so a partial or hostile batch is refused naming the op — and leaves the file byte-identical, because a refusal never opens a transaction.
+
+The write is one transaction through its own store hook, ops first and snapshot demotions second.
+Each op is inserted and then filled: the insert conflicts away where the row is already there, and the fill only touches NULL payload columns.
+So the write never has to classify an op correctly in order to be correct.
+
+**A recovery can retire a prune boundary, and that is the only thing that moves `required` back to 0.**
+Once every op behind a required snapshot has its payload again, replaying reproduces exactly what the snapshot holds, so the row stops being load-bearing and is demoted to a droppable cache.
+The demotion moves the flag alone — the chunks are already correct, and re-encoding a payload that can run to gigabytes to move one bit would be the expensive way to change nothing.
+
+Until that happens the boundary still binds, from the other direction: **a batch introducing an op that forks below a still-required snapshot is refused**.
+That op would present a writer the emptied ops superseded and nothing can suppress — the same fabricated multi-value pruning refuses to create.
+Sending the rest of that snapshot's ancestry in the same batch is what makes such a batch acceptable, which is why this is a boundary rather than a ban.
+
+The demotion is written **after** the fills, and the order is load-bearing.
+A crash between them leaves a snapshot still marked required over history that is already back, which costs one pinned cache entry.
+The reverse would leave a droppable snapshot standing over history that is still gone, which is data loss.
