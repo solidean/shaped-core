@@ -18,7 +18,7 @@
 /// [try_decode] enforces it — a non-canonical encoding is a decode error, never something repaired.
 /// Tolerating one would silently break diffing, content addressing and every merge decision built on them.
 ///
-/// The design is [the concept](../../docs/concept.md#values).
+/// The design is [the concept](../../docs/concepts/values.md).
 ///
 /// NOT FROZEN.
 /// If a general-purpose any-value format ever lands elsewhere, this codec may be replaced by it.

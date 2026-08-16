@@ -5,7 +5,7 @@ Today's build opens documents written three years from now, and keeps working on
 Two *different applications* share one document while each understands only its own half of it.
 
 That third one is the interesting claim, and it is what this document exists to state.
-The design is [concept.md](concept.md); this is the property that most of it was shaped to buy.
+The design is [the concepts](_index.md#concepts); this is the property that most of it was shaped to buy.
 
 ---
 
@@ -15,7 +15,7 @@ The storage model is entity → component → property over an immutable DAG of 
 [The library ships zero components](decisions.md#the-library-ships-zero-components) — every one named in this document belongs to some application, and none of them is `vdoc`'s.
 
 **Nothing storage knows can go out of date, because it knows nothing that could.**
-That is what lets the core stay fixed while application logic evolves indefinitely, and everything that *can* age lives in [interpretation](concept.md#interpretation) above it.
+That is what lets the core stay fixed while application logic evolves indefinitely, and everything that *can* age lives in [interpretation](concepts/interpretation.md) above it.
 
 So the compatibility surface between two builds is not "do they agree on the format".
 It is "which components do they *both* understand" — and that question has a useful answer other than *all* or *none*.
@@ -60,15 +60,16 @@ Four properties, each specified elsewhere, which together are the guarantee.
 None of them is a convention that a careless implementation could quietly break.
 
 **1. An op is never re-serialized.**
-An op retains the producer's bytes and decodes on demand, so an op assigning to unknown components round-trips byte-identically ([The op is its bytes](concept.md#the-op-is-its-bytes)).
+An op retains the producer's bytes and decodes on demand, so an op assigning to unknown components round-trips byte-identically.
+See [the op is its bytes](concepts/ops-and-content-addressing.md#the-op-is-its-bytes).
 
 **2. Parsing never refuses.**
-An unknown component type, an unknown schema version and an unresolvable conflict are each an entry in the [parse report](concept.md#parsing-never-refuses).
+An unknown component type, an unknown schema version and an unresolvable conflict are each an entry in the [parse report](concepts/interpretation.md#parsing-never-refuses).
 The rest of the document loads and stays editable.
 A build that does not understand a component is not entitled to refuse the document that contains it.
 
 **3. Which writes survived is decided on the raw layer.**
-Dominance and multi-values are computed over the op DAG, before anything is interpreted, and they need only the property path ([Multi-values](concept.md#multi-values)).
+Dominance and multi-values are computed over the op DAG, before anything is interpreted, and they need only the property path ([Multi-values](concepts/multi-values.md)).
 Storage never picks a winner among concurrent writes — it reports them all, and *choosing* is a parse step layered on top.
 
 That ordering is what lets an application merge concurrent edits to components it cannot read.
@@ -85,16 +86,16 @@ So a save cycle through an older build does not strip newer state.
 The guarantee is mutual, and these are the obligations that keep it.
 
 - **Do not use `$`-prefixed component types or property names.**
-  That namespace belongs to the library ([Reserved names](concept.md#reserved-names)); everything without the sigil is the application's, forever.
+  That namespace belongs to the library ([Reserved names](concepts/interpretation.md#reserved-names)); everything without the sigil is the application's, forever.
 - **Do not interpret another application's components.**
   Reading them is fine and often useful; *depending* on their shape re-creates the coupling this design removes, and does it invisibly.
 - **Do not rewrite history to tidy up what you do not understand.**
   Deleting an unknown component is not a cleanup, it is data loss for another application.
-  [There is no delete](concept.md#deletion-is-interpretation-not-storage) at the storage layer to do it with, either.
+  [There is no delete](concepts/interpretation.md#deletion-is-interpretation-not-storage) at the storage layer to do it with, either.
 - **Do not prune by deleting ops.**
-  Pruning leaves [skeleton ops](concept.md#pruning), and removing the nodes outright severs ancestry and changes what the document says.
+  Pruning leaves [skeleton ops](concepts/pruning-and-recovery.md#pruning), and removing the nodes outright severs ancestry and changes what the document says.
 - **Stamp `$schema_version` and migrate on read.**
-  That is what makes your *own* components forward-compatible with your future self ([Schema evolution](concept.md#schema-evolution)).
+  That is what makes your *own* components forward-compatible with your future self ([Schema evolution](concepts/interpretation.md#schema-evolution)).
 
 ---
 

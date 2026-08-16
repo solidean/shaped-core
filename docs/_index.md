@@ -50,7 +50,7 @@ Library-local docs live next to their library, under `libs/<category>/<lib>/docs
   [cheat-sheet](../libs/data/versioned-document-file/cheat-sheet.md) ·
   [docs](../libs/data/versioned-document-file/docs/_index.md)), the `.vdoc` save format on top of it.
   Both are at the design stage.
-  [concept.md](../libs/data/versioned-document/docs/concept.md) is the design, and [format.md](../libs/data/versioned-document-file/docs/format.md) the on-disk specification.
+  Its [concept docs](../libs/data/versioned-document/docs/_index.md#concepts) are the design, and [format.md](../libs/data/versioned-document-file/docs/format.md) the on-disk specification.
 - **graphics family** ([overview](graphics.md)) — shaped-graphics
   ([readme](../libs/graphics/shaped-graphics/readme.md) ·
   [cheat-sheet](../libs/graphics/shaped-graphics/cheat-sheet.md) ·

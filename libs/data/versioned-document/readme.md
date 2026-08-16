@@ -13,8 +13,6 @@ auto const head = graph.add(vdoc::op_builder{}
                                 .build(graph));
 
 auto const raw = graph.materialize(head);          // schema-agnostic
-
-// [planned] — the typed layer, milestone 3
 auto const doc = vdoc::parse(raw, policy, report); // typed, immutable, queryable
 ```
 
@@ -23,14 +21,14 @@ What a `transform` or a `material` is belongs to the application; `vdoc` owns th
 
 Headers are included by their full path from `src/`, e.g. `#include <versioned-document/op_graph.hh>`.
 
-The concept is complete, and the **storage layer** is built: values, ids, ops, the DAG and the raw document.
-The typed layer above it — components, parsing, `document` — is not.
-[docs/concept.md](docs/concept.md) is the design, [docs/todo/](docs/todo/_index.md) is the ordered plan to build the rest.
+The library is complete: values, ids, ops, the DAG, snapshots and pruning, the typed layer, and recovery from an untrusted peer.
+Persistence is [versioned-document-file](../versioned-document-file/readme.md), one library up.
+The [concept docs](./docs/_index.md#concepts) are the design, one file per concept.
 
 ## Design at a glance
 
 Four layers, kept strictly apart.
-[docs/concept.md](docs/concept.md) owns all of it.
+The [concept docs](./docs/_index.md#concepts) own all of it.
 
 - **Ops** — an immutable, content-addressed DAG, where zero parents starts a document, one extends it and several merge.
   Canonicalization is the producer's job, so verifying a stored op is a plain hash of the bytes as stored, never a re-serialization.
@@ -51,18 +49,18 @@ Three properties are worth knowing before reading anything else:
 ## File organization
 
 Source lives in `src/versioned-document/`.
-`fwd.hh` doubles as the index of every name the library plans to expose, implemented or not.
+`fwd.hh` doubles as the index of every name the library exposes.
 
 | Area | What is in it |
 |--------------|--------------------|
 | (root)       | `fwd.hh` — forward declarations and vocabulary aliases |
-| values       | `value` / `value_view` / `value_builder` — the binary value codec **(built)** |
-| identity     | `entity_id` / `component_type_id` / `property_id` / `property_path` — interned, distinct id types **(built)** |
-| ops          | `op` / `op_id` / `op_builder` / `op_graph` — the DAG and its materialization **(built)** |
-| raw          | `raw_document` and the three levels below it **(built)** |
+| values       | `value` / `value_view` / `value_builder` — the binary value codec |
+| identity     | `entity_id` / `component_type_id` / `property_id` / `property_path` — interned, distinct id types |
+| ops          | `op` / `op_id` / `op_builder` / `op_graph` — the DAG and its materialization |
+| raw          | `raw_document` and the three levels below it |
+| snapshots    | `snapshot_document` / `snapshot_cache` — materializations cached against an op |
+| recovery     | `received_op` and `integrate` — history taken from a peer, verified by recomputation |
 | typed        | `component_registry` / `parse_policy` / `parse_report` / `document` |
-
-[docs/structure.md](docs/structure.md) tracks what is `[done]` versus `[planned]` as the milestones land.
 
 ## Building & testing
 
@@ -77,10 +75,8 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 
 ## More
 
-- [docs/concept.md](docs/concept.md) — the design, end to end, and the thing to read first.
+- [docs/](./docs/_index.md) — the documentation hub, and the index of the concept docs that are the design.
 - [docs/compatibility.md](docs/compatibility.md) — what a document guarantees across builds and across applications, and what an application owes in return.
 - [docs/decisions.md](docs/decisions.md) — every settled decision, its reasoning, and what would reopen it.
-- [docs/todo/](docs/todo/_index.md) — the milestones, in execution order.
-- [docs/structure.md](docs/structure.md) — the roadmap (`[done]` / `[planned]`).
-- [cheat-sheet.md](cheat-sheet.md) — the planned API at a glance.
+- [cheat-sheet.md](cheat-sheet.md) — the API at a glance.
 - [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows.

@@ -4,8 +4,7 @@ project(versioned-document-file LANGUAGES CXX)
 # The `.vdoc` save format: one SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets and their blobs, and a disposable workspace.
 # See readme.md and docs/format.md.
 #
-# Milestones 4 and 5 land the store, its two implementations, the loader and the content store; snapshots follow in milestone 6.
-# See ../versioned-document/docs/todo/.
+# See readme.md and docs/format.md.
 add_library(versioned-document-file
     src/versioned-document-file/fwd.cc
     src/versioned-document-file/diagnostics.cc

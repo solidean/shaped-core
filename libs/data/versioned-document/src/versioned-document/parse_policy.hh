@@ -9,7 +9,7 @@
 /// `property_reader` is what a component's parse is handed, and `parse_policy` is what it defers the hard cases to.
 /// Splitting them this way is what keeps "how to interpret" out of the parser entirely.
 ///
-/// The design is [the concept](../../docs/concept.md#interpretation) and [multi-values](../../docs/concept.md#multi-values).
+/// The design is [the concept](../../docs/concepts/interpretation.md) and [multi-values](../../docs/concepts/multi-values.md).
 
 /// Reads one component's properties, applying the multi-value rules exactly once.
 ///

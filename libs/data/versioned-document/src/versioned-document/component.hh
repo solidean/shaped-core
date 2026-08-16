@@ -25,7 +25,7 @@
 ///         static cc::optional<my_transform> parse(vdoc::property_reader const& r);
 ///     };
 ///
-/// The design is [the concept](../../docs/concept.md#components-belong-to-the-application).
+/// The design is [the concept](../../docs/concepts/interpretation.md#components-belong-to-the-application).
 
 /// The `$`-prefixed names the library owns.
 /// Applications must not use the sigil, for a component type or for a property.
@@ -207,7 +207,7 @@ public:
     void register_component()
     {
         static_assert(is_component<ComponentT>, "specialize vdoc::component_traits<C> first - see "
-                                                "docs/concept.md#components-belong-to-the-application");
+                                                "docs/concepts/interpretation.md#components-belong-to-the-application");
         add(impl::make_component_schema<ComponentT>());
     }
 

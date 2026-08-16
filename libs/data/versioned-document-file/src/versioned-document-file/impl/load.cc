@@ -9,7 +9,7 @@
 /// The one loader, over a store_reader.
 ///
 /// In the order [the format](../../../docs/format.md#loading) gives, and metadata before payloads.
-/// Every op goes through milestone 2's verifying decoder, and there is no other route.
+/// Every op goes through try_decode_op, which verifies as it goes, and there is no other route.
 ///
 /// **Soft failures never block a load.** A corrupt op is dropped and reported, landing on exactly the same downstream
 /// path as a pruned one — which is what makes that path get exercised rather than rot until the day it is needed.

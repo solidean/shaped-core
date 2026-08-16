@@ -3,9 +3,7 @@ project(versioned-document LANGUAGES CXX)
 
 # Structured, versioned documents: entities and components materialized from an immutable content-addressed DAG of ops.
 # Knows nothing about what a component means — the component set belongs entirely to the application.
-# See readme.md and docs/concept.md.
-#
-# Each milestone in docs/todo/ adds its own sources here.
+# See readme.md and docs/_index.md.
 add_library(versioned-document
     src/versioned-document/component.cc
     src/versioned-document/document.cc

@@ -21,7 +21,7 @@
 /// iteration order is the same on every machine — the levels cannot be interchanged, and nothing here is a hash
 /// container whose order could leak into output.
 ///
-/// The design is [the concept](../../docs/concept.md#interpretation) and [multi-values](../../docs/concept.md#multi-values).
+/// The design is [the concept](../../docs/concepts/interpretation.md) and [multi-values](../../docs/concepts/multi-values.md).
 
 /// One surviving write of a property: the value, and the op that wrote it.
 struct vdoc::property_value

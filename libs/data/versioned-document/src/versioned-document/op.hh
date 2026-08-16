@@ -21,7 +21,7 @@
 ///
 /// try_decode_op is the only route from bytes to an op, and it verifies as it goes.
 ///
-/// The design is [the concept](../../docs/concept.md#ops-and-content-addressing), and the settled choices are
+/// The design is [the concept](../../docs/concepts/ops-and-content-addressing.md), and the settled choices are
 /// [decisions.md](../../docs/decisions.md#the-op-retains-its-bytes-and-decodes-on-demand).
 
 /// Content hash of an op: a 32-byte BLAKE3 digest that recursively commits to the whole history behind it.

@@ -16,7 +16,7 @@
 /// A child can arrive before its parent, and pruning leaves parents that are gone entirely, so reachability skips
 /// what is missing rather than failing.
 ///
-/// The design is [the concept](../../docs/concept.md#the-dag).
+/// The design is [the concept](../../docs/concepts/ops-and-content-addressing.md#the-dag).
 class vdoc::op_graph
 {
 public:

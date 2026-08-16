@@ -3,12 +3,11 @@
 The on-disk specification.
 A `.vdoc` file is a single SQLite database holding a document's whole history, the assets a user embedded in it, and the disposable UI state that goes with it.
 
-The model it stores is [versioned-document](../../versioned-document/docs/concept.md)'s; read that first.
+The model it stores is [versioned-document](../../versioned-document/docs/_index.md#concepts)'s; read that first.
 This document is the authority on the bytes.
 
-The schema, the load path, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — and snapshots with history pruning are implemented.
-[milestone-4](../../versioned-document/docs/todo/milestone-4.md) and [milestone-5](../../versioned-document/docs/todo/milestone-5.md) landed the store and the content store.
-[milestone-6](../../versioned-document/docs/todo/milestone-6.md) landed snapshots and pruning; recovery from an untrusted peer is what remains.
+Everything specified here is implemented.
+The schema and the load path, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — snapshots with history pruning, and recovery from an untrusted peer.
 
 ---
 

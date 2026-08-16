@@ -5,7 +5,7 @@
 
 /// The parser and the policy that bakes in the library's conventions.
 ///
-/// The design is [the concept](../../docs/concept.md#interpretation).
+/// The design is [the concept](../../docs/concepts/interpretation.md).
 
 /// The conventions, ready to use: registry lookup, `$alive`-based deletion, and local-closure conflict resolution.
 ///

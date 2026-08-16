@@ -11,7 +11,7 @@
 
 /// The typed document: an immutable index, built once by a parse and queried many times.
 ///
-/// The design is [the concept](../../docs/concept.md#the-typed-document-is-an-immutable-index).
+/// The design is [the concept](../../docs/concepts/the-typed-document.md).
 
 namespace vdoc::impl
 {
@@ -96,7 +96,7 @@ public:
     [[nodiscard]] ComponentT const* get(entity_id entity) const
     {
         static_assert(is_component<ComponentT>, "specialize vdoc::component_traits<C> first - see "
-                                                "docs/concept.md#components-belong-to-the-application");
+                                                "docs/concepts/interpretation.md#components-belong-to-the-application");
 
         auto const* const column = try_find_column(impl::component_type_of<ComponentT>());
         if (column == nullptr)
@@ -125,8 +125,9 @@ public:
     void each(F&& f) const
     {
         static_assert(sizeof...(ComponentTs) > 0, "each needs at least one component type");
-        static_assert((is_component<ComponentTs> && ...), "every type must specialize vdoc::component_traits - see "
-                                                          "docs/concept.md#components-belong-to-the-application");
+        static_assert((is_component<ComponentTs> && ...),
+                      "every type must specialize vdoc::component_traits - see "
+                      "docs/concepts/interpretation.md#components-belong-to-the-application");
 
         constexpr auto n = isize(sizeof...(ComponentTs));
         impl::component_column const* columns[n] = {try_find_column(impl::component_type_of<ComponentTs>())...};

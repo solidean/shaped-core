@@ -17,7 +17,7 @@
 /// component type at a time.
 /// Determinism is structural here rather than merely tested.
 ///
-/// The design is [the concept](../../docs/concept.md#parsing-never-refuses).
+/// The design is [the concept](../../docs/concepts/interpretation.md#parsing-never-refuses).
 
 /// One thing parsing found, and where.
 enum class vdoc::diagnostic_kind : vdoc::u8

@@ -5,7 +5,7 @@
 
 /// A materialized document that owns every byte it points at.
 ///
-/// The design is [milestone 6](../../docs/todo/milestone-6.md#1-snapshot-terminated-materialization).
+/// The design is [snapshots](../../docs/concepts/snapshots.md).
 
 /// One materialized document, owning every value byte it points at.
 ///

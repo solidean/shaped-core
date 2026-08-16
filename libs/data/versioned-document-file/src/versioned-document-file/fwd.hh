@@ -7,7 +7,7 @@
 ///
 /// This header is also the API index: every name the library exposes is declared here, with the one line that says what it is.
 /// The on-disk shape is specified by [the format](../../docs/format.md).
-/// The milestones live with the model library, in [its todo list](../../../versioned-document/docs/todo/_index.md).
+/// The model it stores is [versioned-document](../../../versioned-document/docs/_index.md#concepts)'s.
 ///
 /// A `.vdoc` file holds three kinds of state, and only the first is immutable:
 ///   the op DAG plus its refs and snapshots — content-addressed, verified on load, append-only

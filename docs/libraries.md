@@ -108,10 +108,9 @@ Two properties shape everything else.
 Property values are a **canonical binary codec where equality is byte equality**, which is what makes diffing, content addressing and merge decisions memcmps.
 The typed document is **immutable**: edits build an op and re-materialize, so a parsed document is safe to hold across threads for as long as it is useful.
 
-At the **design stage** — nothing is implemented.
-[concept.md](../libs/data/versioned-document/docs/concept.md) is the design.
+Complete, both libraries.
+[docs/](../libs/data/versioned-document/docs/_index.md#concepts) is the design, one file per concept.
 [decisions.md](../libs/data/versioned-document/docs/decisions.md) records every settled choice and what would reopen it.
-[todo/](../libs/data/versioned-document/docs/todo/_index.md) is the ordered plan for both libraries.
 
 ### versioned-document-file — namespace `vdoc::file` — depends on versioned-document, babel-serializer
 

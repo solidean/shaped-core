@@ -6,8 +6,7 @@
 ///
 /// This header is also the API index: every name the library plans to expose is declared here, with the one line that says what it is.
 /// Every layer here is implemented; persistence is the library above.
-/// The design is [the concept](../../docs/concept.md).
-/// The milestones that land it are [the todo list](../../docs/todo/_index.md).
+/// The design is [the concept docs](../../docs/_index.md#concepts), one file per concept.
 ///
 /// The four layers, bottom to top:
 ///   value        — a canonically-encoded binary value, the only thing a property holds

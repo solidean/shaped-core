@@ -18,7 +18,7 @@ The op DAG loads eagerly and completely; blobs load lazily through a [`blob_sour
 
 The store, the loader, publishing, the workspace and the content store — assets, blobs, the encoding seam and reclamation — are implemented.
 Snapshots are decoded into a materialization cache, persisted over a chunked payload, and history can be pruned behind one.
-What remains of [milestone 6](../versioned-document/docs/todo/_index.md) is recovery from an untrusted peer.
+History missing after a prune can be recovered from a peer nobody trusts, verified by recomputing the hashes.
 [docs/format.md](docs/format.md) specifies the on-disk shape.
 
 ## The one thing to know first
@@ -78,4 +78,4 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 - [docs/format.md](docs/format.md) — the on-disk specification: tables, columns, encodings, and the compatibility rules.
 - [docs/_index.md](docs/_index.md) — this library's documentation hub.
 - [cheat-sheet.md](cheat-sheet.md) — the API at a glance.
-- [versioned-document/docs/concept.md](../versioned-document/docs/concept.md) — the model this persists.
+- [versioned-document/docs/](../versioned-document/docs/_index.md#concepts) — the model this persists.

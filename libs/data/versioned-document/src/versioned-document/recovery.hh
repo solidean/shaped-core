@@ -12,7 +12,7 @@
 /// anyone at all: it recomputes the hashes and checks them against the ids it already expected.
 /// If they match, the history is correct, and the sender was never trusted at any point.
 ///
-/// The design is [the concept](../../docs/concept.md#recovery-from-an-untrusted-peer).
+/// The design is [the concept](../../docs/concepts/pruning-and-recovery.md#recovery-from-an-untrusted-peer).
 
 /// One op exactly as a peer sent it: the id it claims, its parents, and its two payload blobs.
 ///

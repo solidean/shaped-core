@@ -14,7 +14,7 @@
 /// This is what keeps history small enough to keep forever, and it is why an op's assignment list is a genuine
 /// changelog rather than a snapshot.
 ///
-/// The design is [the concept](../../docs/concept.md#ops-write-only-what-changed).
+/// The design is [the concept](../../docs/concepts/ops-and-content-addressing.md#ops-write-only-what-changed).
 class vdoc::op_builder
 {
 public:
@@ -42,7 +42,7 @@ public:
     op_builder& set(entity_id entity, ComponentT const& c)
     {
         static_assert(is_component<ComponentT>, "specialize vdoc::component_traits<C> first - see "
-                                                "docs/concept.md#components-belong-to-the-application");
+                                                "docs/concepts/interpretation.md#components-belong-to-the-application");
 
         auto const type = impl::component_type_of<ComponentT>();
         set_raw(entity, type, reserved::schema_version(), value::of(component_traits<ComponentT>::schema_version));

@@ -27,9 +27,8 @@
 /// **One thread owns a store.** What makes the API non-blocking is that storage work runs on an actor, not that
 /// several threads may call in.
 ///
-/// The design is [format.md](../../docs/format.md), and the milestones are
-/// [milestone-4](../../../versioned-document/docs/todo/milestone-4.md) and
-/// [milestone-5](../../../versioned-document/docs/todo/milestone-5.md).
+/// The design is [format.md](../../docs/format.md), and the model it stores is
+/// [versioned-document](../../../versioned-document/docs/_index.md#concepts)'s.
 
 namespace vdoc::file
 {

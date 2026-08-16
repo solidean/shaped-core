@@ -43,15 +43,33 @@ Two-character namespaces are reserved for the libraries whose names appear on ne
 
 ### The full design is built in v1
 
-**Decided.** Every layer described in [concept.md](concept.md) is implemented, including merges, multi-values, snapshots, pruning and verification.
+**Decided.** Every layer described in [the concepts](_index.md#concepts) is implemented, including merges, multi-values, snapshots, pruning and verification.
 
 **Partial implementation is never a licence to simplify the design.**
 "Nothing uses it yet" is not a reason to cut a layer, collapse a seam, or skip a case — it is a statement about the calendar, not about the design.
 A design cut down while it is half-built is not a smaller design; it is a broken one whose breakage surfaces a year later, in the shape of a format that cannot express what it was designed to express.
 
-This is a standing instruction to everyone implementing the milestones, and it is why [todo/](todo/_index.md) describes the whole thing before any of it is written.
+This was a standing instruction to everyone implementing the plan, and it is why the whole design was described before any of it was written.
 
 **Reopen when:** nothing.
+
+### The design lives in `docs/concepts/`, one file per question, and the plan folder is gone
+
+**Decided at the end of milestone 6.** `concept.md` became ten files under `docs/concepts/`, indexed from [the hub](_index.md#concepts); `docs/todo/` and `structure.md` were deleted.
+
+`concept.md` was ~550 lines and was the document everyone was told to read first.
+At that size "read this before starting" stops being an instruction anyone follows, and a reader who wanted to know how multi-values resolve had to find it.
+
+**What replaces it is an index, not a summary.**
+A summary is a second place for the design to live, and the second place is the one that goes stale.
+
+The plan folder went because a plan describes something being built, so it stops being true the moment the thing is built — and scaffolding left standing is read as part of the building.
+The same argument retired `structure.md`, which tracked `[done]` versus `[planned]` per piece: a status tracker whose every entry has become `[done]` is a file that can only ever be wrong again.
+
+**Splitting is also where three drifted claims were caught**, which is the argument for reconciling during a move rather than after one.
+Moving a section is the moment it is actually reread.
+
+**Reopen when:** a concept file grows past the size at which it stops being read, which is the same failure this split fixed.
 
 ---
 
@@ -171,7 +189,7 @@ A dedicated reference type would imply the document knows how references resolve
 **Decided.** In all four length-prefixed kinds the `u32` prefix counts everything after itself.
 For `string` and `bytes` that is the data; for `array` and `object` it is the `u32` element count plus the entries.
 
-[concept.md](concept.md#values) left this ambiguous by saying "payload byte length" without fixing where the payload starts.
+[values](concepts/values.md) left this ambiguous by saying "payload byte length" without fixing where the payload starts.
 Both readings give an O(1) skip, so the tiebreak is elsewhere.
 One meaning across all four kinds makes skipping a single rule — `5 + prefix`, whatever the tag — instead of two rules a reader has to remember apart.
 A container payload shorter than 4 is therefore invalid by construction: it could not hold its own count.
@@ -209,7 +227,7 @@ Raising it is a format change like any other.
 
 **Decided.** `try_build()` returns `cc::result<value, value_build_error>`; `build()` asserts on the same conditions.
 
-[milestone-1.md](todo/milestone-1.md) said only that the builder "rejects a duplicate key", which an assert would also satisfy.
+The original plan said only that the builder "rejects a duplicate key", which an assert would also satisfy.
 An assert is wrong for the case that actually happens: an importer feeding externally-sourced key/value pairs straight into a builder.
 There a duplicate key is input to reject, not a bug to abort on.
 So the fallible form is the primitive and the asserting one is the convenience.
@@ -229,13 +247,13 @@ That keeps an O(n·depth) walk off the release path, for a mistake no real compo
 **Decided.** An `op` holds `op_id`, its parents, and an `optional<op_payload>` of the producer's `metadata_bytes` and `assignment_bytes`.
 `metadata()` and `assignments()` are decoded views over those bytes; nothing decoded is stored.
 
-[milestone-2.md](todo/milestone-2.md) originally sketched an op carrying decoded `metadata` and `assignments` *plus* an optional payload.
+The original plan sketched an op carrying decoded `metadata` and `assignments` *plus* an optional payload.
 That is a fourth copy of state already present three times.
 It also corresponds to nothing storage hands back.
 [format.md](../../versioned-document-file/docs/format.md#ops--the-dag) stores the metadata and the assignments as two separate blobs, with no single payload column anywhere.
 The combined form would therefore have to be synthesized, which is re-serialization wearing a different hat.
 
-Inverting it makes [the no-re-serialization rule](concept.md#the-op-is-its-bytes) structural rather than remembered.
+Inverting it makes [the no-re-serialization rule](concepts/ops-and-content-addressing.md#the-op-is-its-bytes) structural rather than remembered.
 An op holding only decoded assignments would leave verification hashing `encode(decode(bytes))`.
 A future change to a formatter, an integer width or an ordering would then turn every good stored op in the wild into a mismatch, and a mismatch is indistinguishable from tampering.
 With the bytes retained there is no encoder near a loaded op for such a change to reach.
@@ -256,7 +274,7 @@ The *representation* could change — an arena shared across an `op_graph` rathe
 It is total and run-stable, so it looks usable, and it is *not* the order of the 32 bytes.
 
 The parent sort feeds the hash preimage.
-A third-party reader implementing the format from [concept.md](concept.md#the-producer-canonicalizes-the-hash-just-hashes-bytes) would sort by bytes.
+A third-party reader implementing the format from [ops and content addressing](concepts/ops-and-content-addressing.md#the-producer-canonicalizes-the-hash-just-hashes-bytes) would sort by bytes.
 It would produce a different parent order, and compute a different `op_id` for identical content.
 Once files exist that break cannot be fixed by either side.
 
@@ -278,11 +296,11 @@ This is a wire-format property.
 The diff exists to skip writes that would change nothing, and a multi-valued path is not a value that could equal the desired one — it is two independent writes.
 
 It is also the only way a conflict is ever resolved through the normal edit path.
-[concept.md](concept.md#multi-values) says a later op that writes the path resolves it back to a single value, and that later op is this one.
+[multi-values](concepts/multi-values.md) says a later op that writes the path resolves it back to a single value, and that later op is this one.
 A user who sees `10` and sets `10` must be able to collapse it.
 The agreed-multi-value side channel exists precisely as a tidy-up hint for this write, and diffing it away would make the channel dead.
 
-Concluding "both writers said 10, so the current value is 10" is the collapse [the interpretation layer](concept.md#writers-that-agree-still-conflict-structurally) owns.
+Concluding "both writers said 10, so the current value is 10" is the collapse [the interpretation layer](concepts/multi-values.md#writers-that-agree-still-conflict-structurally) owns.
 Making the storage layer's diff depend on writers agreeing would be the same category error as sub-value merging.
 
 Idempotency survives: the emitted op collapses the path, so a second `build` against it sees one equal writer and emits nothing.
@@ -318,7 +336,7 @@ An oracle has to be correct by inspection, and "correct modulo a chain cover" is
 
 ### A snapshot stores `surviving` only, and its validity is decided at use
 
-**Decided in milestone 6**, and it reverses what [milestone-6.md](todo/milestone-6.md#1-snapshot-terminated-materialization) originally specified.
+**Decided in milestone 6**, and it reverses what the plan originally specified.
 
 A cached snapshot is exactly a `raw_document` — the surviving writers and nothing else, over bytes it owns.
 
@@ -376,12 +394,114 @@ The boundary a document may prune to is the oldest op every ref still descends f
 The fix would be to give a required snapshot its superseded ids after all: 32 bytes each, no payload, and computable at prune time while history is still present.
 That reintroduces the size question above, bounded this time to one snapshot rather than every one.
 
+### A skeleton op reports unverifiable, and never a hash mismatch
+
+**Decided.** `verify_op` has three outcomes rather than two, and a skeleton gets its own.
+
+A skeleton has no bytes to hash, so it is unverifiable *by construction* — this is not a check that failed, it is a check that could not be run.
+
+Reporting it as a mismatch would be a false alarm about the one thing content addressing exists to detect.
+Pruning is a normal, encouraged operation, so a document that has been pruned would raise tampering alarms as a matter of course, and everyone would learn to ignore the alarm that matters.
+
+The load path files a hash mismatch only from a genuine decode failure, and the two outcomes are pinned apart by a test over one document that is both pruned *and* corrupt.
+
+**Reopen when:** nothing.
+A third outcome costs one enum value and buys the alarm its meaning.
+
+### Persisting a snapshot is explicit, and never a side effect of publish
+
+**Decided in milestone 6.** `publish_snapshots` is its own call, and `publish` never writes a snapshot.
+
+A snapshot is derived, so writing one on a heuristic would make publishing **non-idempotent**: the same publish would produce different bytes depending on what the cache happened to hold.
+It would also grow the file with caches nobody asked for, at gigabyte scale on the documents that most need the file to stay small.
+
+An op with no cached snapshot is skipped rather than reported, because the cache is derived and may legitimately have evicted it.
+
+**Reopen when:** a heuristic appears that is good enough to be worth the idempotence, which would have to be argued rather than assumed.
+
+### Recovery verifies a whole batch before it applies any of it
+
+**Decided in milestone 6.** `try_verify_batch` decodes and checks every received op, reaching the graph for nothing; `apply_verified_batch` is infallible.
+
+The property wanted is "a partial or hostile batch leaves the replica exactly as it was".
+The obvious way to get it is to undo what was applied, and the obvious way is wrong.
+A rollback is code that runs only on the hostile path, which is the path least likely to be exercised and most likely to be attacked.
+
+Splitting the verb makes it true for free instead.
+Every fallible step runs before the first mutation, so there is nothing to roll back because nothing happened.
+
+The split is also what lets a caller with more to weigh — a store holding a required snapshot — refuse the batch on its own grounds while that guarantee still holds.
+
+**Reopen when:** nothing.
+
+### Filling a skeleton is its own verb, on the graph and on the writer alike
+
+**Decided in milestone 6.** `op_graph::fill_payload` sits beside `add`, and `store_writer::fill_op_payload` beside `insert_op`.
+
+Both could have been folded into the existing verb, and both were deliberately not.
+
+`op_graph::add` is idempotent by id, which is what makes re-adding content safe everywhere.
+`insert_op` is `ON CONFLICT DO NOTHING`, which is where publishing's idempotence comes from — "a conflict means the identical row is already there".
+That claim stops being true the moment a row can be skeletonized.
+Relaxing it to an upsert would let an ordinary publish rewrite a stored op — on the safest operation in the format, to serve the rarest one.
+
+A dedicated verb also buys a guarantee an upsert cannot: the fill is scoped to rows whose payload is NULL, so it **cannot damage a good row even when called wrongly**.
+
+**Reopen when:** nothing.
+The asymmetry is the point: emptying and filling are both narrow, and appending stays unable to destroy.
+
+### A skeleton's parents are covered by no hash, so integration compares them explicitly
+
+**Decided in milestone 6.** A received op whose parents differ from the ones the replica holds under that id refuses the batch.
+
+An op id commits to its parents, so two full ops that hash alike cannot disagree about them — the check is unreachable there.
+A **skeleton** is different: its parents came out of storage and no hash has ever covered them, because the payload they were hashed with is gone.
+
+So this is the one place content addressing does not reach, and integration is the one moment it becomes checkable at all.
+It costs a comparison on a path that is already verifying.
+
+**Reopen when:** skeletons gain a hash over their surviving fields, which would make the check redundant.
+
+### A required snapshot is demoted, not recomputed, once its ancestry is payload-complete
+
+**Decided in milestone 6.** Recovering everything behind a required snapshot flips its `required` flag and unpins it, and touches not one byte of its payload.
+
+There is nothing to recompute.
+The snapshot was materialized *before* the prune, over the very ops that just came back, so it already is the true `surviving` at that op.
+What changes is not its contents but its standing: history can reproduce it again, so it stops being load-bearing and becomes an ordinary cache entry.
+
+Re-encoding a payload that can run to gigabytes in order to move one bit would be the expensive way to change nothing.
+
+The demotion is written **after** the fills, and the order is load-bearing.
+A crash between them leaves a snapshot still marked required over history that is already back, which costs one pinned cache entry.
+The reverse would leave a droppable snapshot standing over history that is still gone, which is data loss.
+
+**Reopen when:** nothing.
+
+### A batch forking below a still-required snapshot is refused, unless it completes that ancestry
+
+**Decided in milestone 6.** This is the pruning boundary above, arriving from the other direction.
+
+An op that forks below a required snapshot presents a writer the emptied ops superseded, and the snapshot has no `superseded` set to suppress it with.
+Merging fabricates a multi-value; replaying reads the skeletons as silent and is lossy.
+Both are exactly what `prune` refuses to create, so integration refuses to create them too.
+
+**The escape is what makes this a boundary rather than a ban.**
+Sending the rest of that snapshot's ancestry in the same batch completes it, which demotes the snapshot — and once demoted there is no boundary left to fork below.
+So the two rules are one rule: complete the ancestry and the fork is fine, leave it incomplete and the fork is refused.
+
+Refilling *ancestors* of a required snapshot is always safe and is never refused.
+The walk terminates at the snapshot and never expands its parents, so ops it does not reach cannot change any sweep.
+It is worth stating because the reverse is the intuitive guess, and the plan that specified this item guessed it.
+
+**Reopen when:** a required snapshot gains its superseded ids, which is the same change that would relax pruning's boundary.
+
 ### Metadata is any canonical value, not necessarily an object
 
 **Decided.** `try_decode_op` requires the metadata blob to be a canonically encoded value, and checks nothing else about it.
 `op_builder` writes an object, and a decoder still accepts whatever kind it is handed.
 
-The sketch in [milestone-2.md](todo/milestone-2.md) said "an object", which would have been a second format rule to enforce.
+The original sketch said "an object", which would have been a second format rule to enforce.
 Nothing interprets metadata, so constraining its kind buys no safety.
 Enforcing it now would also make relaxing it later a **forward-compatibility break**, since builds predating the relaxation would reject files they could otherwise carry unharmed.
 
@@ -558,7 +678,7 @@ It is general vocabulary — anything with symbolic identity wants it — and th
 **Built in milestone 0, and the handle carries a pointer rather than a numeric id.**
 `cc::interned_string` holds the address of an entry that is never moved and never freed, so `as_string_view()` and byte-ordering are direct rather than a table lookup.
 It also settles the "never serialize the raw id" rule by construction: there is no id to write down, only a private pointer.
-Identity stays process-local, exactly as [concept.md](concept.md) says.
+Identity stays process-local, exactly as [the model](concepts/the-model.md#entity-ids-are-strings) says.
 
 **There is no `operator<`, and `vdoc` must pick its order explicitly.**
 `compare_bytes` is reproducible across processes and costs a memcmp; `compare_identity` is a pointer compare whose order differs every run.
@@ -638,7 +758,28 @@ So "no caller can tell them apart" holds for every caller that pumps, which is e
 Without that, a set that is too large would make the optimization *required* for correctness: the next publish would skip ops that were never written, and the failure would become silent data loss.
 With it, a set that is too small costs a rewrite and nothing else — which is the only kind of wrongness an optimization is allowed to have.
 
+A consequence worth stating, because it constrains recovery: a skeleton loaded from a file **is** in storage, so it is durable, and a publish will not offer its filled-in payload later.
+Recovery therefore builds its own job rather than routing through publish's reachability delta — which it could not use anyway, since a recovered op has no ref reaching it yet.
+
 **Reopen when:** nothing.
+
+### Recovering is a seventh store hook, because the hooks split by what a write can destroy
+
+**Decided in milestone 6.** `on_recover` sits beside `on_publish` and `on_write_snapshots`, rather than becoming a mode of either.
+
+The split criterion was already written down when pruning got its own hook.
+A publish only ever **appends** and is idempotent by content addressing, while a prune **destroys**, and the safest operation in the format should not share a code path with the only destructive one.
+
+That criterion generalizes, and a recovery is a third kind: it **fills a hole back in**.
+Three kinds, three hooks.
+
+Riding `on_publish` is not open to it for a second reason: that path derives its ops from the refs by reachability, which is a safety property, and a recovered op has no ref reaching it.
+Riding `on_write_snapshots` would put an append on the destructive path, which is what the criterion argues against.
+
+Atomicity settles it either way.
+A recovery must fill payloads and demote snapshots in **one** transaction, and splitting it across two existing hooks would be two.
+
+**Reopen when:** a fourth kind of write appears that is none of the three, at which point the criterion is worth restating rather than extending by habit.
 
 ### Blobs ship raw-only, with the encoding seam reserved
 

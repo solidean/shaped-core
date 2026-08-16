@@ -577,7 +577,7 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
         // The justification is per-SWEEP and does not survive being stored: a snapshot outlives its sweep, and a
         // user who later branches from before it reintroduces exactly what was dropped here.
         // Which is why the gate above re-establishes the same property against today's DAG rather than trusting that
-        // it held when a snapshot was taken — see ../../docs/todo/milestone-6.md.
+        // it held when a snapshot was taken — see ../../docs/concepts/snapshots.md.
         if (options.drop_superseded_at_articulation_points && live_states == 1)
             for (auto& s : states[ix])
                 s.superseded.clear();

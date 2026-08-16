@@ -19,7 +19,7 @@
 /// process-local identity, and it is deliberately not reachable from here: an id order decides how assignments are
 /// sorted, that sort feeds the op hash, and a hash that depends on the run is not a content address.
 ///
-/// The design is [the concept](../../docs/concept.md#entity-ids-are-strings).
+/// The design is [the concept](../../docs/concepts/the-model.md#entity-ids-are-strings).
 
 namespace vdoc::impl
 {
@@ -76,7 +76,7 @@ struct vdoc::entity_id : impl::interned_id<entity_id>
 };
 
 /// Names a component type, e.g. "Transform".
-/// Names starting with `$` are reserved for the library — see [reserved names](../../docs/concept.md#reserved-names).
+/// Names starting with `$` are reserved for the library — see [reserved names](../../docs/concepts/interpretation.md#reserved-names).
 struct vdoc::component_type_id : impl::interned_id<component_type_id>
 {
     using impl::interned_id<component_type_id>::interned_id;

@@ -14,7 +14,7 @@ using vdoc::assignment_encoding;
 using vdoc::op_decode_error;
 using vdoc::op_id;
 
-// The hash preimage is a FORMAT CONSTANT, pinned here and specified in ../../docs/concept.md.
+// The hash preimage is a FORMAT CONSTANT, pinned here and specified in ../../docs/concepts/ops-and-content-addressing.md.
 // Every integer in it is fixed-width little-endian, and the domain separator makes an op id unable to collide with
 // any other digest this library computes.
 constexpr cc::string_view op_domain = "vdoc::op/v1";

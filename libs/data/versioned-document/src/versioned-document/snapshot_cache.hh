@@ -6,7 +6,7 @@
 
 /// The materialization cache: snapshots keyed by the op they were computed at.
 ///
-/// The design is [milestone 6](../../docs/todo/milestone-6.md#1-snapshot-terminated-materialization) and
+/// The design is [snapshots](../../docs/concepts/snapshots.md) and
 /// [decisions.md](../../docs/decisions.md#a-snapshot-stores-surviving-only-and-its-validity-is-decided-at-use).
 
 /// Materialization results cached against the op they were computed at.
