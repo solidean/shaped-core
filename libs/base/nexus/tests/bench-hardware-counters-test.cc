@@ -9,6 +9,10 @@ using namespace cc::primitive_defines;
 // It must pass on the virtualized GitHub-hosted CI runners, where the PMU is hidden and only the baseline is produced, AND genuinely check real values on hardware.
 // So the baseline — elapsed time, and reference cycles on x86 — is always asserted.
 // The full PMU counters are asserted only when the machine reports them available, and otherwise noted as skipped.
+//
+// The PMU is one CPU-wide resource, not a per-test one: two measurements at once and one of them reads zero.
+// So every test here that measures holds `exclusive("nx-hw-counters")`.
+// It only bites where the counters are actually readable, which is why it survived a parallel sweep on a host where they are hidden and showed up first on an ARM runner.
 
 namespace
 {
@@ -29,7 +33,7 @@ void run_workload(u64 iterations)
 }
 } // namespace
 
-TEST("nexus bench - hardware counters query and measure")
+TEST("nexus bench - hardware counters query and measure", exclusive("nx-hw-counters"))
 {
     using nx::bench::hw_counter;
 
@@ -82,7 +86,7 @@ TEST("nexus bench - hardware counters query and measure")
     }
 }
 
-TEST("nexus bench - default counter set is non-empty and starts with the baseline")
+TEST("nexus bench - default counter set is non-empty and starts with the baseline", exclusive("nx-hw-counters"))
 {
     using nx::bench::hw_counter;
 
@@ -99,7 +103,7 @@ TEST("nexus bench - list hardware counters", nx::config::manual)
     nx::bench::print_hw_counters();
 }
 
-TEST("nexus bench - an explicit counter set is honored and the body runs once")
+TEST("nexus bench - an explicit counter set is honored and the body runs once", exclusive("nx-hw-counters"))
 {
     using nx::bench::hw_counter;
 
@@ -114,7 +118,7 @@ TEST("nexus bench - an explicit counter set is honored and the body runs once")
     CHECK(m.samples[1].id == hw_counter::instructions_retired);
 }
 
-TEST("nexus bench - measure_all gathers every available counter across passes")
+TEST("nexus bench - measure_all gathers every available counter across passes", exclusive("nx-hw-counters"))
 {
     using nx::bench::hw_counter;
 

@@ -50,20 +50,17 @@ static_assert(cc::async<big_value>::frame_capacity == 72, "a big value widens th
 
 namespace
 {
-// Exactly the 24 B budget: a captured word plus two dependency handles, which is the shape the sugar builds.
+// The budget is a BYTE count, so these are sized against it rather than by counting pointers.
+// Three pointers is the shape the sugar builds — a captured word plus two dependency handles — and it is exactly 24 B only where a pointer is 8 B.
+// On wasm32 it is 12 B, which would quietly turn the spilling frame below into a fitting one and assert the opposite of what is meant.
 struct fitting_frame
 {
-    void* a;
-    void* b;
-    void* c;
+    alignas(void*) byte storage[cc::async<int>::frame_capacity];
 };
-// One word over.
+// One byte over.
 struct spilling_frame
 {
-    void* a;
-    void* b;
-    void* c;
-    void* d;
+    alignas(void*) byte storage[cc::async<int>::frame_capacity + 1];
 };
 // Fits by size, but the frame starts at absolute node offset 40, so 16-alignment cannot be honoured inline.
 struct alignas(16) overaligned_frame
@@ -71,8 +68,8 @@ struct alignas(16) overaligned_frame
     void* a;
 };
 } // namespace
-static_assert(cc::async<int>::frame_fits_inline<fitting_frame>, "24 B is exactly the budget on a one-line node");
-static_assert(!cc::async<int>::frame_fits_inline<spilling_frame>, "32 B must box on a one-line node");
+static_assert(cc::async<int>::frame_fits_inline<fitting_frame>, "exactly the budget still fits on a one-line node");
+static_assert(!cc::async<int>::frame_fits_inline<spilling_frame>, "one byte over the budget must box");
 static_assert(!cc::async<int>::frame_fits_inline<overaligned_frame>, "the inline slot is only 8-aligned");
 // The type-dependence, stated as a test because it is the surprising part: the SAME frame boxes under one async and
 // stays inline under another, purely because a bigger T widened the payload behind it.
