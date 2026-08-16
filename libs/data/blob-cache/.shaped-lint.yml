@@ -1,0 +1,24 @@
+# blob-cache's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# There is deliberately no <sqlite3.h> entry, and there never should be: the engine is reached through babel::sqlite.
+# An entry blessing it here would mean the babel wrapper was bypassed rather than extended.
+
+rules:
+  - kind: allow-include
+    value: <memory>
+    reason: the cache core is SHARED with the acquire pipelines still in flight, which must outlive a handle the caller drops — and cc::shared_ptr cannot type-erase an owner or hand out a plain weak reference. The same named clean-core gap versioned-document-file and shaped-graphics hit; cc::pinned_data's own owner is a std::shared_ptr for it too.
+    files:
+      - src/blob-cache/blob_cache.hh
+      - src/blob-cache/blob_cache.cc
+      - src/blob-cache/impl/cache_core.hh
+      - src/blob-cache/impl/cache_actor.hh
+      - tests/**
+
+  - kind: allow-include
+    value: <type_traits>
+    reason: the acquire() convenience overload constrains on std::is_invocable_r_v to stay disjoint from the async one.
+    files:
+      - src/blob-cache/blob_cache.hh

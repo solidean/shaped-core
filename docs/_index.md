@@ -60,6 +60,11 @@ Findings we want to keep, but that are not a guide to anything.
   [docs](../libs/data/versioned-document-file/docs/_index.md)), the `.vdoc` save format on top of it.
   Both are at the design stage.
   Its [concept docs](../libs/data/versioned-document/docs/_index.md#concepts) are the design, and [format.md](../libs/data/versioned-document-file/docs/format.md) the on-disk specification.
+- **blob-cache**
+  ([readme](../libs/data/blob-cache/readme.md) ·
+  [cheat-sheet](../libs/data/blob-cache/cheat-sheet.md) ·
+  [docs](../libs/data/blob-cache/docs/_index.md)), the `bcache` persistent multi-process cache for expensive derived bytes.
+  [design.md](../libs/data/blob-cache/docs/design.md) is the reasoning behind every decision in it.
 - **graphics family** ([overview](graphics.md)) — shaped-graphics
   ([readme](../libs/graphics/shaped-graphics/readme.md) ·
   [cheat-sheet](../libs/graphics/shaped-graphics/cheat-sheet.md) ·

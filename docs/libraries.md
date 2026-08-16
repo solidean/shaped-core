@@ -126,6 +126,27 @@ History is content-addressed and verified, blobs are content-addressed but their
 So op ids do not commit to asset content, deliberately: without that escape hatch, replacing a placeholder asset would be a rewrite of history.
 [format.md](../libs/data/versioned-document-file/docs/format.md) specifies the bytes and says why at length.
 
+### blob-cache — namespace `bcache` — depends on clean-core, babel-serializer
+
+[readme](../libs/data/blob-cache/readme.md) ·
+[cheat-sheet](../libs/data/blob-cache/cheat-sheet.md) ·
+[docs](../libs/data/blob-cache/docs/_index.md)
+
+A persistent cache for results that are expensive to produce and cheap to recognize: geometry processing output,
+serialized acceleration structures, generated archives, downloaded artifacts.
+One SQLite file, shared by every process on the machine that opens the same path.
+babel-serializer is linked privately, so no sqlite type reaches a public header.
+
+Everything about it follows from one invariant: **deleting all cache data can never affect correctness.**
+That is what makes a storage failure a miss rather than an error, an incompatible file something to discard rather
+than migrate, and cross-process duplicate computation a cost rather than a bug.
+
+Entries are keyed `(namespace, key, version)`, immutable, and first-writer-wins; the bytes behind them are
+content-addressed, so two entries with identical payloads name one object.
+`acquire` singleflights the whole pipeline — lookup, compute, store — rather than only the compute, and eviction
+weighs recompute cost per byte of disk rather than age alone.
+[design.md](../libs/data/blob-cache/docs/design.md) is the reasoning, decision by decision.
+
 ## graphics
 
 The graphics stack, layered on top of `base`.

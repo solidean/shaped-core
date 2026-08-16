@@ -316,6 +316,12 @@ struct async;
 template <class T, class E = async_error>
 using shared_async = shared_ptr<async<T, E>, impl::async_node_traits>;
 
+/// A non-owning handle to the same node; lock() gives back a shared_async, or an empty one once nobody owns it.
+/// For a registry that must COORDINATE live operations without keeping their results alive — a table of these
+/// forgets an operation the moment its last consumer does, rather than becoming a second cache of the values.
+template <class T, class E = async_error>
+using weak_async = weak_ptr<async<T, E>, impl::async_node_traits>;
+
 
 //
 // Hashing

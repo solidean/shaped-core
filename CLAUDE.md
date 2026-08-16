@@ -47,6 +47,11 @@ One-liner per library:
   Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
   Complete: the store and its loader, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — snapshots with pruning, and recovery from an untrusted peer.
   [docs/format.md](libs/data/versioned-document-file/docs/format.md) is the on-disk specification.
+* **`libs/data/blob-cache`** — a persistent, multi-process cache for expensive derived bytes: `(namespace, key, version)` → content-addressed blobs in one shared SQLite file.
+  In-process singleflight over the whole acquire pipeline, TTLs, and cost-aware eviction; one `cc::threaded_actor` owns the connection.
+  Everything follows from one invariant: **deleting all cache data can never affect correctness**, so a storage failure is a miss and never an error.
+  Namespace `bcache`. Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
+  See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan exist today (vulkan creates devices and resources but stubs its recording paths); metal/webgpu and opengl/webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.

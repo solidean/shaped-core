@@ -2,8 +2,8 @@
 #include <clean-core/thread/spin.hh>
 #include <nexus/test.hh>
 
-// cc::current_time_steady_secs and cc::current_cycles are the repo's timing seam, replacing <chrono> and
-// the x86 intrinsic headers everywhere else.
+// cc::current_time_steady_secs, cc::current_time_wall_secs and cc::current_cycles are the repo's timing seam,
+// replacing <chrono> and the x86 intrinsic headers everywhere else.
 // What is pinned here is the contract callers rely on, not the resolution, which is the platform's.
 
 TEST("cc::current_time_steady_secs advances and never goes backwards")
@@ -24,6 +24,25 @@ TEST("cc::current_time_steady_secs advances and never goes backwards")
         cc::spin_pause();
 
     CHECK(cc::current_time_steady_secs() - t0 >= 1e-4);
+}
+
+TEST("cc::current_time_wall_secs reads the Unix epoch")
+{
+    auto const t0 = cc::current_time_wall_secs();
+
+    // 2020-01-01 and 2100-01-01. Wide enough that a badly-set machine clock does not fail the suite, narrow enough
+    // that the two things this could plausibly be wrong about — a different epoch, or the wrong unit — both fail.
+    CHECK(t0 > 1577836800.0);
+    CHECK(t0 < 4102444800.0);
+
+    // Busy-wait on the STEADY clock, which is the only one that cannot stall or step here.
+    auto const s0 = cc::current_time_steady_secs();
+    while (cc::current_time_steady_secs() - s0 < 1e-3)
+        cc::spin_pause();
+
+    // Advances over a millisecond of real time, but deliberately not asserted MONOTONIC: the wall clock may step
+    // backwards when the system clock is set, which is exactly why it is not the one to measure a duration with.
+    CHECK(cc::current_time_wall_secs() > t0 - 1.0);
 }
 
 TEST("cc::current_cycles advances where the architecture has a counter")
