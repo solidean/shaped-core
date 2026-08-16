@@ -19,6 +19,15 @@ cc::optional<cc::vector<byte>> copy_nullable_blob(sql::row const& row, i32 colum
     return copy_blob(row, column);
 }
 
+/// Binds an optional blob column, as the blob or as NULL.
+/// Absent and empty are different here: an empty vdoc value still decodes, and NULL is what "no column" means.
+cc::result<cc::unit> bind_nullable_blob(sql::statement& stmt, i32 index, cc::optional<cc::vector<byte>> const& value)
+{
+    if (value.has_value())
+        return stmt.bind(index, cc::span<byte const>(value.value()));
+    return stmt.bind_null(index);
+}
+
 /// Runs one statement to completion, ignoring its result rows.
 cc::result<cc::unit> step_to_done(sql::statement& stmt)
 {
@@ -78,13 +87,14 @@ cc::result<cc::vector<chunk_summary>> sqlite_reader::read_chunk_summaries()
 
 cc::result<cc::vector<asset_row>> sqlite_reader::read_assets()
 {
-    return read_all<asset_row>(_db, "SELECT asset_id, kind, parts, meta FROM assets",
+    return read_all<asset_row>(_db, "SELECT asset_id, kind, parts, meta, deps FROM assets",
                                [](sql::row const& row)
                                {
                                    return asset_row{.asset_id = cc::string(row.as_string(0)),
                                                     .kind = cc::string(row.as_string(1)),
                                                     .parts = copy_blob(row, 2),
-                                                    .meta = copy_nullable_blob(row, 3)};
+                                                    .meta = copy_nullable_blob(row, 3),
+                                                    .deps = copy_nullable_blob(row, 4)};
                                });
 }
 
@@ -134,6 +144,100 @@ cc::result<cc::vector<meta_row>> sqlite_reader::read_meta()
     return read_all<meta_row>(
         _db, "SELECT key, value FROM meta", [](sql::row const& row)
         { return meta_row{.key = cc::string(row.as_string(0)), .value = copy_nullable_blob(row, 1)}; });
+}
+
+// sqlite_blob_payload_reader
+// -------------------------------------------------------------------------------------------------
+
+cc::result<cc::optional<blob_header>> sqlite_blob_payload_reader::read_blob_header(blob_hash const& hash)
+{
+    byte hash_bytes[blob_hash::byte_size] = {};
+    hash.to_bytes(hash_bytes);
+
+    auto stmt = _db.prepare("SELECT id, size, stored_size, chunk_count, encoding FROM blobs WHERE hash = ?1");
+    CC_RETURN_IF_ERROR(stmt);
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, cc::span<byte const>(hash_bytes)));
+
+    auto const stepped = stmt.value().next();
+    CC_RETURN_IF_ERROR(stepped);
+    if (!stepped.value())
+        return cc::optional<blob_header>();
+
+    auto const row = stmt.value().current();
+    return cc::optional<blob_header>(blob_header{.id = row.as_i64(0),
+                                                 .decoded_size = row.as_i64(1),
+                                                 .stored_size = row.as_i64(2),
+                                                 .chunk_count = row.as_i64(3),
+                                                 .encoding = cc::string(row.as_string(4))});
+}
+
+cc::result<cc::unit> sqlite_blob_payload_reader::read_stored_range(blob_header const& blob, i64 offset, cc::span<byte> out)
+{
+    if (out.empty())
+        return cc::unit{};
+
+    struct chunk_extent
+    {
+        i64 rowid = 0;
+        i64 size = 0;
+    };
+
+    // LENGTH() is answered from the row header, so this walk costs an index scan and reads no payload.
+    auto extents = cc::vector<chunk_extent>();
+    {
+        auto stmt = _db.prepare("SELECT id, LENGTH(data) FROM blob_chunk WHERE blob_id = ?1 ORDER BY chunk_index");
+        CC_RETURN_IF_ERROR(stmt);
+        CC_RETURN_IF_ERROR(stmt.value().bind(1, blob.id));
+
+        for (auto const row : stmt.value())
+            extents.push_back({.rowid = row.as_i64(0), .size = row.as_i64(1)});
+        if (!stmt.value().is_ok())
+            return cc::error(cc::any_error(cc::string(stmt.value().last_error().message)));
+    }
+
+    // A handle is only opened once the walk reaches the first overlapping chunk, and then reopened along it.
+    // Nothing here can be invalidated by this store's own writes: a publish and a fetch are two messages on one actor,
+    // which dispatches them one at a time.
+    // A FOREIGN writer still can, and read_at reports that rather than handing back stale bytes — which is why there
+    // is no retry.
+    auto handle = cc::optional<babel::sqlite::blob_handle>();
+    auto at = i64(0); // where this chunk starts, in the blob's stored bytes
+    auto filled = i64(0);
+    for (auto const& extent : extents)
+    {
+        if (filled == out.size())
+            break;
+        auto const chunk_end = at + extent.size;
+        if (chunk_end <= offset)
+        {
+            at = chunk_end;
+            continue;
+        }
+
+        auto const from = cc::max(i64(0), offset - at);
+        auto const take = cc::min(extent.size - from, i64(out.size()) - filled);
+
+        if (!handle.has_value())
+        {
+            auto opened = _db.open_blob_handle({.table = "blob_chunk", .column = "data", .rowid = extent.rowid});
+            CC_RETURN_IF_ERROR(opened);
+            handle = cc::move(opened.value());
+        }
+        else
+        {
+            CC_RETURN_IF_ERROR(handle.value().reopen(extent.rowid));
+        }
+
+        CC_RETURN_IF_ERROR(handle.value().read_at(from, out.subspan({.offset = filled, .size = take})));
+        filled += take;
+        at = chunk_end;
+    }
+
+    // A short walk means the chunks do not cover the range — a torn blob, reported rather than silently zero-filled.
+    if (filled != out.size())
+        return cc::error(
+            cc::any_error(cc::format("a blob's chunks cover {} of the {} bytes asked for", filled, out.size())));
+    return cc::unit{};
 }
 
 // sqlite_writer
@@ -213,23 +317,38 @@ cc::result<cc::unit> sqlite_writer::upsert_asset(asset_row const& row)
 {
     // The one mutable mapping in the format, so this one really does overwrite — and it names only the columns this
     // build owns, which is what leaves a newer build's column alone.
-    auto stmt = _db.prepare("INSERT INTO assets(asset_id, kind, parts, meta) VALUES (?1, ?2, ?3, ?4)"
+    auto stmt = _db.prepare("INSERT INTO assets(asset_id, kind, parts, meta, deps) VALUES (?1, ?2, ?3, ?4, ?5)"
                             " ON CONFLICT(asset_id) DO UPDATE SET kind = excluded.kind, parts = excluded.parts,"
-                            " meta = excluded.meta");
+                            " meta = excluded.meta, deps = excluded.deps");
     CC_RETURN_IF_ERROR(stmt);
 
     CC_RETURN_IF_ERROR(stmt.value().bind(1, cc::string_view(row.asset_id)));
     CC_RETURN_IF_ERROR(stmt.value().bind(2, cc::string_view(row.kind)));
     CC_RETURN_IF_ERROR(stmt.value().bind(3, cc::span<byte const>(row.parts)));
-    if (row.meta.has_value())
-    {
-        CC_RETURN_IF_ERROR(stmt.value().bind(4, cc::span<byte const>(row.meta.value())));
-    }
-    else
-    {
-        CC_RETURN_IF_ERROR(stmt.value().bind_null(4));
-    }
+    CC_RETURN_IF_ERROR(bind_nullable_blob(stmt.value(), 4, row.meta));
+    CC_RETURN_IF_ERROR(bind_nullable_blob(stmt.value(), 5, row.deps));
 
+    return step_to_done(stmt.value());
+}
+
+cc::result<cc::unit> sqlite_writer::delete_asset(cc::string_view asset_id)
+{
+    auto stmt = _db.prepare("DELETE FROM assets WHERE asset_id = ?1");
+    CC_RETURN_IF_ERROR(stmt);
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, asset_id));
+    return step_to_done(stmt.value());
+}
+
+cc::result<cc::unit> sqlite_writer::delete_blob(blob_hash const& hash)
+{
+    byte hash_bytes[blob_hash::byte_size] = {};
+    hash.to_bytes(hash_bytes);
+
+    // blob_chunk follows by ON DELETE CASCADE, which only fires because ensure_schema turns foreign_keys on and reads
+    // the pragma back rather than assuming the request took.
+    auto stmt = _db.prepare("DELETE FROM blobs WHERE hash = ?1");
+    CC_RETURN_IF_ERROR(stmt);
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, cc::span<byte const>(hash_bytes)));
     return step_to_done(stmt.value());
 }
 

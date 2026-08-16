@@ -16,8 +16,8 @@ file->publish({.refs = {{"main", new_head}}});  // ops derived from the refs by 
 One file is one shareable unit: send it to someone and they have the document, its history and its embedded content.
 The op DAG loads eagerly and completely; blobs load lazily through a [`blob_source`](src/versioned-document-file/store.hh).
 
-The store, the loader, publishing and the workspace are implemented.
-Assets, blobs and snapshots have their tables, their vocabulary and their load path, and are populated and decoded in [milestones 5 and 6](../versioned-document/docs/todo/_index.md).
+The store, the loader, publishing, the workspace and the content store — assets, blobs, the encoding seam and reclamation — are implemented.
+Snapshots have their table, their vocabulary and their load path, and are decoded in [milestone 6](../versioned-document/docs/todo/_index.md).
 [docs/format.md](docs/format.md) specifies the on-disk shape.
 
 ## The one thing to know first
@@ -52,15 +52,15 @@ Public headers live in `src/versioned-document-file/`, and `fwd.hh` doubles as t
 | File | What is in it |
 |------|---------------|
 | `fwd.hh`          | forward declarations and vocabulary aliases |
-| `store`           | `store`, `store_handle`, `open_result`, `publish_changes`, `publish_result`, `snapshot_entry`, `blob_source` |
+| `store`           | `store`, `store_handle`, `open_result`, `publish_changes`, `publish_result`, `reclaim_result`, `snapshot_entry`, `blob_source`, `asset_resolution` |
 | `assets`          | `blob_hash` / `asset_part` / `asset_record` / `blob_upload` |
 | `workspace`       | `workspace_value` / `workspace_entry` |
 | `diagnostics`     | `load_issue_kind` / `load_issue` / `load_report` |
-| `rows`            | one struct per table, untyped — what a reader hands back before anything is verified |
-| `memory_image`    | the in-memory backing, in those same rows |
+| `memory_image`    | the in-memory backing, in the row structs `impl/rows` defines |
 
 `impl/` is private, and is the only place `babel::sqlite` is included.
-The loader and the publisher live there once and serve both implementations; the SQLite half is its schema, its I/O, its actor and the store over them.
+The loader, the publisher, the reclaimer, the blob fetch and the encoding table live there once and serve both implementations.
+The SQLite half is its schema, its I/O, its actor and the store over them.
 
 ## Building & testing
 

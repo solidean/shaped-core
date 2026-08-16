@@ -43,6 +43,12 @@ struct publish_changes;
 /// Both counts are zero for a publish that was already durable, which is what idempotence looks like from the outside.
 struct publish_result;
 
+/// What a reclamation actually collected.
+struct reclaim_result;
+
+/// An asset id resolved to its record plus a source to fetch its parts through.
+struct asset_resolution;
+
 /// The two halves of an open: the store, and when its load finished.
 /// Separate because the CALLER must own the store from the first instant — an actor that held the last reference would tear itself down.
 struct open_result;
@@ -67,7 +73,7 @@ struct load_report;
 
 // ---- assets and blobs --------------------------------------------------------------------------
 //
-// An asset is a name pointing at an ordered list of parts; a part points at a blob.
+// An asset is a name pointing at a list of parts; a part points at a blob.
 // Blobs are content-addressed and shared, so two assets that happen to hold the same bytes store them once.
 
 namespace vdoc::file
@@ -76,8 +82,14 @@ namespace vdoc::file
 struct blob_hash;
 
 /// One part of an asset.
-/// Order is the contract; the name is for humans reading a dump.
+/// Addressed by (name, index); the name is the contract, and the index disambiguates parts sharing one.
 struct asset_part;
+
+/// Why a part lookup did not produce exactly one part.
+enum class part_lookup_error : u8;
+
+/// The parts of one asset sharing a name, in declaration order.
+class part_range;
 
 /// One row of the asset index: what the asset is, its parts, and its informational metadata.
 struct asset_record;

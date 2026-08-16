@@ -5,7 +5,7 @@
 #include <clean-core/string/string.hh>
 #include <versioned-document-file/fwd.hh>
 
-/// One struct per table, holding exactly the columns [the format](../../docs/format.md#schema) names, in the column types it names.
+/// One struct per table, holding exactly the columns [the format](../../../docs/format.md#schema) names, in the column types it names.
 ///
 /// **Untyped on purpose.** A hash is bytes rather than a blob_hash, and a payload is bytes rather than a decoded value,
 /// because these are what a reader hands back *before* anything is verified — and a row that will not decode still has
@@ -51,6 +51,9 @@ struct vdoc::file::asset_row
     /// An encoded vdoc value: an ordered array of part objects.
     cc::vector<byte> parts;
     cc::optional<cc::vector<byte>> meta;
+    /// An encoded vdoc value: an array of asset id strings.
+    /// Absent means no declared dependencies.
+    cc::optional<cc::vector<byte>> deps;
 };
 
 /// A row of `blobs` — the metadata alone, never the payload.

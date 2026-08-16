@@ -2,9 +2,11 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
+#include <versioned-document-file/assets.hh>
 #include <versioned-document-file/fwd.hh>
-#include <versioned-document-file/rows.hh>
+#include <versioned-document-file/impl/rows.hh>
 
 /// The two interfaces the shared loader and publisher speak, and the self-contained job that crosses to the actor thread.
 ///
@@ -75,6 +77,13 @@ public:
     /// The one mutable mapping in the format, so this one really does overwrite.
     [[nodiscard]] virtual cc::result<cc::unit> upsert_asset(asset_row const& row) = 0;
 
+    /// Unmaps a name.
+    /// Removing an asset id that is not there is not an error — the outcome asked for already holds.
+    [[nodiscard]] virtual cc::result<cc::unit> delete_asset(cc::string_view asset_id) = 0;
+
+    /// Deletes a blob; its chunks follow by cascade, which is why foreign_keys must be on.
+    [[nodiscard]] virtual cc::result<cc::unit> delete_blob(blob_hash const& hash) = 0;
+
     [[nodiscard]] virtual cc::result<cc::unit> upsert_ref(ref_row const& row) = 0;
     [[nodiscard]] virtual cc::result<cc::unit> upsert_workspace(workspace_row const& row) = 0;
 
@@ -82,6 +91,52 @@ public:
     /// Anything else — an error above, or this writer dying — rolls it back, so there is no observable half-publish.
     [[nodiscard]] virtual cc::result<cc::unit> commit() = 0;
 };
+
+/// A range of a blob's DECODED bytes.
+/// A negative `size` means "to the end", which is what a whole-blob fetch asks for.
+struct blob_fetch_range
+{
+    i64 offset = 0;
+    i64 size = -1;
+};
+
+/// A blob's row facts, without a byte of its payload.
+/// `id` is the storage-side row identity chunks are found by, and it never leaves the arm that produced it.
+struct blob_header
+{
+    i64 id = 0;
+    i64 decoded_size = 0;
+    i64 stored_size = 0;
+    i64 chunk_count = 0;
+    cc::string encoding;
+};
+
+/// Reads blob payloads back out of storage, one blob at a time.
+///
+/// Separate from store_reader on purpose: a load reads no payload and a fetch reads nothing else, and the two run at
+/// different times over different lifetimes — a reader is built once per open, this is built once per fetch.
+class blob_payload_reader
+{
+public:
+    virtual ~blob_payload_reader() = default;
+
+    blob_payload_reader() = default;
+    blob_payload_reader(blob_payload_reader const&) = delete;
+    blob_payload_reader& operator=(blob_payload_reader const&) = delete;
+
+    /// The row facts for `hash`, or empty where no blob has it.
+    [[nodiscard]] virtual cc::result<cc::optional<blob_header>> read_blob_header(blob_hash const& hash) = 0;
+
+    /// Reads exactly out.size() STORED bytes from `offset`, assembling across chunk boundaries.
+    /// A range the chunks do not cover is an error — a torn blob is never a short fill.
+    [[nodiscard]] virtual cc::result<cc::unit> read_stored_range(blob_header const& blob, i64 offset, cc::span<byte> out)
+        = 0;
+};
+
+/// Reads one blob back and decodes it — the ONE route from a hash to bytes, shared by both implementations.
+[[nodiscard]] cc::result<cc::vector<byte>> fetch_blob(blob_payload_reader& reader,
+                                                      blob_hash const& hash,
+                                                      blob_fetch_range range);
 
 /// A blob and the bytes to store for it, as the publisher hands them to a writer.
 /// `data` is empty when the upload said "you already have this", which the publisher has already validated.
@@ -102,9 +157,25 @@ struct publish_job
     cc::vector<op_row> ops;
     cc::vector<blob_write> blobs;
     cc::vector<asset_row> assets;
+    /// Names to unmap.
+    /// Applied AFTER the upserts, so publishing an asset and removing it in one call removes it.
+    /// Blobs the removed assets named are left alone: only a reclamation collects bytes.
+    cc::vector<cc::string> removed_assets;
     /// Written LAST, which is what makes a ref move mean everything behind it landed.
     cc::vector<ref_row> refs;
 };
+
+/// One reclamation, computed on the calling thread from the resident asset index.
+///
+/// Both lists are already the answer: the closure walk happens above this, so the writer only deletes what it is told.
+struct reclaim_job
+{
+    cc::vector<cc::string> removed_assets;
+    cc::vector<blob_hash> removed_blobs;
+};
+
+/// Runs one reclamation over a writer, in one transaction.
+[[nodiscard]] cc::result<reclaim_result> apply_reclaim(store_writer& writer, reclaim_job const& job);
 
 /// How many bytes of a blob go in one `blob_chunk` row.
 ///

@@ -28,6 +28,8 @@ public:
 
 protected:
     [[nodiscard]] cc::shared_async<publish_result> on_publish(publish_job job) override;
+    [[nodiscard]] cc::shared_async<cc::vector<byte>> on_fetch_blob(blob_hash const& hash, blob_fetch_range range) override;
+    [[nodiscard]] cc::shared_async<reclaim_result> on_reclaim(reclaim_job job) override;
     [[nodiscard]] cc::shared_async<cc::unit> on_flush_workspace(cc::vector<workspace_entry> entries) override;
     void on_close() override;
     [[nodiscard]] bool on_pump() override;

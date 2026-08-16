@@ -4,15 +4,18 @@ project(versioned-document-file LANGUAGES CXX)
 # The `.vdoc` save format: one SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets and their blobs, and a disposable workspace.
 # See readme.md and docs/format.md.
 #
-# Milestone 4 lands the store, its two implementations and the loader; assets and snapshots follow in milestones 5 and 6.
+# Milestones 4 and 5 land the store, its two implementations, the loader and the content store; snapshots follow in milestone 6.
 # See ../versioned-document/docs/todo/.
 add_library(versioned-document-file
     src/versioned-document-file/fwd.cc
     src/versioned-document-file/diagnostics.cc
     src/versioned-document-file/assets.cc
     src/versioned-document-file/store.cc
+    src/versioned-document-file/impl/blob_codec.cc
+    src/versioned-document-file/impl/blob_fetch.cc
     src/versioned-document-file/impl/load.cc
     src/versioned-document-file/impl/publish.cc
+    src/versioned-document-file/impl/reclaim.cc
     src/versioned-document-file/impl/store_memory.cc
     src/versioned-document-file/impl/sqlite_schema.cc
     src/versioned-document-file/impl/sqlite_io.cc
@@ -32,7 +35,6 @@ target_sources(versioned-document-file
     src/versioned-document-file/diagnostics.hh
     src/versioned-document-file/assets.hh
     src/versioned-document-file/workspace.hh
-    src/versioned-document-file/rows.hh
     src/versioned-document-file/memory_image.hh
     src/versioned-document-file/store.hh
 )
@@ -71,6 +73,7 @@ if(SC_BUILD_TESTS)
         tests/conformance/sqlite_medium.cc
         tests/conformance/drivers.cc
         tests/conformance/conformance-test.cc
+        tests/conformance/assets-conformance-test.cc
     )
 
     # babel-serializer is linked for the test fixture alone, which fabricates a damaged file on purpose.

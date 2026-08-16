@@ -21,7 +21,7 @@ cc::async_error as_async_error(cc::any_error e)
 /// The handle is a member HERE, so nothing outside this class can reach it — which is what makes exclusive ownership
 /// structural rather than a rule somebody has to remember.
 class sqlite_connection_actor final
-  : public cc::threaded_actor_impl<open_request, publish_request, workspace_request, close_request>
+  : public cc::threaded_actor_impl<open_request, publish_request, reclaim_request, workspace_request, blob_request, close_request>
 {
 public:
     // A string literal, so it outlives the thread it names.
@@ -85,6 +85,40 @@ protected:
             msg.promise->push_error(as_async_error(cc::move(applied).error()));
         else
             msg.promise->push_value(applied.value());
+    }
+
+    void on_message(reclaim_request msg) override
+    {
+        if (!_is_open)
+        {
+            msg.promise->push_error(as_async_error(cc::any_error(cc::string("reclaiming in a store whose connection "
+                                                                            "is closed"))));
+            return;
+        }
+
+        auto writer = sqlite_writer(_db);
+        auto applied = apply_reclaim(writer, msg.job);
+        if (applied.has_error())
+            msg.promise->push_error(as_async_error(cc::move(applied).error()));
+        else
+            msg.promise->push_value(applied.value());
+    }
+
+    void on_message(blob_request msg) override
+    {
+        if (!_is_open)
+        {
+            msg.promise->push_error(as_async_error(cc::any_error(cc::string("fetching a blob from a store whose "
+                                                                            "connection is closed"))));
+            return;
+        }
+
+        auto reader = sqlite_blob_payload_reader(_db);
+        auto fetched = fetch_blob(reader, msg.hash, msg.range);
+        if (fetched.has_error())
+            msg.promise->push_error(as_async_error(cc::move(fetched).error()));
+        else
+            msg.promise->push_value(cc::move(fetched.value()));
     }
 
     void on_message(workspace_request msg) override

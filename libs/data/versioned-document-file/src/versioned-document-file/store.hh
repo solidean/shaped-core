@@ -20,13 +20,14 @@
 ///
 /// **The loaded state is plain members, filled once at load; only keeping it in sync with storage is virtual.**
 /// That split is the whole seam — the two implementations share every query, every reachability computation and every
-/// diagnostic, and differ in four hooks and nothing else.
+/// diagnostic, and differ in five hooks and nothing else.
 ///
 /// **One thread owns a store.** What makes the API non-blocking is that storage work runs on an actor, not that
 /// several threads may call in.
 ///
-/// The design is [format.md](../../docs/format.md), and the milestone is
-/// [milestone-4](../../../versioned-document/docs/todo/milestone-4.md).
+/// The design is [format.md](../../docs/format.md), and the milestones are
+/// [milestone-4](../../../versioned-document/docs/todo/milestone-4.md) and
+/// [milestone-5](../../../versioned-document/docs/todo/milestone-5.md).
 
 namespace vdoc::file
 {
@@ -94,6 +95,13 @@ struct vdoc::file::publish_changes
     cc::vector<cc::pair<cc::string, vdoc::op_id>> refs;
     cc::vector<asset_record> assets;
     cc::vector<blob_upload> blobs;
+
+    /// Asset ids to unmap, applied after the upserts.
+    ///
+    /// Retroactive exactly like a remap: it changes what every past version of the document resolves to, creates no op
+    /// and moves no ref.
+    /// It collects no bytes — a blob outlives the last asset naming it until a reclamation sweeps it.
+    cc::vector<cc::string> removed_assets;
 };
 
 /// What a publish actually had to write.
@@ -106,6 +114,24 @@ struct vdoc::file::publish_result
     [[nodiscard]] friend bool operator==(publish_result const& a, publish_result const& b) = default;
 };
 
+/// What a reclamation collected.
+struct vdoc::file::reclaim_result
+{
+    isize assets_removed = 0;
+    isize blobs_removed = 0;
+
+    [[nodiscard]] friend bool operator==(reclaim_result const& a, reclaim_result const& b) = default;
+};
+
+/// What a consumer needs to fetch an asset: the record, and the source to fetch its parts through.
+///
+/// The record is a COPY, so it cannot dangle behind a publish that rewrites the index.
+struct vdoc::file::asset_resolution
+{
+    asset_record record;
+    std::shared_ptr<blob_source> blobs;
+};
+
 /// Fetches asset blob bytes on demand.
 ///
 /// Handed to whatever resolves assets for the application; the store itself never interprets a blob.
@@ -116,9 +142,16 @@ class vdoc::file::blob_source
 public:
     /// The decoded bytes of `hash`.
     ///
-    /// **Enqueue-and-return.** This never blocks and never re-enters its caller, whatever state the store is in.
-    /// The live fetch path is milestone 5; until then a live source reports that, and a severed one reports being severed.
+    /// **Enqueue-and-return.** This never blocks and never re-enters its caller, whatever state the store is in — it
+    /// may be called with a caller's own lock held, so the answer always arrives later, even where it is already known.
     [[nodiscard]] cc::shared_async<cc::vector<byte>> load(blob_hash const& hash);
+
+    /// A range of the decoded bytes of `hash`; a negative `size` means to the end.
+    ///
+    /// Same enqueue-and-return contract as load().
+    /// This is what chunking was paid for: a consumer wanting a 64-byte header out of a multi-gigabyte part never
+    /// materializes the part.
+    [[nodiscard]] cc::shared_async<cc::vector<byte>> load_range(blob_hash const& hash, i64 offset, i64 size);
 
     /// True once the store that made this closed.
     [[nodiscard]] bool is_severed() const { return _severed; }
@@ -210,6 +243,38 @@ public:
     /// A source for this store's blob bytes, kept alive by the handle it holds.
     [[nodiscard]] std::shared_ptr<blob_source> make_blob_source();
 
+    /// Keeps `roots` and everything reachable from them through declared dependencies, and deletes the rest.
+    ///
+    /// The closure is a flood fill over the resident asset index, so cycles are ordinary and a dependency naming
+    /// nothing in this file is simply skipped.
+    /// Blobs are then marked from the RETAINED assets alone and the rest are swept, chunks following by cascade.
+    ///
+    /// **An asset remap may legitimately orphan blobs** — that is the case this exists for, not a bug to prevent.
+    /// Reclaiming with no roots at all empties the asset index, which is a legitimate ask and not guarded against.
+    [[nodiscard]] cc::shared_async<reclaim_result> reclaim(cc::span<cc::string const> roots);
+
+    // resolving assets
+public:
+    /// An asset id -> its metadata, its ordered parts, and a source to fetch them through.
+    ///
+    /// **This is where this library stops.** Caching, eviction, streaming, format dispatch and decode-to-GPU are all
+    /// downstream, because a file is one source of assets among many.
+    ///
+    /// **The single entry point for reaching parts**, and deliberately the only one.
+    /// Addressing a part goes through the record it hands back — `main_part()`, `try_find_part`, `parts_named` — so a
+    /// caller always works from one snapshot.
+    /// A per-part accessor on the store would read the live index each call, and a remap between two of them could
+    /// hand back parts from two different assets with nothing able to detect it.
+    [[nodiscard]] cc::optional<asset_resolution> resolve_asset(cc::string_view asset_id);
+
+    /// Runs storage work this build must run on the calling thread; true if there may be more.
+    ///
+    /// **A blob fetch completes here on an in-memory store**, which has no thread of its own — and on any store in a
+    /// build without threads.
+    /// A file-backed store in a threaded build has nothing to run and returns false, so a caller that pumps its loop
+    /// unconditionally is correct everywhere and a caller that never pumps waits forever on one arm.
+    bool pump() { return on_pump(); }
+
     // the workspace
 public:
     /// Marks `key` dirty and performs no I/O, so it is safe to call every frame.
@@ -243,12 +308,23 @@ public:
     store(store const&) = delete;
     store& operator=(store const&) = delete;
 
-    // the seam — four hooks, and nothing else differs
+    // the seam — five hooks, and nothing else differs
 protected:
     store() = default;
 
     /// Persists one already-computed publish.
     [[nodiscard]] virtual cc::shared_async<publish_result> on_publish(impl::publish_job job) = 0;
+
+    /// Starts one blob fetch and returns at once.
+    ///
+    /// **MUST NOT run the fetch inline.** blob_source::load may be called with a caller's lock held, so an
+    /// implementation that resolved the promise here would re-enter that caller through the woken continuation —
+    /// which is why the arm that could answer instantly is the one that has to queue.
+    [[nodiscard]] virtual cc::shared_async<cc::vector<byte>> on_fetch_blob(blob_hash const& hash,
+                                                                           impl::blob_fetch_range range) = 0;
+
+    /// Persists one already-computed reclamation.
+    [[nodiscard]] virtual cc::shared_async<reclaim_result> on_reclaim(impl::reclaim_job job) = 0;
 
     /// Persists the dirty workspace entries.
     [[nodiscard]] virtual cc::shared_async<cc::unit> on_flush_workspace(cc::vector<workspace_entry> entries) = 0;
@@ -288,6 +364,14 @@ protected:
 
     // the non-virtual machinery
 private:
+    friend class blob_source;
+
+    /// Routes one fetch to the implementation, and PUMPS NOTHING.
+    ///
+    /// That omission is the whole non-re-entrancy contract: pumping here would run the fetch — and the caller's
+    /// continuation — inside the caller's own load() call, under whatever lock it holds.
+    [[nodiscard]] cc::shared_async<cc::vector<byte>> impl_fetch_blob(blob_hash const& hash, impl::blob_fetch_range range);
+
     /// Collects finished publishes, latches the first failure, and un-claims a failed job's ops.
     void impl_harvest_pending();
 
@@ -305,5 +389,7 @@ private:
     cc::set<cc::string> _workspace_dirty;
     cc::optional<cc::any_error> _sticky_error;
     cc::vector<std::weak_ptr<blob_source>> _blob_sources;
+    /// The one source resolve_asset hands out, remade once every resolution has let go of it.
+    std::weak_ptr<blob_source> _shared_source;
     bool _is_closed = false;
 };

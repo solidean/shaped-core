@@ -39,13 +39,27 @@ enum class vdoc::file::load_issue_kind : vdoc::file::u8
     /// The ref is kept anyway: discarding somebody's ref is not a loader's decision.
     dangling_ref,
 
-    /// An asset row's `parts` blob would not decode, or is not the array of part objects it must be.
+    /// An asset row's `parts` or `meta` blob would not decode, which DROPS the asset from the index.
+    ///
+    /// Also filed for a `deps` blob that will not decode, which does not: a dependency list is advisory, so an
+    /// unreadable one leaves the asset with no declared dependencies and costs a later sweep precision instead.
     asset_decode_failed,
+
+    /// An asset carries a part with an empty name, which nothing can address.
+    /// Only reachable by asking for it, since asset_part::name defaults to `$main`.
+    asset_part_unnamed,
+
+    /// An asset carries several parts under one name where the name looks singular.
+    ///
+    /// **The duplicates are KEPT**, exactly as a dangling ref is: discarding somebody's part is not a loader's
+    /// decision, and dropping them here would make asset_record::try_find_part's `ambiguous` unreachable.
+    /// So the report names it at open and the lookup names it at use, and neither can be silently wrong.
+    asset_duplicate_part_name,
 
     /// An asset names a content hash with no blob row.
     asset_blob_missing,
 
-    /// The blob row exists but its chunks do not all.
+    /// The blob row exists but its chunks do not all add up.
     asset_blob_incomplete,
 
     /// A blob names an encoding this build does not have.
@@ -69,7 +83,8 @@ enum class vdoc::file::load_issue_kind : vdoc::file::u8
 ///   op_decode_failed / op_hash_mismatch / missing_snapshot — `op`
 ///   missing_parent                                          — `op` is the child, `parent` the id it names
 ///   dangling_ref                                            — `name` is the ref, `op` the id it names
-///   asset_decode_failed                                     — `name` is the asset id
+///   asset_decode_failed / asset_part_unnamed                — `name` is the asset id
+///   asset_duplicate_part_name                               — `name` is the asset id, and the part name is not carried
 ///   asset_blob_missing / asset_blob_incomplete              — `name` is the asset id, `blob` the hash it names
 ///   unknown_encoding                                        — `blob`, and `name` is the encoding it asked for
 ///   workspace_decode_failed                                 — `name` is the key

@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <versioned-document-file/impl/blob_codec.hh>
 #include <versioned-document-file/impl/store_memory.hh>
 #include <versioned-document-file/store.hh>
 #include <versioned-document/value_builder.hh>
@@ -9,8 +10,10 @@ namespace
 {
 /// The `parts` column: an ordered array of part objects.
 ///
-/// The order is the contract, so this preserves it exactly; the name is written only when there is one, because an
-/// absent debug label and an empty one are the same thing and only one of them costs bytes.
+/// Declaration order is preserved exactly, because it is what disambiguates parts sharing a name.
+/// `$main` is written as an ABSENT name field and read back as `$main`, so the ceremony-free single-part asset costs
+/// no bytes for a name every such asset would carry.
+/// An empty name is written explicitly, since it has to stay distinguishable from that default.
 vdoc::value encode_parts(cc::span<asset_part const> parts)
 {
     auto array = vdoc::value_builder::array();
@@ -22,10 +25,22 @@ vdoc::value encode_parts(cc::span<asset_part const> parts)
         auto object = vdoc::value_builder::object();
         object.set_bytes("hash", hash_bytes);
         object.set("format", part.format);
-        if (!part.name.empty())
+        if (part.name != main_part_name)
             object.set("name", part.name);
         array.push(object.build());
     }
+    return array.build();
+}
+
+/// The `deps` column: an array of asset id strings, exactly as the application declared them.
+///
+/// Written verbatim rather than deduplicated or sorted: this is the application's declaration, and normalizing it here
+/// would make a round-trip lossy for no gain — the flood fill does not care about order or repeats.
+vdoc::value encode_deps(cc::span<cc::string const> dependencies)
+{
+    auto array = vdoc::value_builder::array();
+    for (auto const& id : dependencies)
+        array.push(cc::string_view(id));
     return array.build();
 }
 
@@ -111,13 +126,29 @@ cc::shared_async<publish_result> store::publish(publish_changes changes)
             return cc::make_async_from_error<publish_result>(cc::async_error::make_error(
                 cc::any_error(cc::string("a blob was published with no data, and its hash names nothing stored"))));
 
+    for (auto const& upload : changes.blobs)
+    {
+        // Note the asymmetry with the load path, which treats the same unknown encoding as an issue and carries on: a
+        // FILE naming a codec this build lacks is someone else's newer writer, while a CALLER asking for one is this
+        // build asking itself for something it cannot do.
+        if (impl::find_blob_codec(upload.encoding) == nullptr)
+            return cc::make_async_from_error<publish_result>(cc::async_error::make_error(cc::any_error(cc::format(
+                "a blob was published under the encoding '{}', which this build has no codec for", upload.encoding))));
+
+        // Under raw the decoded size is recoverable from the stored bytes; under anything else only a decode knows it,
+        // so an unstated one would be unrecoverable rather than merely absent.
+        if (upload.encoding != "raw" && upload.decoded_size <= 0)
+            return cc::make_async_from_error<publish_result>(cc::async_error::make_error(
+                cc::any_error(cc::string("a blob was published under a non-raw encoding without its decoded size"))));
+    }
+
     auto claimed_blobs = cc::vector<blob_hash>();
     for (auto const& upload : changes.blobs)
     {
         if (!upload.has_data || _durable_blobs.contains(upload.hash))
             continue;
 
-        auto row = blob_row{.size = upload.size,
+        auto row = blob_row{.size = upload.decoded_size > 0 ? upload.decoded_size : upload.data.size(),
                             .stored_size = upload.data.size(),
                             .chunk_count = (upload.data.size() + impl::blob_chunk_size - 1) / impl::blob_chunk_size,
                             .format = upload.format,
@@ -137,8 +168,15 @@ cc::shared_async<publish_result> store::publish(publish_changes changes)
                              .parts = cc::vector<byte>::create_copy_of(parts.bytes())};
         if (!record.meta.is_null())
             row.meta = cc::vector<byte>::create_copy_of(record.meta.bytes());
+        // An asset with nothing declared writes NULL rather than an empty array, so "declared nothing" and "declared
+        // an empty list" cannot drift apart into two encodings of one fact.
+        if (!record.dependencies.empty())
+            row.deps = cc::vector<byte>::create_copy_of(encode_deps(record.dependencies).bytes());
         job.assets.push_back(cc::move(row));
     }
+
+    for (auto const& asset_id : changes.removed_assets)
+        job.removed_assets.push_back(asset_id);
 
     for (auto const& [name, head] : changes.refs)
     {
@@ -153,6 +191,9 @@ cc::shared_async<publish_result> store::publish(publish_changes changes)
         _refs[name] = head;
     for (auto& record : changes.assets)
         _assets[record.asset_id] = cc::move(record);
+    // Removals after the upserts here too, matching the order the writer applies them in.
+    for (auto const& asset_id : changes.removed_assets)
+        (void)_assets.erase(asset_id);
     for (auto const& id : claimed)
         _durable_ops.insert(id);
     for (auto const& hash : claimed_blobs)
@@ -223,8 +264,101 @@ std::shared_ptr<blob_source> store::make_blob_source()
     auto source = std::shared_ptr<blob_source>(new blob_source(shared_from_this()));
     if (_is_closed)
         source->impl_sever();
-    _blob_sources.push_back(source);
+
+    // Pruned on the way in, because resolve_asset makes this a real growth path rather than a theoretical one: a
+    // caller resolving assets every frame would otherwise grow this vector forever.
+    auto live = cc::vector<std::weak_ptr<blob_source>>();
+    for (auto& weak : _blob_sources)
+        if (!weak.expired())
+            live.push_back(cc::move(weak));
+    live.push_back(source);
+    _blob_sources = cc::move(live);
     return source;
+}
+
+// reclamation
+// -------------------------------------------------------------------------------------------------
+
+cc::shared_async<reclaim_result> store::reclaim(cc::span<cc::string const> roots)
+{
+    impl_harvest_pending();
+
+    if (_is_closed)
+        return cc::make_async_from_error<reclaim_result>(
+            cc::async_error::make_error(cc::any_error(cc::string("reclaiming in a closed store"))));
+
+    // The closure, by flood fill over the resident index.
+    // `retained` doubles as the visited set, which is what makes a cycle terminate rather than need detecting.
+    auto retained = cc::set<cc::string>();
+    auto frontier = cc::vector<cc::string>();
+    for (auto const& root : roots)
+        if (_assets.contains(root) && retained.insert(root))
+            frontier.push_back(root);
+
+    while (!frontier.empty())
+    {
+        auto const id = frontier.back();
+        frontier.remove_back();
+
+        auto const* record = _assets.get_ptr(id);
+        if (record == nullptr)
+            continue;
+
+        for (auto const& dependency : record->dependencies)
+        {
+            // A dependency naming nothing in this file is skipped in silence: a file is one asset source among many,
+            // so an id resolving elsewhere is the expected case rather than a defect to report.
+            if (!_assets.contains(dependency))
+                continue;
+            if (retained.insert(dependency))
+                frontier.push_back(dependency);
+        }
+    }
+
+    auto job = impl::reclaim_job();
+    for (auto const& [asset_id, record] : _assets)
+        if (!retained.contains(asset_id))
+            job.removed_assets.push_back(asset_id);
+
+    // Marked from the RETAINED assets alone — which is the one line that makes a root set mean anything.
+    auto marked = cc::set<blob_hash>();
+    for (auto const& asset_id : retained)
+        if (auto const* record = _assets.get_ptr(asset_id); record != nullptr)
+            for (auto const& part : record->parts)
+                marked.insert(part.hash);
+
+    for (auto const& hash : _durable_blobs)
+        if (!marked.contains(hash))
+            job.removed_blobs.push_back(hash);
+
+    for (auto const& asset_id : job.removed_assets)
+        (void)_assets.erase(asset_id);
+    for (auto const& hash : job.removed_blobs)
+        _durable_blobs.erase(hash);
+
+    auto async = on_reclaim(cc::move(job));
+    impl_pump_until_idle();
+    return async;
+}
+
+// resolving assets
+// -------------------------------------------------------------------------------------------------
+
+cc::optional<asset_resolution> store::resolve_asset(cc::string_view asset_id)
+{
+    auto const* record = _assets.get_ptr(asset_id);
+    if (record == nullptr)
+        return {};
+
+    // One source shared across every resolution, rather than one per asset: they are interchangeable, and a caller
+    // resolving many assets should not accumulate many.
+    auto source = _shared_source.lock();
+    if (!source)
+    {
+        source = make_blob_source();
+        _shared_source = source;
+    }
+    return asset_resolution{.record = *record, .blobs = cc::move(source)};
 }
 
 // the workspace
@@ -320,15 +454,28 @@ void blob_source::impl_sever()
 
 cc::shared_async<cc::vector<byte>> blob_source::load(blob_hash const& hash)
 {
-    (void)hash;
+    return load_range(hash, 0, -1);
+}
 
+cc::shared_async<cc::vector<byte>> blob_source::load_range(blob_hash const& hash, i64 offset, i64 size)
+{
     // Enqueue-and-return: this never blocks and never re-enters its caller, whatever state the store is in.
     if (_severed)
         return cc::make_async_from_error<cc::vector<byte>>(
             cc::async_error::make_error(cc::any_error(cc::string("the blob source was severed by close()"))));
 
-    // The live fetch path is milestone 5. Reporting is what an unbuilt path owes a caller; hanging is not.
-    return cc::make_async_from_error<cc::vector<byte>>(cc::async_error::make_error(
-        cc::any_error(cc::string("loading blob bytes arrives with milestone 5 (assets and blobs)"))));
+    return _owner->impl_fetch_blob(hash, {.offset = offset, .size = size});
+}
+
+cc::shared_async<cc::vector<byte>> store::impl_fetch_blob(blob_hash const& hash, impl::blob_fetch_range range)
+{
+    if (_is_closed)
+        return cc::make_async_from_error<cc::vector<byte>>(
+            cc::async_error::make_error(cc::any_error(cc::string("fetching a blob from a closed store"))));
+
+    // No harvest and NO PUMP, deliberately: both would run work — and with it a caller's continuation — inside the
+    // load() call this is serving.
+    // See on_fetch_blob.
+    return on_fetch_blob(hash, range);
 }
 } // namespace vdoc::file

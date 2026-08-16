@@ -41,6 +41,12 @@ struct publish_request
     cc::shared_async<publish_result> promise;
 };
 
+struct reclaim_request
+{
+    reclaim_job job;
+    cc::shared_async<reclaim_result> promise;
+};
+
 struct workspace_request
 {
     cc::vector<workspace_entry> entries;
@@ -53,9 +59,20 @@ struct close_request
 {
 };
 
-// milestone 5 adds: struct blob_request { blob_hash hash; cc::shared_async<cc::vector<byte>> promise; };
+/// One blob fetch: which blob, which range of its decoded bytes, and where the answer goes.
+///
+/// **Its position in the mailbox is load-bearing.** Messages dispatch in send order, so a fetch enqueued after a
+/// publish sees that publish's writes — and no fetch ever interleaves with one, which is what makes an open blob
+/// handle here impossible for this store to invalidate.
+struct blob_request
+{
+    blob_hash hash;
+    blob_fetch_range range;
+    cc::shared_async<cc::vector<byte>> promise;
+};
 
-using sqlite_actor = cc::threaded_actor<open_request, publish_request, workspace_request, close_request>;
+using sqlite_actor
+    = cc::threaded_actor<open_request, publish_request, reclaim_request, workspace_request, blob_request, close_request>;
 
 /// Creates and starts the actor.
 /// Nothing touches the disk here — the open is a message like any other.

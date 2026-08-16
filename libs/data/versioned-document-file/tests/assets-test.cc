@@ -99,7 +99,7 @@ TEST("vdoc::file - an asset with no parts is legal")
 
 TEST("vdoc::file - a blob upload defaults to raw with data")
 {
-    auto const upload = vdoc::file::blob_upload{.hash = hash_of("payload"), .format = "png", .size = 7};
+    auto const upload = vdoc::file::blob_upload{.hash = hash_of("payload"), .format = "png", .decoded_size = 7};
 
     CHECK(upload.encoding == "raw"); // the only encoding v1 writes
     CHECK(upload.has_data);          // "you already have this" is the opt-in, not the default

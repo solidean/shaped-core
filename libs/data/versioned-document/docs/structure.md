@@ -14,7 +14,7 @@ This document tracks *state*; it is not where the design lives.
 - The settled choices and their reasoning are [decisions.md](decisions.md).
 - The ordered plan, with acceptance criteria per step, is [todo/](todo/_index.md).
 
-Milestones 0 through 3 have landed; everything above them is `[planned]`.
+Milestones 0 through 5 have landed; everything above them is `[planned]`.
 The milestone that lands each piece is named so the two documents stay in step.
 
 ## Top-level structure
@@ -36,17 +36,20 @@ src/versioned-document/
 src/versioned-document-file/
   fwd.hh          [done]        forward declarations; also the API index
   diagnostics     [done]        load_issue_kind, load_issue, load_report        milestone 4
-  rows            [done]        one struct per table, untyped                   milestone 4
   memory_image    [done]        the in-memory backing, in the same rows         milestone 4
   store           [done]        open / load / verify / refs / publish / close   milestone 4
   workspace       [done]        the disposable side table                       milestone 4
-  assets          [partial]     the vocabulary and the load path; the machinery  milestone 5
-  snapshots       [partial]     carried opaquely; caching and pruning            milestone 6
+  assets          [done]        the vocabulary, the store and the blob source   milestone 5
+  snapshots       [in progress] carried opaquely; caching and pruning           milestone 6
 
 src/versioned-document-file/impl/
+  rows            [done]        one struct per table, untyped                   milestone 4
   store_io        [done]        the reader/writer seam, and the publish job     milestone 4
   load            [done]        the one loader, shared by both implementations  milestone 4
   publish         [done]        the one publisher, shared the same way          milestone 4
+  reclaim         [done]        the one reclaimer, shared the same way          milestone 5
+  blob_codec      [done]        the encoding table; `raw` is its one entry      milestone 5
+  blob_fetch      [done]        the one route from a blob hash to bytes         milestone 5
   store_memory    [done]        the in-memory arm, and the suite's oracle       milestone 4
   sqlite_schema   [done]        the DDL, the pragmas, the shape check           milestone 4
   sqlite_io       [done]        the only file that talks to a database          milestone 4
@@ -101,24 +104,27 @@ Design: [concept.md](concept.md#interpretation). Landed in [milestone 3](todo/mi
 - `[done]` **the multi-value rules in one place** — `property_reader::try_get`, which is what a component's parse is handed.
 - `[done]` **selection and construction split**, so every structural diagnostic is filed once and the two phases cannot disagree.
 
-## versioned-document-file [planned]
+## versioned-document-file [in progress]
 
-### the store [planned]
+### the store [done]
 
 The `.vdoc` file: schema, load, verification, refs, publish, workspace, and the actor that owns the connection.
-Specification: [format.md](../../versioned-document-file/docs/format.md). Lands in [milestone 4](todo/milestone-4.md).
+Specification: [format.md](../../versioned-document-file/docs/format.md). Landed in [milestone 4](todo/milestone-4.md).
 
-- `[planned]` **two implementations behind one seam** — in-memory and SQLite — with a conformance suite run against both.
-- `[planned]` **publish derives its op set from refs by reachability**, so an unreachable op cannot be published by mistake.
-- `[planned]` **the sticky first-failure latch**, so a failing autosave surfaces immediately rather than at close.
+- `[done]` **two implementations behind one seam** — in-memory and SQLite — with a conformance suite run against both.
+- `[done]` **publish derives its op set from refs by reachability**, so an unreachable op cannot be published by mistake.
+- `[done]` **the sticky first-failure latch**, so a failing autosave surfaces immediately rather than at close.
 
-### assets and blobs [planned]
+### assets and blobs [done]
 
 The asset index over a chunked, deduplicated blob store, plus the async blob source.
-Design: [concept.md](concept.md#assets-and-blobs). Lands in [milestone 5](todo/milestone-5.md).
+Design: [concept.md](concept.md#assets-and-blobs). Landed in [milestone 5](todo/milestone-5.md).
 
-- `[planned]` **blob sharing across assets**, with mark-and-sweep reclamation from the asset index.
-- `[planned]` **the encoding seam**, with `raw` the only registered encoding — see [decisions.md](decisions.md#blobs-ship-raw-only-with-the-encoding-seam-reserved).
+- `[done]` **blob sharing across assets**, with mark-and-sweep reclamation from the asset index.
+- `[done]` **declared asset dependencies**, so reclamation takes a root set and computes the closure.
+  See [decisions.md](decisions.md#asset-dependencies-are-declared-by-the-application-and-reclamation-takes-a-root-set).
+- `[done]` **the encoding seam**, with `raw` the only registered encoding — see [decisions.md](decisions.md#blobs-ship-raw-only-with-the-encoding-seam-reserved).
+- `[done]` **the async blob source**, enqueue-and-return, with a byte-range variant over the chunked store.
 
 ### snapshots, pruning and recovery [planned]
 

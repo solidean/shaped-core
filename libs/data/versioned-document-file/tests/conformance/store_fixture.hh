@@ -60,6 +60,20 @@ public:
     /// Makes every subsequent write fail, so a failing autosave can be observed.
     virtual void block_writes() = 0;
     virtual void unblock_writes() = 0;
+
+    /// Deletes one chunk of the lowest-id blob, behind the store's back — a torn blob.
+    /// True if there was a chunk to delete.
+    virtual bool delete_first_blob_chunk() = 0;
+
+    /// Rewrites the lowest-id blob's encoding, so the file names one this build has no codec for.
+    virtual bool set_first_blob_encoding(cc::string_view encoding) = 0;
+
+    /// Replaces the first asset's `deps` column with bytes that were never a vdoc value.
+    /// True if there was an asset carrying one.
+    virtual bool corrupt_first_asset_deps() = 0;
+
+    /// How many blobs are stored, which is what a dedup assertion counts.
+    [[nodiscard]] virtual isize count_blobs() = 0;
 };
 
 /// One store implementation, as the conformance suite drives it.
@@ -103,6 +117,18 @@ template <class T>
     while (!async->is_ready())
     {
     }
+    return cc::into_result(cc::move(async));
+}
+
+/// Waits for `async`, pumping `s` while it waits.
+///
+/// A blob fetch needs this: the in-memory arm has no thread of its own, so its fetches complete inside pump().
+/// The file arm's actor has usually resolved by then and the pump is a no-op, which is why one form serves both.
+template <class T>
+[[nodiscard]] cc::result<T, cc::async_error> wait_for(store& s, cc::shared_async<T> async)
+{
+    while (!async->is_ready())
+        (void)s.pump();
     return cc::into_result(cc::move(async));
 }
 

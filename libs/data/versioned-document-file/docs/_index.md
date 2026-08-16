@@ -1,9 +1,9 @@
 # versioned-document-file docs
 
 Documentation hub for versioned-document-file — the `.vdoc` save format (namespace `vdoc::file`).
-Start at the [readme](../readme.md) for the overview, and the [cheat-sheet](../cheat-sheet.md) for the planned API at a glance.
+Start at the [readme](../readme.md) for the overview, and the [cheat-sheet](../cheat-sheet.md) for the API at a glance.
 
-The library is at the **design stage**: the format is specified and nothing is implemented.
+The store, the loader, publishing, the workspace and the content store are implemented; snapshots are carried but not yet decoded.
 
 ## Topics
 
@@ -15,7 +15,7 @@ The model this persists is [versioned-document](../../versioned-document/docs/_i
 - [concept.md](../../versioned-document/docs/concept.md) — the design of the document model itself.
 - [decisions.md](../../versioned-document/docs/decisions.md) — the settled choices, including the three this library depends on.
   The table split, the mutable asset mapping, and the reserved encoding seam.
-- [todo/](../../versioned-document/docs/todo/_index.md) — the milestones, of which this library's work is 4 through 6.
+- [todo/](../../versioned-document/docs/todo/_index.md) — the milestones, of which this library's work is 4 through 6; 4 and 5 have landed.
   Both libraries are built to one plan.
 
 Formatting follows the repo-wide [coding-guidelines](../../../../docs/coding-guidelines.md); `.clang-format` is authoritative.

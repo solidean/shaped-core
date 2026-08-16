@@ -3,9 +3,13 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <versioned-document-file/fwd.hh>
-#include <versioned-document-file/rows.hh>
+#include <versioned-document-file/impl/rows.hh>
 
 /// The whole of an in-memory store's state, in the same rows a file holds.
+///
+/// This is the one public header built out of `impl/` types, and deliberately so: an image IS the row set, and a test
+/// that fabricates a damaged one needs the same structs the loader reads.
+/// Reaching for a row type to do anything else means reaching past the store's own API.
 ///
 /// **It outlives the store that wrote it**, which is what lets a caller close one and reopen it exactly like a file —
 /// re-running the load, its verification and its issues.

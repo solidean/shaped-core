@@ -47,14 +47,17 @@ cc::vector<known_table> known_tables()
                              ") WITHOUT ROWID",
                       .columns = {"op_hash", "required", "encoding", "data"}});
 
+    // `deps` is what lets reclamation compute a closure instead of the application resolving one: an array of asset id
+    // strings, declared by the application and never interpreted here.
     tables.push_back({.name = "assets",
                       .ddl = "CREATE TABLE assets ("
                              " asset_id TEXT PRIMARY KEY NOT NULL,"
                              " kind     TEXT NOT NULL,"
                              " parts    BLOB NOT NULL,"
-                             " meta     BLOB"
+                             " meta     BLOB,"
+                             " deps     BLOB"
                              ") WITHOUT ROWID",
-                      .columns = {"asset_id", "kind", "parts", "meta"}});
+                      .columns = {"asset_id", "kind", "parts", "meta", "deps"}});
 
     // A rowid table, because incremental blob I/O addresses rows by rowid — which is how a chunk is read without
     // materializing it in memory first.

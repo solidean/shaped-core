@@ -41,6 +41,10 @@ cc::result<publish_result> apply_publish(store_writer& writer, publish_job const
     for (auto const& row : job.assets)
         CC_RETURN_IF_ERROR(writer.upsert_asset(row));
 
+    // AFTER the upserts, so publishing an asset and removing it in one call leaves it removed.
+    for (auto const& asset_id : job.removed_assets)
+        CC_RETURN_IF_ERROR(writer.delete_asset(asset_id));
+
     // Refs LAST, so they move only once everything they reach is in the same transaction.
     for (auto const& row : job.refs)
         CC_RETURN_IF_ERROR(writer.upsert_ref(row));

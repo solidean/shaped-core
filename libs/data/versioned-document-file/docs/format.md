@@ -6,9 +6,10 @@ A `.vdoc` file is a single SQLite database holding a document's whole history, t
 The model it stores is [versioned-document](../../versioned-document/docs/concept.md)'s; read that first.
 This document is the authority on the bytes.
 
-The schema, the load path, publishing and the workspace are implemented; assets, blobs and snapshots are carried but not yet populated or decoded.
-[milestone-4](../../versioned-document/docs/todo/milestone-4.md) landed the first.
-[milestone-5](../../versioned-document/docs/todo/milestone-5.md) and [milestone-6](../../versioned-document/docs/todo/milestone-6.md) land the rest.
+The schema, the load path, publishing, the workspace, and the whole content store — assets, blobs, the encoding seam and reclamation — are implemented.
+Snapshots are carried but not yet decoded.
+[milestone-4](../../versioned-document/docs/todo/milestone-4.md) and [milestone-5](../../versioned-document/docs/todo/milestone-5.md) landed the first.
+[milestone-6](../../versioned-document/docs/todo/milestone-6.md) lands the rest.
 
 ---
 
@@ -131,7 +132,8 @@ CREATE TABLE assets (
     asset_id TEXT PRIMARY KEY NOT NULL,  -- the same string a document property holds
     kind     TEXT NOT NULL,              -- load-bearing: what the asset is
     parts    BLOB NOT NULL,              -- an encoded vdoc value (array), see below
-    meta     BLOB                        -- an encoded vdoc value (object), informational
+    meta     BLOB,                       -- an encoded vdoc value (object), informational
+    deps     BLOB                        -- an encoded vdoc value (array of asset id strings)
 ) WITHOUT ROWID;
 ```
 
@@ -143,10 +145,28 @@ CREATE TABLE assets (
 | `format` | what the bytes are, e.g. `"png"` — selects a parser downstream |
 | `name` | optional, **debug only** |
 
-**Order is the contract; the name is for humans.**
-Nothing may key behaviour on a part name, because the moment something does, renaming a part becomes a format change.
+**The name is the contract, and position within a name disambiguates.**
+A part is addressed by `(name, index)`, where the index counts only the parts sharing that name.
+Whole-list position carries nothing, so reordering an asset's parts changes no behaviour.
+
+`name` is **absent when the part is `$main`**, the reserved default, and read back as `$main` — so the ceremony-free single-part asset stores no name at all.
+An empty name is written explicitly, since it has to stay distinguishable from that default, and is reported at load.
+`$` is reserved: an application must not invent its own `$`-name.
+
+Duplicate names are reported and **kept**, because discarding somebody's part is not a loader's decision.
+A lookup that reports ambiguity would also have nothing to report if the loader had already resolved it.
 
 An asset with an empty `parts` array is legal, and means an asset that has metadata but no bytes.
+
+**`deps` is declared by the application and never interpreted here.**
+The store never parses a blob, so it cannot discover a dependency on its own; an application that wants a precise sweep declares one, and one that declares nothing gets a sweep that collects more.
+NULL means no declared dependencies.
+
+An id naming nothing in this file is legal and **silently skipped**, never a load issue.
+A file is one asset source among many, so a dependency may name a built-in, procedural, remote or otherwise externally-stored asset.
+Order carries no meaning, duplicates are harmless, and cycles are ordinary — the closure walk is a flood fill whose visited set terminates them.
+An entry that is not a string is dropped, and a whole `deps` blob that will not decode is reported and read as absent.
+Neither drops the asset: a dependency list is advisory, so an unreadable one costs a later sweep precision rather than costing the reader the asset.
 
 ### `blobs` and `blob_chunk` — the content store
 
@@ -239,9 +259,11 @@ Load issues are string-free: a kind plus the id it concerns.
 | `missing_parent` | an op names a parent not in the file; informational, and normal after pruning |
 | `missing_snapshot` | a snapshot row would not decode |
 | `dangling_ref` | a ref names an op not in the file, usually one this load dropped; the ref is kept anyway |
-| `asset_decode_failed` | an asset's `parts` blob would not decode, or is not the array of part objects it must be |
+| `asset_decode_failed` | an asset's `parts` or `meta` blob would not decode, which drops the asset; or its `deps` blob would not, which does not |
+| `asset_part_unnamed` | an asset carries a part with an empty name, which nothing can address |
+| `asset_duplicate_part_name` | several parts share one name; all are kept, and a singular lookup reports it as ambiguous |
 | `asset_blob_missing` | an asset names a content hash with no blob row |
-| `asset_blob_incomplete` | the blob row exists but its chunks do not all |
+| `asset_blob_incomplete` | the blob row exists but its chunks do not all add up |
 | `unknown_encoding` | a blob names an encoding this build does not have |
 | `workspace_decode_failed` | a workspace row's value would not decode; the row is left in place |
 | `unknown_table` | a table this build does not know; ignored, and left untouched |
@@ -273,7 +295,19 @@ Closing flushes pending workspace writes, drains accepted publishes, rejects new
 
 Blobs are reachable **from the asset index only**, never from ops.
 
-So reclamation is one mark-and-sweep: mark every blob named by an asset, delete the rest, and `blob_chunk` follows by cascade.
+Reclamation therefore has two levels, and the caller supplies the roots of the first.
+
+1. **The asset closure.** Starting from the root asset ids the caller names, flood-fill through each asset's declared `deps`, and delete every asset outside the result.
+   The visited set is what makes a cycle terminate, and an id naming nothing in this file is skipped.
+2. **The blob sweep.** Mark every blob named by a *retained* asset, delete the rest, and `blob_chunk` follows by cascade.
+   "The rest" is the blobs this build actually read at load, so a blob under an unknown `encoding` is never collected — a build does not delete rows it cannot read.
+
+Both happen in one transaction, so a file never holds an asset whose blob was already collected.
+
+**Marking is still from the asset index and only from there** — the change is that the index is first narrowed by a caller-supplied root set.
+That is what lets an application name what it wants to keep instead of resolving the closure itself.
 An asset remap may legitimately orphan blobs, which is exactly the case this handles.
+
+Unmapping a single name is a separate, cheaper act: it rides a publish, is retroactive exactly like a remap, and collects no bytes.
 
 History pruning is separate and independent: attach a snapshot to an op, mark it `required`, then delete the ops behind it, leaving skeletons where the DAG still needs a position.

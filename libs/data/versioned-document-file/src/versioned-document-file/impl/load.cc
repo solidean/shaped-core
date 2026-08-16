@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <versioned-document-file/impl/blob_codec.hh>
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/store.hh>
 #include <versioned-document/op.hh>
@@ -21,13 +22,6 @@ struct blob_facts
 {
     bool is_usable = false; // false where the encoding is unknown or the chunks do not add up
 };
-
-/// The blob encodings this build can read.
-/// `raw` is the only one v1 writes; an unknown one is a load issue and the blob is skipped, never a failed open.
-bool is_known_encoding(cc::string_view encoding)
-{
-    return encoding == "raw";
-}
 
 void report_issue(load_report& report, load_issue issue)
 {
@@ -117,7 +111,10 @@ cc::result<cc::unit> load(store_reader& reader, store& target)
         if (!hash.has_value())
             continue; // a hash column that is not 32 bytes names no blob any asset can reach
 
-        if (!is_known_encoding(row.encoding))
+        // An encoding this build has no codec for is a load issue and the blob is skipped, never a failed open.
+        // Note what the `continue` skips: the blob does NOT join _durable_blobs, so a republish rewrites it rather
+        // than trusting a row this build cannot read.
+        if (find_blob_codec(row.encoding) == nullptr)
         {
             report_issue(report, {.kind = load_issue_kind::unknown_encoding, .blob = hash.value(), .name = row.encoding});
             blob_state[hash.value()] = {.is_usable = false};
@@ -175,6 +172,47 @@ cc::result<cc::unit> load(store_reader& reader, store& target)
             }
             record.meta = vdoc::value::from_validated_bytes(row.meta.value());
         }
+
+        if (row.deps.has_value())
+        {
+            // A dependency list is advisory, so NOTHING here drops the asset — an unreadable list is reported and
+            // leaves the asset with no declared dependencies, exactly as an absent one would.
+            // The cost of that is a reclamation that collects more than it had to, never a wrong idea of what the
+            // asset IS.
+            // Dropping the asset instead would turn an advisory field into a load-bearing one.
+            auto const deps = vdoc::try_decode(row.deps.value());
+            if (deps.has_error() || deps.value().kind() != vdoc::value_kind::array)
+            {
+                report_issue(report, {.kind = load_issue_kind::asset_decode_failed, .name = row.asset_id});
+            }
+            else
+            {
+                // One entry that is not a string is dropped, for the same reason and at the same cost.
+                auto const declared = deps.value();
+                for (isize i = 0; i < declared.size(); ++i)
+                    if (auto const entry = declared.element_at(i); entry.kind() == vdoc::value_kind::string)
+                        record.dependencies.push_back(cc::string(entry.as_string()));
+            }
+        }
+
+        // Both of these KEEP every part: the report names them at open and the lookup names them at use, and dropping
+        // one here would make asset_record::try_find_part's `ambiguous` unreachable.
+        auto has_unnamed = false;
+        auto has_duplicate = false;
+        for (isize i = 0; i < record.parts.size(); ++i)
+        {
+            if (record.parts[i].name.empty())
+                has_unnamed = true;
+            for (isize j = i + 1; j < record.parts.size(); ++j)
+                if (record.parts[i].name == record.parts[j].name)
+                    has_duplicate = true;
+        }
+        // Once per asset rather than once per part: a naive publish leaves every part on the default name, and one
+        // issue per part would bury the rest of the report.
+        if (has_unnamed)
+            report_issue(report, {.kind = load_issue_kind::asset_part_unnamed, .name = row.asset_id});
+        if (has_duplicate)
+            report_issue(report, {.kind = load_issue_kind::asset_duplicate_part_name, .name = row.asset_id});
 
         for (auto const& part : record.parts)
         {

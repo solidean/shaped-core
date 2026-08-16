@@ -19,6 +19,24 @@ cc::shared_async<publish_result> sqlite_store::on_publish(publish_job job)
     return promise;
 }
 
+cc::shared_async<reclaim_result> sqlite_store::on_reclaim(reclaim_job job)
+{
+    auto promise = cc::make_async_manual<reclaim_result>();
+    if (!_actor->enqueue_message(reclaim_request{.job = cc::move(job), .promise = promise}))
+        promise->push_error(rejected("a reclamation"));
+    return promise;
+}
+
+cc::shared_async<cc::vector<byte>> sqlite_store::on_fetch_blob(blob_hash const& hash, blob_fetch_range range)
+{
+    // Enqueue and return, with no pump: in an unthreaded build the message waits in the mailbox until the owner pumps,
+    // which is the same deferral the in-memory arm implements by hand.
+    auto promise = cc::make_async_manual<cc::vector<byte>>();
+    if (!_actor->enqueue_message(blob_request{.hash = hash, .range = range, .promise = promise}))
+        promise->push_error(rejected("a blob fetch"));
+    return promise;
+}
+
 cc::shared_async<cc::unit> sqlite_store::on_flush_workspace(cc::vector<workspace_entry> entries)
 {
     auto promise = cc::make_async_manual<cc::unit>();

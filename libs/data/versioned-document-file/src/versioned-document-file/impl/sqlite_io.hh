@@ -37,6 +37,24 @@ private:
     schema_scan _scan;
 };
 
+/// Reads blob payloads back out of a connection, through incremental blob I/O.
+///
+/// Chunk rowids are resolved PER FETCH rather than cached at load, and that is a correctness choice rather than a
+/// laziness: a publish after open inserts chunks the load never scanned, and a VACUUM renumbers rowids under a file
+/// another process holds — a stale cache would hand back wrong bytes rather than merely be slow.
+/// One indexed lookup in front of a payload read costs microseconds against milliseconds.
+class sqlite_blob_payload_reader final : public blob_payload_reader
+{
+public:
+    explicit sqlite_blob_payload_reader(babel::sqlite::database& db) : _db(db) {}
+
+    [[nodiscard]] cc::result<cc::optional<blob_header>> read_blob_header(blob_hash const& hash) override;
+    [[nodiscard]] cc::result<cc::unit> read_stored_range(blob_header const& blob, i64 offset, cc::span<byte> out) override;
+
+private:
+    babel::sqlite::database& _db;
+};
+
 /// Writes one publish into a connection, as one transaction.
 ///
 /// The transaction lives here rather than in the caller, so that this writer dying — for any reason, on any path — rolls it back.
@@ -51,6 +69,8 @@ public:
     [[nodiscard]] cc::result<cc::optional<i64>> insert_blob(blob_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> insert_chunk(chunk_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> upsert_asset(asset_row const& row) override;
+    [[nodiscard]] cc::result<cc::unit> delete_asset(cc::string_view asset_id) override;
+    [[nodiscard]] cc::result<cc::unit> delete_blob(blob_hash const& hash) override;
     [[nodiscard]] cc::result<cc::unit> upsert_ref(ref_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> upsert_workspace(workspace_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> commit() override;

@@ -30,7 +30,7 @@ Within a milestone, the work items are roughly ordered but need not be done in s
 | 2 | [Ids, ops and the DAG](milestone-2.md) **[done]** — content addressing, materialization, multi-values | versioned-document |
 | 3 | [Raw and typed documents](milestone-3.md) **[done]** — interpretation, the immutable index | versioned-document |
 | 4 | [The file](milestone-4.md) **[done]** — schema, load, publish, workspace, the actor | versioned-document-file |
-| 5 | [Assets and blobs](milestone-5.md) — the content store and its sharing | versioned-document-file |
+| 5 | [Assets and blobs](milestone-5.md) **[done]** — the content store, its sharing and declared dependencies | versioned-document-file |
 | 6 | [Snapshots, pruning and recovery](milestone-6.md) — and the docs' final pass | both |
 
 ## What "done" means

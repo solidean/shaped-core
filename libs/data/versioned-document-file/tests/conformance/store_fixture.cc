@@ -39,7 +39,9 @@ public:
         for (auto const& row : _image->snapshots)
             text += cc::format("snap {} {} {} {}\n", hex(row.op_hash), row.required, row.encoding, hex(row.data));
         for (auto const& row : _image->assets)
-            text += cc::format("asset {} {} {}\n", row.asset_id, row.kind, hex(row.parts));
+            text += cc::format("asset {} {} {} {} {}\n", row.asset_id, row.kind, hex(row.parts),
+                               row.meta.has_value() ? hex(row.meta.value()) : cc::string("-"),
+                               row.deps.has_value() ? hex(row.deps.value()) : cc::string("-"));
         for (auto const& row : _image->blobs)
             text += cc::format("blob {} {} {} {} {}\n", hex(row.hash), row.size, row.stored_size, row.chunk_count,
                                row.encoding);
@@ -113,7 +115,74 @@ public:
         _image->writes_fail = false;
     }
 
+    bool delete_first_blob_chunk() override
+    {
+        auto const id = first_blob_id();
+        if (!id.has_value())
+            return false;
+
+        // The LAST chunk of that blob, so a torn blob is short at its end rather than holed at its start — which is
+        // the shape a write interrupted partway through actually leaves.
+        auto best = isize(-1);
+        auto best_index = i64(-1);
+        for (isize i = 0; i < _image->blob_chunks.size(); ++i)
+            if (_image->blob_chunks[i].blob_id == id.value() && _image->blob_chunks[i].chunk_index > best_index)
+            {
+                best = i;
+                best_index = _image->blob_chunks[i].chunk_index;
+            }
+        if (best < 0)
+            return false;
+
+        auto kept = cc::vector<chunk_row>();
+        for (isize i = 0; i < _image->blob_chunks.size(); ++i)
+            if (i != best)
+                kept.push_back(cc::move(_image->blob_chunks[i]));
+        _image->blob_chunks = cc::move(kept);
+        return true;
+    }
+
+    bool set_first_blob_encoding(cc::string_view encoding) override
+    {
+        auto const id = first_blob_id();
+        if (!id.has_value())
+            return false;
+
+        for (auto& row : _image->blobs)
+            if (row.id == id.value())
+            {
+                row.encoding = cc::string(encoding);
+                return true;
+            }
+        return false;
+    }
+
+    bool corrupt_first_asset_deps() override
+    {
+        for (auto& row : _image->assets)
+            if (row.deps.has_value())
+            {
+                // A vdoc value has to start with an encoding tag this build knows; 0xFF never is one.
+                row.deps = cc::vector<byte>::create_defaulted(3);
+                row.deps.value()[0] = byte(0xFF);
+                return true;
+            }
+        return false;
+    }
+
+    isize count_blobs() override { return _image->blobs.size(); }
+
 private:
+    /// Lowest id, which is the first blob written — the same choice the file arm makes.
+    cc::optional<i64> first_blob_id() const
+    {
+        auto lowest = cc::optional<i64>();
+        for (auto const& row : _image->blobs)
+            if (!lowest.has_value() || row.id < lowest.value())
+                lowest = row.id;
+        return lowest;
+    }
+
     static cc::string hex(cc::span<byte const> bytes)
     {
         auto out = cc::string();

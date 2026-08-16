@@ -121,6 +121,64 @@ public:
         auto db = require_db();
         REQUIRE(db.exec("DROP TRIGGER IF EXISTS conformance_block_ops").has_value());
         REQUIRE(db.exec("DROP TRIGGER IF EXISTS conformance_block_workspace").has_value());
+        REQUIRE(db.exec("DROP TRIGGER IF EXISTS conformance_block_blobs").has_value());
+        REQUIRE(db.exec("DROP TRIGGER IF EXISTS conformance_block_chunks").has_value());
+    }
+
+    bool delete_first_blob_chunk() override
+    {
+        auto db = require_db();
+        auto const id = first_blob_id(db);
+        if (!id.has_value())
+            return false;
+
+        auto stmt = db.prepare("DELETE FROM blob_chunk WHERE blob_id = ?1 AND chunk_index ="
+                               " (SELECT MAX(chunk_index) FROM blob_chunk WHERE blob_id = ?1)");
+        REQUIRE(stmt.has_value());
+        REQUIRE(stmt.value().bind(1, id.value()).has_value());
+        REQUIRE(stmt.value().next().has_value());
+        return db.changes() > 0;
+    }
+
+    bool set_first_blob_encoding(cc::string_view encoding) override
+    {
+        auto db = require_db();
+        auto const id = first_blob_id(db);
+        if (!id.has_value())
+            return false;
+
+        auto stmt = db.prepare("UPDATE blobs SET encoding = ?2 WHERE id = ?1");
+        REQUIRE(stmt.has_value());
+        REQUIRE(stmt.value().bind(1, id.value()).has_value());
+        REQUIRE(stmt.value().bind(2, encoding).has_value());
+        REQUIRE(stmt.value().next().has_value());
+        return true;
+    }
+
+    bool corrupt_first_asset_deps() override
+    {
+        auto db = require_db();
+
+        // A vdoc value has to start with an encoding tag this build knows; 0xFF never is one.
+        auto damaged = cc::vector<byte>::create_defaulted(3);
+        damaged[0] = byte(0xFF);
+
+        auto stmt = db.prepare("UPDATE assets SET deps = ?1 WHERE deps IS NOT NULL AND asset_id ="
+                               " (SELECT MIN(asset_id) FROM assets WHERE deps IS NOT NULL)");
+        REQUIRE(stmt.has_value());
+        REQUIRE(stmt.value().bind(1, cc::span<byte const>(damaged)).has_value());
+        REQUIRE(stmt.value().next().has_value());
+        return db.changes() > 0;
+    }
+
+    isize count_blobs() override
+    {
+        auto db = require_db();
+        auto stmt = db.query("SELECT COUNT(*) FROM blobs");
+        REQUIRE(stmt.has_value());
+        for (auto const row : stmt.value())
+            return row.as_i64(0);
+        return 0;
     }
 
 private:
@@ -153,6 +211,16 @@ private:
         return {};
     }
 
+    /// Lowest rowid, which is the first blob written — deterministic on both arms.
+    static cc::optional<i64> first_blob_id(sql::database& db)
+    {
+        auto stmt = db.query("SELECT id FROM blobs ORDER BY id LIMIT 1");
+        REQUIRE(stmt.has_value());
+        for (auto const row : stmt.value())
+            return row.as_i64(0);
+        return {};
+    }
+
     static bool write_assignments(sql::database& db, cc::span<byte const> hash, cc::span<byte const> assignments)
     {
         auto stmt = db.prepare("UPDATE ops SET assignments = ?2 WHERE hash = ?1");
@@ -172,6 +240,16 @@ private:
                         " BEGIN SELECT RAISE(ABORT, 'writes are blocked'); END")
                     .has_value());
         REQUIRE(db.exec("CREATE TRIGGER IF NOT EXISTS conformance_block_workspace BEFORE INSERT ON workspace"
+                        " BEGIN SELECT RAISE(ABORT, 'writes are blocked'); END")
+                    .has_value());
+
+        // The blob tables too, because the in-memory arm refuses EVERY write at begin(): without these a blob-only
+        // publish would be blocked on one arm and succeed on the other, and a test written against it would pass on
+        // one of them for the wrong reason.
+        REQUIRE(db.exec("CREATE TRIGGER IF NOT EXISTS conformance_block_blobs BEFORE INSERT ON blobs"
+                        " BEGIN SELECT RAISE(ABORT, 'writes are blocked'); END")
+                    .has_value());
+        REQUIRE(db.exec("CREATE TRIGGER IF NOT EXISTS conformance_block_chunks BEFORE INSERT ON blob_chunk"
                         " BEGIN SELECT RAISE(ABORT, 'writes are blocked'); END")
                     .has_value());
     }

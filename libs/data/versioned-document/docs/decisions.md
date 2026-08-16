@@ -516,7 +516,14 @@ That is the difference between an oracle and a shortcut.
 
 It has no actor because the connection an actor exists to own exclusively is the thing this arm does not have.
 A thread per unsaved document would buy nothing and would put a second scheduler under a suite that exists to be deterministic.
-Its `on_pump` reports nothing left, which is exactly what a threaded build's actor reports, so no caller can tell them apart.
+
+**Amended in milestone 5: its `on_pump` does report work, for blob fetches alone.**
+A fetch must not be resolved inside `blob_source::load`, which may be called with a caller's lock held.
+So the arm that could answer instantly is precisely the one that has to queue, and it drains in `pump()`.
+
+That narrows the original claim rather than breaking it.
+A correct caller already had to pump: with `SC_THREADS=OFF` the file arm's actor also runs on the calling thread and never progresses otherwise.
+So "no caller can tell them apart" holds for every caller that pumps, which is every caller that works on both builds — and a caller that never pumps was already broken in one configuration.
 
 **Reopen when:** nothing.
 
@@ -540,6 +547,75 @@ A file naming an unknown encoding is reported as a load issue and the blob is sk
 
 **Reopen when:** embedded content sizes justify it.
 It is an additive change by construction, so nothing about the format has to move.
+
+### Decoding runs on the storage thread while `raw` is the only codec
+
+**Decided.** `fetch_blob` keeps the chunk read and the decode as two visibly separate steps, and `raw`'s identity decode runs on the thread that did the read.
+
+**A whole-blob fetch goes through decode even under a byte-addressable codec.**
+The byte-range fast path exists to avoid materializing a multi-gigabyte blob for 64 bytes of it, so it is taken only for a partial range.
+Routing every full read through the codec is what keeps that half of the seam exercised instead of dead until the first real codec.
+Under `raw` the decode is a move, so the fast path would buy nothing there anyway.
+
+This departs from milestone 5's own wording, which says decoding happens "never on the storage thread".
+Honouring that literally today would mean building a decode scheduler — its lifetime, its single-threaded fallback, its ownership — entirely for a function that returns its argument.
+Nothing would validate it until a real codec exists.
+
+The seam a real codec would move at is what actually ships.
+The read and the decode are separate statements rather than one expression, so introducing a compressing codec moves one call and changes no structure.
+
+**Reopen when:** a second codec is registered.
+That is the point at which the hand-off has something to carry and something to test it with.
+
+### Part names are the contract, and position within a name disambiguates
+
+**Decided, reversing an earlier rule.** A part is addressed by `(name, index)`, where the index is its position among the parts sharing that name.
+Whole-list position carries nothing: reordering an asset's parts changes no behaviour, and renaming one is the format change it looks like.
+
+The rule used to be the opposite — order was the contract and names were cosmetic, on the argument that keying on a name makes renaming a format change.
+That argument is true and cuts both ways: under the old rule *reordering* was equally a format change, and it is the one nobody notices they made.
+A rename is a visible, deliberate edit; a reorder happens by touching an export loop.
+
+**The failure modes decide it.**
+A wrong index silently returns a different part — plausible bytes, wrong content, undetectable.
+A wrong name returns nothing, immediately.
+Trading a silent failure for a loud one is worth the rule it costs.
+
+`$main` is the reserved default name, so a single-part asset costs no ceremony: `{.hash = h, .format = "png"}` is reachable through `main_part()`.
+Defaulting the field rather than warning about an unset one is what keeps the common case honest — an empty name is then only reachable by asking for it, and is reported.
+`$` is reserved generally, leaving `$preview` and friends available without colliding with an application's names.
+
+**A singular lookup errors rather than picking one.**
+`main_part()` and `try_find_part(name)` return a result and distinguish `not_found` from `ambiguous`.
+An application that expected one part and silently got the first of three has a bug it cannot see.
+
+That is only reachable because **duplicates are kept at load**: the loader reports them and keeps them, exactly as it keeps a dangling ref.
+So the report names the problem at open and the lookup names it at use, and dropping them would make `ambiguous` unreachable while losing the caller's data.
+
+**Reopen when:** nothing.
+The format never moved — `name` was always stored per part — so this was an API and an invariant change only.
+
+### Asset dependencies are declared by the application, and reclamation takes a root set
+
+**Decided.** An asset carries a `deps` list of asset ids, and `reclaim(roots)` keeps the closure of those roots under it.
+
+The store **never interprets a blob**, so it cannot discover that one asset references another — the bytes that would say so are exactly the bytes it refuses to parse.
+Without a declared list the only place a closure could be computed is the application, which would have to resolve its whole asset graph before it could ask for anything to be collected.
+Declaring it moves the walk into vdoc at the cost of one nullable column, and assets already load whole at open, so the map is resident and the flood fill needs no new machinery.
+
+The list is **uninterpreted**, which is what lets it carry ids that resolve elsewhere — built-in, procedural, remote — alongside the ones in this file.
+An id naming nothing here is silently skipped rather than reported: a file is one asset source among many, so a dangling entry is the expected case.
+Reporting one would fire constantly and train readers to ignore the report.
+Cycles are ordinary and terminate on the visited set.
+
+This restates, rather than abandons, the rule that reclamation marks from the asset index and only from there — the index is now first narrowed by a caller-supplied root set.
+An application that under-declares gets a sweep that collects too much, which is the failure mode a declaration-based scheme has to own.
+
+The alternative was a separate edge table.
+It buys queryable edges and costs a table, a row type, reader and writer methods, delete-on-upsert semantics and a second whole-table read — for data the asset row already carries to the same place.
+
+**Reopen when:** something needs to ask "what depends on this?" rather than "what does this depend on?".
+That is a reverse index, and it is the one question a per-row list answers badly.
 
 ---
 

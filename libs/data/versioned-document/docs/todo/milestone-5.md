@@ -1,5 +1,30 @@
 # Milestone 5 — Assets and blobs
 
+**Status: done.**
+Landed as `impl/blob_codec`, `impl/blob_fetch`, `impl/reclaim`, and the `blob_payload_reader` seam on both arms.
+Plus the `blob_request` and `reclaim_request` actor messages, and the assets half of the conformance suite.
+
+The starting position was better than this file assumed: milestone 4 had already built the asset/blob **write** path and the **load** path in full.
+So the work here was blob read-back, the fetch route, real encoding dispatch, reclamation and name resolution.
+
+Five departures from what is written below, each argued where it is recorded:
+
+- **Assets carry a declared dependency list, and reclamation takes a root set.**
+  An addition rather than a correction, and the one thing here that changes the design.
+  The store never interprets a blob, so it cannot discover an asset→asset reference; without a declared list an application wanting a precise sweep would have to resolve its whole asset graph first.
+  Item 6 below is therefore two levels, not one — see [decisions.md](../decisions.md#asset-dependencies-are-declared-by-the-application-and-reclamation-takes-a-root-set).
+- **Decoding runs on the storage thread** while `raw` is the only codec, against item 4's wording.
+  The read/decode split ships as the seam a real codec moves at; a scheduler built for an identity function would have nothing to validate it.
+  A whole-blob fetch goes through decode even under a byte-addressable codec, so that half of the seam is exercised rather than dead.
+- **The in-memory arm defers a fetch to `pump()`**, which narrows a milestone-4 decision about the two arms being indistinguishable.
+  The arm that could answer instantly is exactly the one that must not, and a correct caller already had to pump for `SC_THREADS=OFF`.
+- **The part-range variant is a byte range within a blob.**
+  Read literally, "fetch one part without the rest" is already what `load(hash)` does, since a part *is* one blob — so `load_range` is the capability chunking was actually paid for.
+  `publish_changes::removed_assets` landed alongside it, unnamed below.
+- **Part addressing was reversed to `(name, index)`**, and `$main` added as the reserved default name.
+  A per-part accessor on the store was built and then removed: addressing goes through the record `resolve_asset` hands back, so a caller always works from one snapshot.
+  Argued in [decisions.md](../decisions.md#part-names-are-the-contract-and-position-within-a-name-disambiguates).
+
 **Goal.** The content store: an asset index over deduplicated, chunked, shared blobs, plus the async blob source that hands bytes out.
 
 **Why here.** The tables and their load path already exist from milestone 4, so this milestone fills them rather than changing the format.
@@ -18,12 +43,15 @@ name  ->  asset  ->  part, part, part
 ```
 
 - A **blob** is content-addressed bytes: immutable, deduplicated, and **shared across assets**.
-- An **asset** is `{ kind, metadata, an ordered list of parts }`.
-- A **part** is `{ blob hash, format, optional debug name }`.
+- An **asset** is `{ kind, metadata, a list of parts }`.
+- A **part** is `{ blob hash, format, name }`, addressed by `(name, index)` and defaulting to `$main`.
 
-**Order is the contract, and part names are for humans.**
-Nothing may key behaviour on a part name — the moment something does, renaming a part becomes a format change, and the name stops being safe to improve.
-If a lookup by name feels necessary while implementing this, that is the signal that the part list wants a different shape, not that the rule should bend.
+**The name is the contract, and position within a name disambiguates.**
+This reverses what this file originally said — that order was the contract and names were cosmetic — and the argument is
+[decisions.md](../decisions.md#part-names-are-the-contract-and-position-within-a-name-disambiguates).
+
+In short: a wrong index silently returns a different part, while a wrong name returns nothing.
+The old rule also made *reordering* a format change, which is the version of that mistake nobody notices making.
 
 Blob sharing is the point, not an optimization: it is what makes derived assets, re-exports and coincidentally identical payloads cost one copy.
 
@@ -92,8 +120,14 @@ A file is one source of assets among many, which is exactly why asset ids are pl
 
 Blobs are reachable **from the asset index only**, never from ops.
 
-So: mark every blob named by an asset, delete the rest, and let the cascade take the chunks.
+`reclaim(roots)` is two levels, in one transaction.
+Flood-fill the asset closure from the caller's roots through each asset's declared dependencies, and delete the assets outside it.
+Then mark every blob named by a *retained* asset, delete the rest, and let the cascade take the chunks.
+
+**Marking is still from the asset index and only from there** — the index is first narrowed by a root set.
 An asset remap may legitimately orphan blobs — that is the case this exists for, not a bug to prevent.
+
+Unmapping one name is the separate, cheaper act: `publish_changes::removed_assets`, retroactive like a remap, collecting no bytes.
 
 ### 7. The mutable mapping, defended
 
@@ -108,9 +142,14 @@ It is not — see [decisions.md](../decisions.md#the-asset-mapping-is-mutable-an
 ## API surface this lands
 
 ```text
-vdoc::file::blob_hash / asset_part / asset_record / blob_upload
-vdoc::file::blob_source
-vdoc::file::store::assets() / blob_source()
+vdoc::file::blob_hash / asset_part / asset_record / blob_upload / blob_upload::of
+vdoc::file::main_part_name / part_lookup_error / part_range
+vdoc::file::asset_record::main_part() / try_find_part() / part_at() / parts_named() / main_parts()
+vdoc::file::blob_source::load / load_range
+vdoc::file::reclaim_result / asset_resolution
+vdoc::file::store::assets() / make_blob_source() / pump()
+vdoc::file::store::reclaim() / resolve_asset()
+vdoc::file::publish_changes::removed_assets
 ```
 
 ## Tests
@@ -120,8 +159,10 @@ Extending milestone 4's conformance suite, so both store implementations are hel
 - **Dedup**: two assets publishing identical bytes store one blob; the second upload writes nothing.
 - **Sharing survives**: deleting one of the two assets leaves the other's blob intact.
 - **Ordered parts** round-trip exactly, including an asset with no parts, and one with parts sharing a blob with another asset.
-- **Part names are cosmetic**: change every name, and every behavioural assertion still holds.
+- **Part names are the contract**: a unique name resolves wherever it sits in the list, a shared name is `ambiguous` rather than the first, and an absent one is `not_found`.
   This test is the rule's enforcement.
+- **`$main` costs no ceremony**: a part published with no name round-trips as `$main` and is reached through `main_part()`.
+- **Several `$main` parts** are reported at load, kept, and error on lookup rather than resolving to one.
 - **Chunking**: a blob spanning several chunks round-trips; reading at an offset and across a boundary is correct.
 - **Torn blob**: delete one chunk row behind the store's back; the asset reports `asset_blob_incomplete` and the file still opens.
 - **Empty upload**: with the blob present it is a no-op; with the blob absent it is a publish error.
@@ -135,7 +176,7 @@ Extending milestone 4's conformance suite, so both store implementations are hel
 ## Acceptance
 
 - Identical bytes are stored once, whatever route they arrive by.
-- No code path anywhere keys on a part name.
+- No code path anywhere keys on a part's position in the whole list.
 - The encoding seam is real dispatch, with `raw` as its only registered entry.
 - The blob source never blocks and never re-enters its caller.
 - Reclamation marks from the asset index, and only from there.
