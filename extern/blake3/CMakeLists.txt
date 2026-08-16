@@ -17,6 +17,15 @@ set(BLAKE3_SOURCES
     ${BLAKE3_DIR}/src/blake3_portable.c
 )
 
+set(BLAKE3_WITH_NEON OFF)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Aa][Rr][Cc][Hh]64|[Aa][Rr][Mm]64)$")
+    set(BLAKE3_WITH_NEON ON)
+elseif (APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+    # An Apple cross build — iOS above all — leaves CMAKE_SYSTEM_PROCESSOR naming the HOST, so the architecture list
+    # is the only thing that says what is actually being targeted.
+    set(BLAKE3_WITH_NEON ON)
+endif()
+
 if (SC_ARCH_X64)
     list(APPEND BLAKE3_SOURCES
         ${BLAKE3_DIR}/src/blake3_sse2.c
@@ -24,7 +33,7 @@ if (SC_ARCH_X64)
         ${BLAKE3_DIR}/src/blake3_avx2.c
         ${BLAKE3_DIR}/src/blake3_avx512.c
     )
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Aa][Rr][Cc][Hh]64|[Aa][Rr][Mm]64)$")
+elseif (BLAKE3_WITH_NEON)
     list(APPEND BLAKE3_SOURCES ${BLAKE3_DIR}/src/blake3_neon.c)
 endif()
 
@@ -55,8 +64,18 @@ if (SC_ARCH_X64)
     endif()
 else()
     # Nothing x86 was compiled, so make sure nothing x86 is referenced either.
-    # NEON needs no counterpart: upstream defaults BLAKE3_USE_NEON to 1 only on AArch64.
     target_compile_definitions(blake3 PRIVATE BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512)
+endif()
+
+# The NEON counterpart, and it is NOT optional.
+#
+# Upstream autodetects BLAKE3_USE_NEON to 1 on any AArch64 target, so leaving it alone is only safe where the detection
+# above agreed and compiled blake3_neon.c.
+# Where it did not, dispatch still calls blake3_hash_many_neon and the failure lands at LINK time, in whatever binary
+# happens to pull blake3 in — which is how an iOS build reported an undefined symbol out of clean-core-test.
+# Pinning it here means a platform this file fails to recognize degrades to the portable path instead.
+if (NOT BLAKE3_WITH_NEON)
+    target_compile_definitions(blake3 PRIVATE BLAKE3_USE_NEON=0)
 endif()
 
 # Third-party code: silence its warnings, hide its symbols (statically absorbed).

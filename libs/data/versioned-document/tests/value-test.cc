@@ -456,16 +456,20 @@ TEST("vdoc - a value is small_vector sized and small values stay inline")
     // property in every document, and would show up in a profile long before it showed up in a test.
     static_assert(sizeof(value) == 48);
     static_assert(cc::small_vector<byte, 1>::inline_capacity() == 36);
+
+    // A position-like struct is the shape this inline budget exists for, and it encodes to exactly 36 bytes — so it
+    // fits the 64-bit buffer precisely, and nothing smaller.
+    // Guarded with the size assertions above rather than left loose: on a 32-bit target a small_vector is narrower,
+    // so this heap-allocates, which is slower and not wrong.
+    CHECK(value_builder::array().push(1.0).push(2.0).push(3.0).build().is_inline());
 #endif
 
+    // Well inside any target's buffer, 32-bit ones included.
     CHECK(value::of_null().is_inline());
     CHECK(value::of(true).is_inline());
     CHECK(value::of(1.5).is_inline());
     CHECK(value::of(0x7FFFFFFFFFFFFFFFll).is_inline());
     CHECK(value::of("a short name").is_inline());
-
-    // a position-like struct is the shape this inline budget exists for
-    CHECK(value_builder::array().push(1.0).push(2.0).push(3.0).build().is_inline());
 
     // and something past it is merely heap-backed, not wrong
     auto const big = value::of("a string long enough that it cannot possibly fit the inline buffer of a value");

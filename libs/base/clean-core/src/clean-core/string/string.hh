@@ -853,9 +853,14 @@ public:
     // comparisons
 public:
     /// Compares against anything convertible to string_view for equality of size and content.
+    ///
+    /// **`string` itself is excluded, and must be**, or comparing two non-const strings is ambiguous.
+    /// The forwarding reference binds a non-const lvalue exactly while the overload below has to add `const`, so the
+    /// template wins — and C++20 then synthesizes a reversed candidate from it that ties with the forward one.
+    /// MSVC rejects that outright (C2666); clang only warns, which is how it reaches a build that never sees MSVC.
     template <class S>
     [[nodiscard]] bool operator==(S&& rhs) const
-        requires std::convertible_to<S, string_view>
+        requires std::convertible_to<S, string_view> && (!std::is_same_v<std::remove_cvref_t<S>, string>)
     {
         return string_view(*this) == string_view(cc::forward<S>(rhs));
     }
