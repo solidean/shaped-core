@@ -295,6 +295,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Build & test reference           | [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md) |
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
+| Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |

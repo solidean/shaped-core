@@ -83,6 +83,22 @@ So `dev.py test hash-benchmark.cc` reports that the file's benchmarks are in the
 Under bash a pattern like `tests/memory/*` is expanded by the shell into many arguments; those arrive as several filters, which are OR'd, so the selection comes out the same.
 Quoting it keeps the glob for nexus to interpret, which is what you want for `**`.
 
+## Chasing a flake: `--repeat N`
+
+```bash
+uv run dev.py test shaped-graphics-dx12-test --repeat 100
+```
+
+Runs the same selection up to N times and **stops at the first failing iteration**, naming it.
+Build and target discovery happen once, so an iteration costs only the binaries — far cheaper than a shell loop around `dev.py`.
+
+Stopping on failure is the point, not a convenience.
+Run logs and JUnit XML are written per target and **overwritten every run**, so a loop that keeps going destroys the evidence of the failure it just found.
+Halting leaves that iteration's `run-logs/` and `*.results.xml` exactly as the failing run left them, which is what `test_diag` and `--mirror-test-output` then read.
+
+A rate is a different question from a cause, and this answers the cause.
+When you do want the rate, loop it in the shell and count — but expect to lose the logs of all but the last failure.
+
 ## Presets
 
 Presets live in [CMakePresets.json](../../CMakePresets.json), one per platform × compiler × build type (MSVC / Clang / GCC across Windows / Linux / macOS / Android NDK / Emscripten).
