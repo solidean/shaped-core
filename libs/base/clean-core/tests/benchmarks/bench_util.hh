@@ -1,10 +1,10 @@
 #pragma once
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
-
-#include <algorithm>
 
 // Shared helpers for the clean-core micro-benchmarks under tests/benchmarks/.
 // These are guide benchmarks (GUIDE_BENCHMARK) that print timing tables and record representative points via nx::guide.
@@ -74,7 +74,7 @@ double median_units_per_sec(double units_per_pass, Pass&& pass)
     double results[Runs];
     for (int i = 0; i < Runs; ++i)
         results[i] = measure_units_per_sec(units_per_pass, pass);
-    std::sort(results, results + Runs);
+    cc::sort(cc::span<double>(results, Runs));
     return results[Runs / 2];
 }
 } // namespace bench

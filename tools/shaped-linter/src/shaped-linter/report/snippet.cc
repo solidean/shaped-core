@@ -1,12 +1,12 @@
 #include "snippet.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
 #include <shaped-linter/report/impl/display_width.hh>
 
-#include <algorithm> // std::sort: labels arrive in rule order, the snippet renders top to bottom
 
 namespace scl
 {
@@ -164,12 +164,10 @@ cc::vector<file_block> build_blocks(cc::span<label const> labels, source_manager
         }
 
         // Collection order follows the labels; the render walks the file top to bottom.
-        std::sort(b.marked.begin(), b.marked.end(),
-                  [](marked_line const& x, marked_line const& y) { return x.line < y.line; });
+        cc::sort(b.marked, [](marked_line const& x, marked_line const& y) { return x.line < y.line; });
         for (auto& m : b.marked)
-            std::sort(m.marks.begin(), m.marks.end(),
-                      [](mark const& x, mark const& y) { return x.begin_col < y.begin_col; });
-        std::sort(b.display_lines.begin(), b.display_lines.end());
+            cc::sort(m.marks, [](mark const& x, mark const& y) { return x.begin_col < y.begin_col; });
+        cc::sort(b.display_lines);
     }
 
     return blocks;

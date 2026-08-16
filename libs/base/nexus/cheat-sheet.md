@@ -48,7 +48,10 @@ ASYNC_TEST("cache - resolves a miss")    // body returns cc::shared_async<cc::un
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
 
-## Guide benchmarks (perf metrics)
+## Guide benchmarks (PGO metrics)
+
+A **tracking signal**, not a benchmarking framework: a few stable points per subject, consumed by `dev.py pgo`.
+To compare two implementations, write a `nx::config::manual` test instead — it never runs in a sweep, needs no CHECK, and prints whatever table you want.
 
 ```cpp
 #include <nexus/guide.hh>
