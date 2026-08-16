@@ -15,7 +15,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - epoch advance and retire")
+TEST("sg dx12 - epoch advance and retire", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context(); // fresh: this asserts the epoch counter's initial value
     REQUIRE(handle != nullptr);
@@ -30,7 +30,7 @@ TEST("sg dx12 - epoch advance and retire")
     CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }
 
-TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch retires")
+TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch retires", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -50,7 +50,7 @@ TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch re
     CHECK(finalized);
 }
 
-TEST("sg dx12 - submission token reports completion")
+TEST("sg dx12 - submission token reports completion", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -65,7 +65,7 @@ TEST("sg dx12 - submission token reports completion")
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
 
-TEST("sg dx12 - throttle bounds epochs in flight")
+TEST("sg dx12 - throttle bounds epochs in flight", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);

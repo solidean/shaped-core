@@ -156,7 +156,7 @@ TEST("sg - routine acquire hands out a const reference, acquire_exclusive a move
     ctx->drop_command_list(cc::move(cmd));
 }
 
-TEST("sg - routine phases run once, then re-run declare + materialize on a reload")
+TEST("sg - routine phases run once, then re-run declare + materialize on a reload", exclusive("sg-reload-generation"))
 {
     auto const ctx = make_warp_context();
     if (ctx == nullptr)
@@ -186,7 +186,8 @@ TEST("sg - routine phases run once, then re-run declare + materialize on a reloa
     ctx->drop_command_list(cc::move(cmd));
 }
 
-TEST("sg - routines are per-context: each context builds its own instance from scratch")
+TEST("sg - routines are per-context: each context builds its own instance from scratch",
+     exclusive("sg-reload-generation"))
 {
     // Context A initializes the routine, then goes away.
     {
@@ -217,7 +218,8 @@ TEST("sg - routines are per-context: each context builds its own instance from s
     ctx_b->drop_command_list(cc::move(cmd_b));
 }
 
-TEST("sg - evicting a routine drops its instance (the acquire cache does not resurrect it)")
+TEST("sg - evicting a routine drops its instance (the acquire cache does not resurrect it)",
+     exclusive("sg-reload-generation"))
 {
     auto const ctx = make_warp_context();
     if (ctx == nullptr)
@@ -274,7 +276,7 @@ TEST("sg - two live contexts keep separate routine instances")
     ctx_b->drop_command_list(cc::move(cmd_b));
 }
 
-TEST("sg - a routine compiles a shader and dispatches it end to end")
+TEST("sg - a routine compiles a shader and dispatches it end to end", exclusive("slib-shader-library"))
 {
     auto const ctx = make_warp_context();
     if (ctx == nullptr)
@@ -318,7 +320,7 @@ TEST("sg - a routine compiles a shader and dispatches it end to end")
 // Spawning std::threads there would race by construction and prove nothing about the guard.
 #if CC_HAS_THREADS
 
-TEST("sg - concurrent acquires of one routine run each phase exactly once")
+TEST("sg - concurrent acquires of one routine run each phase exactly once", exclusive("sg-reload-generation"))
 {
     // The phase engine is guarded, so racing acquires must not both run init_declare.
     // Without that lock this is a plain data race on the phase flags, and the counts come out above one under contention.
@@ -326,6 +328,9 @@ TEST("sg - concurrent acquires of one routine run each phase exactly once")
     if (ctx == nullptr)
         SKIP("no dx12 WARP device");
 
+    // The exclusion tag is what makes `declare == 1` meaningful: sg::reload_generation() is process-global, and a concurrent
+    // sg::signal_reload() elsewhere would legitimately re-run init_declare here.
+    //
     // racing_routine's counters are static (see there), so clear them before the race — a prior run in the same process would otherwise carry in.
     racing_routine::once = 0;
     racing_routine::declare = 0;

@@ -37,7 +37,7 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline")
+TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context(); // fresh context -> empty built-in cache
     REQUIRE(handle != nullptr);
@@ -99,7 +99,7 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     CHECK(ok);
 }
 
-TEST("sg pipeline_cache - static samplers participate in the layout key")
+TEST("sg pipeline_cache - static samplers participate in the layout key", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -123,7 +123,7 @@ TEST("sg pipeline_cache - static samplers participate in the layout key")
     CHECK(a.get() != b.get());       // a different static sampler => a different cached group layout
 }
 
-TEST("sg pipeline_cache - a different shader yields a different pipeline node")
+TEST("sg pipeline_cache - a different shader yields a different pipeline node", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -147,7 +147,7 @@ TEST("sg pipeline_cache - a different shader yields a different pipeline node")
     CHECK(base.get() != other.get());
 }
 
-TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipeline-layout key")
+TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipeline-layout key", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -180,7 +180,7 @@ TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipe
     CHECK(a.get() != b.get());       // a different static sampler => a different cached pipeline layout
 }
 
-TEST("sg pipeline_cache - inline constants participate in the pipeline-layout key")
+TEST("sg pipeline_cache - inline constants participate in the pipeline-layout key", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);

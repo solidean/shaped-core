@@ -220,7 +220,9 @@ TEST("node_allocation - cross-thread free then reuse (basic)")
     CHECK(b2.ptr->a == 55);
 }
 
-TEST("node_allocation - thread-exit reclaims fully-free slabs to backing")
+// The next two tests read cc::impl::node_orphan_slab_count(), and the orphan bins are process-global rather than per-resource.
+// So ANY concurrently exiting thread that owned slabs moves the number, not just another reader — which is why this is a barrier and not a tag.
+TEST("node_allocation - thread-exit reclaims fully-free slabs to backing", exclusive())
 {
     auto const before = cc::impl::node_orphan_slab_count();
 
@@ -240,7 +242,7 @@ TEST("node_allocation - thread-exit reclaims fully-free slabs to backing")
     CHECK(cc::impl::node_orphan_slab_count() == before); // orphan bins untouched -> slabs went to backing
 }
 
-TEST("node_allocation - abandoned slab is adopted by a later thread")
+TEST("node_allocation - abandoned slab is adopted by a later thread", exclusive())
 {
     auto const before = cc::impl::node_orphan_slab_count();
     int const usable = usable_slots<T8B>();

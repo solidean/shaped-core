@@ -25,7 +25,7 @@ sg::texture_description target_desc(sg::texture_usage usage, sg::pixel_format fo
 }
 } // namespace
 
-TEST("sg dx12 - clear render target fills every texel (render_to)")
+TEST("sg dx12 - clear render target fills every texel (render_to)", exclusive("gpu"))
 {
     auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
@@ -58,7 +58,7 @@ TEST("sg dx12 - clear render target fills every texel (render_to)")
     CHECK(ok);
 }
 
-TEST("sg dx12 - clear depth target fills every texel")
+TEST("sg dx12 - clear depth target fills every texel", exclusive("gpu"))
 {
     auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
@@ -89,7 +89,7 @@ TEST("sg dx12 - clear depth target fills every texel")
     CHECK(ok);
 }
 
-TEST("sg dx12 - clear render target via the explicit manual scope")
+TEST("sg dx12 - clear render target via the explicit manual scope", exclusive("gpu"))
 {
     auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
@@ -121,7 +121,7 @@ TEST("sg dx12 - clear render target via the explicit manual scope")
     CHECK(ok);
 }
 
-TEST("sg dx12 - discard render target records and executes")
+TEST("sg dx12 - discard render target records and executes", exclusive("gpu"))
 {
     auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
@@ -146,7 +146,7 @@ TEST("sg dx12 - discard render target records and executes")
     CHECK(bytes.has_value());
 }
 
-TEST("sg dx12 - clear with an explicit viewport and scissor")
+TEST("sg dx12 - clear with an explicit viewport and scissor", exclusive("gpu"))
 {
     auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);

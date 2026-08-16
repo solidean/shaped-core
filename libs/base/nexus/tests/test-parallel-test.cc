@@ -1,12 +1,16 @@
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
+
+#include <thread> // std::this_thread::get_id: no cc thread id yet
 
 // What --jobs must preserve, and what it must actually deliver.
 //
@@ -178,6 +182,43 @@ TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
 
     CHECK(exec.count_failed_tests() == 0);
     CHECK(seen_beside_the_barrier.load(cc::memory_order_acquire) == 0);
+}
+
+TEST("parallel - a no-arg exclusive test is routed off the scheduler entirely", no_scheduler)
+{
+    // Running beside nothing is exactly what the no-scheduler group already delivers, so a barrier is scheduled there instead of as a node with an edge to every test before it.
+    // Observable as the body landing on the run's OWN calling thread.
+    // A plain test may land there too — the caller participates as a worker — so only the barrier's thread is pinned.
+    auto const caller = std::this_thread::get_id();
+    auto barrier_thread = std::this_thread::get_id();
+
+    nx::test_registry reg;
+    for (auto i = 0; i < 4; ++i)
+        reg.add_declaration(cc::format("busy{}", i), {}, [] { CHECK(true); });
+    reg.add_declaration("alone", nx::impl::merge_config(nx::config::exclusive()),
+                        [&]
+                        {
+                            barrier_thread = std::this_thread::get_id();
+                            CHECK(true);
+                        });
+
+    auto const schedule = nx::test_schedule::create({}, reg);
+    auto const exec = nx::execute_tests(schedule, with_jobs(4));
+
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(barrier_thread == caller);
+}
+
+// The routing above must not reach an async body: with no scheduler bound, nothing would drive the root it hands back.
+// This test is the canary — it only passes if an exclusive ASYNC_TEST kept its scheduler.
+ASYNC_TEST("parallel - an exclusive ASYNC_TEST still gets a scheduler", exclusive())
+{
+    return cc::make_async_lazy<cc::unit>(
+        [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
+        {
+            CHECK(true);
+            return actx.resolve_to_value(cc::unit{});
+        });
 }
 
 #if CC_HAS_THREADS

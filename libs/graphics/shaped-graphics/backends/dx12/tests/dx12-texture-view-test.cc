@@ -28,7 +28,7 @@ sg::texture_description tex_desc(sg::texture_usage usage)
 }
 } // namespace
 
-TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descriptors")
+TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descriptors", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -65,7 +65,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
     }
 }
 
-TEST("sg dx12 - compute dispatch with a bound storage texture transitions + validates it")
+TEST("sg dx12 - compute dispatch with a bound storage texture transitions + validates it", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);

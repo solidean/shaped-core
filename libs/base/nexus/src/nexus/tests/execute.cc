@@ -551,21 +551,24 @@ void report_orphan_check(impl::check_result result, cc::string_view why)
         });
 }
 
-/// Install the assertion handler a test body runs under: a failing CC_ASSERT reports exactly as a failing REQUIRE does.
+/// A failing CC_ASSERT reports exactly as a failing REQUIRE does.
+/// Attribution is the ambient context's, not the thread's, so this is correct on a pool worker as well as on the test's own thread.
+void report_assert_as_check(cc::impl::assertion_info const& info)
+{
+    nx::impl::report_check_result({
+        .kind = impl::check_kind::require,
+        .op = impl::cmp_op::assert_fail,
+        .expr = info.expression,
+        .passed = false,
+        .diagnostic = info.message,
+        .location = info.location,
+    });
+}
+
+/// Install that handler on the thread running a test body.
 auto scoped_test_assertion_handler()
 {
-    return cc::impl::scoped_assertion_handler(
-        [](cc::impl::assertion_info const& info)
-        {
-            nx::impl::report_check_result({
-                .kind = impl::check_kind::require,
-                .op = impl::cmp_op::assert_fail,
-                .expr = info.expression,
-                .passed = false,
-                .diagnostic = info.message,
-                .location = info.location,
-            });
-        });
+    return cc::impl::scoped_assertion_handler(&report_assert_as_check);
 }
 
 /// Run one scheduled instance's body to completion, resolving its effective section scopes first.
@@ -1312,6 +1315,10 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     CC_ASSERT(cc::async_scheduler::current_or_null() == nullptr, "execute_tests may not run under a scheduler; a test "
                                                                  "that nests a run must declare nx::no_scheduler");
 
+    // The per-body handler covers the thread the body runs on; this covers every OTHER thread the run reaches — pool workers driving an ASYNC_TEST's graph, and threads a test started itself.
+    // Without it a CC_ASSERT there aborts the process instead of failing a test.
+    cc::impl::scoped_fallback_assertion_handler const assert_fallback(&report_assert_as_check);
+
     // Pre-sized and written by index, never appended to.
     // Report order is then the SCHEDULE's, whatever order the tests actually ran in, and the slot a running test writes into cannot be reallocated out from under it.
     result.executions.resize_to_defaulted(schedule.instances.size());
@@ -1341,7 +1348,15 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         if (execution.instance.registry == nullptr)
             execution.instance.registry = schedule.registry; // a hand-built schedule may only name the registry once
 
-        auto const mode = instance.declaration->test_config.scheduler;
+        // A no-arg exclusive() test runs beside nothing, so a node buys it nothing and costs a barrier's worth of edges plus a stalled pool.
+        // The no-scheduler group already runs bodies one at a time on the calling thread, which is the same guarantee for free — so route it there.
+        // Only a synchronous body under the run's own scheduler: an ASYNC_TEST needs a scheduler to drive the root it returns, and own_pool was asked for on purpose.
+        // The cost is that such a test no longer orders against the shared phase, only within the no-scheduler one.
+        auto mode = instance.declaration->test_config.scheduler;
+        if (mode == nx::config::scheduler_mode::shared && instance.declaration->test_config.exclusive_global
+            && !instance.declaration->is_async())
+            mode = nx::config::scheduler_mode::none;
+
         auto const threads = instance.declaration->test_config.scheduler_threads;
         auto* phase = static_cast<run_phase*>(nullptr);
         for (auto& p : phases)

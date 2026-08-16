@@ -26,7 +26,7 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
 
 // A single upload larger than one staging window must pack across several windows, pipelining and recycling as it goes.
 // A fresh context with deliberately tiny windows forces it.
-TEST("sg dx12 - async upload larger than a staging window packs across windows")
+TEST("sg dx12 - async upload larger than a staging window packs across windows", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 4096});
     REQUIRE(ctx.has_value());
@@ -57,7 +57,7 @@ TEST("sg dx12 - async upload larger than a staging window packs across windows")
 // Each targets its own buffer; all must read back intact.
 // Window 0 shares its staging slot with window 3, so the window fence must observe window 0's completion before window 3 overwrites that slot.
 // That aliasing is what the 1-based window-fence values guard — see submit_window in dx12_upload_async.cc.
-TEST("sg dx12 - many async uploads recycle the staging windows")
+TEST("sg dx12 - many async uploads recycle the staging windows", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
@@ -94,7 +94,7 @@ TEST("sg dx12 - many async uploads recycle the staging windows")
 // Uneven upload sizes (none a window multiple) force the actor to both pack several jobs into one window and split a single job across windows, all while recycling.
 // That is a shape the exact-fill and single-large-upload tests miss.
 // Distinct buffers; each must read back intact.
-TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
+TEST("sg dx12 - uneven async uploads pack and straddle staging windows", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());

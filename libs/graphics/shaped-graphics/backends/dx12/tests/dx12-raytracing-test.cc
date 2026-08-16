@@ -28,7 +28,7 @@ sg::raw_buffer_handle upload_triangle_vertices(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sg dx12 - raytracing builds a blas and a tlas on WARP")
+TEST("sg dx12 - raytracing builds a blas and a tlas on WARP", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);

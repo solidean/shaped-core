@@ -8,8 +8,8 @@ namespace
 // counts live instances so we can assert that destruction happens exactly once
 struct Tracked
 {
-    static inline int ctor_count = 0;
-    static inline int dtor_count = 0;
+    static inline thread_local int ctor_count = 0;
+    static inline thread_local int dtor_count = 0;
     static void reset_counters()
     {
         ctor_count = 0;

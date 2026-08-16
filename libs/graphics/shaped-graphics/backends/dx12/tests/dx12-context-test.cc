@@ -56,7 +56,7 @@ void exercise_context(sg::context& ctx)
 }
 } // namespace
 
-TEST("sg dx12 - warp context")
+TEST("sg dx12 - warp context", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     REQUIRE(ctx.has_value());
@@ -65,7 +65,7 @@ TEST("sg dx12 - warp context")
     exercise_context(*ctx.value());
 }
 
-TEST("sg dx12 - hardware context")
+TEST("sg dx12 - hardware context", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.enable_debug_layer = true});
     if (ctx.has_error())
@@ -77,7 +77,7 @@ TEST("sg dx12 - hardware context")
 
 // Backend-internal invariant, with no public equivalent — hence the downcast to the concrete buffer.
 // A size-0 buffer holds no ID3D12Resource, while a non-empty one does.
-TEST("sg dx12 - a zero-size buffer allocates no backing resource")
+TEST("sg dx12 - a zero-size buffer allocates no backing resource", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.use_warp = true});
     REQUIRE(ctx.has_value());

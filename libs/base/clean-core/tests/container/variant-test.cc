@@ -41,10 +41,10 @@ struct immovable
 // counts its own lifetime events
 struct counting_type
 {
-    inline static int default_ctor_count = 0;
-    inline static int copy_ctor_count = 0;
-    inline static int move_ctor_count = 0;
-    inline static int dtor_count = 0;
+    static inline thread_local int default_ctor_count = 0;
+    static inline thread_local int copy_ctor_count = 0;
+    static inline thread_local int move_ctor_count = 0;
+    static inline thread_local int dtor_count = 0;
 
     int value = 0;
 

@@ -17,7 +17,7 @@
 // Only built where a shader compiler exists (SC_HAS_DXC_COMPILER); the shader library's own tests cover
 // the mechanism everywhere with a fake compiler.
 
-TEST("sg - a consumer's shader package registers")
+TEST("sg - a consumer's shader package registers", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_package(sg::test::shaders::package());

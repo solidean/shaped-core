@@ -13,7 +13,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - command allocators are recycled across epochs")
+TEST("sg dx12 - command allocators are recycled across epochs", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -38,7 +38,7 @@ TEST("sg dx12 - command allocators are recycled across epochs")
     CHECK(free_count() == 1);
 }
 
-TEST("sg dx12 - command lists are pooled and reused")
+TEST("sg dx12 - command lists are pooled and reused", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -62,7 +62,7 @@ TEST("sg dx12 - command lists are pooled and reused")
     CHECK(free_lists() == 1);
 }
 
-TEST("sg dx12 - a dropped list returns its allocator and list to the pool immediately")
+TEST("sg dx12 - a dropped list returns its allocator and list to the pool immediately", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);

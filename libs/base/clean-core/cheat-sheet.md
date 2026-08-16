@@ -49,6 +49,11 @@ CC_ASSERTF(idx < n, "index {} out of range {}", idx, n);
 CC_ASSERTF_ALWAYS(cond, "fmt {}", x);
 // Enabled in debug + relwithdebinfo, stripped in release (unless CC_ENABLE_ASSERT_IN_RELEASE).
 // For invariants/pre/postconditions only — never for user input or expected errors (use result<>).
+
+#include <clean-core/common/assert-handler.hh>   // who gets called when one fires
+cc::impl::scoped_assertion_handler h(fn);        // push on THIS THREAD's stack; a throwing handler is fine, it cannot leak to another thread
+cc::impl::scoped_fallback_assertion_handler f(fn); // process-wide, consulted when the failing thread's own stack is empty
+// The fallback is a plain function pointer and fires on threads nobody scoped — worker threads — so it must not throw.
 ```
 
 ## Containers — owning (value semantics, deep copy)

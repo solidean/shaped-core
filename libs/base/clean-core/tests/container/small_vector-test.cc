@@ -11,7 +11,7 @@ namespace
 struct Tracked
 {
     int value = 0;
-    static inline int alive = 0;
+    static inline thread_local int alive = 0;
 
     Tracked() { ++alive; }
     explicit Tracked(int v) : value(v) { ++alive; }

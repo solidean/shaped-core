@@ -30,7 +30,7 @@ void seed(sg::context& c, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 
 // A single download larger than one readback window must pack across several windows, pipelining and recycling as it goes.
 // A fresh context with deliberately tiny windows forces it.
-TEST("sg dx12 - async download larger than a staging window packs across windows")
+TEST("sg dx12 - async download larger than a staging window packs across windows", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 4096});
     REQUIRE(ctx.has_value());
@@ -54,7 +54,7 @@ TEST("sg dx12 - async download larger than a staging window packs across windows
 
 // Many downloads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on the window fence and recycle windows repeatedly.
 // Each targets its own buffer; all must read back intact.
-TEST("sg dx12 - many async downloads recycle the staging windows")
+TEST("sg dx12 - many async downloads recycle the staging windows", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 1024});
     REQUIRE(ctx.has_value());
@@ -87,7 +87,7 @@ TEST("sg dx12 - many async downloads recycle the staging windows")
 // Uneven download sizes (none a window multiple) force the actor to both pack several reads into one window and split a single read across windows, all while recycling.
 // That is a shape the exact-fill and single-large tests miss.
 // Distinct buffers; each must read back intact.
-TEST("sg dx12 - uneven async downloads pack and straddle staging windows")
+TEST("sg dx12 - uneven async downloads pack and straddle staging windows", exclusive("gpu"))
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 1024});
     REQUIRE(ctx.has_value());

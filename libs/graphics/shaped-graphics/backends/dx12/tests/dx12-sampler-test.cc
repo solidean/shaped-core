@@ -29,7 +29,7 @@ sg::texture_description sampled_tex()
 }
 } // namespace
 
-TEST("sg dx12 - sampler translates to a D3D12 sampler desc")
+TEST("sg dx12 - sampler translates to a D3D12 sampler desc", exclusive("gpu"))
 {
     // A trilinear clamping sampler with 4x anisotropy.
     sg::sampler s;
@@ -70,7 +70,7 @@ TEST("sg dx12 - sampler translates to a D3D12 sampler desc")
     CHECK(st.AddressV == D3D12_TEXTURE_ADDRESS_MODE_BORDER);
 }
 
-TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WARP")
+TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WARP", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -101,7 +101,7 @@ TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WAR
     REQUIRE(group.has_value()); // CreateSampler into the sampler heap + both descriptor tables — debug-layer clean
 }
 
-TEST("sg dx12 - static sampler naming no binding is rejected")
+TEST("sg dx12 - static sampler naming no binding is rejected", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -116,7 +116,7 @@ TEST("sg dx12 - static sampler naming no binding is rejected")
     CHECK(!layout.has_value());
 }
 
-TEST("sg dx12 - a missing dynamic sampler is rejected at group creation")
+TEST("sg dx12 - a missing dynamic sampler is rejected at group creation", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -138,7 +138,7 @@ TEST("sg dx12 - a missing dynamic sampler is rejected at group creation")
     CHECK(!group2.has_value());
 }
 
-TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP")
+TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);

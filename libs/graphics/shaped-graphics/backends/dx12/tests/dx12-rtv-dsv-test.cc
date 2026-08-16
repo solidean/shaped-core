@@ -26,7 +26,7 @@ sg::texture_description tex_desc(sg::texture_usage usage, sg::pixel_format forma
 }
 } // namespace
 
-TEST("sg dx12 - render-target views create valid RTV descriptors")
+TEST("sg dx12 - render-target views create valid RTV descriptors", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -56,7 +56,7 @@ TEST("sg dx12 - render-target views create valid RTV descriptors")
     }
 }
 
-TEST("sg dx12 - depth-stencil views create valid DSV descriptors")
+TEST("sg dx12 - depth-stencil views create valid DSV descriptors", exclusive("gpu"))
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);

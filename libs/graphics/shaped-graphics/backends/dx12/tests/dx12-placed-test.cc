@@ -18,7 +18,7 @@ isize align_up(isize value, isize alignment)
 }
 } // namespace
 
-TEST("sg dx12 - two placed buffers share one heap without aliasing")
+TEST("sg dx12 - two placed buffers share one heap without aliasing", exclusive("gpu"))
 {
     auto handle = sg::backend::dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -79,7 +79,7 @@ TEST("sg dx12 - two placed buffers share one heap without aliasing")
     CHECK(ok_b);
 }
 
-TEST("sg dx12 - placed buffer keeps its heap alive")
+TEST("sg dx12 - placed buffer keeps its heap alive", exclusive("gpu"))
 {
     auto handle = sg::backend::dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
@@ -115,7 +115,7 @@ TEST("sg dx12 - placed buffer keeps its heap alive")
     CHECK(bytes.value()[100] == byte(100));
 }
 
-TEST("sg dx12 - placed read-write (UAV) buffer creates")
+TEST("sg dx12 - placed read-write (UAV) buffer creates", exclusive("gpu"))
 {
     auto handle = sg::backend::dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);

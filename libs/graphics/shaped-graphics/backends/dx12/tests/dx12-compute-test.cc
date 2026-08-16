@@ -40,7 +40,7 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-TEST("sg dx12 - compute dispatch writes a structured buffer")
+TEST("sg dx12 - compute dispatch writes a structured buffer", exclusive("gpu"))
 {
     auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
@@ -97,7 +97,7 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
 // The transient descriptor region is a deliberately tiny 32 slots, so 40 iterations wrap the ring several times.
 // Proves the transient descriptor ring and transient buffer heap reclaim end-to-end on the GPU: no exhaustion, and every epoch's result is correct (Output[i] == i*2).
 // The tiny hand-sized descriptor heap is a dx12 knob, so this takes a dx12 context directly; the work itself is all public sg API.
-TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
+TEST("sg dx12 - transient binding groups + buffers recycle across epochs", exclusive("gpu"))
 {
     auto ctx_r = sg::create_dx12_context(
         {.use_warp = true, .descriptor_heap_capacity = 64, .descriptor_transient_fraction = 0.5f});
@@ -155,7 +155,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 // Each group takes 1 descriptor; 50 iterations far exceed the region, so the group's range must be
 // returned to the free list (epoch-deferred) and reused — a bump allocator would exhaust after 4. The
 // hand-sized descriptor heap is a dx12 knob; the group create/release cycle is all public sg API.
-TEST("sg dx12 - persistent binding groups free and reuse their descriptor range")
+TEST("sg dx12 - persistent binding groups free and reuse their descriptor range", exclusive("gpu"))
 {
     auto ctx_r = sg::create_dx12_context(
         {.use_warp = true, .descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f}); // 4 persistent slots

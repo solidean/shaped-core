@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/atomic.hh>
 #include <instruction-tracer/report/source_cache.hh>
 #include <instruction-tracer/report/source_view.hh>
 #include <nexus/test.hh>
@@ -31,7 +32,9 @@ trace trace_of(cc::vector<recorded_instruction> instructions)
 /// Returns the path, which the caller removes.
 cc::string write_fixture()
 {
-    auto const path = std::filesystem::temp_directory_path() / "itrace_source_view_test.cc";
+    static cc::atomic<int> next_id = {0};
+    auto const name = "itrace_source_view_test_" + std::to_string(next_id.fetch_add(1)) + ".cc";
+    auto const path = std::filesystem::temp_directory_path() / name;
     std::ofstream f(path, std::ios::binary);
     for (int i = 1; i <= 30; ++i)
     {

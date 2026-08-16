@@ -19,7 +19,7 @@ namespace dx12 = sg::backend::dx12;
 }
 } // namespace
 
-TEST("sg dx12 - an index-buffer read syncs on INDEX_INPUT, never VERTEX_SHADING")
+TEST("sg dx12 - an index-buffer read syncs on INDEX_INPUT, never VERTEX_SHADING", exclusive("gpu"))
 {
     // D3D12 validates sync against access pairwise: ACCESS_INDEX_BUFFER paired with SYNC_VERTEX_SHADING is rejected outright ("incompatible"),
     // because the index fetch happens in the input assembler.
@@ -32,7 +32,7 @@ TEST("sg dx12 - an index-buffer read syncs on INDEX_INPUT, never VERTEX_SHADING"
     CHECK((b.SyncAfter & D3D12_BARRIER_SYNC_VERTEX_SHADING) == 0);
 }
 
-TEST("sg dx12 - a vertex-buffer read still syncs on VERTEX_SHADING")
+TEST("sg dx12 - a vertex-buffer read still syncs on VERTEX_SHADING", exclusive("gpu"))
 {
     // The neighbouring case must not regress: ACCESS_VERTEX_BUFFER pairs with SYNC_VERTEX_SHADING fine.
     auto const b = after_copy_to(sg::pipeline_stage_flags::vertex, sg::access_flags::vertex_read);
@@ -42,7 +42,7 @@ TEST("sg dx12 - a vertex-buffer read still syncs on VERTEX_SHADING")
     CHECK((b.SyncAfter & D3D12_BARRIER_SYNC_INDEX_INPUT) == 0);
 }
 
-TEST("sg dx12 - one buffer read as both index and vertex widens to SYNC_DRAW")
+TEST("sg dx12 - one buffer read as both index and vertex widens to SYNC_DRAW", exclusive("gpu"))
 {
     // The transient allocator can hand a draw's vertex and index data out of one resource, so both accesses merge into a single barrier.
     // No narrow sync bit is legal with both, and SYNC_DRAW covers the pair.
@@ -53,7 +53,7 @@ TEST("sg dx12 - one buffer read as both index and vertex widens to SYNC_DRAW")
     CHECK((b.SyncAfter & D3D12_BARRIER_SYNC_VERTEX_SHADING) == 0);
 }
 
-TEST("sg dx12 - a copy-only barrier is untouched")
+TEST("sg dx12 - a copy-only barrier is untouched", exclusive("gpu"))
 {
     // The reconciliation must not fire when no index read is involved.
     auto const b = after_copy_to(sg::pipeline_stage_flags::copy, sg::access_flags::copy_read);

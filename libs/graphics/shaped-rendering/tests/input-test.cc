@@ -9,7 +9,9 @@
 // character rule — because reaching it means injecting real SDL events, and SDL lives in exactly one file
 // (../docs/coding-guidelines.md). See ../docs/TODO.md.
 
-TEST("sr - key modifiers combine and test as a bit set")
+// nx::no_scheduler here is main-thread affinity in disguise: sr::window_system must be created on the process main thread, and only that mode runs a body on the run's own thread.
+// See window-test.cc.
+TEST("sr - key modifiers combine and test as a bit set", no_scheduler)
 {
     auto const none = sr::key_modifiers::none;
     auto const ctrl = sr::key_modifiers::ctrl;
@@ -33,7 +35,7 @@ TEST("sr - key modifiers combine and test as a bit set")
     CHECK(accumulated == (ctrl | shift));
 }
 
-TEST("sr - window system creation reports whether a backend exists")
+TEST("sr - window system creation reports whether a backend exists", no_scheduler)
 {
     // The API is here either way; only the answer changes.
     // A caller writes this once and it compiles in both builds, which is the point of not gating the types on SR_HAS_WINDOW.
@@ -48,7 +50,7 @@ TEST("sr - window system creation reports whether a backend exists")
 
 #if SR_HAS_WINDOW
 
-TEST("sr - a fresh window system has no events")
+TEST("sr - a fresh window system has no events", no_scheduler)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     CHECK(wsys->events().empty());
@@ -58,7 +60,7 @@ TEST("sr - a fresh window system has no events")
     CHECK(wsys->events().empty());
 }
 
-TEST("sr - text input is off until asked for")
+TEST("sr - text input is off until asked for", no_scheduler)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "text"});
@@ -73,7 +75,7 @@ TEST("sr - text input is off until asked for")
     CHECK(!win->is_text_input_active());
 }
 
-TEST("sr - relative mouse mode round-trips")
+TEST("sr - relative mouse mode round-trips", no_scheduler)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "capture"});

@@ -51,7 +51,18 @@ TEST("env - rewrites the global config", exclusive())        // runs alone, besi
 ```
 
 A test **requires the last holder of each tag it carries**, and becomes that tag's new tail.
-No-arg `exclusive()` is a barrier: it follows everything before it in its phase, and everything after follows it.
+No-arg `exclusive()` runs alone, beside nothing at all.
+
+**A no-arg `exclusive()` is not scheduled as a node.**
+A test that runs beside nothing gains nothing from a graph, and as a barrier would cost an edge to every test before it plus a stalled pool.
+So a synchronous one is routed into the **no-scheduler group** instead, which already runs bodies one at a time on the calling thread — the same guarantee, for free.
+
+Two consequences worth knowing:
+
+* Such a test **does not order against the shared phase** any more, only within the no-scheduler one.
+  It still runs alone, and the order is still reproducible; it is simply no longer a seam that the tests around it sit before and after.
+* An **`ASYNC_TEST` keeps its scheduler**, because nothing would drive the root it returns.
+  So does a test that asked for `own_pool`.
 
 Every edge points backwards in schedule order, so the result is a DAG by construction.
 That is why there is no admission control, no deadlock to reason about, and no starvation to guard against.
@@ -109,6 +120,24 @@ Two limits, both deliberate:
 * **A graph resolving to an error fails the test, naming the error**, and is never propagated onward.
 
 `no_scheduler` and `ASYNC_TEST` are mutually exclusive: nothing would drive the graph.
+
+## A failing `CC_ASSERT` reports as a check, from any thread
+
+Nexus installs its assert-to-check handler twice, because clean-core's handler stack is per-thread.
+Once around every body, on the thread running it, and once as the **process-wide fallback** for the whole run.
+The fallback is what covers pool workers driving an `ASYNC_TEST`'s graph, and threads a test started itself.
+Attribution is the ambient context's either way, so the check lands on the right test rather than on whatever was running.
+
+This is also why a `CHECK_ASSERTS` block is safe at `-jN`: the throwing handler it installs is visible only on its own thread.
+
+## Not here yet: main-thread affinity
+
+Some work must run on the **process main thread** — `sr::window_system` asserts on it, because SDL does.
+No `--jobs` value helps: at `-jN` a body runs on whichever worker picks it up, and an exclusion tag orders tests without choosing a thread.
+
+Those tests carry `nx::no_scheduler` today, which is the only mode that drives a body on the run's own calling thread.
+It works, and it is a stand-in: it says "no scheduler" where the test means "the main thread", and it serializes the whole phase to say it.
+A `main_thread` config item is the real answer, once a second library needs one.
 
 ## Crash reports name every running test
 

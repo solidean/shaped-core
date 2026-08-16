@@ -72,7 +72,7 @@ void check_doubles(sg::context& ctx,
 }
 } // namespace
 
-TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatches")
+TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatches", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -97,7 +97,7 @@ TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatche
     check_doubles(ctx, *seeded, group_layout, 256);
 }
 
-TEST("sg cached PSO - a garbage blob degrades to a fresh build")
+TEST("sg cached PSO - a garbage blob degrades to a fresh build", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -119,7 +119,7 @@ TEST("sg cached PSO - a garbage blob degrades to a fresh build")
     check_doubles(ctx, *res.value(), group_layout, 256);
 }
 
-TEST("sg cached PSO - the blob is not part of the built-in cache key")
+TEST("sg cached PSO - the blob is not part of the built-in cache key", exclusive("gpu"))
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);

@@ -122,7 +122,7 @@ struct counting_fixture
 };
 } // namespace
 
-TEST("slib - editing a shader reloads it")
+TEST("slib - editing a shader reloads it", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     CHECK(f.source() == "v1"); // the first acquire compiles it
@@ -138,7 +138,7 @@ TEST("slib - editing a shader reloads it")
     CHECK(f.lib.generation() > 0); // the coarse "something changed" check moved too
 }
 
-TEST("slib - a scan with nothing changed reloads nothing")
+TEST("slib - a scan with nothing changed reloads nothing", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     CHECK(f.source() == "v1");
@@ -154,7 +154,7 @@ TEST("slib - a scan with nothing changed reloads nothing")
     CHECK(f.lib.generation() == lib_generation_before); // a no-op scan advances nothing
 }
 
-TEST("slib - a shader never acquired is not compiled by a reload")
+TEST("slib - a shader never acquired is not compiled by a reload", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     f.start();
@@ -168,7 +168,7 @@ TEST("slib - a shader never acquired is not compiled by a reload")
     CHECK(f.source() == "v2");
 }
 
-TEST("slib - a broken edit keeps the last good shader and reports why")
+TEST("slib - a broken edit keeps the last good shader and reports why", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     CHECK(f.source() == "v1");
@@ -192,7 +192,7 @@ TEST("slib - a broken edit keeps the last good shader and reports why")
     }
 }
 
-TEST("slib - deleting a shader's source keeps the last good shader")
+TEST("slib - deleting a shader's source keeps the last good shader", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     CHECK(f.source() == "v1");
@@ -205,7 +205,7 @@ TEST("slib - deleting a shader's source keeps the last good shader")
     CHECK(f.pkg.invert->last_error().has_value());
 }
 
-TEST("slib - editing an included file reloads the shaders that include it")
+TEST("slib - editing an included file reloads the shaders that include it", exclusive("slib-shader-library"))
 {
     reload_fixture f("#include \"common.hlsli\"");
     f.fs->write("common.hlsli", "COMMON_V1");
@@ -223,7 +223,7 @@ TEST("slib - editing an included file reloads the shaders that include it")
     CHECK(f.pkg.invert->generation() == 1);
 }
 
-TEST("slib - an include discovered by a reload is seeded, not treated as a change")
+TEST("slib - an include discovered by a reload is seeded, not treated as a change", exclusive("slib-shader-library"))
 {
     reload_fixture f("no includes yet");
     CHECK(f.source() == "no includes yet");
@@ -241,7 +241,7 @@ TEST("slib - an include discovered by a reload is seeded, not treated as a chang
     CHECK(f.pkg.invert->generation() == 1);
 }
 
-TEST("slib - each acquired format is reloaded")
+TEST("slib - each acquired format is reloaded", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     f.lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::spirv));
@@ -260,7 +260,7 @@ TEST("slib - each acquired format is reloaded")
     CHECK(spirv_after != spirv_before);
 }
 
-TEST("slib - poll_hot_reload is a no-op before hot reload is started")
+TEST("slib - poll_hot_reload is a no-op before hot reload is started", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     CHECK(f.source() == "v1");
@@ -272,7 +272,7 @@ TEST("slib - poll_hot_reload is a no-op before hot reload is started")
     CHECK(f.source() == "v1"); // nothing watches yet
 }
 
-TEST("slib - packages must be registered before hot reload starts")
+TEST("slib - packages must be registered before hot reload starts", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     f.start();
@@ -284,7 +284,7 @@ TEST("slib - packages must be registered before hot reload starts")
     CHECK_ASSERTS(f.lib.start_hot_reload());
 }
 
-TEST("slib - a shader first acquired after hot reload started is still watched")
+TEST("slib - a shader first acquired after hot reload started is still watched", exclusive("slib-shader-library"))
 {
     reload_fixture f;
     f.start();
@@ -300,7 +300,7 @@ TEST("slib - a shader first acquired after hot reload started is still watched")
     CHECK(f.source() == "v2");
 }
 
-TEST("slib - a watched poll does no work while nothing changes")
+TEST("slib - a watched poll does no work while nothing changes", exclusive("slib-shader-library"))
 {
     auto f = counting_fixture(true);
     CHECK(f.source() == "v1");
@@ -322,7 +322,7 @@ TEST("slib - a watched poll does no work while nothing changes")
     CHECK(f.source() == "v2");
 }
 
-TEST("slib - hot reload falls back to polling when the filesystem cannot notify")
+TEST("slib - hot reload falls back to polling when the filesystem cannot notify", exclusive("slib-shader-library"))
 {
     auto f = counting_fixture(false);
     CHECK(f.source() == "v1");
@@ -340,7 +340,7 @@ TEST("slib - hot reload falls back to polling when the filesystem cannot notify"
     CHECK(f.source() == "v2");
 }
 
-TEST("slib - force_polling ignores a filesystem that could notify")
+TEST("slib - force_polling ignores a filesystem that could notify", exclusive("slib-shader-library"))
 {
     auto f = counting_fixture(true); // it *can* notify; the config says not to care
     CHECK(f.source() == "v1");
@@ -356,7 +356,7 @@ TEST("slib - force_polling ignores a filesystem that could notify")
     CHECK(f.source() == "v2");
 }
 
-TEST("slib - a threaded watcher starts and stops cleanly")
+TEST("slib - a threaded watcher starts and stops cleanly", exclusive("slib-shader-library"))
 {
     // The tests above pump by hand for determinism; this one takes the path a real app does.
     // It only asserts the lifecycle — a real reload race would be flaky, and the scan logic is covered above.
@@ -371,7 +371,7 @@ TEST("slib - a threaded watcher starts and stops cleanly")
     // The fixture's destructor stops the watcher; a stop must not wait out the poll interval.
 }
 
-TEST("slib - a threaded watcher reloads through a real directory")
+TEST("slib - a threaded watcher reloads through a real directory", exclusive("slib-shader-library"))
 {
     // The whole thing, on the path a dev build actually takes: a real directory, the OS watch backend, a thread, and no polling anywhere.
     // Everything above runs on memory_filesystem so it can be exact, but none of it would notice a backend that never fires or a notification that never reaches the mailbox.

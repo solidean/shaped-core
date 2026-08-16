@@ -13,7 +13,9 @@
 
 using namespace sr;
 
-TEST("sr::impl - scancodes map to imgui keys")
+// nx::no_scheduler here is main-thread affinity in disguise: sr::window_system must be created on the process main thread, and only that mode runs a body on the run's own thread.
+// See window-test.cc.
+TEST("sr::impl - scancodes map to imgui keys", no_scheduler, exclusive("sr-imgui-context"))
 {
     CHECK(impl::imgui_key_from_scancode(scancode::a) == ImGuiKey_A);
     CHECK(impl::imgui_key_from_scancode(scancode::z) == ImGuiKey_Z);
@@ -52,7 +54,7 @@ TEST("sr::impl - scancodes map to imgui keys")
     CHECK(impl::imgui_key_from_scancode(scancode::unknown) == ImGuiKey_None);
 }
 
-TEST("sr::impl - imgui cursors map to sr shapes")
+TEST("sr::impl - imgui cursors map to sr shapes", no_scheduler, exclusive("sr-imgui-context"))
 {
     CHECK(impl::cursor_shape_from_imgui(ImGuiMouseCursor_Arrow) == cursor_shape::arrow);
     CHECK(impl::cursor_shape_from_imgui(ImGuiMouseCursor_TextInput) == cursor_shape::text);
@@ -74,7 +76,7 @@ TEST("sr::impl - imgui cursors map to sr shapes")
     CHECK(impl::cursor_shape_from_imgui(ImGuiMouseCursor_None) == cursor_shape::arrow);
 }
 
-TEST("sr::impl - mouse buttons are reordered for imgui, not passed through")
+TEST("sr::impl - mouse buttons are reordered for imgui, not passed through", no_scheduler, exclusive("sr-imgui-context"))
 {
     // This is the whole hazard: sr is left/middle/right, imgui is left/right/middle.
     // Passing the enum through unconverted swaps middle and right, which looks fine until someone middle-clicks.
@@ -89,7 +91,7 @@ TEST("sr::impl - mouse buttons are reordered for imgui, not passed through")
     CHECK(impl::imgui_mouse_button_from(mouse_button::right) != int(mouse_button::right));
 }
 
-TEST("sr::imgui_context - a mouse click reaches imgui")
+TEST("sr::imgui_context - a mouse click reaches imgui", no_scheduler, exclusive("sr-imgui-context"))
 {
     auto imgui = sr::imgui_context::create();
 
@@ -107,7 +109,7 @@ TEST("sr::imgui_context - a mouse click reaches imgui")
     imgui.end_frame();
 }
 
-TEST("sr::imgui_context - a middle click does not read as a right click")
+TEST("sr::imgui_context - a middle click does not read as a right click", no_scheduler, exclusive("sr-imgui-context"))
 {
     // The end-to-end form of the reorder check above: feeding sr's enum straight through would land here.
     auto imgui = sr::imgui_context::create();
@@ -123,7 +125,7 @@ TEST("sr::imgui_context - a middle click does not read as a right click")
     imgui.end_frame();
 }
 
-TEST("sr::imgui_context - a key press and its modifiers reach imgui")
+TEST("sr::imgui_context - a key press and its modifiers reach imgui", no_scheduler, exclusive("sr-imgui-context"))
 {
     auto imgui = sr::imgui_context::create();
 
@@ -142,7 +144,7 @@ TEST("sr::imgui_context - a key press and its modifiers reach imgui")
     imgui.end_frame();
 }
 
-TEST("sr::imgui_context - text arrives as decoded UTF-8 codepoints")
+TEST("sr::imgui_context - text arrives as decoded UTF-8 codepoints", no_scheduler, exclusive("sr-imgui-context"))
 {
     // Text must come from text_event, not rebuilt from key_events: an IME commits a whole phrase and a paste arrives as one event.
     //
@@ -164,7 +166,7 @@ TEST("sr::imgui_context - text arrives as decoded UTF-8 codepoints")
     imgui.end_frame();
 }
 
-TEST("sr::imgui_context - the scroll wheel reaches imgui on the same frame")
+TEST("sr::imgui_context - the scroll wheel reaches imgui on the same frame", no_scheduler, exclusive("sr-imgui-context"))
 {
     // The frame it lands on is the point, not merely that it arrives.
     // imgui's ConfigInputTrickleEventQueue splits a cursor-position change and a wheel across two frames,
@@ -188,7 +190,9 @@ TEST("sr::imgui_context - the scroll wheel reaches imgui on the same frame")
 
 #if SR_HAS_WINDOW
 
-TEST("sr::imgui_context - a frame driven by a window takes its size and text-input intent")
+TEST("sr::imgui_context - a frame driven by a window takes its size and text-input intent",
+     no_scheduler,
+     exclusive("sr-imgui-context"))
 {
     // The window-driven path end to end, on the dummy video driver.
     // What it pins is the wiring, not the pixels:
@@ -215,7 +219,9 @@ TEST("sr::imgui_context - a frame driven by a window takes its size and text-inp
     imgui.end_frame();
 }
 
-TEST("sr::imgui_context - imgui drives the window system's cursor, and only when it wants the mouse")
+TEST("sr::imgui_context - imgui drives the window system's cursor, and only when it wants the mouse",
+     no_scheduler,
+     exclusive("sr-imgui-context"))
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.width = 320, .height = 240});
@@ -261,7 +267,9 @@ TEST("sr::imgui_context - imgui drives the window system's cursor, and only when
     CHECK(wsys->cursor() == cursor_shape::arrow); // imgui's now, no longer the crosshair
 }
 
-TEST("sr::imgui_context - viewports are off unless asked for, and then move imgui into desktop space")
+TEST("sr::imgui_context - viewports are off unless asked for, and then move imgui into desktop space",
+     no_scheduler,
+     exclusive("sr-imgui-context"))
 {
     // The whole point of the opt-in: enabling viewports changes what an imgui coordinate means, so a caller that did not ask for them must see exactly the single-viewport behaviour pinned above.
     auto const wsys = sr::window_system::create({.headless = true});
@@ -290,7 +298,7 @@ TEST("sr::imgui_context - viewports are off unless asked for, and then move imgu
     CHECK(ImGui::GetIO().MousePos.y == 110.0f);
 }
 
-TEST("sr::imgui_context - a frame that skips update_viewports asserts")
+TEST("sr::imgui_context - a frame that skips update_viewports asserts", no_scheduler, exclusive("sr-imgui-context"))
 {
     // Without it imgui stops hit-testing the mouse against any viewport, which reads as "nothing hovers any more" rather than as a missing call.
     // Worth an assert instead of a debugging session.
@@ -306,7 +314,7 @@ TEST("sr::imgui_context - a frame that skips update_viewports asserts")
     CHECK_ASSERTS(imgui.begin_frame(*win, 1.0f / 60.0f));
 }
 
-TEST("sr::imgui_context - copy and paste reach the system clipboard")
+TEST("sr::imgui_context - copy and paste reach the system clipboard", no_scheduler, exclusive("sr-imgui-context"))
 {
     // Wires imgui's clipboard hooks to sr::window_system, so ctrl+C and ctrl+V in a text field talk to the real clipboard rather than to nothing.
     auto const wsys = sr::window_system::create({.headless = true});

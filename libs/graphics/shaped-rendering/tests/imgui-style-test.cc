@@ -12,7 +12,7 @@ constexpr float chan(unsigned byte)
 }
 } // namespace
 
-TEST("sr - the solidean-default style paints the brand palette")
+TEST("sr - the solidean-default style paints the brand palette", exclusive("sr-imgui-context"))
 {
     // ImGuiStyle's default ctor fills every slot (StyleColorsDark) and needs no context, so this runs device-free.
     ImGuiStyle style;
@@ -46,7 +46,7 @@ TEST("sr - the solidean-default style paints the brand palette")
     CHECK(style.Colors[ImGuiCol_Separator].w == 0.30f);
 }
 
-TEST("sr - a context applies the solidean theme by default")
+TEST("sr - a context applies the solidean theme by default", exclusive("sr-imgui-context"))
 {
     auto imgui = sr::imgui_context::create();
 
@@ -57,7 +57,7 @@ TEST("sr - a context applies the solidean theme by default")
     CHECK(grab.z == chan(0xff));
 }
 
-TEST("sr - a context leaves the theme alone when asked")
+TEST("sr - a context leaves the theme alone when asked", exclusive("sr-imgui-context"))
 {
     auto imgui = sr::imgui_context::create({.apply_default_style = false});
 

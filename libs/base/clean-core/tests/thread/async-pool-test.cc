@@ -86,7 +86,7 @@ TEST("async - many independent asyncs fan out across the pool")
 // With one thread the graph parks on a manual node nobody can ever push, which is exactly what blocking_get's is_ready() assert reports.
 // That is a different contract, covered by async-test.cc's no-progress tests.
 #if CC_HAS_THREADS
-TEST("async - external push from a foreign thread wakes a pool-parked dependent")
+TEST("async - external push from a foreign thread wakes a pool-parked dependent", exclusive("cc-default-async-pool"))
 {
     cc::async_thread_pool pool(2);
     cc::scoped_default_async_pool as_default(pool); // so the foreign push routes the woken dependent back here
@@ -122,7 +122,7 @@ TEST("async - two pools coexist; each drives its own submitted root")
     CHECK(pool_b.blocking_get(rb) == 9);
 }
 
-TEST("async - installing a second default pool asserts")
+TEST("async - installing a second default pool asserts", exclusive("cc-default-async-pool"))
 {
     cc::async_thread_pool pool_a(1);
     cc::async_thread_pool pool_b(1);
@@ -271,7 +271,8 @@ TEST("async - a pool with one worker still wakes for injected work")
 // Supported and must stay correct; not optimized for.
 // See "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md for what is and is not guaranteed.
 
-TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked in a pool")
+TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked in a pool",
+     exclusive("cc-default-async-pool"))
 {
     // The graph is parked on an unpushed manual node inside the pool, so a singlethreaded_scheduler cannot advance it however hard it pumps.
     // That is a report, not an abort -- it is not this scheduler's graph to fail.
@@ -292,7 +293,8 @@ TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked i
     CHECK(pool.blocking_get(p) == 42);
 }
 
-TEST("async - a subtree shared between a pool and a singlethreaded_scheduler stays correct")
+TEST("async - a subtree shared between a pool and a singlethreaded_scheduler stays correct",
+     exclusive("cc-default-async-pool"))
 {
     // The real shape of the hybrid case: an outer API alternating single- and multi-threaded work over asyncs shared with previous calls, so one subtree is reachable from both schedulers at once.
     // `shared` below is that subtree, driven on the pool; root_st is a dependent driven right here on a singlethreaded_scheduler.
@@ -328,7 +330,8 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
     }
 }
 
-TEST("async - a node migrated into a singlethreaded_scheduler is not stranded when it stops driving")
+TEST("async - a node migrated into a singlethreaded_scheduler is not stranded when it stops driving",
+     exclusive("cc-default-async-pool"))
 {
     // Regression for migration stranding, which is a HANG rather than a wrong answer.
     // TWO separate roots share a subtree: root_mt is submitted to the pool, root_st is driven on a singlethreaded_scheduler.
@@ -359,7 +362,7 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
 }
 
 #if CC_HAS_THREADS
-TEST("async - a node woken across threads still runs under its own ambient context")
+TEST("async - a node woken across threads still runs under its own ambient context", exclusive("cc-default-async-pool"))
 {
     // Needs real threads: the point is that the context comes from the node's own arm and never from the worker
     // that happens to pick it up, so the dependent must be re-polled somewhere other than where it parked.
