@@ -3,7 +3,7 @@
 Documentation hub for versioned-document-file — the `.vdoc` save format (namespace `vdoc::file`).
 Start at the [readme](../readme.md) for the overview, and the [cheat-sheet](../cheat-sheet.md) for the API at a glance.
 
-The store, the loader, publishing, the workspace and the content store are implemented; snapshots are carried but not yet decoded.
+The store, the loader, publishing, the workspace, the content store and snapshots with history pruning are implemented; recovery from an untrusted peer is what remains.
 
 ## Topics
 

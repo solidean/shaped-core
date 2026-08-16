@@ -118,14 +118,38 @@ cc::result<cc::vector<ref_row>> sqlite_reader::read_refs()
 
 cc::result<cc::vector<snapshot_row>> sqlite_reader::read_snapshots()
 {
-    return read_all<snapshot_row>(_db, "SELECT op_hash, required, encoding, data FROM snapshots",
-                                  [](sql::row const& row)
-                                  {
-                                      return snapshot_row{.op_hash = copy_blob(row, 0),
-                                                          .required = row.as_i64(1),
-                                                          .encoding = cc::string(row.as_string(2)),
-                                                          .data = copy_blob(row, 3)};
-                                  });
+    return read_all<snapshot_row>(
+        _db, "SELECT op_hash, required, encoding, decoded_size, stored_size, chunk_count FROM snapshots",
+        [](sql::row const& row)
+        {
+            return snapshot_row{.op_hash = copy_blob(row, 0),
+                                .required = row.as_i64(1),
+                                .encoding = cc::string(row.as_string(2)),
+                                .decoded_size = row.as_i64(3),
+                                .stored_size = row.as_i64(4),
+                                .chunk_count = row.as_i64(5)};
+        });
+}
+
+cc::result<cc::vector<snapshot_chunk_row>> sqlite_reader::read_snapshot_chunks(cc::span<byte const> op_hash)
+{
+    auto stmt = _db.prepare("SELECT chunk_index, data FROM snapshot_chunk WHERE op_hash = ?1 ORDER BY chunk_index");
+    CC_RETURN_IF_ERROR(stmt);
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, op_hash));
+
+    auto out = cc::vector<snapshot_chunk_row>();
+    while (true)
+    {
+        auto const stepped = stmt.value().next();
+        CC_RETURN_IF_ERROR(stepped);
+        if (!stepped.value())
+            return out;
+
+        auto const row = stmt.value().current();
+        out.push_back({.op_hash = cc::vector<byte>::create_copy_of(op_hash),
+                       .chunk_index = row.as_i64(0),
+                       .data = copy_blob(row, 1)});
+    }
 }
 
 cc::result<cc::vector<workspace_row>> sqlite_reader::read_workspace()
@@ -349,6 +373,60 @@ cc::result<cc::unit> sqlite_writer::delete_blob(blob_hash const& hash)
     auto stmt = _db.prepare("DELETE FROM blobs WHERE hash = ?1");
     CC_RETURN_IF_ERROR(stmt);
     CC_RETURN_IF_ERROR(stmt.value().bind(1, cc::span<byte const>(hash_bytes)));
+    return step_to_done(stmt.value());
+}
+
+cc::result<cc::unit> sqlite_writer::upsert_snapshot(snapshot_row const& row, cc::span<cc::vector<byte> const> chunks)
+{
+    // The old chunks go first: a replacement payload that is shorter would otherwise leave the tail of the longer one
+    // behind, and chunk_count would disagree with what is actually stored.
+    auto cleared = _db.prepare("DELETE FROM snapshot_chunk WHERE op_hash = ?1");
+    CC_RETURN_IF_ERROR(cleared);
+    CC_RETURN_IF_ERROR(cleared.value().bind(1, cc::span<byte const>(row.op_hash)));
+    CC_RETURN_IF_ERROR(step_to_done(cleared.value()));
+
+    auto stmt = _db.prepare("INSERT INTO snapshots(op_hash, required, encoding, decoded_size, stored_size, chunk_count)"
+                            " VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+                            " ON CONFLICT(op_hash) DO UPDATE SET required = excluded.required,"
+                            " encoding = excluded.encoding, decoded_size = excluded.decoded_size,"
+                            " stored_size = excluded.stored_size, chunk_count = excluded.chunk_count");
+    CC_RETURN_IF_ERROR(stmt);
+
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, cc::span<byte const>(row.op_hash)));
+    CC_RETURN_IF_ERROR(stmt.value().bind(2, row.required));
+    CC_RETURN_IF_ERROR(stmt.value().bind(3, cc::string_view(row.encoding)));
+    CC_RETURN_IF_ERROR(stmt.value().bind(4, row.decoded_size));
+    CC_RETURN_IF_ERROR(stmt.value().bind(5, row.stored_size));
+    CC_RETURN_IF_ERROR(stmt.value().bind(6, row.chunk_count));
+    CC_RETURN_IF_ERROR(step_to_done(stmt.value()));
+
+    for (isize i = 0; i < chunks.size(); ++i)
+    {
+        auto chunk = _db.prepare("INSERT INTO snapshot_chunk(op_hash, chunk_index, data) VALUES (?1, ?2, ?3)");
+        CC_RETURN_IF_ERROR(chunk);
+        CC_RETURN_IF_ERROR(chunk.value().bind(1, cc::span<byte const>(row.op_hash)));
+        CC_RETURN_IF_ERROR(chunk.value().bind(2, i64(i)));
+        CC_RETURN_IF_ERROR(chunk.value().bind(3, cc::span<byte const>(chunks[i])));
+        CC_RETURN_IF_ERROR(step_to_done(chunk.value()));
+    }
+
+    return cc::unit{};
+}
+
+cc::result<cc::unit> sqlite_writer::delete_snapshot(cc::span<byte const> op_hash)
+{
+    auto stmt = _db.prepare("DELETE FROM snapshots WHERE op_hash = ?1");
+    CC_RETURN_IF_ERROR(stmt);
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, op_hash));
+    return step_to_done(stmt.value());
+}
+
+cc::result<cc::unit> sqlite_writer::skeletonize_op(cc::span<byte const> op_hash)
+{
+    // The row stays and keeps its parents, so ancestry through it survives; only the payload goes.
+    auto stmt = _db.prepare("UPDATE ops SET metadata = NULL, assignments = NULL WHERE hash = ?1");
+    CC_RETURN_IF_ERROR(stmt);
+    CC_RETURN_IF_ERROR(stmt.value().bind(1, op_hash));
     return step_to_done(stmt.value());
 }
 

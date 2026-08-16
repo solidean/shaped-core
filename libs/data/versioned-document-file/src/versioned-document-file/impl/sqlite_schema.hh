@@ -23,7 +23,7 @@ inline constexpr i32 vdoc_application_id = 0x56444F43;
 
 /// The format version this build writes and reads.
 /// A HIGHER one is a hard failure: the file may use shapes this build would misread, and guessing is worse than refusing.
-inline constexpr i32 current_user_version = 1;
+inline constexpr i32 current_user_version = 2;
 
 /// What ensuring the schema found that the loader has to report.
 struct schema_scan

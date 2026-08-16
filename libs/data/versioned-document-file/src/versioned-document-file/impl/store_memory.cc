@@ -2,6 +2,8 @@
 #include <clean-core/string/format.hh>
 #include <versioned-document-file/impl/store_memory.hh>
 
+#include <algorithm>
+
 namespace vdoc::file::impl
 {
 namespace
@@ -108,7 +110,23 @@ public:
             out.push_back({.op_hash = copy_of(cc::span<byte const>(row.op_hash)),
                            .required = row.required,
                            .encoding = row.encoding,
-                           .data = copy_of(cc::span<byte const>(row.data))});
+                           .decoded_size = row.decoded_size,
+                           .stored_size = row.stored_size,
+                           .chunk_count = row.chunk_count});
+        return out;
+    }
+
+    cc::result<cc::vector<snapshot_chunk_row>> read_snapshot_chunks(cc::span<byte const> op_hash) override
+    {
+        auto out = cc::vector<snapshot_chunk_row>();
+        for (auto const& row : _image.snapshot_chunks)
+            if (same_bytes(row.op_hash, op_hash))
+                out.push_back({.op_hash = copy_of(op_hash),
+                               .chunk_index = row.chunk_index,
+                               .data = copy_of(cc::span<byte const>(row.data))});
+
+        std::sort(out.begin(), out.end(), [](snapshot_chunk_row const& a, snapshot_chunk_row const& b)
+                  { return a.chunk_index < b.chunk_index; });
         return out;
     }
 
@@ -328,6 +346,73 @@ public:
         return cc::unit{};
     }
 
+    cc::result<cc::unit> upsert_snapshot(snapshot_row const& row, cc::span<cc::vector<byte> const> chunks) override
+    {
+        // Old chunks go first, so a shorter replacement payload cannot leave the tail of a longer one behind.
+        auto kept = cc::vector<snapshot_chunk_row>();
+        for (auto& chunk : _staged.snapshot_chunks)
+            if (!same_bytes(chunk.op_hash, row.op_hash))
+                kept.push_back(cc::move(chunk));
+        _staged.snapshot_chunks = cc::move(kept);
+
+        auto stored = snapshot_row{.op_hash = copy_of(cc::span<byte const>(row.op_hash)),
+                                   .required = row.required,
+                                   .encoding = row.encoding,
+                                   .decoded_size = row.decoded_size,
+                                   .stored_size = row.stored_size,
+                                   .chunk_count = row.chunk_count};
+
+        auto replaced = false;
+        for (auto& existing : _staged.snapshots)
+            if (same_bytes(existing.op_hash, row.op_hash))
+            {
+                existing = cc::move(stored);
+                replaced = true;
+                break;
+            }
+        if (!replaced)
+            _staged.snapshots.push_back(cc::move(stored));
+
+        for (isize i = 0; i < chunks.size(); ++i)
+            _staged.snapshot_chunks.push_back({.op_hash = copy_of(cc::span<byte const>(row.op_hash)),
+                                               .chunk_index = i64(i),
+                                               .data = copy_of(cc::span<byte const>(chunks[i]))});
+
+        return cc::unit{};
+    }
+
+    cc::result<cc::unit> delete_snapshot(cc::span<byte const> op_hash) override
+    {
+        auto kept_rows = cc::vector<snapshot_row>();
+        for (auto& existing : _staged.snapshots)
+            if (!same_bytes(existing.op_hash, op_hash))
+                kept_rows.push_back(cc::move(existing));
+        _staged.snapshots = cc::move(kept_rows);
+
+        // The file arm gets this from ON DELETE CASCADE; here it is spelled out, so both arms leave the same state.
+        auto kept_chunks = cc::vector<snapshot_chunk_row>();
+        for (auto& chunk : _staged.snapshot_chunks)
+            if (!same_bytes(chunk.op_hash, op_hash))
+                kept_chunks.push_back(cc::move(chunk));
+        _staged.snapshot_chunks = cc::move(kept_chunks);
+
+        return cc::unit{};
+    }
+
+    cc::result<cc::unit> skeletonize_op(cc::span<byte const> op_hash) override
+    {
+        for (auto& existing : _staged.ops)
+            if (same_bytes(existing.hash, op_hash))
+            {
+                existing.metadata = {};
+                existing.assignments = {};
+                return cc::unit{};
+            }
+
+        // An op that is not here is not an error: what was asked for already holds.
+        return cc::unit{};
+    }
+
     cc::result<cc::unit> upsert_ref(ref_row const& row) override
     {
         for (auto& existing : _staged.refs)
@@ -386,6 +471,16 @@ protected:
         auto applied = apply_publish(writer, job);
         if (applied.has_error())
             return cc::make_async_from_error<publish_result>(cc::async_error::make_error(cc::move(applied).error()));
+        return cc::make_async_from_value(applied.value());
+    }
+
+    cc::shared_async<snapshot_write_result> on_write_snapshots(snapshot_write_job job) override
+    {
+        auto writer = memory_writer(*_image);
+        auto applied = apply_snapshot_write(writer, job);
+        if (applied.has_error())
+            return cc::make_async_from_error<snapshot_write_result>(
+                cc::async_error::make_error(cc::move(applied).error()));
         return cc::make_async_from_value(applied.value());
     }
 
@@ -472,7 +567,13 @@ store_handle make_memory_store(std::shared_ptr<memory_image> const& image)
     auto handle = std::make_shared<memory_store>(image);
     auto reader = memory_reader(*image);
     auto const loaded = load(reader, *handle);
-    CC_ASSERT(loaded.has_value(), "an in-memory load has no hard failure to report");
+
+    // A hard failure IS reachable here — a required snapshot that will not decode is one — and create_in_memory has no
+    // error channel to report it through.
+    // A null handle is what a caller sees instead, matching the file arm, where a hard failure leaves nothing to open.
+    if (loaded.has_error())
+        return {};
+
     return handle;
 }
 } // namespace vdoc::file::impl

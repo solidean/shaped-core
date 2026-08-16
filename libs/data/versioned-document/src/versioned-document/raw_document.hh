@@ -10,8 +10,12 @@
 ///   raw_entity    : component_type_id -> raw_component
 ///   raw_component : property_id       -> raw_property
 ///
-/// **A raw document borrows the graph's op bytes.** Every value_view in it points into the payload of the op that
-/// wrote it, so a raw document is valid only while those ops are still in the op_graph it came from.
+/// **A raw document borrows the bytes it was materialized from, and owns not one of them.**
+/// A value_view points into the payload of the op that wrote it, or — where a snapshot terminated the sweep — into
+/// that snapshot's own arena.
+/// So a raw document is valid only while both the op_graph it came from and the snapshot_cache that served the sweep
+/// are alive and unmodified.
+/// [snapshot_document](snapshot_document.hh) is the owning form, and the only one that outlives its ops.
 ///
 /// Each level is a distinct struct wrapping a vector sorted by canonical id bytes, so lookup is a binary search and
 /// iteration order is the same on every machine — the levels cannot be interchanged, and nothing here is a hash

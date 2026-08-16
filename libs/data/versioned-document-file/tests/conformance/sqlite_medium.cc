@@ -181,6 +181,74 @@ public:
         return 0;
     }
 
+    isize count_snapshots() override
+    {
+        auto db = require_db();
+        auto stmt = db.query("SELECT COUNT(*) FROM snapshots");
+        REQUIRE(stmt.has_value());
+        for (auto const row : stmt.value())
+            return row.as_i64(0);
+        return 0;
+    }
+
+    bool delete_first_snapshot() override
+    {
+        auto db = require_db();
+
+        // The chunks go by cascade, but only where this connection has foreign keys on — which it does not by default.
+        REQUIRE(db.exec("DELETE FROM snapshot_chunk WHERE op_hash = (SELECT MIN(op_hash) FROM snapshots)").has_value());
+        REQUIRE(db.exec("DELETE FROM snapshots WHERE op_hash = (SELECT MIN(op_hash) FROM snapshots)").has_value());
+        return db.changes() > 0;
+    }
+
+    bool corrupt_first_snapshot_payload() override
+    {
+        auto db = require_db();
+
+        // The row keeps saying what it stores, so this is a payload that will not decode rather than a short one.
+        auto damaged = cc::vector<byte>::create_defaulted(3);
+        damaged[0] = byte(0xFF);
+
+        auto stmt = db.prepare("UPDATE snapshot_chunk SET data = ?1 WHERE chunk_index = 0 AND op_hash ="
+                               " (SELECT MIN(op_hash) FROM snapshots)");
+        REQUIRE(stmt.has_value());
+        REQUIRE(stmt.value().bind(1, cc::span<byte const>(damaged)).has_value());
+        REQUIRE(stmt.value().next().has_value());
+        return db.changes() > 0;
+    }
+
+    bool set_first_snapshot_required(bool required) override
+    {
+        auto db = require_db();
+        auto stmt
+            = db.prepare("UPDATE snapshots SET required = ?1 WHERE op_hash = (SELECT MIN(op_hash) FROM snapshots)");
+        REQUIRE(stmt.has_value());
+        REQUIRE(stmt.value().bind(1, i64(required ? 1 : 0)).has_value());
+        REQUIRE(stmt.value().next().has_value());
+        return db.changes() > 0;
+    }
+
+    bool set_first_snapshot_encoding(cc::string_view encoding) override
+    {
+        auto db = require_db();
+        auto stmt
+            = db.prepare("UPDATE snapshots SET encoding = ?1 WHERE op_hash = (SELECT MIN(op_hash) FROM snapshots)");
+        REQUIRE(stmt.has_value());
+        REQUIRE(stmt.value().bind(1, encoding).has_value());
+        REQUIRE(stmt.value().next().has_value());
+        return db.changes() > 0;
+    }
+
+    bool first_snapshot_is_required() override
+    {
+        auto db = require_db();
+        auto stmt = db.query("SELECT required FROM snapshots ORDER BY op_hash LIMIT 1");
+        REQUIRE(stmt.has_value());
+        for (auto const row : stmt.value())
+            return row.as_i64(0) != 0;
+        return false;
+    }
+
 private:
     struct op_bytes
     {

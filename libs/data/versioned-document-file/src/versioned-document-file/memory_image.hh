@@ -26,7 +26,7 @@ struct vdoc::file::memory_image
     static constexpr i32 vdoc_application_id = 0x56444F43;
 
     /// The format version this build writes and reads.
-    static constexpr i32 current_user_version = 1;
+    static constexpr i32 current_user_version = 2;
 
     /// A table this build does not know, kept whole so a rewrite cannot drop it.
     /// It has no rows here because nothing this build can do would fill them — what matters is that it survives.
@@ -43,6 +43,7 @@ struct vdoc::file::memory_image
     cc::vector<op_row> ops;
     cc::vector<ref_row> refs;
     cc::vector<snapshot_row> snapshots;
+    cc::vector<snapshot_chunk_row> snapshot_chunks;
     cc::vector<asset_row> assets;
     cc::vector<blob_row> blobs;
     cc::vector<chunk_row> blob_chunks;

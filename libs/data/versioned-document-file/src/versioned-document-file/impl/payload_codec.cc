@@ -1,5 +1,5 @@
 #include <clean-core/string/format.hh>
-#include <versioned-document-file/impl/blob_codec.hh>
+#include <versioned-document-file/impl/payload_codec.hh>
 
 namespace vdoc::file::impl
 {
@@ -20,17 +20,17 @@ cc::result<cc::vector<byte>> raw_decode(cc::vector<byte> stored, i64 decoded_siz
     return stored;
 }
 
-constexpr blob_codec codecs[] = {
+constexpr payload_codec codecs[] = {
     {.name = "raw", .encode = raw_encode, .decode = raw_decode, .is_byte_addressable = true},
 };
 } // namespace
 
-cc::span<blob_codec const> blob_codecs()
+cc::span<payload_codec const> payload_codecs()
 {
     return codecs;
 }
 
-blob_codec const* find_blob_codec(cc::string_view encoding)
+payload_codec const* find_payload_codec(cc::string_view encoding)
 {
     for (auto const& codec : codecs)
         if (codec.name == encoding)

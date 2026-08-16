@@ -45,7 +45,8 @@ One-liner per library:
 * **`libs/data/versioned-document-file`** — the `.vdoc` save format.
   One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
   Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
-  The store, its loader, publishing, the workspace and the content store — assets, blobs, the encoding seam and reclamation — are in; snapshots are carried but not yet decoded.
+  The store, its loader, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — and snapshots with history pruning are in.
+  Recovery from an untrusted peer is what remains.
   [docs/format.md](libs/data/versioned-document-file/docs/format.md) is the on-disk specification.
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan exist today (vulkan creates devices and resources but stubs its recording paths); metal/webgpu and opengl/webgl are intended tiers with no backend yet.

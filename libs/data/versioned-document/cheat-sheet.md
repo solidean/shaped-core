@@ -122,9 +122,28 @@ auto const raw = graph.materialize(head);            // or materialize(span<op_i
 graph.materialize_entities(heads, entities);         // the cheap path op_builder diffs against
 graph.collect_reachable(heads);                      // the local closure; missing ops are skipped
 graph.children(id);                                  // inverted parent edges; may name ops not present
+graph.skeletonize(id);                               // drop an op's payload, keep its id and parents
 ```
 
-**A raw document borrows the graph's op bytes**, so it is valid only while those ops are still in the graph.
+**A raw document borrows the bytes it was materialized from**, and owns none of them.
+A value points into the writing op's payload, or into the arena of the snapshot that terminated the sweep.
+So it is valid only while both the graph and the cache that served it are alive and unmodified.
+
+### Snapshots
+
+```cpp
+vdoc::snapshot_cache cache;                          // caller-owned; op_graph holds none
+graph.materialize(head, cache);                      // walks back only as far as a usable snapshot
+graph.materialize_entities(heads, entities, cache);  // a snapshot serves a filtered sweep by projection
+
+vdoc::install_snapshot(graph, head, cache);          // explicit; nothing installs behind your back
+vdoc::install_snapshot_if_useful(graph, head, cache, {.min_ops_behind = 4096});
+
+cache.clear_unpinned();                              // invisible: costs speed, never a result
+cache.erase(id); cache.is_pinned(id); cache.size();
+```
+
+A snapshot is **surviving writers only** — exactly a `raw_document` over bytes it owns, so it outlives the ops that wrote them.
 
 ### The typed layer
 
@@ -222,6 +241,12 @@ A property normally has one value.
 Concurrent writers where neither dominates leave several, and **that includes writers who wrote identical bytes** — collapsed silently at parse time into `report.agreed_multi_values`.
 
 ## Patterns & gotchas
+
+- **A snapshot stores surviving writers only**, and whether one may be USED is decided per sweep against today's DAG — never recorded when it was taken.
+- **Installing a *filtered* result poisons the cache.**
+  A filtered materialization is a projection rather than surviving(head), so every later sweep terminating there is silently truncated.
+- **Dropping the cache is invisible by construction.** It changes how long a materialization takes and nothing else.
+- **Adding ops never invalidates a snapshot.** An op id commits to everything behind it, so surviving(id) cannot change once computed.
 
 - **`op_id` orders by its canonical 32 bytes**, never by `cc::hash256`'s defaulted `<=>`, which orders limbs and is a different order entirely.
 - **Deletion is interpretation, not storage** — nothing is ever removed.

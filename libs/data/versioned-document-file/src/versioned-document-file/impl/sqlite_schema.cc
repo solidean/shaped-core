@@ -38,14 +38,32 @@ cc::vector<known_table> known_tables()
                              ") WITHOUT ROWID",
                       .columns = {"name", "op_hash"}});
 
+    // The payload lives in snapshot_chunk rather than inline, because SQLite caps a single value near a gigabyte and a
+    // snapshot of a large document goes past that.
     tables.push_back({.name = "snapshots",
                       .ddl = "CREATE TABLE snapshots ("
-                             " op_hash  BLOB PRIMARY KEY NOT NULL,"
-                             " required INTEGER NOT NULL,"
-                             " encoding TEXT NOT NULL,"
-                             " data     BLOB NOT NULL"
+                             " op_hash      BLOB PRIMARY KEY NOT NULL,"
+                             " required     INTEGER NOT NULL,"
+                             " encoding     TEXT NOT NULL,"
+                             " decoded_size INTEGER NOT NULL,"
+                             " stored_size  INTEGER NOT NULL,"
+                             " chunk_count  INTEGER NOT NULL"
                              ") WITHOUT ROWID",
-                      .columns = {"op_hash", "required", "encoding", "data"}});
+                      .columns = {"op_hash", "required", "encoding", "decoded_size", "stored_size", "chunk_count"}});
+
+    // Cascading off `snapshots` rather than living in `blobs` is deliberate.
+    // Blob lifetime is decided by a mark-and-sweep over the asset index, and a required snapshot is load-bearing data
+    // whose loss is unrecoverable — so a marking bug would become a data-loss bug.
+    // Here the lifetime is structural: these bytes die when their snapshot row dies, and nothing else can reach them.
+    tables.push_back({.name = "snapshot_chunk",
+                      .ddl = "CREATE TABLE snapshot_chunk ("
+                             " op_hash     BLOB NOT NULL,"
+                             " chunk_index INTEGER NOT NULL,"
+                             " data        BLOB NOT NULL,"
+                             " PRIMARY KEY(op_hash, chunk_index),"
+                             " FOREIGN KEY(op_hash) REFERENCES snapshots(op_hash) ON DELETE CASCADE"
+                             ") WITHOUT ROWID",
+                      .columns = {"op_hash", "chunk_index", "data"}});
 
     // `deps` is what lets reclamation compute a closure instead of the application resolving one: an array of asset id
     // strings, declared by the application and never interpreted here.

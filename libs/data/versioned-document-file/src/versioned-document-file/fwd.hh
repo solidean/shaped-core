@@ -46,6 +46,9 @@ struct publish_result;
 /// What a reclamation actually collected.
 struct reclaim_result;
 
+/// What a prune actually emptied.
+struct snapshot_write_result;
+
 /// An asset id resolved to its record plus a source to fetch its parts through.
 struct asset_resolution;
 
@@ -108,6 +111,7 @@ namespace vdoc::file
 struct op_row;
 struct ref_row;
 struct snapshot_row;
+struct snapshot_chunk_row;
 struct asset_row;
 struct blob_row;
 struct chunk_row;

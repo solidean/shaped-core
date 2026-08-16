@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/container/small_vector.hh>
+#include <versioned-document/snapshot_cache.hh>
 
 #include <algorithm>
 
@@ -203,6 +204,56 @@ cc::vector<vdoc::op_id> vdoc::op_graph::collect_reachable(cc::span<op_id const> 
     return out;
 }
 
+cc::vector<vdoc::op_id> vdoc::op_graph::collect_reachable_until(cc::span<op_id const> heads,
+                                                                cc::function_ref<bool(op_id const&)> is_terminator) const
+{
+    auto seen = cc::set<op_id>();
+    auto stack = cc::vector<op_id>();
+    auto out = cc::vector<op_id>();
+
+    for (auto const& head : heads)
+        stack.push_back(head);
+
+    while (!stack.empty())
+    {
+        auto const id = stack.back();
+        stack.remove_back();
+
+        if (seen.contains(id))
+            continue;
+
+        auto const* const o = find(id);
+        if (o == nullptr)
+            continue;
+
+        seen.insert(id);
+        out.push_back(id);
+
+        // A terminator is in the result but its parents are not expanded, which is what leaves the result
+        // parent-closed EXCEPT at terminators — the property the validity gate reads off the in-degrees.
+        // A head that is itself a terminator terminates too; nothing here special-cases one.
+        if (is_terminator(id))
+            continue;
+
+        for (auto const& parent : o->parents)
+            stack.push_back(parent);
+    }
+
+    std::sort(out.begin(), out.end(), op_id::by_bytes{});
+    return out;
+}
+
+bool vdoc::op_graph::skeletonize(op_id const& id)
+{
+    auto* const o = _ops.get_ptr(id);
+    if (o == nullptr)
+        return false;
+
+    // The child index is untouched on purpose: a skeleton keeps every edge, and that is the whole point of it.
+    o->payload = {};
+    return true;
+}
+
 vdoc::raw_document vdoc::op_graph::materialize(op_id const& head) const
 {
     op_id const heads[] = {head};
@@ -220,12 +271,36 @@ vdoc::raw_document vdoc::op_graph::materialize_entities(cc::span<op_id const> he
     return impl::materialize(*this, heads, entities, {});
 }
 
+vdoc::raw_document vdoc::op_graph::materialize(op_id const& head, snapshot_cache& cache) const
+{
+    op_id const heads[] = {head};
+    return impl::materialize(*this, heads, {}, {.cache = &cache});
+}
+
+vdoc::raw_document vdoc::op_graph::materialize(cc::span<op_id const> heads, snapshot_cache& cache) const
+{
+    return impl::materialize(*this, heads, {}, {.cache = &cache});
+}
+
+vdoc::raw_document vdoc::op_graph::materialize_entities(cc::span<op_id const> heads,
+                                                        cc::span<entity_id const> entities,
+                                                        snapshot_cache& cache) const
+{
+    return impl::materialize(*this, heads, entities, {.cache = &cache});
+}
+
 vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
                                            cc::span<op_id const> heads,
                                            cc::span<entity_id const> entities,
                                            materialize_options options)
 {
-    auto const reachable = graph.collect_reachable(heads);
+    // The walk stops at cached snapshots where there are any, which is the whole of what makes a long history cost
+    // what a short one does.
+    // Whether stopping there was SOUND is decided below, against this DAG as it is today.
+    auto const reachable
+        = options.cache == nullptr
+            ? graph.collect_reachable(heads)
+            : graph.collect_reachable_until(heads, [&](op_id const& id) { return options.cache->contains(id); });
     auto const n = reachable.size();
 
     auto index_of = cc::map<op_id, i32>();
@@ -239,18 +314,18 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
         wanted.insert(e);
     auto const filtered = !entities.empty();
 
-    // ---- pass 1: dense path indices, and the forward edges the sweep walks -------------------------------------
-    //
-    // This map is probed and never iterated, so its order cannot reach the output.
-    auto path_index = cc::map<property_path, i32>();
-    auto paths = cc::vector<property_path>();
-
+    // ---- pass 1a: the forward edges the sweep walks --------------------------------------------------------------
     auto forward = cc::vector<cc::vector<i32>>();
     forward.resize_to_defaulted(n);
     auto in_degree = cc::vector<i32>();
     in_degree.resize_to_filled(n, 0);
     auto remaining_consumers = cc::vector<i32>();
     remaining_consumers.resize_to_filled(n, 0);
+
+    // An op whose parent is in the graph but outside the walk — which only a terminated walk can produce, and which
+    // means this op's state would be built from an incomplete set of ancestors.
+    auto has_unwalked_parent = cc::vector<bool>();
+    has_unwalked_parent.resize_to_filled(n, false);
 
     for (isize i = 0; i < n; ++i)
     {
@@ -259,26 +334,110 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
         {
             auto const* const p = index_of.get_ptr(parent);
             if (p == nullptr)
-                continue; // a missing parent contributes no edge, which is what makes a pruned history still walkable
+            {
+                // An op the graph does not have contributes no edge, which is what makes a pruned history walkable.
+                // One the graph DOES have, but the walk stopped short of, is a different thing entirely.
+                has_unwalked_parent[i] = graph.contains(parent);
+                continue;
+            }
 
             forward[*p].push_back(i32(i));
             ++in_degree[i];
             ++remaining_consumers[*p];
         }
+    }
 
-        for (auto const a : o->assignments())
+    // ---- the validity gate: may this sweep be seeded from a snapshot at all? -------------------------------------
+    //
+    // A snapshot holds `surviving` and no `superseded`, so seeding one is sound exactly where nothing else in this
+    // sweep can present a writer that the missing `superseded` would have suppressed.
+    //
+    // That holds when the walked set has EXACTLY ONE source and it is the snapshot: every non-source has a parent
+    // inside the walk, so descending parent edges from any op lands on that single source, making it an ancestor of
+    // everything walked — and an ancestor cannot present a stale branch.
+    //
+    // "Every source is cached" would NOT be enough.
+    // Materializing {T, X} where X is a distant ancestor of T gives two cached sources, and unions their surviving
+    // sets into a multi-value nobody wrote.
+    // The minimal condition is pairwise-incomparable sources, but comparing them is the global ancestor query
+    // ../../docs/decisions.md declines to pay for, and exactly-one is the cheap sufficient case that fits real
+    // histories.
+    auto seeded = i32(-1);
+    if (options.cache != nullptr)
+    {
+        auto any_terminator = false;
+        for (isize i = 0; i < n && !any_terminator; ++i)
+            any_terminator = options.cache->contains(reachable[i]);
+
+        if (any_terminator)
         {
-            if (filtered && !wanted.contains(a.path.entity))
-                continue;
+            auto sources = cc::vector<i32>();
+            for (isize i = 0; i < n; ++i)
+                if (in_degree[i] == 0)
+                    sources.push_back(i32(i));
 
-            auto entry = path_index.entry(a.path);
-            if (!entry.exists())
+            auto accepted = sources.size() == 1 && options.cache->contains(reachable[sources[0]]);
+
+            // Everything the walk stopped short of must be behind that one source, or some op is being replayed
+            // from a partial set of ancestors.
+            for (isize i = 0; accepted && i < n; ++i)
+                accepted = !has_unwalked_parent[i] || i32(i) == sources[0];
+
+            if (!accepted)
             {
-                auto const next = i32(paths.size());
-                paths.push_back(a.path);
-                entry.emplace(next);
+                // Self-correcting rather than optimistic: the sweep simply replays, which costs time and never a
+                // result.
+                // This is the case a branch reaching around a snapshot lands in.
+                if (options.stats != nullptr)
+                    options.stats->fell_back = true;
+
+                auto plain = options;
+                plain.cache = nullptr;
+                return materialize(graph, heads, entities, plain);
             }
+
+            seeded = sources[0];
         }
+    }
+
+    // ---- pass 1b: dense path indices ----------------------------------------------------------------------------
+    //
+    // This map is probed and never iterated, so its order cannot reach the output.
+    auto path_index = cc::map<property_path, i32>();
+    auto paths = cc::vector<property_path>();
+
+    auto const register_path = [&](property_path const& path)
+    {
+        if (filtered && !wanted.contains(path.entity))
+            return;
+
+        auto entry = path_index.entry(path);
+        if (!entry.exists())
+        {
+            auto const next = i32(paths.size());
+            paths.push_back(path);
+            entry.emplace(next);
+        }
+    };
+
+    for (isize i = 0; i < n; ++i)
+    {
+        // The seeded op's own writes are already in its snapshot, so its assignments are not registered here and are
+        // not applied later either.
+        if (i32(i) == seeded)
+        {
+            auto const& snapshot = options.cache->find(reachable[i])->document();
+            for (auto const& e : snapshot.entities)
+                for (auto const& c : e.value.components)
+                    for (auto const& p : c.value.properties)
+                        register_path({.entity = e.entity, .component = c.component, .property = p.property});
+
+            continue;
+        }
+
+        auto const* const o = graph.find(reachable[i]);
+        for (auto const a : o->assignments())
+            register_path(a.path);
     }
 
     // a head's state is read at the very end, so it is a consumer like any child
@@ -345,12 +504,41 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
             if (has_state[p])
                 merge_into(state, states[p]);
 
-        for (auto const a : o->assignments())
+        if (ix == seeded)
         {
-            if (filtered && !wanted.contains(a.path.entity))
-                continue;
+            // The snapshot IS this op's state: surviving as stored, and nothing superseded, which the gate above has
+            // just established that no op in this sweep can exploit.
+            //
+            // Its own assignments must NOT be re-applied.
+            // surviving(T) already contains T's writes, so applying them again would move T into superseded while it
+            // is also in surviving, and the next merge would drop it — T's own writes would silently vanish.
+            auto const& snapshot = options.cache->find(reachable[ix])->document();
+            for (auto const& e : snapshot.entities)
+                for (auto const& c : e.value.components)
+                    for (auto const& p : c.value.properties)
+                    {
+                        auto const path
+                            = property_path{.entity = e.entity, .component = c.component, .property = p.property};
+                        if (filtered && !wanted.contains(path.entity))
+                            continue;
 
-            apply_write(state[path_index[a.path]], o->id, a.value);
+                        auto& s = state[path_index[path]];
+                        for (auto const& w : p.value.writers)
+                            s.surviving.push_back(w);
+                    }
+
+            if (options.stats != nullptr)
+                options.stats->snapshots_used = 1;
+        }
+        else
+        {
+            for (auto const a : o->assignments())
+            {
+                if (filtered && !wanted.contains(a.path.entity))
+                    continue;
+
+                apply_write(state[path_index[a.path]], o->id, a.value);
+            }
         }
 
         states[ix] = cc::move(state);
@@ -374,7 +562,8 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
         //
         // The justification is per-SWEEP and does not survive being stored: a snapshot outlives its sweep, and a
         // user who later branches from before it reintroduces exactly what was dropped here.
-        // See ../../docs/todo/milestone-6.md, which may not reuse this predicate for snapshot eligibility.
+        // Which is why the gate above re-establishes the same property against today's DAG rather than trusting that
+        // it held when a snapshot was taken — see ../../docs/todo/milestone-6.md.
         if (options.drop_superseded_at_articulation_points && live_states == 1)
             for (auto& s : states[ix])
                 s.superseded.clear();
@@ -406,6 +595,9 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
 
         merge_into(final_state, states[*h]);
     }
+
+    if (options.stats != nullptr)
+        options.stats->ops_walked = processed;
 
     return build_document(paths, final_state);
 }

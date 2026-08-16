@@ -1,8 +1,11 @@
 #include <clean-core/string/format.hh>
-#include <versioned-document-file/impl/blob_codec.hh>
+#include <versioned-document-file/impl/payload_codec.hh>
+#include <versioned-document-file/impl/snapshot_codec.hh>
 #include <versioned-document-file/impl/store_memory.hh>
 #include <versioned-document-file/store.hh>
 #include <versioned-document/value_builder.hh>
+
+#include <algorithm>
 
 namespace vdoc::file
 {
@@ -131,7 +134,7 @@ cc::shared_async<publish_result> store::publish(publish_changes changes)
         // Note the asymmetry with the load path, which treats the same unknown encoding as an issue and carries on: a
         // FILE naming a codec this build lacks is someone else's newer writer, while a CALLER asking for one is this
         // build asking itself for something it cannot do.
-        if (impl::find_blob_codec(upload.encoding) == nullptr)
+        if (impl::find_payload_codec(upload.encoding) == nullptr)
             return cc::make_async_from_error<publish_result>(cc::async_error::make_error(cc::any_error(cc::format(
                 "a blob was published under the encoding '{}', which this build has no codec for", upload.encoding))));
 
@@ -150,7 +153,7 @@ cc::shared_async<publish_result> store::publish(publish_changes changes)
 
         auto row = blob_row{.size = upload.decoded_size > 0 ? upload.decoded_size : upload.data.size(),
                             .stored_size = upload.data.size(),
-                            .chunk_count = (upload.data.size() + impl::blob_chunk_size - 1) / impl::blob_chunk_size,
+                            .chunk_count = (upload.data.size() + impl::payload_chunk_size - 1) / impl::payload_chunk_size,
                             .format = upload.format,
                             .encoding = upload.encoding};
         row.hash.resize_to_uninitialized(blob_hash::byte_size);
@@ -337,6 +340,164 @@ cc::shared_async<reclaim_result> store::reclaim(cc::span<cc::string const> roots
         _durable_blobs.erase(hash);
 
     auto async = on_reclaim(cc::move(job));
+    impl_pump_until_idle();
+    return async;
+}
+
+// snapshots and pruning
+// -------------------------------------------------------------------------------------------------
+
+namespace
+{
+/// Encodes one cached snapshot into the row and chunks a writer takes.
+[[nodiscard]] cc::result<impl::snapshot_write> encode_for_storage(vdoc::op_id const& op,
+                                                                  vdoc::snapshot_document const& snapshot,
+                                                                  bool required)
+{
+    auto const decoded = impl::encode_snapshot(snapshot.document());
+
+    auto const* const codec = impl::find_payload_codec("raw");
+    CC_ASSERT(codec != nullptr, "the raw codec is always registered");
+
+    auto stored = codec->encode(cc::vector<byte>::create_copy_of(decoded));
+    CC_RETURN_IF_ERROR(stored);
+
+    auto chunks = impl::split_into_chunks(stored.value());
+    auto row = snapshot_row{.required = required ? 1 : 0,
+                            .encoding = cc::string("raw"),
+                            .decoded_size = decoded.size(),
+                            .stored_size = stored.value().size(),
+                            .chunk_count = chunks.size()};
+    row.op_hash.resize_to_uninitialized(vdoc::op_id::byte_size);
+    op.to_bytes(row.op_hash);
+
+    return impl::snapshot_write{.row = cc::move(row), .chunks = cc::move(chunks)};
+}
+} // namespace
+
+cc::shared_async<snapshot_write_result> store::publish_snapshots(cc::span<vdoc::op_id const> ops)
+{
+    impl_harvest_pending();
+
+    if (_is_closed)
+        return cc::make_async_from_error<snapshot_write_result>(
+            cc::async_error::make_error(cc::any_error(cc::string("publishing snapshots in a closed store"))));
+
+    auto job = impl::snapshot_write_job();
+    for (auto const& op : ops)
+    {
+        auto const* const snapshot = _snapshot_cache.find(op);
+        if (snapshot == nullptr)
+            continue; // the cache is derived and may have evicted it, which is not something to report
+
+        auto encoded = encode_for_storage(op, *snapshot, /*required =*/false);
+        if (encoded.has_error())
+            continue;
+
+        _snapshots[op] = snapshot_entry{.op = op,
+                                        .required = false,
+                                        .encoding = encoded.value().row.encoding,
+                                        .decoded_size = encoded.value().row.decoded_size,
+                                        .decoded = true};
+
+        job.snapshots.push_back(cc::move(encoded.value()));
+    }
+
+    auto async = on_write_snapshots(cc::move(job));
+    impl_pump_until_idle();
+    return async;
+}
+
+cc::shared_async<snapshot_write_result> store::prune(vdoc::op_id const& head)
+{
+    impl_harvest_pending();
+
+    if (_is_closed)
+        return cc::make_async_from_error<snapshot_write_result>(
+            cc::async_error::make_error(cc::any_error(cc::string("pruning a closed store"))));
+
+    if (!_ops.contains(head))
+        return cc::make_async_from_error<snapshot_write_result>(
+            cc::async_error::make_error(cc::any_error(cc::string("pruning at an op this document does not have"))));
+
+    // Computed here, on the calling thread, so nothing crosses to storage until the whole answer is known.
+    auto const doc = _ops.materialize(head, _snapshot_cache);
+    auto snapshot = vdoc::snapshot_document::create_owning_copy(doc);
+
+    auto encoded = encode_for_storage(head, snapshot, /*required =*/true);
+    if (encoded.has_error())
+        return cc::make_async_from_error<snapshot_write_result>(cc::async_error::make_error(
+            cc::any_error(cc::string("pruning at an op whose snapshot could not be encoded"))));
+
+    // EVERY ref must descend from `head`, or this prune is refused.
+    //
+    // A required snapshot carries no `superseded`, and that is only sound while nothing can present a writer from
+    // behind it.
+    // A ref that forked BEFORE `head` can: its own branch keeps its ancestors, so it still offers writers that ops
+    // behind `head` superseded — and merging the two would fabricate a multi-value nobody authored.
+    // Replaying instead is no answer either, since the ops that would have suppressed it are now skeletons.
+    //
+    // So the boundary a document may prune to is the oldest op every ref still descends from, and asking for more is
+    // an error rather than something to silently do half of.
+    for (auto const& [name, ref_head] : _refs)
+    {
+        if (ref_head == head)
+            continue;
+
+        auto descends = false;
+        op_id const other[] = {ref_head};
+        for (auto const& id : _ops.collect_reachable(other))
+            descends = descends || id == head;
+
+        if (!descends)
+            return cc::make_async_from_error<snapshot_write_result>(cc::async_error::make_error(cc::any_error(
+                cc::format("pruning at an op the ref '{}' does not descend from, which would leave the two unable to "
+                           "merge correctly",
+                           name))));
+    }
+
+    op_id const head_span[] = {head};
+    auto behind = cc::set<vdoc::op_id>();
+    for (auto const& id : _ops.collect_reachable(head_span))
+        if (!(id == head))
+            behind.insert(id);
+
+    auto job = impl::snapshot_write_job();
+    auto const encoding = encoded.value().row.encoding;
+    auto const decoded_size = encoded.value().row.decoded_size;
+    job.snapshots.push_back(cc::move(encoded.value()));
+
+    for (auto const& id : behind)
+    {
+        // Already a skeleton means already pruned, and re-emptying it would count a second time.
+        auto const* const o = _ops.find(id);
+        if (o == nullptr || o->is_skeleton())
+            continue;
+
+        auto hash = cc::vector<byte>();
+        hash.resize_to_uninitialized(vdoc::op_id::byte_size);
+        id.to_bytes(hash);
+        job.skeletonized.push_back(cc::move(hash));
+    }
+
+    std::sort(job.skeletonized.begin(), job.skeletonized.end(),
+              [](cc::vector<byte> const& a, cc::vector<byte> const& b)
+              {
+                  for (isize i = 0; i < a.size() && i < b.size(); ++i)
+                      if (a[i] != b[i])
+                          return a[i] < b[i];
+                  return a.size() < b.size();
+              });
+
+    // The in-memory graph follows the file, so a prune needs no reopen to take effect.
+    for (auto const& id : behind)
+        (void)_ops.skeletonize(id);
+
+    _snapshots[head]
+        = snapshot_entry{.op = head, .required = true, .encoding = encoding, .decoded_size = decoded_size, .decoded = true};
+    _snapshot_cache.install(head, cc::move(snapshot), /*pinned =*/true);
+
+    auto async = on_write_snapshots(cc::move(job));
     impl_pump_until_idle();
     return async;
 }

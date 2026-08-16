@@ -26,6 +26,7 @@ public:
     [[nodiscard]] cc::result<cc::vector<op_row>> read_ops() override;
     [[nodiscard]] cc::result<cc::vector<ref_row>> read_refs() override;
     [[nodiscard]] cc::result<cc::vector<snapshot_row>> read_snapshots() override;
+    [[nodiscard]] cc::result<cc::vector<snapshot_chunk_row>> read_snapshot_chunks(cc::span<byte const> op_hash) override;
     [[nodiscard]] cc::result<cc::vector<workspace_row>> read_workspace() override;
     [[nodiscard]] cc::result<cc::vector<meta_row>> read_meta() override;
 
@@ -71,6 +72,10 @@ public:
     [[nodiscard]] cc::result<cc::unit> upsert_asset(asset_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> delete_asset(cc::string_view asset_id) override;
     [[nodiscard]] cc::result<cc::unit> delete_blob(blob_hash const& hash) override;
+    [[nodiscard]] cc::result<cc::unit> upsert_snapshot(snapshot_row const& row,
+                                                       cc::span<cc::vector<byte> const> chunks) override;
+    [[nodiscard]] cc::result<cc::unit> delete_snapshot(cc::span<byte const> op_hash) override;
+    [[nodiscard]] cc::result<cc::unit> skeletonize_op(cc::span<byte const> op_hash) override;
     [[nodiscard]] cc::result<cc::unit> upsert_ref(ref_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> upsert_workspace(workspace_row const& row) override;
     [[nodiscard]] cc::result<cc::unit> commit() override;

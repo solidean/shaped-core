@@ -21,7 +21,7 @@ cc::async_error as_async_error(cc::any_error e)
 /// The handle is a member HERE, so nothing outside this class can reach it — which is what makes exclusive ownership
 /// structural rather than a rule somebody has to remember.
 class sqlite_connection_actor final
-  : public cc::threaded_actor_impl<open_request, publish_request, reclaim_request, workspace_request, blob_request, close_request>
+  : public cc::threaded_actor_impl<open_request, publish_request, snapshot_write_request, reclaim_request, workspace_request, blob_request, close_request>
 {
 public:
     // A string literal, so it outlives the thread it names.
@@ -81,6 +81,23 @@ protected:
 
         auto writer = sqlite_writer(_db);
         auto applied = apply_publish(writer, msg.job);
+        if (applied.has_error())
+            msg.promise->push_error(as_async_error(cc::move(applied).error()));
+        else
+            msg.promise->push_value(applied.value());
+    }
+
+    void on_message(snapshot_write_request msg) override
+    {
+        if (!_is_open)
+        {
+            msg.promise->push_error(as_async_error(cc::any_error(cc::string("pruning a store whose connection "
+                                                                            "is closed"))));
+            return;
+        }
+
+        auto writer = sqlite_writer(_db);
+        auto applied = apply_snapshot_write(writer, msg.job);
         if (applied.has_error())
             msg.promise->push_error(as_async_error(cc::move(applied).error()));
         else

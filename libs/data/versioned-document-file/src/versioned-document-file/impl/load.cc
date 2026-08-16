@@ -1,5 +1,6 @@
 #include <clean-core/string/format.hh>
-#include <versioned-document-file/impl/blob_codec.hh>
+#include <versioned-document-file/impl/payload_codec.hh>
+#include <versioned-document-file/impl/snapshot_codec.hh>
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/store.hh>
 #include <versioned-document/op.hh>
@@ -114,7 +115,7 @@ cc::result<cc::unit> load(store_reader& reader, store& target)
         // An encoding this build has no codec for is a load issue and the blob is skipped, never a failed open.
         // Note what the `continue` skips: the blob does NOT join _durable_blobs, so a republish rewrites it rather
         // than trusting a row this build cannot read.
-        if (find_blob_codec(row.encoding) == nullptr)
+        if (find_payload_codec(row.encoding) == nullptr)
         {
             report_issue(report, {.kind = load_issue_kind::unknown_encoding, .blob = hash.value(), .name = row.encoding});
             blob_state[hash.value()] = {.is_usable = false};
@@ -311,9 +312,12 @@ cc::result<cc::unit> load(store_reader& reader, store& target)
             report_issue(report, {.kind = load_issue_kind::dangling_ref, .op = id.value(), .name = row.name});
     }
 
-    // 7. Snapshots, stored OPAQUE.
-    //    Nothing here decodes one: milestone 6 attaches a decoder behind the `encoding` seam, and until then a row
-    //    round-trips byte for byte.
+    // 7. Snapshots, decoded into the materialization cache.
+    //
+    //    This is the ONE place where severity is decided by the `required` flag rather than by the kind of failure.
+    //    A droppable snapshot that will not decode costs speed and nothing else, so it is an issue.
+    //    A required one stood in for history that has been pruned away, so it is a hard failure and the open does not
+    //    complete — there is no correct document to hand back.
     auto snapshots = reader.read_snapshots();
     CC_RETURN_IF_ERROR(snapshots);
     for (auto const& row : snapshots.value())
@@ -321,18 +325,77 @@ cc::result<cc::unit> load(store_reader& reader, store& target)
         auto const id = try_read_op_id(row.op_hash);
         if (!id.has_value())
         {
-            // A required snapshot that cannot be read is a HARD failure: the history it stood in for is gone.
             if (row.required != 0)
                 return cc::error(cc::any_error(cc::string("a required snapshot is keyed on something that is not an "
                                                           "op id, and the history behind it has been pruned")));
+
+            // No op to name, because the key itself is not an id.
             report_issue(report, {.kind = load_issue_kind::missing_snapshot});
             continue;
         }
 
-        target._snapshots[id.value()] = snapshot_entry{.op = id.value(),
-                                                       .required = row.required != 0,
-                                                       .encoding = row.encoding,
-                                                       .data = cc::vector<byte>::create_copy_of(row.data)};
+        auto entry = snapshot_entry{.op = id.value(),
+                                    .required = row.required != 0,
+                                    .encoding = row.encoding,
+                                    .decoded_size = row.decoded_size};
+
+        auto const fail_or_report = [&](load_issue_kind kind, cc::string_view what) -> cc::result<cc::unit>
+        {
+            if (row.required != 0)
+                return cc::error(cc::any_error(
+                    cc::format("a required snapshot {}, and the history behind it has been pruned", what)));
+
+            report_issue(report, {.kind = kind, .op = id.value()});
+            return cc::unit{};
+        };
+
+        auto const* const codec = find_payload_codec(row.encoding);
+        if (codec == nullptr)
+        {
+            // The row stays on disk untouched, because publishing only ever inserts — so a snapshot a newer build
+            // wrote survives this one opening and saving the file.
+            CC_RETURN_IF_ERROR(fail_or_report(load_issue_kind::unknown_encoding, "names an encoding this build has no "
+                                                                                 "codec for"));
+            target._snapshots[id.value()] = cc::move(entry);
+            continue;
+        }
+
+        auto chunks = reader.read_snapshot_chunks(row.op_hash);
+        CC_RETURN_IF_ERROR(chunks);
+
+        auto stored = cc::vector<byte>();
+        for (auto const& chunk : chunks.value())
+            for (auto const b : chunk.data)
+                stored.push_back(b);
+
+        if (isize(chunks.value().size()) != row.chunk_count || stored.size() != row.stored_size)
+        {
+            CC_RETURN_IF_ERROR(fail_or_report(load_issue_kind::missing_snapshot, "is missing chunks"));
+            target._snapshots[id.value()] = cc::move(entry);
+            continue;
+        }
+
+        auto decoded_bytes = codec->decode(cc::move(stored), row.decoded_size);
+        if (decoded_bytes.has_error())
+        {
+            CC_RETURN_IF_ERROR(fail_or_report(load_issue_kind::missing_snapshot, "will not decode"));
+            target._snapshots[id.value()] = cc::move(entry);
+            continue;
+        }
+
+        auto snapshot = try_decode_snapshot(snapshot_encoding_v1, decoded_bytes.value());
+        if (snapshot.has_error())
+        {
+            CC_RETURN_IF_ERROR(fail_or_report(load_issue_kind::missing_snapshot, "will not decode"));
+            target._snapshots[id.value()] = cc::move(entry);
+            continue;
+        }
+
+        // A required snapshot is PINNED: it is not a cache, and shedding memory must not be able to destroy the only
+        // record of the history it replaced.
+        entry.decoded = true;
+        target._snapshot_cache.install(id.value(), cc::move(snapshot.value()), entry.required);
+        target._snapshots[id.value()] = cc::move(entry);
     }
 
     // 8. Workspace.

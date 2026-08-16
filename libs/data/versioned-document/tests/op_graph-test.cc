@@ -1,162 +1,25 @@
-#include <clean-core/common/assert.hh>
+#include "op_graph_corpus.hh"
+
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <versioned-document/op_graph.hh>
-#include <versioned-document/value_builder.hh>
 
 #include <algorithm>
 
 using namespace cc::primitive_defines;
 
-using vdoc::assignment;
-using vdoc::component_type_id;
 using vdoc::entity_id;
-using vdoc::op;
 using vdoc::op_graph;
 using vdoc::op_id;
-using vdoc::property_id;
 using vdoc::property_path;
-using vdoc::raw_document;
-using vdoc::value;
 
-namespace
-{
-[[nodiscard]] property_path path_of(cc::string_view e, cc::string_view c, cc::string_view p)
-{
-    return property_path{.entity = entity_id::of(e),
-                         .component = component_type_id::of(c),
-                         .property = property_id::of(p)};
-}
-
-/// One write, as a test spells it: a path and an integer.
-struct write
-{
-    property_path path;
-    i64 value;
-};
-
-/// Builds and adds one op, standing in for op_builder, which does not exist yet.
-///
-/// The values are local because their views only have to survive as far as encode_assignments, which copies the
-/// bytes into the blob — after that the op owns everything it points at.
-[[nodiscard]] op_id add_op(op_graph& graph, cc::span<op_id const> parents, cc::span<write const> writes)
-{
-    auto sorted_parents = cc::vector<op_id>::create_copy_of(parents);
-    std::sort(sorted_parents.begin(), sorted_parents.end(), op_id::by_bytes{});
-
-    auto owned = cc::vector<value>();
-    owned.reserve(writes.size());
-    for (auto const& w : writes)
-        owned.push_back(value::of_i64(w.value));
-
-    auto entries = cc::vector<assignment>();
-    for (isize i = 0; i < writes.size(); ++i)
-        entries.push_back(assignment{.path = writes[i].path, .value = owned[i]});
-
-    std::sort(entries.begin(), entries.end(),
-              [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
-
-    auto const metadata = vdoc::value_builder::object().build();
-    auto const metadata_bytes = cc::vector<byte>::create_copy_of(metadata.bytes());
-    auto const assignment_bytes = vdoc::encode_assignments(entries);
-
-    auto const id = vdoc::compute_op_id(sorted_parents, metadata_bytes, assignment_bytes);
-    auto decoded = vdoc::try_decode_op(id, sorted_parents, metadata_bytes, assignment_bytes);
-    CC_ASSERT(decoded.has_value(), "the harness built an op its own decoder rejects");
-
-    return graph.add(cc::move(decoded.value()));
-}
-
-/// The writers of one path, as sorted id bytes, for comparing two materializations.
-[[nodiscard]] cc::vector<op_id> writers_of(raw_document const& doc, property_path const& path)
-{
-    auto out = cc::vector<op_id>();
-    auto const* const p = doc.try_get(path);
-    if (p == nullptr)
-        return out;
-
-    for (auto const& w : p->writers)
-        out.push_back(w.writer);
-
-    return out;
-}
-
-[[nodiscard]] bool same_ids(cc::span<op_id const> a, cc::span<op_id const> b)
-{
-    if (a.size() != b.size())
-        return false;
-    for (isize i = 0; i < a.size(); ++i)
-        if (!(a[i] == b[i]))
-            return false;
-    return true;
-}
-
-/// The deliberately stupid reference: a writer survives unless some OTHER writer of the same path descends from it.
-///
-/// This is what the real pass is checked against.
-/// It is exponentially worse and obviously correct, which is the point: milestone 6 checks its snapshot cache
-/// against the real pass, so the real pass needs an oracle of its own.
-[[nodiscard]] cc::vector<op_id> oracle_writers(op_graph const& graph, cc::span<op_id const> heads, property_path const& path)
-{
-    auto const reachable = graph.collect_reachable(heads);
-
-    auto writers = cc::vector<op_id>();
-    for (auto const& id : reachable)
-    {
-        auto const* const o = graph.find(id);
-        for (auto const a : o->assignments())
-            if (a.path == path)
-                writers.push_back(id);
-    }
-
-    auto const descends_from = [&](op_id const& from, op_id const& ancestor)
-    {
-        auto stack = cc::vector<op_id>();
-        stack.push_back(from);
-        auto seen = cc::vector<op_id>();
-        while (!stack.empty())
-        {
-            auto const cur = stack.back();
-            stack.remove_back();
-
-            auto const* const o = graph.find(cur);
-            if (o == nullptr)
-                continue;
-
-            for (auto const& p : o->parents)
-            {
-                if (p == ancestor)
-                    return true;
-
-                auto already = false;
-                for (auto const& s : seen)
-                    already = already || s == p;
-                if (already)
-                    continue;
-
-                seen.push_back(p);
-                stack.push_back(p);
-            }
-        }
-        return false;
-    };
-
-    auto out = cc::vector<op_id>();
-    for (auto const& w : writers)
-    {
-        auto dominated = false;
-        for (auto const& other : writers)
-            dominated = dominated || (!(other == w) && descends_from(other, w));
-
-        if (!dominated)
-            out.push_back(w);
-    }
-
-    std::sort(out.begin(), out.end(), op_id::by_bytes{});
-    return out;
-}
-} // namespace
+using vdoc_test::add_op;
+using vdoc_test::oracle_writers;
+using vdoc_test::path_of;
+using vdoc_test::same_ids;
+using vdoc_test::write;
+using vdoc_test::writers_of;
 
 TEST("vdoc - add is idempotent and does not disturb the child index")
 {

@@ -74,6 +74,26 @@ public:
 
     /// How many blobs are stored, which is what a dedup assertion counts.
     [[nodiscard]] virtual isize count_blobs() = 0;
+
+    /// How many snapshot rows are stored, whatever their state.
+    [[nodiscard]] virtual isize count_snapshots() = 0;
+
+    /// Deletes the lowest-keyed snapshot row and its chunks, behind the store's back.
+    /// True if there was one.
+    virtual bool delete_first_snapshot() = 0;
+
+    /// Replaces the lowest-keyed snapshot's payload with bytes that were never a snapshot.
+    /// True if there was one.
+    virtual bool corrupt_first_snapshot_payload() = 0;
+
+    /// Flips the lowest-keyed snapshot's `required` flag, so both severities are reachable from one fixture.
+    virtual bool set_first_snapshot_required(bool required) = 0;
+
+    /// Rewrites the lowest-keyed snapshot's encoding, so the file names one this build has no codec for.
+    virtual bool set_first_snapshot_encoding(cc::string_view encoding) = 0;
+
+    /// Whether the lowest-keyed snapshot is marked required — read back from storage rather than from the store.
+    [[nodiscard]] virtual bool first_snapshot_is_required() = 0;
 };
 
 /// One store implementation, as the conformance suite drives it.
@@ -134,6 +154,10 @@ template <class T>
 
 /// Builds a small history with real assignments, so a round-trip compares something.
 [[nodiscard]] sample_history make_sample_history();
+
+/// A linear history of `length` ops over one entity, each overwriting the last.
+/// Long enough that pruning it leaves something behind, which the three-op sample is not.
+[[nodiscard]] sample_history make_linear_history(isize length);
 
 /// A second head branching off `after`, reachable from no ref unless one is published for it.
 [[nodiscard]] vdoc::op_id add_branch(vdoc::op_graph& graph, vdoc::op_id const& after, cc::string_view marker);

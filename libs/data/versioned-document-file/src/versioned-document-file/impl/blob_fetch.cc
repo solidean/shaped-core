@@ -1,5 +1,5 @@
 #include <clean-core/string/format.hh>
-#include <versioned-document-file/impl/blob_codec.hh>
+#include <versioned-document-file/impl/payload_codec.hh>
 #include <versioned-document-file/impl/store_io.hh>
 
 /// The one route from a blob hash to bytes, over a blob_payload_reader.
@@ -20,7 +20,7 @@ cc::result<cc::vector<byte>> fetch_blob(blob_payload_reader& reader, blob_hash c
 
     // Unlike the load, which reports an unknown encoding and carries on, a FETCH of such a blob can only fail: there is
     // no partial answer to give.
-    auto const* codec = find_blob_codec(blob.encoding);
+    auto const* codec = find_payload_codec(blob.encoding);
     if (codec == nullptr)
         return cc::error(cc::any_error(cc::format("this build has no codec for the blob encoding '{}'", blob.encoding)));
 

@@ -47,6 +47,14 @@ struct reclaim_request
     cc::shared_async<reclaim_result> promise;
 };
 
+/// Attaches a snapshot, and empties whatever ops the job names.
+/// Its own message rather than a mode of publish_request, because it is the one thing here that destroys.
+struct snapshot_write_request
+{
+    snapshot_write_job job;
+    cc::shared_async<snapshot_write_result> promise;
+};
+
 struct workspace_request
 {
     cc::vector<workspace_entry> entries;
@@ -72,7 +80,7 @@ struct blob_request
 };
 
 using sqlite_actor
-    = cc::threaded_actor<open_request, publish_request, reclaim_request, workspace_request, blob_request, close_request>;
+    = cc::threaded_actor<open_request, publish_request, snapshot_write_request, reclaim_request, workspace_request, blob_request, close_request>;
 
 /// Creates and starts the actor.
 /// Nothing touches the disk here — the open is a message like any other.

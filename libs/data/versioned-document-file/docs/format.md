@@ -6,10 +6,9 @@ A `.vdoc` file is a single SQLite database holding a document's whole history, t
 The model it stores is [versioned-document](../../versioned-document/docs/concept.md)'s; read that first.
 This document is the authority on the bytes.
 
-The schema, the load path, publishing, the workspace, and the whole content store — assets, blobs, the encoding seam and reclamation — are implemented.
-Snapshots are carried but not yet decoded.
-[milestone-4](../../versioned-document/docs/todo/milestone-4.md) and [milestone-5](../../versioned-document/docs/todo/milestone-5.md) landed the first.
-[milestone-6](../../versioned-document/docs/todo/milestone-6.md) lands the rest.
+The schema, the load path, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — and snapshots with history pruning are implemented.
+[milestone-4](../../versioned-document/docs/todo/milestone-4.md) and [milestone-5](../../versioned-document/docs/todo/milestone-5.md) landed the store and the content store.
+[milestone-6](../../versioned-document/docs/todo/milestone-6.md) landed snapshots and pruning; recovery from an untrusted peer is what remains.
 
 ---
 
@@ -112,10 +111,20 @@ Publishing derives the op set to persist from the refs being set, so an op no re
 
 ```sql
 CREATE TABLE snapshots (
-    op_hash  BLOB PRIMARY KEY NOT NULL,
-    required INTEGER NOT NULL,  -- 1 = load-bearing, 0 = droppable cache
-    encoding TEXT NOT NULL,
-    data     BLOB NOT NULL
+    op_hash      BLOB PRIMARY KEY NOT NULL,
+    required     INTEGER NOT NULL,  -- 1 = load-bearing, 0 = droppable cache
+    encoding     TEXT NOT NULL,     -- the payload codec: `raw` today
+    decoded_size INTEGER NOT NULL,
+    stored_size  INTEGER NOT NULL,
+    chunk_count  INTEGER NOT NULL
+) WITHOUT ROWID;
+
+CREATE TABLE snapshot_chunk (
+    op_hash     BLOB NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    data        BLOB NOT NULL,
+    PRIMARY KEY (op_hash, chunk_index),
+    FOREIGN KEY (op_hash) REFERENCES snapshots(op_hash) ON DELETE CASCADE
 ) WITHOUT ROWID;
 ```
 
@@ -124,6 +133,40 @@ CREATE TABLE snapshots (
 
 A snapshot that will not decode is dropped with a load issue.
 A *required* one that will not decode is a hard failure, because the history it stood in for is gone.
+
+**The payload is chunked rather than inline**, because SQLite caps a single value near a gigabyte and a snapshot of a large document goes past that.
+`chunk_count` and `stored_size` say what must be there, so a snapshot whose chunks do not add up is visibly incomplete rather than silently short.
+The bytes cascade off the snapshot row, so they die with it and nothing else can reach them.
+That is deliberately unlike a blob, whose lifetime a reclamation decides.
+
+`encoding` names the **payload codec**, the same table blobs use, so compression will arrive for both at once.
+
+### The `snapshot-v1` payload
+
+A snapshot holds the surviving writers of every property, and nothing else.
+It is a materialized document rather than a resumable sweep state.
+[decisions.md](../../versioned-document/docs/decisions.md#a-snapshot-stores-surviving-only-and-its-validity-is-decided-at-use) argues why.
+
+All integers are u32 little-endian, matching the value codec's own length prefixes.
+Names are the canonical id bytes, exactly what an id commits to.
+
+| field | meaning |
+|-------|---------|
+| `writer_count`, then that many 32-byte ids | the writer table, ascending by canonical bytes |
+| three name tables | entity, component and property names, each a count then `len`-prefixed bytes, ascending |
+| `entity_count` | then, per entity: a name index and a component count |
+| per component | a name index and a property count |
+| per property | a name index and a writer count |
+| per writer | a writer index, the value's byte length, then the value verbatim |
+
+**Four intern tables, and they are what makes this affordable.**
+A document of a few million properties would otherwise spend 32 bytes per property on writer ids alone, and the number of *distinct* writer ops is far smaller, since one op writes many paths.
+
+**Every value carries its own extent.**
+`vdoc::try_decode` rejects trailing bytes, so a value can only be validated against a slice already known to be exactly it — the same reason an assignment carries one.
+
+The encoding is **canonical**, and the decoder enforces it: every table and every level ascending and deduplicated.
+Two builds computing the same snapshot produce byte-identical rows.
 
 ### `assets` — the name index
 
@@ -245,7 +288,8 @@ Unknown keys are preserved untouched.
 3. Read `assets`, filling in blob-side facts from step 2, and flagging assets whose blobs are missing or incomplete.
 4. Read `ops`, decoding and **verifying every one**, then check each op's parents against what the file actually held.
 5. Read `refs`, `snapshots`, `workspace`, `meta`.
-   A snapshot is carried **opaquely** — its op, its `required` flag, its `encoding` and its bytes — and nothing decodes one until milestone 6 attaches a decoder behind that seam.
+   A snapshot is **decoded** into the materialization cache, and a `required` one is pinned there so shedding cache memory cannot destroy it.
+   The file records what it has — the op, the flag, the encoding, the decoded size — and never keeps the payload resident.
 
 **Soft failures never block a load.**
 A corrupt op is dropped and reported, landing on exactly the same downstream path as a pruned one — which is what makes that path get exercised rather than rotting.
@@ -257,14 +301,14 @@ Load issues are string-free: a kind plus the id it concerns.
 | `op_decode_failed` | an op row's bytes would not decode |
 | `op_hash_mismatch` | the bytes do not hash to the stored id — corruption or tampering |
 | `missing_parent` | an op names a parent not in the file; informational, and normal after pruning |
-| `missing_snapshot` | a snapshot row would not decode |
+| `missing_snapshot` | a snapshot's payload would not decode, or its chunks do not add up; names the `op`, except where the row's key was not an op id at all |
 | `dangling_ref` | a ref names an op not in the file, usually one this load dropped; the ref is kept anyway |
 | `asset_decode_failed` | an asset's `parts` or `meta` blob would not decode, which drops the asset; or its `deps` blob would not, which does not |
 | `asset_part_unnamed` | an asset carries a part with an empty name, which nothing can address |
 | `asset_duplicate_part_name` | several parts share one name; all are kept, and a singular lookup reports it as ambiguous |
 | `asset_blob_missing` | an asset names a content hash with no blob row |
 | `asset_blob_incomplete` | the blob row exists but its chunks do not all add up |
-| `unknown_encoding` | a blob names an encoding this build does not have |
+| `unknown_encoding` | a blob or a snapshot names an encoding this build does not have |
 | `workspace_decode_failed` | a workspace row's value would not decode; the row is left in place |
 | `unknown_table` | a table this build does not know; ignored, and left untouched |
 | `unknown_column` | a column this build does not know on a table it does know; ignored, and preserved |
@@ -310,4 +354,32 @@ An asset remap may legitimately orphan blobs, which is exactly the case this han
 
 Unmapping a single name is a separate, cheaper act: it rides a publish, is retroactive exactly like a remap, and collects no bytes.
 
-History pruning is separate and independent: attach a snapshot to an op, mark it `required`, then delete the ops behind it, leaving skeletons where the DAG still needs a position.
+History pruning is separate and independent, and has its own section below.
+
+---
+
+## Pruning history
+
+Attach a `required` snapshot to an op, then empty every op behind it — leaving a **skeleton**: the row, its id and its parents, with both payload columns NULL.
+
+Deleting the rows instead would sever ancestry through them.
+Two writes that were ordered would read as concurrent, and materialization would manufacture a multi-value nobody authored.
+That is why the position survives even where the content does not.
+
+**How far a document may prune is bounded, and the bound is not obvious.**
+`prune` refuses unless **every ref descends from the prune point**, and names the ref that blocked it.
+
+A required snapshot carries no superseded set, which is sound only while nothing can present a writer from behind it.
+Ops behind the boundary are skeletons and carry no writers — but a ref that forked *before* the boundary keeps its own ancestors, because they are history it still needs.
+That branch does still offer writers the emptied ops superseded, and merging the two would fabricate a multi-value.
+Replaying instead is no escape either: the ops that would have suppressed it are skeletons by then, so the replay is lossy rather than merely slow.
+
+So the boundary a document may prune to is the **oldest op every ref still descends from**.
+
+The write is one transaction, snapshots first and skeletons second, through its own store hook — a publish only ever appends and is idempotent by content addressing, while this destroys.
+
+**The trade-off, stated where a user can see it:** less storage and a faster load, against losing deep history and shortening the range over which two replicas can still synchronize.
+Pruning is always optional, and never automatic.
+
+After a prune, materializing **without** the snapshot is lossy by construction, since the emptied ops carry nothing.
+That is what `required` means, and why deleting such a row destroys data.

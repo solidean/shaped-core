@@ -6,7 +6,12 @@
 #include <clean-core/string/string_view.hh>
 #include <versioned-document-file/fwd.hh>
 
-/// The blob encoding seam: how stored bytes are made, and unmade.
+/// The payload encoding seam: how stored bytes are made, and unmade.
+///
+/// **One table serves every chunked payload the format has** — blobs and snapshots both.
+/// They store their bytes in different tables, on purpose, because their lifetimes are decided differently; but the
+/// question "what were these bytes encoded with" is the same question, and answering it twice is how the two would
+/// end up supporting different compressors.
 ///
 /// `raw` is the only encoding v1 writes or reads, and the seam exists anyway — as real dispatch rather than a
 /// placeholder, which is what makes adding compression later a codec entry and no format migration.
@@ -17,11 +22,11 @@
 
 namespace vdoc::file::impl
 {
-/// One blob encoding.
+/// One payload encoding.
 ///
 /// Both directions take and return the vector BY VALUE, which is what lets `raw` be a move rather than a copy: the
 /// identity codec hands its argument straight back, so the seam costs nothing while it has only one entry.
-struct blob_codec
+struct payload_codec
 {
     cc::string_view name;
 
@@ -39,11 +44,11 @@ struct blob_codec
 };
 
 /// The encodings this build can read and write, `raw` first.
-[[nodiscard]] cc::span<blob_codec const> blob_codecs();
+[[nodiscard]] cc::span<payload_codec const> payload_codecs();
 
 /// The codec for `encoding`, or null where this build has none.
 ///
 /// Null means two different things by where it is asked, and both are correct: a FILE naming an unknown encoding is a
 /// load issue and the blob is skipped, while a CALLER asking for one is a publish error.
-[[nodiscard]] blob_codec const* find_blob_codec(cc::string_view encoding);
+[[nodiscard]] payload_codec const* find_payload_codec(cc::string_view encoding);
 } // namespace vdoc::file::impl

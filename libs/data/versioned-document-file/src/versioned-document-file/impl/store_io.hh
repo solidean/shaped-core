@@ -39,6 +39,11 @@ public:
     [[nodiscard]] virtual cc::result<cc::vector<op_row>> read_ops() = 0;
     [[nodiscard]] virtual cc::result<cc::vector<ref_row>> read_refs() = 0;
     [[nodiscard]] virtual cc::result<cc::vector<snapshot_row>> read_snapshots() = 0;
+
+    /// Every chunk of one snapshot, in ascending chunk order.
+    /// Asked per snapshot rather than as a whole table, because a snapshot is only ever wanted entire.
+    [[nodiscard]] virtual cc::result<cc::vector<snapshot_chunk_row>> read_snapshot_chunks(cc::span<byte const> op_hash)
+        = 0;
     [[nodiscard]] virtual cc::result<cc::vector<workspace_row>> read_workspace() = 0;
     [[nodiscard]] virtual cc::result<cc::vector<meta_row>> read_meta() = 0;
 
@@ -83,6 +88,24 @@ public:
 
     /// Deletes a blob; its chunks follow by cascade, which is why foreign_keys must be on.
     [[nodiscard]] virtual cc::result<cc::unit> delete_blob(blob_hash const& hash) = 0;
+
+    /// Attaches or replaces a snapshot and its chunks.
+    ///
+    /// Really overwrites, like upsert_asset and unlike insert_op: a snapshot is derived, and recomputing one is
+    /// normal rather than a conflict.
+    /// Any chunks the previous row had are gone afterwards, so a shorter payload cannot leave a longer one's tail.
+    [[nodiscard]] virtual cc::result<cc::unit> upsert_snapshot(snapshot_row const& row,
+                                                               cc::span<cc::vector<byte> const> chunks) = 0;
+
+    /// Detaches a snapshot; its chunks follow by cascade, which is why foreign_keys must be on.
+    /// Removing one that is not there is not an error — the outcome asked for already holds.
+    [[nodiscard]] virtual cc::result<cc::unit> delete_snapshot(cc::span<byte const> op_hash) = 0;
+
+    /// Empties an op's payload columns, leaving its id and its parents — a SKELETON.
+    ///
+    /// Deleting the row instead would sever ancestry through it, and two writes that were ordered would read as
+    /// concurrent.
+    [[nodiscard]] virtual cc::result<cc::unit> skeletonize_op(cc::span<byte const> op_hash) = 0;
 
     [[nodiscard]] virtual cc::result<cc::unit> upsert_ref(ref_row const& row) = 0;
     [[nodiscard]] virtual cc::result<cc::unit> upsert_workspace(workspace_row const& row) = 0;
@@ -165,6 +188,32 @@ struct publish_job
     cc::vector<ref_row> refs;
 };
 
+/// One snapshot and the bytes to store for it, as the caller hands them to a writer.
+struct snapshot_write
+{
+    snapshot_row row;
+    cc::vector<cc::vector<byte>> chunks;
+};
+
+/// One snapshot write, with the ops it makes redundant — computed on the calling thread and complete in itself.
+///
+/// Self-contained for the same reason a publish_job is: it crosses to the actor thread, so every byte here is a copy.
+/// The snapshots go in BEFORE anything is emptied, which is the order that makes a torn run impossible to get wrong
+/// even though the transaction already makes it impossible to observe.
+///
+/// One job type serves both persisting a droppable snapshot and pruning, because the difference between them is
+/// `required` plus whether `skeletonized` is empty — not a different write.
+struct snapshot_write_job
+{
+    cc::vector<snapshot_write> snapshots;
+
+    /// Op hashes to empty out, sorted by bytes so the write order is deterministic.
+    cc::vector<cc::vector<byte>> skeletonized;
+};
+
+/// Runs one snapshot write over a writer, in one transaction.
+[[nodiscard]] cc::result<snapshot_write_result> apply_snapshot_write(store_writer& writer, snapshot_write_job const& job);
+
 /// One reclamation, computed on the calling thread from the resident asset index.
 ///
 /// Both lists are already the answer: the closure walk happens above this, so the writer only deletes what it is told.
@@ -177,11 +226,18 @@ struct reclaim_job
 /// Runs one reclamation over a writer, in one transaction.
 [[nodiscard]] cc::result<reclaim_result> apply_reclaim(store_writer& writer, reclaim_job const& job);
 
-/// How many bytes of a blob go in one `blob_chunk` row.
+/// How many bytes of a payload go in one chunk row, for blobs and snapshots alike.
 ///
-/// Chunking sidesteps SQLite's per-value size ceiling and keeps a multi-gigabyte asset from being one allocation.
+/// Chunking sidesteps SQLite's per-value size ceiling and keeps a multi-gigabyte payload from being one allocation.
 /// The value is a storage detail rather than a format constant: a reader is told the count, and never assumes it.
-inline constexpr isize blob_chunk_size = 1 << 20;
+inline constexpr isize payload_chunk_size = 1 << 20;
+
+/// Splits a payload into the chunks its table stores, in order.
+///
+/// Shared by blobs and snapshots so the two cannot end up chunking differently, which would only show up as a file
+/// one build can read and another cannot.
+/// An empty payload yields no chunks, and reassembling none of them is an empty payload again.
+[[nodiscard]] cc::vector<cc::vector<byte>> split_into_chunks(cc::span<byte const> payload);
 
 /// Runs one publish over a writer, in one transaction.
 /// Shared by both store implementations, which is what keeps the write order — and its atomicity — identical on each.

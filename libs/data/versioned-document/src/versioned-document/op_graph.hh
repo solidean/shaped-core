@@ -3,6 +3,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/function/function_ref.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/raw_document.hh>
 
@@ -43,6 +44,23 @@ public:
     /// parent is a normal state rather than an error.
     [[nodiscard]] cc::vector<op_id> collect_reachable(cc::span<op_id const> heads) const;
 
+    /// Every op reachable from `heads`, stopping at any op `is_terminator` accepts, sorted by id bytes.
+    ///
+    /// A terminator is INCLUDED and its parents are not expanded, so the result is parent-closed except at
+    /// terminators.
+    /// That is what makes the in-degree-0 set of the result the frontier a snapshot-seeded sweep validates against.
+    [[nodiscard]] cc::vector<op_id> collect_reachable_until(cc::span<op_id const> heads,
+                                                            cc::function_ref<bool(op_id const&)> is_terminator) const;
+
+    /// Replaces an op's payload with nothing, leaving its id and its parent edges exactly where they are.
+    ///
+    /// Removing the entry instead would sever ancestry through it, and two writes that were ordered would read as
+    /// concurrent — a semantic change caused by a storage operation.
+    ///
+    /// **Nothing here checks that a snapshot covers what this erases**; that is the pruning caller's job.
+    /// False where the graph does not have the op; an op that is already a skeleton is a no-op and true.
+    bool skeletonize(op_id const& id);
+
     /// Materializes the document as of one head, or as of several merged.
     ///
     /// Materializing several heads is defined to equal materializing a merge op over them, for every property
@@ -59,6 +77,19 @@ public:
     /// This is what op_builder diffs against, so it must agree with the unfiltered pass exactly.
     [[nodiscard]] raw_document materialize_entities(cc::span<op_id const> heads, cc::span<entity_id const> entities) const;
 
+    /// The same three passes, terminating the walk at cached snapshots wherever that is sound today.
+    ///
+    /// The result is defined to equal the uncached overload above, always.
+    /// Where the cache cannot be used the sweep silently replays instead, so this differs only in how long it takes.
+    ///
+    /// **The result borrows the cache as well as the graph** — see [raw_document](raw_document.hh).
+    /// Nothing is installed here: installing is [snapshot_cache](snapshot_cache.hh)'s explicit business.
+    [[nodiscard]] raw_document materialize(op_id const& head, snapshot_cache& cache) const;
+    [[nodiscard]] raw_document materialize(cc::span<op_id const> heads, snapshot_cache& cache) const;
+    [[nodiscard]] raw_document materialize_entities(cc::span<op_id const> heads,
+                                                    cc::span<entity_id const> entities,
+                                                    snapshot_cache& cache) const;
+
 private:
     cc::map<op_id, op> _ops;
     cc::map<op_id, cc::vector<op_id>> _children;
@@ -66,7 +97,23 @@ private:
 
 namespace vdoc::impl
 {
-/// Knobs on the materialization pass that exist only so a test can compare the two modes against each other.
+/// What one materialization pass did, for a test that has to see the cache was actually used.
+///
+/// Comparing a cached result against an uncached one proves nothing if the cache was never consulted, and that is the
+/// most likely way this whole area passes vacuously.
+struct materialize_stats
+{
+    /// Ops the sweep actually processed, which is the number a snapshot is there to shrink.
+    isize ops_walked = 0;
+
+    /// 1 where the sweep was seeded from a snapshot, 0 where it replayed.
+    isize snapshots_used = 0;
+
+    /// True where a snapshot was found and the validity gate then rejected it, so the sweep re-ran without one.
+    bool fell_back = false;
+};
+
+/// Knobs on the materialization pass, and the seam the snapshot cache attaches to.
 struct materialize_options
 {
     /// Drop the superseded sets wholesale where exactly one live state remains in the sweep.
@@ -74,6 +121,13 @@ struct materialize_options
     /// Without it a linear history of N writes to one path accumulates N-1 superseded entries, which makes the
     /// reference pass quadratic — so this is on in production and off only to prove it changes no result.
     bool drop_superseded_at_articulation_points = true;
+
+    /// Terminate the walk at cached snapshots and seed from one where the gate allows it.
+    /// Null is the plain replay, which is what a cached sweep is checked against.
+    snapshot_cache* cache = nullptr;
+
+    /// Where the sweep records what it did, or null.
+    materialize_stats* stats = nullptr;
 };
 
 /// The one materialization pass, which every public entry point above forwards to.

@@ -136,6 +136,16 @@ struct raw_entity;
 
 /// The materialized but still untyped document.
 struct raw_document;
+
+/// A materialized document owning every byte it points at, so it outlives the ops that wrote them.
+class snapshot_document;
+
+/// Materialization results cached against the op they were computed at.
+/// Caller-owned and passed in explicitly; op_graph holds no cache of its own.
+class snapshot_cache;
+
+/// When installing a snapshot is worth its memory.
+struct snapshot_policy;
 } // namespace vdoc
 
 // ---- interpretation ----------------------------------------------------------------------------

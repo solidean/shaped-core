@@ -14,7 +14,7 @@ This document tracks *state*; it is not where the design lives.
 - The settled choices and their reasoning are [decisions.md](decisions.md).
 - The ordered plan, with acceptance criteria per step, is [todo/](todo/_index.md).
 
-Milestones 0 through 5 have landed; everything above them is `[planned]`.
+Milestones 0 through 5 have landed, and milestone 6 all but its recovery half; everything above them is `[planned]`.
 The milestone that lands each piece is named so the two documents stay in step.
 
 ## Top-level structure
@@ -27,6 +27,8 @@ src/versioned-document/
   op              [done]        op / op_id / op_builder, canonical encoding    milestone 2
   op_graph        [done]        the DAG, reachability, materialization         milestone 2
   raw_document    [done]        the untyped materialized document              milestone 2
+  snapshot_document [done]      a materialized document owning its bytes       milestone 6
+  snapshot_cache  [done]        materializations cached against an op          milestone 6
   component       [done]        traits, registry, schema, component_writer     milestone 3
   parse_report    [done]        diagnostics and agreed multi-values            milestone 3
   parse_policy    [done]        property_reader and the policy seam            milestone 3
@@ -40,7 +42,7 @@ src/versioned-document-file/
   store           [done]        open / load / verify / refs / publish / close   milestone 4
   workspace       [done]        the disposable side table                       milestone 4
   assets          [done]        the vocabulary, the store and the blob source   milestone 5
-  snapshots       [in progress] carried opaquely; caching and pruning           milestone 6
+  snapshots       [done]        decoded, cached, pinned when required           milestone 6
 
 src/versioned-document-file/impl/
   rows            [done]        one struct per table, untyped                   milestone 4
@@ -48,7 +50,9 @@ src/versioned-document-file/impl/
   load            [done]        the one loader, shared by both implementations  milestone 4
   publish         [done]        the one publisher, shared the same way          milestone 4
   reclaim         [done]        the one reclaimer, shared the same way          milestone 5
-  blob_codec      [done]        the encoding table; `raw` is its one entry      milestone 5
+  payload_codec   [done]        the encoding table; `raw` is its one entry      milestone 5
+  snapshot_codec  [done]        the snapshot-v1 layout, and its decoder         milestone 6
+  snapshot_write  [done]        one snapshot write, and one prune               milestone 6
   blob_fetch      [done]        the one route from a blob hash to bytes         milestone 5
   store_memory    [done]        the in-memory arm, and the suite's oracle       milestone 4
   sqlite_schema   [done]        the DDL, the pragmas, the shape check           milestone 4
@@ -126,10 +130,14 @@ Design: [concept.md](concept.md#assets-and-blobs). Landed in [milestone 5](todo/
 - `[done]` **the encoding seam**, with `raw` the only registered encoding — see [decisions.md](decisions.md#blobs-ship-raw-only-with-the-encoding-seam-reserved).
 - `[done]` **the async blob source**, enqueue-and-return, with a byte-range variant over the chunked store.
 
-### snapshots, pruning and recovery [planned]
+### snapshots, pruning and recovery [in progress]
 
 Materialization caching, history pruning, skeleton ops, and verifying history received from an untrusted peer.
-Lands in [milestone 6](todo/milestone-6.md).
+Lands in [milestone 6](todo/milestone-6.md); recovery is what remains.
 
-- `[planned]` **snapshot-terminated materialization**, so a long history costs what a short one does.
-- `[planned]` **skeleton ops reported as unverifiable**, never as a hash mismatch.
+- `[done]` **snapshot-terminated materialization**, so a long history costs what a short one does.
+- `[done]` **validity decided at use, against today's DAG**, rather than recorded when a snapshot was taken.
+- `[done]` **persisted snapshots**, chunked, behind the shared payload codec.
+- `[done]` **history pruning**, bounded to the oldest op every ref descends from, and never automatic.
+- `[done]` **skeleton ops reported as unverifiable**, never as a hash mismatch.
+- `[planned]` **recovery from an untrusted peer**, by recomputing hashes over the bytes as received.

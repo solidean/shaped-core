@@ -22,7 +22,12 @@ public:
             return {};
         if (_blocked)
             _image->writes_fail = true;
-        return store::create_in_memory(_image);
+
+        // Null is this arm's failed open — a required snapshot that will not decode is what produces one.
+        auto handle = store::create_in_memory(_image);
+        if (handle == nullptr)
+            return {};
+        return handle;
     }
 
     cc::vector<byte> snapshot_bytes() override
@@ -37,7 +42,10 @@ public:
         for (auto const& row : _image->refs)
             text += cc::format("ref {} {}\n", row.name, hex(row.op_hash));
         for (auto const& row : _image->snapshots)
-            text += cc::format("snap {} {} {} {}\n", hex(row.op_hash), row.required, row.encoding, hex(row.data));
+            text += cc::format("snap {} {} {} {} {} {}\n", hex(row.op_hash), row.required, row.encoding,
+                               row.decoded_size, row.stored_size, row.chunk_count);
+        for (auto const& row : _image->snapshot_chunks)
+            text += cc::format("snap-chunk {} {} {}\n", hex(row.op_hash), row.chunk_index, hex(row.data));
         for (auto const& row : _image->assets)
             text += cc::format("asset {} {} {} {} {}\n", row.asset_id, row.kind, hex(row.parts),
                                row.meta.has_value() ? hex(row.meta.value()) : cc::string("-"),
@@ -172,7 +180,109 @@ public:
 
     isize count_blobs() override { return _image->blobs.size(); }
 
+    isize count_snapshots() override { return _image->snapshots.size(); }
+
+    bool delete_first_snapshot() override
+    {
+        auto const key = first_snapshot_key();
+        if (!key.has_value())
+            return false;
+
+        auto kept = cc::vector<snapshot_row>();
+        for (auto& row : _image->snapshots)
+            if (!same_hash(row.op_hash, key.value()))
+                kept.push_back(cc::move(row));
+        _image->snapshots = cc::move(kept);
+
+        // The file arm gets this from ON DELETE CASCADE; here it is spelled out so both arms leave the same state.
+        auto kept_chunks = cc::vector<snapshot_chunk_row>();
+        for (auto& row : _image->snapshot_chunks)
+            if (!same_hash(row.op_hash, key.value()))
+                kept_chunks.push_back(cc::move(row));
+        _image->snapshot_chunks = cc::move(kept_chunks);
+        return true;
+    }
+
+    bool corrupt_first_snapshot_payload() override
+    {
+        auto const key = first_snapshot_key();
+        if (!key.has_value())
+            return false;
+
+        // The row keeps saying what it stores, so this is a payload that will not decode rather than a short one.
+        for (auto& row : _image->snapshot_chunks)
+            if (same_hash(row.op_hash, key.value()) && row.chunk_index == 0 && !row.data.empty())
+            {
+                for (auto& b : row.data)
+                    b = byte(0xFF);
+                return true;
+            }
+        return false;
+    }
+
+    bool set_first_snapshot_required(bool required) override
+    {
+        auto const key = first_snapshot_key();
+        if (!key.has_value())
+            return false;
+
+        for (auto& row : _image->snapshots)
+            if (same_hash(row.op_hash, key.value()))
+            {
+                row.required = required ? 1 : 0;
+                return true;
+            }
+        return false;
+    }
+
+    bool set_first_snapshot_encoding(cc::string_view encoding) override
+    {
+        auto const key = first_snapshot_key();
+        if (!key.has_value())
+            return false;
+
+        for (auto& row : _image->snapshots)
+            if (same_hash(row.op_hash, key.value()))
+            {
+                row.encoding = cc::string(encoding);
+                return true;
+            }
+        return false;
+    }
+
+    bool first_snapshot_is_required() override
+    {
+        auto const key = first_snapshot_key();
+        if (!key.has_value())
+            return false;
+
+        for (auto const& row : _image->snapshots)
+            if (same_hash(row.op_hash, key.value()))
+                return row.required != 0;
+        return false;
+    }
+
 private:
+    static bool same_hash(cc::span<byte const> a, cc::span<byte const> b)
+    {
+        if (a.size() != b.size())
+            return false;
+        for (isize i = 0; i < a.size(); ++i)
+            if (a[i] != b[i])
+                return false;
+        return true;
+    }
+
+    /// Lowest key by bytes, so both arms damage the same snapshot.
+    cc::optional<cc::vector<byte>> first_snapshot_key() const
+    {
+        auto lowest = cc::optional<cc::vector<byte>>();
+        for (auto const& row : _image->snapshots)
+            if (!lowest.has_value() || hex(row.op_hash) < hex(lowest.value()))
+                lowest = cc::vector<byte>::create_copy_of(cc::span<byte const>(row.op_hash));
+        return lowest;
+    }
+
     /// Lowest id, which is the first blob written — the same choice the file arm makes.
     cc::optional<i64> first_blob_id() const
     {
@@ -226,6 +336,28 @@ sample_history make_sample_history()
     third.set_parents(cc::span<vdoc::op_id const>(history.ops).last_n(1));
     third.set_raw(wall, transform, vdoc::property_id::of("label"), vdoc::value::of("north"));
     history.ops.push_back(history.graph.add(third.build(history.graph)));
+
+    return history;
+}
+
+sample_history make_linear_history(isize length)
+{
+    auto history = sample_history();
+
+    auto const wall = vdoc::entity_id::of("wall-17");
+    auto const transform = vdoc::component_type_id::of("transform");
+
+    for (isize i = 0; i < length; ++i)
+    {
+        auto op = vdoc::op_builder();
+        if (!history.ops.empty())
+            op.set_parents(cc::span<vdoc::op_id const>(history.ops).last_n(1));
+
+        // Every op overwrites x, so all but the last writer is superseded — which is what makes pruning observable.
+        op.set_raw(wall, transform, vdoc::property_id::of("x"), vdoc::value::of(f64(i)));
+        op.set_raw(wall, transform, vdoc::property_id::of(cc::format("p{}", i)), vdoc::value::of(i64(i)));
+        history.ops.push_back(history.graph.add(op.build(history.graph)));
+    }
 
     return history;
 }

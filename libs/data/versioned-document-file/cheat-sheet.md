@@ -3,8 +3,8 @@
 The `.vdoc` save format: one SQLite file holding a document's history, its embedded assets, and its workspace state.
 Namespace `vdoc::file`. Depends on versioned-document and babel-serializer.
 
-> The store, the loader, publishing, the workspace and the whole content store are real.
-> Snapshots are **carried but not yet decoded** — entries below say which.
+> The store, the loader, publishing, the workspace, the content store and snapshots with pruning are real.
+> Recovery from an untrusted peer is what milestone 6 has left.
 > The on-disk shape is fully specified in [docs/format.md](docs/format.md).
 
 ## Opening and reading
@@ -17,7 +17,8 @@ vdoc::file::store::is_file_storage_available();                  // false where 
 // `loaded` is cc::shared_async<cc::unit>: ready once the load finished, and a HARD failure rides its error.
 file->ops();          // vdoc::op_graph const& — loaded and verified in full
 file->refs();         // cc::map<cc::string, op_id> — kept verbatim, dangling ones included
-file->snapshots();    // cc::map<op_id, snapshot_entry> — OPAQUE here; milestone 6 decodes them
+file->snapshots();    // cc::map<op_id, snapshot_entry> — what the FILE records; never the bytes
+file->snapshot_cache(); // vdoc::snapshot_cache& — the decoded ones; required snapshots are pinned
 file->assets();       // cc::map<cc::string, asset_record>
 file->meta();         // cc::map<cc::string, vdoc::value> — file-level facts, not document ones
 file->report();       // load_report: the soft failures
@@ -164,7 +165,7 @@ That is what makes the in-memory arm an oracle rather than a shortcut, and it is
 
 - **Only history is immutable.** Blobs are content-addressed, but the **name → asset mapping is mutable and remapping is retroactive, on purpose**.
   So **op ids do not commit to asset content** — a document is reproducible only relative to an asset resolution.
-- **A store is a seam.** The loaded state is plain members filled once at load; only keeping it in sync with storage is virtual, and that is five hooks.
+- **A store is a seam.** The loaded state is plain members filled once at load; only keeping it in sync with storage is virtual, and that is six hooks.
 - **One actor owns the connection**, and only the SQLite arm has one.
   No caller blocks on storage, and no lock is held across a read.
 - **One thread owns a store.** The API is non-blocking because storage work runs on an actor, not because several threads may call in.
@@ -172,3 +173,6 @@ That is what makes the in-memory arm an oracle rather than a shortcut, and it is
 - **A skeleton op is unverifiable, not corrupt.** A pruned parent has no bytes to hash, and must never be reported as a mismatch.
 - **`encoding` is a reserved seam.** `raw` is all v1 writes; an unknown encoding skips the blob with an issue rather than failing the open.
 - **Unknown tables and columns survive** an open-modify-save cycle, because every statement names its own columns and no rewrite exists.
+- **A required snapshot is load-bearing.** Materializing a pruned document *without* it is lossy by construction, which is why it is pinned in the cache and why an undecodable one fails the open.
+- **Pruning is bounded.** It is refused unless every ref descends from the prune point, because a ref that forked earlier can still present writers the emptied ops superseded.
+- **Persisting a snapshot is explicit.** `publish` never writes one, or it would stop being idempotent.

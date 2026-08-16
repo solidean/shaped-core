@@ -309,12 +309,72 @@ Dropping an entry because no side currently lists it as surviving resurrects a d
 
 It may be dropped *wholesale* at an articulation point, where one live state remains in the sweep.
 **That justification is per-sweep and does not survive being stored.**
-[milestone-6.md](todo/milestone-6.md#1-snapshot-terminated-materialization) works out why a persisted snapshot needs a strictly stronger condition, and what each snapshot kind does instead.
+The decision below works out what a stored snapshot does instead.
 
-This pass is also the oracle milestone 6's snapshot cache is checked against, which is a second reason to prefer it.
+This pass is also the oracle the snapshot cache is checked against, which is a second reason to prefer it.
 An oracle has to be correct by inspection, and "correct modulo a chain cover" is not.
 
 **Reopen when:** profiling shows the state copy at merges dominating, which is a question about representation rather than about the rule.
+
+### A snapshot stores `surviving` only, and its validity is decided at use
+
+**Decided in milestone 6**, and it reverses what [milestone-6.md](todo/milestone-6.md#1-snapshot-terminated-materialization) originally specified.
+
+A cached snapshot is exactly a `raw_document` — the surviving writers and nothing else, over bytes it owns.
+
+**Storing `superseded` was designed first, and rejected on size.**
+It totals `32 B × (all historical assignments − distinct paths)`, so a snapshot would grow with the very history it exists to replace.
+A document of a few million properties that saw fifty million assignments over its life would carry over a gigabyte of superseded ids.
+That stands in for a document that fits in a tenth of the space.
+The asymptotics are wrong, not merely the constant.
+
+**`surviving(X)` is a function of X's own causal past alone.**
+State flows forward through the sweep, so the state at X never depends on anything outside X's ancestry, and the articulation-point clear cannot corrupt it.
+So any op may be snapshotted, from any sweep, and there is no eligibility question at creation time.
+
+**Validity moves to use time, and is re-checked against today's DAG.**
+The walk terminates at any op the cache holds, which leaves the walked set parent-closed except at terminators.
+A snapshot may then be seeded only where that set has **exactly one source** — one op with no parent inside the walk — and that source is the snapshot.
+Every non-source has a parent inside the walk, so descending parent edges from anywhere lands on that single source.
+That makes the source an ancestor of everything walked, and an ancestor cannot present a stale branch.
+It costs nothing, because it is the in-degree computation Kahn already does.
+
+**"Every source is cached" is unsound, and was the first rule tried.**
+Materializing `{T, X}` where X is a distant ancestor of T gives two cached sources, and unions their surviving sets into a multi-value nobody wrote.
+The mathematically minimal condition is pairwise-incomparable sources, but comparing them is the ancestor query the decision above declines to pay for.
+Exactly-one is the cheap sufficient case, and it fits real histories.
+
+A second condition is needed and is easy to miss: **no op other than the seed may have a parent that is in the graph but outside the walk.**
+Only a terminated walk can produce one, and such an op would be replayed from a partial set of ancestors.
+
+Everything else falls back to a plain replay, which costs time and never a result.
+So correctness never depends on the optimism; only speed does.
+
+**Consequence, stated because it is real behaviour rather than a corner case:**
+a merge of two branches that both reach the root has two sources, and replays in full until a snapshot exists at or below the merge base.
+
+**Reopen when:** profiling shows the fallback firing on a workload that is not linear-heavy.
+That is a question about the *condition*, not about the representation.
+
+### A snapshot's empty superseded is what bounds how far history may be pruned
+
+**Decided in milestone 6.** A `required` snapshot carries no superseded set, exactly like a droppable one.
+
+That is sound only while nothing can present a writer from behind it.
+Ops behind a prune boundary are skeletons, and a skeleton carries no assignments, so a branch arriving through one contributes no writer to resurrect.
+
+**But a ref that forked *before* the boundary breaks that**, and this was found by a test rather than by reasoning.
+Such a branch keeps its own ancestors, because they are history it still needs.
+So it does still offer writers that ops behind the boundary superseded, and merging the two fabricates a multi-value.
+Replaying instead is no escape: the ops that would have suppressed it are skeletons by then, so the replay is *lossy* rather than merely slow.
+Both paths are wrong, which means the prune itself was the error.
+
+So `store::prune` **refuses unless every ref descends from the prune point**, and names the ref that blocked it.
+The boundary a document may prune to is the oldest op every ref still descends from.
+
+**Reopen when:** a workflow genuinely needs to prune past a long-lived divergent ref.
+The fix would be to give a required snapshot its superseded ids after all: 32 bytes each, no payload, and computable at prune time while history is still present.
+That reintroduces the size question above, bounded this time to one snapshot rather than every one.
 
 ### Metadata is any canonical value, not necessarily an object
 
@@ -444,6 +504,28 @@ The reservation stands as written, and this is the evidence it asked for rather 
 
 **Reopen when:** BLAKE3 shows up in a profile of an ordinary open / edit / save loop.
 If it does, the design put hashing somewhere it does not belong, and the fix is to move the hashing — after which the choice of hash can be re-argued on evidence.
+
+### Snapshot bytes get their own chunk table, and share the blob codec
+
+**Decided in milestone 6.** A snapshot's payload lives in `snapshot_chunk`, cascading off `snapshots`, and not in the blob store.
+
+Chunking is not optional: SQLite caps a single value near a gigabyte, and a snapshot of a document with millions of properties goes past that.
+Once a user's document is over the line, no later change can rescue the file they already have.
+
+The blob store already chunks, already has an encoding seam, and already deduplicates — so pointing snapshots at it looks obviously right.
+**The argument against is lifetime.**
+Blob lifetime is decided by a mark-and-sweep over the asset index, and a required snapshot is load-bearing data whose loss is unrecoverable.
+Putting it behind a GC makes a marking bug into a data-loss bug, in the one place the format promises never to lose anything.
+A cascade makes the lifetime structural instead: those bytes die when their snapshot row dies, and nothing else can reach them.
+
+The blob store's two real advantages do not apply here either.
+Snapshots do not repeat, so cross-payload dedup buys nothing, and a snapshot must be decoded whole to be a document, so ranged reads buy nothing.
+
+What *is* shared is the **codec**: `blob_codec` became `payload_codec`, and one table serves blobs and snapshots alike.
+Adding zstd later stays one entry there rather than two.
+The chunker is shared for the same reason — two implementations could only ever differ by writing a file one build reads and another does not.
+
+**Reopen when:** a third chunked payload appears, at which point the table-per-kind pattern is worth generalizing rather than copying a third time.
 
 ### String interning belongs in clean-core
 

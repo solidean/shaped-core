@@ -8,6 +8,18 @@
 
 namespace vdoc::file::impl
 {
+cc::vector<cc::vector<byte>> split_into_chunks(cc::span<byte const> payload)
+{
+    auto out = cc::vector<cc::vector<byte>>();
+    for (isize at = 0; at < payload.size(); at += payload_chunk_size)
+    {
+        auto const size = cc::min(payload_chunk_size, payload.size() - at);
+        out.push_back(cc::vector<byte>::create_copy_of(payload.subspan({.offset = at, .size = size})));
+    }
+
+    return out;
+}
+
 cc::result<publish_result> apply_publish(store_writer& writer, publish_job const& job)
 {
     CC_RETURN_IF_ERROR(writer.begin());
@@ -25,17 +37,10 @@ cc::result<publish_result> apply_publish(store_writer& writer, publish_job const
 
         ++blobs_written;
         auto const id = inserted.value().value();
-        auto index = i64(0);
-        for (isize at = 0; at < blob.data.size(); at += blob_chunk_size)
-        {
-            auto const size = cc::min(blob_chunk_size, blob.data.size() - at);
+        auto chunks = split_into_chunks(blob.data);
+        for (isize index = 0; index < chunks.size(); ++index)
             CC_RETURN_IF_ERROR(
-                writer.insert_chunk({.blob_id = id,
-                                     .chunk_index = index,
-                                     .data = cc::vector<byte>::create_copy_of(
-                                         cc::span<byte const>(blob.data).subspan({.offset = at, .size = size}))}));
-            ++index;
-        }
+                writer.insert_chunk({.blob_id = id, .chunk_index = i64(index), .data = cc::move(chunks[index])}));
     }
 
     for (auto const& row : job.assets)

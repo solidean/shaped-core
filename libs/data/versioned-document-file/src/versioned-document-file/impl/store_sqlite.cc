@@ -19,6 +19,14 @@ cc::shared_async<publish_result> sqlite_store::on_publish(publish_job job)
     return promise;
 }
 
+cc::shared_async<snapshot_write_result> sqlite_store::on_write_snapshots(snapshot_write_job job)
+{
+    auto promise = cc::make_async_manual<snapshot_write_result>();
+    if (!_actor->enqueue_message(snapshot_write_request{.job = cc::move(job), .promise = promise}))
+        promise->push_error(rejected("a prune"));
+    return promise;
+}
+
 cc::shared_async<reclaim_result> sqlite_store::on_reclaim(reclaim_job job)
 {
     auto promise = cc::make_async_manual<reclaim_result>();

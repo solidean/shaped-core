@@ -13,6 +13,7 @@
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/workspace.hh>
 #include <versioned-document/op_graph.hh>
+#include <versioned-document/snapshot_cache.hh>
 
 #include <memory>
 
@@ -57,10 +58,13 @@ struct vdoc::file::open_result
     cc::shared_async<cc::unit> loaded;
 };
 
-/// A materialized document cached against an op, so loading need not replay history back to the root.
+/// What the file records about one snapshot — never its payload.
 ///
-/// **Opaque in this milestone.** Nothing here decodes a snapshot: the row round-trips byte for byte, and `encoding` is
-/// the seam a decoder attaches to in milestone 6.
+/// **The bytes are deliberately not here.** A decodable snapshot has already become an entry in the store's
+/// snapshot_cache, and one this build cannot decode is bytes nobody can use; keeping either resident would mean
+/// holding a second copy of something that can run to gigabytes.
+/// A row this build cannot read still round-trips untouched, because publishing only ever inserts and never rewrites.
+///
 /// `required` is carried rather than inferred, because a required snapshot that will not decode is a hard failure
 /// while a droppable one is an issue.
 struct vdoc::file::snapshot_entry
@@ -69,19 +73,12 @@ struct vdoc::file::snapshot_entry
     /// True where history behind this op has been pruned, so deleting the row destroys data.
     bool required = false;
     cc::string encoding;
-    cc::vector<byte> data;
+    i64 decoded_size = 0;
 
-    /// Spelled out rather than defaulted, because cc::vector carries no equality of its own.
-    /// Byte equality on `data` is the only equality an opaque payload can have.
-    [[nodiscard]] friend bool operator==(snapshot_entry const& a, snapshot_entry const& b)
-    {
-        if (a.op != b.op || a.required != b.required || a.encoding != b.encoding || a.data.size() != b.data.size())
-            return false;
-        for (isize i = 0; i < a.data.size(); ++i)
-            if (a.data[i] != b.data[i])
-                return false;
-        return true;
-    }
+    /// True where this build has a codec for `encoding` and the bytes decoded, so the cache has it.
+    bool decoded = false;
+
+    [[nodiscard]] friend bool operator==(snapshot_entry const&, snapshot_entry const&) = default;
 };
 
 /// What a caller asks to publish: ref moves plus the assets and blobs that go with them.
@@ -121,6 +118,18 @@ struct vdoc::file::reclaim_result
     isize blobs_removed = 0;
 
     [[nodiscard]] friend bool operator==(reclaim_result const& a, reclaim_result const& b) = default;
+};
+
+/// What one snapshot write actually did — the same result for persisting a snapshot and for pruning.
+///
+/// `ops_skeletonized` is zero when nothing was pruned, and zero again on a second prune of the same head, which is
+/// what its idempotence looks like from the outside.
+struct vdoc::file::snapshot_write_result
+{
+    isize snapshots_written = 0;
+    isize ops_skeletonized = 0;
+
+    [[nodiscard]] friend bool operator==(snapshot_write_result const& a, snapshot_write_result const& b) = default;
 };
 
 /// What a consumer needs to fetch an asset: the record, and the source to fetch its parts through.
@@ -191,6 +200,9 @@ public:
     ///
     /// Reopening one re-runs the load — its decoding, its verification and its issues — which is what makes the
     /// in-memory arm an oracle rather than a shortcut.
+    ///
+    /// **Null where that load failed hard**, which is this arm's equivalent of a file that will not open.
+    /// A required snapshot that will not decode is the one way an image produces one.
     [[nodiscard]] static store_handle create_in_memory(std::shared_ptr<memory_image> image);
 
     // the loaded document
@@ -201,7 +213,16 @@ public:
     /// The named heads, kept verbatim — including one whose op this load dropped, which is reported as a dangling ref.
     [[nodiscard]] cc::map<cc::string, vdoc::op_id> const& refs() const { return _refs; }
 
+    /// What the file records about each snapshot — never its bytes.
     [[nodiscard]] cc::map<vdoc::op_id, snapshot_entry> const& snapshots() const { return _snapshots; }
+
+    /// The materialization cache this store's snapshots live in.
+    ///
+    /// Non-const because materializing through it is what a caller wants:
+    /// `store.ops().materialize(head, store.snapshot_cache())`.
+    /// Required snapshots in here are PINNED, so clear_unpinned() cannot destroy what a prune stood on.
+    [[nodiscard]] vdoc::snapshot_cache& snapshot_cache() { return _snapshot_cache; }
+
     [[nodiscard]] cc::map<cc::string, asset_record> const& assets() const { return _assets; }
 
     /// File-level facts rather than document ones — the writer's build, creation time.
@@ -252,6 +273,35 @@ public:
     /// **An asset remap may legitimately orphan blobs** — that is the case this exists for, not a bug to prevent.
     /// Reclaiming with no roots at all empties the asset index, which is a legitimate ask and not guarded against.
     [[nodiscard]] cc::shared_async<reclaim_result> reclaim(cc::span<cc::string const> roots);
+
+    // snapshots and pruning
+public:
+    /// Persists the cached snapshots at `ops` as DROPPABLE rows.
+    ///
+    /// **Explicit, and never a side effect of publish.** A snapshot is derived, so writing one on a heuristic would
+    /// make publishing non-idempotent and grow the file with caches nobody asked for.
+    /// An op with no cached snapshot is skipped rather than reported: the cache is derived and may have evicted it.
+    [[nodiscard]] cc::shared_async<snapshot_write_result> publish_snapshots(cc::span<vdoc::op_id const> ops);
+
+    /// Attaches a REQUIRED snapshot at `head` and empties every op behind it that no other ref still needs.
+    ///
+    /// **Destructive, explicit, and never automatic.** Less storage and a faster load, against losing deep history and
+    /// shortening the range over which two replicas can still synchronize.
+    ///
+    /// What remains where an op was is a SKELETON — its id and its parents, with no payload.
+    /// The DAG keeps its shape, so reachability, merges and child walks all still work; only the content is gone.
+    /// Deleting the rows instead would sever ancestry, and two writes that were ordered would read as concurrent.
+    ///
+    /// **Every ref must descend from `head`**, and this fails without writing anything otherwise.
+    ///
+    /// A required snapshot carries no `superseded`, which is sound only while nothing can present a writer from behind
+    /// it.
+    /// A ref that forked earlier can — its branch keeps its own ancestors — and merging the two would then fabricate
+    /// a multi-value nobody authored, while replaying instead would read the pruned ops as empty.
+    /// So the boundary a document may prune to is the oldest op every ref still descends from.
+    ///
+    /// Also fails, writing nothing, where `head` is not in the graph.
+    [[nodiscard]] cc::shared_async<snapshot_write_result> prune(vdoc::op_id const& head);
 
     // resolving assets
 public:
@@ -308,12 +358,19 @@ public:
     store(store const&) = delete;
     store& operator=(store const&) = delete;
 
-    // the seam — five hooks, and nothing else differs
+    // the seam — six hooks, and nothing else differs
 protected:
     store() = default;
 
     /// Persists one already-computed publish.
     [[nodiscard]] virtual cc::shared_async<publish_result> on_publish(impl::publish_job job) = 0;
+
+    /// Persists one already-computed prune.
+    ///
+    /// Its own hook rather than a mode of on_publish, because a publish only ever APPENDS and is idempotent by content
+    /// addressing, while a prune destroys.
+    /// The safest operation in the format should not share a code path with the only destructive one.
+    [[nodiscard]] virtual cc::shared_async<snapshot_write_result> on_write_snapshots(impl::snapshot_write_job job) = 0;
 
     /// Starts one blob fetch and returns at once.
     ///
@@ -346,6 +403,10 @@ protected:
     vdoc::op_graph _ops;
     cc::map<cc::string, vdoc::op_id> _refs;
     cc::map<vdoc::op_id, snapshot_entry> _snapshots;
+
+    /// The decoded snapshots, with the REQUIRED ones pinned.
+    /// _snapshots above is what the file records; this is what materializing actually uses.
+    vdoc::snapshot_cache _snapshot_cache;
     cc::map<cc::string, asset_record> _assets;
     cc::map<cc::string, workspace_value> _workspace;
     cc::map<cc::string, vdoc::value> _meta;

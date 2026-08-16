@@ -33,13 +33,27 @@ struct vdoc::file::ref_row
     cc::vector<byte> op_hash;
 };
 
-/// A row of `snapshots`.
+/// A row of `snapshots` — the metadata alone, never the payload.
+///
 /// `required = 1` means history behind this op has been pruned, so deleting the row destroys data.
+/// `chunk_count` and `stored_size` say what must be there, so a snapshot whose chunks do not add up is visibly
+/// incomplete rather than silently short.
 struct vdoc::file::snapshot_row
 {
     cc::vector<byte> op_hash;
     i64 required = 0;
     cc::string encoding;
+    i64 decoded_size = 0;
+    i64 stored_size = 0;
+    i64 chunk_count = 0;
+};
+
+/// A row of `snapshot_chunk`.
+/// Keyed by the snapshot's op hash rather than a rowid, because a snapshot is never read a range at a time.
+struct vdoc::file::snapshot_chunk_row
+{
+    cc::vector<byte> op_hash;
+    i64 chunk_index = 0;
     cc::vector<byte> data;
 };
 

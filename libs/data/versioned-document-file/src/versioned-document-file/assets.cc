@@ -1,6 +1,6 @@
 #include <clean-core/string/format.hh>
 #include <versioned-document-file/assets.hh>
-#include <versioned-document-file/impl/blob_codec.hh>
+#include <versioned-document-file/impl/payload_codec.hh>
 
 namespace vdoc::file
 {
@@ -75,7 +75,7 @@ part_range asset_record::parts_named(cc::string_view name) const
 
 cc::result<blob_upload> blob_upload::of(cc::span<byte const> decoded, cc::string_view format, cc::string_view encoding)
 {
-    auto const* codec = impl::find_blob_codec(encoding);
+    auto const* codec = impl::find_payload_codec(encoding);
     if (codec == nullptr)
         return cc::error(cc::any_error(cc::format("this build has no codec for the blob encoding '{}'", encoding)));
 

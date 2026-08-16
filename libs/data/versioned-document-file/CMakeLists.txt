@@ -11,7 +11,9 @@ add_library(versioned-document-file
     src/versioned-document-file/diagnostics.cc
     src/versioned-document-file/assets.cc
     src/versioned-document-file/store.cc
-    src/versioned-document-file/impl/blob_codec.cc
+    src/versioned-document-file/impl/payload_codec.cc
+    src/versioned-document-file/impl/snapshot_write.cc
+    src/versioned-document-file/impl/snapshot_codec.cc
     src/versioned-document-file/impl/blob_fetch.cc
     src/versioned-document-file/impl/load.cc
     src/versioned-document-file/impl/publish.cc
@@ -69,11 +71,14 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/assets-test.cc
         tests/diagnostics-test.cc
+        tests/snapshot_codec-test.cc
+        tests/snapshot_codec-test.cc
         tests/conformance/store_fixture.cc
         tests/conformance/sqlite_medium.cc
         tests/conformance/drivers.cc
         tests/conformance/conformance-test.cc
         tests/conformance/assets-conformance-test.cc
+        tests/conformance/snapshots-conformance-test.cc
     )
 
     # babel-serializer is linked for the test fixture alone, which fabricates a damaged file on purpose.

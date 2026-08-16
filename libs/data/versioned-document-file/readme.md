@@ -17,7 +17,8 @@ One file is one shareable unit: send it to someone and they have the document, i
 The op DAG loads eagerly and completely; blobs load lazily through a [`blob_source`](src/versioned-document-file/store.hh).
 
 The store, the loader, publishing, the workspace and the content store — assets, blobs, the encoding seam and reclamation — are implemented.
-Snapshots have their table, their vocabulary and their load path, and are decoded in [milestone 6](../versioned-document/docs/todo/_index.md).
+Snapshots are decoded into a materialization cache, persisted over a chunked payload, and history can be pruned behind one.
+What remains of [milestone 6](../versioned-document/docs/todo/_index.md) is recovery from an untrusted peer.
 [docs/format.md](docs/format.md) specifies the on-disk shape.
 
 ## The one thing to know first
