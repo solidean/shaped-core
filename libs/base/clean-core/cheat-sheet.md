@@ -305,8 +305,23 @@ sv.subview_clamped(off, len);
 sv.remove_prefix(n);  sv.remove_suffix(n);
 sv.starts_with(x);  sv.ends_with(x);  sv.contains(x);   // x = string_view or char
 sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if not found
-sv.compare(o);  sv == o;  sv < o;                       // lexicographic by byte (no locale/collation)
+sv.compare(o);  sv == o;  sv < o;                       // lexicographic by UNSIGNED byte (no locale/collation)
 sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
+
+#include <clean-core/string/interned_string.hh>  // cc::interned_string — 8-byte handle to one canonical copy
+cc::interned_string id = cc::intern("transform");  // process-wide table, created on first use, never destroyed
+id.as_string_view();  id.size();  id.empty();      // as_string_view is a load, not a lookup
+a == b;                                   // POINTER compare (canonical within a table); != too
+// NO relational operators: the two orders are not interchangeable, so the call site names the one it means
+a.compare_bytes(b);                       // -> strong_ordering by canonical BYTES; reproducible, costs a memcmp
+a.compare_identity(b);                    // -> strong_ordering by process-local identity; one pointer compare,
+                                          //    and a DIFFERENT order every run — only where nobody sees the order
+cc::interned_string::by_bytes{};  cc::interned_string::by_identity{};   // the matching sort predicates
+hash(id);                                 // precomputed; == hash(id.as_string_view())
+cc::interned_string{};                    // the empty string, == intern("") in any table
+cc::string_interner t;  t.intern(s);  t.size();    // caller-owned table, for tests that want isolation
+// Thread-safe: intern from any thread, no external locking (sharded internally; free when CC_HAS_THREADS == 0).
+// A caller-owned table must OUTLIVE every handle it handed out; the process-wide one has no such question.
 
 #include <clean-core/string/glob.hh>             // path globbing (shaped-linter configs, nexus' file filters)
 cc::glob_normalize_path(p);               // -> cc::string: '\'->'/', repeated/trailing slashes dropped, /c/x = C:\x = c:/x
@@ -444,6 +459,14 @@ cc::has_single_bit(x);  cc::bit_ceil(x);  cc::bit_floor(x);  cc::bit_width(x);
 cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
 
+#include <clean-core/common/endian.hh>            // durable formats: the byte order is the FORMAT's, never the host's
+cc::load_bytes_le<u32>(bytes, offset=0);          // -> u32; byte-wise, so buffer alignment never enters into it
+cc::load_bytes_be<f64>(bytes, offset=0);          // floats go through their bit pattern; NaN payloads and -0.0 survive
+cc::store_bytes_le<u64>(bytes, offset, v);  cc::store_bytes_be<i16>(bytes, offset, v);
+// T is an integer or float of 1/2/4/8 bytes. `bool` is REJECTED: it has no unique object representation,
+// so a stored byte other than 0 or 1 would load as a bool that is neither true nor false — store a u8 you validate.
+// offset + sizeof(T) must be in range: a CC_ASSERT, so bounds-check untrusted input BEFORE loading.
+
 #include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
 cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
 cc::add_with_carry(a, b, carry_in=0);            // -> {value, carry}; sub_with_borrow -> {value, borrow}
@@ -514,6 +537,18 @@ cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold ov
 cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)
 cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const> + u64 seed (content-addr IDs)
 hash(h128);                                // hidden-friend customization point -> low limb (u64)
+
+#include <clean-core/common/hash256.hh>
+cc::hash256{.l0=..,.l1=..,.l2=..,.l3=..};  // 256-bit value, four u64 limbs; ==, <=> (lex by l0..l3, NOT byte order)
+cc::hash256::create(bytes);                // = cc::blake3::create; BLAKE3-256 of a span<byte const>
+h256.to_bytes(out32);  cc::hash256::from_bytes(in32);  // the durable 32-byte form: l0 first, each limb little-endian
+hash(h256);                                // hidden-friend customization point -> l0 (u64)
+
+#include <clean-core/common/blake3.hh>    // the CRYPTOGRAPHIC hash — for content addressing, not for maps
+cc::blake3::create(bytes);                 // -> hash256, one-shot
+cc::blake3 h;  h.update(bytes);  h.finalize();  h.reset();  // streaming: hash a sequence without concatenating it
+// finalize() is const and repeatable; update() may continue after it
+// ~8-20x slower than XXH3 depending on input size (tests/benchmarks/hash-benchmark.cc measures both)
 ```
 
 ## Comparators
@@ -786,6 +821,8 @@ cc::async_is_polling();          // inside a poll? i.e. would a throw from here 
 #include <clean-core/string/conversion.hh>
 cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> surrogate pair; bad -> U+FFFD
                                                   // NOT NUL-terminated (push_back(u'\0') if you need it)
+cc::string u8 = cc::utf16_to_utf8(u16);           // pair -> astral code point; an unpaired surrogate -> U+FFFD
+                                                  // takes a span, since a wide OS string is rarely NUL-terminated
 ```
 
 ## Platform
@@ -803,6 +840,13 @@ cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> su
                                                    // reach <rpcndr.h> past WIN32_LEAN_AND_MEAN.
 #include <clean-core/platform/native.hh>
 cc::demangle_symbol(symbol)                        // cc::string — human-readable C++ symbol name
+
+#include <clean-core/platform/file_path.hh>       // where scratch files go, and how to unmake one
+cc::temp_directory_path();                          // cc::string — no trailing separator; "." where none is named
+cc::temp_file_path(prefix, suffix = "");            // "<temp>/<prefix>-<pid>-<counter><suffix>" — CREATES NOTHING
+cc::remove_file(path);                              // true == gone, which includes never having been there
+                                                    // NOT a filesystem layer: no mkdir, no iteration, no metadata,
+                                                    // no path arithmetic. Reading and writing are the file streams'.
 
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
@@ -890,6 +934,15 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`string` / `string_view` are NOT null-terminated.**
   `data()` is not a C string — use `str.c_str_materialize()`, whose result is valid only until the next non-const operation.
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
+- **An `interned_string`'s identity is process-local and must never leave the process.**
+  Serialize `as_string_view()`, and hash durable data over those bytes — two runs will not agree on anything else.
+- **`interned_string` has no `<`, on purpose.** Everything about the type is a pointer operation except ordering by bytes, so making that cost visible beats a `<` that quietly memcmps.
+  `compare_bytes` is the reproducible one and the default choice; `compare_identity` is cheaper and its order changes every run, so never persist or display anything sorted by it.
+- **String ordering is by UNSIGNED byte value**, in `string_view::compare`, the `<` family built on it, and `interned_string::compare_bytes` alike.
+  `char` is signed here, so the naive comparison would sort every byte >= 0x80 ahead of all ASCII — an order that silently disagrees with every other implementation once it reaches a file or a hash.
+- **`hash256` orders by limb, not by its 32 canonical bytes.**
+  The order is total and deterministic, so it is fine as a tiebreak — it just is not the order the hex digests sort in.
+  Use `to_bytes` / `from_bytes` whenever the 32 bytes themselves are what matters.
 - **`optional` has no `operator*` / `operator->`.** Use `value()`, which
   *asserts* when empty rather than throwing.
 - **Return errors with `cc::error(...)`** — never an implicit conversion.

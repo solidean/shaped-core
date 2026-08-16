@@ -725,6 +725,21 @@ TEST("string - comparisons")
         CHECK(s == cc::string_view{""});
     }
 
+    SECTION("equality between two NON-CONST strings")
+    {
+        // Deliberately non-const on both sides, which is the case the string_view overloads above never reach.
+        // A forwarding-reference operator== binds a non-const lvalue better than `string const&` does, so C++20's
+        // reversed candidate ties with the forward one and the call is ambiguous.
+        // clang only warns about that, so this compiles green everywhere except MSVC, which rejects it as C2666.
+        cc::string a = cc::string("hello");
+        cc::string b = cc::string("hello");
+        cc::string c = cc::string("world");
+
+        CHECK(a == b);
+        CHECK(!(a == c));
+        CHECK(a != c);
+    }
+
     SECTION("ordering between two strings")
     {
         cc::string const a = cc::string("apple");

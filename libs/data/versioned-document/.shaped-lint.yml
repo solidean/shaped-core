@@ -1,0 +1,9 @@
+# versioned-document's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# Empty on purpose: this library depends on clean-core alone, so it has no third-party or platform header to bless.
+# An entry here would mean vdoc reached outside cc for something cc should have grown instead.
+
+rules: []

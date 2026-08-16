@@ -1,10 +1,9 @@
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/atomic.hh>
 #include <instruction-tracer/report/source_cache.hh>
 #include <instruction-tracer/report/source_view.hh>
 #include <nexus/test.hh>
 
-#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -28,39 +27,24 @@ trace trace_of(cc::vector<recorded_instruction> instructions)
     return t;
 }
 
+/// Write `content` verbatim to a unique temp path named after `name`.
+/// Returns the path, which the caller removes.
+cc::string write_file(char const* name, cc::string_view content)
+{
+    auto const path = cc::temp_file_path(name);
+    std::ofstream f(std::string(path.data(), size_t(path.size())), std::ios::binary);
+    f.write(content.data(), std::streamsize(content.size()));
+    return path;
+}
+
 /// Write a 30-line file to a unique temp path; line 10 is indented so indentation-preservation can be checked.
 /// Returns the path, which the caller removes.
 cc::string write_fixture()
 {
-    static cc::atomic<int> next_id = {0};
-    auto const name = "itrace_source_view_test_" + std::to_string(next_id.fetch_add(1)) + ".cc";
-    auto const path = std::filesystem::temp_directory_path() / name;
-    std::ofstream f(path, std::ios::binary);
+    cc::string content;
     for (int i = 1; i <= 30; ++i)
-    {
-        if (i == 10)
-            f << "    int indented = 10;\n";
-        else
-            f << "line " << i << "\n";
-    }
-    auto const s = path.string();
-    return cc::string(cc::string_view(s.data(), isize(s.size())));
-}
-
-/// Write `content` verbatim to a temp path named `name`.
-/// Returns the path, which the caller removes.
-cc::string write_file(char const* name, cc::string_view content)
-{
-    auto const path = std::filesystem::temp_directory_path() / name;
-    std::ofstream f(path, std::ios::binary);
-    f.write(content.data(), std::streamsize(content.size()));
-    auto const s = path.string();
-    return cc::string(cc::string_view(s.data(), isize(s.size())));
-}
-
-void remove_file(cc::string_view path)
-{
-    std::filesystem::remove(std::filesystem::path(std::string(path.data(), size_t(path.size()))));
+        content += i == 10 ? cc::string("    int indented = 10;\n") : cc::format("line {}\n", i);
+    return write_file("itrace_source_view_test.cc", content);
 }
 } // namespace
 
@@ -77,7 +61,7 @@ TEST("source cache - a CRLF file yields lines with no carriage return")
     CHECK(sources.raw_line(path, 3) == "");
     CHECK(sources.raw_line(path, 4) == "last");
 
-    remove_file(path);
+    cc::remove_file(path);
 }
 
 TEST("source cache - a final line without a newline still counts")
@@ -88,7 +72,7 @@ TEST("source cache - a final line without a newline still counts")
     CHECK(sources.line_count(path) == 2);
     CHECK(sources.raw_line(path, 2) == "b");
 
-    remove_file(path);
+    cc::remove_file(path);
 }
 
 TEST("source cache - an unreadable file is empty, not an error")
@@ -121,7 +105,7 @@ TEST("source view - grows, merges near lines, keeps far lines separate")
 
     CHECK(f.ranges[0].lines.size() == 17);
 
-    remove_file(path);
+    cc::remove_file(path);
 }
 
 TEST("source view - marks executed lines and preserves indentation")
@@ -142,7 +126,7 @@ TEST("source view - marks executed lines and preserves indentation")
             CHECK(line.text == "    int indented = 10;"); // indentation preserved, unlike source_cache::line
     }
 
-    remove_file(path);
+    cc::remove_file(path);
 }
 
 TEST("source view - drops instructions without a source mapping")

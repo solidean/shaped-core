@@ -334,6 +334,22 @@ TEST("string_view - comparison")
         CHECK(sv2.compare(sv1) > 0);
     }
 
+    SECTION("compare - unsigned byte value, not signed char")
+    {
+        // char is signed on our platforms, so comparing it directly would sort every byte >= 0x80 before all ASCII.
+        // That order is not the byte order the content has, and it reaches files and hashes through sorted structures.
+        auto const ascii = cc::string_view{"z"};
+        auto const high = cc::string_view{"\xC3\xA4"}; // 'a-umlaut', UTF-8
+
+        CHECK(ascii.compare(high) < 0);
+        CHECK(high.compare(ascii) > 0);
+        CHECK(ascii < high);
+        CHECK(high > ascii);
+
+        // 0x7F is the last byte that is positive either way, 0x80 the first that is not
+        CHECK(cc::string_view{"\x7F"}.compare(cc::string_view{"\x80"}) < 0);
+    }
+
     SECTION("relational operators")
     {
         auto const sv1 = cc::string_view{"abc"};

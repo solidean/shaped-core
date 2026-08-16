@@ -86,6 +86,46 @@ Today: a base64 codec, JSON and markdown readers plus a SQLite engine wrapper (`
 Plus PNG/JPEG read+write, with the `babel::image` aggregator on top (`image/`).
 The roadmap lives in [structure.md](../libs/io/babel-serializer/docs/structure.md).
 
+## data
+
+Structured data that outlives a session: documents, their history, and the files they live in.
+Layered on `base`, and on `io` where persistence needs a storage engine.
+
+### versioned-document — namespace `vdoc` — depends on clean-core
+
+[readme](../libs/data/versioned-document/readme.md) ·
+[cheat-sheet](../libs/data/versioned-document/cheat-sheet.md) ·
+[docs](../libs/data/versioned-document/docs/_index.md)
+
+Structured documents that are versioned, mergeable and verifiable.
+A document is entities holding components holding properties — but the source of truth is not that document, it is an immutable content-addressed DAG of **ops** that everything is materialized from.
+
+The library **ships zero components**: what a `transform` or a `material` is belongs to the application.
+`vdoc` owns only the machinery that gives every application's components the same guarantees.
+Four layers, kept strictly apart: the op DAG, the schema-agnostic raw document, the typed immutable index, and — one library up — persistence.
+
+Two properties shape everything else.
+Property values are a **canonical binary codec where equality is byte equality**, which is what makes diffing, content addressing and merge decisions memcmps.
+The typed document is **immutable**: edits build an op and re-materialize, so a parsed document is safe to hold across threads for as long as it is useful.
+
+Complete, both libraries.
+[docs/](../libs/data/versioned-document/docs/_index.md#concepts) is the design, one file per concept.
+[decisions.md](../libs/data/versioned-document/docs/decisions.md) records every settled choice and what would reopen it.
+
+### versioned-document-file — namespace `vdoc::file` — depends on versioned-document, babel-serializer
+
+[readme](../libs/data/versioned-document-file/readme.md) ·
+[cheat-sheet](../libs/data/versioned-document-file/cheat-sheet.md) ·
+[docs](../libs/data/versioned-document-file/docs/_index.md)
+
+The `.vdoc` save format: one SQLite file holding a document's whole history, the assets a user embedded in it, and the UI state that goes with it.
+babel-serializer is linked privately, so no sqlite type reaches a public header.
+
+A `.vdoc` file holds three kinds of state, and **only one of them is immutable**.
+History is content-addressed and verified, blobs are content-addressed but their asset names are not, and the workspace is disposable.
+So op ids do not commit to asset content, deliberately: without that escape hatch, replacing a placeholder asset would be a rewrite of history.
+[format.md](../libs/data/versioned-document-file/docs/format.md) specifies the bytes and says why at length.
+
 ## graphics
 
 The graphics stack, layered on top of `base`.

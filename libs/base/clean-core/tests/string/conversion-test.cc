@@ -50,3 +50,36 @@ TEST("conversion - utf8_to_utf16")
         CHECK(truncated[0] == 0xFFFD);
     }
 }
+
+TEST("conversion - utf16_to_utf8")
+{
+    SECTION("empty")
+    {
+        CHECK(cc::utf16_to_utf8(cc::span<char16_t const>()).empty());
+    }
+
+    SECTION("round-trips every encodable length")
+    {
+        // one byte, two, three, four — one representative of each UTF-8 length class
+        for (auto const* text : {"abc", "\xC3\xA4", "\xE2\x82\xAC", "\xF0\x9F\x98\x80", "a\xC3\xA4\xF0\x9F\x98\x80z"})
+            CHECK(cc::utf16_to_utf8(cc::utf8_to_utf16(text)) == cc::string_view(text));
+    }
+
+    SECTION("an unpaired surrogate becomes U+FFFD")
+    {
+        // U+FFFD is the same three bytes whichever side produced it, so the two directions agree on malformed input.
+        auto const replacement = cc::string_view("\xEF\xBF\xBD");
+
+        auto const high = char16_t(0xD83D);
+        CHECK(cc::utf16_to_utf8(cc::span<char16_t const>(&high, 1)) == replacement);
+
+        auto const low = char16_t(0xDE00);
+        CHECK(cc::utf16_to_utf8(cc::span<char16_t const>(&low, 1)) == replacement);
+
+        // a high surrogate followed by something that is not a low one: the pair is not consumed together
+        char16_t const dangling[] = {0xD83D, u'a'};
+        CHECK(cc::utf16_to_utf8(dangling)
+              == cc::string("\xEF\xBF\xBD"
+                            "a"));
+    }
+}

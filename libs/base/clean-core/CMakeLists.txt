@@ -8,15 +8,20 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 #   src/clean-core/memory/mimalloc_resource.cc. Header stays private to that .cc.
 # - xxhash (private): backs cc::hash128 (XXH3 128-bit); see
 #   src/clean-core/common/hash128.cc. Header stays private to that .cc.
+# - blake3 (private): backs cc::blake3 / cc::hash256 (the cryptographic hash); see
+#   src/clean-core/common/blake3.cc. Header stays private to that .cc.
 
 # Define the library and its sources
 add_library(clean-core
     src/clean-core/common/assert.cc
     src/clean-core/common/hash.cc
     src/clean-core/common/hash128.cc
+    src/clean-core/common/hash256.cc
+    src/clean-core/common/blake3.cc
     src/clean-core/common/time.cc
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
+    src/clean-core/platform/file_path.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
@@ -29,6 +34,7 @@ add_library(clean-core
     src/clean-core/string/string_view.cc
     src/clean-core/string/conversion.cc
     src/clean-core/string/glob.cc
+    src/clean-core/string/interned_string.cc
     src/clean-core/container/vector.cc
     src/clean-core/container/byte_stream_builder.cc
     src/clean-core/container/key_value_cache.cc
@@ -61,6 +67,9 @@ target_sources(clean-core
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
     src/clean-core/common/hash128.hh
+    src/clean-core/common/hash256.hh
+    src/clean-core/common/blake3.hh
+    src/clean-core/common/endian.hh
     src/clean-core/common/assert.hh
     src/clean-core/common/time.hh
     src/clean-core/common/impl/small_size_type.hh
@@ -70,6 +79,7 @@ target_sources(clean-core
 
     src/clean-core/platform/native.hh
     src/clean-core/platform/console.hh
+    src/clean-core/platform/file_path.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
     src/clean-core/platform/win32_sanitized.hh
@@ -130,6 +140,7 @@ target_sources(clean-core
     src/clean-core/string/print.hh
     src/clean-core/string/conversion.hh
     src/clean-core/string/glob.hh
+    src/clean-core/string/interned_string.hh
 
     src/clean-core/function/function_ref.hh
     src/clean-core/function/unique_function.hh
@@ -169,10 +180,10 @@ target_include_directories(clean-core
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-# mimalloc backs the default general memory resource; xxhash backs cc::hash128.
-# PRIVATE: only mimalloc_resource.cc / hash128.cc include the respective headers;
+# mimalloc backs the default general memory resource; xxhash backs cc::hash128; blake3 backs cc::blake3.
+# PRIVATE: only mimalloc_resource.cc / hash128.cc / blake3.cc include the respective headers;
 # CMake still propagates the static libs to consumers' final link.
-target_link_libraries(clean-core PRIVATE mimalloc xxhash)
+target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3)
 
 # std::thread / pthread_setname_np (cc::threaded_actor, cc::set_current_thread_name) need the
 # platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.
@@ -312,12 +323,16 @@ if(SC_BUILD_TESTS)
         tests/common/hash-test.cc
         tests/common/hash-types-test.cc
         tests/common/hash128-test.cc
+        tests/common/hash256-test.cc
+        tests/common/blake3-test.cc
+        tests/common/endian-test.cc
         tests/common/invocable-test.cc
         tests/common/macros-test.cc
         tests/common/utility-test.cc
         tests/common/time-test.cc
 
         tests/platform/console-test.cc
+        tests/platform/file_path-test.cc
 
         tests/algorithm/sort-test.cc
         tests/algorithm/select-test.cc
@@ -362,6 +377,7 @@ if(SC_BUILD_TESTS)
         tests/string/conversion-test.cc
         tests/string/format-test.cc
         tests/string/glob-test.cc
+        tests/string/interned_string-test.cc
         tests/string/print-test.cc
         tests/string/string-test.cc
         tests/string/string_view-test.cc
@@ -393,6 +409,7 @@ if(SC_BUILD_TESTS)
         clean-core
         nexus
         xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
+        blake3 # and the raw BLAKE3 ones, in the same table
     )
 
     sc_target_pch(clean-core-test CC_STD NEXUS) # 0.67
