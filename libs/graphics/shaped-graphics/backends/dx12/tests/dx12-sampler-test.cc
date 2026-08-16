@@ -29,7 +29,7 @@ sg::texture_description sampled_tex()
 }
 } // namespace
 
-TEST("sg dx12 - sampler translates to a D3D12 sampler desc", exclusive("gpu"))
+TEST("sg dx12 - sampler translates to a D3D12 sampler desc")
 {
     // A trilinear clamping sampler with 4x anisotropy.
     sg::sampler s;

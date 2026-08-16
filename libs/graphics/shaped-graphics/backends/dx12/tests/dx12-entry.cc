@@ -22,7 +22,7 @@ constexpr char const* warp_driver = "sg dx12 backend - warp";
 constexpr char const* hardware_driver = "sg dx12 backend - hardware";
 } // namespace
 
-TEST("sg dx12 backend - warp", exclusive("gpu"))
+TEST("sg dx12 backend - warp")
 {
     auto ctx = dx12::make_test_context();
     if (ctx.has_error())
@@ -31,7 +31,7 @@ TEST("sg dx12 backend - warp", exclusive("gpu"))
         nx::invoke_tests("warp", ctx.value());
 }
 
-TEST("sg dx12 backend - hardware", exclusive("gpu"))
+TEST("sg dx12 backend - hardware")
 {
     auto ctx = dx12::as_test_context(sg::create_dx12_context({.enable_debug_layer = true, .use_warp = false}));
     if (ctx.has_error())

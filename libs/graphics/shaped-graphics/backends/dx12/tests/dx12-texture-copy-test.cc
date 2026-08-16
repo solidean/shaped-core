@@ -26,7 +26,7 @@ sg::texture_description copy_desc(sg::pixel_format fmt, int w, int h)
 }
 } // namespace
 
-TEST("sg dx12 - texture footprint math (padding, subresource index, block sizing)", exclusive("gpu"))
+TEST("sg dx12 - texture footprint math (padding, subresource index, block sizing)")
 {
     // compute_texture_footprint takes an already-resolved concrete region (the sg layer expands "whole
     // subresource" and skips empty regions), so these pass explicit boxes.
@@ -224,7 +224,7 @@ INVOCABLE_TEST("sg dx12 - an inline readback waits on a pending async texture up
     CHECK(ok);
 }
 
-TEST("sg dx12 - texture copy chunking (2D split, 3D whole-slice batch + mid-slice split)", exclusive("gpu"))
+TEST("sg dx12 - texture copy chunking (2D split, 3D whole-slice batch + mid-slice split)")
 {
     // 2D — one depth slice, 8 block-rows.
     // A window that fits fewer rows than the whole slice yields a partial row-run; the next call finishes the slice.
@@ -280,7 +280,7 @@ TEST("sg dx12 - texture copy chunking (2D split, 3D whole-slice batch + mid-slic
     }
 }
 
-TEST("sg dx12 - inline texture upload splits across the ring seam", exclusive("gpu"))
+TEST("sg dx12 - inline texture upload splits across the ring seam")
 {
     // A ring that holds the region + its staging slack (tight 768 + padded 256 + 512 alignment = 1536).
     // Parking the cursor 512 bytes before the seam forces the 768-byte region to split — 2 padded rows
@@ -323,7 +323,7 @@ TEST("sg dx12 - inline texture upload splits across the ring seam", exclusive("g
     CHECK(ok);
 }
 
-TEST("sg dx12 - inline texture download splits across the ring seam", exclusive("gpu"))
+TEST("sg dx12 - inline texture download splits across the ring seam")
 {
     constexpr isize ring_bytes = 2048; // >= tight 768 + padded 256 + 512 alignment slack
     constexpr isize park = ring_bytes - 512;
@@ -363,7 +363,7 @@ TEST("sg dx12 - inline texture download splits across the ring seam", exclusive(
     CHECK(ok);
 }
 
-TEST("sg dx12 - async texture copy splits across staging windows", exclusive("gpu"))
+TEST("sg dx12 - async texture copy splits across staging windows")
 {
     // Tiny 512-byte async windows: each holds exactly one 256-padded row, so an 8x8 R32_FLOAT (8 rows)
     // is packed across several windows on both the upload and readback copy queues.

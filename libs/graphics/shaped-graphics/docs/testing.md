@@ -51,7 +51,11 @@ The dx12 drivers create their context with the debug layer on and install a list
 Without it a validation error is a line on stderr nobody reads, and the run stays green — which it did, for ~680 of them.
 Attribution rides the ambient context, so the check lands on the right test wherever the runtime raised the message.
 
-A test that means to provoke a validation error opts out by simply not installing the listener on its own context; there is no tag for it.
+A test whose subject **is** the bad input opts out with a `dx12::scoped_expected_validation_messages` guard; there is no tag for it.
+That guard is thread-scoped rather than per-context, and deliberately so: D3D12 hands one message to **every** callback registered in the process, not only the one on the device that raised it.
+With several contexts alive — the normal state of the dx12 suite at `-jN` — silencing one context's listener leaves the others to fail the test anyway.
+The message is raised synchronously on the thread that provoked it, so the thread is what names the right test.
+
 The `[sg]` warnings printed by sg itself (`cc::eprintln`) are **not** covered — that wants a real `cc` log system, which does not exist yet.
 
 **What belongs here:** every statement about the public API — allocation shapes, lifetime/epoch semantics, transfer round-trips, binding validation, the transient budget contract.

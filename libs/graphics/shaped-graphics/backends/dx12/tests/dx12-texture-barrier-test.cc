@@ -45,7 +45,7 @@ cc::small_vector<dx12::dx12_subresource_barrier, 4> declare_flush(dx12::dx12_tex
 }
 } // namespace
 
-TEST("sg dx12 - subresource_extent_of maps the texture grid", exclusive("gpu"))
+TEST("sg dx12 - subresource_extent_of maps the texture grid")
 {
     auto e1 = dx12::subresource_extent_of(desc_2d(sg::pixel_format::rgba8_unorm, 64, 64, 3));
     CHECK(e1.mip_count == 3);
@@ -66,7 +66,7 @@ TEST("sg dx12 - subresource_extent_of maps the texture grid", exclusive("gpu"))
     CHECK(depth.aspect_count == 1);
 }
 
-TEST("sg dx12 - texture access declares layout transitions", exclusive("gpu"))
+TEST("sg dx12 - texture access declares layout transitions")
 {
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
@@ -89,7 +89,7 @@ TEST("sg dx12 - texture access declares layout transitions", exclusive("gpu"))
     CHECK(b1[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
 }
 
-TEST("sg dx12 - multiple declares before one flush merge into a single barrier", exclusive("gpu"))
+TEST("sg dx12 - multiple declares before one flush merge into a single barrier")
 {
     // A resource bound more than once to the same op declares more than once before the op's single flush.
     // The flush must emit ONE barrier carrying the union of the declared stages/access — not one per declare.
@@ -109,7 +109,7 @@ TEST("sg dx12 - multiple declares before one flush merge into a single barrier",
     CHECK(sg::has_all(b[0].barrier.dst_access, sg::access_flags::shader_read | sg::access_flags::shader_write));
 }
 
-TEST("sg dx12 - combine_layouts folds sampled+storage to COMMON and flags real conflicts", exclusive("gpu"))
+TEST("sg dx12 - combine_layouts folds sampled+storage to COMMON and flags real conflicts")
 {
     using sg::texture_layout;
     // Equal layouts combine cleanly.
@@ -129,7 +129,7 @@ TEST("sg dx12 - combine_layouts folds sampled+storage to COMMON and flags real c
           == dx12::layout_combine::conflict);
 }
 
-TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to COMMON", exclusive("gpu"))
+TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to COMMON")
 {
     // Two views of one texture in the same op — shader_readonly (SRV) and shader_readwrite (UAV) — combine to the COMMON (general) layout.
     // They arrive as a single barrier carrying both accesses, plus a one-time perf warning.
@@ -155,7 +155,7 @@ TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to CO
     CHECK(sg::has_all(b[0].barrier.dst_access, sg::access_flags::shader_read | sg::access_flags::shader_write));
 }
 
-TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly once per op", exclusive("gpu"))
+TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly once per op")
 {
     // The command list enqueues a texture for the pre-op barrier flush only when mark_pending_barrier returns true, on the first binding of the op.
     // flush clears the flag, so the next op enqueues it again.
@@ -171,7 +171,7 @@ TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly on
     CHECK(acc.mark_pending_barrier(slot));  // next op -> enqueue again
 }
 
-TEST("sg dx12 - mark_recorded reports the slot's first record", exclusive("gpu"))
+TEST("sg dx12 - mark_recorded reports the slot's first record")
 {
     // The command list uses mark_recorded to add a texture to its finalize set exactly once, in O(1) with no scan.
     // True the first time per slot, false after, and true again once the slot is cleared.
@@ -193,7 +193,7 @@ TEST("sg dx12 - mark_recorded reports the slot's first record", exclusive("gpu")
     CHECK(acc.mark_recorded(s0)); // records again
 }
 
-TEST("sg dx12 - texture access fragments per subresource range", exclusive("gpu"))
+TEST("sg dx12 - texture access fragments per subresource range")
 {
     // Two mips; touch each separately with a different layout, then the whole texture at once.
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64, 2);
@@ -221,7 +221,7 @@ TEST("sg dx12 - texture access fragments per subresource range", exclusive("gpu"
     CHECK(c.size() == 2);
 }
 
-TEST("sg dx12 - a non-final submit reverts the texture to its canonical layout", exclusive("gpu"))
+TEST("sg dx12 - a non-final submit reverts the texture to its canonical layout")
 {
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
@@ -242,7 +242,7 @@ TEST("sg dx12 - a non-final submit reverts the texture to its canonical layout",
     CHECK(revert[0].barrier.dst_layout == sg::texture_layout::general);
 }
 
-TEST("sg dx12 - the last active slot promotes without reverting", exclusive("gpu"))
+TEST("sg dx12 - the last active slot promotes without reverting")
 {
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
@@ -262,7 +262,7 @@ TEST("sg dx12 - the last active slot promotes without reverting", exclusive("gpu
         CHECK(sb.barrier.src_layout == sb.barrier.dst_layout); // no layout change, at most a WAW barrier
 }
 
-TEST("sg dx12 - promote is per-texture: only the last active slot commits, earlier ones revert", exclusive("gpu"))
+TEST("sg dx12 - promote is per-texture: only the last active slot commits, earlier ones revert")
 {
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
@@ -292,7 +292,7 @@ TEST("sg dx12 - promote is per-texture: only the last active slot commits, earli
         CHECK(sb.barrier.src_layout == sb.barrier.dst_layout); // canonical is shader_readonly now
 }
 
-TEST("sg dx12 - d3d12_layout_from maps the layouts", exclusive("gpu"))
+TEST("sg dx12 - d3d12_layout_from maps the layouts")
 {
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::undefined) == D3D12_BARRIER_LAYOUT_UNDEFINED);
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::general) == D3D12_BARRIER_LAYOUT_COMMON);

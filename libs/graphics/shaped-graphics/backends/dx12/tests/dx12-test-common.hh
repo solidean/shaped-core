@@ -16,6 +16,11 @@
 
 namespace sg::backend::dx12
 {
+struct scoped_expected_validation_messages;
+} // namespace sg::backend::dx12
+
+namespace sg::backend::dx12
+{
 /// Debug-layer advisories sg provokes on purpose, matched as substrings.
 /// Each entry is a decision, not a mute button: the message is understood, and the alternative is worse or does not exist yet.
 /// Anything not listed fails the test, so a NEW warning is still loud.
@@ -28,16 +33,37 @@ inline constexpr cc::string_view k_expected_validation_messages[] = {
     "recorded only Barrier commands",
 };
 
+/// Set while a test is deliberately provoking a validation message; see scoped_expected_validation_messages.
+inline thread_local bool tl_expect_validation_messages = false;
+
+} // namespace sg::backend::dx12
+
+/// Suppresses the listener below for the calling thread, for a test whose subject IS the bad input.
+///
+/// Thread-scoped rather than per-context, because D3D12 hands one debug-layer message to EVERY callback registered in the process, not only the one on the device that raised it.
+/// With several contexts alive — which is the normal state of this suite at -jN — clearing one context's listener leaves the other N-1 to fail the test.
+/// The message is raised synchronously on the thread that provoked it, so the thread is what names the right test.
+struct sg::backend::dx12::scoped_expected_validation_messages
+{
+    scoped_expected_validation_messages() { tl_expect_validation_messages = true; }
+    ~scoped_expected_validation_messages() { tl_expect_validation_messages = false; }
+
+    scoped_expected_validation_messages(scoped_expected_validation_messages const&) = delete;
+    scoped_expected_validation_messages& operator=(scoped_expected_validation_messages const&) = delete;
+};
+
+namespace sg::backend::dx12
+{
+
 /// Fails whichever test provoked it on any debug-layer message of warning severity or worse, bar the expected ones above.
 /// Without this a validation error is a line on stderr nobody reads, and the run stays green.
 /// Attribution rides the ambient context, so the check lands on the right test wherever the runtime raised the message.
-/// A test that means to provoke a validation error opts out with `set_message_callback({})` on its own context.
 inline void fail_on_validation_messages(dx12_context_handle const& ctx)
 {
     ctx->set_message_callback(
         [](dx12_message_severity severity, cc::string_view message)
         {
-            if (severity > dx12_message_severity::warning)
+            if (severity > dx12_message_severity::warning || tl_expect_validation_messages)
                 return;
             for (auto const expected : k_expected_validation_messages)
                 if (message.contains(expected))

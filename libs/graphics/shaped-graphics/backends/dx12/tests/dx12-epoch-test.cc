@@ -15,7 +15,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - epoch advance and retire", exclusive("gpu"))
+TEST("sg dx12 - epoch advance and retire")
 {
     auto handle = dx12::make_warp_context(); // fresh: this asserts the epoch counter's initial value
     REQUIRE(handle != nullptr);

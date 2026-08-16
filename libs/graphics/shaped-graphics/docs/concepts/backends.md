@@ -31,7 +31,9 @@ It runs on the **WARP** software adapter, present on any Windows host, so the wh
 
 Both adapters come from the same mechanism tier 1 uses: two **entry drivers** in [`dx12-entry.cc`](../../backends/dx12/tests/dx12-entry.cc).
 Each brings up one context and `nx::invoke_tests`es every `INVOCABLE_TEST` in the binary against it.
-So the suite costs two devices rather than one per test — the shape it used to have, which was a throughput hazard and hid a multi-context bug behind an `exclusive("gpu")` tag on every test.
+So the suite costs two devices rather than one per test — the shape it used to have, which was a throughput hazard and needed an `exclusive("gpu")` tag on every test to stay stable.
+**That tag is gone.** Nothing in the dx12 suite is serialized against the GPU any more.
+The two drivers and the dozen tests that build a context of their own run concurrently at `-jN`, so several live `dx12_context`s are the normal state rather than an untested corner.
 An alias per invocable keeps `dev.py test "sg dx12 - <name>"` selecting that one test, on both adapters.
 
 A test that needs a context of its **own** — pristine pool/epoch state, or a backend knob it is about — stays an ordinary `TEST`.

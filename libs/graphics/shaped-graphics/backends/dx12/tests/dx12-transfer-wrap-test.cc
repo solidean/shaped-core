@@ -27,7 +27,7 @@ constexpr isize seam_gap = 64;    // bytes left before the seam when we park the
 constexpr isize xfer_bytes = 128; // > seam_gap, so the transfer must cross the seam
 } // namespace
 
-TEST("sg dx12 - inline upload splits across the ring seam", exclusive("gpu"))
+TEST("sg dx12 - inline upload splits across the ring seam")
 {
     auto ctx_r = dx12::make_test_context({.upload_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
@@ -72,7 +72,7 @@ TEST("sg dx12 - inline upload splits across the ring seam", exclusive("gpu"))
         CHECK(bytes.value()[i] == byte((i * 7 + 3) & 0xFF));
 }
 
-TEST("sg dx12 - inline download splits across the ring seam", exclusive("gpu"))
+TEST("sg dx12 - inline download splits across the ring seam")
 {
     auto ctx_r = dx12::make_test_context({.download_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());

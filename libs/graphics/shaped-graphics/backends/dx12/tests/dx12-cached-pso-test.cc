@@ -72,7 +72,7 @@ void check_doubles(sg::context& ctx,
 }
 } // namespace
 
-TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatches", exclusive("gpu"))
+TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatches")
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
@@ -97,14 +97,14 @@ TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatche
     check_doubles(ctx, *seeded, group_layout, 256);
 }
 
-TEST("sg cached PSO - a garbage blob degrades to a fresh build", exclusive("gpu"))
+TEST("sg cached PSO - a garbage blob degrades to a fresh build")
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
     // The unreadable cached blob below is the subject, so the debug layer's complaint about it is the expected outcome rather than a failure.
-    handle->set_message_callback({});
+    dx12::scoped_expected_validation_messages const expect_complaint;
 
     sg::compiled_shader const shader = make_double_shader();
     auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
@@ -122,7 +122,7 @@ TEST("sg cached PSO - a garbage blob degrades to a fresh build", exclusive("gpu"
     check_doubles(ctx, *res.value(), group_layout, 256);
 }
 
-TEST("sg cached PSO - the blob is not part of the built-in cache key", exclusive("gpu"))
+TEST("sg cached PSO - the blob is not part of the built-in cache key")
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
