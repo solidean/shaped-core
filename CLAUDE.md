@@ -152,6 +152,12 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * **`--preset` is a per-subcommand flag — it goes *after* the subcommand**: `uv run dev.py test --preset release-clang`.
 * `uv run dev.py list-presets` / `list-targets` show what's available.
 * `relwithdebinfo-*` has `CC_ASSERT` **on**; `release-*` has it **off**. If you touch assertion-gated code, build a `release-*` preset too.
+* **Per-target precompiled headers** are on by default ([tools/cmake/PrecompiledHeaders.cmake](tools/cmake/PrecompiledHeaders.cmake)).
+  Each library declares the tiers it owns with `sc_declare_pch_tier` in its own CMakeLists, and targets apply them with `sc_target_pch`.
+  A tier's header list belongs next to the headers it names, never centrally.
+  A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
+  [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
+  The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
 * `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` gate the `*-test` binaries and `tools/`.
   Both default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.
@@ -308,14 +314,19 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Build & test reference           | [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md) |
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
+| Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
+| Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
+| Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
+| Find what a target's precompiled header is worth | `uv run dev.py compile-time pch "<glob>"` ([precompiled-headers](docs/guides/precompiled-headers.md)) |
 | See a function's codegen         | `uv run dev.py assembly search/show` ([disassembly](docs/guides/disassembly.md)) |
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
-| Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
+| Benchmark / compare two implementations | a `nx::config::manual` test — never swept, needs no CHECK, prints its own table ([sort-benchmark.cc](libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model). A microbenchmark harness in nexus is still TODO |
+| Record a tracked metric for PGO  | `GUIDE_BENCHMARK` + `nx::guide` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Read hardware performance counters | `uv run dev.py profiling counters` ([docs/guides/profiling.md](docs/guides/profiling.md)) |
 | Find where a build/test/check run's time goes | `uv run dev.py check --fix --profile <file> --profile-type chrome-tracing` ([profiling a run](docs/guides/building-and-testing.md#profiling-a-run)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |

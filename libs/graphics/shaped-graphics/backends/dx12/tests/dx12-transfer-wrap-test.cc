@@ -29,10 +29,10 @@ constexpr isize xfer_bytes = 128; // > seam_gap, so the transfer must cross the 
 
 TEST("sg dx12 - inline upload splits across the ring seam")
 {
-    auto ctx_r = sg::create_dx12_context({.use_warp = true, .upload_ring_bytes = ring_bytes});
+    auto ctx_r = dx12::make_test_context({.upload_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
-    auto& c = static_cast<dx12::dx12_context&>(*ctx);
+    auto& c = *ctx;
 
     auto buf = ctx->persistent.create_raw_buffer(xfer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
@@ -74,10 +74,10 @@ TEST("sg dx12 - inline upload splits across the ring seam")
 
 TEST("sg dx12 - inline download splits across the ring seam")
 {
-    auto ctx_r = sg::create_dx12_context({.use_warp = true, .download_ring_bytes = ring_bytes});
+    auto ctx_r = dx12::make_test_context({.download_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
-    auto& c = static_cast<dx12::dx12_context&>(*ctx);
+    auto& c = *ctx;
 
     auto buf = ctx->persistent.create_raw_buffer(xfer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);

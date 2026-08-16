@@ -7,6 +7,14 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# No C++20 modules anywhere in the repo, so the per-TU scan CMP0155 turns on for C++20+ buys nothing.
+# It is off repo-wide rather than per preset because that is a fact about our sources, not about a platform.
+# Leaving it to the default also makes the build depend on whether a `clang-scan-deps` happens to be on the
+# machine: CMake pairs whichever it finds with our compiler, and a scanner cannot read a precompiled header
+# another toolchain produced — which is exactly how the Android CI runner broke, having one for its Linux
+# clang jobs. Turn this back on with the first `import`, and make sure the scanner matches the compiler.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # Build gating. Both default ON for a top-level build (the normal dev flow) and OFF when
 # shaped-core is consumed via add_subdirectory, where a dependent wants the libraries but not
 # our test and tool binaries. Must precede add_subdirectory(extern): the tools' externals gate
@@ -44,6 +52,13 @@ include(Coverage)     # SC_COVERAGE  — LLVM source-based test coverage
 include(Sanitizers)   # SANITIZE     — ASan/UBSan wiring (clang only)
 include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (clang only)
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
+
+# Per-target precompiled headers.
+# Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();
+# sc_finalize_pch() at the bottom of this file resolves the two together.
+# Unlike the four above this one adds no flags of its own, so its position here is convention rather than a requirement.
+# CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (the nopch-* presets) turns every application into a no-op.
+include(PrecompiledHeaders)
 
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
@@ -144,3 +159,7 @@ sc_finalize_web_runners()
 # Check that every declared shader package found the shaped-shader-library target. See
 # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
 sc_finalize_shader_packages()
+
+# Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
+# Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
+sc_finalize_pch()

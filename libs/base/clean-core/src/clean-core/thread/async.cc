@@ -1,6 +1,8 @@
+#include <clean-core/error/exception.hh> // std::exception, to classify one that escaped a compute frame
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
+#include <clean-core/thread/impl/async_tls.hh>
 
 using namespace cc::primitive_defines;
 
@@ -16,13 +18,12 @@ using namespace cc::primitive_defines;
 //   * the lock is never held across the user compute frame;
 //   * continuations are weak_ptrs, so a wake can never touch a dependent torn down concurrently.
 
+// The one per-thread block the async runtime reads (impl/async_tls.hh).
+// thread_local even without threads: a single-threaded build just has one slot.
+thread_local cc::impl::async_tls_block cc::impl::s_async_tls = {};
+
 namespace
 {
-// The scheduler bound to the calling thread, set by async_worker_scope.
-// thread_local even without threads: a single-threaded build just has one slot.
-// nullptr => no worker scope active.
-thread_local cc::async_scheduler* s_current_scheduler = nullptr;
-
 // Process-wide default scheduler for compute nodes that cannot run on the current thread.
 // Read-mostly, installed once at startup.
 // Atomic so installation is visible to worker threads without extra synchronization.
@@ -67,13 +68,12 @@ void cont_free_cell(cc::impl::async_cont_cell* c)
 
 // Per-worker recursion depth of the eager depth-first dep drive, where poll() calls a dependency's poll().
 // Caps the native stack at graph depth; past the cap we fall back to subscribe+park, which uses no extra stack.
-thread_local int s_inline_depth = 0;
 constexpr int async_max_inline_depth = 128;
 
 struct inline_depth_guard
 {
-    inline_depth_guard() { ++s_inline_depth; }
-    ~inline_depth_guard() { --s_inline_depth; }
+    inline_depth_guard() { ++cc::impl::async_tls().inline_depth; }
+    ~inline_depth_guard() { --cc::impl::async_tls().inline_depth; }
     inline_depth_guard(inline_depth_guard const&) = delete;
     inline_depth_guard& operator=(inline_depth_guard const&) = delete;
 };
@@ -85,13 +85,14 @@ struct inline_depth_guard
 
 cc::async_scheduler& cc::async_scheduler::current()
 {
-    CC_ASSERT(s_current_scheduler != nullptr, "no async worker scope active on this thread");
-    return *s_current_scheduler;
+    auto* const s = cc::impl::async_tls().scheduler;
+    CC_ASSERT(s != nullptr, "no async worker scope active on this thread");
+    return *s;
 }
 
 cc::async_scheduler* cc::async_scheduler::current_or_null()
 {
-    return s_current_scheduler;
+    return cc::impl::async_tls().scheduler;
 }
 
 void cc::async_scheduler::set_default(async_scheduler* sched)
@@ -104,14 +105,24 @@ cc::async_scheduler* cc::async_scheduler::default_or_null()
     return s_default_scheduler.load(cc::memory_order_acquire);
 }
 
-cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(s_current_scheduler)
+cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(cc::impl::async_tls().scheduler)
 {
-    s_current_scheduler = &scheduler;
+    cc::impl::async_tls().scheduler = &scheduler;
 }
 
 cc::async_worker_scope::~async_worker_scope()
 {
-    s_current_scheduler = _previous;
+    cc::impl::async_tls().scheduler = _previous;
+}
+
+cc::async_no_worker_scope::async_no_worker_scope() : _previous(cc::impl::async_tls().scheduler)
+{
+    cc::impl::async_tls().scheduler = nullptr;
+}
+
+cc::async_no_worker_scope::~async_no_worker_scope()
+{
+    cc::impl::async_tls().scheduler = _previous;
 }
 
 void cc::singlethreaded_scheduler::enqueue(async_node_ptr node)
@@ -159,6 +170,11 @@ void cc::async_node_base::schedule()
             return;
         }
 
+        // Ambient write site 1 of 3: a COLD node is being handed to a queue, so it takes the context of whoever hands it over.
+        // Deliberately not the `blocked` case, which is a wake — see the ambient section in libs/base/clean-core/docs/systems/async.md.
+        if (s == async_node_state::cold)
+            impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+
         // cold or blocked -> make runnable (we route exactly once, below, after releasing the lock)
         store_state(async_node_state::scheduled);
     }
@@ -181,6 +197,9 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
             set_wake();
             return;
         }
+
+        if (s == async_node_state::cold) // see schedule(): the same write site, on the explicit-target path
+            impl::async_ambient_store(ambient(), impl::async_tls().ambient);
 
         store_state(async_node_state::scheduled);
         do_submit = true;
@@ -233,6 +252,12 @@ void cc::async_node_base::reschedule_self()
     {
         lock_scope g(this);
         CC_ASSERT(load_state(cc::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
+
+        // Ambient write site 2 of 3, and the easiest to overlook.
+        // A node driven INLINE as someone's dependency was never scheduled, so it carries no context yet; without this it would come back off the queue with none.
+        // Unconditional rather than cold-only: we are running, so the installed context IS this node's, and a repeat store writes the same word.
+        impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+
         store_state_clear_wake(async_node_state::scheduled);
     }
     route_after_schedule();
@@ -569,6 +594,29 @@ cc::async_error cc::impl::async_error_propagate(async_error const& e)
     return async_error::make_error(cc::any_error(e.underlying().to_string()));
 }
 
+cc::async_error cc::custom::async_error_from_exception_trait<cc::async_error>::make(cc::string_view message)
+{
+    return async_error::make_error(cc::any_error(cc::string(message)));
+}
+
+#ifdef CC_HAS_CPP_EXCEPTIONS
+cc::string cc::impl::async_describe_current_exception()
+{
+    try
+    {
+        throw; // rethrow the in-flight exception, purely to classify it by type
+    }
+    catch (std::exception const& e)
+    {
+        return cc::string("exception escaped an async frame: ") + e.what();
+    }
+    catch (...)
+    {
+        return cc::string("a non-std::exception value escaped an async frame");
+    }
+}
+#endif
+
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
 {
     lock_scope g(this);
@@ -608,12 +656,59 @@ void cc::async_node_base::teardown_payload()
 // async_node_base — the poll loop (never blocks)
 // ============================================================================
 
+cc::async_step_status cc::async_node_base::invoke_frame_step(async_context_base& ctx)
+{
+    CC_ASSERT(ops()->frame_invoke != nullptr, "polled a node without a compute frame");
+#ifdef CC_HAS_CPP_EXCEPTIONS
+    try
+    {
+        return ops()->frame_invoke(frame_storage(), ctx);
+    }
+    catch (...)
+    {
+        // The frame threw AFTER resolving, which resolve's `delete this;` rule already forbids in its milder form.
+        // The frame is destroyed and the node may be freed outright, so nothing here may touch it — not even ops().
+        // The exception is dropped; produced_error only tells poll() to return without looking at us.
+        if (ctx.step_resolved())
+        {
+            CC_ASSERT(false, "an async frame threw AFTER resolving — resolve is terminal, so the exception is dropped");
+            return async_step_status::produced_error;
+        }
+
+        // No lock is held across the frame, and the node is still `running`, so this is the identical transition resolve_to_error would have made from inside it.
+        // `this` may be freed the moment it returns.
+        if (auto const resolve_exception = ops()->frame_resolve_exception)
+        {
+            resolve_exception(this);
+            return async_step_status::produced_error;
+        }
+
+        CC_ASSERT(false, "an async frame threw, but its error type cannot represent an exception — specialize "
+                         "cc::custom::async_error_from_exception_trait<E>, or catch inside the frame");
+        throw; // nothing can fail the node, so leave the pre-existing behaviour rather than corrupt its state
+    }
+#else
+    return ops()->frame_invoke(frame_storage(), ctx);
+#endif
+}
+
 void cc::async_node_base::poll()
 {
     if (!try_begin_running())
         return; // another poller owns it, it is terminal, or it is a manual node awaiting external completion
 
     unsubscribe_all(); // re-evaluate dependencies from scratch this turn
+
+    // Install this node's ambient context, if it has one, for the whole poll — the frame, anything it calls, and any node it spawns.
+    //
+    // Read it into a LOCAL now, while the arm is guaranteed alive.
+    // A frame resolves re-entrantly, so by the time the invoke returns the arm is gone and `ambient()` would read the value built over it; `this` may be freed outright.
+    // ambient_scope therefore restores from its own stack copy and never touches the node again.
+    //
+    // A node with no token falls straight through and inherits the driver's context.
+    // That is the eager depth-first drive: a dependency polled inline belongs to the subtree driving it, and a 512-node chain pays ONE install rather than 512.
+    void* const installed = ambient();
+    impl::async_ambient_poll_scope const ambient_scope(installed);
 
     async_context_base ctx;
     ctx.current = this;
@@ -630,7 +725,7 @@ void cc::async_node_base::poll()
             // We fall back to subscribe+park only when the picked dep cannot be completed inline, or the depth cap is hit.
             // Inline-impossible means a manual/push node, one already running on another worker, or one whose own deps aren't ready.
             // Subscription is therefore the exception, not the rule.
-            if (s_inline_depth < async_max_inline_depth)
+            if (cc::impl::async_tls().inline_depth < async_max_inline_depth)
             {
                 async_node_base* const pick = deps().first(); // non-null: deps() is not empty
 
@@ -666,6 +761,10 @@ void cc::async_node_base::poll()
                     clear_wake(); // a dependency woke us mid-subscribe: don't park, re-evaluate
                 else
                 {
+                    // Ambient write site 3 of 3: we are about to leave this stack, and whoever re-polls us must resume under the context we suspended in.
+                    // Same reasoning as the yield above — we are running, so `installed` is ours.
+                    impl::async_ambient_store(ambient(), installed);
+
                     store_state(async_node_state::blocked);
                     parked = true;
                 }
@@ -682,8 +781,8 @@ void cc::async_node_base::poll()
 
         // Run the compute step with the frame in place -- it is never moved, so parking is free and a stateful (mutable) closure picks up where it left off.
         // If it resolves, with a value OR an error, it has already destroyed itself: finish_value / finish_error builds the result over the frame's own slot.
-        CC_ASSERT(ops()->frame_invoke != nullptr, "polled a node without a compute frame");
-        switch (ops()->frame_invoke(frame_storage(), ctx))
+        // A frame that throws instead is failed on its error channel by invoke_frame_step, so it too arrives here as produced_error.
+        switch (invoke_frame_step(ctx))
         {
         case async_step_status::produced_value:
         case async_step_status::produced_error:

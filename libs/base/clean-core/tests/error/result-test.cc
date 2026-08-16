@@ -68,13 +68,13 @@ struct counting_type
 {
     int value = 0;
 
-    static inline int default_ctor_count = 0;
-    static inline int value_ctor_count = 0;
-    static inline int copy_ctor_count = 0;
-    static inline int move_ctor_count = 0;
-    static inline int copy_assign_count = 0;
-    static inline int move_assign_count = 0;
-    static inline int dtor_count = 0;
+    static inline thread_local int default_ctor_count = 0;
+    static inline thread_local int value_ctor_count = 0;
+    static inline thread_local int copy_ctor_count = 0;
+    static inline thread_local int move_ctor_count = 0;
+    static inline thread_local int copy_assign_count = 0;
+    static inline thread_local int move_assign_count = 0;
+    static inline thread_local int dtor_count = 0;
 
     static void reset_counters()
     {

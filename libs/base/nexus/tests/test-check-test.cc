@@ -8,7 +8,7 @@
 
 #include <string>
 
-TEST("check - basic CHECK passes on true expression")
+TEST("check - basic CHECK passes on true expression", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_pass", {},
@@ -28,7 +28,7 @@ TEST("check - basic CHECK passes on true expression")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - basic CHECK fails on false expression")
+TEST("check - basic CHECK fails on false expression", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_fail", {},
@@ -48,7 +48,7 @@ TEST("check - basic CHECK fails on false expression")
     CHECK(exec.count_failed_checks() == 3);
 }
 
-TEST("check - CHECK continues execution after failure")
+TEST("check - CHECK continues execution after failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -72,7 +72,7 @@ TEST("check - CHECK continues execution after failure")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - REQUIRE passes on true expression")
+TEST("check - REQUIRE passes on true expression", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("require_pass", {},
@@ -92,7 +92,7 @@ TEST("check - REQUIRE passes on true expression")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - REQUIRE aborts execution on failure")
+TEST("check - REQUIRE aborts execution on failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -115,7 +115,7 @@ TEST("check - REQUIRE aborts execution on failure")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - SUCCEED always passes")
+TEST("check - SUCCEED always passes", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("succeed_test", {},
@@ -135,7 +135,7 @@ TEST("check - SUCCEED always passes")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - FAIL always fails and aborts")
+TEST("check - FAIL always fails and aborts", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -155,7 +155,7 @@ TEST("check - FAIL always fails and aborts")
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("check - FAIL with message")
+TEST("check - FAIL with message", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -175,7 +175,7 @@ TEST("check - FAIL with message")
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("check - comparison operators lt lte gt gte")
+TEST("check - comparison operators lt lte gt gte", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("comparison_ops", {},
@@ -198,7 +198,7 @@ TEST("check - comparison operators lt lte gt gte")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - equality operators == !=")
+TEST("check - equality operators == !=", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("equality_ops", {},
@@ -218,7 +218,7 @@ TEST("check - equality operators == !=")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - mixed CHECK and REQUIRE")
+TEST("check - mixed CHECK and REQUIRE", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -244,7 +244,7 @@ TEST("check - mixed CHECK and REQUIRE")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - chaining with .context()")
+TEST("check - chaining with .context()", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("context_chain", {},
@@ -262,7 +262,7 @@ TEST("check - chaining with .context()")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - chaining with .note()")
+TEST("check - chaining with .note()", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("note_chain", {},
@@ -280,7 +280,7 @@ TEST("check - chaining with .note()")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - chaining with .dump()")
+TEST("check - chaining with .dump()", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("dump_chain", {},
@@ -299,7 +299,7 @@ TEST("check - chaining with .dump()")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - multiple chaining")
+TEST("check - multiple chaining", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("multi_chain", {},
@@ -341,7 +341,7 @@ struct call_tracker
 };
 } // namespace
 
-TEST("check - to_debug_string only called on failing checks")
+TEST("check - to_debug_string only called on failing checks", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -375,7 +375,7 @@ TEST("check - to_debug_string only called on failing checks")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - to_debug_string only called on failing REQUIRE")
+TEST("check - to_debug_string only called on failing REQUIRE", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -416,7 +416,7 @@ TEST("check - to_debug_string only called on failing REQUIRE")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - to_debug_string with comparison operators")
+TEST("check - to_debug_string with comparison operators", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -450,7 +450,7 @@ TEST("check - to_debug_string with comparison operators")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - boolean expression CHECK")
+TEST("check - boolean expression CHECK", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("bool_expr_test", {},
@@ -471,7 +471,7 @@ TEST("check - boolean expression CHECK")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - string comparison")
+TEST("check - string comparison", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("string_compare_test", {},
@@ -493,7 +493,7 @@ TEST("check - string comparison")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - pointer comparison")
+TEST("check - pointer comparison", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("pointer_compare_test", {},
@@ -515,7 +515,7 @@ TEST("check - pointer comparison")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - floating point comparison")
+TEST("check - floating point comparison", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("float_compare_test", {},
@@ -538,7 +538,7 @@ TEST("check - floating point comparison")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - SUCCEED allows test to pass explicitly")
+TEST("check - SUCCEED allows test to pass explicitly", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -569,7 +569,7 @@ TEST("check - SUCCEED allows test to pass explicitly")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - SKIP aborts test execution")
+TEST("check - SKIP aborts test execution", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -590,7 +590,7 @@ TEST("check - SKIP aborts test execution")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - complex expression with multiple operators")
+TEST("check - complex expression with multiple operators", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("complex_expr_test", {},
@@ -614,7 +614,7 @@ TEST("check - complex expression with multiple operators")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - CHECK_THROWS passes when expression throws")
+TEST("check - CHECK_THROWS passes when expression throws", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_throws_pass", {},
@@ -634,7 +634,7 @@ TEST("check - CHECK_THROWS passes when expression throws")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - CHECK_THROWS fails when expression does not throw")
+TEST("check - CHECK_THROWS fails when expression does not throw", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_throws_fail", {},
@@ -653,7 +653,7 @@ TEST("check - CHECK_THROWS fails when expression does not throw")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - CHECK_THROWS continues execution after failure")
+TEST("check - CHECK_THROWS continues execution after failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -677,7 +677,7 @@ TEST("check - CHECK_THROWS continues execution after failure")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - CHECK_THROWS_AS passes when correct exception type is thrown")
+TEST("check - CHECK_THROWS_AS passes when correct exception type is thrown", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_throws_as_pass", {},
@@ -697,7 +697,7 @@ TEST("check - CHECK_THROWS_AS passes when correct exception type is thrown")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - CHECK_THROWS_AS fails when expression does not throw")
+TEST("check - CHECK_THROWS_AS fails when expression does not throw", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_throws_as_no_throw", {},
@@ -716,7 +716,7 @@ TEST("check - CHECK_THROWS_AS fails when expression does not throw")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - CHECK_THROWS_AS fails when wrong exception type is thrown")
+TEST("check - CHECK_THROWS_AS fails when wrong exception type is thrown", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_throws_as_wrong_type", {},
@@ -735,7 +735,7 @@ TEST("check - CHECK_THROWS_AS fails when wrong exception type is thrown")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - CHECK_THROWS_AS continues execution after failure")
+TEST("check - CHECK_THROWS_AS continues execution after failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -759,7 +759,7 @@ TEST("check - CHECK_THROWS_AS continues execution after failure")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - REQUIRE_THROWS passes when expression throws")
+TEST("check - REQUIRE_THROWS passes when expression throws", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("require_throws_pass", {},
@@ -779,7 +779,7 @@ TEST("check - REQUIRE_THROWS passes when expression throws")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - REQUIRE_THROWS aborts execution when expression does not throw")
+TEST("check - REQUIRE_THROWS aborts execution when expression does not throw", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -802,7 +802,7 @@ TEST("check - REQUIRE_THROWS aborts execution when expression does not throw")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - REQUIRE_THROWS_AS passes when correct exception type is thrown")
+TEST("check - REQUIRE_THROWS_AS passes when correct exception type is thrown", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("require_throws_as_pass", {},
@@ -822,7 +822,7 @@ TEST("check - REQUIRE_THROWS_AS passes when correct exception type is thrown")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - REQUIRE_THROWS_AS aborts when expression does not throw")
+TEST("check - REQUIRE_THROWS_AS aborts when expression does not throw", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -845,7 +845,7 @@ TEST("check - REQUIRE_THROWS_AS aborts when expression does not throw")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - REQUIRE_THROWS_AS aborts when wrong exception type is thrown")
+TEST("check - REQUIRE_THROWS_AS aborts when wrong exception type is thrown", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -869,7 +869,7 @@ TEST("check - REQUIRE_THROWS_AS aborts when wrong exception type is thrown")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - CHECK_THROWS with chaining")
+TEST("check - CHECK_THROWS with chaining", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_throws_chain", {},
@@ -887,7 +887,7 @@ TEST("check - CHECK_THROWS with chaining")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - CHECK_THROWS_AS with chaining")
+TEST("check - CHECK_THROWS_AS with chaining", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_throws_as_chain", {},
@@ -905,7 +905,7 @@ TEST("check - CHECK_THROWS_AS with chaining")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - REQUIRE_THROWS with chaining")
+TEST("check - REQUIRE_THROWS with chaining", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("require_throws_chain", {},
@@ -923,7 +923,7 @@ TEST("check - REQUIRE_THROWS with chaining")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - REQUIRE_THROWS_AS with chaining")
+TEST("check - REQUIRE_THROWS_AS with chaining", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration(
@@ -942,7 +942,7 @@ TEST("check - REQUIRE_THROWS_AS with chaining")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - mixed throw checks and regular checks")
+TEST("check - mixed throw checks and regular checks", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -970,7 +970,7 @@ TEST("check - mixed throw checks and regular checks")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - throw checks with exception inheritance")
+TEST("check - throw checks with exception inheritance", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("throw_checks_inheritance", {},
@@ -1021,7 +1021,7 @@ void no_assertion_function(int value)
 }
 } // namespace
 
-TEST("check - CHECK_ASSERTS passes when assertion is triggered")
+TEST("check - CHECK_ASSERTS passes when assertion is triggered", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_asserts_pass", {},
@@ -1041,7 +1041,7 @@ TEST("check - CHECK_ASSERTS passes when assertion is triggered")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - CHECK_ASSERTS fails when no assertion is triggered")
+TEST("check - CHECK_ASSERTS fails when no assertion is triggered", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_asserts_fail", {},
@@ -1061,7 +1061,7 @@ TEST("check - CHECK_ASSERTS fails when no assertion is triggered")
     CHECK(exec.count_failed_checks() == 3);
 }
 
-TEST("check - CHECK_ASSERTS continues execution after failure")
+TEST("check - CHECK_ASSERTS continues execution after failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -1085,7 +1085,7 @@ TEST("check - CHECK_ASSERTS continues execution after failure")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - REQUIRE_ASSERTS passes when assertion is triggered")
+TEST("check - REQUIRE_ASSERTS passes when assertion is triggered", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("require_asserts_pass", {},
@@ -1105,7 +1105,7 @@ TEST("check - REQUIRE_ASSERTS passes when assertion is triggered")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - REQUIRE_ASSERTS aborts execution when no assertion is triggered")
+TEST("check - REQUIRE_ASSERTS aborts execution when no assertion is triggered", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -1128,7 +1128,7 @@ TEST("check - REQUIRE_ASSERTS aborts execution when no assertion is triggered")
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("check - CHECK_ASSERTS with chaining")
+TEST("check - CHECK_ASSERTS with chaining", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_asserts_chain", {},
@@ -1146,7 +1146,7 @@ TEST("check - CHECK_ASSERTS with chaining")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - REQUIRE_ASSERTS with chaining")
+TEST("check - REQUIRE_ASSERTS with chaining", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("require_asserts_chain", {},
@@ -1164,7 +1164,7 @@ TEST("check - REQUIRE_ASSERTS with chaining")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - mixed assert checks and regular checks")
+TEST("check - mixed assert checks and regular checks", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -1192,7 +1192,7 @@ TEST("check - mixed assert checks and regular checks")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("check - mixed assert checks with failures")
+TEST("check - mixed assert checks with failures", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -1218,7 +1218,7 @@ TEST("check - mixed assert checks with failures")
     CHECK(exec.count_failed_checks() == 2);
 }
 
-TEST("check - CHECK_ASSERTS with lambda")
+TEST("check - CHECK_ASSERTS with lambda", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("check_asserts_lambda", {},
@@ -1239,7 +1239,7 @@ TEST("check - CHECK_ASSERTS with lambda")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("check - REQUIRE_ASSERTS aborts on first failure")
+TEST("check - REQUIRE_ASSERTS aborts on first failure", no_scheduler)
 {
     nx::test_registry reg;
 

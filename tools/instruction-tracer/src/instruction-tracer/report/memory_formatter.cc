@@ -1,5 +1,6 @@
 #include "memory_formatter.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/platform/console.hh>
@@ -7,7 +8,6 @@
 #include <instruction-tracer/decode/memory_access.hh>
 #include <instruction-tracer/report/trace_formatter.hh>
 
-#include <algorithm> // std::sort: cachelines print in ascending address order
 
 namespace itrace
 {
@@ -189,7 +189,7 @@ cc::string format_memory_cachelines(cc::span<trace const> traces, memory_view_op
         return out;
     }
 
-    std::sort(buckets.begin(), buckets.end(), [](bucket const& a, bucket const& b) { return a.line < b.line; });
+    cc::sort(buckets, [](bucket const& a, bucket const& b) { return a.line < b.line; });
 
     for (isize i = 0; i < buckets.size(); ++i)
     {

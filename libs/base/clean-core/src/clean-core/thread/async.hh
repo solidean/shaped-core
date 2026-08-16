@@ -47,16 +47,59 @@ U async_declval() noexcept;
 } // namespace impl
 
 // ============================================================================
+// exceptions escaping a compute frame
+// ============================================================================
+
+// A frame that throws instead of resolving is failed on its own channel E, so the node stays a value/error machine from the outside.
+// Containment is not politeness: an escaping exception would leave the node `running` forever, parking every dependent, and terminate the process outright on a pool worker.
+// The catch itself is in async_node_base::invoke_frame_step, which is untyped and reaches E only through the ops-table slot minted below.
+
+namespace custom
+{
+/// Opt a failure channel E into exception containment: build an E describing an exception that escaped a frame.
+///
+/// The primary template is deliberately EMPTY, so an E that declares no mapping is a RUNTIME diagnostic — the node rethrows — and never a compile error.
+/// That is what keeps a custom E which has no way to represent an exception, an enum say, compiling exactly as before.
+///
+/// Specialize with a single `static E make(cc::string_view message)`.
+/// The message is already extracted, so a specialization needs neither <exception> nor exception support at all.
+template <class E>
+struct async_error_from_exception_trait
+{
+};
+
+/// The default channel's mapping: an escaped exception is an ordinary failure, never a cancellation.
+template <>
+struct async_error_from_exception_trait<cc::async_error>
+{
+    static async_error make(cc::string_view message);
+};
+} // namespace custom
+
+namespace impl
+{
+/// Whether E can be built from an escaped exception — see cc::custom::async_error_from_exception_trait.
+template <class E>
+concept async_error_from_exception_capable
+    = requires(cc::string_view m) { cc::custom::async_error_from_exception_trait<E>::make(m); };
+
+/// Describe the exception CURRENTLY BEING HANDLED: a std::exception's what(), or a fixed text for anything else.
+/// Callable only from inside a catch handler — it rethrows internally to classify, and a bare throw with nothing in flight terminates.
+/// Out-of-line and untemplated because it is the one place needing <exception>, which keeps that out of this header.
+[[nodiscard]] cc::string async_describe_current_exception();
+} // namespace impl
+
+// ============================================================================
 // typed node: the value + compute-frame layer under async<T>
 // ============================================================================
 
 namespace impl
 {
 /// Declares the node's payload storage — the offset-16 slot the base manages, see async_node_base::payload().
-/// Raw bytes holding EITHER the unresolved scratch (frame + deps + conts) OR the resolved value ⊍ error, which share offset 0 and are discriminated by state.
-/// Sized to the larger of the scratch, sizeof(T) and sizeof(E), so a large T or E grows the node naturally.
+/// Raw bytes holding EITHER the unresolved arm followed by the compute frame, OR the resolved value ⊍ error, which share offset 0 and are discriminated by state.
+/// Sized to the larger of sizeof(T), sizeof(E) and the 48 B floor, so a large T or E grows the node naturally.
 /// Cacheline-aligned so unrelated nodes never share a line; the value/error is 16-aligned.
-/// This layer adds the typed read and teardown of the value AND the error; the base owns everything else, including the compute frame.
+/// This layer adds the typed read and teardown of the value AND the error, plus the inline-frame budget; the base owns everything else, including the frame's lifetime.
 template <class T, class E>
 struct alignas(64) async_typed_node : cc::async_node_base
 {
@@ -84,8 +127,30 @@ struct alignas(64) async_typed_node : cc::async_node_base
 
 private:
     static constexpr isize max_of(isize a, isize b) { return a > b ? a : b; }
-    static constexpr isize payload_bytes
-        = max_of(max_of(isize(sizeof(T)), isize(sizeof(E))), isize(sizeof(impl::async_unresolved)));
+
+    /// The floor that keeps async<int> one cache line: the 24 B arm plus a 24 B inline frame.
+    /// Deliberately a constant rather than sizeof(async_unresolved).
+    /// Deriving it from the arm would drop the floor to 24 the moment the arm shrank, collapsing frame_capacity to zero and boxing every frame.
+    static constexpr isize payload_floor = 48;
+
+    static constexpr isize payload_bytes = max_of(max_of(isize(sizeof(T)), isize(sizeof(E))), payload_floor);
+
+public:
+    /// Bytes the inline compute frame gets: whatever the payload has left once the unresolved arm has taken its 24.
+    /// 24 B on a 64 B node — a captured fn plus two dependency handles — and it GROWS with a large T or E, since those widen the payload.
+    ///
+    /// So the budget is type-dependent, and the same F may box under async<int> while staying inline under async<big_thing>.
+    /// Harmless, but surprising enough to be worth knowing before you go looking for why one spilled.
+    static constexpr isize frame_capacity = payload_bytes - impl::async_arm_bytes;
+
+    /// True if F is stored inline rather than boxed.
+    /// Anything larger, or over-aligned, falls back to a heap-boxed cc::unique_function — itself one 8-aligned pointer, so it always fits.
+    /// The alignment ceiling is 8 rather than 16 because the frame starts at an odd multiple of 8 (see impl::async_frame_align).
+    template <class F>
+    static constexpr bool frame_fits_inline
+        = isize(sizeof(F)) <= frame_capacity && alignof(F) <= impl::async_frame_align;
+
+private:
     alignas(16) byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
 };
 
@@ -124,21 +189,57 @@ void async_frame_destroy(void* frame)
     static_cast<G*>(frame)->~G();
 }
 
+/// Fail `n` on its failure channel E from the exception being handled.
+/// A friend of async_node_base, declared in async_node.hh, to reach finish_error_emplace.
+template <class E>
+void async_frame_resolve_current_exception(cc::async_node_base* n)
+{
+    n->template finish_error_emplace<E>(
+        cc::custom::async_error_from_exception_trait<E>::make(async_describe_current_exception()));
+}
+
 using async_frame_invoke_fn = async_step_status (*)(void*, cc::async_context_base&);
 using async_frame_destroy_fn = void (*)(void*);
+using async_frame_except_fn = void (*)(cc::async_node_base*);
 
-/// The ops descriptor (see cc::async_type_ops), keyed on what actually distinguishes it: the node size class, the value/error teardowns, and the frame ops.
+/// The exception -> E resolver for a failure channel: null when E declares no mapping, which is the pre-existing behaviour for that E (rethrow).
+/// `if constexpr` keeps a channel without a mapping from ever instantiating the thunk.
+template <class E>
+consteval async_frame_except_fn async_frame_except_ptr()
+{
+#ifdef CC_HAS_CPP_EXCEPTIONS
+    if constexpr (async_error_from_exception_capable<E>)
+        return &async_frame_resolve_current_exception<E>;
+    else
+        return nullptr;
+#else
+    return nullptr; // no exception can escape a frame in the first place
+#endif
+}
+
+/// The ops descriptor (see cc::async_type_ops), keyed on what actually distinguishes it: the node size class, the value/error teardowns, the frame ops, and the exception resolver.
 /// Two async types agreeing on all of those share ONE static instance — async<int, async_error> and async<float, async_error> get the SAME pointer.
 /// The frame ops are per-frame-type, so a framed descriptor does not collapse across closures; the frameless descriptors below do.
 /// class_index comes from async_typed_node<T, E>, which is complete here where async<T, E> is not.
-template <cc::node_class_index Cls, async_teardown_fn TV, async_teardown_fn TE, async_frame_invoke_fn FI, async_frame_destroy_fn FD>
-inline constexpr cc::async_type_ops async_type_ops_v = {TV, TE, FI, FD, Cls};
+template <cc::node_class_index Cls,
+          async_teardown_fn TV,
+          async_teardown_fn TE,
+          async_frame_invoke_fn FI,
+          async_frame_destroy_fn FD,
+          async_frame_except_fn FX>
+inline constexpr cc::async_type_ops async_type_ops_v = {TV, TE, FI, FD, FX, Cls};
 
 /// The descriptor for a concrete async<T, E> with NO compute frame — a manual/push node, or a born-ready factory.
 /// A reference into the shared, collapsed instance above.
+/// The exception resolver is null here for the same reason the frame ops are: with no frame there is nothing that could throw.
 template <class T, class E>
 inline constexpr cc::async_type_ops const& async_type_ops_for
-    = async_type_ops_v<cc::node_class_index_for<async_typed_node<T, E>>(), async_teardown_ptr<T>(), async_teardown_ptr<E>(), nullptr, nullptr>;
+    = async_type_ops_v<cc::node_class_index_for<async_typed_node<T, E>>(),
+                       async_teardown_ptr<T>(),
+                       async_teardown_ptr<E>(),
+                       nullptr,
+                       nullptr,
+                       nullptr>;
 
 /// The descriptor for an async<T, E> running an inline frame of type G.
 /// Installed by set_frame, which is what determines G — the node births frameless and is re-pointed here before it is shared.
@@ -148,7 +249,8 @@ inline constexpr cc::async_type_ops const& async_type_ops_for_frame
                        async_teardown_ptr<T>(),
                        async_teardown_ptr<E>(),
                        &async_frame_invoke<G>,
-                       &async_frame_destroy<G>>;
+                       &async_frame_destroy<G>,
+                       async_frame_except_ptr<E>()>;
 
 // error-propagation hook: produce a fresh, independent copy of a dependency's error for a dependent node.
 // The default copies, so a custom E must be copyable where this is used.
@@ -229,13 +331,14 @@ public:
     void set_frame_emplace(Args&&... args)
     {
         if constexpr (async::template frame_fits_inline<F>)
-            this->template install_frame<F>(&impl::async_type_ops_for_frame<T, E, F>, cc::forward<Args>(args)...);
+            this->template install_frame<async::frame_capacity, F>(&impl::async_type_ops_for_frame<T, E, F>,
+                                                                   cc::forward<Args>(args)...);
         else
         {
             // too big for the inline slot: box it.
             // A cc::unique_function is one pointer, so IT fits inline, and create_from emplaces the closure into the box — an immovable F still works.
             using boxed_t = typename async::frame_type;
-            this->template install_frame<boxed_t>(
+            this->template install_frame<async::frame_capacity, boxed_t>(
                 &impl::async_type_ops_for_frame<T, E, boxed_t>,
                 boxed_t::template create_from<F>(cc::default_node_allocator(), cc::forward<Args>(args)...));
         }
@@ -321,6 +424,26 @@ public:
         current->add_pending_dependency(dep.get());
         return false;
     }
+
+    // the step's resolution latch — read by async_node_base::invoke_frame_step's handler
+public:
+    /// True once this step resolved the node.
+    /// A frame that throws AFTER resolving leaves nothing to fail: the frame is destroyed and the node may already be freed, so `current` is not even loadable.
+    /// This is the only way the handler can tell that case apart from a frame that threw on its way to a result.
+    [[nodiscard]] bool step_resolved() const { return _step->_resolved; }
+
+private:
+    template <class, class>
+    friend struct cc::async_context; // the typed resolves latch through mark_step_resolved
+
+    void mark_step_resolved() const { _step->_resolved = true; }
+
+    /// The poll-stack context this step belongs to.
+    /// The typed async_context<T, E> is built by COPYING this base, so the copy must not own the latch.
+    /// The default member initializer points poll's own context at itself, and every copy inherits that pointer.
+    /// Poll's context outlives the frame, so the latch stays readable after the node is gone.
+    async_context_base* _step = this;
+    bool _resolved = false;
 };
 
 /// The typed compute-step context the user's frame receives: `[](cc::async_context<T, E>& ctx) -> ...`.
@@ -329,8 +452,9 @@ public:
 template <class T, class E>
 struct cc::async_context : async_context_base
 {
-    /// Wrap the step's base context (copies the two pointers).
-    async_context(async_context_base const& base) : async_context_base(base) {}
+    /// Wrap the step's base context.
+    /// Takes a non-const lvalue so the copied latch pointer cannot outlive a temporary — see async_context_base::_step.
+    async_context(async_context_base& base) : async_context_base(base) {}
 
     // resolving the result — each returns the matching async_step_status, so a frame can `return ctx.xxx(...)`.
     // Resolving completes the node IN PLACE over the frame's own slot: it destroys the frame, the live executing closure, and builds the value/error there.
@@ -343,6 +467,7 @@ public:
     [[nodiscard]] async_step_status resolve_to_value(T v) const
     {
         CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
+        this->mark_step_resolved();
         current->finish_value(cc::move(v)); // T exactly, so finish_value's decay deduces the payload type
         return async_step_status::produced_value;
     }
@@ -356,6 +481,7 @@ public:
     [[nodiscard]] async_step_status resolve_to_value_emplace(Args&&... args) const
     {
         CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
+        this->mark_step_resolved();
         current->template finish_value_emplace<T>(cc::forward<Args>(args)...);
         return async_step_status::produced_value;
     }
@@ -364,6 +490,7 @@ public:
     [[nodiscard]] async_step_status resolve_to_error(E e) const
     {
         CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
+        this->mark_step_resolved();
         current->finish_error(cc::move(e));
         return async_step_status::produced_error;
     }
@@ -374,6 +501,7 @@ public:
     [[nodiscard]] async_step_status resolve_to_error_emplace(Args&&... args) const
     {
         CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
+        this->mark_step_resolved();
         current->template finish_error_emplace<E>(cc::forward<Args>(args)...);
         return async_step_status::produced_error;
     }

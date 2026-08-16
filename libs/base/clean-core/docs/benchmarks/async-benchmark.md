@@ -39,10 +39,12 @@ An affine mix composes — a chain of `x = x*a + b` rounds collapses into a sing
 Those measure the machine rather than the scheduler, and cap out around 8 workers.
 So a case that stops scaling past ~8 workers is a codegen question before it is a scheduler question.
 
-**Every fork-join frame must fit the node's 32 B inline slot.**
-A closure over 32 B falls back to a heap-boxed `cc::unique_function` ([node layout](../systems/async.md#node-layout-size--locking)).
+**Every fork-join frame must fit the node's inline slot, which on a one-line node is 24 B.**
+A closure that does not fit falls back to a heap-boxed `cc::unique_function` ([node layout](../systems/async.md#node-layout-size--locking)).
 That is an allocation in every task, and it makes the whole thing a benchmark of malloc.
-A two-child frame already captures exactly `span` (16) + two `shared_async` (8+8), so the budget is spent.
+A two-child frame captures two `shared_async` (8+8) outright, so a range has to be one word: these carry `{i32 offset, i32 count}` against a namespace-scope base pointer rather than a 16 B `cc::span`.
+The `spawn` helpers ask `cc::async<i64>::frame_fits_inline<F>` rather than restating the budget.
+An earlier hand-copied `<= 32` survived the slot shrinking to 24, and would have let all six frames spill silently.
 That is why grain sizes are namespace-scope constants rather than captures, and why the spawn helpers `static_assert` on it: adding one capture anywhere changes what is measured.
 
 **The pool is constructed outside the timed pass.**

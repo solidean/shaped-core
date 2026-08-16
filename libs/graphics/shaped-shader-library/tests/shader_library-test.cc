@@ -55,7 +55,8 @@ sg::compiled_shader const& await(sg::async_compiled_shader const& shader)
 }
 } // namespace
 
-TEST("slib - add_package fills in the generated globals")
+// slib::shader_library is a process-wide singleton — the generated symbols it fills in are globals — so every test that stands one up shares that tag.
+TEST("slib - add_package fills in the generated globals", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     test_package pkg;
@@ -81,7 +82,7 @@ TEST("slib - add_package fills in the generated globals")
     CHECK(pkg.blit_ps->stage() == sg::shader_stage::fragment);
 }
 
-TEST("slib - the same package cannot be added twice")
+TEST("slib - the same package cannot be added twice", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     test_package pkg;
@@ -90,14 +91,14 @@ TEST("slib - the same package cannot be added twice")
     CHECK_ASSERTS(lib.add_package(pkg.package(), make_sources()));
 }
 
-TEST("slib - only one library may exist at a time")
+TEST("slib - only one library may exist at a time", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     // The generated symbols are process-wide globals; a second library would fight over them.
     CHECK_ASSERTS(slib::shader_library{});
 }
 
-TEST("slib - acquiring through a global whose library is gone reports an error")
+TEST("slib - acquiring through a global whose library is gone reports an error", exclusive("slib-shader-library"))
 {
     // The generated globals are statics, so an asset outliving its library is normal, not a misuse.
     // The asset only weakly references the library, which is what keeps this a reported error rather
@@ -114,7 +115,7 @@ TEST("slib - acquiring through a global whose library is gone reports an error")
     CHECK(pkg.invert->acquire(sg::shader_format::dxil)->has_error());
 }
 
-TEST("slib - acquire compiles a shader lazily, once per format")
+TEST("slib - acquire compiles a shader lazily, once per format", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     auto compiler = std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil);
@@ -143,7 +144,7 @@ TEST("slib - acquire compiles a shader lazily, once per format")
     CHECK(compiler_ptr->compile_count() == 2);
 }
 
-TEST("slib - acquire builds each requested format from the same source")
+TEST("slib - acquire builds each requested format from the same source", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -161,7 +162,7 @@ TEST("slib - acquire builds each requested format from the same source")
     CHECK(dxil != spirv);
 }
 
-TEST("slib - can_compile reports the registered edges")
+TEST("slib - can_compile reports the registered edges", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     CHECK(!lib.can_compile(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -173,7 +174,7 @@ TEST("slib - can_compile reports the registered edges")
     CHECK(lib.supported_formats(slib::shader_language::hlsl).size() == 1);
 }
 
-TEST("slib - a second compiler for the same edge replaces the first")
+TEST("slib - a second compiler for the same edge replaces the first", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -182,7 +183,7 @@ TEST("slib - a second compiler for the same edge replaces the first")
     CHECK(lib.supported_formats(slib::shader_language::hlsl).size() == 1);
 }
 
-TEST("slib - acquiring a format with no compiler fails on the async channel")
+TEST("slib - acquiring a format with no compiler fails on the async channel", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     test_package pkg;
@@ -195,7 +196,7 @@ TEST("slib - acquiring a format with no compiler fails on the async channel")
     CHECK(shader->has_error());
 }
 
-TEST("slib - acquiring a shader whose source is missing fails on the async channel")
+TEST("slib - acquiring a shader whose source is missing fails on the async channel", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -208,7 +209,7 @@ TEST("slib - acquiring a shader whose source is missing fails on the async chann
     CHECK(shader->has_error());
 }
 
-TEST("slib - a shader that does not compile fails on the async channel")
+TEST("slib - a shader that does not compile fails on the async channel", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -228,7 +229,7 @@ TEST("slib - a shader that does not compile fails on the async channel")
     CHECK(await(pkg.blit_vs->acquire(sg::shader_format::dxil)).entry_point == "main_vs");
 }
 
-TEST("slib - includes are inlined and recorded as dependencies")
+TEST("slib - includes are inlined and recorded as dependencies", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -253,7 +254,7 @@ TEST("slib - includes are inlined and recorded as dependencies")
     CHECK(dependencies[1] == "test_pkg/common.hlsli");
 }
 
-TEST("slib - an include resolves relative to the including file first")
+TEST("slib - an include resolves relative to the including file first", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -275,7 +276,7 @@ TEST("slib - an include resolves relative to the including file first")
     CHECK(invert->dependencies()[1] == "test_pkg/dir/common.hlsli");
 }
 
-TEST("slib - an include falls back to the package root")
+TEST("slib - an include falls back to the package root", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -294,7 +295,7 @@ TEST("slib - an include falls back to the package root")
     CHECK(invert->dependencies()[1] == "test_pkg/common.hlsli");
 }
 
-TEST("slib - a shared mount serves includes to several packages by a stable path")
+TEST("slib - a shared mount serves includes to several packages by a stable path", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
@@ -325,7 +326,7 @@ TEST("slib - a shared mount serves includes to several packages by a stable path
     CHECK(a->dependencies()[1] == "common/brdf.hlsli");
 }
 
-TEST("slib - a missing include fails on the async channel")
+TEST("slib - a missing include fails on the async channel", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));

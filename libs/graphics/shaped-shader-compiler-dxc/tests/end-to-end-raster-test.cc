@@ -53,14 +53,14 @@ struct sg::vertex_layout_of<vertex>
     }
 };
 
-TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target")
+INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target",
+               (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx_r.has_value());
-    sg::context& ctx = *ctx_r.value();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
 
     // Compile the vertex + pixel stages from the one source.
     auto compile = [&](char const* entry, sg::shader_stage stage) -> sg::compiled_shader

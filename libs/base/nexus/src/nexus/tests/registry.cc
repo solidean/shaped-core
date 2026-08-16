@@ -23,6 +23,19 @@ void test_registry::add_declaration(cc::string name,
     });
 }
 
+void test_registry::add_async_declaration(cc::string name,
+                                          config::cfg test_config,
+                                          cc::unique_function<void(impl::async_test_sink&)> async_function,
+                                          cc::source_location loc)
+{
+    declarations.push_back(test_declaration{
+        .name = cc::move(name),
+        .test_config = test_config,
+        .location = loc,
+        .async_function = cc::move(async_function),
+    });
+}
+
 void test_registry::add_invocable_declaration(cc::string name,
                                               config::cfg test_config,
                                               cc::vector<std::type_index> signature,

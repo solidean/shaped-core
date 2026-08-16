@@ -83,6 +83,22 @@ So `dev.py test hash-benchmark.cc` reports that the file's benchmarks are in the
 Under bash a pattern like `tests/memory/*` is expanded by the shell into many arguments; those arrive as several filters, which are OR'd, so the selection comes out the same.
 Quoting it keeps the glob for nexus to interpret, which is what you want for `**`.
 
+## Chasing a flake: `--repeat N`
+
+```bash
+uv run dev.py test shaped-graphics-dx12-test --repeat 100
+```
+
+Runs the same selection up to N times and **stops at the first failing iteration**, naming it.
+Build and target discovery happen once, so an iteration costs only the binaries — far cheaper than a shell loop around `dev.py`.
+
+Stopping on failure is the point, not a convenience.
+Run logs and JUnit XML are written per target and **overwritten every run**, so a loop that keeps going destroys the evidence of the failure it just found.
+Halting leaves that iteration's `run-logs/` and `*.results.xml` exactly as the failing run left them, which is what `test_diag` and `--mirror-test-output` then read.
+
+A rate is a different question from a cause, and this answers the cause.
+When you do want the rate, loop it in the shell and count — but expect to lose the logs of all but the last failure.
+
 ## Presets
 
 Presets live in [CMakePresets.json](../../CMakePresets.json), one per platform × compiler × build type (MSVC / Clang / GCC across Windows / Linux / macOS / Android NDK / Emscripten).
@@ -107,6 +123,14 @@ uv run dev.py test  --preset "x64-linux-*"
 
 **When you touch assertion-gated code, build a `release-*` preset too.**
 The default preset only exercises the assertions-on branch the table above names.
+
+### No-PCH presets
+
+Every preset above builds against per-target precompiled headers.
+The `nopch-*` and `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON` instead, which is what catches a source relying on a header only the PCH's `/FI` supplied.
+`check` runs `debug-nopch-*` as its debug leg and CI runs `nopch-linux-clang`, so you rarely reach for these by hand.
+`uv run dev.py build --preset nopch-clang` reproduces a CI canary failure locally.
+[precompiled-headers.md](precompiled-headers.md) is the tiers, how to pick one, and the ordering rule the SDK gates impose.
 
 ### Pinning toolset versions
 
@@ -277,7 +301,8 @@ It reports each offender as `file:line: reason`.
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
 It builds and runs the suite across five build variants:
 
-- **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on
+- **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**
+  (`debug-nopch-*`, the cheapest of the four to give a PCH up on, so a source that dropped an include the PCH's `/FI` was supplying fails here — see [precompiled-headers.md](precompiled-headers.md))
 - the platform default **relwithdebinfo** — `CC_ASSERT` on
 - the **release** sibling — `CC_ASSERT` off
 - a **single-threaded** sibling — `SC_THREADS=OFF`, otherwise reachable only through a wasm build
@@ -391,7 +416,10 @@ Reading it as structure would file most of a build's fan-out under `containers`,
 `par` is the ratio — 1.0 is serial, and above that is how many ran at once on average.
 A type with a large `sum` and a small `span` is already parallel and not the thing to fix; a type whose `span` approaches the run's is.
 
-`env` above is a worked example: 8.8 s of a 135 s run, at `1.0x`, spent re-deriving the same MSVC environment.
+`env` is the worked example, and it is what the summary above was captured before.
+8.8 s of a 135 s run at `1.0x`, all of it re-deriving the same MSVC environment, because configure and build each asked for it independently once per preset.
+It is cached on `(toolset, arch)` now and shows up as a single capture, so a run like that one reads `env 1 2.6 s`.
+[notes/build-times.md](../notes/build-times.md) carries that measurement and the others it came with — read it before optimizing anything here, since it says which scenario each cost belongs to.
 
 ### What becomes a job
 

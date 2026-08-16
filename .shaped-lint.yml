@@ -52,10 +52,6 @@ rules:
     reason: no cc:: numeric limits yet
 
   - kind: allow-include
-    value: <algorithm>
-    reason: no cc:: algorithm library yet
-
-  - kind: allow-include
     value: <thread>
     reason: no cc:: thread type — clean-core/thread/thread.hh is helpers only. Prefer cc::threaded_actor or cc::async over a raw thread either way
 
@@ -92,6 +88,10 @@ rules:
   - kind: deny-include
     value: <span>
     reason: use cc::span
+
+  - kind: deny-include
+    value: <algorithm>
+    reason: use clean-core/algorithm/ — cc::sort / sort_by / sort_multi / sort_indices, cc::partition_by, cc::sort_at / sort_window / sort_first, cc::is_sorted, and search.hh's cc::partition_point / first_at_least_in_sorted / first_greater_in_sorted / find_in_sorted / find_range_in_sorted. Scanning (find, count, any_of) is cc::sequence's. A library needing something none of them covers re-allows this with the gap named
 
   - kind: deny-include
     value: <functional>

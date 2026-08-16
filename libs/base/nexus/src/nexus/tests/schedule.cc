@@ -3,7 +3,9 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/string/glob.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 
 #include <iostream>    // std::cout: console output
@@ -17,6 +19,24 @@ namespace
 std::string_view as_sv(cc::string_view s)
 {
     return std::string_view(s.data(), size_t(s.size()));
+}
+
+// Decimal, no sign, no whitespace; -1 for anything else, including an empty view.
+int parse_count(cc::string_view s)
+{
+    if (s.empty())
+        return -1;
+
+    int value = 0;
+    for (auto const c : s)
+    {
+        if (c < '0' || c > '9')
+            return -1;
+        value = value * 10 + (c - '0');
+        if (value > 4096) // far past any plausible job count, and it keeps the accumulate from overflowing
+            return -1;
+    }
+    return value;
 }
 
 // Does one glob select `path`? Both sides are already normalized, and matching folds case — a path is a path,
@@ -84,6 +104,11 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
 {
     test_schedule_config config;
 
+    // A real run uses every core unless --jobs says otherwise, which is the opposite of the struct's own default.
+    // A suite that only passes one test at a time is hiding something, and the place to find that out is the ordinary run.
+    // A hand-built config keeps schedule order, because a test that builds a schedule is usually asserting about it.
+    config.jobs = 0;
+
     // Track Catch2 compatibility flags for XML discovery mode
     bool has_verbosity = false;
     bool has_list_tests = false;
@@ -130,6 +155,26 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         else if (arg == "--match-names")
         {
             config.mode = filter_mode::name;
+            continue;
+        }
+        // Upper bound on concurrently running tests: `--jobs N`, `-j N` or `-jN`; 0 means hardware concurrency.
+        // A bad or missing count leaves the default rather than failing the run — a mistyped -j should not look like a green suite.
+        else if (arg == "--jobs" || arg == "-j" || arg.starts_with("-j"))
+        {
+            auto count = -1;
+            if (arg == "--jobs" || arg == "-j")
+            {
+                if (i + 1 < argc)
+                    count = parse_count(argv[++i]);
+            }
+            else
+                count = parse_count(arg.subview(2));
+
+            // 0 is stored as-is: execute_tests resolves it to hardware concurrency, so the field means the same thing however it was set.
+            if (count >= 0)
+                config.jobs = count;
+            else
+                cc::eprintln("nexus: ignoring `{}`: expected a job count", arg);
             continue;
         }
         // Check for section filter flag
@@ -328,13 +373,14 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         if (decl.is_invocable())
             continue;
 
-        CC_ASSERT(decl.function.is_valid(), "invalid test decl");
+        CC_ASSERT(decl.function.is_valid() || decl.is_async(), "invalid test decl");
 
         if (!config.would_run(decl))
             continue;
 
         schedule.instances.push_back(test_instance{
             .declaration = &decl,
+            .registry = &registry,
         });
     }
 
@@ -384,7 +430,7 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
                 }
             if (scoped == nullptr)
             {
-                schedule.instances.push_back(test_instance{.declaration = frag.driver});
+                schedule.instances.push_back(test_instance{.declaration = frag.driver, .registry = &registry});
                 scoped = &schedule.instances.back();
             }
 

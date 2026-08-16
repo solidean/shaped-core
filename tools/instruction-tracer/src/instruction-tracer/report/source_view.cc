@@ -1,11 +1,11 @@
 #include "source_view.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh> // cc::min, cc::max
 #include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
 #include <instruction-tracer/report/source_cache.hh>
 
-#include <algorithm> // std::sort
 
 namespace itrace
 {
@@ -46,7 +46,7 @@ source_view_model collect_source_view(trace const& t, source_cache& sources, u32
             continue;
 
         // Sort + dedupe the touched lines (cc::vector has no resize/unique seam of its own).
-        std::sort(tf.lines.begin(), tf.lines.end());
+        cc::sort(tf.lines);
         cc::vector<u32> touched_lines;
         for (auto const l : tf.lines)
             if (touched_lines.empty() || touched_lines.back() != l)

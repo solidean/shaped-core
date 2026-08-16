@@ -15,9 +15,10 @@
 //     ARM64 has __umulh / __mulh for the multiplies but no carry intrinsic, so add/sub take the plain-u64 fallback.
 //     None of the intrinsics are usable in a constant expression, so `if !consteval` routes constant evaluation to the plain-u64 fallback below.
 
-#if defined(CC_COMPILER_MSVC)
-#include <intrin.h>
-#endif
+// The MSVC intrinsics below are declared by intrinsics.hh rather than pulled in with <intrin.h>, which costs
+// tens of thousands of lines for the six we use.
+// It expands to nothing on clang and gcc, which have __int128.
+#include <clean-core/platform/intrinsics.hh>
 
 /// Low and high 64-bit halves of an unsigned 128-bit value (hi is the more significant half).
 struct cc::u128

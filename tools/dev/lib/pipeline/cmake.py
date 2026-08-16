@@ -25,10 +25,16 @@ def configure_command(
     return cmd
 
 
-def build_command(build_dir: Path, target: str | None = None, *, keep_going: bool = False) -> list[str]:
+def build_command(
+    build_dir: Path, target: str | list[str] | None = None, *, keep_going: bool = False
+) -> list[str]:
     # Build by directory rather than by build-preset name: the build presets are thin, name plus configurePreset only, so this is equivalent and follows an overridden build_dir.
     cmd = ["cmake", "--build", str(build_dir)]
-    if target:
+    # A list becomes one `--target a b c`, which is what keeps several targets in a single ninja invocation and therefore parallel.
+    if isinstance(target, list):
+        if target:
+            cmd += ["--target", *target]
+    elif target:
         cmd += ["--target", target]
     if keep_going:
         # Pass through to the native tool: ninja's -k 0 keeps building after a failure, so one run surfaces every independent error rather than just the first.

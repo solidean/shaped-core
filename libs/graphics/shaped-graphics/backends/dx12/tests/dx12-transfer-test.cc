@@ -14,9 +14,8 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - buffer upload then download round-trips")
+INVOCABLE_TEST("sg dx12 - buffer upload then download round-trips", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -48,9 +47,8 @@ TEST("sg dx12 - buffer upload then download round-trips")
     CHECK(matches);
 }
 
-TEST("sg dx12 - typed upload/download convenience")
+INVOCABLE_TEST("sg dx12 - typed upload/download convenience", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -76,9 +74,8 @@ TEST("sg dx12 - typed upload/download convenience")
     CHECK(data.value()[3] == 8);
 }
 
-TEST("sg dx12 - empty transfers")
+INVOCABLE_TEST("sg dx12 - empty transfers", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -97,9 +94,8 @@ TEST("sg dx12 - empty transfers")
     c.submit_command_list(cc::move(cmd));
 }
 
-TEST("sg dx12 - partial download with offset")
+INVOCABLE_TEST("sg dx12 - partial download with offset", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -130,9 +126,8 @@ TEST("sg dx12 - partial download with offset")
     CHECK(matches);
 }
 
-TEST("sg dx12 - multiple uploads in one list, last writer wins")
+INVOCABLE_TEST("sg dx12 - multiple uploads in one list, last writer wins", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -167,9 +162,9 @@ TEST("sg dx12 - multiple uploads in one list, last writer wins")
     CHECK(all_second);
 }
 
-TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
+INVOCABLE_TEST("sg dx12 - dropping a download future is safe and reclaims ring space",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -206,9 +201,8 @@ TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
     CHECK(bytes.value()[100] == byte(100));
 }
 
-TEST("sg dx12 - inline transfer reused across epochs")
+INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -247,9 +241,9 @@ TEST("sg dx12 - inline transfer reused across epochs")
 // The actor copies in submission order, which then does not match ring-allocation order.
 // A per-submission free watermark would reclaim the first-allocated window while the other list still holds it.
 // Epoch-granular reclaim must keep both windows pinned, and both futures must read back intact.
-TEST("sg dx12 - interleaved downloads submitted out of allocation order")
+INVOCABLE_TEST("sg dx12 - interleaved downloads submitted out of allocation order",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -304,9 +298,8 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
 // Dropping (never submitting) a list with a pending download cancels its future: it never becomes
 // ready, wait fails instead of blocking forever, and the ring space it reserved is reclaimed with the
 // epoch so later downloads still succeed.
-TEST("sg dx12 - dropping a recording list cancels its downloads")
+INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 

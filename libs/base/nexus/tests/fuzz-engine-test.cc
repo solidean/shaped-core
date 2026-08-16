@@ -86,7 +86,7 @@ TEST("fuzz engine - uncreatable argument type is a setup error, not a finding")
     CHECK(!res.failing_run.has_value()); // setup error: no finding
 }
 
-TEST("fuzz engine - a passing test reports no failures and does not pollute the host")
+TEST("fuzz engine - a passing test reports no failures and does not pollute the host", no_scheduler)
 {
     // run an inner fuzz test that never fails inside its own execution context
     nx::test_registry reg;
@@ -105,7 +105,7 @@ TEST("fuzz engine - a passing test reports no failures and does not pollute the 
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("fuzz engine - a failing test reports exactly one failed check (no pollution)")
+TEST("fuzz engine - a failing test reports exactly one failed check (no pollution)", no_scheduler)
 {
     // The many CHECK/invariant failures probed during fuzzing + minimization must NOT leak into the
     // host test: only the single outer CHECK(execute_fuzz_test()) should be recorded as failing.

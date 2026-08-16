@@ -60,7 +60,8 @@ private:
 };
 } // namespace
 
-TEST("console - never colors")
+// Every test here writes process-wide state — the global color mode, and NO_COLOR / FORCE_COLOR in the environment — so they share one exclusion tag.
+TEST("console - never colors", exclusive("cc-console-color"))
 {
     color_scope const scope(color_mode::never);
 
@@ -73,7 +74,7 @@ TEST("console - never colors")
     CHECK(cyan("x") == "x");
 }
 
-TEST("console - always wraps in ANSI, even when not a terminal")
+TEST("console - always wraps in ANSI, even when not a terminal", exclusive("cc-console-color"))
 {
     // The test binary's stdout is redirected by the runner, so auto would say no.
     // An explicit `always` must override that rather than consult the terminal.
@@ -88,7 +89,7 @@ TEST("console - always wraps in ANSI, even when not a terminal")
     CHECK(cyan("x") == "\033[36mx\033[0m");
 }
 
-TEST("console - every color has its own escape")
+TEST("console - every color has its own escape", exclusive("cc-console-color"))
 {
     color_scope const scope(color_mode::always);
 
@@ -109,7 +110,7 @@ TEST("console - every color has its own escape")
     CHECK(bright_white("x") == "\033[97mx\033[0m");
 }
 
-TEST("console - colorize takes the flag explicitly or from the global")
+TEST("console - colorize takes the flag explicitly or from the global", exclusive("cc-console-color"))
 {
     color_scope const scope(color_mode::never);
 
@@ -122,7 +123,7 @@ TEST("console - colorize takes the flag explicitly or from the global")
 // Emscripten's node shim, for one, a captured stdout still reports as a terminal.
 // So these pin the two rules that hold whatever the stdio looks like.
 
-TEST("console - NO_COLOR forces plain and beats FORCE_COLOR")
+TEST("console - NO_COLOR forces plain and beats FORCE_COLOR", exclusive("cc-console-color"))
 {
     env_scope const no_color("NO_COLOR", "1");
     env_scope const force_color("FORCE_COLOR", "1");
@@ -131,7 +132,7 @@ TEST("console - NO_COLOR forces plain and beats FORCE_COLOR")
     CHECK(!color_enabled());
 }
 
-TEST("console - FORCE_COLOR colors a stream that is not a terminal")
+TEST("console - FORCE_COLOR colors a stream that is not a terminal", exclusive("cc-console-color"))
 {
     env_scope const no_color("NO_COLOR", nullptr);
     env_scope const force_color("FORCE_COLOR", "1");
@@ -140,7 +141,7 @@ TEST("console - FORCE_COLOR colors a stream that is not a terminal")
     CHECK(color_enabled());
 }
 
-TEST("console - an explicit mode ignores the environment entirely")
+TEST("console - an explicit mode ignores the environment entirely", exclusive("cc-console-color"))
 {
     env_scope const force_color("FORCE_COLOR", "1");
     color_scope const scope(color_mode::never);
@@ -148,7 +149,7 @@ TEST("console - an explicit mode ignores the environment entirely")
     CHECK(!color_enabled());
 }
 
-TEST("console - an empty string round-trips")
+TEST("console - an empty string round-trips", exclusive("cc-console-color"))
 {
     color_scope const scope(color_mode::always);
     CHECK(dim("") == "\033[2m\033[0m");

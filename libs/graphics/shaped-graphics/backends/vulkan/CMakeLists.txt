@@ -38,6 +38,10 @@ target_include_directories(shaped-graphics-vulkan
 # Vulkan::Vulkan carries the loader link plus the SDK include dir (for <vulkan/vulkan.h>).
 target_link_libraries(shaped-graphics-vulkan PUBLIC shaped-graphics Vulkan::Vulkan)
 
+# SG rather than a vulkan-specific tier: <vulkan/vulkan.h> reaches an UNSANITIZED windows.h under
+# VK_USE_PLATFORM_WIN32_KHR, which is the collision dx12_common.hh's bracket exists to prevent, and 6 TUs do not justify the risk.
+sc_target_pch(shaped-graphics-vulkan SG)
+
 target_compile_options(shaped-graphics-vulkan
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>

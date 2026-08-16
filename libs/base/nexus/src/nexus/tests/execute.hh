@@ -70,6 +70,11 @@ struct nx::test_execution
     // note: global stats == root stats
     section root;
 
+    // The --verbose console trace this test produced, buffered instead of printed as it happens.
+    // Tests may run concurrently, so printing from the running test's own thread interleaves into noise.
+    // A nested (dispatched) execution appends into its top-level ancestor's buffer, which is what keeps a driver's trace and its children's interleaved as they were.
+    cc::string verbose_output;
+
     // Executions dispatched from this test's body via nx::invoke_tests, so a parametrized-test instance runs as an addressable child.
     // Empty for an ordinary test.
     // invocation_group is the nx::invoke_tests(name) segment this execution ran under, and is empty for a top-level test.
@@ -84,6 +89,12 @@ struct nx::test_execution
 struct nx::test_schedule_execution
 {
     cc::vector<test_execution> executions;
+
+    // Checks that ran with no test to attribute them to — see report_check_result: a thread nexus never heard of, or code outside a test entirely.
+    // They belong to no test, so they fail the RUN rather than a test, however green everything else is.
+    // Drained from a process-global sink at the end of this run, so a nested execute_tests takes what it produced and the outer one sees only its own.
+    int orphan_checks = 0;
+    cc::vector<test_error> orphan_errors;
 
     // All counts recurse into dispatched (nested) executions: a dispatched instance counts as its own test.
     [[nodiscard]] int count_total_tests() const;
@@ -123,8 +134,8 @@ nx::test_schedule_config const* current_config();
 int current_filter_consumed(); // scope segments already matched by this path + ancestors
 cc::span<cc::vector<cc::string> const> current_section_scopes(); // effective section scopes of the running instance
 
-// Registry nx::invoke_tests queries during the active execute_tests run (nullptr outside a run). Set from the
-// running schedule, so dispatching within a local-registry run stays within that registry.
+// Registry nx::invoke_tests queries for the test running here (nullptr outside a test).
+// Read off the running instance through the ambient chain rather than a thread-local, so it is correct for a test running on any thread and for one dispatched from another.
 nx::test_registry const* active_registry();
 
 // True if `decl` is already running on the current execution chain (an ancestor invoke, or the running test

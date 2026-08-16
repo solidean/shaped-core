@@ -25,6 +25,11 @@ rules:
       - src/clean-core/thread/threaded_actor.hh
 
   - kind: allow-include
+    value: <chrono>
+    reason: cc::current_time_steady_secs replaces it repo-wide; <chrono> is the standard library's most expensive header on MSVC (1.16 s, 148 files, via <format> and <xutility>) so it must never reach a header — see docs/notes/build-times.md
+    files: src/clean-core/common/time.cc
+
+  - kind: allow-include
     value: [<cstddef>, <cstdint>]
     reason: fwd.hh is where the sized aliases everyone else uses are declared from
     files: src/clean-core/fwd.hh
@@ -239,3 +244,8 @@ rules:
     value: [<cstdio>, <cstdlib>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>, <blake3.h>]
     reason: the C runtime and the intrinsics the benchmarks and platform tests measure against
     files: tests/**
+
+  - kind: allow-include
+    value: <algorithm>
+    reason: std::sort is the baseline cc::sort is measured against, which is the whole point of this file
+    files: tests/benchmarks/sort-benchmark.cc

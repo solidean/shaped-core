@@ -159,6 +159,16 @@ struct small_vector;
 // compares with operator==.
 struct default_hash;
 struct default_equal;
+
+// Comparator vocabulary for the ordering algorithms (common/compare.hh).
+// default_less / default_greater are both built on operator<; compare_by builds a lexicographic one from projections.
+struct default_less;
+struct default_greater;
+template <class ProjF>
+struct descending_projection;
+template <class... ProjFs>
+struct lexicographic_comparator;
+
 template <class K, class V, class Hash = default_hash, class KeyEqual = default_equal>
 struct map;
 template <class T, class Hash = default_hash, class KeyEqual = default_equal>
@@ -205,6 +215,16 @@ struct bit_index_range;
 template <class RangeT>
 struct sequence;
 
+// The virtual ranges the sorting algorithms permute (algorithm/sort.hh), built by cc::as_index_swap_range*.
+template <class RangeT>
+struct index_swap_range_of;
+template <class RangeT, class KeyF>
+struct index_swap_range_by;
+template <class KeyRangeT, class... RangeTs>
+struct index_swap_range_multi;
+template <class KeyF, class... RangeTs>
+struct index_swap_range_multi_by;
+
 
 //
 // Functions
@@ -247,6 +267,8 @@ struct result;
 // Concurrency
 //
 
+enum class thread_id : u64; // a thread's identity, compared for equality only (thread/thread.hh)
+
 template <class T>
 struct mutex;
 template <class T>
@@ -277,8 +299,13 @@ struct async_node_traits;
 }
 struct async_scheduler;
 struct async_worker_scope;
+struct async_no_worker_scope;
 struct singlethreaded_scheduler;
 struct async_thread_pool;
+struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)
+struct async_ambient_scope;
+struct async_ambient_handle; // a captured chain head, re-installable on another thread
+struct async_ambient_install_scope;
 struct async_context_base;
 template <class T, class E = async_error>
 struct async_context;

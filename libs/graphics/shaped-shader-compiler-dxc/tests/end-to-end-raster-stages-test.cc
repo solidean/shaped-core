@@ -128,14 +128,13 @@ float4 main_ps(ds_output input) : SV_Target { return input.color; }
 )";
 } // namespace
 
-TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle")
+INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle", (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx_r.has_value());
-    sg::context& ctx = *ctx_r.value();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
 
     auto compile = [&](char const* entry, sg::shader_stage stage) -> sg::compiled_shader
     {
@@ -219,14 +218,14 @@ TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle")
     CHECK(corner[3] == 255);
 }
 
-TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle")
+INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle",
+               (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx_r.has_value());
-    sg::context& ctx = *ctx_r.value();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
 
     auto compile = [&](char const* entry, sg::shader_stage stage) -> sg::compiled_shader
     {

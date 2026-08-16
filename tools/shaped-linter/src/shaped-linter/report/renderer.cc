@@ -1,5 +1,6 @@
 #include "renderer.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
@@ -7,7 +8,6 @@
 #include <shaped-linter/report/snippet.hh>
 #include <shaped-linter/rules/registry.hh>
 
-#include <algorithm> // std::sort: findings arrive per file in rule order, the report reads top to bottom
 
 namespace scl
 {
@@ -194,19 +194,19 @@ cc::string render_report(cc::span<finding const> findings, source_manager const&
     for (auto const& f : findings)
         order.push_back(&f);
 
-    std::sort(order.begin(), order.end(),
-              [&](finding const* a, finding const* b)
-              {
-                  auto const la = sm.resolve(a->span);
-                  auto const lb = sm.resolve(b->span);
-                  if (la.path != lb.path)
-                      return la.path < lb.path;
-                  if (la.line != lb.line)
-                      return la.line < lb.line;
-                  if (la.column != lb.column)
-                      return la.column < lb.column;
-                  return a->rule_id < b->rule_id;
-              });
+    cc::sort(order,
+             [&](finding const* a, finding const* b)
+             {
+                 auto const la = sm.resolve(a->span);
+                 auto const lb = sm.resolve(b->span);
+                 if (la.path != lb.path)
+                     return la.path < lb.path;
+                 if (la.line != lb.line)
+                     return la.line < lb.line;
+                 if (la.column != lb.column)
+                     return la.column < lb.column;
+                 return a->rule_id < b->rule_id;
+             });
 
     auto out = cc::string();
     for (auto const* f : order)

@@ -1,7 +1,7 @@
 name: Linux Clang
 
 # Tier-1 native gate AND the deep config punch: Linux clang across
-# debug / relwithdebinfo / release, so define interactions (CC_ASSERT on with
+# debug / relwithdebinfo / release / relwithdebinfo-without-PCH, so define interactions (CC_ASSERT on with
 # debug+relwithdebinfo, off with release; optimization differences) are all
 # exercised in one workflow. Linux clang is chosen for the deep matrix because
 # it's the fastest, lowest-setup runner. Every other platform runs a single
@@ -25,7 +25,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [debug-linux-clang, relwithdebinfo-linux-clang, release-linux-clang]
+        # nopch-linux-clang is relwithdebinfo with precompiled headers off: the canary for a TU that
+        # dropped an include it still uses and compiles only because the PCH's /FI supplied it.
+        preset: [debug-linux-clang, relwithdebinfo-linux-clang, release-linux-clang, nopch-linux-clang]
     steps:
       - uses: actions/checkout@v5
 

@@ -45,7 +45,8 @@ SDL_Event window_event(u32 window_id, SDL_EventType type, i32 data1 = 0, i32 dat
 }
 } // namespace
 
-TEST("sr - an event is routed to the window it names")
+// nx::main_thread here because sr::window_system must be created on the process main thread; see window-test.cc.
+TEST("sr - an event is routed to the window it names", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const a = wsys->create_window({.title = "a"});
@@ -71,7 +72,7 @@ TEST("sr - an event is routed to the window it names")
     CHECK(k->is_down);
 }
 
-TEST("sr - events keep their order across windows")
+TEST("sr - events keep their order across windows", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const a = wsys->create_window({.title = "a"});
@@ -99,7 +100,7 @@ TEST("sr - events keep their order across windows")
     CHECK(wsys->events()[2].try_as_key()->scancode == scancode::num_3);
 }
 
-TEST("sr - each poll replaces the previous frame's events")
+TEST("sr - each poll replaces the previous frame's events", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "w"});
@@ -115,7 +116,7 @@ TEST("sr - each poll replaces the previous frame's events")
     CHECK(wsys->events().empty());
 }
 
-TEST("sr - modifiers carry forward from key events onto mouse events")
+TEST("sr - modifiers carry forward from key events onto mouse events", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "w"});
@@ -146,7 +147,7 @@ TEST("sr - modifiers carry forward from key events onto mouse events")
     CHECK(b->cursor_pos[1] == 34.0f);
 }
 
-TEST("sr - committed text arrives as its own event, copied")
+TEST("sr - committed text arrives as its own event, copied", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "w"});
@@ -172,7 +173,7 @@ TEST("sr - committed text arrives as its own event, copied")
     CHECK(t->text == "héllo");
 }
 
-TEST("sr - a close request lands only on the window that got it")
+TEST("sr - a close request lands only on the window that got it", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const a = wsys->create_window({.title = "a"});
@@ -186,7 +187,7 @@ TEST("sr - a close request lands only on the window that got it")
     CHECK(!a->is_close_requested());
 }
 
-TEST("sr - a quit closes every window")
+TEST("sr - a quit closes every window", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const a = wsys->create_window({.title = "a"});
@@ -205,7 +206,7 @@ TEST("sr - a quit closes every window")
     CHECK(!wsys->is_quit_requested());
 }
 
-TEST("sr - a pixel size change updates that window's size")
+TEST("sr - a pixel size change updates that window's size", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "w", .width = 800, .height = 600});
@@ -219,7 +220,7 @@ TEST("sr - a pixel size change updates that window's size")
     CHECK(win->height() == 768);
 }
 
-TEST("sr - minimizing reports no drawable area")
+TEST("sr - minimizing reports no drawable area", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "w", .width = 800, .height = 600});
@@ -234,7 +235,7 @@ TEST("sr - minimizing reports no drawable area")
     CHECK(win->height() == 0);
 }
 
-TEST("sr - destroying a window drops its queued events")
+TEST("sr - destroying a window drops its queued events", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const a = wsys->create_window({.title = "a"});

@@ -283,8 +283,8 @@ namespace
 {
 struct tracked
 {
-    inline static int ctor_count = 0;
-    inline static int dtor_count = 0;
+    static inline thread_local int ctor_count = 0;
+    static inline thread_local int dtor_count = 0;
 
     int value;
 

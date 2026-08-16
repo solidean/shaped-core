@@ -13,7 +13,7 @@
 
 using slib_test::fake_compiler;
 
-TEST("slib - the generated package exposes a symbol per stage and entry point")
+TEST("slib - the generated package exposes a symbol per stage and entry point", exclusive("slib-shader-library"))
 {
     // The payoff of generating C++: this is checked by the compiler, so a typo is a build error rather
     // than a runtime lookup that returns nothing.
@@ -37,7 +37,7 @@ TEST("slib - the generated package exposes a symbol per stage and entry point")
     CHECK(slib_test::shaders::blit.vertex.main_vs->virtual_path() == "slib_test_shaders/blit.hlsl");
 }
 
-TEST("slib - the generated package describes itself")
+TEST("slib - the generated package describes itself", exclusive("slib-shader-library"))
 {
     auto const& pkg = slib_test::shaders::package();
 
@@ -54,7 +54,7 @@ TEST("slib - the generated package describes itself")
     }
 }
 
-TEST("slib - the generated package embeds its include closure")
+TEST("slib - the generated package embeds its include closure", exclusive("slib-shader-library"))
 {
     auto const& pkg = slib_test::shaders::package();
 
@@ -80,7 +80,7 @@ TEST("slib - the generated package embeds its include closure")
     CHECK(has_include);
 }
 
-TEST("slib - the generated package compiles from its embedded sources alone")
+TEST("slib - the generated package compiles from its embedded sources alone", exclusive("slib-shader-library"))
 {
     // What a shipped binary does: no source tree, only what the generator baked in.
     // Here we take the real package and prove the embedded copy is complete enough to build from.

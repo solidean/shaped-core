@@ -20,6 +20,9 @@ Two design commitments follow from that, and everything else in this document is
   The sidecars each describe one step, while `--profile` records the run *across* steps — the only place a wall-clock question can be answered.
 - **Collection-oriented.** Presets and targets are selected with comma-lists, repeated flags and wildcards, and configure, build and test operate on *lists* rather than one at a time.
   A toolset matrix is one invocation.
+  Operating on lists is also what lets the driver decide *where* concurrency belongs.
+  A multi-preset build configures every stale preset at once and then builds them one at a time, because a build already saturates the machine and a configure does not.
+  [notes/build-times.md](notes/build-times.md) has the measurement, and is the place to look before adding concurrency anywhere else here.
 
 One invariant is worth stating here rather than in the guide, because it is a design constraint rather than a flag: **UTF-8 end to end, and never hanging over it.**
 dev.py forces its own stdout and stderr to UTF-8 at startup, because everything on both ends of it already is.

@@ -57,8 +57,6 @@
 
 #if CC_HAS_THREADS
 
-thread_local cc::async_thread_pool::worker* cc::async_thread_pool::s_current_worker = nullptr;
-
 int cc::async_thread_pool::default_worker_count()
 {
     int const n = cc::num_hardware_threads() - 1; // the blocking_get caller runs work too; leave it a core
@@ -122,7 +120,7 @@ cc::async_thread_pool::~async_thread_pool()
 
 void cc::async_thread_pool::enqueue(async_node_ptr node)
 {
-    worker* w = s_current_worker;
+    worker* w = current_worker();
     CC_ASSERT(w != nullptr && w->pool == this, "enqueue() must be called from a worker of this pool");
     push_local(*w, cc::move(node));
 }
@@ -254,7 +252,7 @@ static constexpr int async_pool_spin_rounds = 64;
 void cc::async_thread_pool::worker_main(worker& w)
 {
     cc::set_current_thread_name("async-pool");
-    s_current_worker = &w;
+    set_current_worker(&w);
     async_worker_scope const scope(*this);
 
     while (!_stop.load(cc::memory_order_acquire))
@@ -309,7 +307,7 @@ void cc::async_thread_pool::worker_main(worker& w)
         _sleepers.fetch_sub(1, cc::memory_order_relaxed);
     }
 
-    s_current_worker = nullptr;
+    set_current_worker(nullptr);
 }
 
 // Park the calling thread until `root` completes.
@@ -389,8 +387,8 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         return;
     }
 
-    worker* const previous = s_current_worker;
-    s_current_worker = slot;
+    worker* const previous = current_worker();
+    set_current_worker(slot);
     {
         async_worker_scope const scope(*this); // binds THIS pool, so the root's children route to our own deque
 
@@ -432,7 +430,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 
         drain_slot_to_injection(*slot);
     }
-    s_current_worker = previous;
+    set_current_worker(previous);
     slot->claimed.store(false, cc::memory_order_release);
 }
 

@@ -26,7 +26,7 @@ One workflow per platform/compiler, so each gets its own status badge in the
 
 | Workflow                                                              | Runner           | Preset(s)                                                  |
 |-----------------------------------------------------------------------|------------------|------------------------------------------------------------|
-| [ci-linux-clang.yml](../../.github/workflows/ci-linux-clang.yml)      | `ubuntu-26.04`   | `debug-linux-clang`, `relwithdebinfo-linux-clang`, `release-linux-clang` (deep matrix), `--toolset 21` |
+| [ci-linux-clang.yml](../../.github/workflows/ci-linux-clang.yml)      | `ubuntu-26.04`   | `debug-linux-clang`, `relwithdebinfo-linux-clang`, `release-linux-clang`, `nopch-linux-clang` (deep matrix), `--toolset 21` |
 | [ci-linux-gcc.yml](../../.github/workflows/ci-linux-gcc.yml)          | `ubuntu-26.04`   | `relwithdebinfo-linux-gcc`, `--toolset 14`                  |
 | [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`, `--toolset 20` (assert clang-cl 20) |
 | [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-2025`   | `relwithdebinfo-msvc`, `--toolset 14.44` (VS 2022)         |
@@ -37,6 +37,9 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
 | [ci-ios-clang.yml](../../.github/workflows/ci-ios-clang.yml) | `macos-latest` | `ios-arm64-relwithdebinfo` (**build-only**) |
 | [ci-android-ndk.yml](../../.github/workflows/ci-android-ndk.yml) | `ubuntu-26.04` | `android-ndk-arm64-relwithdebinfo` (**build-only**) |
+
+`nopch-linux-clang` is the odd cell: RelWithDebInfo with precompiled headers off.
+A PCH reaches every TU through `/FI`, so a source that dropped an include it still uses compiles everywhere else and fails only here — see [precompiled-headers.md](precompiled-headers.md).
 
 Every workflow shares the same shape: provision the toolchain, then `doctor` → `build` → `test` through `dev.py`, always with an **explicit `--preset`**, since CI never relies on the platform default.
 Each also uploads a **diagnostics artifact**, described below.

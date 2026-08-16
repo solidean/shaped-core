@@ -352,10 +352,16 @@ void run_all(bool record)
     std::fflush(stdout);
 }
 
-// The three points the guide benchmark records.
-// Chosen to cover the distinct cost shapes with the fewest measurements: the undriven floor, one full scheduler round-trip, and the amortized per-node cost at scale.
-// That last one is also the only case exercising the dependency path.
-// The full sweep's other rows interpolate between these, so they add runtime without adding regression coverage — and guide benchmarks are swept across every binary by dev.py pgo.
+// The points the guide benchmark records.
+// The first three cover the distinct cost shapes with the fewest measurements: the undriven floor, one full scheduler round-trip, and the amortized per-node cost at scale.
+//
+// The last two are here because the "other rows merely interpolate" argument stops holding once a change lands cost on a path none of the first three reach:
+//
+//   * chain N=512 is past the inline depth cap, so it is the ONLY recorded point that subscribes and parks.
+//   * fan-in is the only one whose frame captures more than one dependency handle, which is what the node's inline frame budget is sized against.
+//
+// Both are cheap next to the sum tree.
+// Resist growing this further — guide benchmarks are swept across every binary by dev.py pgo, so each point is paid for repeatedly.
 void run_guide()
 {
     std::printf("\n=== cc::async single-thread drive (guide points, median of 5) ===\n");
@@ -368,6 +374,8 @@ void run_guide()
 
     case_single_lazy(sched, /*record*/ true);
     case_sum_tree(sched, 13, /*record*/ true);
+    case_chain(sched, "chain N=512 (>cap)", 512, /*record*/ true);
+    case_fan_in(sched, /*record*/ true);
     std::fflush(stdout);
 }
 } // namespace

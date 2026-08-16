@@ -30,14 +30,14 @@ void main(uint3 tid : SV_DispatchThreadID)
 )";
 } // namespace
 
-TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 group between dispatches")
+INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 group between dispatches",
+               (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx_r.has_value());
-    sg::context& ctx = *ctx_r.value();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
 
     ssc::dxc::shader_description sd;
     sd.stage = sg::shader_stage::compute;

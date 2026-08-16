@@ -112,7 +112,7 @@ static_assert(alignof(T256B) == 8);
 // Type with non-trivial destructor for tracking
 struct TrackedDtor
 {
-    static inline int dtor_counter = 0;
+    static inline thread_local int dtor_counter = 0;
 
     static void reset_counters() { dtor_counter = 0; }
 
@@ -151,8 +151,8 @@ static_assert(std::is_trivially_destructible_v<TrivialType>);
 // Non-trivial type with complex destructor behavior
 struct NonTrivialType
 {
-    static inline int ctor_counter = 0;
-    static inline int dtor_counter = 0;
+    static inline thread_local int ctor_counter = 0;
+    static inline thread_local int dtor_counter = 0;
 
     static void reset_counters()
     {

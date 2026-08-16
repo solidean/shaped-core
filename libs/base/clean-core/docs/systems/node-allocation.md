@@ -186,6 +186,8 @@ lock  or [base + remote_off], bit  ; other thread: the ONLY atomic in the hot pa
 ### The design benchmark carries the real allocator
 
 [`bench-node-design`](../../tests/benchmarks/node-allocation-design-benchmark.cc) sweeps eight idealized fast-path variants, one inline mini-allocator per lock-removal strategy.
+**It is compiled out in the tree** — set `CC_BENCH_NODE_ALLOCATION_DESIGN` to 1 at the top of that file to build and run it.
+The sweep costs ~9 s of compile time on every preset, which is not worth paying for a settled question; docs/notes/build-times.md has the measurement.
 `mimalloc` and `system` run alongside them as reference lines.
 It also drives a **`node` line over the real `cc::node_allocator`**.
 On this machine the shipped `node` line **meets or beats** the idealized `step2_tls_diff` variant it implements, at every size, so the shipped code pays no penalty over the design it was chosen from.
@@ -202,5 +204,6 @@ Reproduce (and regenerate the design-benchmark SVGs):
 
 ```bash
 uv run dev.py --mirror-output test "bench-alloc (handle & node comparison)" --target clean-core-test --preset release-clang --timeout 0
+# then, with CC_BENCH_NODE_ALLOCATION_DESIGN set to 1:
 uv run libs/base/clean-core/scripts/plot-node-allocation-design.py --out .   # runs bench-node-design, writes two SVGs
 ```

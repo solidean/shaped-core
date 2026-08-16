@@ -58,6 +58,12 @@ Everything below is session judgement; the mechanisms, flags and artifact format
   The result loads straight into <https://ui.perfetto.dev>, or into `analyze_trace`.
   The step banners only time whole steps, so the costs that actually surprise you — per-TU compiles, the MSVC env capture, the per-binary test probes — are invisible without it.
 
+- **Chase a flake with `--repeat N`, never a shell loop.**
+  `uv run dev.py test <binary> --repeat 100` runs the selection up to N times and stops at the first failure, naming the iteration.
+  Run logs and result XML are per target and overwritten every run, so a loop that keeps going — or a diagnostic re-run you fire afterwards — destroys the evidence of the failure it just found.
+  Stopping is what leaves that iteration's logs for `test_diag`.
+  Build and discovery happen once, so it is also several times faster than looping `dev.py` itself.
+
 - **A crash shows up as a non-zero exit and a failure XML.**
   dev.py synthesizes a JUnit result from each binary's exit code, so a binary that crashes before printing anything is still reported as failed.
   Re-run the culprit with `uv run dev.py --mirror-test-output test "<pattern>"` to see the live stream — that flag skips the build wall, which `--mirror-output` does not.

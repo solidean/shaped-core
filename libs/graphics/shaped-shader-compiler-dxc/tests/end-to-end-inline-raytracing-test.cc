@@ -45,14 +45,14 @@ void main(uint3 tid : SV_DispatchThreadID)
 )";
 } // namespace
 
-TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispatch")
+INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispatch",
+               (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx_r.has_value());
-    sg::context& ctx = *ctx_r.value();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
 
     // WARP implements DXR (incl. tier-1.1 inline RT), but gate on the query so this SKIPs rather than fails
     // on an SDK/device without ray tracing.

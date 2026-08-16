@@ -10,6 +10,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/mutex.hh>
 
 namespace cc
@@ -155,8 +156,11 @@ private:
     // More would just dilute the steal rotation.
     static constexpr int external_slot_count = 4;
 
-    // the worker whose loop is running on the calling thread (null on foreign threads); used by enqueue
-    static thread_local worker* s_current_worker;
+    // The worker whose loop is running on the calling thread (null on foreign threads); used by enqueue.
+    // Stored in the shared per-thread block (impl/async_tls.hh) as a void*, so a poll resolves ONE TLS address for
+    // the scheduler, the inline depth and this — hence the cast pair rather than a typed slot.
+    [[nodiscard]] static worker* current_worker() { return static_cast<worker*>(cc::impl::async_tls().current_worker); }
+    static void set_current_worker(worker* w) { cc::impl::async_tls().current_worker = w; }
 
     // _workers holds _thread_count real workers followed by external_slot_count borrowable slots.
     // Thieves scan the whole vector: an unclaimed slot is simply an empty deque.

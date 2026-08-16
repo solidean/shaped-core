@@ -109,8 +109,8 @@ TEST("node_allocation - setting the default to null re-resolves")
 #if CC_HAS_THREADS
 TEST("node_allocation - a fresh thread starts unhydrated and restores to null")
 {
-    // observations are recorded on the worker and asserted here: nexus tracks checks per-thread, so
-    // a CHECK inside the lambda would not count towards this test.
+    // Observations are recorded on the worker and asserted here.
+    // A bare thread carries no test attribution, so a CHECK inside the lambda would be an orphan and fail the run — see ../../../nexus/docs/threaded-checks.md.
     bool starts_null = false;
     bool value_ok = false;
     bool served_by_local = false;

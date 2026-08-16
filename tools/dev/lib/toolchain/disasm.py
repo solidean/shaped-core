@@ -93,6 +93,10 @@ def discover_objects(roots: Sequence[Path], target_patterns: list[str] | None) -
     A root is a directory to scan recursively, or a single object file to take as-is.
     `target_patterns` None or empty means every target, and patterns are matched against the derived target name.
     Comma-splitting is the caller's job.
+
+    A target's precompiled-header object is skipped, though a root naming it explicitly still gets through.
+    On the MSVC frontend CMake compiles a `cmake_pch.cxx` per target and links it in, and it is not one of our translation units.
+    What it carries is a copy of instantiations that also live in the real objects, so counting it adds symbols nothing in the tree declares and inflates the target's object-size total.
     """
     by_target: dict[str, list[Path]] = {}
     for root in roots:
@@ -101,6 +105,8 @@ def discover_objects(roots: Sequence[Path], target_patterns: list[str] | None) -
             continue
         for suffix in _OBJ_SUFFIXES:
             for obj in root.rglob("*" + suffix):
+                if obj.name.startswith("cmake_pch."):
+                    continue
                 by_target.setdefault(_target_of(obj, root), []).append(obj)
 
     if target_patterns:

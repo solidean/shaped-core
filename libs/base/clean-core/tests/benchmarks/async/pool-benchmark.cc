@@ -32,7 +32,6 @@
 #include <nexus/guide.hh>
 #include <nexus/test.hh>
 
-#include <algorithm>
 #include <cstdio>
 #include <type_traits>
 
@@ -45,22 +44,43 @@ namespace
 {
 // make_async_lazy<i64>, but pinning the frame to the node's inline slot first.
 //
-// Mirrors async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here.
-// If that budget ever changes, this assert is what will loudly notice.
+// Asks async<i64> for the real predicate rather than restating the budget: a hand-copied number goes stale silently,
+// and a silent spill is exactly the failure this assert exists to prevent.
 // The zero-dependency make_async_lazy form wraps the frame in a lambda whose only capture is the frame itself,
 // so sizeof(F) IS the installed frame size.
 // The variadic dep form would additionally store the dep handles, and none of these use it.
 template <class F>
 [[nodiscard]] cc::shared_async<i64> spawn(F&& f)
 {
-    static_assert(sizeof(std::decay_t<F>) <= 32 && alignof(std::decay_t<F>) <= 16,
-                  "fork-join frame spilled out of the node's 32 B inline slot into a heap-boxed unique_function "
+    static_assert(cc::async<i64>::frame_fits_inline<std::decay_t<F>>,
+                  "fork-join frame spilled out of the node's inline slot into a heap-boxed unique_function "
                   "— that is an allocation per task, and it would make this a benchmark of malloc rather than "
                   "of the scheduler. Drop a capture (see the grain constants) rather than relaxing this.");
     return cc::make_async_lazy<i64>(cc::forward<F>(f));
 }
 
-// --- workload constants (namespace scope so frames stay <= 32 B; see the header note) --------------------
+// Base of the buffer the case currently running works on, set by that case.
+// A global for the same reason the grain constants are: it keeps the fork-join frames inside the node's inline slot.
+// Cases run one at a time, so one slot is enough.
+i32* g_data = nullptr;
+
+/// A subrange of g_data as two i32 — deliberately not a cc::span.
+/// A span is 16 B, which alongside the two child handles would make the frame 32 B and spill it out of the node's 24 B inline slot; see spawn().
+struct range
+{
+    i32 off = 0;
+    i32 count = 0;
+
+    [[nodiscard]] cc::span<i32> mut() const { return cc::span<i32>(g_data + off, count); }
+    [[nodiscard]] cc::span<i32 const> get() const { return cc::span<i32 const>(g_data + off, count); }
+
+    /// Split at `k`, which must be in [0, count] — the two halves partition this range exactly.
+    [[nodiscard]] range head(i32 k) const { return {.off = off, .count = k}; }
+    [[nodiscard]] range tail(i32 k) const { return {.off = off + k, .count = count - k}; }
+};
+static_assert(sizeof(range) == 8, "the fork-join frames are sized around this being one word");
+
+// --- workload constants (namespace scope so frames stay inside the inline slot; see the header note) -----
 
 constexpr isize qsort_n = 1 << 20;   // 4 MiB of i32
 constexpr isize qsort_cutoff = 1024; // below this a subproblem is sorted serially
@@ -155,13 +175,13 @@ CC_DONT_INLINE void serial_quicksort(cc::span<i32> d)
 {
     if (d.size() <= qsort_cutoff)
     {
-        std::sort(d.begin(), d.end());
+        cc::sort(d);
         return;
     }
     isize const s = hoare_partition(d);
     if (s <= 0 || s >= d.size()) // degenerate split (all-equal run): fall back rather than recurse forever
     {
-        std::sort(d.begin(), d.end());
+        cc::sort(d);
         return;
     }
     serial_quicksort(d.subspan(cc::start_end{0, s}));
@@ -201,27 +221,28 @@ CC_DONT_INLINE i64 serial_tree(int depth)
 //
 // The children are captured, which is what keeps them alive: the pending-dependency list does not own anything.
 
-cc::shared_async<i64> async_quicksort(cc::span<i32> d)
+cc::shared_async<i64> async_quicksort(range rg)
 {
     return spawn(
-        [d, l = cc::shared_async<i64>(),
+        [rg, l = cc::shared_async<i64>(),
          r = cc::shared_async<i64>()](cc::async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (l == nullptr)
             {
-                if (d.size() <= qsort_cutoff)
+                auto const d = rg.mut();
+                if (rg.count <= qsort_cutoff)
                 {
-                    std::sort(d.begin(), d.end());
+                    cc::sort(d);
                     return actx.success(i64(0));
                 }
-                isize const s = hoare_partition(d);
-                if (s <= 0 || s >= d.size())
+                auto const s = i32(hoare_partition(d));
+                if (s <= 0 || s >= rg.count)
                 {
-                    std::sort(d.begin(), d.end());
+                    cc::sort(d);
                     return actx.success(i64(0));
                 }
-                l = async_quicksort(d.subspan(cc::start_end{0, s}));
-                r = async_quicksort(d.subspan(s));
+                l = async_quicksort(rg.head(s));
+                r = async_quicksort(rg.tail(s));
                 (void)actx.require(l);
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
@@ -230,22 +251,22 @@ cc::shared_async<i64> async_quicksort(cc::span<i32> d)
         });
 }
 
-cc::shared_async<i64> async_pfor(cc::span<i32> d)
+cc::shared_async<i64> async_pfor(range rg)
 {
     return spawn(
-        [d, l = cc::shared_async<i64>(),
+        [rg, l = cc::shared_async<i64>(),
          r = cc::shared_async<i64>()](cc::async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (l == nullptr)
             {
-                if (d.size() <= pfor_grain)
+                if (rg.count <= pfor_grain)
                 {
-                    mix_range(d);
+                    mix_range(rg.mut());
                     return actx.success(i64(0));
                 }
-                isize const m = d.size() / 2;
-                l = async_pfor(d.subspan(cc::start_end{0, m}));
-                r = async_pfor(d.subspan(m));
+                auto const m = rg.count / 2;
+                l = async_pfor(rg.head(m));
+                r = async_pfor(rg.tail(m));
                 (void)actx.require(l);
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
@@ -254,19 +275,19 @@ cc::shared_async<i64> async_pfor(cc::span<i32> d)
         });
 }
 
-cc::shared_async<i64> async_reduce(cc::span<i32 const> d)
+cc::shared_async<i64> async_reduce(range rg)
 {
     return spawn(
-        [d, l = cc::shared_async<i64>(),
+        [rg, l = cc::shared_async<i64>(),
          r = cc::shared_async<i64>()](cc::async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (l == nullptr)
             {
-                if (d.size() <= reduce_grain)
-                    return actx.success(sum_range(d));
-                isize const m = d.size() / 2;
-                l = async_reduce(d.subspan(cc::start_end{0, m}));
-                r = async_reduce(d.subspan(m));
+                if (rg.count <= reduce_grain)
+                    return actx.success(sum_range(rg.get()));
+                auto const m = rg.count / 2;
+                l = async_reduce(rg.head(m));
+                r = async_reduce(rg.tail(m));
                 (void)actx.require(l);
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
@@ -277,22 +298,22 @@ cc::shared_async<i64> async_reduce(cc::span<i32 const> d)
         });
 }
 
-cc::shared_async<i64> async_nested_inner(cc::span<i32> d)
+cc::shared_async<i64> async_nested_inner(range rg)
 {
     return spawn(
-        [d, l = cc::shared_async<i64>(),
+        [rg, l = cc::shared_async<i64>(),
          r = cc::shared_async<i64>()](cc::async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (l == nullptr)
             {
-                if (d.size() <= nested_inner_grain)
+                if (rg.count <= nested_inner_grain)
                 {
-                    mix_range(d);
+                    mix_range(rg.mut());
                     return actx.success(i64(0));
                 }
-                isize const m = d.size() / 2;
-                l = async_nested_inner(d.subspan(cc::start_end{0, m}));
-                r = async_nested_inner(d.subspan(m));
+                auto const m = rg.count / 2;
+                l = async_nested_inner(rg.head(m));
+                r = async_nested_inner(rg.tail(m));
                 (void)actx.require(l);
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
@@ -303,23 +324,23 @@ cc::shared_async<i64> async_nested_inner(cc::span<i32> d)
 
 // The outer level: bisects to nested_outer_grain, then each leaf spawns ONE child — a whole inner parallel-for over its range — and joins on it.
 // `r` stays null in that case.
-cc::shared_async<i64> async_nested_outer(cc::span<i32> d)
+cc::shared_async<i64> async_nested_outer(range rg)
 {
     return spawn(
-        [d, l = cc::shared_async<i64>(),
+        [rg, l = cc::shared_async<i64>(),
          r = cc::shared_async<i64>()](cc::async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (l == nullptr)
             {
-                if (d.size() <= nested_outer_grain)
+                if (rg.count <= nested_outer_grain)
                 {
-                    l = async_nested_inner(d);
+                    l = async_nested_inner(rg);
                     (void)actx.require(l);
                     return actx.wait_for_dependencies();
                 }
-                isize const m = d.size() / 2;
-                l = async_nested_outer(d.subspan(cc::start_end{0, m}));
-                r = async_nested_outer(d.subspan(m));
+                auto const m = rg.count / 2;
+                l = async_nested_outer(rg.head(m));
+                r = async_nested_outer(rg.tail(m));
                 (void)actx.require(l);
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
@@ -452,8 +473,10 @@ sweep_result case_quicksort(cc::span<int const> workers)
 {
     auto const src = make_random(qsort_n);
     cc::vector<i32> work = src;
+    g_data = work.data(); // the frames address the buffer through this; see `range`
 
     auto const refill = [&] { std::copy(src.begin(), src.end(), work.begin()); };
+    auto const whole = range{.off = 0, .count = i32(qsort_n)};
 
     return run_sweep(
         "parallel quicksort (1<<20 i32)", "ns/elem", double(qsort_n), workers,
@@ -466,7 +489,7 @@ sweep_result case_quicksort(cc::span<int const> workers)
         [&](cc::async_thread_pool& pool)
         {
             refill();
-            auto root = async_quicksort(cc::span<i32>(work));
+            auto root = async_quicksort(whole);
             (void)pool.blocking_get(root);
             return u64(work[0]);
         });
@@ -475,6 +498,8 @@ sweep_result case_quicksort(cc::span<int const> workers)
 sweep_result case_pfor(cc::span<int const> workers)
 {
     auto work = make_random(pfor_n);
+    g_data = work.data();
+    auto const whole = range{.off = 0, .count = i32(pfor_n)};
 
     return run_sweep(
         "parallel-for transform (1<<22 i32)", "ns/elem", double(pfor_n), workers,
@@ -485,7 +510,7 @@ sweep_result case_pfor(cc::span<int const> workers)
         },
         [&](cc::async_thread_pool& pool)
         {
-            auto root = async_pfor(cc::span<i32>(work));
+            auto root = async_pfor(whole);
             (void)pool.blocking_get(root);
             return u64(work[0]);
         });
@@ -493,14 +518,16 @@ sweep_result case_pfor(cc::span<int const> workers)
 
 sweep_result case_reduce(cc::span<int const> workers)
 {
-    auto const src = make_random(reduce_n);
+    auto src = make_random(reduce_n);
+    g_data = src.data();
+    auto const whole = range{.off = 0, .count = i32(reduce_n)};
 
     return run_sweep(
         "reduction (1<<22 i32)", "ns/elem", double(reduce_n), workers,
         [&] { return u64(serial_reduce(cc::span<i32 const>(src))); },
         [&](cc::async_thread_pool& pool)
         {
-            auto root = async_reduce(cc::span<i32 const>(src));
+            auto root = async_reduce(whole);
             return u64(pool.blocking_get(root));
         });
 }
@@ -508,6 +535,8 @@ sweep_result case_reduce(cc::span<int const> workers)
 sweep_result case_nested(cc::span<int const> workers)
 {
     auto work = make_random(nested_n);
+    g_data = work.data();
+    auto const whole = range{.off = 0, .count = i32(nested_n)};
 
     return run_sweep(
         "nested parallel-for (1<<22 i32)", "ns/elem", double(nested_n), workers,
@@ -518,7 +547,7 @@ sweep_result case_nested(cc::span<int const> workers)
         },
         [&](cc::async_thread_pool& pool)
         {
-            auto root = async_nested_outer(cc::span<i32>(work));
+            auto root = async_nested_outer(whole);
             (void)pool.blocking_get(root);
             return u64(work[0]);
         });

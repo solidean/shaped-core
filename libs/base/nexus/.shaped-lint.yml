@@ -21,11 +21,6 @@ rules:
     reason: the perf_event_open syscall wrapper for the Linux hardware counters
     files: src/nexus/bench/impl/hardware_counters_linux.cc
 
-  - kind: allow-include
-    value: [<intrin.h>, <x86intrin.h>]
-    reason: rdtsc and the serializing fences the timing baseline is measured with
-    files: src/nexus/bench/impl/baseline.hh
-
   # =========================================================================================================
   # Waiting on a cc:: replacement — see docs/stdlib-migration.md
   # =========================================================================================================

@@ -17,11 +17,6 @@ rules:
     files: src/instruction-tracer/debug/symbol_session.cc
 
   - kind: allow-include
-    value: <algorithm>
-    reason: std::sort over report rows while cc:: has no algorithm library
-    files: src/instruction-tracer/report/**
-
-  - kind: allow-include
     value: <charconv>
     reason: from_chars is what the JSON reader parses numbers with
     files: src/instruction-tracer/report/json_reader.hh

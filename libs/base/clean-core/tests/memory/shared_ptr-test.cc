@@ -21,8 +21,8 @@ namespace
 
 struct tracked
 {
-    static inline int live = 0;
-    static inline int destroyed = 0;
+    static inline thread_local int live = 0;
+    static inline thread_local int destroyed = 0;
     static void reset() { live = destroyed = 0; }
 
     int value;
@@ -38,8 +38,8 @@ struct tracked
 
 struct node_base
 {
-    static inline int payload_torn = 0;
-    static inline int freed = 0;
+    static inline thread_local int payload_torn = 0;
+    static inline thread_local int freed = 0;
     static void reset() { payload_torn = freed = 0; }
 
     cc::atomic<u32> strong = {0};
@@ -104,8 +104,8 @@ using node_weak = cc::weak_ptr<node_base, node_traits>;
 
 struct only_strong
 {
-    static inline int torn = 0;
-    static inline int freed = 0;
+    static inline thread_local int torn = 0;
+    static inline thread_local int freed = 0;
     static void reset() { torn = freed = 0; }
 
     cc::atomic<u32> strong = {0};

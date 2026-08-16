@@ -7,7 +7,7 @@
 #include <nexus/tests/schedule.hh>
 
 
-TEST("test registry - basics")
+TEST("test registry - basics", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration( //
@@ -27,7 +27,7 @@ TEST("test registry - basics")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test registry - multi-test multi-check accounting")
+TEST("test registry - multi-test multi-check accounting", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -65,7 +65,7 @@ TEST("test registry - multi-test multi-check accounting")
     CHECK(exec.count_failed_checks() == 4); // 1 from T2, 3 from T3
 }
 
-TEST("test registry - CHECK continues after failure")
+TEST("test registry - CHECK continues after failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -91,7 +91,7 @@ TEST("test registry - CHECK continues after failure")
     CHECK(exec.count_failed_checks() == 1); // only the first CHECK failed
 }
 
-TEST("test registry - REQUIRE aborts test on failure")
+TEST("test registry - REQUIRE aborts test on failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -117,7 +117,7 @@ TEST("test registry - REQUIRE aborts test on failure")
     CHECK(exec.count_failed_checks() == 1); // REQUIRE counts as a check
 }
 
-TEST("test registry - CC_ASSERT_ALWAYS aborts test on failure")
+TEST("test registry - CC_ASSERT_ALWAYS aborts test on failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -141,7 +141,7 @@ TEST("test registry - CC_ASSERT_ALWAYS aborts test on failure")
     CHECK(exec.count_failed_tests() == 1);
 }
 
-TEST("test registry - disabled tests are not executed")
+TEST("test registry - disabled tests are not executed", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -176,7 +176,7 @@ TEST("test registry - disabled tests are not executed")
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test registry - config via aggregate literal vs merge_config are equivalent")
+TEST("test registry - config via aggregate literal vs merge_config are equivalent", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -215,7 +215,7 @@ TEST("test registry - config via aggregate literal vs merge_config are equivalen
     CHECK(exec.count_failed_checks() == 0);
 }
 
-TEST("test registry - seed configuration is stored")
+TEST("test registry - seed configuration is stored", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -239,7 +239,7 @@ TEST("test registry - seed configuration is stored")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test registry - uncaught exceptions become failing tests")
+TEST("test registry - uncaught exceptions become failing tests", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -264,7 +264,7 @@ TEST("test registry - uncaught exceptions become failing tests")
     // We accept either count_failed_checks() == 0 or == 1 depending on implementation
 }
 
-TEST("test registry - failure attribution with mixed CHECK and REQUIRE")
+TEST("test registry - failure attribution with mixed CHECK and REQUIRE", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -286,7 +286,7 @@ TEST("test registry - failure attribution with mixed CHECK and REQUIRE")
     CHECK(exec.count_failed_tests() == 1);  // 1 test failed
 }
 
-TEST("test registry - duplicate test names are both registered")
+TEST("test registry - duplicate test names are both registered", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -319,7 +319,7 @@ TEST("test registry - duplicate test names are both registered")
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test registry - test with zero checks is counted as a test")
+TEST("test registry - test with zero checks is counted as a test", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -356,7 +356,7 @@ TEST("test registry - test with zero checks is counted as a test")
     CHECK(exec.count_failed_checks() == 0); // no failed CHECKs, just missing checks
 }
 
-TEST("test registry - schedule integration with run_disabled_tests config")
+TEST("test registry - schedule integration with run_disabled_tests config", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -402,7 +402,7 @@ TEST("test registry - schedule integration with run_disabled_tests config")
     }
 }
 
-TEST("test registry - manual tests are excluded from automatic and run_disabled sweeps")
+TEST("test registry - manual tests are excluded from automatic and run_disabled sweeps", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -459,7 +459,7 @@ TEST("test registry - manual tests are excluded from automatic and run_disabled 
     }
 }
 
-TEST("test registry - selected_bucket restricts the eligible set to that bucket")
+TEST("test registry - selected_bucket restricts the eligible set to that bucket", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -497,7 +497,7 @@ TEST("test registry - selected_bucket restricts the eligible set to that bucket"
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test registry - guide-benchmark bucket is swept only when selected")
+TEST("test registry - guide-benchmark bucket is swept only when selected", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -545,7 +545,7 @@ TEST("test registry - guide-benchmark bucket is swept only when selected")
     }
 }
 
-TEST("test registry - manual test without any CHECK is not a failure")
+TEST("test registry - manual test without any CHECK is not a failure", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -612,7 +612,7 @@ TEST("test schedule config - a bucket flag selects a bucket and pins the sweep t
     }
 }
 
-TEST("test schedule config - a substring filter never reaches another bucket")
+TEST("test schedule config - a substring filter never reaches another bucket", no_scheduler)
 {
     // The reported bug: `dev.py test "async"` ran not just the normal async tests but every manual and
     // guide-benchmark test whose name merely contained "async" — expensive benchmarks in an unattended run.
