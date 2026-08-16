@@ -202,8 +202,10 @@ uv run dev.py test                       # build + run the whole suite
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --perf-json <file> (write recorded-metric sidecar).
-// --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency. DEFAULT IS 1, and -j1 runs
-//   them one at a time in schedule order rather than on a pool of one. See docs/parallel-execution.md.
+// --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
+//   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
+//   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.
+//   See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
 //   still just a filter, so the disabled and bucket gates hold — only an exact test NAME opens those.
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,

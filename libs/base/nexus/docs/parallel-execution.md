@@ -12,9 +12,16 @@ The check-attribution contract this rests on is [threaded-checks](threaded-check
 
 `--jobs N`, `-j N` or `-jN` caps how many tests may run at once; `-j0` means the machine's hardware concurrency.
 
-**The default is `-j1`**, and `-j1` is not merely "a pool of one".
-It drives one test node at a time under a `cc::singlethreaded_scheduler`, so the run order **is** the schedule order — the property every existing test was written against.
+**The default is `-j0`** — every core, because a test suite that only runs correctly one at a time is hiding something.
 `-jN` for N > 1 builds a join over the whole phase and drives it on a `cc::async_thread_pool` of N-1 workers, the caller participating as the Nth.
+
+`-j1` stays first-class, and is not merely "a pool of one".
+It drives one test node at a time under a `cc::singlethreaded_scheduler`, so the run order **is** the schedule order.
+That makes it the reproducible-debugging mode: a failure at `-jN` that survives `-j1` is a test bug, and one that vanishes is a concurrency bug.
+
+A **hand-built** `test_schedule_config` defaults the other way, to `jobs = 1`.
+Only `create_from_args` starts at 0, so the parallel default belongs to a real run.
+A test that builds its own schedule is usually asserting something about the order it runs in, and nexus' own meta-tests are all of that kind.
 
 Report order never depends on either: results are written into pre-sized slots by index, and the `--verbose` trace is buffered per test and flushed in schedule order.
 

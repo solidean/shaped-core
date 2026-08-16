@@ -104,6 +104,11 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
 {
     test_schedule_config config;
 
+    // A real run uses every core unless --jobs says otherwise, which is the opposite of the struct's own default.
+    // A suite that only passes one test at a time is hiding something, and the place to find that out is the ordinary run.
+    // A hand-built config keeps schedule order, because a test that builds a schedule is usually asserting about it.
+    config.jobs = 0;
+
     // Track Catch2 compatibility flags for XML discovery mode
     bool has_verbosity = false;
     bool has_list_tests = false;
@@ -165,9 +170,8 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
             else
                 count = parse_count(arg.subview(2));
 
-            if (count == 0)
-                count = cc::num_hardware_threads();
-            if (count > 0)
+            // 0 is stored as-is: execute_tests resolves it to hardware concurrency, so the field means the same thing however it was set.
+            if (count >= 0)
                 config.jobs = count;
             else
                 cc::eprintln("nexus: ignoring `{}`: expected a job count", arg);

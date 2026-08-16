@@ -1413,8 +1413,11 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             continue;
         }
 
-        // own_pool names its own width; everything else is capped by the run's --jobs.
-        auto const jobs = phase.mode == nx::config::scheduler_mode::own_pool ? phase.threads : config.jobs;
+        // own_pool names its own width; everything else is capped by the run's --jobs, where 0 means the machine's hardware concurrency.
+        // Resolved here rather than at argument parsing, so a hand-built config means the same thing as a command line.
+        auto const jobs = phase.mode == nx::config::scheduler_mode::own_pool ? phase.threads
+                        : config.jobs <= 0                                   ? cc::num_hardware_threads()
+                                                                             : config.jobs;
 
         // One node per test — the graph IS the phase, and which thread picks up which test is the scheduler's business.
         // A test node ALWAYS resolves to a value, never to an error: exclusivity is a dependency edge between test nodes, so an error here would propagate into every test ordered behind this one.

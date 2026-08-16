@@ -48,8 +48,10 @@ struct nx::test_schedule_config
     // is_eligible below applies both, and is the one place those rules live.
     nx::config::test_bucket selected_bucket = nx::config::test_bucket::normal;
     bool allow_cross_bucket_naming = false;
-    // Upper bound on how many tests may run at once, --jobs N.
-    // 1 drives them one at a time in schedule order — today's behavior, and the default until the repo has been swept at -jN.
+    // Upper bound on how many tests may run at once, --jobs N; 0 means the machine's hardware concurrency.
+    // 1 drives them one at a time in schedule order, which is the reproducible-debugging mode rather than a pool of one.
+    // It is the default HERE, for a hand-built config, so a test that builds a schedule gets the deterministic order unless it asks otherwise.
+    // A real run goes the other way: create_from_args starts at 0, so `nx::run` with no --jobs uses every core.
     // A test asking for own_pool(n) names its own width instead, and is unaffected.
     int jobs = 1;
 
