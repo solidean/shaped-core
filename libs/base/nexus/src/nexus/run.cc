@@ -7,6 +7,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/catch2.hh>
@@ -105,6 +106,9 @@ void collect_invoked(nx::test_execution const& exec, std::unordered_set<void con
 
 int nx::run(int argc, char** argv)
 {
+    // Before anything else can start a thread: a test asking for nx::main_thread means THIS one.
+    cc::mark_current_thread_as_main();
+
     // Install a crash handler so a fatal fault in a test prints the offending test and a
     // stacktrace instead of a bare non-zero exit code.
     cc::install_crash_handler();

@@ -45,6 +45,8 @@ struct nx::config::cfg
     scheduler_mode scheduler = scheduler_mode::shared;
     int scheduler_threads = 0; // only read for scheduler_mode::own_pool
 
+    bool main_thread = false; // the body must run on the process main thread; orthogonal to `scheduler`
+
     // Tags whose holders must never run at the same time, compared by content.
     // `exclusion_tag_count` counts what was ASKED for, so it may exceed the array and execute_tests reports the overflow rather than dropping it silently.
     char const* exclusion_tags[max_exclusion_tags] = {};
@@ -103,10 +105,20 @@ constexpr auto exclusive(char const* tag = nullptr)
 
 // Run this test with NO scheduler bound: its body is driven directly, in schedule order, alongside the other tests asking for the same.
 // Required by a test that stands up its own cc scheduler, or that nests an nx::execute_tests run — neither may sit under the run's own.
+// Not the way to ask for the main thread: nx::main_thread says that, and says the thing that gets checked.
 constexpr struct
 {
     void apply(cfg& result) const { result.scheduler = scheduler_mode::none; }
 } no_scheduler;
+
+// Run this test's body on the process MAIN thread — the one nx::run was entered on.
+// For a test whose subject asserts on it: sr::window_system does, because SDL does.
+// Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound.
+// own_pool and ASYNC_TEST cannot be combined with it and assert, because either could only be honoured by ignoring one of the two asks.
+constexpr struct
+{
+    void apply(cfg& result) const { result.main_thread = true; }
+} main_thread;
 
 // Run this test on a private pool of `n` workers, shared with every other test asking for the same count.
 // For a test whose own concurrency shape is the thing under test; the default (the run's scheduler) is otherwise the right answer.

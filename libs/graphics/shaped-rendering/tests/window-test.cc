@@ -10,14 +10,12 @@
 // Close and resize events from a real window manager, pixel sizes on a high-density display, and the native-handle-to-swapchain path are all out of reach — a headless window has no native handle.
 // Those live in window-manual-test.cc and, for the swapchain, above sr.
 
-// Every test here carries nx::no_scheduler, and it is standing in for something nexus does not express yet.
-// SDL asserts that sr::window_system is created on the process MAIN thread, and a parallel run drives test bodies on pool workers.
-// no_scheduler is the only mode that runs a body on the run's own calling thread, so it is what makes these pass at -jN — an exclusion tag cannot.
-// The real fix is a main-thread affinity config item; until then, do not drop this to exclusive().
+// Every test here carries nx::main_thread: SDL asserts that sr::window_system is created on the process MAIN thread, and a parallel run otherwise drives bodies on pool workers.
+// An exclusion tag cannot express that — it orders tests without choosing a thread.
 
 #if SR_HAS_WINDOW
 
-TEST("sr - window system creates and shuts down", no_scheduler)
+TEST("sr - window system creates and shuts down", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     CHECK(wsys->is_headless());
@@ -25,7 +23,7 @@ TEST("sr - window system creates and shuts down", no_scheduler)
     CHECK(!wsys->is_quit_requested());
 }
 
-TEST("sr - window reports its requested size before any poll", no_scheduler)
+TEST("sr - window reports its requested size before any poll", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "sized", .width = 640, .height = 480});
@@ -36,7 +34,7 @@ TEST("sr - window reports its requested size before any poll", no_scheduler)
     CHECK(!win->is_close_requested());
 }
 
-TEST("sr - window position and size read back without an intervening poll", no_scheduler)
+TEST("sr - window position and size read back without an intervening poll", main_thread)
 {
     // The write-through is the point: imgui's viewport backend sets a position and reads it again inside one frame, long before the next poll_events would refresh it.
     auto const wsys = sr::window_system::create({.headless = true});
@@ -50,7 +48,7 @@ TEST("sr - window position and size read back without an intervening poll", no_s
     CHECK(win->height() == 600);
 }
 
-TEST("sr - the display list is never empty and its work area fits inside its bounds", no_scheduler)
+TEST("sr - the display list is never empty and its work area fits inside its bounds", main_thread)
 {
     // imgui's multi-viewport path refuses a frame outright while the monitor list is empty, and the dummy
     // video driver reports no displays at all — so a headless system substitutes one.
@@ -73,7 +71,7 @@ TEST("sr - the display list is never empty and its work area fits inside its bou
     }
 }
 
-TEST("sr - windows register in creation order and unregister on destruction", no_scheduler)
+TEST("sr - windows register in creation order and unregister on destruction", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
 
@@ -94,7 +92,7 @@ TEST("sr - windows register in creation order and unregister on destruction", no
     CHECK(wsys->windows()[1] == c.get());
 }
 
-TEST("sr - a close request is per window", no_scheduler)
+TEST("sr - a close request is per window", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const a = wsys->create_window({.title = "a"});
@@ -114,7 +112,7 @@ TEST("sr - a close request is per window", no_scheduler)
     CHECK(!b->is_close_requested());
 }
 
-TEST("sr - window title round-trips", no_scheduler)
+TEST("sr - window title round-trips", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "before"});
@@ -124,7 +122,7 @@ TEST("sr - window title round-trips", no_scheduler)
     CHECK(win->title() == "after");
 }
 
-TEST("sr - a headless window has no native handle", no_scheduler)
+TEST("sr - a headless window has no native handle", main_thread)
 {
     // Pins the documented contract rather than skipping it.
     // Nothing can present against a headless window, and a caller must see that from the handle alone.
@@ -134,13 +132,13 @@ TEST("sr - a headless window has no native handle", no_scheduler)
     CHECK(win->native_window_handle() == nullptr);
 }
 
-TEST("sr - a second window system asserts", no_scheduler)
+TEST("sr - a second window system asserts", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     CHECK_ASSERTS(sr::window_system::create({.headless = true}));
 }
 
-TEST("sr - a window knows the system it came from", no_scheduler)
+TEST("sr - a window knows the system it came from", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "owned"});
@@ -148,7 +146,7 @@ TEST("sr - a window knows the system it came from", no_scheduler)
     CHECK(&win->system() == wsys.get());
 }
 
-TEST("sr - the cursor shape is tracked and starts as an arrow", no_scheduler)
+TEST("sr - the cursor shape is tracked and starts as an arrow", main_thread)
 {
     // The dummy video driver has no real pointer, so what is checkable here is the bookkeeping: the shape a
     // caller set is the shape it reads back, and setting the same one twice is not an error.
@@ -168,7 +166,7 @@ TEST("sr - the cursor shape is tracked and starts as an arrow", no_scheduler)
     CHECK(wsys->cursor() == sr::cursor_shape::resize_nwse);
 }
 
-TEST("sr - hiding the cursor leaves its shape alone", no_scheduler)
+TEST("sr - hiding the cursor leaves its shape alone", main_thread)
 {
     // Visibility and shape are independent, so showing the pointer again must restore what was set rather than
     // resetting it to an arrow.
@@ -185,7 +183,7 @@ TEST("sr - hiding the cursor leaves its shape alone", no_scheduler)
     CHECK(wsys->cursor() == sr::cursor_shape::pointer);
 }
 
-TEST("sr - clipboard text round-trips", no_scheduler)
+TEST("sr - clipboard text round-trips", main_thread)
 {
     // The clipboard is real even under the dummy driver: SDL keeps its own when the platform has none.
     auto const wsys = sr::window_system::create({.headless = true});

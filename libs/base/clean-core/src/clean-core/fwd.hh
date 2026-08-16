@@ -239,6 +239,8 @@ struct result;
 // Concurrency
 //
 
+enum class thread_id : u64; // a thread's identity, compared for equality only (thread/thread.hh)
+
 template <class T>
 struct mutex;
 template <class T>

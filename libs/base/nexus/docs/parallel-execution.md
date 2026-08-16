@@ -43,6 +43,31 @@ Tests sharing a mode form one graph and run as one **phase**; phases run one aft
 `execute_tests` asserts when a scheduler is already bound rather than nesting one, and names the fix.
 `nx::invoke_tests` is unaffected — a dispatched child runs inside its driver's body and creates no scheduler.
 
+## Main-thread affinity
+
+Some work must run on the **process main thread** — `sr::window_system` asserts on it, because SDL does.
+No `--jobs` value helps: at `-jN` a body runs on whichever worker picks it up, and an exclusion tag orders tests without choosing a thread.
+
+```cpp
+TEST("sr - window system creates and shuts down", main_thread) { … }
+```
+
+`main_thread` is a **flag, not a fourth scheduler mode**, so it composes with the modes instead of excluding them.
+A test that wants its body on main and also drives async work of its own can say both.
+
+`nx::run` records the thread it was entered on, and `execute_tests` asserts that is the thread it was called on before honouring the flag.
+A nested run satisfies that for free: nesting already requires `no_scheduler`, and the no-scheduler group runs bodies on the outer run's calling thread.
+The case that legitimately trips the assert is a run driven from a thread somebody spawned.
+
+The flag is honoured today by driving the body in the no-scheduler group, which already runs bodies directly on the calling thread.
+That is the implementation and not the contract: `main_thread` promises a thread, `no_scheduler` promises an absent scheduler, and they are asked for separately.
+So main-thread tests share that one phase and run in schedule order among its other members, and cannot yet overlap the shared phase — a quality-of-implementation gap, not a property of the API.
+
+Two combinations are asserts rather than quiet demotions:
+
+* **`own_pool(n)`**, because a private pool's worker is never the main thread.
+* **`ASYNC_TEST`**, because the graph it returns is driven by the phase's scheduler and not by the thread the body started on.
+
 ## Exclusion is an ordering edge
 
 ```cpp
@@ -129,15 +154,6 @@ The fallback is what covers pool workers driving an `ASYNC_TEST`'s graph, and th
 Attribution is the ambient context's either way, so the check lands on the right test rather than on whatever was running.
 
 This is also why a `CHECK_ASSERTS` block is safe at `-jN`: the throwing handler it installs is visible only on its own thread.
-
-## Not here yet: main-thread affinity
-
-Some work must run on the **process main thread** — `sr::window_system` asserts on it, because SDL does.
-No `--jobs` value helps: at `-jN` a body runs on whichever worker picks it up, and an exclusion tag orders tests without choosing a thread.
-
-Those tests carry `nx::no_scheduler` today, which is the only mode that drives a body on the run's own calling thread.
-It works, and it is a stand-in: it says "no scheduler" where the test means "the main thread", and it serializes the whole phase to say it.
-A `main_thread` config item is the real answer, once a second library needs one.
 
 ## Crash reports name every running test
 

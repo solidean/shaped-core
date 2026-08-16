@@ -14,6 +14,7 @@
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/check.hh>
@@ -24,6 +25,8 @@
 #include <cstdio>        // std::fputs / std::fwrite: crash-context hook writes to stderr without allocating
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
+
+using namespace cc::primitive_defines;
 
 
 /// The graph an ASYNC_TEST body hands back.
@@ -1315,6 +1318,27 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     CC_ASSERT(cc::async_scheduler::current_or_null() == nullptr, "execute_tests may not run under a scheduler; a test "
                                                                  "that nests a run must declare nx::no_scheduler");
 
+    // Validated BEFORE the fallback handler below goes up.
+    // Past that point report_assert_as_check records a check and RETURNS, so a CC_ASSERT here would become an orphan check and the run would continue —
+    // which for a misplaced main_thread test means falling straight into the abort the flag exists to prevent.
+    auto any_main_thread = false;
+    for (auto const& instance : schedule.instances)
+    {
+        CC_ASSERT(instance.declaration != nullptr, "instances must be valid");
+        if (!instance.declaration->test_config.main_thread)
+            continue;
+
+        any_main_thread = true;
+        CC_ASSERT(instance.declaration->test_config.scheduler != nx::config::scheduler_mode::own_pool,
+                  "nx::main_thread cannot be combined with own_pool: a private pool's worker is never the main thread");
+        CC_ASSERT(!instance.declaration->is_async(), "an ASYNC_TEST cannot use nx::main_thread: the graph it returns "
+                                                     "is driven by the phase's scheduler, not by the thread the body "
+                                                     "started on");
+    }
+    CC_ASSERT(!any_main_thread || cc::current_thread_id() == cc::thread_id::main,
+              "a test asked for nx::main_thread, but execute_tests is not running on the main thread; a binary running "
+              "tests without nx::run must call cc::mark_current_thread_as_main() from main()");
+
     // The per-body handler covers the thread the body runs on; this covers every OTHER thread the run reaches — pool workers driving an ASYNC_TEST's graph, and threads a test started itself.
     // Without it a CC_ASSERT there aborts the process instead of failing a test.
     cc::impl::scoped_fallback_assertion_handler const assert_fallback(&report_assert_as_check);
@@ -1348,13 +1372,18 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         if (execution.instance.registry == nullptr)
             execution.instance.registry = schedule.registry; // a hand-built schedule may only name the registry once
 
+        // main_thread is orthogonal in the API and has exactly one implementation today: drive the body directly on the run's calling thread, which the pre-pass proved is the main one.
+        // Keeping that mapping to ONE line is what lets a future main-thread-driven phase replace it without touching a single test's config.
+        //
         // A no-arg exclusive() test runs beside nothing, so a node buys it nothing and costs a barrier's worth of edges plus a stalled pool.
         // The no-scheduler group already runs bodies one at a time on the calling thread, which is the same guarantee for free — so route it there.
         // Only a synchronous body under the run's own scheduler: an ASYNC_TEST needs a scheduler to drive the root it returns, and own_pool was asked for on purpose.
         // The cost is that such a test no longer orders against the shared phase, only within the no-scheduler one.
         auto mode = instance.declaration->test_config.scheduler;
-        if (mode == nx::config::scheduler_mode::shared && instance.declaration->test_config.exclusive_global
-            && !instance.declaration->is_async())
+        if (instance.declaration->test_config.main_thread)
+            mode = nx::config::scheduler_mode::none;
+        else if (mode == nx::config::scheduler_mode::shared && instance.declaration->test_config.exclusive_global
+                 && !instance.declaration->is_async())
             mode = nx::config::scheduler_mode::none;
 
         auto const threads = instance.declaration->test_config.scheduler_threads;

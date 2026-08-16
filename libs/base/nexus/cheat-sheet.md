@@ -31,8 +31,9 @@ TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RN
 TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
 TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all; a synchronous one is
                                          //     routed into the no-scheduler group, so it costs no barrier and no node
-TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — nothing bound; REQUIRED to nest nx::execute_tests,
-                                         //     and the only way to land a body on the process MAIN thread (SDL wants that)
+TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — nothing bound; REQUIRED to nest nx::execute_tests
+TEST("opens a window", main_thread) { }  //   main_thread     — body runs on the process MAIN thread (SDL wants that);
+                                         //     a flag, not a mode, so it composes; own_pool / ASYNC_TEST assert
 TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-worker pool, shared per count
 // Exclusion is an ORDERING edge, not a lock: holders run in schedule order, which is reproducible by design.
 

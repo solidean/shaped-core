@@ -10,7 +10,7 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <thread> // std::this_thread::get_id: no cc thread id yet
+using namespace cc::primitive_defines;
 
 // What --jobs must preserve, and what it must actually deliver.
 //
@@ -189,8 +189,8 @@ TEST("parallel - a no-arg exclusive test is routed off the scheduler entirely", 
     // Running beside nothing is exactly what the no-scheduler group already delivers, so a barrier is scheduled there instead of as a node with an edge to every test before it.
     // Observable as the body landing on the run's OWN calling thread.
     // A plain test may land there too — the caller participates as a worker — so only the barrier's thread is pinned.
-    auto const caller = std::this_thread::get_id();
-    auto barrier_thread = std::this_thread::get_id();
+    auto const caller = cc::current_thread_id();
+    auto barrier_thread = cc::thread_id::invalid;
 
     nx::test_registry reg;
     for (auto i = 0; i < 4; ++i)
@@ -198,7 +198,7 @@ TEST("parallel - a no-arg exclusive test is routed off the scheduler entirely", 
     reg.add_declaration("alone", nx::impl::merge_config(nx::config::exclusive()),
                         [&]
                         {
-                            barrier_thread = std::this_thread::get_id();
+                            barrier_thread = cc::current_thread_id();
                             CHECK(true);
                         });
 
@@ -219,6 +219,113 @@ ASYNC_TEST("parallel - an exclusive ASYNC_TEST still gets a scheduler", exclusiv
             CHECK(true);
             return actx.resolve_to_value(cc::unit{});
         });
+}
+
+// nx::main_thread — a flag rather than a fourth scheduler mode, so it composes with the modes instead of excluding them.
+// The outer body here runs on the run's own calling thread, which nx::run claimed as main, so a nested run can honour the flag.
+
+TEST("parallel - a main_thread test runs on the process main thread", no_scheduler)
+{
+    // Stronger than the barrier test above, which only pins the body to "whoever called": this compares against cc::thread_id::main.
+    REQUIRE(cc::current_thread_id() == cc::thread_id::main);
+
+    auto pinned_thread = cc::thread_id::invalid;
+
+    nx::test_registry reg;
+    for (auto i = 0; i < 4; ++i)
+        reg.add_declaration(cc::format("busy{}", i), {}, [] { CHECK(true); });
+    reg.add_declaration("pinned", nx::impl::merge_config(nx::config::main_thread),
+                        [&]
+                        {
+                            pinned_thread = cc::current_thread_id();
+                            CHECK(true);
+                        });
+
+    auto const schedule = nx::test_schedule::create({}, reg);
+    auto const exec = nx::execute_tests(schedule, with_jobs(4));
+
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(pinned_thread == cc::thread_id::main);
+}
+
+TEST("parallel - main_thread and no_scheduler share one phase, in schedule order", no_scheduler)
+{
+    // Two separate promises — a thread, and an absent scheduler — that today land in the same group.
+    // Pinning the order is what makes replacing that implementation a visible change rather than a silent one.
+    cc::vector<cc::string> order;
+
+    nx::test_registry reg;
+    for (auto i = 0; i < 3; ++i)
+    {
+        reg.add_declaration(cc::format("m{}", i), nx::impl::merge_config(nx::config::main_thread),
+                            [&order, i]
+                            {
+                                order.push_back(cc::format("m{}", i));
+                                CHECK(true);
+                            });
+        reg.add_declaration(cc::format("n{}", i), nx::impl::merge_config(nx::config::no_scheduler),
+                            [&order, i]
+                            {
+                                order.push_back(cc::format("n{}", i));
+                                CHECK(true);
+                            });
+    }
+
+    auto const schedule = nx::test_schedule::create({}, reg);
+    auto const exec = nx::execute_tests(schedule, with_jobs(4));
+
+    CHECK(exec.count_failed_tests() == 0);
+    REQUIRE(order.size() == 6);
+    for (auto i = 0; i < 3; ++i)
+    {
+        CHECK(order[i * 2] == cc::format("m{}", i));
+        CHECK(order[i * 2 + 1] == cc::format("n{}", i));
+    }
+}
+
+TEST("parallel - main_thread composes with exclusive()", no_scheduler)
+{
+    // Both route into the same group; the guard is that asking for both still runs the body once, on main, beside nothing.
+    auto pinned_thread = cc::thread_id::invalid;
+    cc::atomic<int> live = {0};
+    cc::atomic<int> seen_beside = {0};
+
+    nx::test_registry reg;
+    auto const busy = [&]
+    {
+        live.fetch_add(1, cc::memory_order_acq_rel);
+        for (auto spin = 0; spin < 20000; ++spin)
+            cc::spin_pause();
+        live.fetch_sub(1, cc::memory_order_acq_rel);
+        CHECK(true);
+    };
+    for (auto i = 0; i < 4; ++i)
+        reg.add_declaration(cc::format("busy{}", i), {}, busy);
+    reg.add_declaration("pinned", nx::impl::merge_config(nx::config::main_thread, nx::config::exclusive()),
+                        [&]
+                        {
+                            pinned_thread = cc::current_thread_id();
+                            seen_beside.store(live.load(cc::memory_order_acquire), cc::memory_order_relaxed);
+                            CHECK(true);
+                        });
+
+    auto const schedule = nx::test_schedule::create({}, reg);
+    auto const exec = nx::execute_tests(schedule, with_jobs(4));
+
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(pinned_thread == cc::thread_id::main);
+    CHECK(seen_beside.load(cc::memory_order_acquire) == 0);
+}
+
+TEST("parallel - main_thread and own_pool cannot be combined", no_scheduler)
+{
+    // A private pool's worker is never the main thread, so honouring both is impossible and demoting one silently is the failure mode the flag exists to avoid.
+    nx::test_registry reg;
+    reg.add_declaration("pinned", nx::impl::merge_config(nx::config::main_thread, nx::config::own_pool(2)),
+                        [] { CHECK(true); });
+
+    auto const schedule = nx::test_schedule::create({}, reg);
+    CHECK_ASSERTS(nx::execute_tests(schedule, with_jobs(2)));
 }
 
 #if CC_HAS_THREADS
