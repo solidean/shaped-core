@@ -173,11 +173,11 @@ TEST("vdoc - a snapshot is rejected where a branch reaches around it")
     auto graph = op_graph();
     auto const path = path_of("e", "T", "p");
 
-    write const wa[] = {{.path = path, .value = 1}};
+    property_write const wa[] = {{.path = path, .value = 1}};
     auto const a = add_op(graph, {}, wa);
 
     op_id const from_a[] = {a};
-    write const wb[] = {{.path = path, .value = 2}};
+    property_write const wb[] = {{.path = path, .value = 2}};
     auto const b = add_op(graph, from_a, wb);
 
     op_id const from_b[] = {b};
@@ -212,14 +212,14 @@ TEST("vdoc - a snapshot at an ancestor of another head is rejected")
     auto graph = op_graph();
     auto const path = path_of("e", "T", "p");
 
-    write const w1[] = {{.path = path, .value = 1}};
+    property_write const w1[] = {{.path = path, .value = 1}};
     auto const x = add_op(graph, {}, w1);
 
     op_id const from_x[] = {x};
     auto const middle = add_op(graph, from_x, {});
 
     op_id const from_middle[] = {middle};
-    write const w2[] = {{.path = path, .value = 2}};
+    property_write const w2[] = {{.path = path, .value = 2}};
     auto const t = add_op(graph, from_middle, w2);
 
     op_id const heads[] = {t, x};
@@ -245,11 +245,11 @@ TEST("vdoc - a cached op that is not a source is replayed rather than seeded")
     auto graph = op_graph();
     auto const path = path_of("e", "T", "p");
 
-    write const w1[] = {{.path = path, .value = 1}};
+    property_write const w1[] = {{.path = path, .value = 1}};
     auto const x = add_op(graph, {}, w1);
 
     op_id const from_x[] = {x};
-    write const w2[] = {{.path = path, .value = 2}};
+    property_write const w2[] = {{.path = path, .value = 2}};
     auto const t = add_op(graph, from_x, w2);
 
     op_id const heads[] = {t, x};
@@ -274,7 +274,7 @@ TEST("vdoc - a snapshot shortens the walk it terminates")
     auto prev = cc::vector<op_id>();
     for (isize i = 0; i < 32; ++i)
     {
-        write const w[] = {{.path = path, .value = i}};
+        property_write const w[] = {{.path = path, .value = i}};
         auto const id = add_op(graph, prev, w);
         ops.push_back(id);
         prev = cc::vector<op_id>{id};

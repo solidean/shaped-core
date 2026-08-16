@@ -1,10 +1,9 @@
 #include "op_graph_corpus.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <versioned-document/value_builder.hh>
-
-#include <algorithm>
 
 using vdoc::assignment;
 using vdoc::component_type_id;
@@ -54,10 +53,10 @@ property_path vdoc_test::path_of(cc::string_view e, cc::string_view c, cc::strin
                          .property = property_id::of(p)};
 }
 
-op_id vdoc_test::add_op(op_graph& graph, cc::span<op_id const> parents, cc::span<write const> writes)
+op_id vdoc_test::add_op(op_graph& graph, cc::span<op_id const> parents, cc::span<property_write const> writes)
 {
     auto sorted_parents = cc::vector<op_id>::create_copy_of(parents);
-    std::sort(sorted_parents.begin(), sorted_parents.end(), op_id::by_bytes{});
+    cc::sort(sorted_parents, op_id::by_bytes{});
 
     // the encoding rejects a duplicate parent, and a generated DAG can pick the same one twice
     auto unique_parents = cc::vector<op_id>();
@@ -74,8 +73,7 @@ op_id vdoc_test::add_op(op_graph& graph, cc::span<op_id const> parents, cc::span
     for (isize i = 0; i < writes.size(); ++i)
         entries.push_back(assignment{.path = writes[i].path, .value = owned[i]});
 
-    std::sort(entries.begin(), entries.end(),
-              [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
+    cc::sort(entries, [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
 
     auto const metadata = vdoc::value_builder::object().build();
     auto const metadata_bytes = cc::vector<byte>::create_copy_of(metadata.bytes());
@@ -216,7 +214,7 @@ cc::vector<op_id> vdoc_test::oracle_writers(op_graph const& graph, cc::span<op_i
             out.push_back(w);
     }
 
-    std::sort(out.begin(), out.end(), op_id::by_bytes{});
+    cc::sort(out, op_id::by_bytes{});
     return out;
 }
 
@@ -252,7 +250,7 @@ void finish_case(vdoc_test::corpus_case& c)
     auto prev = cc::vector<op_id>();
     for (isize i = 0; i < length; ++i)
     {
-        vdoc_test::write const w[] = {{.path = c.paths[i % path_count], .value = i}};
+        vdoc_test::property_write const w[] = {{.path = c.paths[i % path_count], .value = i}};
         auto const id = vdoc_test::add_op(c.graph, prev, w);
         c.ops.push_back(id);
         prev = cc::vector<op_id>{id};
@@ -268,22 +266,23 @@ void finish_case(vdoc_test::corpus_case& c)
     auto c = vdoc_test::corpus_case{.name = merge_writes ? cc::string("diamond-merge-writes") : cc::string("diamond")};
     c.paths.push_back(vdoc_test::path_of("e", "T", "p"));
 
-    vdoc_test::write const w0[] = {{.path = c.paths[0], .value = 0}};
+    vdoc_test::property_write const w0[] = {{.path = c.paths[0], .value = 0}};
     auto const root = vdoc_test::add_op(c.graph, {}, w0);
     c.ops.push_back(root);
 
     op_id const from_root[] = {root};
-    vdoc_test::write const w1[] = {{.path = c.paths[0], .value = 1}};
-    vdoc_test::write const w2[] = {{.path = c.paths[0], .value = 2}};
+    vdoc_test::property_write const w1[] = {{.path = c.paths[0], .value = 1}};
+    vdoc_test::property_write const w2[] = {{.path = c.paths[0], .value = 2}};
     auto const left = vdoc_test::add_op(c.graph, from_root, w1);
     auto const right = vdoc_test::add_op(c.graph, from_root, w2);
     c.ops.push_back(left);
     c.ops.push_back(right);
 
     op_id const both[] = {left, right};
-    vdoc_test::write const w3[] = {{.path = c.paths[0], .value = 3}};
+    vdoc_test::property_write const w3[] = {{.path = c.paths[0], .value = 3}};
     c.ops.push_back(vdoc_test::add_op(
-        c.graph, both, merge_writes ? cc::span<vdoc_test::write const>(w3) : cc::span<vdoc_test::write const>()));
+        c.graph, both,
+        merge_writes ? cc::span<vdoc_test::property_write const>(w3) : cc::span<vdoc_test::property_write const>()));
 
     finish_case(c);
     return c;
@@ -300,16 +299,16 @@ void finish_case(vdoc_test::corpus_case& c)
     c.ops.push_back(root);
 
     op_id const from_root[] = {root};
-    vdoc_test::write const wa[] = {{.path = c.paths[0], .value = 1}};
-    vdoc_test::write const wb[] = {{.path = c.paths[1], .value = 2}};
+    vdoc_test::property_write const wa[] = {{.path = c.paths[0], .value = 1}};
+    vdoc_test::property_write const wb[] = {{.path = c.paths[1], .value = 2}};
     auto const a = vdoc_test::add_op(c.graph, from_root, wa);
     auto const b = vdoc_test::add_op(c.graph, from_root, wb);
     c.ops.push_back(a);
     c.ops.push_back(b);
 
     op_id const ab[] = {a, b};
-    vdoc_test::write const wm1[] = {{.path = c.paths[0], .value = 3}};
-    vdoc_test::write const wm2[] = {{.path = c.paths[1], .value = 4}};
+    vdoc_test::property_write const wm1[] = {{.path = c.paths[0], .value = 3}};
+    vdoc_test::property_write const wm2[] = {{.path = c.paths[1], .value = 4}};
     c.ops.push_back(vdoc_test::add_op(c.graph, ab, wm1));
     c.ops.push_back(vdoc_test::add_op(c.graph, ab, wm2));
 
@@ -329,7 +328,7 @@ void finish_case(vdoc_test::corpus_case& c)
     op_id const from_root[] = {root};
     for (isize i = 0; i < 4; ++i)
     {
-        vdoc_test::write const w[] = {{.path = c.paths[0], .value = i}};
+        vdoc_test::property_write const w[] = {{.path = c.paths[0], .value = i}};
         c.ops.push_back(vdoc_test::add_op(c.graph, from_root, w));
     }
 
@@ -368,13 +367,13 @@ void finish_case(vdoc_test::corpus_case& c)
             }
         }
 
-        auto writes = cc::vector<vdoc_test::write>();
+        auto writes = cc::vector<vdoc_test::property_write>();
         auto const write_count = rng.next_below(u32(path_count) + 1);
         for (u32 w = 0; w < write_count; ++w)
             writes.push_back({.path = c.paths[rng.next_below(u32(path_count))], .value = i});
 
         // duplicate paths in one op are not encodable, so keep the first of each
-        auto unique = cc::vector<vdoc_test::write>();
+        auto unique = cc::vector<vdoc_test::property_write>();
         for (auto const& w : writes)
         {
             auto seen = false;

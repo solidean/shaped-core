@@ -15,14 +15,15 @@ namespace vdoc_test
 {
 using namespace cc::primitive_defines;
 
-/// One write, as a test spells it: a path and an integer.
-struct write;
+/// One property write, as a test spells it: a path and an integer.
+/// NOT `write`: that collides with POSIX ::write(2) wherever a test says `using namespace vdoc_test`.
+struct property_write;
 
 /// One generated DAG, with the head sets and paths worth asking it about.
 struct corpus_case;
 } // namespace vdoc_test
 
-struct vdoc_test::write
+struct vdoc_test::property_write
 {
     vdoc::property_path path;
     i64 value;
@@ -52,7 +53,9 @@ namespace vdoc_test
 ///
 /// The values are local because their views only have to survive as far as encode_assignments, which copies the bytes
 /// into the blob — after that the op owns everything it points at.
-[[nodiscard]] vdoc::op_id add_op(vdoc::op_graph& graph, cc::span<vdoc::op_id const> parents, cc::span<write const> writes);
+[[nodiscard]] vdoc::op_id add_op(vdoc::op_graph& graph,
+                                 cc::span<vdoc::op_id const> parents,
+                                 cc::span<property_write const> writes);
 
 /// The writers of one path, as sorted id bytes, for comparing two materializations.
 [[nodiscard]] cc::vector<vdoc::op_id> writers_of(vdoc::raw_document const& doc, vdoc::property_path const& path);

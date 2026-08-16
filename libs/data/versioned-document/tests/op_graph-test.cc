@@ -5,8 +5,6 @@
 #include <nexus/test.hh>
 #include <versioned-document/op_graph.hh>
 
-#include <algorithm>
-
 using namespace cc::primitive_defines;
 
 using vdoc::entity_id;
@@ -17,8 +15,8 @@ using vdoc::property_path;
 using vdoc_test::add_op;
 using vdoc_test::oracle_writers;
 using vdoc_test::path_of;
+using vdoc_test::property_write;
 using vdoc_test::same_ids;
-using vdoc_test::write;
 using vdoc_test::writers_of;
 
 TEST("vdoc - add is idempotent and does not disturb the child index")
@@ -27,7 +25,7 @@ TEST("vdoc - add is idempotent and does not disturb the child index")
 
     auto const root = add_op(graph, {}, {});
     op_id const parents[] = {root};
-    write const writes[] = {{.path = path_of("e1", "T", "x"), .value = 1}};
+    property_write const writes[] = {{.path = path_of("e1", "T", "x"), .value = 1}};
     auto const child = add_op(graph, parents, writes);
 
     CHECK(graph.size() == 2);
@@ -46,11 +44,11 @@ TEST("vdoc - linear history resolves last-write-wins")
 
     auto const p = path_of("e1", "T", "x");
 
-    write const first[] = {{.path = p, .value = 1}};
+    property_write const first[] = {{.path = p, .value = 1}};
     auto const a = add_op(graph, {}, first);
 
     op_id const from_a[] = {a};
-    write const second[] = {{.path = p, .value = 2}};
+    property_write const second[] = {{.path = p, .value = 2}};
     auto const b = add_op(graph, from_a, second);
 
     auto const doc = graph.materialize(b);
@@ -71,8 +69,8 @@ TEST("vdoc - a diamond where both sides write one path leaves two values")
     auto const root = add_op(graph, {}, {});
     op_id const from_root[] = {root};
 
-    write const left_write[] = {{.path = p, .value = 1}};
-    write const right_write[] = {{.path = p, .value = 2}};
+    property_write const left_write[] = {{.path = p, .value = 1}};
+    property_write const right_write[] = {{.path = p, .value = 2}};
     auto const left = add_op(graph, from_root, left_write);
     auto const right = add_op(graph, from_root, right_write);
 
@@ -99,7 +97,7 @@ TEST("vdoc - concurrent writers of the SAME bytes still leave two values")
     op_id const from_root[] = {root};
 
     // byte-identical writes: the parse layer collapses this silently, and storage must not
-    write const same[] = {{.path = p, .value = 7}};
+    property_write const same[] = {{.path = p, .value = 7}};
     auto const left = add_op(graph, from_root, same);
     auto const right_parent = add_op(graph, from_root, {});
     op_id const from_right[] = {right_parent};
@@ -135,13 +133,13 @@ TEST("vdoc - a superseded writer is not resurrected across a second merge")
     auto const root = add_op(graph, {}, {});
     op_id const from_root[] = {root};
 
-    write const a_write[] = {{.path = p, .value = 1}};
-    write const b_write[] = {{.path = p, .value = 2}};
+    property_write const a_write[] = {{.path = p, .value = 1}};
+    property_write const b_write[] = {{.path = p, .value = 2}};
     auto const a = add_op(graph, from_root, a_write);
     auto const b = add_op(graph, from_root, b_write);
 
     op_id const ab[] = {a, b};
-    write const x_write[] = {{.path = p, .value = 3}};
+    property_write const x_write[] = {{.path = p, .value = 3}};
     auto const x = add_op(graph, ab, x_write);
     auto const y = add_op(graph, ab, {});
 
@@ -163,11 +161,11 @@ TEST("vdoc - materializing an ancestor alongside its descendant equals the desce
 
     auto const p = path_of("e1", "T", "x");
 
-    write const first[] = {{.path = p, .value = 1}};
+    property_write const first[] = {{.path = p, .value = 1}};
     auto const a = add_op(graph, {}, first);
 
     op_id const from_a[] = {a};
-    write const second[] = {{.path = p, .value = 2}};
+    property_write const second[] = {{.path = p, .value = 2}};
     auto const b = add_op(graph, from_a, second);
 
     op_id const both[] = {a, b};
@@ -187,8 +185,8 @@ TEST("vdoc - materializing several heads equals materializing a merge op over th
     auto const root = add_op(graph, {}, {});
     op_id const from_root[] = {root};
 
-    write const left_write[] = {{.path = left_path, .value = 1}};
-    write const right_write[] = {{.path = right_path, .value = 2}};
+    property_write const left_write[] = {{.path = left_path, .value = 1}};
+    property_write const right_write[] = {{.path = right_path, .value = 2}};
     auto const left = add_op(graph, from_root, left_write);
     auto const right = add_op(graph, from_root, right_write);
 
@@ -215,7 +213,7 @@ TEST("vdoc - reachability skips a pruned parent rather than failing")
     auto const missing = op_id::from_bytes(missing_bytes);
 
     op_id const from_missing[] = {missing};
-    write const w[] = {{.path = p, .value = 1}};
+    property_write const w[] = {{.path = p, .value = 1}};
     auto const child = add_op(graph, from_missing, w);
 
     auto const reachable = graph.collect_reachable(cc::span<op_id const>(&child, 1));
@@ -239,11 +237,12 @@ TEST("vdoc - materialize_entities equals filtering the full materialization")
     auto const b_path = path_of("e2", "T", "x");
     auto const c_path = path_of("e3", "T", "x");
 
-    write const writes[] = {{.path = a_path, .value = 1}, {.path = b_path, .value = 2}, {.path = c_path, .value = 3}};
+    property_write const writes[]
+        = {{.path = a_path, .value = 1}, {.path = b_path, .value = 2}, {.path = c_path, .value = 3}};
     auto const first = add_op(graph, {}, writes);
 
     op_id const from_first[] = {first};
-    write const more[] = {{.path = a_path, .value = 10}};
+    property_write const more[] = {{.path = a_path, .value = 10}};
     auto const second = add_op(graph, from_first, more);
 
     op_id const heads[] = {second};
@@ -271,18 +270,18 @@ TEST("vdoc - dropping superseded sets at articulation points changes nothing")
     auto const root = add_op(graph, {}, {});
     op_id const from_root[] = {root};
 
-    write const a_write[] = {{.path = p, .value = 1}};
-    write const b_write[] = {{.path = p, .value = 2}, {.path = q, .value = 9}};
+    property_write const a_write[] = {{.path = p, .value = 1}};
+    property_write const b_write[] = {{.path = p, .value = 2}, {.path = q, .value = 9}};
     auto const a = add_op(graph, from_root, a_write);
     auto const b = add_op(graph, from_root, b_write);
 
     op_id const ab[] = {a, b};
-    write const x_write[] = {{.path = p, .value = 3}};
+    property_write const x_write[] = {{.path = p, .value = 3}};
     auto const x = add_op(graph, ab, x_write);
     auto const y = add_op(graph, ab, {});
 
     op_id const xy[] = {x, y};
-    write const tail_write[] = {{.path = q, .value = 10}};
+    property_write const tail_write[] = {{.path = q, .value = 10}};
     auto const tail = add_op(graph, xy, tail_write);
 
     op_id const heads[] = {tail};
@@ -311,8 +310,8 @@ TEST("vdoc - materialization is deterministic under shuffled insertion order")
         auto const root = add_op(graph, {}, {});
         op_id const from_root[] = {root};
 
-        write const a_write[] = {{.path = p, .value = 1}};
-        write const b_write[] = {{.path = q, .value = 2}};
+        property_write const a_write[] = {{.path = p, .value = 1}};
+        property_write const b_write[] = {{.path = q, .value = 2}};
         auto const a = add_op(graph, from_root, a_write);
         auto const b = add_op(graph, from_root, b_write);
 
@@ -321,7 +320,7 @@ TEST("vdoc - materialization is deterministic under shuffled insertion order")
         {
             auto name = cc::string("filler");
             name += cc::to_string(i);
-            write const filler[] = {{.path = path_of(name, "T", "z"), .value = i}};
+            property_write const filler[] = {{.path = path_of(name, "T", "z"), .value = i}};
             (void)add_op(graph, from_root, filler);
         }
 
@@ -356,7 +355,7 @@ TEST("vdoc - re-setting an unchanged path still records a distinct writer")
 
     auto const p = path_of("e1", "T", "x");
 
-    write const w[] = {{.path = p, .value = 5}};
+    property_write const w[] = {{.path = p, .value = 5}};
     auto const a = add_op(graph, {}, w);
 
     op_id const from_a[] = {a};

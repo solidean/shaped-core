@@ -104,8 +104,8 @@ TEST("vdoc - a tampered op in a received batch is rejected by id")
     auto sender = op_graph();
     auto const p = path_of("e1", "T", "x");
 
-    write const one[] = {{.path = p, .value = 1}};
-    write const two[] = {{.path = p, .value = 2}};
+    property_write const one[] = {{.path = p, .value = 1}};
+    property_write const two[] = {{.path = p, .value = 2}};
     auto const a = add_op(sender, {}, one);
     auto const b = add_op(sender, {}, two);
 
@@ -129,11 +129,11 @@ TEST("vdoc - parents that disagree with a held skeleton are refused")
     auto sender = op_graph();
     auto const p = path_of("e1", "T", "x");
 
-    write const one[] = {{.path = p, .value = 1}};
+    property_write const one[] = {{.path = p, .value = 1}};
     auto const root = add_op(sender, {}, one);
 
     op_id const from_root[] = {root};
-    write const two[] = {{.path = p, .value = 2}};
+    property_write const two[] = {{.path = p, .value = 2}};
     auto const head = add_op(sender, from_root, two);
 
     // A skeleton carries parents no hash has ever covered, so storage can hand back a wrong list and nothing upstream
@@ -158,11 +158,11 @@ TEST("vdoc - a rejected batch leaves the replica exactly as it was")
     auto sender = op_graph();
     auto const p = path_of("e1", "T", "x");
 
-    write const one[] = {{.path = p, .value = 1}};
+    property_write const one[] = {{.path = p, .value = 1}};
     auto const root = add_op(sender, {}, one);
 
     op_id const from_root[] = {root};
-    write const two[] = {{.path = p, .value = 2}};
+    property_write const two[] = {{.path = p, .value = 2}};
     auto const child = add_op(sender, from_root, two);
 
     auto tampered = send(sender, child);
@@ -186,11 +186,11 @@ TEST("vdoc - integrating fills a skeleton where add would not")
     auto sender = op_graph();
     auto const p = path_of("e1", "T", "x");
 
-    write const one[] = {{.path = p, .value = 1}};
+    property_write const one[] = {{.path = p, .value = 1}};
     auto const root = add_op(sender, {}, one);
 
     op_id const from_root[] = {root};
-    write const two[] = {{.path = p, .value = 2}};
+    property_write const two[] = {{.path = p, .value = 2}};
     auto const head = add_op(sender, from_root, two);
 
     op_id const heads[] = {head};
@@ -219,7 +219,7 @@ TEST("vdoc - integrating fills a skeleton where add would not")
 TEST("vdoc - an op the replica already holds in full is verified and left alone")
 {
     auto sender = op_graph();
-    write const one[] = {{.path = path_of("e1", "T", "x"), .value = 1}};
+    property_write const one[] = {{.path = path_of("e1", "T", "x"), .value = 1}};
     auto const root = add_op(sender, {}, one);
 
     op_id const just_root[] = {root};
@@ -238,7 +238,7 @@ TEST("vdoc - an op the replica already holds in full is verified and left alone"
 TEST("vdoc - a peer cannot offer a skeleton, and it never reads as tampering")
 {
     auto sender = op_graph();
-    write const one[] = {{.path = path_of("e1", "T", "x"), .value = 1}};
+    property_write const one[] = {{.path = path_of("e1", "T", "x"), .value = 1}};
     auto const root = add_op(sender, {}, one);
 
     auto empty = send(sender, root);
