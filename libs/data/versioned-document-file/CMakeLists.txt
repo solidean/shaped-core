@@ -79,6 +79,8 @@ if(SC_BUILD_TESTS)
         tests/conformance/drivers.cc
         tests/conformance/conformance-test.cc
         tests/conformance/assets-conformance-test.cc
+        tests/benchmarks/document-loop-benchmark.cc
+
         tests/conformance/recovery-conformance-test.cc
         tests/conformance/snapshots-conformance-test.cc
     )

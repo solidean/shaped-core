@@ -502,8 +502,30 @@ Note that this machine is Alder Lake, where AVX-512 is fused off — BLAKE3's wi
 So the ratio got worse and the conclusion did not change: at the two places the design hashes, the absolute cost is far below anything a user perceives.
 The reservation stands as written, and this is the evidence it asked for rather than a case for reopening.
 
+**Measured, milestone 6 — the loop itself, and the condition did not fire.**
+The reopen condition names a profile of an ordinary open / edit / save loop, and milestone 6 is the first point at which one existed.
+[document-loop-benchmark.md](../../versioned-document-file/docs/benchmarks/document-loop-benchmark.md) is the write-up; the same i9-12900H under `release-clang`, so it composes with the table above.
+
+| document | loop | of which hashing | share of loop | share of the open |
+|---|---|---|---|---|
+| 200 ops | 32 ms | 0.14 ms | 0.5% | 5.6% |
+| 2,000 ops | 278 ms | 1.15 ms | 0.4% | 15.9% |
+| 8,000 ops | 2,182 ms | 4.58 ms | 0.2% | 20.4% |
+
+Doubling the loop's hashing does not produce a measurable change in the loop: the injected delta scatters around zero, because it is smaller than run-to-run variance.
+That is the strongest form the answer comes in.
+
+**The share worth watching is hashing's share of the OPEN, not of the loop.**
+The loader re-hashes every op it reads, so that cost is linear in history length rather than in document size — which is the one place it could ever grow into something.
+Pruning is what bounds it, and at 4.6 ms for 8,000 ops there is nothing to act on today.
+
+What the loop is actually spent on is materialization and op building, both quadratic, and neither is what the reservation was about.
+The sharpest of those is that `op_builder::build` takes an `op_graph` with no `snapshot_cache` overload, so the edit path cannot reach the caching built to make exactly this cheap.
+That is a finding this measurement produced rather than a hashing question, and it is recorded in the write-up.
+
 **Reopen when:** BLAKE3 shows up in a profile of an ordinary open / edit / save loop.
-If it does, the design put hashing somewhere it does not belong, and the fix is to move the hashing — after which the choice of hash can be re-argued on evidence.
+Checked in milestone 6 and it did not; re-check if the loop's shape changes, above all if loading stops being one hash per stored op.
+If it ever does fire, the design put hashing somewhere it does not belong, and the fix is to move the hashing — after which the choice of hash can be re-argued on evidence.
 
 ### Snapshot bytes get their own chunk table, and share the blob codec
 

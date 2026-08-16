@@ -19,3 +19,21 @@ rules:
       - src/versioned-document-file/impl/store_sqlite.hh
       - src/versioned-document-file/impl/store_sqlite.cc
       - tests/**
+
+  - kind: allow-include
+    value: <cstdio>
+    reason: a guide benchmark prints a fixed-width table a human reads next to its write-up, which cc::format does not lay out — the same reason clean-core's benchmarks reach for it, and it never leaves tests/benchmarks/.
+    files:
+      - tests/benchmarks/**
+
+  - kind: allow-include
+    value: <chrono>
+    reason: the loop benchmark times one-shot stages rather than repeatable throughput, so it needs a clock rather than clean-core's adaptive timer.
+    files:
+      - tests/benchmarks/**
+
+  - kind: allow-include
+    value: <algorithm>
+    reason: taking a median of a handful of timings, which is the simplest robust noise filter and not worth a container of our own.
+    files:
+      - tests/benchmarks/**

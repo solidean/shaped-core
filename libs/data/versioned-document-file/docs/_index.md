@@ -9,6 +9,8 @@ The store, the loader, publishing, the workspace, the content store and snapshot
 
 - [format.md](format.md) — the on-disk specification, and the authority on the bytes.
   The three durability classes, the tables, the load procedure and its soft failures, publishing, and how space is reclaimed.
+- [benchmarks/document-loop-benchmark.md](benchmarks/document-loop-benchmark.md) — what an ordinary open / edit / publish / close loop costs, stage by stage.
+  Written to check the standing reservation about BLAKE3's cost, and it is where that reservation was tested rather than argued.
 
 The model this persists is [versioned-document](../../versioned-document/docs/_index.md)'s:
 
