@@ -25,6 +25,8 @@
 #include <nexus/test.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/op_builder.hh>
+#include <versioned-document/snapshot_cache.hh>
+#include <versioned-document/snapshot_document.hh>
 
 #include <algorithm>
 #include <chrono>
@@ -53,7 +55,14 @@ using clock_type = std::chrono::steady_clock;
 ///
 /// Each op writes to its OWN entity, because op_builder diffs against its parents — rewriting one entity would emit
 /// nothing and measure a loop over an empty document.
-[[nodiscard]] cc::vector<vdoc::op_id> extend(vdoc::op_graph& graph, cc::optional<vdoc::op_id> from, isize first, isize count)
+///
+/// `cache` is optional: an application that has just opened a file has a snapshot at its head, and passing one is what
+/// lets each build's diff terminate there instead of replaying the whole history.
+[[nodiscard]] cc::vector<vdoc::op_id> extend(vdoc::op_graph& graph,
+                                             cc::optional<vdoc::op_id> from,
+                                             isize first,
+                                             isize count,
+                                             vdoc::snapshot_cache* cache = nullptr)
 {
     auto head = from;
     auto added = cc::vector<vdoc::op_id>();
@@ -73,7 +82,7 @@ using clock_type = std::chrono::steady_clock;
         op.set_raw(entity, transform, vdoc::property_id::of("label"), vdoc::value::of(cc::format("wall {}", first + i)));
         op.set_raw(entity, transform, vdoc::property_id::of("layer"), vdoc::value::of(i64(i % 8)));
 
-        head = graph.add(op.build(graph));
+        head = graph.add(cache == nullptr ? op.build(graph) : op.build(graph, *cache));
         added.push_back(head.value());
     }
 
@@ -143,8 +152,14 @@ struct stage_times
     for (auto const* const op : resident)
         (void)graph.add(*op);
 
+    // What an application has after an open: a snapshot at the head it just materialized, so the builder's diff
+    // terminates there rather than replaying the history.
+    // Untimed, because it is the reuse of a materialization the loop has already paid for above.
+    auto edit_cache = vdoc::snapshot_cache();
+    edit_cache.install(head, vdoc::snapshot_document::create_owning_copy(raw), /*pinned =*/true);
+
     auto const t_edit = clock_type::now();
-    auto const fresh = extend(graph, head, 1'000'000, edits);
+    auto const fresh = extend(graph, head, 1'000'000, edits, &edit_cache);
     times.edit = seconds_since(t_edit);
 
     // Only the NEW ops are handed over: the rest are already in the store, and re-offering them would time a copy the

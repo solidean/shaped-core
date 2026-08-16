@@ -365,3 +365,118 @@ TEST("vdoc - re-setting an unchanged path still records a distinct writer")
     CHECK(!doc.try_get(p)->is_multi_valued());
     CHECK(doc.try_get(p)->writers[0].writer == b);
 }
+
+TEST("vdoc - dropping superseded at articulation points changes nothing about the result")
+{
+    // The clear is an optimization with a per-SWEEP justification, and materialize_options exists so it can be turned
+    // off and the two passes compared.
+    // It walks a dirty list rather than every path, so a missed record would silently keep a writer the dense clear
+    // would have dropped — which is exactly the difference this pins.
+    auto const corpus = vdoc_test::generate_corpus();
+    REQUIRE(corpus.size() > 20);
+
+    for (auto const& c : corpus)
+        for (auto const& heads : c.head_sets)
+        {
+            auto const cleared
+                = vdoc::impl::materialize(c.graph, heads, {}, {.drop_superseded_at_articulation_points = true});
+            auto const kept
+                = vdoc::impl::materialize(c.graph, heads, {}, {.drop_superseded_at_articulation_points = false});
+
+            CHECK(vdoc_test::same_document(cleared, kept));
+        }
+}
+
+TEST("vdoc - a filtered sweep agrees with the oracle, cleared or not")
+{
+    // The filter changes which paths exist at all, so it also changes which slots the side lists cover.
+    // A dense clear could not tell the two apart; a dirty list can.
+    auto const corpus = vdoc_test::generate_corpus();
+
+    for (auto const& c : corpus)
+    {
+        auto entities = cc::vector<entity_id>();
+        for (auto const& p : c.paths)
+            if (entities.empty() || !(entities.back() == p.entity))
+                entities.push_back(p.entity);
+
+        for (auto const& heads : c.head_sets)
+            for (auto const& only : entities)
+            {
+                auto const one = cc::span<entity_id const>(&only, 1);
+                auto const cleared
+                    = vdoc::impl::materialize(c.graph, heads, one, {.drop_superseded_at_articulation_points = true});
+                auto const kept
+                    = vdoc::impl::materialize(c.graph, heads, one, {.drop_superseded_at_articulation_points = false});
+
+                CHECK(vdoc_test::same_document(cleared, kept));
+
+                for (auto const& path : c.paths)
+                    if (path.entity == only)
+                        CHECK(same_ids(writers_of(cleared, path), oracle_writers(c.graph, heads, path)));
+            }
+    }
+}
+
+TEST("vdoc - a discarded editing frame can be dropped outright")
+{
+    // The drag shape: every frame is a new op off the SAME state, and all but the last are thrown away.
+    // Nothing else removes an op, so without this a ten-second drag leaves a thousand of them resident forever.
+    auto graph = op_graph();
+
+    auto const base = add_op(graph, {}, {});
+    op_id const from_base[] = {base};
+
+    auto frames = cc::vector<op_id>();
+    for (isize i = 0; i < 16; ++i)
+    {
+        property_write const writes[] = {{.path = path_of("e1", "T", "x"), .value = i}};
+        frames.push_back(add_op(graph, from_base, writes));
+    }
+
+    CHECK(graph.size() == 17);
+    CHECK(graph.children(base).size() == 16);
+    CHECK(graph.leaves().size() == 16);
+
+    auto const kept = frames.back();
+    for (isize i = 0; i + 1 < frames.size(); ++i)
+        CHECK(graph.drop_leaf(frames[i]));
+
+    CHECK(graph.size() == 2);
+    REQUIRE(graph.children(base).size() == 1);
+    CHECK(graph.children(base)[0] == kept);
+
+    auto const leaves = graph.leaves();
+    REQUIRE(leaves.size() == 1);
+    CHECK(leaves[0] == kept);
+
+    // the surviving frame materializes exactly as it did before its siblings went
+    auto const p = path_of("e1", "T", "x");
+    CHECK(same_ids(writers_of(graph.materialize(kept), p), oracle_writers(graph, cc::span<op_id const>(&kept, 1), p)));
+
+    // dropping something absent is false rather than an error
+    CHECK(!graph.drop_leaf(frames[0]));
+
+    // and content addressing means a dropped frame comes back byte-identically
+    property_write const again[] = {{.path = path_of("e1", "T", "x"), .value = 0}};
+    CHECK(add_op(graph, from_base, again) == frames[0]);
+    CHECK(graph.size() == 3);
+    CHECK(graph.children(base).size() == 2);
+}
+
+TEST("vdoc - dropping the last frame leaves the base a leaf again")
+{
+    auto graph = op_graph();
+
+    auto const base = add_op(graph, {}, {});
+    op_id const from_base[] = {base};
+    property_write const writes[] = {{.path = path_of("e1", "T", "x"), .value = 1}};
+    auto const only = add_op(graph, from_base, writes);
+
+    CHECK(graph.drop_leaf(only));
+    CHECK(graph.children(base).empty());
+
+    auto const leaves = graph.leaves();
+    REQUIRE(leaves.size() == 1);
+    CHECK(leaves[0] == base);
+}

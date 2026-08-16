@@ -74,6 +74,46 @@ Undeleting is just another write.
 A version this build does not know skips that component with a diagnostic, leaving the stored data untouched for a build that does know it.
 Stored history is never rewritten and never migrated in place; old versions stay loadable forever.
 
+## Applying an op incrementally
+
+`vdoc::apply` evolves a typed document from one op to another instead of re-parsing it.
+It is the same interpretation, run over fewer entities — the selection phase is one function, and both `parse` and `apply` call it, so the two cannot drift.
+
+**The fast path is a bounded single-parent chain.**
+Walking from `to` back to `from`, every op must have exactly one parent, and `from` must be reached inside a bound.
+Single-parentage is what makes the chain's own assignments the complete delta.
+Each op dominates what it overwrites and contributes nothing else, so no untouched entity changed and none became multi-valued.
+Multi-values *inside* the touched set are fine — those entities go through the full selection-and-construction path, exactly as a parse runs it.
+
+The gate is a bound rather than a proof of ancestry, for the same reason the [snapshot](snapshots.md#validity-is-decided-at-use-not-at-creation) gate is.
+An exact ancestor test on a DAG is what this design declines to pay for.
+Anything else — a merge on the chain, a chain too long, a `to` that does not reach `from` — re-materializes and re-parses.
+Correctness never depends on the gate; only speed does.
+
+### What an incremental apply owes the report
+
+A parse appends.
+An apply **edits**, because carrying a stale finding for something it has just re-decided is a correctness trap rather than untidiness.
+
+- Entries naming an entity in the touched set are **dropped before anything re-decides it**, then recomputed.
+- On the fallback the whole report is cleared, because a full parse re-decides the whole document.
+- **`unsupported_component_type` is never retracted.**
+  It is document-scoped: reported once per type, not once per entity, and carrying no entity at all.
+  So an apply cannot know a type is *gone* without walking the whole document, which is the one thing this path exists to avoid.
+  A type that stops being present keeps its diagnostic until the next full parse.
+
+That asymmetry is stated rather than hidden: it is the one way an incremental report differs from the parse of the same op.
+
+### The change summary
+
+`apply` produces a `change_summary` rather than leaving a caller to diff two documents: touched entities and touched (entity, component) pairs, each marked added, removed or modified.
+
+`modified` means the component was re-parsed because a raw property under it changed.
+**It is not a claim that the parsed value differs**, which the library cannot make — a component is required only to be move-constructible and destructible, so there is no equality to test.
+
+On the **fallback** the summary is conservative: everything.
+A full re-parse has no delta to read, and a caller seeing `took_fast_path == false` should treat every projection it holds as stale — which is exactly what that summary says.
+
 ## Validation layers
 
 Validation happens in stages, and **only the first can refuse anything**.

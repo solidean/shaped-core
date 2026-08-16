@@ -7,7 +7,9 @@ project(versioned-document LANGUAGES CXX)
 add_library(versioned-document
     src/versioned-document/component.cc
     src/versioned-document/document.cc
+    src/versioned-document/document_builder.cc
     src/versioned-document/fwd.cc
+    src/versioned-document/incremental_parse.cc
     src/versioned-document/op.cc
     src/versioned-document/op_builder.cc
     src/versioned-document/op_graph.cc
@@ -31,10 +33,13 @@ target_sources(versioned-document
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
+    src/versioned-document/change_summary.hh
     src/versioned-document/component.hh
     src/versioned-document/document.hh
+    src/versioned-document/document_builder.hh
     src/versioned-document/fwd.hh
     src/versioned-document/ids.hh
+    src/versioned-document/incremental_parse.hh
     src/versioned-document/op.hh
     src/versioned-document/op_builder.hh
     src/versioned-document/op_graph.hh
@@ -77,9 +82,13 @@ if(SC_BUILD_TESTS)
     add_executable(versioned-document-test
         tests/main.cc
 
+        tests/benchmarks/edit-latency-benchmark.cc
+
         tests/component-test.cc
         tests/document-test.cc
+        tests/document_builder-test.cc
         tests/ids-test.cc
+        tests/incremental_apply-test.cc
         tests/op-test.cc
         tests/op-fuzz-test.cc
         tests/op_builder-test.cc
@@ -89,6 +98,7 @@ if(SC_BUILD_TESTS)
         tests/parse-test.cc
         tests/parser-test.cc
         tests/recovery-test.cc
+        tests/snapshot_advance-test.cc
         tests/snapshot_cache-test.cc
         tests/value-test.cc
         tests/value-fuzz-test.cc

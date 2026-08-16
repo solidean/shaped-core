@@ -86,5 +86,15 @@ struct vdoc::parse_report
 
     [[nodiscard]] isize count_of(diagnostic_kind kind) const;
 
+    /// Drops every entry whose path names one of `sorted_entities`, keeping the rest in order.
+    ///
+    /// What an incremental apply owes the report: the entities it is about to re-decide must not keep the findings of
+    /// a previous decision, and carrying a stale diagnostic is a correctness trap rather than untidiness.
+    ///
+    /// **A document-scoped diagnostic names no entity and therefore survives.**
+    /// `unsupported_component_type` is the one, deliberately reported once per type rather than once per occurrence —
+    /// see [interpretation](../../docs/concepts/interpretation.md#what-an-incremental-apply-owes-the-report).
+    void drop_for_entities(cc::span<entity_id const> sorted_entities);
+
     void clear();
 };

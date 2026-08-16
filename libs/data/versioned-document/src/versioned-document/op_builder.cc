@@ -1,10 +1,9 @@
 #include "op_builder.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/set.hh>
 #include <versioned-document/value_builder.hh>
-
-#include <algorithm>
 
 using namespace cc::primitive_defines;
 
@@ -22,8 +21,28 @@ vdoc::op_builder& vdoc::op_builder::set_metadata(value metadata)
 
 vdoc::op_builder& vdoc::op_builder::set_raw(property_path const& path, value v)
 {
-    for (auto const& w : _writes)
-        CC_ASSERT(!(w.path == path), "the same property path was staged twice in one op");
+    // Free in release, where CC_ASSERT is stripped — but a debug editor staging a bulk edit pays it, and a linear
+    // scan per write is quadratic in the size of the op.
+    // Past a handful of writes the set is cheaper than the scan and asks the same question.
+    if constexpr (CC_ASSERT_ENABLED)
+    {
+        if (_writes.size() < 16)
+        {
+            for (auto const& w : _writes)
+                CC_ASSERT(!(w.path == path), "the same property path was staged twice in one op");
+        }
+        else
+        {
+            if (_staged_paths.size() != _writes.size())
+            {
+                _staged_paths.clear();
+                for (auto const& w : _writes)
+                    (void)_staged_paths.insert(w.path);
+            }
+
+            CC_ASSERT(_staged_paths.insert(path), "the same property path was staged twice in one op");
+        }
+    }
 
     _writes.push_back(pending_write{.path = path, .v = cc::move(v)});
     return *this;
@@ -46,8 +65,18 @@ vdoc::op_builder& vdoc::op_builder::set_entity_alive(entity_id entity, bool aliv
 
 vdoc::op vdoc::op_builder::build(op_graph const& graph) const
 {
+    return impl_build(graph, nullptr);
+}
+
+vdoc::op vdoc::op_builder::build(op_graph const& graph, snapshot_cache& cache) const
+{
+    return impl_build(graph, &cache);
+}
+
+vdoc::op vdoc::op_builder::impl_build(op_graph const& graph, snapshot_cache* cache) const
+{
     auto parents = _parents;
-    std::sort(parents.begin(), parents.end(), op_id::by_bytes{});
+    cc::sort(parents, op_id::by_bytes{});
 
     // Deduplicate in place: a caller naming one parent twice means one edge, and the hash must see the canonical form.
     auto unique_parents = cc::vector<op_id>();
@@ -62,7 +91,8 @@ vdoc::op vdoc::op_builder::build(op_graph const& graph) const
         if (seen.insert(w.path.entity))
             touched.push_back(w.path.entity);
 
-    auto const current = graph.materialize_entities(unique_parents, touched);
+    auto const current = cache == nullptr ? graph.materialize_entities(unique_parents, touched)
+                                          : graph.materialize_entities(unique_parents, touched, *cache);
 
     auto entries = cc::vector<assignment>();
     for (auto const& w : _writes)
@@ -78,8 +108,7 @@ vdoc::op vdoc::op_builder::build(op_graph const& graph) const
         entries.push_back(assignment{.path = w.path, .value = w.v});
     }
 
-    std::sort(entries.begin(), entries.end(),
-              [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
+    cc::sort(entries, [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
 
     auto const metadata_bytes = cc::vector<byte>::create_copy_of(_metadata.bytes());
     auto assignment_bytes = encode_assignments(entries);

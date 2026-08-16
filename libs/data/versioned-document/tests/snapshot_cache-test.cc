@@ -1,6 +1,7 @@
 #include "op_graph_corpus.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <versioned-document/op_graph.hh>
 #include <versioned-document/snapshot_cache.hh>
@@ -135,6 +136,91 @@ TEST("vdoc - a filtered sweep may terminate at a snapshot too")
             }
         }
     }
+}
+
+TEST("vdoc - seeding a filtered sweep reads only the entities it was asked for")
+{
+    // The result is identical either way, so nothing above this can tell a lookup from a walk of the whole snapshot.
+    // But a walk is O(document) per build, which is precisely the cost a snapshot is supposed to remove at the size
+    // that matters — so it is asserted directly.
+    auto const corpus = generate_corpus();
+    auto ever_used = false;
+
+    for (auto const& c : corpus)
+    {
+        auto entities = cc::vector<vdoc::entity_id>();
+        for (auto const& p : c.paths)
+        {
+            auto seen = false;
+            for (auto const& e : entities)
+                seen = seen || e == p.entity;
+            if (!seen)
+                entities.push_back(p.entity);
+        }
+        if (entities.empty())
+            continue;
+
+        auto const one = cc::span<vdoc::entity_id const>(entities.data(), 1);
+
+        for (auto const& heads : c.head_sets)
+            for (auto const& at : c.ops)
+            {
+                auto cache = unbounded_cache();
+                cache.install(at, snapshot_document::create_owning_copy(c.graph.materialize(at)));
+
+                auto stats = vdoc::impl::materialize_stats();
+                (void)vdoc::impl::materialize(c.graph, heads, one, {.cache = &cache, .stats = &stats});
+
+                if (stats.snapshots_used == 0)
+                    continue;
+
+                ever_used = true;
+
+                // At most one: the filter names one entity, and the snapshot either has it or does not.
+                CHECK(stats.snapshot_entities_read <= 1);
+            }
+    }
+
+    CHECK(ever_used);
+}
+
+TEST("vdoc - seeding cost is the filter's size, not the snapshot's")
+{
+    // The corpus is a few entities wide, so it cannot tell "read one" from "read them all".
+    // This is the shape the fix is actually for: a wide document, a one-entity filter.
+    auto graph = op_graph();
+
+    auto head = cc::vector<op_id>();
+    for (isize i = 0; i < 64; ++i)
+    {
+        auto const name = cc::format("e{}", i);
+        vdoc_test::property_write const writes[] = {{.path = path_of(name, "T", "x"), .value = i}};
+        auto const next = add_op(graph, head, writes);
+        head = cc::vector<op_id>{next};
+    }
+
+    auto cache = unbounded_cache();
+    auto const full = graph.materialize(head.back());
+    REQUIRE(full.entities.size() == 64);
+    cache.install(head.back(), snapshot_document::create_owning_copy(full));
+
+    // one more op, so there is something for the sweep to replay on top of the snapshot
+    vdoc_test::property_write const edit[] = {{.path = path_of("e7", "T", "x"), .value = 999}};
+    auto const tip = add_op(graph, head, edit);
+
+    auto const only = vdoc::entity_id::of("e7");
+    auto const one = cc::span<vdoc::entity_id const>(&only, 1);
+
+    auto stats = vdoc::impl::materialize_stats();
+    op_id const heads[] = {tip};
+    auto const doc = vdoc::impl::materialize(graph, heads, one, {.cache = &cache, .stats = &stats});
+
+    REQUIRE(stats.snapshots_used == 1);
+    CHECK(stats.snapshot_entities_read == 1);
+
+    // and the answer is still the one the plain replay gives
+    CHECK(same_document(doc, graph.materialize_entities(heads, one)));
+    CHECK(doc.entities.size() == 1);
 }
 
 TEST("vdoc - dropping the cache mid-workload changes nothing")

@@ -106,6 +106,9 @@ auto const op = vdoc::op_builder{}
 auto const head2 = graph.add(cc::move(op));               // keyed by content hash; returns it
 ```
 
+`build(graph, cache)` is the same op, with the diff's walk allowed to terminate at a cached snapshot.
+The filter applies to assignments and never to edges, so a snapshot is the only thing that shortens a build — **use this overload in any edit loop**.
+
 - **`add` is not append.** It inserts by content hash and moves no head, so two identical ops collapse to one entry.
 - **`build` diffs.** Re-setting an unchanged property emits no assignments at all.
 - **A multi-valued path always emits**, even when every surviving writer holds identical bytes — that op is how a conflict is resolved.
@@ -124,7 +127,12 @@ graph.collect_reachable(heads);                      // the local closure; missi
 graph.children(id);                                  // inverted parent edges; may name ops not present
 graph.skeletonize(id);                               // drop an op's payload, keep its id and parents
 graph.fill_payload(id, cc::move(payload));           // the inverse; `add` leaves a skeleton a skeleton
+graph.drop_leaf(id);                                 // forget it entirely; ASSERTS if anything descends from it
+graph.leaves();                                      // every op nothing descends from, sorted by id bytes
 ```
+
+**`skeletonize` and `drop_leaf` are for opposite situations.**
+A skeleton keeps ancestry alive through a pruned op; `drop_leaf` is for a discarded editing frame with no ancestry to preserve.
 
 **A raw document borrows the bytes it was materialized from**, and owns none of them.
 A value points into the writing op's payload, or into the arena of the snapshot that terminated the sweep.
@@ -140,12 +148,19 @@ graph.materialize_entities(heads, entities, cache);  // a snapshot serves a filt
 vdoc::install_snapshot(graph, head, cache);          // explicit; nothing installs behind your back
 vdoc::install_snapshot_if_useful(graph, head, cache, {.min_ops_behind = 4096});
 
+vdoc::advance_snapshot(graph, cache, parent, child); // moves the entry onto a SINGLE-PARENT child, ~3 us
+
 cache.clear_unpinned();                              // invisible: costs speed, never a result
 cache.erase(id); cache.is_pinned(id); cache.size();
 cache.unpin(id);                                     // a snapshot that stopped being load-bearing, bytes kept
+cache.take(id);                                      // removes and hands it over; advance_snapshot's primitive
 ```
 
 A snapshot is **surviving writers only** — exactly a `raw_document` over bytes it owns, so it outlives the ops that wrote them.
+
+**The editing loop is: pin one snapshot after the load, then `advance_snapshot` on every accepted op.**
+That keeps the head permanently one op from a snapshot, so a build and a materialization never get slower with the session.
+Do **not** advance during a drag: the frames are siblings, and moving the snapshot onto one leaves the rest replaying everything.
 
 ### Recovery from an untrusted peer
 
@@ -175,8 +190,55 @@ vdoc::parse_report report;
 auto const doc = vdoc::parse(raw, policy, report);   // never fails; issues land in `report`
 ```
 
-The typed document is **immutable** — there is no `set`.
+The typed document is **immutable** — there is no `set`, and there never will be.
 Edits build an op and re-materialize, which is what makes a `document` safe to hold across threads indefinitely.
+
+```cpp
+auto b = vdoc::document_builder(cc::move(doc));      // CONSUMES it; a document you hold cannot change
+b.insert_entity(e); b.remove_entity(e);              // the entity table; removing takes its components too
+b.set_component(schema, e, construct);               // => change_kind; construct==false means "drop it"
+b.remove_component(type, e);
+b.dead_arena_bytes(); b.live_arena_bytes();
+b.compact();                                         // reclaims what in-place edits stranded; caller's call
+doc = cc::move(b).freeze();                          // immutable again
+```
+
+`document_builder` is a **storage** edit: no `$alive`, no policy, no diagnostics.
+`vdoc::apply` is what does interpretation and drives this underneath — reach for that, not this, unless you are building a document from nothing.
+
+### Evolving a document as ops arrive
+
+```cpp
+vdoc::change_summary changes;
+vdoc::incremental_apply_stats stats;
+
+doc = vdoc::apply(cc::move(doc), graph, from, to,       // CONSUMES doc; `from` is where doc currently is
+                  policy, report, changes,
+                  {.cache = &cache}, &stats);           // .max_chain_ops, .compaction_ratio, .force_full_reparse
+
+stats.took_fast_path;                                   // false = it re-parsed, and `changes` then says "everything"
+changes.entities; changes.components;                   // sorted; added / removed / modified
+```
+
+**The fast path needs a single-parent chain from `to` back to `from`, within `max_chain_ops` (64).**
+A merge, a longer chain, or a `to` that does not descend from `from` re-materializes and re-parses — correct, and slow.
+
+The report is **edited, not appended to**: findings for touched entities are dropped and recomputed.
+`unsupported_component_type` is document-scoped and is never retracted — see [interpretation](docs/concepts/interpretation.md#what-an-incremental-apply-owes-the-report).
+
+The whole realtime loop, per op:
+
+```cpp
+auto op = staged.build(graph, cache);                   // diff terminates at the snapshot
+auto const previous = head;
+head = graph.add(cc::move(op));
+vdoc::advance_snapshot(graph, cache, previous, head);   // only for an op ACCEPTED as history
+doc = vdoc::apply(cc::move(doc), graph, previous, head, policy, report, changes, {.cache = &cache});
+```
+
+**Chain a drag's frames, do not fan them.**
+Sibling frames force a full re-parse each; single-parent frames stay on the fast path, and `drop_leaf` discards them on release.
+See [workloads](docs/concepts/workloads.md#at-the-typed-layer-chain-the-frames-instead-of-fanning-them).
 
 ```cpp
 doc.get<my_transform>(entity);                       // pointer, null if absent; binary search

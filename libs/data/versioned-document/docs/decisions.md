@@ -334,6 +334,36 @@ An oracle has to be correct by inspection, and "correct modulo a chain cover" is
 
 **Reopen when:** profiling shows the state copy at merges dominating, which is a question about representation rather than about the rule.
 
+### The sweep's per-path state carries side lists, so nothing walks the whole path set per op
+
+**Decided in milestone 7**, after measuring.
+
+A sweep state is dense by path index, because a path index is what everything else is keyed by.
+On any real document almost every slot is empty: an op touches a handful of paths and the document has tens of thousands.
+
+Three passes used to walk all of them anyway, and the third is the one that mattered.
+`merge_into` iterated every slot per merge edge, `build_document` iterated every slot once, and the **articulation-point clear iterated every slot per op**.
+In a [mostly-linear history](concepts/workloads.md) every op is an articulation point, so that last one is ops × paths.
+On the benchmark document that is 8,000 × 48,000 ≈ 384 million iterations, which measured as 1.1 s of the 1.2 s a materialization took.
+
+The irony is that the clear exists to *remove* a quadratic term: without it, N writes to one path accumulate N−1 superseded entries.
+It traded a quadratic-in-writes-per-path term for a quadratic-in-ops×paths one, and on real documents the second is far worse.
+
+So the state carries two index lists beside its slots — `occupied` for slots that have been non-empty, `dirty` for slots whose `superseded` has been.
+Both are **supersets**: an index goes in when a slot first becomes non-empty and never comes out, because a merge or the clear itself can empty a slot again.
+Every consumer re-checks the slot, so a stale index costs one comparison and never a wrong answer.
+The lists live inside the state rather than beside it, so a stolen state brings them along and a linear history still copies nothing.
+
+Cost after: **45.8 ms** for the same materialization, down from 1,099 ms.
+
+The failure mode is a missed record, and it is invisible — the sweep skips work it owed and returns a plausible wrong answer.
+Two things catch it.
+`side_lists_cover` asserts at the end of every sweep that the lists still cover every non-empty slot, with no index listed twice.
+A corpus-wide differential test then pins the clear against `drop_superseded_at_articulation_points = false`, which is what that option exists for.
+
+**Reopen when:** a workload makes the dirty list as large as the path set — a document where nearly every path is overwritten between articulation points.
+Then the side list is pure overhead and the dense clear was right all along.
+
 ### A snapshot stores `surviving` only, and its validity is decided at use
 
 **Decided in milestone 6**, and it reverses what the plan originally specified.
@@ -374,6 +404,64 @@ a merge of two branches that both reach the root has two sources, and replays in
 **Reopen when:** profiling shows the fallback firing on a workload that is not linear-heavy.
 That is a question about the *condition*, not about the representation.
 
+### Seeding a filtered sweep costs the filter's size, not the snapshot's
+
+**Decided in milestone 7.**
+
+A snapshot is a whole `raw_document`, and a filtered sweep used to walk all of it and discard everything outside the filter.
+That made a snapshot worthless at exactly the call it exists for — `op_builder::build` materializing one entity — because seeding was O(document) either way.
+
+It now iterates the wanted entities and reaches into the snapshot by binary search, so the cost is `|wanted| · log(entities)`.
+
+The list it iterates is a sorted vector rather than the membership set, because path indices are allocated in iteration order and a hash container's order must not reach the output.
+`build_document` sorts at the end, so it could not have leaked — this simply removes the question.
+
+The result is identical either way, so no comparison can tell a lookup from a walk.
+`materialize_stats::snapshot_entities_read` reports it instead, and a test asserts it against a 64-entity document filtered to one.
+
+**Reopen when:** a filter routinely names most of the document, at which point the walk was cheaper than the lookups.
+
+### The edit path may reach the snapshot cache
+
+**Decided in milestone 7.** `op_builder::build` gains an overload taking a `snapshot_cache&`.
+
+The entity filter applies to assignments and never to edges — filtering edges would sever ancestry and fabricate multi-values.
+So a one-entity diff still *walks* the whole history, and a snapshot is the only thing that shortens it.
+Without the overload the edit path structurally could not reach the caching built for exactly this, and every build replayed the entire history.
+
+The two overloads are defined to produce the identical op, always: a cache changes how long the diff takes and never what it produces.
+Content addressing makes that checkable by comparing one id, which is total, and the corpus test does it with a snapshot installed at every op in turn.
+
+Cost at 8,000 ops, fifty ops built: **2.0 ms**, down from 1,046 ms.
+
+**Reopen when:** N sequential builds against one snapshot cost materially more than one, which is the case for a burst-oriented API.
+
+### A snapshot may be advanced in place along a single-parent edge
+
+**Decided in milestone 7.**
+
+The question the edit loop asks is "how often should a snapshot be recomputed", and the honest answer turned out to be *never*.
+`surviving(child) = surviving(parent)` with the child's assignments overwriting their paths, exactly on a single-parent edge, so a snapshot moves forward for the cost of one op's writes.
+A session that advances on every accepted op keeps its head permanently one op behind a snapshot, which is a stronger property than any cadence could buy and costs 3 µs regardless of document size.
+
+Two things had to change for it.
+
+The snapshot arena became a **chunk list**, each chunk reserved once and never grown, because appending to a single buffer would reallocate and dangle every `value_view` at once.
+Overwriting therefore strands the old bytes; they are counted, and the snapshot is rebuilt from scratch once dead outweighs live.
+That rebuild is the only O(document) event on the path, and it happens a logarithmic number of times per session rather than once per op.
+
+The cache entry is **re-keyed** — removed from the parent, installed at the child, pin and all.
+`snapshot_cache::take` exists for that and for nothing else.
+What lands at the child genuinely is `surviving(child)`, so "an op id commits to everything behind it" still holds.
+What breaks is any `raw_document` borrowing the old entry, which `raw_document.hh` already says a cache modification does.
+
+**It is caller-driven rather than automatic**, and that is the load-bearing part.
+During a wide fan the frames are siblings, so advancing onto one would leave every other frame replaying the whole history.
+The snapshot stays at the branch point until a frame is accepted as history, and only the application knows when that is — so it is an API, not a policy knob.
+
+**Reopen when:** an advance across a merge is wanted.
+It needs the parent's superseded set, which is what the decision above rejected on size, so this would reopen that one first.
+
 ### A snapshot's empty superseded is what bounds how far history may be pruned
 
 **Decided in milestone 6.** A `required` snapshot carries no superseded set, exactly like a droppable one.
@@ -393,6 +481,28 @@ The boundary a document may prune to is the oldest op every ref still descends f
 **Reopen when:** a workflow genuinely needs to prune past a long-lived divergent ref.
 The fix would be to give a required snapshot its superseded ids after all: 32 bytes each, no payload, and computable at prune time while history is still present.
 That reintroduces the size question above, bounded this time to one snapshot rather than every one.
+
+### A discarded editing frame is dropped outright, not skeletonized
+
+**Decided in milestone 7.**
+
+Continuous editing emits one op per frame, each branching from the same state, and only the last becomes history — see [workloads](concepts/workloads.md#continuous-editing-goes-wide).
+Nothing removed an op before this, so a ten-second drag at 120 fps left 1,200 of them in `_ops` and 1,200 entries in one op's child list, for the rest of the session.
+Roughly half a megabyte per ten seconds of dragging, never reclaimed.
+
+It is **only memory**: a sweep walks parent edges and never child ones, so the fan costs nothing in time.
+That is why the API is as small as it can be — `drop_leaf`, which asserts if anything descends from the op, plus `leaves()` so a session can sweep rather than track.
+
+`skeletonize` is the wrong tool and looks like the right one.
+It exists because ancestry must survive a pruned op; this is for an op with no ancestry to preserve.
+Keeping a skeleton per discarded frame would leave the leak in place under a different name.
+
+A scratch `op_graph` for transient frames does not work either: both `build` and `materialize` need the branch point's ancestry, which lives in the real graph.
+
+Forgetting is safe rather than lossy because the DAG is content-addressed — a dropped op that ever comes back is recreated byte-identically by `add`.
+
+**Reopen when:** an undo stack wants to reach a dropped frame.
+At that point those frames are history, and the mistake was dropping them rather than the API that allowed it.
 
 ### A skeleton op reports unverifiable, and never a hash mismatch
 
@@ -567,13 +677,92 @@ With one stamp site the invariant is structural, and with the sigil rejected out
 
 ### The document arena is vdoc-local until clean-core grows one
 
-**Decided.** `vdoc::impl::document_arena` is a bump allocator behind a `cc::memory_resource`, declared and defined entirely inside `document.cc`.
+**Decided.** `vdoc::impl::document_arena` is a bump allocator behind a `cc::memory_resource`, in `impl/document_arena.hh`.
+It moved out of `document.cc` in milestone 7, when `document_builder` became a second thing that allocates from one.
 
 clean-core has the `cc::memory_resource` seam but no bump resource behind it, and a document wants exactly one: build cheaply, free in a single release.
 This is the **second** hand-rolled copy in the tree — `cc::impl::intern_shard` is the first — which is the point at which it should be written once, in the library that owns the capability.
 It is not written there yet only because the document's own layout was still moving; the seam is already the right shape, so the migration is a deletion rather than a refactor.
 
 **Reopen when:** clean-core grows a bump `cc::memory_resource` next to `cc::system_memory_resource`. Then this copy goes.
+
+### A document is evolved by consuming it, not by mutating it and not by sharing it
+
+**Decided in milestone 7**, and it argues with [the typed document](concepts/the-typed-document.md), which said the absence of a mutation API was "not a limitation to be lifted later".
+
+That sentence stands, read precisely: `document` still has no `set`, and a document you are holding still cannot change.
+What was also true and is no longer is that **the only way to a new document was a full parse**.
+`document_builder` consumes a `document&&`, patches its arrays, and `freeze()`s back — the same shape as `op_builder` and `op`.
+
+Three options were on the table, and the property to preserve was the one immutability was really bought for: a parsed document is safe to hand to another thread and hold indefinitely.
+
+- **Consuming builder — taken.** Zero copy, no refcounts, and it keeps that property exactly, because evolving a document requires giving it up.
+  It is the compile-time form of the "no readers right now" contract the next option asks for at runtime.
+- **In-place `document::apply_batch` — rejected.** Fastest to write, and it gives up thread safety outright, which is the strongest claim the concept doc makes.
+- **Immutable plus structural sharing — rejected, and it was the designed-for future.**
+  It is the right answer when several versions are live at once, which an editor does not want: it keeps one document and the op graph, not a history of documents.
+  The cost is not the refcount per column but the shared *destruction*.
+  Components may own heap — `vdoc_test::mesh` holds a `cc::string` — so a shared column needs a shared arena and a shared destroy, which is an allocator redesign.
+  The layout still does not preclude it.
+
+The failure mode here is a slot destroyed twice or never, which is silent.
+The oracle is a full `parse`, compared over the whole query surface, since `document` has no `operator==` and deliberately never will.
+One of the test components owns heap, so a leak surfaces under ASAN rather than passing quietly.
+
+**Reopen when:** an application genuinely needs two versions of one document live at once.
+That is what structural sharing exists for, and consuming evolution cannot serve it at any price.
+
+### `component_schema` gains a relocate hook
+
+**Decided in milestone 7.** `relocate_range(dst, src, count)` move-constructs and then destroys the sources, handling overlap.
+
+A dense column cannot insert, remove or grow without moving its tail, and the library cannot memmove instead.
+`is_component` requires only move-construction and destruction, so nothing generic knows whether a component is trivially relocatable.
+The hook is a `cc::function_ptr` like the other three, and the compiler collapses it to a memcpy loop for the types where that is what it means.
+
+**Reopen when:** clean-core grows a trivially-relocatable trait, at which point the hook can be skipped for the types that satisfy it.
+
+### The incremental apply's gate is a bounded single-parent chain, not an ancestor query
+
+**Decided in milestone 7.**
+
+`vdoc::apply` takes the fast path exactly where `to` reaches `from` through single-parent edges within `max_chain_ops`, default 64.
+
+**Single-parentage is the whole argument.**
+Each op on the chain dominates every writer it overwrites and contributes no other, so the chain's assignments are the complete delta.
+No untouched entity changed, and none became multi-valued.
+
+That is weaker than "no multi-values anywhere", which was the obvious condition and is the wrong one.
+Multi-values *inside* the touched set are fine, because those entities go through the full selection-and-construction path exactly as a parse runs it.
+
+The bound exists for the same reason the snapshot gate's does.
+Proving ancestry exactly on a DAG is the global query this design declines to pay for, and a bounded walk is the cheap sufficient case for a [mostly-linear history](concepts/workloads.md).
+Everything else re-materializes and re-parses, so correctness never depends on the gate.
+
+`incremental_apply_options::force_full_reparse` exists so the two paths can be run over identical input and compared, which is what the corpus-wide differential test does.
+`took_fast_path` is asserted alongside, so a green run cannot mean "it always fell back".
+
+**Reopen when:** `took_fast_path` is false in an ordinary session.
+That is a statement about the workload rather than about the bound.
+
+### An incremental apply recomputes diagnostics for touched entities and never retracts a document-scoped one
+
+**Decided in milestone 7.**
+
+A parse appends to its report; an apply edits it.
+Entries naming a touched entity are dropped before anything re-decides that entity, then recomputed — carrying a stale finding is a correctness trap rather than untidiness.
+
+`unsupported_component_type` cannot follow that rule.
+It is document-scoped, reported once per type and carrying no entity.
+So retracting one means proving the type is gone from the *whole* document, which is an O(document) scan and the one thing this path exists to avoid.
+
+So it is never retracted, and a type that stops being present keeps its diagnostic until the next full parse.
+The alternative considered was a full re-parse whenever a column empties, which is more correct and less predictable.
+It is a rare O(document) spike, landing exactly when a user deletes the last instance of something.
+Predictable was preferred, and the asymmetry is documented in [interpretation](concepts/interpretation.md#what-an-incremental-apply-owes-the-report) rather than left to be discovered.
+
+**Reopen when:** a UI shows a stale `unsupported_component_type` and users notice.
+The fix is then a periodic full re-parse, not a per-apply scan.
 
 ---
 
@@ -639,9 +828,13 @@ That is the strongest form the answer comes in.
 The loader re-hashes every op it reads, so that cost is linear in history length rather than in document size — which is the one place it could ever grow into something.
 Pruning is what bounds it, and at 4.6 ms for 8,000 ops there is nothing to act on today.
 
-What the loop is actually spent on is materialization and op building, both quadratic, and neither is what the reservation was about.
+What the loop is actually spent on is materialization and op building, and neither is what the reservation was about.
 The sharpest of those is that `op_builder::build` takes an `op_graph` with no `snapshot_cache` overload, so the edit path cannot reach the caching built to make exactly this cheap.
 That is a finding this measurement produced rather than a hashing question, and it is recorded in the write-up.
+
+The table above is the milestone-6 measurement and is kept as it was taken.
+The loop has since got much faster — the 8,000-op figure is 1,110 ms rather than 2,182 ms — so hashing's share of the *loop* has roughly doubled while its absolute cost has not moved.
+Its share of the *open* is unchanged, and that is the one the reopen condition is really about.
 
 **Reopen when:** BLAKE3 shows up in a profile of an ordinary open / edit / save loop.
 Checked in milestone 6 and it did not; re-check if the loop's shape changes, above all if loading stops being one hash per stored op.

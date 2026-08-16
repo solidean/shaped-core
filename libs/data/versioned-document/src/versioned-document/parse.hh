@@ -32,6 +32,16 @@ public:
                                                                       op_graph const& graph,
                                                                       cc::span<op_id const> local_heads);
 
+    /// Adds ops to the local closure, keeping it sorted by op id bytes.
+    ///
+    /// A session that advances its own head one op at a time must not rebuild the closure: `create_with_local_head`
+    /// walks the whole history, and doing that per frame costs more than everything else in an edit loop together.
+    ///
+    /// The caller owes that every id is genuinely reachable from the existing local heads, which is what makes this
+    /// the same closure the factory would have produced.
+    /// A no-op where the policy has no local closure at all, since there is no branch to extend.
+    void extend_local_closure(cc::span<op_id const> new_ops);
+
     // interpretation
 public:
     [[nodiscard]] component_schema const* query_component_schema(component_type_id type) const override;
@@ -57,6 +67,43 @@ private:
     /// Empty means there is no local branch, and every conflict resolves by smallest op id.
     cc::vector<op_id> _local_closure;
 };
+
+namespace vdoc::impl
+{
+/// One component of one entity that survived selection, and the version its parse will see.
+struct selected_component
+{
+    component_type_id type;
+    component_schema const* schema = nullptr;
+    raw_component const* raw = nullptr;
+    i32 version = 0;
+};
+
+/// Everything selection decided about one entity.
+struct entity_selection
+{
+    /// False where the policy suppressed the entity, in which case `components` is empty.
+    bool instantiate = false;
+
+    /// Sorted by component type id bytes, which a raw entity's own order already is.
+    cc::vector<selected_component> components;
+};
+
+/// The selection phase, for one entity.
+///
+/// **Every structural diagnostic a parse files is filed here**, and construction files none — which is what makes it
+/// impossible for the two phases to disagree or to double-report.
+/// Factored out because an incremental apply re-runs selection for the entities it touched and nothing else, and the
+/// two must not be allowed to drift.
+///
+/// `out_unsupported` collects component types this build does not know, deduplicated by the caller: they are
+/// document-scoped and reported once per type rather than once per occurrence.
+[[nodiscard]] entity_selection select_entity(entity_id entity,
+                                             raw_entity const& raw,
+                                             parse_policy const& policy,
+                                             parse_report& report,
+                                             cc::vector<component_type_id>& out_unsupported);
+} // namespace vdoc::impl
 
 namespace vdoc
 {

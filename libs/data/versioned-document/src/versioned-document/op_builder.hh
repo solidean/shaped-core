@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <versioned-document/component.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/op_graph.hh>
+#include <versioned-document/snapshot_cache.hh>
 
 /// Builds one op from a set of edits, diffing against its own parents so only changed properties are written.
 ///
@@ -93,7 +95,20 @@ public:
     /// The result is not added to the graph; that is the caller's `graph.add(...)`.
     [[nodiscard]] op build(op_graph const& graph) const;
 
+    /// The same diff, with the parent materialization allowed to terminate at a cached snapshot.
+    ///
+    /// **The result is defined to equal the overload above, always.**
+    /// A cache changes how long the diff takes and never what it produces, so the two are checked against each other
+    /// by op id, which is total.
+    ///
+    /// The entity filter applies to assignments and never to edges, so it does not shorten the *walk* — a snapshot is
+    /// the only thing that does, and this is how the edit path reaches one.
+    /// Without it, every build replays the whole history to diff a single entity.
+    [[nodiscard]] op build(op_graph const& graph, snapshot_cache& cache) const;
+
 private:
+    [[nodiscard]] op impl_build(op_graph const& graph, snapshot_cache* cache) const;
+
     struct pending_write
     {
         property_path path;
@@ -103,4 +118,8 @@ private:
     cc::vector<op_id> _parents;
     value _metadata;
     cc::vector<pending_write> _writes;
+
+    /// The duplicate-path check's index, built lazily once a linear scan per write stops being cheap.
+    /// Populated only where CC_ASSERT is on, and empty otherwise.
+    cc::set<property_path> _staged_paths;
 };

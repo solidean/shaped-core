@@ -145,6 +145,13 @@ struct vdoc::component_schema
     /// Destroys `count` adjacent components starting at `data`.
     cc::function_ptr<void(byte* data, isize count)> destroy_range = nullptr;
 
+    /// Move-constructs `count` components from `src` into `dst`, then destroys the sources.
+    /// The ranges may overlap; the implementation picks the safe direction.
+    ///
+    /// A dense column cannot insert, remove or grow without this, and the library cannot memmove instead: a component
+    /// is required only to be move-constructible and destructible, and nothing here knows whether it is more.
+    cc::function_ptr<void(byte* dst, byte* src, isize count)> relocate_range = nullptr;
+
     /// Writes one live component through a writer.
     /// `op_builder::set` calls the traits directly; this is for code that only has a type id.
     cc::function_ptr<void(byte const* component, component_writer& writer)> write = nullptr;
@@ -174,6 +181,30 @@ void destroy_components(byte* data, isize count)
 }
 
 template <class ComponentT>
+void relocate_components(byte* dst, byte* src, isize count)
+{
+    auto* const to = reinterpret_cast<ComponentT*>(dst);
+    auto* const from = reinterpret_cast<ComponentT*>(src);
+    if (to == from || count == 0)
+        return;
+
+    // Overlap is the normal case: shifting a column's tail to open or close a slot.
+    // Moving away from the overlap is what keeps a source intact until it has been read.
+    if (to < from)
+        for (auto i = isize(0); i < count; ++i)
+        {
+            new (cc::placement_new, to + i) ComponentT(cc::move(from[i]));
+            from[i].~ComponentT();
+        }
+    else
+        for (auto i = count; i > 0; --i)
+        {
+            new (cc::placement_new, to + i - 1) ComponentT(cc::move(from[i - 1]));
+            from[i - 1].~ComponentT();
+        }
+}
+
+template <class ComponentT>
 void write_component(byte const* component, component_writer& writer)
 {
     component_traits<ComponentT>::write(*reinterpret_cast<ComponentT const*>(component), writer);
@@ -189,6 +220,7 @@ template <class ComponentT>
                             .component_align = alignof(ComponentT),
                             .parse_into = &parse_component_into<ComponentT>,
                             .destroy_range = &destroy_components<ComponentT>,
+                            .relocate_range = &relocate_components<ComponentT>,
                             .write = &write_component<ComponentT>};
 }
 } // namespace vdoc::impl
