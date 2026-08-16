@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/exception.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
@@ -15,10 +16,11 @@ using namespace cc::primitive_defines;
 using cc::async_context;
 
 // Node size guards.
-// The node is a 16 B header (intrusive refcount + tagged state/ops word) followed by the payload slot: max(scratch, sizeof(T), sizeof(E)).
-// It is aligned so the whole node is a 64 B line for a value up to ~48 B.
-// The value/error shares the payload with the unresolved scratch (frame + deps + continuations), and grows the node naturally for a larger T/E.
-// There is no inline cap — the value is built straight into the payload at resolution.
+// The node is a 16 B header (intrusive refcount + tagged state/ops word) followed by the payload slot: max(sizeof(T), sizeof(E), 48).
+// It is aligned so the whole node is a 64 B line for a value up to 48 B.
+// The value/error shares the payload with the unresolved side — the 24 B arm, then the compute frame — and grows the node naturally for a larger T/E.
+// There is no inline cap on the VALUE: it is built straight into the payload at resolution.
+// The frame is the part with a budget.
 static_assert(sizeof(cc::async<int>) == 64, "async<int> should be exactly one cache line");
 static_assert(sizeof(cc::async<cc::vector<int>>) == 64, "async<vector> should stay one cache line");
 static_assert(sizeof(cc::async<cc::string>) == 64, "async<string> should stay one cache line");
@@ -28,7 +30,7 @@ struct big_value // 96 B: intentionally larger than one line's payload — the n
 {
     i64 data[12] = {};
 };
-struct big_error // 64 B: a custom failure type larger than the 32 B unresolved scratch — grows the error arm
+struct big_error // 64 B: a custom failure type larger than the 48 B payload floor — grows the error arm
 {
     i64 data[8] = {};
 };
@@ -37,6 +39,42 @@ static_assert(sizeof(cc::async<big_value>) > 64, "a large value must grow the no
 // a custom E defaults to async_error; the default async<int> (== async<int, async_error>) stays one cache line
 static_assert(sizeof(cc::async<int, cc::async_error>) == 64, "async<int, async_error> should be exactly one cache line");
 static_assert(sizeof(cc::async<int, big_error>) > 64, "a large error type must grow the node onto further lines");
+
+// Payload layout guards.
+// The arm sits at payload offsets 0/8/16 (ambient, deps, conts) and the compute frame is the tail past it, so the
+// frame's budget is whatever the payload has left — which GROWS with a large T or E.
+static_assert(sizeof(cc::impl::async_unresolved) == 24, "the unresolved arm is what the frame offset is measured from");
+static_assert(alignof(cc::impl::async_unresolved) <= 8, "padding after the arm would silently shrink the frame slot");
+static_assert(cc::async<int>::frame_capacity == 24, "a one-line node has 24 B of inline frame: 48 payload - 24 arm");
+static_assert(cc::async<big_value>::frame_capacity == 72, "a big value widens the payload, and the frame slot with it");
+
+namespace
+{
+// The budget is a BYTE count, so these are sized against it rather than by counting pointers.
+// Three pointers is the shape the sugar builds — a captured word plus two dependency handles — and it is exactly 24 B only where a pointer is 8 B.
+// On wasm32 it is 12 B, which would quietly turn the spilling frame below into a fitting one and assert the opposite of what is meant.
+struct fitting_frame
+{
+    alignas(void*) byte storage[cc::async<int>::frame_capacity];
+};
+// One byte over.
+struct spilling_frame
+{
+    alignas(void*) byte storage[cc::async<int>::frame_capacity + 1];
+};
+// Fits by size, but the frame starts at absolute node offset 40, so 16-alignment cannot be honoured inline.
+struct alignas(16) overaligned_frame
+{
+    void* a;
+};
+} // namespace
+static_assert(cc::async<int>::frame_fits_inline<fitting_frame>, "exactly the budget still fits on a one-line node");
+static_assert(!cc::async<int>::frame_fits_inline<spilling_frame>, "one byte over the budget must box");
+static_assert(!cc::async<int>::frame_fits_inline<overaligned_frame>, "the inline slot is only 8-aligned");
+// The type-dependence, stated as a test because it is the surprising part: the SAME frame boxes under one async and
+// stays inline under another, purely because a bigger T widened the payload behind it.
+static_assert(cc::async<big_value>::frame_fits_inline<spilling_frame>,
+              "the same frame that spills under async<int> fits under a node with a big value");
 
 // async_type_ops collapse: trivially-destructible payloads of the same node size class share ONE descriptor.
 // int and float are both trivial and land in the same 64 B class -> identical ops pointer.
@@ -959,4 +997,181 @@ TEST("async - a raw frame that transforms a dependency error does NOT auto-propa
     REQUIRE(outcome.has_value()); // the graph completed
     REQUIRE(outcome.value().has_value());
     CHECK(outcome.value().value() == -1); // the frame chose a value; no error propagated
+}
+
+// ============================================================================
+// exceptions escaping a compute frame
+// ============================================================================
+
+namespace
+{
+struct msg_err // a custom channel that opts into exception containment, via the specialization below
+{
+    cc::string msg;
+};
+} // namespace
+
+template <>
+struct cc::custom::async_error_from_exception_trait<msg_err>
+{
+    static msg_err make(cc::string_view message) { return msg_err{cc::string(message)}; }
+};
+
+// The null slot is what keeps a channel with no mapping compiling — my_err above is exactly that case.
+static_assert(cc::impl::async_frame_except_ptr<cc::async_error>() != nullptr, "the default channel maps exceptions");
+static_assert(cc::impl::async_frame_except_ptr<msg_err>() != nullptr, "an opted-in custom channel maps exceptions");
+static_assert(cc::impl::async_frame_except_ptr<my_err>() == nullptr, "a channel with no mapping gets a null slot");
+
+TEST("async - a frame throwing std::exception resolves on the error channel")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value()); // the graph completed rather than deadlocking
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().underlying().to_string().contains("boom")); // what() is preserved
+    CHECK(!outcome.value().error().is_cancelled()); // a throw is a failure, never a cancellation
+}
+
+TEST("async - a frame throwing a non-std value still fails the node")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw 42;
+            return ctx.success(0); // unreachable
+        });
+
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().has_error());
+}
+
+TEST("async - a throwing frame leaves the node terminal, not stuck running")
+{
+    // The regression this guards: without containment the node stays `running` forever, so every dependent parks
+    // permanently and a second drive can never make progress.
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+
+    (void)cc::try_async_blocking_get_singlethreaded(a);
+    CHECK(a->is_ready());
+    CHECK(a->has_error());
+    CHECK(!a->is_cold());
+
+    auto const again = cc::try_async_blocking_get_singlethreaded(a); // a terminal node is readable again
+    REQUIRE(again.has_value());
+    CHECK(again.value().has_error());
+}
+
+TEST("async - a throwing frame releases its captures at resolution")
+{
+    int live = 0;
+    auto a = cc::make_async_lazy<int>(
+        [guard = live_counter(&live)](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+    CHECK(live == 1);
+
+    (void)cc::try_async_blocking_get_singlethreaded(a);
+    CHECK(live == 0); // destroy_frame ran on the error path too, while the handle is still alive
+}
+
+TEST("async - a throwing dependency propagates its error without unwinding the dependent")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("dep exploded");
+            return ctx.success(0); // unreachable
+        });
+
+    bool ran = false;
+    auto b = cc::make_async_lazy(
+        [&](int x)
+        {
+            ran = true;
+            return x + 1;
+        },
+        a);
+
+    // b drives a inline, so containing the throw per node is what keeps b's own poll on its feet.
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(b);
+    REQUIRE(outcome.has_value());
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().underlying().to_string().contains("dep exploded"));
+    CHECK(!ran); // the auto-propagation short-circuit skipped b's function
+    CHECK(b->is_ready());
+}
+
+TEST("async - a frame throwing on a later poll unsubscribes its dependencies")
+{
+    auto m = cc::make_async_manual<int>();
+    auto a = cc::make_async_lazy<int>(
+        [m](async_context<int>& ctx) -> cc::async_step_status
+        {
+            if (!ctx.require(m))
+                return ctx.wait_for_dependencies();
+            throw std::runtime_error("boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto sched = cc::singlethreaded_scheduler();
+    cc::async_worker_scope const ws(sched);
+    a->schedule();
+    sched.drain();
+    CHECK(!a->is_ready()); // parked on m
+
+    m->push_value(1);
+    sched.drain();
+
+    REQUIRE(a->has_error());
+    CHECK(a->pending_dependency_count() == 0);
+    CHECK(m->continuation_count() == 0);
+}
+
+TEST("async - a custom channel can opt into exception containment")
+{
+    auto a = cc::make_async_lazy<int, msg_err>(
+        [](async_context<int, msg_err>& ctx) -> cc::async_step_status
+        {
+            throw std::runtime_error("custom boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value());
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().msg.contains("custom boom"));
+}
+
+TEST("async - a frame that throws AFTER resolving keeps its value")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            auto const s = ctx.success(7);
+            throw std::runtime_error("too late");
+            return s; // unreachable
+        });
+
+    // Resolving is terminal, so there is nothing left to fail and the exception is dropped — asserted, not silent.
+    // The drive is spelled twice because CHECK_ASSERTS does not execute its expression at all once assertions are compiled out.
+#if CC_ASSERT_ENABLED
+    CHECK_ASSERTS(cc::try_async_blocking_get_singlethreaded(a));
+#else
+    (void)cc::try_async_blocking_get_singlethreaded(a);
+#endif
+    CHECK(a->has_value());
 }

@@ -123,7 +123,9 @@ void draw_test_window()
 }
 } // namespace
 
-TEST("sr::imgui_routine - draws a window into an offscreen target")
+TEST("sr::imgui_routine - draws a window into an offscreen target",
+     exclusive("sr-imgui-context"),
+     exclusive("slib-shader-library"))
 {
     auto const f = make_fixture();
     if (f == nullptr)
@@ -143,7 +145,9 @@ TEST("sr::imgui_routine - draws a window into an offscreen target")
     CHECK(pixel_at(pixels, 250, 250) == byte(0));
 }
 
-TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target")
+TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
+     exclusive("sr-imgui-context"),
+     exclusive("slib-shader-library"))
 {
     // The multi-viewport path, which a single viewport at the origin never reaches:
     // geometry arrives in desktop coordinates and the target covers only part of the desktop, so the routine must subtract the window's origin.
@@ -170,7 +174,7 @@ TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target
     CHECK(pixel_at(shifted, 125, 125) == byte(0));
 }
 
-TEST("sr::imgui_routine - a shader reload keeps drawing")
+TEST("sr::imgui_routine - a shader reload keeps drawing", exclusive("sr-imgui-context"), exclusive("slib-shader-library"))
 {
     auto const f = make_fixture();
     if (f == nullptr)
@@ -187,7 +191,9 @@ TEST("sr::imgui_routine - a shader reload keeps drawing")
     CHECK(any_pixel_drawn(f->read_back()));
 }
 
-TEST("sr::imgui_routine - an empty frame records nothing and does not assert")
+TEST("sr::imgui_routine - an empty frame records nothing and does not assert",
+     exclusive("sr-imgui-context"),
+     exclusive("slib-shader-library"))
 {
     auto const f = make_fixture();
     if (f == nullptr)

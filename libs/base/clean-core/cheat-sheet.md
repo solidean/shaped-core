@@ -49,6 +49,11 @@ CC_ASSERTF(idx < n, "index {} out of range {}", idx, n);
 CC_ASSERTF_ALWAYS(cond, "fmt {}", x);
 // Enabled in debug + relwithdebinfo, stripped in release (unless CC_ENABLE_ASSERT_IN_RELEASE).
 // For invariants/pre/postconditions only — never for user input or expected errors (use result<>).
+
+#include <clean-core/common/assert-handler.hh>   // who gets called when one fires
+cc::impl::scoped_assertion_handler h(fn);        // push on THIS THREAD's stack; a throwing handler is fine, it cannot leak to another thread
+cc::impl::scoped_fallback_assertion_handler f(fn); // process-wide, consulted when the failing thread's own stack is empty
+// The fallback is a plain function pointer and fires on threads nobody scoped — worker threads — so it must not throw.
 ```
 
 ## Containers — owning (value semantics, deep copy)
@@ -653,6 +658,9 @@ auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold
 #include <clean-core/thread/thread.hh>
 cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux; no-op where unavailable)
 int p = cc::num_hardware_threads();       // >= 1 always; a "don't know" (0) from the platform becomes 1
+auto id = cc::current_thread_id();        // cc::thread_id (enum class : u64); equality only — NOT the OS id a debugger shows
+cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread; nothing does it implicitly
+                                          //   cc::thread_id::invalid (0) is the "no thread" sentinel
 
 #include <clean-core/thread/spin.hh>
 cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking
@@ -719,10 +727,17 @@ actx.require(dep);              // -> bool ready (NEITHER subscribes NOR schedul
                                 //    else records a pending dep, return wait
 actx.resolve_to_value(v)/success(v);  actx.resolve_to_value_emplace(args...);  // emplace: build T in place (immovable ok)
 actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  actx.wait_for_dependencies();  actx.yield();
-// RESOLVE IS TERMINAL (`delete this;`): the frame lives inline in the node and the value is built over its slot,
-// so resolving destroys the running closure. Never touch captures or ctx after it — `return actx.success(v);`.
+// RESOLVE IS TERMINAL (`delete this;`): the frame lives inline in the node and the value is built from payload
+// offset 0, so resolving destroys the running closure. Never touch captures or ctx after — `return actx.success(v);`.
 // State DOES persist across polls (the frame is never moved). *_emplace args must not alias the frame's captures
 // (nor a dep's value they pin) — they are forwarded by reference; the by-value resolves are always safe.
+// A frame that THROWS is contained: poll fails the node on E (async_error carries what()), so it is never stuck
+// `running` and never terminates a worker. Throwing AFTER resolving is the one unsupported case (asserts, dropped).
+template <> struct cc::custom::async_error_from_exception_trait<my_err>  // custom E opts in; without it: assert+rethrow
+{ static my_err make(cc::string_view message) { return my_err{cc::string(message)}; } };
+// INLINE FRAME BUDGET: 24 B on a one-line node, i.e. sizeof(captures) + 8*(dep count) <= 24; anything over is
+// heap-boxed (an alloc per node). Type-dependent — a big T/E widens it — and only 8-aligned, so ask, don't assume:
+static_assert(cc::async<int>::frame_fits_inline<my_frame>);   // the real predicate; a copied number goes stale
 
 // two schedulers, same surface. singlethreaded = drives inline + NEVER publishes, so deps cannot run
 // concurrently however many cores idle (single-threaded by construction, not by circumstance):
@@ -730,6 +745,7 @@ cc::singlethreaded_scheduler sched;  int v = sched.blocking_get(root);  // mirro
 cc::optional<...> o = sched.try_blocking_get(root);  // st: nullopt if pumped out but not ready (see async.md
                                                      // "Multi-scheduler correctness"); pool's try_ returns result
 cc::async_worker_scope scope(sched);   // bind scheduler to this thread (blocking_get does this itself)
+cc::async_no_worker_scope unbound;     // UNbind: run foreign code without its work landing in YOUR queue
 root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump; interleave external push here
 sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)
 
@@ -746,6 +762,20 @@ cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root
 // It starts nothing, worker_count() == 0, the ctor's count is ignored, and blocking_get drives the graph
 // inline on the caller (it reports no steal-capable peers, so nothing is published). It cannot WAIT though:
 // a graph parked on another thread's work never completes, and blocking_get's is_ready() assert says so.
+// ambient context — "which logical task is this work part of?", from anywhere inside a frame
+// (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
+CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)
+cc::async_ambient_scope const s(my_tag(), &my_state); // push; RAII and strictly LIFO. The only way to install one
+void* v = cc::async_ambient_lookup(my_tag());         // walk the calling thread's chain; null if absent
+void* v2 = cc::async_ambient_lookup_in(head, my_tag());  // same, from a head you already hold (no TLS)
+s.link();  s.outstanding();      // this scope's chain head / how much async work still carries it (racy; diagnostics)
+cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
+                                 // or escape a worker thread and terminate — the question before reporting by throw
+// DRIVE-SITE: a subtree driven from one work item is billed to that item's context, and an inline-driven dep
+// inherits its driver's. A node stores it only as a resume token, written once when it is queued/parked/yielded —
+// never by a thread merely WAKING it, so a shared dep completing under B cannot contaminate A's continuation.
+// Links are refcounted, so work may outlive the scope that named it (prewarming is legal, not a leak); cc does
+// not assert on that — read outstanding() and decide for yourself. A RESOLVED node carries no context at all.
 // Not here yet: co_await, plain (non-async) dep args, structured/owned children, error-type conversion across
 // a heterogeneous-E dependency graph (the make_async_* sugar assumes a single E; raw frames can bridge by hand).
 ```

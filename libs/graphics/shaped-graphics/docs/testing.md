@@ -45,6 +45,19 @@ It becomes runnable against each backend by two pieces working together:
 
 Full mechanism: [nexus/docs/invocable-tests.md](../../../base/nexus/docs/invocable-tests.md).
 
+### A validation message fails the test that provoked it
+
+The dx12 drivers create their context with the debug layer on and install a listener via `dx12_context::set_message_callback`, failing the running test on any message of `warning` severity or worse.
+Without it a validation error is a line on stderr nobody reads, and the run stays green — which it did, for ~680 of them.
+Attribution rides the ambient context, so the check lands on the right test wherever the runtime raised the message.
+
+A test whose subject **is** the bad input opts out with a `dx12::scoped_expected_validation_messages` guard; there is no tag for it.
+That guard is thread-scoped rather than per-context, and deliberately so: D3D12 hands one message to **every** callback registered in the process, not only the one on the device that raised it.
+With several contexts alive — the normal state of the dx12 suite at `-jN` — silencing one context's listener leaves the others to fail the test anyway.
+The message is raised synchronously on the thread that provoked it, so the thread is what names the right test.
+
+The `[sg]` warnings printed by sg itself (`cc::eprintln`) are **not** covered — that wants a real `cc` log system, which does not exist yet.
+
 **What belongs here:** every statement about the public API — allocation shapes, lifetime/epoch semantics, transfer round-trips, binding validation, the transient budget contract.
 Anything that must hold for dx12 *and* vulkan *and* a future cpu backend goes here, written once rather than duplicated per backend.
 Complex and edge-case coverage belongs here too.
@@ -71,36 +84,44 @@ Two kinds of test belong here:
    These `static_cast` the handle to the concrete context and inspect its guts.
    That is the legitimate "here be dragons" escape hatch, valid precisely *because* the test is deliberately coupled to one backend.
 
-### Drive through the abstract API; cast only to inspect
+### A tier-2 test is an invocable too, unless it needs its own context
 
-Even a tier-2 test **drives the work through the abstract `sg::context` API**.
-`ctx.uncached` / `ctx.persistent` / `ctx.cached` for resources and schemas; `ctx.create_command_list` / `ctx.submit_command_list` / `ctx.wait_for` for recording.
-Casting the handle to the concrete backend context is reserved for reading internal state in an assertion, never for driving the test.
+The dx12 suite has the same driver shape as tier 1.
+[`dx12-entry.cc`](../backends/dx12/tests/dx12-entry.cc) brings up one WARP and one hardware context, and invokes every `INVOCABLE_TEST` in the binary against each.
+So the default for a new tier-2 test is `INVOCABLE_TEST("sg dx12 - …", (dx12::dx12_context_handle const& ctx))`, which also gets it exercised on the real GPU for free.
+The parameter is the **backend-typed** handle, unlike tier 1's `sg::context_handle`: a suite committed to one backend should not have to downcast to read its guts.
 
-The anti-pattern is casting up front and then using the backend context as the main driver:
+Write an ordinary `TEST` only when the test needs a context of its own: pristine epoch / pool state, or a `dx12_config` knob it is about.
+`dx12::make_test_context({…})` in [`dx12-test-common.hh`](../backends/dx12/tests/dx12-test-common.hh) is how to get one, and such a test carries `exclusive("gpu")`.
+
+### Drive through the abstract API even though the handle is backend-typed
+
+A tier-2 test holds a `dx12_context_handle`, so every backend method is one `->` away.
+That is a convenience for **reading guts**, not a licence to drive with them.
+The work still goes through the abstract surface: `ctx->uncached` / `ctx->persistent` / `ctx->cached` for resources and schemas.
+Recording likewise — `ctx->create_command_list` / `ctx->submit_command_list` / `ctx->wait_for`.
+
+The anti-pattern is using the backend-typed methods as the main driver:
 
 ```cpp
-auto& c = static_cast<dx12::dx12_context&>(*ctx.value());   // WRONG as a driver
-auto buf = c.create_dx12_buffer(size, usage, {});           // bypasses the public contract
-c.submit_dx12_command_list(...);
+auto buf = ctx->create_dx12_buffer(size, usage, {});   // WRONG as a driver: bypasses the public contract
+ctx->submit_dx12_command_list(...);
 ```
 Written this way the test exercises the backend's private API instead of the contract every backend must honour, and silently stops being portable.
-Prefer the public form — `ctx.persistent.create_raw_buffer(...)`, `ctx.submit_command_list(...)`.
-Cast late and narrowly, only where you must read backend guts: `auto& c = static_cast<dx12_context&>(ctx); CHECK(c._cmd_pool.free_allocator_count(...) == ...)`.
-Cast late and narrowly, only where you must read backend guts: `auto& c = static_cast<dx12_context&>(ctx); CHECK(c._descriptor_heap.watermark == ...)`.
+Prefer the public form — `ctx->persistent.create_raw_buffer(...)`, `ctx->submit_command_list(...)`.
+Reach for the backend only in an assertion, where the abstract surface has nothing to say: `CHECK(ctx->_cmd_pool.free_allocator_count(…) == …)`, `CHECK(ctx->_descriptor_heap.watermark == …)`.
 The same rule holds for integration tests in dependent libraries such as `shaped-shader-compiler-dxc/tests`: create the concrete context as the entry point, then drive it as a plain `sg::context&`.
 
-**A tier-2 test may name backend API in exactly three places — everything else routes through `sg::context`:**
+**A tier-2 test may name backend API in exactly three places — everything else routes through the `sg::context` surface:**
 
-1. **Entry point** — `sg::create_<backend>_context({...})` to bring the context up, including to set a
-   backend-specific knob the test is about (ring sizes, descriptor-heap capacity, …). What it returns is a
-   plain `sg::context_handle`; from there, drive it as one.
-2. **Late inspection cast** — `static_cast<<backend>_context&>(ctx)` (or a resource downcast) *inside an
-   assertion*, to read internal state the abstract surface doesn't expose.
+1. **Entry point** — `dx12::make_test_context({...})` (or `sg::create_<backend>_context`) to bring a context
+   up, including to set a backend-specific knob the test is about (ring sizes, descriptor-heap capacity, …).
+2. **Inspection** — a backend member or a resource downcast *inside an assertion*, to read internal state
+   the abstract surface doesn't expose.
 3. **Backend-exclusive resources** — features with no public `sg` entry point yet (e.g. dx12 RTV/DSV
    descriptors). Legitimately backend-typed end to end; keep the backend-typed span minimal and say why.
 
-Self-check when writing or reviewing a tier-2 test: every `create_<backend>_*` / `submit_<backend>_*`, and every up-front `static_cast<…_context&>` used *as the driver*, is the smell.
+Self-check when writing or reviewing a tier-2 test: every `create_<backend>_*` / `submit_<backend>_*` outside an assertion is the smell.
 Search the file for them and confirm each surviving one is case 1, 2 or 3 above.
 A call that is none of those has a public form — use it.
 

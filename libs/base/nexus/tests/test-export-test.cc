@@ -44,7 +44,7 @@ TEST("export - xml_escape replaces the five predefined entities")
     CHECK(nx::impl::xml_escape("plain text 123") == "plain text 123");
 }
 
-TEST("export - junit report has correct aggregate attributes and per-test cases")
+TEST("export - junit report has correct aggregate attributes and per-test cases", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("T_pass", {}, [] { CHECK(1 + 1 == 2); });
@@ -267,7 +267,7 @@ TEST("export - test listing JSON reports aliases and counts a filter-matched ali
     }
 }
 
-TEST("export - junit report for an all-pass run has no failure elements")
+TEST("export - junit report for an all-pass run has no failure elements", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("A", {}, [] { CHECK(true); });

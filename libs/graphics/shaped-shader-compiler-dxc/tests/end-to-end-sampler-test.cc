@@ -55,14 +55,14 @@ sg::compiled_shader compile_compute(ssc::dxc::compiler& comp, char const* source
 }
 } // namespace
 
-TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, read back")
+INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, read back",
+               (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx_r.has_value());
-    sg::context& ctx = *ctx_r.value();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
 
     constexpr int count = N * N;
 

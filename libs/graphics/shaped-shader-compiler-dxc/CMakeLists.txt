@@ -72,6 +72,7 @@ if(SC_BUILD_TESTS)
     # linked for a whole-chain integration test: compile HLSL -> reflect -> bind -> dispatch on WARP -> read back.
     if(TARGET shaped-graphics-dx12)
         target_sources(shaped-shader-compiler-dxc-test PRIVATE
+            tests/dx12-entry.cc
             tests/end-to-end-sampler-test.cc
             tests/end-to-end-multigroup-test.cc
             tests/end-to-end-inline-constants-test.cc

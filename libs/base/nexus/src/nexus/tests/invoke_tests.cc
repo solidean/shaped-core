@@ -98,6 +98,7 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
 
         test_execution child;
         child.instance.declaration = decl;
+        child.instance.registry = registry; // so a dispatch from inside the child searches the same registry
         child.invocation_group = cc::string(name);
 
         run_test_body(child, *config, [&] { decl->invocable_function(values); }, child_scopes, consumed + 2);

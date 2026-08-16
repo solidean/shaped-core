@@ -79,14 +79,14 @@ sg::compiled_shader compile_rt(ssc::dxc::compiler& comp, sg::shader_stage stage,
 }
 } // namespace
 
-TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via dispatch_rays")
+INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via dispatch_rays",
+               (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx_r.has_value());
-    sg::context& ctx = *ctx_r.value();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
 
     {
         auto probe = ctx.create_command_list();

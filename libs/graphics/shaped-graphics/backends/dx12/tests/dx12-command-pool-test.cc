@@ -17,7 +17,7 @@ TEST("sg dx12 - command allocators are recycled across epochs")
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     auto const free_count = [&] { return c._cmd_pool.free_allocator_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
 
@@ -42,7 +42,7 @@ TEST("sg dx12 - command lists are pooled and reused")
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     auto const free_lists = [&] { return c._cmd_pool.free_command_list_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
 
@@ -66,7 +66,7 @@ TEST("sg dx12 - a dropped list returns its allocator and list to the pool immedi
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     auto const free_allocs = [&] { return c._cmd_pool.free_allocator_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
     auto const free_lists = [&] { return c._cmd_pool.free_command_list_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };

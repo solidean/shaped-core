@@ -27,6 +27,22 @@ TEST("bench x", nx::config::manual)      //   nx::config::manual    — never sw
 TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RNG seed
 // Multiple configs compose: TEST("x", nx::config::disabled, nx::config::seed(7)) { }
 
+// Concurrency configs — see docs/parallel-execution.md. A run is a graph of cc::async nodes, capped by --jobs.
+TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
+TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all; a synchronous one is
+                                         //     routed into the no-scheduler group, so it costs no barrier and no node
+TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — nothing bound; REQUIRED to nest nx::execute_tests
+TEST("opens a window", main_thread) { }  //   main_thread     — body runs on the process MAIN thread (SDL wants that);
+                                         //     a flag, not a mode, so it composes; own_pool / ASYNC_TEST assert
+TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-worker pool, shared per count
+// Exclusion is an ORDERING edge, not a lock: holders run in schedule order, which is reproducible by design.
+
+#include <nexus/async-test.hh>           // separate header: TEST pays nothing for the async templates
+ASYNC_TEST("cache - resolves a miss")    // body returns cc::shared_async<cc::unit>; nexus awaits it
+{                                        //   the returned root must be COLD — that stamp is what attributes its checks
+    return cc::make_async_lazy<cc::unit>(/* ... CHECK inside the graph lands on THIS test ... */);
+}                                        //   no SECTION inside an async body; a graph error fails the test by name
+
 // Buckets: every test is in one bucket — normal (default), manual, or guide_benchmark. A sweep selects one
 // bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
@@ -89,6 +105,28 @@ REQUIRE_THROWS(expr);  REQUIRE_THROWS_AS(expr, ExceptionType);  REQUIRE_ASSERTS(
 FAIL();  FAIL("msg");                    // unconditional hard fail
 SKIP();  SKIP("not implemented yet");    // skip the test (not counted as a failure)
 ```
+
+## Checks off the test's own thread
+
+```cpp
+#include <nexus/tests/thread_scope.hh>
+
+\ A check inside a cc::async frame is attributed automatically — the graph carries which test it belongs to.
+CHECK(x);                                  \ on a pool worker: counted against the test that scheduled the node
+
+\ A thread you start yourself carries nothing, so wrap its work:
+std::thread t(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
+auto captured = nx::capture_current_test(); \ for a thread already running: capture here, install there
+nx::test_thread_scope const s(captured);    \ ... on that thread
+```
+
+- **An unattributable check FAILS THE RUN**, passing or not — it is printed where it happens and reported as `N check(s) ran outside any test context`.
+  A check that proved nothing must not look like a pass.
+- **Off the test's own thread, `REQUIRE`/`SKIP` abort only where a throw can land.**
+  Inside an async frame it terminates that node (cc::async turns it into the node's error); on a bare thread it degrades to a recorded failure.
+- **`SECTION` is the test thread's alone** — the body is replayed once per section path, which only that thread does.
+  Opening one elsewhere is a recorded failure.
+- **Leaving async work running past the end of a test fails that test**, by name: it would otherwise report into whatever runs next.
 
 ## Chaining diagnostics (on the check_handle)
 
@@ -167,6 +205,10 @@ uv run dev.py test                       # build + run the whole suite
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --perf-json <file> (write recorded-metric sidecar).
+// --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
+//   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
+//   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.
+//   See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
 //   still just a filter, so the disabled and bucket gates hold — only an exact test NAME opens those.
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,

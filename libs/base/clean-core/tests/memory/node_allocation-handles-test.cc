@@ -158,8 +158,9 @@ TEST("any_node_allocation - class index round-trips through free across classes"
 
 namespace
 {
-int poly_small_dtors = 0;
-int poly_large_dtors = 0;
+// thread_local so each test counts only its own leaves: several tests reset and read these, and they run concurrently
+thread_local int poly_small_dtors = 0;
+thread_local int poly_large_dtors = 0;
 
 void reset_poly_counters()
 {

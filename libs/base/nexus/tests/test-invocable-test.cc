@@ -24,7 +24,7 @@ void add_invocable(nx::test_registry& reg, cc::string name, Fn fn, nx::config::c
 }
 } // namespace
 
-TEST("invocable tests - invoke_tests drives matching instances once, nested under the driver")
+TEST("invocable tests - invoke_tests drives matching instances once, nested under the driver", no_scheduler)
 {
     std::vector<int> seen;
 
@@ -64,7 +64,7 @@ TEST("invocable tests - invoke_tests drives matching instances once, nested unde
     CHECK(!driver.root.is_considered_failing);
 }
 
-TEST("invocable tests - one dataset drives several different invocable tests")
+TEST("invocable tests - one dataset drives several different invocable tests", no_scheduler)
 {
     struct mesh_case
     {
@@ -104,7 +104,7 @@ TEST("invocable tests - one dataset drives several different invocable tests")
     CHECK(exec.executions[0].nested[1].instance.declaration->name == "aspect B");
 }
 
-TEST("invocable tests - matching is on decayed types (T and T const& are the same key)")
+TEST("invocable tests - matching is on decayed types (T and T const& are the same key)", no_scheduler)
 {
     struct thing
     {
@@ -131,7 +131,7 @@ TEST("invocable tests - matching is on decayed types (T and T const& are the sam
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("invocable tests - nesting: an invoked test can itself invoke tests")
+TEST("invocable tests - nesting: an invoked test can itself invoke tests", no_scheduler)
 {
     std::vector<std::string> log;
 
@@ -166,7 +166,7 @@ TEST("invocable tests - nesting: an invoked test can itself invoke tests")
     CHECK(exec.executions[0].nested[0].nested[0].invocation_group == "inner");
 }
 
-TEST("invocable tests - section filters scope invocation to a single instance")
+TEST("invocable tests - section filters scope invocation to a single instance", no_scheduler)
 {
     int ran_a = 0;
     int ran_b = 0;
@@ -201,7 +201,7 @@ TEST("invocable tests - section filters scope invocation to a single instance")
     CHECK(exec.executions[0].nested[0].instance.declaration->name == "childB");
 }
 
-TEST("invocable tests - a failing instance fails the run and is addressable, siblings still pass")
+TEST("invocable tests - a failing instance fails the run and is addressable, siblings still pass", no_scheduler)
 {
     nx::test_registry reg;
     add_invocable(reg, "ok", [&](int x) { CHECK(x == x); });
@@ -224,7 +224,7 @@ TEST("invocable tests - a failing instance fails the run and is addressable, sib
     CHECK(!exec.executions[0].nested[1].root.is_considered_failing);
 }
 
-TEST("invocable tests - an uninvoked invocable test leaves no nested execution (orphan signal)")
+TEST("invocable tests - an uninvoked invocable test leaves no nested execution (orphan signal)", no_scheduler)
 {
     nx::test_registry reg;
     add_invocable(reg, "never run", [&](int) { CHECK(true); });
@@ -240,7 +240,7 @@ TEST("invocable tests - an uninvoked invocable test leaves no nested execution (
     CHECK(exec.count_total_tests() == 1);
 }
 
-TEST("invocable tests - an invocable's SECTIONs are explored inside invoke_tests; the driver runs once")
+TEST("invocable tests - an invocable's SECTIONs are explored inside invoke_tests; the driver runs once", no_scheduler)
 {
     int driver_runs = 0;
     int contexts_built = 0;
@@ -286,7 +286,7 @@ TEST("invocable tests - an invocable's SECTIONs are explored inside invoke_tests
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("invocable tests - a self-invoking invocable is caught by the cycle guard (no infinite recursion)")
+TEST("invocable tests - a self-invoking invocable is caught by the cycle guard (no infinite recursion)", no_scheduler)
 {
     struct cyc
     {
@@ -311,7 +311,7 @@ TEST("invocable tests - a self-invoking invocable is caught by the cycle guard (
     CHECK(exec.count_failed_tests() >= 1); // the cycle surfaces as a failure, not a silent no-op
 }
 
-TEST("invocable tests - an indirect invocation cycle (A -> B -> A) is caught")
+TEST("invocable tests - an indirect invocation cycle (A -> B -> A) is caught", no_scheduler)
 {
     struct ta
     {

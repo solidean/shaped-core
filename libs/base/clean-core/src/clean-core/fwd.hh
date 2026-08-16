@@ -259,6 +259,8 @@ struct result;
 // Concurrency
 //
 
+enum class thread_id : u64; // a thread's identity, compared for equality only (thread/thread.hh)
+
 template <class T>
 struct mutex;
 template <class T>
@@ -289,8 +291,13 @@ struct async_node_traits;
 }
 struct async_scheduler;
 struct async_worker_scope;
+struct async_no_worker_scope;
 struct singlethreaded_scheduler;
 struct async_thread_pool;
+struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)
+struct async_ambient_scope;
+struct async_ambient_handle; // a captured chain head, re-installable on another thread
+struct async_ambient_install_scope;
 struct async_context_base;
 template <class T, class E = async_error>
 struct async_context;

@@ -14,6 +14,7 @@ struct typed_value;          // the type-erased box an invocable test is called 
 struct test_instance;        // one scheduled run of a test declaration (tests/schedule.hh)
 struct test_schedule;        // the runs a CLI invocation selected (tests/schedule.hh)
 struct test_schedule_config; // what the CLI arguments select (tests/schedule.hh)
+struct test_thread_scope;    // attributes a thread's checks to a captured test (tests/thread_scope.hh)
 
 enum class filter_mode; // how the positional filters are read (tests/schedule.hh)
 

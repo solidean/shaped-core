@@ -110,6 +110,41 @@ INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const
     CHECK(matches);
 }
 
+// A same-buffer copy is the one op that reads and writes one resource at once.
+// It must be the FIRST use of the buffer in its list, which is what the fuzz test found: with nothing in flight the tracker used to skip the barrier and let the backend infer the access,
+// and D3D12 can only infer one — it assumed COPY_DEST and rejected the source read.
+INVOCABLE_TEST("sg - copies within one buffer on its first use in a list", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const buf = make_copy_buffer(ctx, 256);
+
+    byte data[256];
+    for (int i = 0; i < 256; ++i)
+        data[i] = pattern(i);
+
+    // Fill in a list of its own, so the copy list below starts with no tracked access for this buffer.
+    auto up = ctx->create_command_list();
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(data, 256));
+    ctx->submit_command_list(cc::move(up));
+
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->copy.buffer_bytes_region(
+        {.src = buf, .dst = buf, .size_in_bytes = 64, .src_offset_in_bytes = 0, .dst_offset_in_bytes = 128});
+    auto future = cmd->download.bytes_from_buffer(buf, 128, 64);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const bytes = ctx->wait_for(future);
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == 64);
+    bool matches = true;
+    for (int i = 0; i < 64; ++i)
+        if (bytes.value()[i] != pattern(i))
+            matches = false;
+    CHECK(matches);
+}
+
 INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

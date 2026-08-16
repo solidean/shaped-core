@@ -42,6 +42,12 @@ It keeps three timelines, so read-after-read is free and only the *delta* of new
 
 `flush` compares `curr` against the in-flight state, returns the `access_barrier` to emit, and rolls the state forward.
 It returns nothing for a freebie — a first write, a read with no writer in flight, or a read already barriered.
+
+The first-write freebie has one exclusion, and it is the subtle one.
+It rests on the backend inferring the access itself — D3D12 promotes a buffer out of `COMMON` on its first op — and a backend can only infer **one**.
+An op that reads *and* writes the same resource has two, so it is always spelled out, however empty the timelines are.
+Only a same-resource copy does that today (`cmd.copy` with `src == dst`); skipping its barrier left D3D12 assuming `COPY_DEST` and rejecting the source read.
+
 The machine is **opt-in**: a backend that emits explicit barriers uses it, and a driver-barrier backend (opengl/webgl) ignores it.
 Emission is entirely the backend's own; there is no core "emit this barrier" seam.
 

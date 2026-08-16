@@ -22,8 +22,8 @@ struct Box
 struct MoveOnly
 {
     int id;
-    inline static int move_ctor_count = 0;
-    inline static int move_assign_count = 0;
+    static inline thread_local int move_ctor_count = 0;
+    static inline thread_local int move_assign_count = 0;
 
     explicit MoveOnly(int i = 0) : id(i) {}
     MoveOnly(MoveOnly const&) = delete;
@@ -54,7 +54,7 @@ namespace test_ns
 struct AdlSwappable
 {
     int value;
-    inline static int adl_swap_count = 0;
+    static inline thread_local int adl_swap_count = 0;
 
     static void reset_count() { adl_swap_count = 0; }
 };

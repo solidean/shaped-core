@@ -25,9 +25,8 @@ sg::texture_description target_desc(sg::texture_usage usage, sg::pixel_format fo
 }
 } // namespace
 
-TEST("sg dx12 - clear render target fills every texel (render_to)")
+INVOCABLE_TEST("sg dx12 - clear render target fills every texel (render_to)", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     constexpr int W = 16;
@@ -58,9 +57,8 @@ TEST("sg dx12 - clear render target fills every texel (render_to)")
     CHECK(ok);
 }
 
-TEST("sg dx12 - clear depth target fills every texel")
+INVOCABLE_TEST("sg dx12 - clear depth target fills every texel", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     constexpr int W = 16;
@@ -89,9 +87,8 @@ TEST("sg dx12 - clear depth target fills every texel")
     CHECK(ok);
 }
 
-TEST("sg dx12 - clear render target via the explicit manual scope")
+INVOCABLE_TEST("sg dx12 - clear render target via the explicit manual scope", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     constexpr int W = 8;
@@ -121,9 +118,8 @@ TEST("sg dx12 - clear render target via the explicit manual scope")
     CHECK(ok);
 }
 
-TEST("sg dx12 - discard render target records and executes")
+INVOCABLE_TEST("sg dx12 - discard render target records and executes", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     constexpr int W = 8;
@@ -146,9 +142,8 @@ TEST("sg dx12 - discard render target records and executes")
     CHECK(bytes.has_value());
 }
 
-TEST("sg dx12 - clear with an explicit viewport and scissor")
+INVOCABLE_TEST("sg dx12 - clear with an explicit viewport and scissor", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     constexpr int W = 16;
