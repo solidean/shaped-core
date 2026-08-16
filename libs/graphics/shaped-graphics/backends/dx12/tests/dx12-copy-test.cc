@@ -14,9 +14,8 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - buffer copy round-trips", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - buffer copy round-trips", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -54,9 +53,8 @@ TEST("sg dx12 - buffer copy round-trips", exclusive("gpu"))
     CHECK(matches);
 }
 
-TEST("sg dx12 - buffer copy with offsets", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - buffer copy with offsets", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -96,9 +94,8 @@ TEST("sg dx12 - buffer copy with offsets", exclusive("gpu"))
     CHECK(matches);
 }
 
-TEST("sg dx12 - typed buffer_data_region copy", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -131,9 +128,8 @@ TEST("sg dx12 - typed buffer_data_region copy", exclusive("gpu"))
     CHECK(data.value()[3] == 8);
 }
 
-TEST("sg dx12 - typed buffer_data_region copy with element offsets", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offsets", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -168,9 +164,8 @@ TEST("sg dx12 - typed buffer_data_region copy with element offsets", exclusive("
     CHECK(data.value()[2] == 14); // src[4]
 }
 
-TEST("sg dx12 - same-buffer non-overlapping copy", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - same-buffer non-overlapping copy", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -208,9 +203,8 @@ TEST("sg dx12 - same-buffer non-overlapping copy", exclusive("gpu"))
     CHECK(matches);
 }
 
-TEST("sg dx12 - zero-size copy is a no-op", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - zero-size copy is a no-op", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 

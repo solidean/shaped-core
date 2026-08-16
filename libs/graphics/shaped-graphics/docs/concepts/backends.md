@@ -27,8 +27,16 @@ That is what lets each backend **evolve on its own schedule** as its API demands
 
 Each backend has its **own `*-test` binary** (`shaped-graphics-dx12-test`), built only where that backend builds.
 The dx12 suite is gated to Windows by CMake, so it needs no `#ifdef`.
-It runs on the **WARP** software adapter, present on any Windows host, so the whole suite also runs on headless CI.
-A shared `make_warp_context()` in [`dx12-test-common.hh`](../../backends/dx12/tests/dx12-test-common.hh) hands one back.
+It runs on the **WARP** software adapter, present on any Windows host, so the whole suite also runs on headless CI, and on the real GPU as well when there is one.
+
+Both adapters come from the same mechanism tier 1 uses: two **entry drivers** in [`dx12-entry.cc`](../../backends/dx12/tests/dx12-entry.cc).
+Each brings up one context and `nx::invoke_tests`es every `INVOCABLE_TEST` in the binary against it.
+So the suite costs two devices rather than one per test — the shape it used to have, which was a throughput hazard and hid a multi-context bug behind an `exclusive("gpu")` tag on every test.
+An alias per invocable keeps `dev.py test "sg dx12 - <name>"` selecting that one test, on both adapters.
+
+A test that needs a context of its **own** — pristine pool/epoch state, or a backend knob it is about — stays an ordinary `TEST`.
+It takes one from `make_test_context()` in [`dx12-test-common.hh`](../../backends/dx12/tests/dx12-test-common.hh).
+Every context a test gets, either way, has the debug layer on and fails the test on an unexpected validation message; see [testing](../testing.md).
 
 Two kinds of test belong in a backend suite.
 **Feature smoke tests** — one end-to-end exercise per feature against a live device — and **backend-internal invariant tests** for behaviour invisible through the abstract surface.
@@ -39,7 +47,8 @@ Tests are split **per topic**, one `.cc` per area, so the suite stays navigable 
 ```text
 backends/dx12/tests/
   main.cc                     # nx::run entry point
-  dx12-test-common.hh         # shared make_warp_context()
+  dx12-entry.cc               # the two entry drivers (warp / hardware) and the invocable aliases
+  dx12-test-common.hh         # make_test_context() and the validation-message listener
   dx12-context-test.cc        # context / command-list / buffer bring-up
   dx12-epoch-test.cc          # epoch advance/retire, deferred deletion, submission token
   dx12-command-pool-test.cc   # allocator + command-list pooling (backend-internal invariants)

@@ -13,6 +13,8 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+namespace dx12 = sg::backend::dx12;
+
 // A pinned byte buffer filled by fn(i), moved into the pin (owns it, zero-copy).
 cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
 {
@@ -28,7 +30,7 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
 // A fresh context with deliberately tiny windows forces it.
 TEST("sg dx12 - async upload larger than a staging window packs across windows", exclusive("gpu"))
 {
-    auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 4096});
+    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 4096});
     REQUIRE(ctx.has_value());
     auto& c = *ctx.value();
 
@@ -59,7 +61,7 @@ TEST("sg dx12 - async upload larger than a staging window packs across windows",
 // That aliasing is what the 1-based window-fence values guard — see submit_window in dx12_upload_async.cc.
 TEST("sg dx12 - many async uploads recycle the staging windows", exclusive("gpu"))
 {
-    auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
+    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
     auto& c = *ctx.value();
 
@@ -96,7 +98,7 @@ TEST("sg dx12 - many async uploads recycle the staging windows", exclusive("gpu"
 // Distinct buffers; each must read back intact.
 TEST("sg dx12 - uneven async uploads pack and straddle staging windows", exclusive("gpu"))
 {
-    auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
+    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
     auto& c = *ctx.value();
 

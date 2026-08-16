@@ -2,22 +2,25 @@
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
-// dx12 backend bring-up: creating a context (WARP + hardware), a command list, and buffers through the public sg::context API.
+// dx12 backend bring-up: a command list and buffers through the public sg::context API.
 // Part of the dx12 test binary (shaped-graphics-dx12-test), built only where the dx12 backend builds (Windows), so it never needs an #ifdef guard.
 // See libs/graphics/shaped-graphics/docs/concepts/backends.md for how backend tests are organized.
 //
-// Two contexts are exercised:
-//   - WARP (software adapter): always available on any Windows host, so it runs on headless CI.
-//   - hardware (default): exercises a real GPU locally, and is skipped when no adapter is present.
-// The debug layer is requested but best-effort — create_dx12_context proceeds without it when the Graphics Tools feature isn't installed.
+// Both adapters are covered because the entry drivers (dx12-entry.cc) run every invocable on each: WARP, always present, and the real GPU when there is one.
 
 namespace
 {
 namespace dx12 = sg::backend::dx12;
+} // namespace
 
-// Drives the real GPU paths against a live context via the public sg::context API — no downcasts.
-void exercise_context(sg::context& ctx)
+INVOCABLE_TEST("sg dx12 - context brings up lists and buffers", (dx12::dx12_context_handle const& handle))
 {
+    REQUIRE(handle != nullptr);
+    CHECK(handle->backend() == sg::backend_kind::dx12);
+    CHECK(handle->threading() == sg::thread_model::multi_threaded);
+
+    auto& ctx = *handle;
+
     // Command list: handed out already recording.
     // Submitting consumes it, since it is moved in.
     auto cmd = ctx.create_command_list();
@@ -54,34 +57,13 @@ void exercise_context(sg::context& ctx)
     REQUIRE(base_cmd != nullptr);
     ctx.drop_command_list(cc::move(base_cmd));
 }
-} // namespace
-
-TEST("sg dx12 - warp context", exclusive("gpu"))
-{
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    REQUIRE(ctx.has_value());
-    CHECK(ctx.value()->backend() == sg::backend_kind::dx12);
-    CHECK(ctx.value()->threading() == sg::thread_model::multi_threaded);
-    exercise_context(*ctx.value());
-}
-
-TEST("sg dx12 - hardware context", exclusive("gpu"))
-{
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true});
-    if (ctx.has_error())
-        return; // no D3D12-capable hardware adapter (e.g. headless CI); WARP test covers the path.
-
-    CHECK(ctx.value()->backend() == sg::backend_kind::dx12);
-    exercise_context(*ctx.value());
-}
 
 // Backend-internal invariant, with no public equivalent — hence the downcast to the concrete buffer.
 // A size-0 buffer holds no ID3D12Resource, while a non-empty one does.
-TEST("sg dx12 - a zero-size buffer allocates no backing resource", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - a zero-size buffer allocates no backing resource", (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx.has_value());
-    auto& c = static_cast<dx12::dx12_context&>(*ctx.value());
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
 
     auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_dst, sg::allocation_info{});
     REQUIRE(buf.has_value());

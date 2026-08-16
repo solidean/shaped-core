@@ -13,9 +13,8 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - gpu timestamp round-trips", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - gpu timestamp round-trips", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -56,9 +55,8 @@ TEST("sg dx12 - gpu timestamp round-trips", exclusive("gpu"))
     CHECK(s1.value() - s0.value() >= 0.0);
 }
 
-TEST("sg dx12 - timestamp heap rollover across leases", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - timestamp heap rollover across leases", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -95,9 +93,8 @@ TEST("sg dx12 - timestamp heap rollover across leases", exclusive("gpu"))
     }
 }
 
-TEST("sg dx12 - dropped list leaves its timestamps not ready", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - dropped list leaves its timestamps not ready", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 

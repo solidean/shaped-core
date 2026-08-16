@@ -89,9 +89,9 @@ TEST("sg dx12 - texture footprint math (padding, subresource index, block sizing
     }
 }
 
-TEST("sg dx12 - texture upload/download round-trip pads + un-pads rows", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - texture upload/download round-trip pads + un-pads rows",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -121,9 +121,9 @@ TEST("sg dx12 - texture upload/download round-trip pads + un-pads rows", exclusi
     CHECK(ok);
 }
 
-TEST("sg dx12 - texture upload into a sub-region leaves the rest untouched", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - texture upload into a sub-region leaves the rest untouched",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -161,9 +161,9 @@ TEST("sg dx12 - texture upload into a sub-region leaves the rest untouched", exc
     CHECK(ok);
 }
 
-TEST("sg dx12 - async texture upload/download round-trip on the copy queue", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - async texture upload/download round-trip on the copy queue",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -191,9 +191,9 @@ TEST("sg dx12 - async texture upload/download round-trip on the copy queue", exc
     CHECK(ok);
 }
 
-TEST("sg dx12 - an inline readback waits on a pending async texture upload", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - an inline readback waits on a pending async texture upload",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -287,10 +287,10 @@ TEST("sg dx12 - inline texture upload splits across the ring seam", exclusive("g
     // before the seam, 1 after.
     constexpr isize ring_bytes = 2048;
     constexpr isize park = ring_bytes - 512; // 512 < 768 staged -> the region cannot fit before the seam
-    auto ctx_r = sg::create_dx12_context({.use_warp = true, .upload_ring_bytes = ring_bytes});
+    auto ctx_r = dx12::make_test_context({.upload_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
-    auto& c = static_cast<dx12::dx12_context&>(*ctx);
+    auto& c = *ctx;
 
     constexpr int W = 4, H = 3, N = W * H; // R32_FLOAT: 16-byte tight row -> 256 padded; 3 rows -> 768 staged
     auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
@@ -327,10 +327,10 @@ TEST("sg dx12 - inline texture download splits across the ring seam", exclusive(
 {
     constexpr isize ring_bytes = 2048; // >= tight 768 + padded 256 + 512 alignment slack
     constexpr isize park = ring_bytes - 512;
-    auto ctx_r = sg::create_dx12_context({.use_warp = true, .download_ring_bytes = ring_bytes});
+    auto ctx_r = dx12::make_test_context({.download_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
-    auto& c = static_cast<dx12::dx12_context&>(*ctx);
+    auto& c = *ctx;
 
     constexpr int W = 4, H = 3, N = W * H;
     auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
@@ -367,8 +367,7 @@ TEST("sg dx12 - async texture copy splits across staging windows", exclusive("gp
 {
     // Tiny 512-byte async windows: each holds exactly one 256-padded row, so an 8x8 R32_FLOAT (8 rows)
     // is packed across several windows on both the upload and readback copy queues.
-    auto ctx_r = sg::create_dx12_context(
-        {.use_warp = true, .async_upload_window_bytes = 512, .async_download_window_bytes = 512});
+    auto ctx_r = dx12::make_test_context({.async_upload_window_bytes = 512, .async_download_window_bytes = 512});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
 
@@ -394,9 +393,8 @@ TEST("sg dx12 - async texture copy splits across staging windows", exclusive("gp
     CHECK(ok);
 }
 
-TEST("sg dx12 - an empty texture region is a no-op", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - an empty texture region is a no-op", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -435,9 +433,8 @@ TEST("sg dx12 - an empty texture region is a no-op", exclusive("gpu"))
     CHECK(ok); // the empty-region upload left the seeded data intact
 }
 
-TEST("sg dx12 - block-compressed texture round-trips whole blocks", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - block-compressed texture round-trips whole blocks", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 

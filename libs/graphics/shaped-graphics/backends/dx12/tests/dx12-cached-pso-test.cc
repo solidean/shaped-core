@@ -103,6 +103,9 @@ TEST("sg cached PSO - a garbage blob degrades to a fresh build", exclusive("gpu"
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
+    // The unreadable cached blob below is the subject, so the debug layer's complaint about it is the expected outcome rather than a failure.
+    handle->set_message_callback({});
+
     sg::compiled_shader const shader = make_double_shader();
     auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
     REQUIRE(group_layout != nullptr);

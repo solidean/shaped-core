@@ -13,6 +13,8 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+namespace dx12 = sg::backend::dx12;
+
 // Seeds `buf` with fn(i) via an inline command-list upload on the direct queue and submits it, so the async download reads committed bytes by auto-waiting on the seed list.
 void seed(sg::context& c, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 {
@@ -32,7 +34,7 @@ void seed(sg::context& c, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 // A fresh context with deliberately tiny windows forces it.
 TEST("sg dx12 - async download larger than a staging window packs across windows", exclusive("gpu"))
 {
-    auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 4096});
+    auto ctx = dx12::make_test_context({.async_download_window_bytes = 4096});
     REQUIRE(ctx.has_value());
     auto& c = *ctx.value();
 
@@ -56,7 +58,7 @@ TEST("sg dx12 - async download larger than a staging window packs across windows
 // Each targets its own buffer; all must read back intact.
 TEST("sg dx12 - many async downloads recycle the staging windows", exclusive("gpu"))
 {
-    auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 1024});
+    auto ctx = dx12::make_test_context({.async_download_window_bytes = 1024});
     REQUIRE(ctx.has_value());
     auto& c = *ctx.value();
 
@@ -89,7 +91,7 @@ TEST("sg dx12 - many async downloads recycle the staging windows", exclusive("gp
 // Distinct buffers; each must read back intact.
 TEST("sg dx12 - uneven async downloads pack and straddle staging windows", exclusive("gpu"))
 {
-    auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 1024});
+    auto ctx = dx12::make_test_context({.async_download_window_bytes = 1024});
     REQUIRE(ctx.has_value());
     auto& c = *ctx.value();
 

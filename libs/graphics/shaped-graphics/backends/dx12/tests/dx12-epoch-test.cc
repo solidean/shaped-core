@@ -30,9 +30,9 @@ TEST("sg dx12 - epoch advance and retire", exclusive("gpu"))
     CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }
 
-TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch retires", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch retires",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -50,9 +50,8 @@ TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch re
     CHECK(finalized);
 }
 
-TEST("sg dx12 - submission token reports completion", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - submission token reports completion", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -65,11 +64,10 @@ TEST("sg dx12 - submission token reports completion", exclusive("gpu"))
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
 
-TEST("sg dx12 - throttle bounds epochs in flight", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - throttle bounds epochs in flight", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // Allow at most one prior epoch in flight; after several advances the FIFO stays bounded.
     for (int i = 0; i < 5; ++i)

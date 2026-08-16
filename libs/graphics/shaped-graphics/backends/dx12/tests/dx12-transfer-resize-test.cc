@@ -76,7 +76,7 @@ bool async_round_trip(sg::context_handle const& ctx, isize n, int seed)
 TEST("sg dx12 - async upload window resize preserves uploads", exclusive("gpu"))
 {
     // A 1 KiB window (packs a larger upload across windows). Resizing changes only staging memory.
-    auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
+    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
 
     CHECK(async_round_trip(ctx.value(), 4096, 1)); // spans several 1 KiB windows
@@ -91,7 +91,7 @@ TEST("sg dx12 - async upload window resize preserves uploads", exclusive("gpu"))
 TEST("sg dx12 - inline upload ring grows to fit a larger upload", exclusive("gpu"))
 {
     // A 4 KiB upload ring: an upload larger than this asserts (a single upload cannot exceed capacity).
-    auto ctx = sg::create_dx12_context({.use_warp = true, .upload_ring_bytes = 4096});
+    auto ctx = dx12::make_test_context({.upload_ring_bytes = 4096});
     REQUIRE(ctx.has_value());
 
     CHECK(inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
@@ -105,7 +105,7 @@ TEST("sg dx12 - inline upload ring grows to fit a larger upload", exclusive("gpu
 TEST("sg dx12 - inline download ring grows to fit a larger readback", exclusive("gpu"))
 {
     // A 4 KiB readback ring: a download larger than this asserts before the resize.
-    auto ctx = sg::create_dx12_context({.use_warp = true, .download_ring_bytes = 4096});
+    auto ctx = dx12::make_test_context({.download_ring_bytes = 4096});
     REQUIRE(ctx.has_value());
 
     CHECK(inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring

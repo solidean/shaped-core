@@ -302,11 +302,10 @@ TEST("sg dx12 - d3d12_layout_from maps the layouts", exclusive("gpu"))
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::copy_src) == D3D12_BARRIER_LAYOUT_COPY_SOURCE);
 }
 
-TEST("sg dx12 - emits well-formed texture barriers on WARP", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers on WARP", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     auto tex = c.create_dx12_texture(d, sg::allocation_info{});

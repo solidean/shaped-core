@@ -40,9 +40,8 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-TEST("sg dx12 - compute dispatch writes a structured buffer", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     constexpr int count = 256; // a multiple of the shader's 64-thread workgroup
@@ -99,8 +98,7 @@ TEST("sg dx12 - compute dispatch writes a structured buffer", exclusive("gpu"))
 // The tiny hand-sized descriptor heap is a dx12 knob, so this takes a dx12 context directly; the work itself is all public sg API.
 TEST("sg dx12 - transient binding groups + buffers recycle across epochs", exclusive("gpu"))
 {
-    auto ctx_r = sg::create_dx12_context(
-        {.use_warp = true, .descriptor_heap_capacity = 64, .descriptor_transient_fraction = 0.5f});
+    auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 64, .descriptor_transient_fraction = 0.5f});
     REQUIRE(ctx_r.has_value());
     auto ctx = ctx_r.value();
 
@@ -157,8 +155,8 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs", exclu
 // hand-sized descriptor heap is a dx12 knob; the group create/release cycle is all public sg API.
 TEST("sg dx12 - persistent binding groups free and reuse their descriptor range", exclusive("gpu"))
 {
-    auto ctx_r = sg::create_dx12_context(
-        {.use_warp = true, .descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f}); // 4 persistent slots
+    // 4 persistent slots
+    auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
     REQUIRE(ctx_r.has_value());
     auto ctx = ctx_r.value();
 

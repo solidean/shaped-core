@@ -70,11 +70,11 @@ TEST("sg dx12 - sampler translates to a D3D12 sampler desc", exclusive("gpu"))
     CHECK(st.AddressV == D3D12_TEXTURE_ADDRESS_MODE_BORDER);
 }
 
-TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WARP", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WARP",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // A sampled texture (t0), one dynamic sampler (s0), and one static sampler (s1).
     sg::binding const bindings[] = {
@@ -101,9 +101,8 @@ TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WAR
     REQUIRE(group.has_value()); // CreateSampler into the sampler heap + both descriptor tables — debug-layer clean
 }
 
-TEST("sg dx12 - static sampler naming no binding is rejected", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - static sampler naming no binding is rejected", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -116,9 +115,9 @@ TEST("sg dx12 - static sampler naming no binding is rejected", exclusive("gpu"))
     CHECK(!layout.has_value());
 }
 
-TEST("sg dx12 - a missing dynamic sampler is rejected at group creation", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - a missing dynamic sampler is rejected at group creation",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -138,11 +137,11 @@ TEST("sg dx12 - a missing dynamic sampler is rejected at group creation", exclus
     CHECK(!group2.has_value());
 }
 
-TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // A group layout with just a texture SRV — no samplers of its own.
     sg::binding const bindings[] = {

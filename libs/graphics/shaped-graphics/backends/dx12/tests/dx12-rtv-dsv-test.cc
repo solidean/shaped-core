@@ -26,11 +26,10 @@ sg::texture_description tex_desc(sg::texture_usage usage, sg::pixel_format forma
 }
 } // namespace
 
-TEST("sg dx12 - render-target views create valid RTV descriptors", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - render-target views create valid RTV descriptors", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // whole-texture 2D color target
     {
@@ -56,11 +55,10 @@ TEST("sg dx12 - render-target views create valid RTV descriptors", exclusive("gp
     }
 }
 
-TEST("sg dx12 - depth-stencil views create valid DSV descriptors", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - depth-stencil views create valid DSV descriptors", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // depth-only
     {

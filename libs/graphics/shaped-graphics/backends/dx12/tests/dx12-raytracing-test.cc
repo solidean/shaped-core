@@ -16,7 +16,7 @@ namespace
 {
 namespace dx12 = sg::backend::dx12;
 
-sg::raw_buffer_handle upload_triangle_vertices(sg::context_handle const& ctx)
+sg::raw_buffer_handle upload_triangle_vertices(dx12::dx12_context_handle const& ctx)
 {
     float const verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
     auto const buf = ctx->persistent.create_raw_buffer(
@@ -28,9 +28,8 @@ sg::raw_buffer_handle upload_triangle_vertices(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sg dx12 - raytracing builds a blas and a tlas on WARP", exclusive("gpu"))
+INVOCABLE_TEST("sg dx12 - raytracing builds a blas and a tlas on WARP", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
 
     // WARP implements DXR, but gate on the query so the test SKIPs (not fails) if this SDK's WARP doesn't.

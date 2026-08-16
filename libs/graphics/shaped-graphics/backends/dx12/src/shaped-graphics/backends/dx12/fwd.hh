@@ -51,6 +51,10 @@ namespace sg::backend::dx12
 {
 
 class dx12_context;
+/// A backend-typed context handle: an sg::context_handle known to point at a dx12_context.
+/// create_dx12_context hands back the abstract sg::context_handle, since that is what a caller drives; this is for code already committed to dx12 — the backend's own tests above all.
+using dx12_context_handle = std::shared_ptr<dx12_context>;
+
 class dx12_command_list;
 class dx12_command_allocator_pool;
 class dx12_buffer;
