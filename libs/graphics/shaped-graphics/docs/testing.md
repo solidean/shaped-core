@@ -45,6 +45,15 @@ It becomes runnable against each backend by two pieces working together:
 
 Full mechanism: [nexus/docs/invocable-tests.md](../../../base/nexus/docs/invocable-tests.md).
 
+### A validation message fails the test that provoked it
+
+The dx12 drivers create their context with the debug layer on and install a listener via `dx12_context::set_message_callback`, failing the running test on any message of `warning` severity or worse.
+Without it a validation error is a line on stderr nobody reads, and the run stays green — which it did, for ~680 of them.
+Attribution rides the ambient context, so the check lands on the right test wherever the runtime raised the message.
+
+A test that means to provoke a validation error opts out by simply not installing the listener on its own context; there is no tag for it.
+The `[sg]` warnings printed by sg itself (`cc::eprintln`) are **not** covered — that wants a real `cc` log system, which does not exist yet.
+
 **What belongs here:** every statement about the public API — allocation shapes, lifetime/epoch semantics, transfer round-trips, binding validation, the transient budget contract.
 Anything that must hold for dx12 *and* vulkan *and* a future cpu backend goes here, written once rather than duplicated per backend.
 Complex and edge-case coverage belongs here too.

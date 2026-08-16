@@ -93,7 +93,10 @@ struct sg::resource_access_state
 
         if (has_curr_writes() || layout_change)
         {
-            if (!has_any_inflight_access() && !layout_change)
+            // The freebie below rests on the backend inferring the access itself at first use (D3D12 promotes a buffer out of COMMON on its first op).
+            // It can only infer ONE, so an op that both reads and writes the same resource — a copy whose source and destination are the same buffer — must be spelled out.
+            // Skipping the barrier there leaves D3D12 assuming COPY_DEST and rejecting the source read.
+            if (!has_any_inflight_access() && !layout_change && !has_read_access(all_curr_access()))
             {
                 // First write with no prior access: take ownership, no barrier.
                 inflight_read_stages = curr_read_stages;

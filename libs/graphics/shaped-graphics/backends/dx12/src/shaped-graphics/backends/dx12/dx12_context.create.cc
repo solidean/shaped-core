@@ -10,48 +10,83 @@ namespace sg::backend::dx12
 {
 namespace
 {
-// Validation messages routed to stderr.
+dx12_message_severity to_sg_severity(D3D12_MESSAGE_SEVERITY severity)
+{
+    switch (severity)
+    {
+    case D3D12_MESSAGE_SEVERITY_CORRUPTION:
+        return dx12_message_severity::corruption;
+    case D3D12_MESSAGE_SEVERITY_ERROR:
+        return dx12_message_severity::error;
+    case D3D12_MESSAGE_SEVERITY_WARNING:
+        return dx12_message_severity::warning;
+    case D3D12_MESSAGE_SEVERITY_INFO:
+        return dx12_message_severity::info;
+    default:
+        return dx12_message_severity::message;
+    }
+}
+
+char const* severity_label(dx12_message_severity severity)
+{
+    switch (severity)
+    {
+    case dx12_message_severity::corruption:
+        return "corruption";
+    case dx12_message_severity::error:
+        return "error";
+    case dx12_message_severity::warning:
+        return "warning";
+    case dx12_message_severity::info:
+        return "info";
+    default:
+        return "message";
+    }
+}
+
+// Validation messages, handed to the context's listener or written to stderr when it has none.
 // Registered on the device's info queue when the debug layer is active, and runs on whatever thread the runtime raises the message from.
 void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
                                     D3D12_MESSAGE_SEVERITY severity,
                                     D3D12_MESSAGE_ID /*id*/,
                                     LPCSTR description,
-                                    void* /*context*/)
+                                    void* context)
 {
-    char const* level = "message";
-    switch (severity)
-    {
-    case D3D12_MESSAGE_SEVERITY_CORRUPTION:
-        level = "corruption";
-        break;
-    case D3D12_MESSAGE_SEVERITY_ERROR:
-        level = "error";
-        break;
-    case D3D12_MESSAGE_SEVERITY_WARNING:
-        level = "warning";
-        break;
-    case D3D12_MESSAGE_SEVERITY_INFO:
-        level = "info";
-        break;
-    case D3D12_MESSAGE_SEVERITY_MESSAGE:
-        level = "message";
-        break;
-    }
-    cc::eprintln("[dx12 {}] {}", level, description);
+    auto const level = to_sg_severity(severity);
+    auto* const ctx = static_cast<dx12_context*>(context);
+    if (ctx != nullptr && ctx->_message_callback.is_valid())
+        ctx->_message_callback(level, description);
+    else
+        cc::eprintln("[dx12 {}] {}", severity_label(level), description);
 }
 
-// Routes D3D12 validation messages to dx12_message_callback.
+// Routes D3D12 validation messages to dx12_message_callback, with `ctx` as the listener to consult.
+// Registered once the context object exists, so anything the runtime raises during creation still takes the stderr path.
 // Best-effort: needs ID3D12InfoQueue1, and is silently skipped when the interface isn't available.
-void register_debug_callback(ID3D12Device* device)
+u32 register_debug_callback(ID3D12Device* device, dx12_context* ctx)
 {
     ComPtr<ID3D12InfoQueue1> info_queue;
-    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&info_queue))))
-    {
-        DWORD cookie = 0;
-        info_queue->RegisterMessageCallback(&dx12_message_callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
-    }
+    if (FAILED(device->QueryInterface(IID_PPV_ARGS(&info_queue))))
+        return 0;
+
+    DWORD cookie = 0;
+    if (FAILED(info_queue->RegisterMessageCallback(&dx12_message_callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, ctx,
+                                                   &cookie)))
+        return 0;
+    return u32(cookie);
 }
 } // namespace
+
+void dx12_context::unregister_message_callback()
+{
+    if (_message_callback_cookie == 0 || !_device)
+        return;
+
+    ComPtr<ID3D12InfoQueue1> info_queue;
+    if (SUCCEEDED(_device->QueryInterface(IID_PPV_ARGS(&info_queue))))
+        info_queue->UnregisterMessageCallback(DWORD(_message_callback_cookie));
+    _message_callback_cookie = 0;
+}
 } // namespace sg::backend::dx12
 
 namespace sg
@@ -107,10 +142,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)); FAILED(hr))
         return dx12_error(hr, "D3D12CreateDevice failed");
 
-    // With the debug layer live, mirror validation messages to stderr.
-    if (config.enable_debug_layer)
-        register_debug_callback(device.Get());
-
     D3D12_COMMAND_QUEUE_DESC queue_desc = {};
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     ComPtr<ID3D12CommandQueue> queue;
@@ -141,6 +172,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_raytracing_tier = raytracing_tier;
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
+
+    // With the debug layer live, route validation messages through the context, so a listener can be set on it later.
+    // Registered here rather than right after device creation: the callback needs the context to consult.
+    if (config.enable_debug_layer)
+        ctx->_message_callback_cookie = register_debug_callback(ctx->_device.Get(), ctx.get());
 
     // Bring up the inline transfer ring buffers; each system creates + maps its own heap (colocated
     // with its logic) off the now-populated device.
