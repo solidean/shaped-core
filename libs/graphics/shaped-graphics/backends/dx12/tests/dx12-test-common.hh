@@ -78,7 +78,11 @@ inline void fail_on_validation_messages(dx12_context_handle const& ctx)
 inline cc::result<dx12_context_handle> as_test_context(cc::result<sg::context_handle> ctx)
 {
     if (ctx.has_error())
+    {
+        // The reason, not just the fact: a caller's `REQUIRE(ctx.has_value())` reports neither the HRESULT nor which step failed, and creation is the step that breaks under contention.
+        cc::eprintln("[dx12-test] context creation failed: {}", ctx.error().to_string());
         return cc::error(cc::move(ctx).error());
+    }
 
     auto typed = std::static_pointer_cast<dx12_context>(ctx.value());
     fail_on_validation_messages(typed);
@@ -96,7 +100,7 @@ inline cc::result<dx12_context_handle> make_test_context(dx12_config config = {}
 }
 
 /// make_test_context as a bare handle, for the tests that assert pristine state — the epoch counter, allocator/list pool counts — and need no knobs.
-/// nullptr on the rare host without WARP.
+/// nullptr when it could not be created; as_test_context has already said why.
 inline dx12_context_handle make_warp_context()
 {
     auto ctx = make_test_context();

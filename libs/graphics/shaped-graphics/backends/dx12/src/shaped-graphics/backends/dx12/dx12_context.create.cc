@@ -60,6 +60,26 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
         cc::eprintln("[dx12 {}] {}", severity_label(level), description);
 }
 
+// Turns the D3D12 debug layer on, at most once for the whole process, and reports whether it is available.
+//
+// EnableDebugLayer is a PROCESS-wide switch rather than a per-device one, so calling it per context creation is both redundant and unsafe:
+// with several contexts coming up at once, one thread flipping it while another is inside CreateDXGIFactory2 makes that call fail with DXGI_ERROR_INVALID_CALL.
+// A function-local static gives thread-safe once-only initialization and hands every later caller the same answer.
+//
+// Best-effort: the layer needs the "Graphics Tools" feature, and a host without it runs unvalidated rather than failing to create a context.
+bool enable_debug_layer_once()
+{
+    static bool const enabled = []
+    {
+        ComPtr<ID3D12Debug> debug;
+        if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+            return false;
+        debug->EnableDebugLayer();
+        return true;
+    }();
+    return enabled;
+}
+
 // Routes D3D12 validation messages to dx12_message_callback, with `ctx` as the listener to consult.
 // Registered once the context object exists, so anything the runtime raises during creation still takes the stderr path.
 // Best-effort: needs ID3D12InfoQueue1, and is silently skipped when the interface isn't available.
@@ -95,17 +115,13 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 {
     using namespace sg::backend::dx12;
 
-    UINT factory_flags = 0;
+    // No DXGI_CREATE_FACTORY_DEBUG here, deliberately.
+    // That flag turns on DXGI's OWN message queue, which nothing in sg reads — validation reaches us through the device's ID3D12InfoQueue1 instead (see register_debug_callback).
+    // It also makes concurrent context creation fail: CreateDXGIFactory2 with it set intermittently returns DXGI_ERROR_INVALID_CALL when several threads are in there at once.
+    // So it was pure cost.
+    UINT const factory_flags = 0;
     if (config.enable_debug_layer)
-    {
-        // Best-effort: needs the "Graphics Tools" feature; skip validation if it's absent, don't fail.
-        ComPtr<ID3D12Debug> debug;
-        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
-        {
-            debug->EnableDebugLayer();
-            factory_flags |= DXGI_CREATE_FACTORY_DEBUG;
-        }
-    }
+        enable_debug_layer_once();
 
     ComPtr<IDXGIFactory4> factory;
     if (HRESULT hr = CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&factory)); FAILED(hr))

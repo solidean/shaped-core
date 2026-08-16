@@ -27,6 +27,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=60.0, metavar="SECS",
                    help="Per-binary timeout in seconds (default: 60; 0 disables). The binary is "
                         "killed and reported as failed if it exceeds it.")
+    p.add_argument("--repeat", type=int, default=1, metavar="N",
+                   help="Run the selection up to N times, stopping at the first failing iteration "
+                        "(default: 1). For chasing a flake: the build and discovery happen once, and "
+                        "stopping on failure is what leaves that run's logs and XML on disk to read.")
     xml_group = p.add_mutually_exclusive_group()
     xml_group.add_argument("--merged-xml-report", metavar="FILE",
                            help="Also merge the per-binary JUnit XML into a single report at FILE")
@@ -87,18 +91,30 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         if diag:
             ctx.die(diag)
 
-    records = dev.test(
-        presets,
-        binary_names,
-        root=ctx.root,
-        test_name=test_name,
-        extra_args=runner_args,
-        timeout=args.timeout if args.timeout else None,
-        write_xml=not args.no_xml_reports,
-        mirror=args.mirror_output,
-        verbose=args.verbose,
-        emsdk_path=args.emsdk_path,
-    )
+    # Repeat runs the SAME selection again — build and discovery above happen once, so an iteration costs only the binaries.
+    # It stops at the first failure rather than tallying a rate: the run that failed is then the one whose logs and XML are still on disk, which is the whole point.
+    repeat = max(1, args.repeat)
+    for iteration in range(1, repeat + 1):
+        if repeat > 1:
+            print(dev.console.dim(f"--- repeat {iteration}/{repeat}"), file=sys.stderr)
+
+        records = dev.test(
+            presets,
+            binary_names,
+            root=ctx.root,
+            test_name=test_name,
+            extra_args=runner_args,
+            timeout=args.timeout if args.timeout else None,
+            write_xml=not args.no_xml_reports,
+            mirror=args.mirror_output,
+            verbose=args.verbose,
+            emsdk_path=args.emsdk_path,
+        )
+
+        if any(r["returncode"] != 0 for r in records):
+            if repeat > 1:
+                print(dev.console.red(f"failed on iteration {iteration} of {repeat}"), file=sys.stderr)
+            break
 
     if args.merged_xml_report:
         parts = [Path(r["artifact"]).parent / f"{Path(r['artifact']).name}.results.xml" for r in records]
