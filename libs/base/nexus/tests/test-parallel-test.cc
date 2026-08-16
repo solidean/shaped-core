@@ -329,6 +329,47 @@ TEST("parallel - main_thread and own_pool cannot be combined", no_scheduler)
 }
 
 #if CC_HAS_THREADS
+TEST("parallel - a failing check names what ran beside it", no_scheduler)
+{
+    // A -jN failure is usually about what it ran BESIDE, and the report otherwise names only the test that failed.
+    // The overlap is forced rather than hoped for: the failing test waits for a partner to be live, and the partner stays live until it has failed.
+    // Both waits are bounded, so a machine that refuses to overlap fails the CHECK below instead of hanging.
+    cc::atomic<int> live = {0};
+    cc::atomic<bool> has_failed = {false};
+
+    nx::test_registry reg;
+    reg.add_declaration("partner", {},
+                        [&]
+                        {
+                            live.fetch_add(1, cc::memory_order_acq_rel);
+                            for (auto spin = 0; spin < 2000000 && !has_failed.load(cc::memory_order_acquire); ++spin)
+                                cc::spin_pause();
+                            CHECK(true);
+                        });
+    reg.add_declaration("failing", {},
+                        [&]
+                        {
+                            live.fetch_add(1, cc::memory_order_acq_rel);
+                            for (auto spin = 0; spin < 2000000 && live.load(cc::memory_order_acquire) < 2; ++spin)
+                                cc::spin_pause();
+                            CHECK(false); // the failure under test
+                            has_failed.store(true, cc::memory_order_release);
+                        });
+
+    auto const schedule = nx::test_schedule::create({}, reg);
+    auto const exec = nx::execute_tests(schedule, with_jobs(4));
+
+    REQUIRE(exec.executions.size() == 2);
+    auto const& failing = exec.executions[1];
+    REQUIRE(failing.root.errors.size() == 1);
+
+    auto beside = false;
+    for (auto const& line : failing.root.errors[0].extra_lines)
+        if (line.contains("partner"))
+            beside = true;
+    CHECK(beside);
+}
+
 TEST("parallel - tests under -jN really do overlap", no_scheduler)
 {
     // Every test waits for a second one to join it, with a bounded fallback so a machine that refuses to overlap fails the CHECK instead of hanging.

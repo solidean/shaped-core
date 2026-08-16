@@ -162,10 +162,21 @@ Attribution is the ambient context's either way, so the check lands on the right
 
 This is also why a `CHECK_ASSERTS` block is safe at `-jN`: the throwing handler it installs is visible only on its own thread.
 
-## Crash reports name every running test
+## A failure names what ran beside it
 
-The crash-context hook reports **all** tests in flight, one fixed slot per thread, allocation-free.
-Under `-jN` the faulting thread is often not the interesting one.
+Under `-jN` a failure is usually about what it ran *beside*, and naming only the test that failed leaves you guessing which pair collided.
+
+So both reports answer that, off the same per-thread table:
+
+* The **crash-context hook** lists all tests in flight, one fixed slot per thread, allocation-free — the faulting thread is often not the interesting one.
+* A **failing check** gains an `also running: "…"` annotation, listing the other threads' tests.
+  Nothing is added at `-j1`, where there is no other thread.
+
+The slot holds the test *declaration* rather than a name pointer and length, because the check reader runs while other threads are still writing to the table.
+One word cannot tear, and a declaration outlives the run, so a racing reader sees the previous test or the next one — never a pointer paired with the wrong length.
+
+What it reports is a snapshot, not a fact: a slot may change while the table is walked, so a name means "was running around now".
+That is the right resolution for the question it answers, and no lock could sharpen it without changing what is being measured.
 
 ## Not here yet: a bare-pool mode
 

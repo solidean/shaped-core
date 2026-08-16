@@ -216,18 +216,20 @@ bool is_own_test_body(test_context const* ctx)
     return !g_body_stack.empty() && g_body_stack.back() == ctx;
 }
 
-// What each thread is running right now, read by the crash-context hook report_running_test.
+// What each thread is running right now: read by the crash-context hook report_running_test, and by a failing check to name what it ran beside.
 //
 // One slot per thread rather than one global: with tests in parallel a single slot names whichever test wrote last, which is exactly the wrong one to blame.
-// A crash context may not allocate and may not lock, so the slots are a fixed array of raw pointer + length, claimed once per thread and never freed.
+// A crash context may not allocate and may not lock, so the slots are a fixed array, claimed once per thread and never freed.
 // A thread past the slot count is simply not reported — losing a name in a crash report beats growing a table inside one.
+//
+// The slot holds the DECLARATION rather than a (pointer, length) pair, because the check reader runs while other threads are still writing.
+// One word cannot tear, and a declaration's name outlives the run, so a racing reader sees the previous test or the next one — never a pointer with the wrong length.
 constexpr int max_running_test_slots = 64;
 
 struct running_test_slot
 {
-    char const* name_data = nullptr;
-    int name_size = 0;
-    int section = 0;
+    cc::atomic<nx::test_declaration const*> declaration = {nullptr};
+    cc::atomic<int> section = {0};
 };
 
 running_test_slot g_running_tests[max_running_test_slots];
@@ -252,12 +254,18 @@ struct scoped_running_test
     explicit scoped_running_test(running_test_slot* slot) : _slot(slot)
     {
         if (_slot != nullptr)
-            _saved = *_slot;
+        {
+            _saved_declaration = _slot->declaration.load(cc::memory_order_relaxed);
+            _saved_section = _slot->section.load(cc::memory_order_relaxed);
+        }
     }
     ~scoped_running_test()
     {
         if (_slot != nullptr)
-            *_slot = _saved;
+        {
+            _slot->section.store(_saved_section, cc::memory_order_relaxed);
+            _slot->declaration.store(_saved_declaration, cc::memory_order_relaxed);
+        }
     }
 
     scoped_running_test(scoped_running_test const&) = delete;
@@ -265,8 +273,43 @@ struct scoped_running_test
 
 private:
     running_test_slot* _slot = nullptr;
-    running_test_slot _saved;
+    nx::test_declaration const* _saved_declaration = nullptr;
+    int _saved_section = 0;
 };
+
+/// Publishes `decl` (and its section index) as what this thread is running.
+void publish_running_test(running_test_slot* slot, nx::test_declaration const& decl, int section)
+{
+    if (slot == nullptr)
+        return;
+    slot->section.store(section, cc::memory_order_relaxed);
+    slot->declaration.store(&decl, cc::memory_order_relaxed);
+}
+
+/// The tests running on OTHER threads right now, as one annotation line, or empty when this test is alone.
+///
+/// A snapshot rather than a fact: a slot may change while this walks the table, so a name here means "was running around now".
+/// That is the right resolution for the question it answers — which pair collided — and no lock could do better without changing what it measures.
+cc::string other_running_tests()
+{
+    auto const claimed = cc::min(g_running_slots_claimed.load(cc::memory_order_relaxed), max_running_test_slots);
+
+    cc::string line;
+    for (auto i = 0; i < claimed; ++i)
+    {
+        if (i == g_running_slot)
+            continue; // this thread's own slot names the failing test itself
+
+        auto const* const decl = g_running_tests[i].declaration.load(cc::memory_order_relaxed);
+        if (decl == nullptr || decl->name.empty())
+            continue;
+
+        line += line.empty() ? "also running: \"" : ", \"";
+        line += decl->name;
+        line += '"';
+    }
+    return line;
+}
 
 // Checks that found no test context at all — process-global, because by definition no test owns them.
 //
@@ -638,8 +681,7 @@ cc::shared_async<cc::unit> run_async_prologue(test_context& ctx, nx::test_declar
 {
     auto* const crash_slot = running_test_slot_for_this_thread();
     scoped_running_test const published(crash_slot);
-    if (crash_slot != nullptr)
-        *crash_slot = running_test_slot{.name_data = decl.name.data(), .name_size = int(decl.name.size()), .section = 0};
+    publish_running_test(crash_slot, decl, 0);
 
     scoped_body const own_body(&ctx);
 
@@ -976,15 +1018,15 @@ void nx::impl::report_running_test() noexcept
     auto reported = 0;
     for (auto i = 0; i < claimed; ++i)
     {
-        auto const& slot = g_running_tests[i];
-        if (slot.name_data == nullptr || slot.name_size <= 0)
+        auto const* const decl = g_running_tests[i].declaration.load(cc::memory_order_relaxed);
+        if (decl == nullptr || decl->name.empty())
             continue;
 
         std::fputs(reported == 0 ? "running test: \"" : "   also running: \"", stderr);
-        std::fwrite(slot.name_data, 1, size_t(slot.name_size), stderr);
+        std::fwrite(decl->name.data(), 1, size_t(decl->name.size()), stderr);
         std::fputc('"', stderr);
-        if (slot.section > 0)
-            std::fprintf(stderr, " (section %d)", slot.section);
+        if (auto const section = g_running_tests[i].section.load(cc::memory_order_relaxed); section > 0)
+            std::fprintf(stderr, " (section %d)", section);
         std::fputc('\n', stderr);
         ++reported;
     }
@@ -1031,6 +1073,12 @@ void nx::impl::report_check_result(check_result result)
         }
         return;
     }
+
+    // A failure at -jN is often about what it ran BESIDE, and the report otherwise names only the test that failed.
+    // The crash hook already knows the answer; a failing check is the other place that needs it.
+    if (!result.passed && result.op != cmp_op::skip)
+        if (auto beside = other_running_tests(); !beside.empty())
+            result.extra_lines.push_back(cc::move(beside));
 
     // An unattributable check fails the RUN — see g_orphan_checks for why silence is not an option here.
     auto* const ctx_ptr = current_context();
@@ -1197,12 +1245,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
             ctx.root_section->next_open_section = nullptr;
 
             // publish the running test for the crash-context hook (points a fatal fault at this test)
-            if (crash_slot != nullptr)
-                *crash_slot = running_test_slot{
-                    .name_data = decl.name.data(),
-                    .name_size = int(decl.name.size()),
-                    .section = section_num,
-                };
+            publish_running_test(crash_slot, decl, section_num);
 
             if (config.verbose)
             {
