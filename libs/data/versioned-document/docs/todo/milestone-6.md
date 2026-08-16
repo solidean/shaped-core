@@ -9,6 +9,13 @@ This is also the milestone that closes the documentation loop, so the design doc
 
 Depends on milestones 2 through 5.
 
+**Status: items 1 through 4 have landed.**
+Snapshots, their persistence, pruning and skeleton ops are done and tested on both store arms.
+What remains is item 5 (recovery), item 6 (the profiling check), and item 7 (the documentation loop) — and item 7 is where this folder stops existing.
+
+Two of this milestone's own items were **wrong**, and were corrected while building them.
+Both corrections are in [decisions.md](../decisions.md); the items below say what shipped rather than what was first specified.
+
 ---
 
 ## Work items
@@ -133,6 +140,18 @@ If they match, the history is correct — no trust in the sender at any point.
 
 This is what BLAKE3 is for, and this milestone is where that decision earns its keep — or fails to.
 
+**Two things items 1 through 4 left in the way, both found while building them:**
+
+- **`op_graph::add` is idempotent by id, so a skeleton cannot be upgraded to a full op.**
+  Re-adding a hash already present changes nothing, deliberately — but that is exactly what receiving the payload for an op this replica holds as a skeleton has to do.
+  So integration needs its own verb rather than a loop of `add`, and that verb is what verifies before it accepts.
+- **Un-pruning invalidates the boundary a required snapshot was written under.**
+  A required snapshot carries no `superseded` because everything behind it is payload-free; restoring a payload behind one puts a live writer back where nothing can suppress it.
+  Integrating a batch must therefore recompute or demote any required snapshot whose past it just filled in.
+  That is the same failure item 3 refuses to create in the first place, arriving from the other direction.
+
+Take the batch as a set rather than op by op: the replica needs one point at which it either accepted the whole set or changed nothing.
+
 ### 6. Check the hashing reservation, on evidence
 
 [decisions.md](../decisions.md#blake3-over-32-byte-ids--with-a-standing-reservation) records a standing reservation about BLAKE3's cost, with a testable condition attached.
@@ -146,15 +165,51 @@ If hashing *does* show up, the conclusion is not "the reservation was wrong" —
 Find where, move it, and re-measure.
 Only then is the choice of hash itself worth re-arguing.
 
-### 7. Close the documentation loop
+### 7. Close the documentation loop, and retire this folder
 
-- Flip every remaining `[planned]` in [structure.md](../structure.md).
-- Remove the `[planned]` banners from both cheat-sheets, and check every entry against what actually shipped.
-- Reconcile [concept.md](../concept.md) with what was built.
-  Where the two differ the implementation is not automatically right — decide which one is, and change the other deliberately.
-- Add anything learned to [decisions.md](../decisions.md), including decisions that were *reversed*.
-  A reversal with its reasoning is worth more than a clean-looking list.
+The docs were written to describe something being built.
+Once it is built, that shape is wrong: a plan and a set of milestone files are scaffolding, and scaffolding left standing is read as part of the building.
+
+**This item ends with `docs/todo/` deleted.**
+Nothing is preserved from it except what is already true elsewhere — a milestone file is a record of intent, and git holds that.
+Anything in here that is still *load-bearing* is a decision that was never written down, and the fix is to write it into [decisions.md](../decisions.md) before the file goes, not to keep the file.
+
+#### Split `concept.md` into `docs/concepts/`, one file per major concept
+
+[concept.md](../concept.md) is ~550 lines across ten top-level sections, and it is the document everyone is told to read first.
+At that size "read this before starting" stops being an instruction anyone follows.
+The system is large enough that per-concept granularity is the right unit, and [clean-core's `docs/systems/`](../../../../base/clean-core/docs/systems/) is the shape to follow.
+
+Its current sections are close to the file boundaries already:
+
+the model, values, ops and content addressing, multi-values, interpretation,
+the typed document, assets and blobs, validation layers, compatibility and pruning,
+and what lives outside the document.
+
+Treat that as a starting point rather than a specification — the split should follow what a reader comes looking for, not what the headings happen to be today.
+
+What replaces `concept.md` is an index, not a summary: one line per concept saying what question it answers.
+A reader who wants the whole design still reads everything, but a reader who wants to know how multi-values resolve reads one file.
+
+**Reconcile as you split, rather than after.**
+Where a concept doc and the implementation disagree, the implementation is not automatically right — decide which one is, and change the other deliberately.
+Moving a section is the moment you actually reread it, so it is the cheapest moment to catch a claim that stopped being true three milestones ago.
+Three known ones to check: snapshots (they no longer resemble what `## Compatibility, pruning and recovery` describes), pruning's boundary rule, and whatever milestone 5 changed about assets.
+
+#### The rest of the loop
+
+- Flip every remaining `[planned]` in [structure.md](../structure.md), and decide whether that file survives at all.
+  It is a status tracker, and status trackers are the other thing that stops being true quietly.
+  If it stays, it stays as a map of what lives where rather than as a roadmap.
+- Check every cheat-sheet entry against what actually shipped, on both libraries.
+- Add anything learned to [decisions.md](../decisions.md), including decisions that were **reversed**.
+  A reversal with its reasoning is worth more than a clean-looking list, and this milestone alone produced three.
 - Update `readme.md` for both libraries, since they stop being "at the design stage".
+- Point everything that cited a milestone file at whatever now owns that answer.
+  A dangling `todo/milestone-N.md` link is the failure mode of deleting this folder, and `dev.py check` catches it — so run it before assuming the deletion is clean.
+
+**Deleting this folder is not a tidy-up to do last and fast.**
+It is the step that decides which of the reasoning written here survives, and the only one whose mistakes are invisible afterwards.
 
 ## Tests
 
@@ -176,13 +231,17 @@ Items 1 through 4 are done; the rest wait on items 5 and 6.
 - **[done] Two replicas pruned to different depths agree**, each through its own snapshot.
 - **[done] The snapshot codec on its own**: canonical output, every truncated prefix refused, trailing bytes refused, and arbitrary garbage decoded to an error rather than a crash.
 - **Recovery**: reconstruct pruned history from a second replica and verify by recomputation; a tampered op in the received set is rejected by id and leaves the replica intact.
+- **Skeleton upgrade**: integrating the payload for an op held as a skeleton fills it in, where a plain `add` would not.
+- **Un-pruning is not silently unsound**: integrating a batch behind a required snapshot leaves that snapshot correct, or demoted, and never quietly wrong.
 - **Profiling**: the open / edit / save loop is measured and recorded, per item 6.
 
 ## Acceptance
 
-- A snapshot is provably indistinguishable from the replay it replaces, over a generated corpus.
-- A required snapshot cannot be dropped silently.
-- A skeleton op is never reported as a hash mismatch, in any path.
+- **[done]** A snapshot is provably indistinguishable from the replay it replaces, over a generated corpus.
+- **[done]** A required snapshot cannot be dropped silently.
+- **[done]** A skeleton op is never reported as a hash mismatch, in any path.
+- **[done]** Pruning cannot produce a document whose merges are wrong, and refuses rather than half-doing it.
 - History from an untrusted peer is verified by recomputation, and a tampered set is rejected without damage.
 - The hashing reservation has been checked against a real profile, and the numbers are in the repo.
-- No `[planned]` marking remains anywhere in either library's docs, and both cheat-sheets match what shipped.
+- Both cheat-sheets match what shipped, and no `[planned]` marking remains anywhere in either library's docs.
+- **`docs/todo/` is gone**, every reference to it has an owner elsewhere, and `dev.py check` passes with no dangling link.

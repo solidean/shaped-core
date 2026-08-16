@@ -33,6 +33,12 @@ Within a milestone, the work items are roughly ordered but need not be done in s
 | 5 | [Assets and blobs](milestone-5.md) **[done]** — the content store, its sharing and declared dependencies | versioned-document-file |
 | 6 | [Snapshots, pruning and recovery](milestone-6.md) — and the docs' final pass | both |
 
+Milestone 6's items 1 through 4 have landed; recovery, the profiling check and the documentation loop remain.
+
+**This folder is temporary, and milestone 6 ends by deleting it.**
+A plan describes something being built, so it stops being true the moment the thing is built — and a plan left standing is read as documentation.
+Whatever is still load-bearing here moves to [decisions.md](../decisions.md) or to `docs/concepts/` first; the rest is history, and git keeps it.
+
 ## What "done" means
 
 A milestone is done when every acceptance criterion in its file holds, and:
