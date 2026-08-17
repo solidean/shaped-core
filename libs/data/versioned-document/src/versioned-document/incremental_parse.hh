@@ -52,6 +52,10 @@ enum class vdoc::apply_fallback_reason : vdoc::u8
     /// A chain that was the right shape and longer than `max_chain_ops`.
     /// A statement about the bound rather than about the history, and the one reason worth raising the bound over.
     chain_too_long,
+
+    /// A [layer_stack](layer_stack.hh) gained, lost or muted a layer, so what changed is not a set of paths anyone can
+    /// enumerate cheaply.
+    structure_changed,
 };
 
 /// What one apply did, for a caller or a test that has to see which path ran and why.
@@ -98,3 +102,25 @@ namespace vdoc
                              incremental_apply_options options = {},
                              incremental_apply_stats* stats = nullptr);
 } // namespace vdoc
+
+namespace vdoc::impl
+{
+/// The single-parent chain from `to` back to `from`, nearest-first.
+///
+/// `found` distinguishes "no chain" from "already there": `to == from` is a genuine empty chain and nothing to do.
+/// `reason` is meaningful only when `found` is false.
+struct chain_walk
+{
+    bool found = false;
+    apply_fallback_reason reason = apply_fallback_reason::no_single_parent_chain;
+    cc::vector<op const*> ops;
+};
+
+[[nodiscard]] chain_walk walk_chain(op_graph const& graph, op_id const& from, op_id const& to, isize max_ops);
+
+/// Every path the chain assigned to.
+///
+/// A single-parent chain's own assignments are its complete delta, which is what makes this the whole dirty set rather
+/// than an approximation of one.
+[[nodiscard]] change_set change_set_of(cc::span<op const* const> chain);
+} // namespace vdoc::impl

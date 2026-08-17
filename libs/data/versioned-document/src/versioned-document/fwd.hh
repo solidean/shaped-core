@@ -234,6 +234,21 @@ struct incremental_apply_options;
 /// Why an apply re-parsed instead of evolving the document it was handed.
 enum class apply_fallback_reason : u8;
 
+/// A layer written property by property by a producer, with no op graph behind it.
+class direct_layer;
+
+/// Names one layer in a stack, and keeps naming it as others come and go.
+struct layer_handle;
+
+/// An ordered stack of independent histories, composed into one document per property path.
+class layer_stack;
+
+/// Knobs on a layered apply.
+struct layered_apply_options;
+
+/// What one layered apply did.
+struct layered_apply_stats;
+
 /// What one apply did, for a caller that has to see whether the fast path ran.
 struct incremental_apply_stats;
 
@@ -263,4 +278,10 @@ class document_arena;
 
 /// Drives one parse, and the only thing that fills a document.
 class parser;
+
+/// One layer as the composition sees it — just its raw document.
+struct layer_view;
+
+/// Reusable buffers for composing one entity across several layers.
+struct compose_scratch;
 } // namespace vdoc::impl

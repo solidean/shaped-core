@@ -40,6 +40,13 @@ enum class vdoc::diagnostic_kind : vdoc::u8
     /// Resurrecting is recoverable and vanishing is not, which is the whole reason this is a diagnostic and not a
     /// deletion.
     contested_alive,
+
+    /// Two layers of a [layer_stack](layer_stack.hh) supplied this component and disagreed about its `$schema_version`,
+    /// so it was dropped rather than read at one layer's version and parsed from another's data.
+    ///
+    /// Only reachable under layering: within one history the writers of a path either agree or are contested, which is
+    /// `unknown_schema_version`.
+    layered_schema_version_conflict,
 };
 
 /// One diagnostic: what happened, and the narrowest path that describes it.

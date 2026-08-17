@@ -103,6 +103,19 @@ struct entity_selection
                                              parse_policy const& policy,
                                              parse_report& report,
                                              cc::vector<component_type_id>& out_unsupported);
+
+/// A whole parse over an entity source that is not a single raw document.
+///
+/// `sorted_entities` must be ascending by entity id bytes, because each column's candidates come out sorted for free
+/// from that order and nothing re-sorts them.
+/// `lookup` returns the entity's components, or null where it has none.
+///
+/// This exists so that `parse` and a composed parse are the *same* code rather than two copies — the selection phase was
+/// factored out for that reason already, and the column-building half needs it just as much.
+[[nodiscard]] document parse_from(cc::span<entity_id const> sorted_entities,
+                                  cc::function_ref<raw_entity const*(entity_id)> lookup,
+                                  parse_policy const& policy,
+                                  parse_report& report);
 } // namespace vdoc::impl
 
 namespace vdoc

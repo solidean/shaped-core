@@ -9,65 +9,6 @@ namespace
 {
 using namespace vdoc;
 
-/// The single-parent chain from `to` back to `from`, nearest-first, or empty where there is none within the bound.
-///
-/// `found` distinguishes "no chain" from "already there": `to == from` is a genuine empty chain and a fast path with
-/// nothing to do.
-/// `reason` is only meaningful when `found` is false.
-struct chain_walk
-{
-    bool found = false;
-    apply_fallback_reason reason = apply_fallback_reason::no_single_parent_chain;
-    cc::vector<op const*> ops;
-};
-
-[[nodiscard]] chain_walk walk_chain(op_graph const& graph, op_id const& from, op_id const& to, isize max_ops)
-{
-    auto out = chain_walk();
-    if (to == from)
-    {
-        out.found = graph.contains(from);
-        return out;
-    }
-
-    auto at = to;
-    for (isize step = 0; step < max_ops; ++step)
-    {
-        auto const* const o = graph.find(at);
-
-        // A skeleton's assignments are gone rather than empty, so a chain through one is not a delta anyone can read.
-        if (o == nullptr || o->is_skeleton() || o->parents.size() != 1)
-            return {};
-
-        out.ops.push_back(o);
-        at = o->parents[0];
-
-        if (at == from)
-        {
-            out.found = true;
-            return out;
-        }
-    }
-
-    // Every step was the right shape, so what ran out was the bound and not the history.
-    return {.reason = apply_fallback_reason::chain_too_long};
-}
-
-/// Every path the chain assigned to.
-///
-/// A single-parent chain's own assignments are its complete delta, which is what makes this the whole dirty set rather
-/// than an approximation of one.
-[[nodiscard]] change_set change_set_of(cc::span<op const* const> chain)
-{
-    auto builder = change_set_builder(change_granularity::property);
-
-    for (auto const* const o : chain)
-        for (auto const a : o->assignments())
-            builder.add(a.path);
-
-    return cc::move(builder).build();
-}
-
 /// Whether the report already carries a document-scoped diagnostic for this type.
 [[nodiscard]] bool already_reported_unsupported(parse_report const& report, component_type_id type)
 {
@@ -148,6 +89,49 @@ void sort_summary(change_summary& out)
 }
 } // namespace
 
+vdoc::impl::chain_walk vdoc::impl::walk_chain(op_graph const& graph, op_id const& from, op_id const& to, isize max_ops)
+{
+    auto out = chain_walk();
+    if (to == from)
+    {
+        out.found = graph.contains(from);
+        return out;
+    }
+
+    auto at = to;
+    for (isize step = 0; step < max_ops; ++step)
+    {
+        auto const* const o = graph.find(at);
+
+        // A skeleton's assignments are gone rather than empty, so a chain through one is not a delta anyone can read.
+        if (o == nullptr || o->is_skeleton() || o->parents.size() != 1)
+            return {};
+
+        out.ops.push_back(o);
+        at = o->parents[0];
+
+        if (at == from)
+        {
+            out.found = true;
+            return out;
+        }
+    }
+
+    // Every step was the right shape, so what ran out was the bound and not the history.
+    return {.reason = apply_fallback_reason::chain_too_long};
+}
+
+vdoc::change_set vdoc::impl::change_set_of(cc::span<op const* const> chain)
+{
+    auto builder = change_set_builder(change_granularity::property);
+
+    for (auto const* const o : chain)
+        for (auto const a : o->assignments())
+            builder.add(a.path);
+
+    return cc::move(builder).build();
+}
+
 vdoc::document vdoc::apply(document&& doc,
                            op_graph const& graph,
                            op_id const& from,
@@ -162,8 +146,8 @@ vdoc::document vdoc::apply(document&& doc,
     if (stats != nullptr)
         *stats = {};
 
-    auto const chain = options.force_full_reparse ? chain_walk{.reason = apply_fallback_reason::forced}
-                                                  : walk_chain(graph, from, to, options.max_chain_ops);
+    auto const chain = options.force_full_reparse ? impl::chain_walk{.reason = apply_fallback_reason::forced}
+                                                  : impl::walk_chain(graph, from, to, options.max_chain_ops);
     if (!chain.found)
     {
         if (stats != nullptr)
@@ -174,7 +158,7 @@ vdoc::document vdoc::apply(document&& doc,
 
     // Entity granularity is what re-interpretation works at: a parse selects and constructs one entity at a time, so
     // knowing which property changed under it buys nothing here.
-    auto dirty = change_set_of(chain.ops);
+    auto dirty = impl::change_set_of(chain.ops);
     dirty.coarsen_to(change_granularity::entity);
 
     auto const touched = dirty.entities();

@@ -693,6 +693,110 @@ Worth noting the motivating case cannot hit it: a per-frame override layer is a 
 **Reopen when:** a UI has to explain why a reset-to-default did not take.
 That is the diagnostic this cannot produce, and the parallel channel above is the answer.
 
+### Layering composes per property path, and a higher layer replaces rather than merges
+
+**Decided in milestone 8.**
+
+A `layer_stack` composes several independent histories into one document, and does it on `raw_document`s rather than on typed ones.
+
+**Property granularity is the requirement, not a refinement.**
+A typed `document` holds component structs in dense columns, so the only thing a higher layer could do to a component is replace it whole.
+Then a base that animates a transform, with an override on `position` alone, would have `rotation` frozen at the edit.
+That is exactly the rebasing the feature exists for, broken.
+So the composition has to happen below the typed layer, and once it does, materializing one ordinary `document` on top costs nothing extra and keeps every downstream guarantee intact.
+
+**Replace, never merge**, per path: the winning layer's entire writer list stands.
+That makes layering the totally ordered conflict-free composition, in contrast to a DAG merge.
+It also means a conflict is always layer-local: a contested path inside the winning layer reaches `parse_policy` exactly as it would unlayered.
+
+The composition unit is the **entity**, because `impl::select_entity` takes one `raw_entity`.
+Composing at that granularity is what lets a layered parse reuse the ordinary selection and construction phases; `impl::parse_from` exists so that reuse is literal rather than a second copy.
+
+Composed entities are held **all at once** rather than one at a time, which is a lifetime requirement.
+Selection records `raw_component const*` into what it was handed and construction reads them afterwards, so a single reused buffer would dangle every entity but the last.
+
+**Reopen when:** arbitrary layer reordering is wanted.
+Nothing here forecloses it — it would mark the stack fully dirty exactly as muting does — but no case has asked for it.
+
+### A layer stack pulls every delta rather than being handed one
+
+**Decided in milestone 8**, and it replaced a design that had been agreed the other way round.
+
+The stack holds each graph layer's head, and `set_head` is the only way to move one.
+A `direct_layer` bumps its own version from inside its mutators.
+So `apply` derives every layer's delta itself.
+
+The alternative, drafted first, was a `layered_change` carrying per-layer op movements.
+`apply` would validate those against the version the composed document was built at, reporting a mismatch rather than asserting it, since `CC_ASSERT` is compiled out in `release-*`.
+
+Pull is better on the same axis that motivated the validation: **a stale or forgotten change set is not expressible**, rather than caught.
+It also deletes the annotation types, the per-layer version comparison, and a fallback reason.
+What it costs is that the stack consumes a direct layer's accumulated dirty set, so such a layer belongs to exactly one stack — recorded in its header.
+
+The one thing push offered that pull would have lost is a producer handing in a dirty set it already knows, skipping the byte compares.
+`direct_layer::mark_dirty` covers that without reopening the hole.
+
+What remains is `apply_fallback_reason`, because *how* a layer moved is not always derivable.
+A merge on a graph layer's chain, a chain past the bound, or a structural change each recompose in full and say so.
+
+**Reopen when:** a second stack has to observe one direct layer.
+That needs the layer to retain changes per consumer, which is the point at which push becomes the simpler shape again.
+
+### A directly written layer is attributed to a synthetic writer id, and versioned by a counter
+
+**Decided in milestone 8.**
+
+`synthetic_writer_id(name)` is `blake3("vdoc::layer/v1" ‖ name)` — domain-separated from `"vdoc::op/v1"` on the same argument that separator itself rests on, so it cannot collide with a real op id.
+It is a function of the name alone, so writer sorts and the ids inside diagnostics reproduce across runs and machines.
+It is never the all-zero id, which already means "absent parent" and "nothing chosen".
+
+One id per layer rather than per path: hashing the path too would make the ids unbounded and would make the byte-equal-writers agreement check meaningless.
+It essentially never reaches `resolve_multi_value` anyway.
+Replace-not-merge means a direct layer's writer and a graph layer's never appear in one candidate list, and a direct layer is single-writer per path by construction.
+
+**The risk is leakage, not collision.**
+A composed document contains writer ids no op has, so installing one into a `snapshot_cache` would put a fabricated op id into a file.
+That is the same class as the existing filtered-result warning, and `snapshot_cache::install` now names it.
+
+A direct layer's **version is a plain counter**, bumped by its mutators.
+A graph layer's version is an op id, which is a real content address; a counter is not, and is good for nothing but telling the stack that something moved.
+It is bumped inside the mutators rather than by the caller because "forgot to say it changed" is precisely the silent staleness the pull model exists to make unreachable.
+
+**Reopen when:** two layers need distinct provenance under one name, or a layer's contents need a content address.
+The second would mean hashing the layer, which is O(n) per frame and is what the counter exists to avoid.
+
+### Provenance is per path, and a composed component may come from several layers
+
+**Decided in milestone 8.**
+
+`layer_stack::provenance_of` takes a `property_path` and nothing coarser.
+
+Per component is not merely inconvenient, it is **not well-defined**.
+Replacement is per path, so one typed component is routinely assembled from two layers, which is the case the whole feature is built around.
+And the typed `document` holds no raw property data at all, so provenance is unrepresentable there rather than just absent.
+
+It materializes the entity per layer on demand instead of keeping every layer's document resident, because the incremental path deliberately materializes only the dirty subset.
+So it is a UI query and not something to run in a loop, which its header says.
+
+**Reopen when:** a UI wants provenance for a whole document at once.
+That wants a different shape — one pass producing a path-to-layer map — rather than this called in a loop.
+
+### `$schema_version` must agree among the layers that supply a component
+
+**Decided in milestone 8.**
+
+Every layer contributing a real property to a component and also stamping a `$schema_version` must agree with the stamp that won, or the component is dropped with a `layered_schema_version_conflict`.
+A layer that does not stamp has **no opinion**, rather than "version 0".
+
+**This is the default hazard rather than an edge case**, which is why it is enforced rather than documented.
+`op_builder::set` always stamps, so every layer written through the typed API carries a version, while the composed stamp is whichever layer won that one path.
+The failure is silent in one direction — v1-shaped data read at v2 — and total in the other, since a too-new or contested version skips the whole component.
+
+The stricter rule was rejected: requiring a layer that overrides any property to also carry the component's version would forbid overriding `transform/position` alone, which is the feature.
+
+**Reopen when:** an application legitimately wants layers at different versions of one component.
+That needs a migration at the composition boundary, which is a much larger thing than this check.
+
 ---
 
 ## Interpretation

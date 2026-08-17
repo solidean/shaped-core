@@ -44,6 +44,10 @@ One-liner per library:
   [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices and what would reopen each.
   **The edit path is incremental and realtime** — `build(graph, cache)`, `advance_snapshot`, `vdoc::apply` — so a one-entity edit is ~10 µs whatever the document's size.
   [concepts/workloads.md](libs/data/versioned-document/docs/concepts/workloads.md) names the editing shapes that buys, and the one (a fanned drag) it does not.
+  **`vdoc::layer_stack` composes several independent histories into one document**, a higher layer replacing a lower one per property path.
+  A per-frame computed base, user overrides on top, forced values above those.
+  [concepts/layering.md](libs/data/versioned-document/docs/concepts/layering.md) is the design.
+  Property granularity is the requirement rather than a refinement, which is why it composes below the typed layer.
 * **`libs/data/versioned-document-file`** — the `.vdoc` save format.
   One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
   Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).

@@ -269,6 +269,45 @@ doc = vdoc::apply(cc::move(doc), graph, previous, head, policy, report, changes,
 Sibling frames force a full re-parse each; single-parent frames stay on the fast path, and `drop_leaf` discards them on release.
 See [workloads](docs/concepts/workloads.md#at-the-typed-layer-chain-the-frames-instead-of-fanning-them).
 
+### Layering
+
+```cpp
+#include <versioned-document/layer_stack.hh>
+
+auto base = vdoc::direct_layer("base");            // no op graph; owns its bytes
+base.set(path, vdoc::value::of(1.0));              // DIFFED: identical bytes bump nothing
+base.begin_rebuild(); /* rewrite everything */ base.finish_rebuild();  // unwritten paths are dropped
+base.abstain(path);  base.mark_dirty(path);  base.clear();
+
+vdoc::layer_stack stack;
+auto const b = stack.push_direct_layer("base", base);        // bottom-first
+auto const u = stack.push_graph_layer("user", graph, head, &cache);
+stack.set_head(u, new_head);                       // the ONLY way a graph layer moves
+stack.set_muted(u, true);                          // forces a full recompose
+
+stack.rebuild(policy, report, changes);            // always correct, O(document)
+stack.apply(policy, report, changes, {}, &stats);  // O(dirty entities x layers)
+stack.composed();                                  // an ORDINARY vdoc::document
+stack.provenance_of(path);                         // -> layer_handle; a UI query, not a loop
+```
+
+**A higher layer replaces a lower one per property path**, and its whole writer list replaces the lower's.
+So overriding `transform/position` leaves `transform/rotation` coming from below — component granularity would freeze it.
+Conflicts stay layer-local: a contested path inside the winning layer reaches the policy exactly as it would unlayered.
+
+- **The stack pulls every delta.** It owns each graph layer's head and each direct layer bumps its own version, so a forgotten change set is not expressible.
+- **`apply` is O(dirty entities × layers)** — measured flat at 0.01–0.03 ms from 500 to 8,000 entities.
+  **A wholesale `begin_rebuild` is O(n) at ~100 ns per property**: 0.3 ms at 500 entities, 1.3 ms at 2,000, 6 ms at 8,000.
+  Comfortable to a couple of thousand; past that write only what moved.
+- **Nothing downstream of `composed()` knows about layering** — dense columns, `each<A,B>`, immutability, all unchanged.
+- **`$alive` composes per path and that is intended**: a higher layer revives or kills what the base did.
+  Withdraw a deletion by *abstaining* `$alive`, not by writing `true`.
+- **`$schema_version` composes per path and that is a hazard.**
+  Every layer supplying a real property *and* stamping must agree with the winning stamp, or the component is dropped with `layered_schema_version_conflict`.
+  A layer that does not stamp has no opinion — which is what an override layer should be.
+- **Never install a composed document into a `snapshot_cache`.** It is several histories at once, and a direct layer's writer ids name no op.
+- Layering is **runtime composition, not persistence** — each layer saves as an ordinary single-graph `.vdoc`.
+
 ```cpp
 doc.get<my_transform>(entity);                       // pointer, null if absent; binary search
 doc.has<my_transform>(entity);
