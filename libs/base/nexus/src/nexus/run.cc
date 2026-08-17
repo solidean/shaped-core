@@ -7,6 +7,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/catch2.hh>
@@ -105,6 +106,9 @@ void collect_invoked(nx::test_execution const& exec, std::unordered_set<void con
 
 int nx::run(int argc, char** argv)
 {
+    // Before anything else can start a thread: a test asking for nx::main_thread means THIS one.
+    cc::mark_current_thread_as_main();
+
     // Install a crash handler so a fatal fault in a test prints the offending test and a
     // stacktrace instead of a bare non-zero exit code.
     cc::install_crash_handler();
@@ -260,7 +264,11 @@ int nx::run(int argc, char** argv)
     int const failed_checks = execution.count_failed_checks();
     int const total_checks = execution.count_total_checks();
 
-    if (failed_tests > 0 || orphan_count > 0)
+    // A check that could not be attributed to any test proved nothing, so it fails the run — however green every test is.
+    // Each one was already printed where it happened; this is the summary that makes the run's exit code say so.
+    int const orphan_checks = execution.orphan_checks;
+
+    if (failed_tests > 0 || orphan_count > 0 || orphan_checks > 0)
     {
         if (failed_tests > 0)
         {
@@ -273,6 +281,13 @@ int nx::run(int argc, char** argv)
         }
         if (orphan_count > 0)
             cc::eprintln("\n{} invocable test(s) were never invoked", orphan_count);
+        if (orphan_checks > 0)
+        {
+            cc::eprintln("\nChecks outside any test:");
+            for (auto const& e : execution.orphan_errors)
+                cc::eprintln("  {} at {}:{}", e.expanded, e.location.file_name(), e.location.line());
+            cc::eprintln("\n{} check(s) ran outside any test context", orphan_checks);
+        }
         return 1;
     }
 

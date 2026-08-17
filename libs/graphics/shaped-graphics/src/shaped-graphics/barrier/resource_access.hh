@@ -147,4 +147,16 @@ constexpr pipeline_stage_flags& operator|=(pipeline_stage_flags& a, pipeline_sta
 {
     return has_any(a & (access_flags::shader_write | access_flags::copy_write | access_flags::accel_write));
 }
+
+/// Every access that only observes the resource.
+/// An op can carry both halves at once — a copy whose source and destination are the same resource does.
+inline constexpr access_flags read_accesses
+    = access_flags::uniform_read | access_flags::index_read | access_flags::vertex_read | access_flags::shader_read
+    | access_flags::copy_read | access_flags::indirect_read | access_flags::depth_read | access_flags::accel_read;
+
+/// True if `a` observes the resource at all, whatever else it does to it.
+[[nodiscard]] constexpr bool has_read_access(access_flags a)
+{
+    return has_any(a & read_accesses);
+}
 } // namespace sg

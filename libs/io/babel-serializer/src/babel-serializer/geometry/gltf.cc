@@ -1,6 +1,7 @@
 #include <babel-serializer/data/base64.hh>
 #include <babel-serializer/data/json.hh>
 #include <babel-serializer/geometry/gltf.hh>
+#include <clean-core/common/endian.hh>  // cc::load_bytes_le — GLB is little-endian, whatever the host is
 #include <clean-core/common/utility.hh> // cc::move, cc::unit, cc::memcpy
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
@@ -20,17 +21,6 @@ namespace
 constexpr u32 glb_magic = 0x46546C67;      // 'g','l','T','F' little-endian
 constexpr u32 glb_chunk_json = 0x4E4F534A; // 'J','S','O','N'
 constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
-
-/// Read a little-endian u32 at `offset`; the caller guarantees 4 readable bytes.
-/// Byte-wise on purpose: the input pin's alignment is not guaranteed, and this costs nothing after inlining.
-u32 load_le_u32(cc::span<byte const> bytes, isize offset)
-{
-    auto const b0 = u32(u8(bytes[offset + 0]));
-    auto const b1 = u32(u8(bytes[offset + 1]));
-    auto const b2 = u32(u8(bytes[offset + 2]));
-    auto const b3 = u32(u8(bytes[offset + 3]));
-    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-}
 
 // JSON member readers.
 // All of them are kind-tolerant by design: a required property is checked explicitly at its use site.
@@ -354,14 +344,14 @@ public:
         if (all.size() < 12)
             return cc::error("GLB parse error: the input is shorter than the 12-byte header");
 
-        if (load_le_u32(all, 0) != glb_magic)
+        if (cc::load_bytes_le<u32>(all, 0) != glb_magic)
             return cc::error("GLB parse error: bad magic (not a GLB)");
 
-        auto const version = load_le_u32(all, 4);
+        auto const version = cc::load_bytes_le<u32>(all, 4);
         if (version != 2)
             return cc::error(cc::format("GLB parse error: unsupported container version {}", version));
 
-        auto const declared = i64(load_le_u32(all, 8));
+        auto const declared = i64(cc::load_bytes_le<u32>(all, 8));
         if (declared < 12)
             return cc::error(cc::format("GLB parse error: declared length {} does not cover the header", declared));
         if (declared > all.size())
@@ -377,8 +367,8 @@ public:
             if (offset + 8 > declared)
                 return cc::error(cc::format("GLB parse error at offset {}: the chunk header does not fit", offset));
 
-            auto const length = i64(load_le_u32(all, offset));
-            auto const type = load_le_u32(all, offset + 4);
+            auto const length = i64(cc::load_bytes_le<u32>(all, offset));
+            auto const type = cc::load_bytes_le<u32>(all, offset + 4);
             auto const start = offset + 8;
             if (start + length > declared)
                 return cc::error(cc::format(
@@ -1166,7 +1156,7 @@ cc::result<cc::vector<u32>> data::read_indices(primitive const& p) const
 
 container detect_container(cc::span<byte const> bytes)
 {
-    if (bytes.size() >= 4 && babel::impl::load_le_u32(bytes, 0) == babel::impl::glb_magic)
+    if (bytes.size() >= 4 && cc::load_bytes_le<u32>(bytes, 0) == babel::impl::glb_magic)
         return container::glb;
     return container::gltf;
 }

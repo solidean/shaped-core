@@ -22,11 +22,11 @@ struct TreeNode
 struct Tracked
 {
     int value = 0;
-    static inline int default_ctor_count = 0;
-    static inline int copy_ctor_count = 0;
-    static inline int move_ctor_count = 0;
-    static inline int dtor_count = 0;
-    static inline std::vector<int>* destruction_order = nullptr;
+    static inline thread_local int default_ctor_count = 0;
+    static inline thread_local int copy_ctor_count = 0;
+    static inline thread_local int move_ctor_count = 0;
+    static inline thread_local int dtor_count = 0;
+    static inline thread_local std::vector<int>* destruction_order = nullptr;
 
     static void reset_counters()
     {
@@ -64,7 +64,7 @@ struct Tracked
 struct TrackedCopy
 {
     int value = 0;
-    static inline int copy_ctor_count = 0;
+    static inline thread_local int copy_ctor_count = 0;
 
     static void reset_counters() { copy_ctor_count = 0; }
 
@@ -79,7 +79,7 @@ struct TrackedCopy
 struct TrackedMove
 {
     int value = 0;
-    static inline int move_ctor_count = 0;
+    static inline thread_local int move_ctor_count = 0;
 
     static void reset_counters() { move_ctor_count = 0; }
 

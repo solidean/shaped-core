@@ -20,6 +20,13 @@ namespace nx::impl
 {
 void register_test(char const* name, config::cfg test_config, void (*fn)(), cc::source_location loc);
 
+// Registers an ASYNC_TEST body: `fn` runs the body and deposits the graph it wants awaited in the sink.
+// Declared here rather than in nexus/async-test.hh so this header names no async type at all — that header carries the macro.
+void register_async_test(char const* name,
+                         config::cfg test_config,
+                         cc::unique_function<void(async_test_sink&)> fn,
+                         cc::source_location loc);
+
 // Registers an invocable (inert) test.
 // `signature` is the decayed argument-type join key, and `fn` runs the body with args sourced from typed_value slots.
 // Non-template so test.hh stays light.

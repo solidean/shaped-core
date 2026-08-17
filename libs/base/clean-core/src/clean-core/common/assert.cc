@@ -7,6 +7,7 @@
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/atomic.hh>
 
 #include <cstdio>
 #include <cstdlib>
@@ -27,9 +28,13 @@ extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent() noexcept;
 
 namespace
 {
-// Global stack of assertion handlers
-// NOTE: This is not thread-safe and must be externally synchronized
-cc::vector<cc::unique_function<void(cc::impl::assertion_info const&)>> g_assertion_handlers;
+// Per-thread stack of assertion handlers.
+// Per-thread rather than global because a handler is scoped to a call, and calls belong to threads:
+// a global stack would expose one thread's throwing recovery handler to every other thread's asserts.
+thread_local cc::vector<cc::unique_function<void(cc::impl::assertion_info const&)>> t_assertion_handlers;
+
+// Consulted when the failing thread's stack is empty, so work on a thread nobody pushed a handler for is still covered.
+cc::atomic<cc::impl::fallback_assertion_handler_fn> g_fallback_assertion_handler = {nullptr};
 
 // Default assertion handler implementation
 void default_assert_handler(cc::impl::assertion_info const& info)
@@ -57,13 +62,28 @@ void default_assert_handler(cc::impl::assertion_info const& info)
 
 void cc::impl::push_assertion_handler(cc::unique_function<void(assertion_info const&)> handler)
 {
-    g_assertion_handlers.push_back(cc::move(handler));
+    t_assertion_handlers.push_back(cc::move(handler));
 }
 
 void cc::impl::pop_assertion_handler()
 {
-    if (!g_assertion_handlers.empty())
-        g_assertion_handlers.remove_back();
+    if (!t_assertion_handlers.empty())
+        t_assertion_handlers.remove_back();
+}
+
+cc::impl::fallback_assertion_handler_fn cc::impl::set_fallback_assertion_handler(fallback_assertion_handler_fn handler)
+{
+    return g_fallback_assertion_handler.exchange(handler, cc::memory_order_relaxed);
+}
+
+cc::impl::scoped_fallback_assertion_handler::scoped_fallback_assertion_handler(fallback_assertion_handler_fn handler)
+  : _previous(set_fallback_assertion_handler(handler))
+{
+}
+
+cc::impl::scoped_fallback_assertion_handler::~scoped_fallback_assertion_handler()
+{
+    set_fallback_assertion_handler(_previous);
 }
 
 cc::impl::scoped_assertion_handler::scoped_assertion_handler(cc::unique_function<void(assertion_info const&)> handler)
@@ -87,10 +107,14 @@ CC_COLD_FUNC void cc::impl::handle_assert_failure_sv(char const* expression,
         .location = location,
     };
 
-    // Call the topmost handler if available, otherwise use default handler
-    if (!g_assertion_handlers.empty())
+    // This thread's topmost handler wins; else the process-wide fallback; else the built-in one
+    if (!t_assertion_handlers.empty())
     {
-        g_assertion_handlers.back()(info);
+        t_assertion_handlers.back()(info);
+    }
+    else if (auto const fallback = g_fallback_assertion_handler.load(cc::memory_order_relaxed))
+    {
+        fallback(info);
     }
     else
     {

@@ -1,12 +1,11 @@
 #include "stream-test-types.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
-#include <filesystem>
-#include <string>
 #include <type_traits>
 
 using namespace cc::primitive_defines;
@@ -26,22 +25,15 @@ namespace
 // A unique writable path in the OS temp dir, removed when the guard goes out of scope.
 struct temp_file
 {
-    std::string path;
+    cc::string path;
 
-    explicit temp_file(char const* name) : path((std::filesystem::temp_directory_path() / name).string())
-    {
-        this->remove();
-    }
+    explicit temp_file(char const* name) : path(cc::temp_file_path(name, ".tmp")) { this->remove(); }
     ~temp_file() { this->remove(); }
     temp_file(temp_file const&) = delete;
     temp_file& operator=(temp_file const&) = delete;
 
-    [[nodiscard]] cc::string_view view() const { return cc::string_view(path.c_str()); }
-    void remove() const
-    {
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
-    }
+    [[nodiscard]] cc::string_view view() const { return path; }
+    void remove() const { (void)cc::remove_file(path); }
 };
 
 cc::vector<byte> make_pattern(isize n)
@@ -87,7 +79,7 @@ cc::vector<byte> read_whole(cc::string_view path)
 
 TEST("file_stream - write then read round-trip across many buffers")
 {
-    temp_file tf("cc-stream-roundtrip.tmp");
+    temp_file tf("cc-stream-roundtrip");
     auto const pattern = make_pattern(10000); // > 2 * 4 KiB buffer
 
     write_file(tf.view(), pattern);
@@ -110,7 +102,7 @@ TEST("file_stream - write then read round-trip across many buffers")
 
 TEST("file_stream - write buffer exactly full")
 {
-    temp_file tf("cc-stream-exact.tmp");
+    temp_file tf("cc-stream-exact");
     auto const pattern = make_pattern(cc::file_write_stream_adapter::k_buffer_size); // exactly one buffer
 
     write_file(tf.view(), pattern);
@@ -127,7 +119,7 @@ TEST("file_stream - write buffer exactly full")
 
 TEST("file_stream - zero-byte file is immediately at end")
 {
-    temp_file tf("cc-stream-empty.tmp");
+    temp_file tf("cc-stream-empty");
     write_file(tf.view(), cc::span<byte const>());
 
     auto rpr = cc::file_read_stream_adapter::open(tf.view());
@@ -143,7 +135,7 @@ TEST("file_stream - zero-byte file is immediately at end")
 
 TEST("file_stream - partial consume then refill preserves the leftover")
 {
-    temp_file tf("cc-stream-leftover.tmp");
+    temp_file tf("cc-stream-leftover");
     auto const pattern = make_pattern(6000);
     write_file(tf.view(), pattern);
 
@@ -165,7 +157,7 @@ TEST("file_stream - partial consume then refill preserves the leftover")
 
 TEST("file_stream - seek past end reads as end-of-file")
 {
-    temp_file tf("cc-stream-seek.tmp");
+    temp_file tf("cc-stream-seek");
     auto const pattern = make_pattern(100);
     write_file(tf.view(), pattern);
 
@@ -188,7 +180,7 @@ TEST("file_stream - seek past end reads as end-of-file")
 
 TEST("file_stream - size reflects buffered-but-unflushed writes")
 {
-    temp_file tf("cc-stream-size.tmp");
+    temp_file tf("cc-stream-size");
 
     auto wpr = cc::file_write_stream_adapter::create(tf.view());
     REQUIRE(wpr.has_value());
@@ -203,7 +195,7 @@ TEST("file_stream - size reflects buffered-but-unflushed writes")
 
 TEST("file_stream - write open overwrites without truncating")
 {
-    temp_file tf("cc-stream-open-overwrite.tmp");
+    temp_file tf("cc-stream-open-overwrite");
     auto const original = make_bytes(100, 0);
     write_file(tf.view(), original);
 
@@ -225,7 +217,7 @@ TEST("file_stream - write open overwrites without truncating")
 
 TEST("file_stream - write append grows an existing file")
 {
-    temp_file tf("cc-stream-append.tmp");
+    temp_file tf("cc-stream-append");
     auto const original = make_bytes(50, 0);
     write_file(tf.view(), original);
 
@@ -246,7 +238,7 @@ TEST("file_stream - write append grows an existing file")
 
 TEST("file_stream - read_write can read the whole file")
 {
-    temp_file tf("cc-stream-rw-read.tmp");
+    temp_file tf("cc-stream-rw-read");
     auto const original = make_bytes(300, 0); // spans multiple buffers
     write_file(tf.view(), original);
 
@@ -261,7 +253,7 @@ TEST("file_stream - read_write can read the whole file")
 
 TEST("file_stream - read_write overwrites in place")
 {
-    temp_file tf("cc-stream-rw-overwrite.tmp");
+    temp_file tf("cc-stream-rw-overwrite");
     auto const original = make_bytes(200, 0);
     write_file(tf.view(), original);
 
@@ -286,7 +278,7 @@ TEST("file_stream - read_write overwrites in place")
 
 TEST("file_stream - read_write grows while writing past the end")
 {
-    temp_file tf("cc-stream-rw-grow.tmp");
+    temp_file tf("cc-stream-rw-grow");
     auto const original = make_bytes(100, 0);
     write_file(tf.view(), original);
 
@@ -310,7 +302,7 @@ TEST("file_stream - read_write appends at EOF via seek-to-end then write")
 {
     // the fresh-append case: seek to EOF, with the window empty for reads, then write with nothing buffered.
     // the separate write-capacity end makes free_bytes() non-empty at EOF, so the append just works.
-    temp_file tf("cc-stream-rw-append.tmp");
+    temp_file tf("cc-stream-rw-append");
     auto const original = make_bytes(40, 0);
     write_file(tf.view(), original);
 

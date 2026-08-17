@@ -33,7 +33,7 @@ sg::compiled_shader const& await(sg::async_compiled_shader const& shader)
 }
 } // namespace
 
-TEST("slib - dxc compiler advertises the hlsl -> dxil edge")
+TEST("slib - dxc compiler advertises the hlsl -> dxil edge", exclusive("slib-shader-library"))
 {
     auto compiler = slib::create_dxc_compiler();
     REQUIRE(compiler.has_value());
@@ -42,7 +42,7 @@ TEST("slib - dxc compiler advertises the hlsl -> dxil edge")
     CHECK(compiler.value()->target_format() == sg::shader_format::dxil);
 }
 
-TEST("slib - dxc compiles the generated package's compute shader")
+TEST("slib - dxc compiles the generated package's compute shader", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     auto compiler = slib::create_dxc_compiler();
@@ -69,7 +69,7 @@ TEST("slib - dxc compiles the generated package's compute shader")
     CHECK(shader.bindings[0].name == "gOutput");
 }
 
-TEST("slib - dxc compiles both entry points of one file")
+TEST("slib - dxc compiles both entry points of one file", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     auto compiler = slib::create_dxc_compiler();
@@ -88,7 +88,7 @@ TEST("slib - dxc compiles both entry points of one file")
     CHECK(ps.bytecode.size() > 0);
 }
 
-TEST("slib - dxc reports a broken shader on the async channel")
+TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-shader-library"))
 {
     slib::shader_asset_handle broken;
     slib::shader_definition definitions[] = {
@@ -111,7 +111,7 @@ TEST("slib - dxc reports a broken shader on the async channel")
     CHECK(shader->has_error());
 }
 
-TEST("slib - dxc hot-reloads a real shader")
+TEST("slib - dxc hot-reloads a real shader", exclusive("slib-shader-library"))
 {
     // The whole stack against the real compiler: an edit, a scan, a recompile, a new shader.
     // Unthreaded and in memory, so it is deterministic rather than a sleep-and-hope.

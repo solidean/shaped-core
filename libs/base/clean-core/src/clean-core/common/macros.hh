@@ -85,7 +85,8 @@
 #if __has_feature(cxx_rtti)
 #define CC_HAS_RTTI
 #endif
-#if __EXCEPTIONS && __has_feature(cxx_exceptions)
+// __has_feature alone: __EXCEPTIONS is GNU-mode only, so pairing the two left this undefined under clang-cl, where exceptions are in fact on.
+#if __has_feature(cxx_exceptions)
 #define CC_HAS_CPP_EXCEPTIONS
 #endif
 #elif defined(CC_COMPILER_GCC)

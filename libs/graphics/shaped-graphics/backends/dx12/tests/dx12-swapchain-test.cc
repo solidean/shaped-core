@@ -74,9 +74,9 @@ struct test_window
 };
 } // namespace
 
-TEST("sg dx12 - swapchain create, describe, and present on a hidden window")
+INVOCABLE_TEST("sg dx12 - swapchain create, describe, and present on a hidden window",
+               (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     test_window win(256, 256);
@@ -124,9 +124,8 @@ TEST("sg dx12 - swapchain create, describe, and present on a hidden window")
     ctx->advance_epoch_and_wait_for_idle();
 }
 
-TEST("sg dx12 - swapchain auto-resizes to its window")
+INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx = dx12::acquire_warp_context();
     REQUIRE(ctx != nullptr);
 
     test_window win(200, 150);

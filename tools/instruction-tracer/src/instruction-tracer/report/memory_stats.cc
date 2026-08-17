@@ -1,12 +1,12 @@
 #include "memory_stats.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <instruction-tracer/report/trace_stats.hh> // strip_template_args
 
-#include <algorithm> // std::sort: rank the table by traffic, with a name tie-break
 
 namespace itrace
 {
@@ -130,13 +130,13 @@ memory_stats_summary collect_memory_stats(cc::span<trace const> traces, memory_v
         summary.rows[i].cachelines = u32(row_lines[i].size());
     summary.total.cachelines = u32(total_lines.size());
 
-    std::sort(summary.rows.begin(), summary.rows.end(),
-              [](memory_symbol_stats const& a, memory_symbol_stats const& b)
-              {
-                  if (a.accesses != b.accesses)
-                      return a.accesses > b.accesses;
-                  return a.symbol.compare(b.symbol) < 0;
-              });
+    cc::sort(summary.rows,
+             [](memory_symbol_stats const& a, memory_symbol_stats const& b)
+             {
+                 if (a.accesses != b.accesses)
+                     return a.accesses > b.accesses;
+                 return a.symbol.compare(b.symbol) < 0;
+             });
 
     return summary;
 }

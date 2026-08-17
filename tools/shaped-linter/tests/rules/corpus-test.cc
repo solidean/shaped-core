@@ -1,5 +1,6 @@
 #include "lint_corpus.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh> // cc::min, cc::move
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -9,7 +10,6 @@
 #include <shaped-linter/config/lint_config.hh>
 #include <shaped-linter/rules/engine.hh>
 
-#include <algorithm> // std::sort
 #include <filesystem>
 
 // The data-driven half of rule testing: every markdown file under rules/ becomes one invocation, addressable by its relative path.
@@ -47,17 +47,17 @@ cc::vector<corpus_file> corpus_files()
         out.push_back({.path = cc::string(e.path().string().c_str()), .relative_path = cc::string(rel.c_str())});
     }
 
-    std::sort(out.begin(), out.end(),
-              [](corpus_file const& a, corpus_file const& b)
-              {
-                  auto const x = cc::string_view(a.relative_path);
-                  auto const y = cc::string_view(b.relative_path);
-                  auto const n = cc::min(x.size(), y.size());
-                  for (auto i = isize(0); i < n; ++i)
-                      if (x[i] != y[i])
-                          return x[i] < y[i];
-                  return x.size() < y.size();
-              });
+    cc::sort(out,
+             [](corpus_file const& a, corpus_file const& b)
+             {
+                 auto const x = cc::string_view(a.relative_path);
+                 auto const y = cc::string_view(b.relative_path);
+                 auto const n = cc::min(x.size(), y.size());
+                 for (auto i = isize(0); i < n; ++i)
+                     if (x[i] != y[i])
+                         return x[i] < y[i];
+                 return x.size() < y.size();
+             });
     return out;
 }
 
@@ -99,15 +99,15 @@ cc::string render_fix_set(cc::span<cc::string_view const> texts)
     for (auto const& t : texts)
         if (!has(sorted, t))
             sorted.push_back(t);
-    std::sort(sorted.begin(), sorted.end(),
-              [](cc::string_view a, cc::string_view b)
-              {
-                  auto const n = cc::min(a.size(), b.size());
-                  for (auto i = isize(0); i < n; ++i)
-                      if (a[i] != b[i])
-                          return a[i] < b[i];
-                  return a.size() < b.size();
-              });
+    cc::sort(sorted,
+             [](cc::string_view a, cc::string_view b)
+             {
+                 auto const n = cc::min(a.size(), b.size());
+                 for (auto i = isize(0); i < n; ++i)
+                     if (a[i] != b[i])
+                         return a[i] < b[i];
+                 return a.size() < b.size();
+             });
 
     auto out = cc::string();
     for (auto const& t : sorted)

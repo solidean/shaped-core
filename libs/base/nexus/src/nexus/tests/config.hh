@@ -5,6 +5,7 @@
 namespace nx::config
 {
 struct cfg;
+enum class scheduler_mode;
 } // namespace nx::config
 
 // Which selection bucket a test belongs to; a test lives in exactly one.
@@ -18,11 +19,39 @@ enum class nx::config::test_bucket
     guide_benchmark,
 };
 
+// How a test's body is driven.
+// Tests sharing a mode form one graph and run as one phase; the phases run one after another, because schedulers do not nest.
+// Orthogonal to buckets and to exclusion: it says *where* a test runs, not *whether* or *alongside what*.
+enum class nx::config::scheduler_mode
+{
+    shared,   // the run's own scheduler, bounded by --jobs
+    own_pool, // a private pool of `scheduler_threads` workers, shared by every test asking for that same count
+    none,     // no scheduler bound at all, bodies driven directly on the calling thread, in schedule order
+};
+
+namespace nx::config
+{
+// The most exclusion tags one test may carry.
+// A raw array of literals rather than a container: cfg stays trivially copyable, and config.hh stays the light header every test TU includes.
+inline constexpr int max_exclusion_tags = 4;
+} // namespace nx::config
+
 struct nx::config::cfg
 {
     bool enabled = true;
     test_bucket bucket = test_bucket::normal;
     int seed = 0;
+
+    scheduler_mode scheduler = scheduler_mode::shared;
+    int scheduler_threads = 0; // only read for scheduler_mode::own_pool
+
+    bool main_thread = false; // the body must run on the process main thread; orthogonal to `scheduler`
+
+    // Tags whose holders must never run at the same time, compared by content.
+    // `exclusion_tag_count` counts what was ASKED for, so it may exceed the array and execute_tests reports the overflow rather than dropping it silently.
+    char const* exclusion_tags[max_exclusion_tags] = {};
+    int exclusion_tag_count = 0;
+    bool exclusive_global = false; // excludes every other test, not just fellow tag holders
 };
 
 namespace nx::config
@@ -50,6 +79,62 @@ constexpr struct
 {
     void apply(cfg& result) const { result.bucket = test_bucket::guide_benchmark; }
 } guide_benchmark;
+
+// No two tests holding `tag` run at the same time; with no tag, this test runs alone, concurrent with nothing.
+// Expressed as an ordering edge between test nodes rather than a lock, so it is deadlock-free by construction and reproducible: holders run in schedule order.
+// Repeat it to hold several tags — a test then waits for the last holder of each.
+constexpr auto exclusive(char const* tag = nullptr)
+{
+    struct excluder
+    {
+        char const* tag;
+        void apply(cfg& result) const
+        {
+            if (tag == nullptr)
+            {
+                result.exclusive_global = true;
+                return;
+            }
+            if (result.exclusion_tag_count < max_exclusion_tags)
+                result.exclusion_tags[result.exclusion_tag_count] = tag;
+            ++result.exclusion_tag_count; // counted even when it does not fit, so the overflow is reportable
+        }
+    };
+    return excluder{tag};
+}
+
+// Run this test with NO scheduler bound: its body is driven directly, in schedule order, alongside the other tests asking for the same.
+// Required by a test that stands up its own cc scheduler, or that nests an nx::execute_tests run — neither may sit under the run's own.
+// Not the way to ask for the main thread: nx::main_thread says that, and says the thing that gets checked.
+constexpr struct
+{
+    void apply(cfg& result) const { result.scheduler = scheduler_mode::none; }
+} no_scheduler;
+
+// Run this test's body on the process MAIN thread — the one nx::run was entered on.
+// For a test whose subject asserts on it: sr::window_system does, because SDL does.
+// Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound.
+// own_pool and ASYNC_TEST cannot be combined with it and assert, because either could only be honoured by ignoring one of the two asks.
+constexpr struct
+{
+    void apply(cfg& result) const { result.main_thread = true; }
+} main_thread;
+
+// Run this test on a private pool of `n` workers, shared with every other test asking for the same count.
+// For a test whose own concurrency shape is the thing under test; the default (the run's scheduler) is otherwise the right answer.
+constexpr auto own_pool(int n)
+{
+    struct pooler
+    {
+        int n;
+        void apply(cfg& result) const
+        {
+            result.scheduler = scheduler_mode::own_pool;
+            result.scheduler_threads = n;
+        }
+    };
+    return pooler{n};
+}
 
 constexpr auto seed(int value)
 {

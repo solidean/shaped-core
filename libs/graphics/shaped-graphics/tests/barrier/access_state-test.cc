@@ -42,6 +42,21 @@ TEST("sg access_state - first write is a freebie")
     CHECK(s.has_inflight_writes());
 }
 
+TEST("sg access_state - a first access that both reads and writes is spelled out")
+{
+    // A copy whose source and destination are the same buffer.
+    // The freebie above rests on the backend inferring the access at first use, and it can only infer one:
+    // D3D12 promotes the buffer to COPY_DEST and then rejects the source read.
+    sg::resource_access_state s;
+    s.declare(copy, copy_read | copy_write);
+
+    auto const b = s.flush();
+    REQUIRE(b.needed);
+    CHECK(sg::has_all(b.dst_access, copy_read | copy_write));
+    CHECK(sg::has_all(b.dst_stages, copy));
+    CHECK(!sg::has_any(b.src_access)); // nothing was in flight, so there is nothing to wait for
+}
+
 TEST("sg access_state - read after write emits a RAW barrier")
 {
     sg::resource_access_state s;

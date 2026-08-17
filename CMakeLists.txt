@@ -112,6 +112,13 @@ add_subdirectory(libs/base/typed-geometry)
 # io stack: serialization / format codecs (babel-serializer), layered on base.
 add_subdirectory(libs/io/babel-serializer)
 
+# data stack: versioned-document (vdoc) -> versioned-document-file, plus blob-cache (bcache) beside them.
+# Added in dependency order, and after babel-serializer because both persist through babel::sqlite.
+# The model library itself depends on clean-core alone, so an in-memory document never links a database engine.
+add_subdirectory(libs/data/versioned-document)
+add_subdirectory(libs/data/versioned-document-file)
+add_subdirectory(libs/data/blob-cache)
+
 # graphics stack: shaped-graphics (sg) -> shaped-rendering (sr) -> shaped-viewer (sv).
 # Added in dependency order; sg pulls in its per-backend static libraries itself.
 add_subdirectory(libs/graphics/shaped-graphics)

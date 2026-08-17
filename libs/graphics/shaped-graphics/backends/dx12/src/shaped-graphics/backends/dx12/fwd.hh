@@ -19,6 +19,8 @@ struct dx12_pending_copy;
 struct dx12_texture_upload;
 struct dx12_texture_download;
 
+enum class dx12_message_severity : u8; // how bad a debug-layer message is (see dx12_context.hh)
+
 enum class cpu_descriptor_slot : int;  // a slot in a CPU descriptor heap (see dx12_cpu_descriptor_heap.hh)
 enum class dx12_query_heap_type : u32; // which query heap a query lives in (see dx12_query.hh)
 enum class layout_combine;             // how two texture layouts merge (see dx12_texture_access.hh)
@@ -49,6 +51,10 @@ namespace sg::backend::dx12
 {
 
 class dx12_context;
+/// A backend-typed context handle: an sg::context_handle known to point at a dx12_context.
+/// create_dx12_context hands back the abstract sg::context_handle, since that is what a caller drives; this is for code already committed to dx12 — the backend's own tests above all.
+using dx12_context_handle = std::shared_ptr<dx12_context>;
+
 class dx12_command_list;
 class dx12_command_allocator_pool;
 class dx12_buffer;

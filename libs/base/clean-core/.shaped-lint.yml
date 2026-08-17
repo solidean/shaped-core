@@ -129,7 +129,14 @@ rules:
   - kind: allow-include
     value: <cerrno>
     reason: errno is how the POSIX file API reports failure
-    files: src/clean-core/streams/impl/native_file.cc
+    files:
+      - src/clean-core/streams/impl/native_file.cc
+      - src/clean-core/platform/file_path.cc
+
+  - kind: allow-include
+    value: [<cstdio>, <cstdlib>]
+    reason: std::remove deletes a file and std::getenv names the temp directory; POSIX offers no other route to either
+    files: src/clean-core/platform/file_path.cc
 
   - kind: allow-include
     value: <iostream>
@@ -167,6 +174,7 @@ rules:
       - src/clean-core/common/assert.cc
       - src/clean-core/platform/console.cc
       - src/clean-core/streams/impl/native_file.cc
+      - src/clean-core/platform/file_path.cc
 
   - kind: allow-include
     value: <fcntl.h>
@@ -188,6 +196,11 @@ rules:
     files:
       - src/clean-core/common/hash.cc
       - src/clean-core/common/hash128.cc
+
+  - kind: allow-include
+    value: <blake3.h>
+    reason: the cryptographic hash cc::blake3 / cc::hash256 forward to
+    files: src/clean-core/common/blake3.cc
 
   - kind: allow-include
     value: <mimalloc.h>
@@ -228,6 +241,11 @@ rules:
     files: tests/thread/threaded_actor-test.cc
 
   - kind: allow-include
-    value: [<cstdio>, <cstdlib>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>]
+    value: [<cstdio>, <cstdlib>, <cstdint>, <unistd.h>, <intrin.h>, <xxhash.h>, <blake3.h>]
     reason: the C runtime and the intrinsics the benchmarks and platform tests measure against
     files: tests/**
+
+  - kind: allow-include
+    value: <algorithm>
+    reason: std::sort is the baseline cc::sort is measured against, which is the whole point of this file
+    files: tests/benchmarks/sort-benchmark.cc

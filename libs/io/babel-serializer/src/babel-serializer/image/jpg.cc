@@ -1,5 +1,6 @@
 #include <babel-serializer/image/impl/stb_backend.hh>
 #include <babel-serializer/image/jpg.hh>
+#include <clean-core/common/endian.hh> // cc::load_bytes_be — JPEG's marker segments are big-endian
 
 namespace babel::jpg
 {
@@ -14,9 +15,10 @@ struct header_scan
     cc::optional<density> jfif_density;
 };
 
+/// A JPEG segment length or density field, which the format stores big-endian.
 int read_be_u16(cc::span<byte const> bytes, isize offset)
 {
-    return (int(u8(bytes[offset])) << 8) | int(u8(bytes[offset + 1]));
+    return int(cc::load_bytes_be<u16>(bytes, offset));
 }
 
 density_unit density_unit_from_byte(int v)

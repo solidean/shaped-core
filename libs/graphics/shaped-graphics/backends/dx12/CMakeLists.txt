@@ -113,6 +113,7 @@ target_compile_options(shaped-graphics-dx12
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-dx12-test
         tests/main.cc
+        tests/dx12-entry.cc
         tests/dx12-context-test.cc
         tests/dx12-epoch-test.cc
         tests/dx12-command-pool-test.cc

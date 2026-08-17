@@ -34,7 +34,7 @@ nx::test_schedule_execution run_failing(F&& body)
 }
 } // namespace
 
-TEST("check render - a comparison keeps its operands and appends every annotation")
+TEST("check render - a comparison keeps its operands and appends every annotation", no_scheduler)
 {
     auto const exec = run_failing(
         []
@@ -58,7 +58,7 @@ TEST("check render - a comparison keeps its operands and appends every annotatio
     CHECK(err.extra_lines[0] == "during parse phase");
 }
 
-TEST("check render - a bare boolean appends its annotations too")
+TEST("check render - a bare boolean appends its annotations too", no_scheduler)
 {
     auto const exec = run_failing(
         []
@@ -72,7 +72,7 @@ TEST("check render - a bare boolean appends its annotations too")
     CHECK(err.expanded.contains("flag must be set after init"));
 }
 
-TEST("check render - a user context does not shadow the throws diagnostic")
+TEST("check render - a user context does not shadow the throws diagnostic", no_scheduler)
 {
     auto const exec = run_failing([] { CHECK_THROWS([] {}()).context("parsing an empty document"); });
 
@@ -81,7 +81,7 @@ TEST("check render - a user context does not shadow the throws diagnostic")
     CHECK(err.expanded.contains("parsing an empty document"));
 }
 
-TEST("check render - a user context does not shadow the throws_as diagnostic")
+TEST("check render - a user context does not shadow the throws_as diagnostic", no_scheduler)
 {
     auto const exec = run_failing(
         []
@@ -96,7 +96,7 @@ TEST("check render - a user context does not shadow the throws_as diagnostic")
 }
 
 #if CC_ASSERT_ENABLED
-TEST("check render - a user context does not shadow the asserts diagnostic")
+TEST("check render - a user context does not shadow the asserts diagnostic", no_scheduler)
 {
     auto const exec = run_failing([] { CHECK_ASSERTS([] {}()).context("the guard should have fired"); });
 
@@ -106,7 +106,7 @@ TEST("check render - a user context does not shadow the asserts diagnostic")
 }
 #endif
 
-TEST("check render - a passing check records nothing")
+TEST("check render - a passing check records nothing", no_scheduler)
 {
     nx::test_registry reg;
     reg.add_declaration("subject", {}, [] { CHECK(1 == 1).context("never shown").note("nor this"); });
@@ -118,7 +118,7 @@ TEST("check render - a passing check records nothing")
     CHECK(exec.executions[0].root.errors.size() == 0);
 }
 
-TEST("check render - annotations reach the junit report")
+TEST("check render - annotations reach the junit report", no_scheduler)
 {
     // The results XML is the only channel from a failing check to `dev.py test` / test_diag, so an
     // annotation that renders but does not export is still invisible where it matters.

@@ -57,6 +57,9 @@ void dx12_context::shutdown()
     _submission_fence.Reset();
     _epoch_fence.Reset();
 
+    // Last thing before the device goes: after this no debug-layer message can reach a context that is on its way out.
+    unregister_message_callback();
+
     // Release the device-level COM objects.
     _queue.Reset();
     _device.Reset();

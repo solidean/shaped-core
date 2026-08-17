@@ -1,4 +1,6 @@
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 
 #if CC_HAS_THREADS
@@ -15,6 +17,35 @@ int cc::num_hardware_threads()
     return 1;
 }
 #endif
+
+namespace
+{
+// A counter rather than GetCurrentThreadId / pthread_self: one portable branch, distinct by construction, and equality is all any caller wants.
+// Starts past thread_id::main, which is reserved for whoever claims it.
+cc::atomic<cc::u64> g_next_thread_id = {cc::u64(cc::thread_id::main) + 1};
+
+// Relaxed throughout: the counter hands out identities and publishes nothing else.
+thread_local cc::thread_id tl_thread_id = cc::thread_id::invalid;
+
+cc::atomic<bool> g_main_claimed = {false};
+} // namespace
+
+cc::thread_id cc::current_thread_id()
+{
+    if (tl_thread_id == thread_id::invalid)
+        tl_thread_id = thread_id(g_next_thread_id.fetch_add(1, cc::memory_order_relaxed));
+    return tl_thread_id;
+}
+
+void cc::mark_current_thread_as_main()
+{
+    CC_ASSERT(tl_thread_id == thread_id::invalid || tl_thread_id == thread_id::main,
+              "this thread was already handed an id; mark_current_thread_as_main must come before anything asks for "
+              "cc::current_thread_id()");
+    CC_ASSERT(!g_main_claimed.exchange(true, cc::memory_order_relaxed) || tl_thread_id == thread_id::main,
+              "another thread already claimed cc::thread_id::main");
+    tl_thread_id = thread_id::main;
+}
 
 #if CC_HAS_THREADS
 

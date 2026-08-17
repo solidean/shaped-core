@@ -1,0 +1,21 @@
+# versioned-document's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# This library depends on clean-core alone, so an entry covering src/ names a clean-core gap rather than a dependency —
+# and it is worth keeping the list short enough that each one still reads as an argument.
+# There is exactly one today, and it is the binary heap.
+
+rules:
+  - kind: allow-include
+    value: <algorithm>
+    reason: the materialize sweep pops its Kahn ready set as a binary heap, so that the topological order is reproducible — make_heap / push_heap / pop_heap are the named clean-core gap, and every sort in the file is cc::sort.
+    files:
+      - src/versioned-document/op_graph.cc
+
+  - kind: allow-include
+    value: <cstdio>
+    reason: a guide benchmark prints a fixed-width table a human reads next to its write-up, which cc::format does not lay out — the same reason clean-core's benchmarks reach for it, and it never leaves tests/benchmarks/.
+    files:
+      - tests/benchmarks/**

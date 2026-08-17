@@ -38,7 +38,24 @@ allowed-tools: Bash Read
    Add `Assisted-By: Claude Code <model-id>` for largely Claude-generated commits, using the exact model id.
    Not `Co-Authored-By`, and skip the trailer entirely for human-written or trivial agent edits.
 
-4. **Push and open the PR.**
+4. **Merge `origin/main` into the branch, and prove the result green.**
+   This is part of opening a PR, not a follow-up someone else does.
+   A branch that is behind has not been tested against what it will actually merge into, so a green run on the old base says nothing.
+
+   ```bash
+   git rev-list --left-right --count origin/main...HEAD   # behind / ahead
+   git merge origin/main
+   ```
+
+   **Resolve the conflicts yourself.** Read both sides and work out which one supersedes the other, or how they combine — that is ordinary work, and the merge is yours to finish.
+   Escalate only where the resolution genuinely needs the author's input: two deliberate designs in conflict, or a semantic choice you cannot settle from the code.
+   When you do escalate, **the PR is deferred until it is resolved** — never open one over an unfinished merge and leave the conflict for the reviewer.
+
+   Then **`uv run dev.py check --fix`**, and it must pass before anything is pushed.
+   A conflict that resolves cleanly at the text level can still fail to compile, and a merge is exactly where that happens.
+   Re-run it after any further edit the merge required.
+
+5. **Push and open the PR.**
    ```bash
    git push -u origin u/pt/<feature>
    gh pr create --base main --head u/pt/<feature> --title "<title>" --body "$(cat <<'EOF'

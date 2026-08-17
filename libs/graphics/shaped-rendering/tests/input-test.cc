@@ -9,7 +9,8 @@
 // character rule — because reaching it means injecting real SDL events, and SDL lives in exactly one file
 // (../docs/coding-guidelines.md). See ../docs/TODO.md.
 
-TEST("sr - key modifiers combine and test as a bit set")
+// nx::main_thread here because sr::window_system must be created on the process main thread; see window-test.cc.
+TEST("sr - key modifiers combine and test as a bit set", main_thread)
 {
     auto const none = sr::key_modifiers::none;
     auto const ctrl = sr::key_modifiers::ctrl;
@@ -33,7 +34,7 @@ TEST("sr - key modifiers combine and test as a bit set")
     CHECK(accumulated == (ctrl | shift));
 }
 
-TEST("sr - window system creation reports whether a backend exists")
+TEST("sr - window system creation reports whether a backend exists", main_thread)
 {
     // The API is here either way; only the answer changes.
     // A caller writes this once and it compiles in both builds, which is the point of not gating the types on SR_HAS_WINDOW.
@@ -48,7 +49,7 @@ TEST("sr - window system creation reports whether a backend exists")
 
 #if SR_HAS_WINDOW
 
-TEST("sr - a fresh window system has no events")
+TEST("sr - a fresh window system has no events", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     CHECK(wsys->events().empty());
@@ -58,7 +59,7 @@ TEST("sr - a fresh window system has no events")
     CHECK(wsys->events().empty());
 }
 
-TEST("sr - text input is off until asked for")
+TEST("sr - text input is off until asked for", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "text"});
@@ -73,7 +74,7 @@ TEST("sr - text input is off until asked for")
     CHECK(!win->is_text_input_active());
 }
 
-TEST("sr - relative mouse mode round-trips")
+TEST("sr - relative mouse mode round-trips", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "capture"});

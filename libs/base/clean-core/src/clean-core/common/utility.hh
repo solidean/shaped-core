@@ -142,6 +142,9 @@ struct cc::default_equal
     }
 };
 
+// cc::default_less / cc::default_greater and the rest of the comparator vocabulary live in common/compare.hh,
+// which this header deliberately does not include — only the ordering algorithms need them.
+
 namespace cc
 {
 

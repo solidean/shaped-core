@@ -51,6 +51,20 @@ Findings we want to keep, but that are not a guide to anything.
   [cheat-sheet](../libs/base/typed-geometry/cheat-sheet.md) and [docs hub](../libs/base/typed-geometry/docs/_index.md).
 - [babel-serializer](../libs/io/babel-serializer/readme.md) — the `babel` format readers and writers.
   [cheat-sheet](../libs/io/babel-serializer/cheat-sheet.md) and [docs hub](../libs/io/babel-serializer/docs/_index.md).
+- **data family** — versioned-document
+  ([readme](../libs/data/versioned-document/readme.md) ·
+  [cheat-sheet](../libs/data/versioned-document/cheat-sheet.md) ·
+  [docs](../libs/data/versioned-document/docs/_index.md)), the `vdoc` versioned document model, and versioned-document-file
+  ([readme](../libs/data/versioned-document-file/readme.md) ·
+  [cheat-sheet](../libs/data/versioned-document-file/cheat-sheet.md) ·
+  [docs](../libs/data/versioned-document-file/docs/_index.md)), the `.vdoc` save format on top of it.
+  Both are at the design stage.
+  Its [concept docs](../libs/data/versioned-document/docs/_index.md#concepts) are the design, and [format.md](../libs/data/versioned-document-file/docs/format.md) the on-disk specification.
+- **blob-cache**
+  ([readme](../libs/data/blob-cache/readme.md) ·
+  [cheat-sheet](../libs/data/blob-cache/cheat-sheet.md) ·
+  [docs](../libs/data/blob-cache/docs/_index.md)), the `bcache` persistent multi-process cache for expensive derived bytes.
+  [design.md](../libs/data/blob-cache/docs/design.md) is the reasoning behind every decision in it.
 - **graphics family** ([overview](graphics.md)) — shaped-graphics
   ([readme](../libs/graphics/shaped-graphics/readme.md) ·
   [cheat-sheet](../libs/graphics/shaped-graphics/cheat-sheet.md) ·

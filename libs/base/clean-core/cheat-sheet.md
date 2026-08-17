@@ -49,6 +49,11 @@ CC_ASSERTF(idx < n, "index {} out of range {}", idx, n);
 CC_ASSERTF_ALWAYS(cond, "fmt {}", x);
 // Enabled in debug + relwithdebinfo, stripped in release (unless CC_ENABLE_ASSERT_IN_RELEASE).
 // For invariants/pre/postconditions only — never for user input or expected errors (use result<>).
+
+#include <clean-core/common/assert-handler.hh>   // who gets called when one fires
+cc::impl::scoped_assertion_handler h(fn);        // push on THIS THREAD's stack; a throwing handler is fine, it cannot leak to another thread
+cc::impl::scoped_fallback_assertion_handler f(fn); // process-wide, consulted when the failing thread's own stack is empty
+// The fallback is a plain function pointer and fires on threads nobody scoped — worker threads — so it must not throw.
 ```
 
 ## Containers — owning (value semantics, deep copy)
@@ -300,8 +305,23 @@ sv.subview_clamped(off, len);
 sv.remove_prefix(n);  sv.remove_suffix(n);
 sv.starts_with(x);  sv.ends_with(x);  sv.contains(x);   // x = string_view or char
 sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if not found
-sv.compare(o);  sv == o;  sv < o;                       // lexicographic by byte (no locale/collation)
+sv.compare(o);  sv == o;  sv < o;                       // lexicographic by UNSIGNED byte (no locale/collation)
 sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
+
+#include <clean-core/string/interned_string.hh>  // cc::interned_string — 8-byte handle to one canonical copy
+cc::interned_string id = cc::intern("transform");  // process-wide table, created on first use, never destroyed
+id.as_string_view();  id.size();  id.empty();      // as_string_view is a load, not a lookup
+a == b;                                   // POINTER compare (canonical within a table); != too
+// NO relational operators: the two orders are not interchangeable, so the call site names the one it means
+a.compare_bytes(b);                       // -> strong_ordering by canonical BYTES; reproducible, costs a memcmp
+a.compare_identity(b);                    // -> strong_ordering by process-local identity; one pointer compare,
+                                          //    and a DIFFERENT order every run — only where nobody sees the order
+cc::interned_string::by_bytes{};  cc::interned_string::by_identity{};   // the matching sort predicates
+hash(id);                                 // precomputed; == hash(id.as_string_view())
+cc::interned_string{};                    // the empty string, == intern("") in any table
+cc::string_interner t;  t.intern(s);  t.size();    // caller-owned table, for tests that want isolation
+// Thread-safe: intern from any thread, no external locking (sharded internally; free when CC_HAS_THREADS == 0).
+// A caller-owned table must OUTLIVE every handle it handed out; the process-wide one has no such question.
 
 #include <clean-core/string/glob.hh>             // path globbing (shaped-linter configs, nexus' file filters)
 cc::glob_normalize_path(p);               // -> cc::string: '\'->'/', repeated/trailing slashes dropped, /c/x = C:\x = c:/x
@@ -439,6 +459,14 @@ cc::has_single_bit(x);  cc::bit_ceil(x);  cc::bit_floor(x);  cc::bit_width(x);
 cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
 
+#include <clean-core/common/endian.hh>            // durable formats: the byte order is the FORMAT's, never the host's
+cc::load_bytes_le<u32>(bytes, offset=0);          // -> u32; byte-wise, so buffer alignment never enters into it
+cc::load_bytes_be<f64>(bytes, offset=0);          // floats go through their bit pattern; NaN payloads and -0.0 survive
+cc::store_bytes_le<u64>(bytes, offset, v);  cc::store_bytes_be<i16>(bytes, offset, v);
+// T is an integer or float of 1/2/4/8 bytes. `bool` is REJECTED: it has no unique object representation,
+// so a stored byte other than 0 or 1 would load as a bool that is neither true nor false — store a u8 you validate.
+// offset + sizeof(T) must be in range: a CC_ASSERT, so bounds-check untrusted input BEFORE loading.
+
 #include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
 cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
 cc::add_with_carry(a, b, carry_in=0);            // -> {value, carry}; sub_with_borrow -> {value, borrow}
@@ -450,6 +478,24 @@ rng.uniform(a, b);                        // integer in [a,b] (unbiased) OR floa
 rng.uniform_bool();                       // fair coin
 rng.uniform_in(range);  rng.shuffle(range); // pick element / in-place permute (indexable range)
 rng.clone();                              // independent generator at the same stream position
+```
+
+## Timing
+
+The seam that replaces `<chrono>` — which only `time.cc` may include, being the most expensive header MSVC ships.
+Seconds as a `double` is the vocabulary; there are no `time_point` / `duration` types.
+
+```cpp
+#include <clean-core/common/time.hh>
+cc::current_time_steady_secs();            // -> double; MONOTONIC, arbitrary zero => only a DIFFERENCE means anything
+                                           //    the one to measure "how long did this take" with
+cc::current_time_wall_secs();              // -> double; seconds since the Unix epoch, comparable across processes/runs
+                                           //    the one to PERSIST (an expiry, a timestamp) — and it can step either way,
+                                           //    so a difference of two readings is not a duration
+cc::has_cycle_counter();                   // -> constexpr bool; false on ARM and WASM
+cc::current_cycles();                      // -> u64 TSC on x86, 0 where there is none; inline, for a benchmark's inner loop
+                                           //    constant-rate, so it tracks wall time rather than work done, and nothing
+                                           //    here converts it to seconds (the rate needs calibration you do yourself)
 ```
 
 ## Flags
@@ -509,6 +555,124 @@ cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold ov
 cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)
 cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const> + u64 seed (content-addr IDs)
 hash(h128);                                // hidden-friend customization point -> low limb (u64)
+
+#include <clean-core/common/hash256.hh>
+cc::hash256{.l0=..,.l1=..,.l2=..,.l3=..};  // 256-bit value, four u64 limbs; ==, <=> (lex by l0..l3, NOT byte order)
+cc::hash256::create(bytes);                // = cc::blake3::create; BLAKE3-256 of a span<byte const>
+h256.to_bytes(out32);  cc::hash256::from_bytes(in32);  // the durable 32-byte form: l0 first, each limb little-endian
+hash(h256);                                // hidden-friend customization point -> l0 (u64)
+
+#include <clean-core/common/blake3.hh>    // the CRYPTOGRAPHIC hash — for content addressing, not for maps
+cc::blake3::create(bytes);                 // -> hash256, one-shot
+cc::blake3 h;  h.update(bytes);  h.finalize();  h.reset();  // streaming: hash a sequence without concatenating it
+// finalize() is const and repeatable; update() may continue after it
+// ~8-20x slower than XXH3 depending on input size (tests/benchmarks/hash-benchmark.cc measures both)
+```
+
+## Comparators
+
+```cpp
+#include <clean-core/common/compare.hh>    // what the ordering algorithms take as `compare`
+cc::default_less{}   cc::default_greater{} // a < b / b < a; transparent, only operator< required
+cc::compare_by(p1, p2, ...);               // lexicographic: order by p1, break ties with p2, and so on
+cc::descending(p);                         // reverses just that one projection inside a compare_by
+// each projection goes through cc::invoke, so &type::member works; each is re-evaluated per comparison.
+// A comparator must be a STRICT WEAK ORDERING — the sorts assert on one that is not.
+cc::sort(entries, cc::compare_by(&entry::group, cc::descending(&entry::score), &entry::name));
+```
+
+## Sorting & selection (see [sorting](docs/sorting.md))
+
+pdqsort driven purely by index get + index swap — nothing is ever parked in a temporary, which is what lets one call permute several ranges at once.
+Takes any **indexed range** (`size()` + `operator[]`): vector, array, span, strided_span, fixed_array, or your own.
+
+```cpp
+#include <clean-core/algorithm/sort.hh>
+cc::sort(values);                          // ascending; deterministic, NOT stable; O(n log n) worst case
+cc::sort(values, cc::default_greater{});   // cc::default_less / cc::default_greater live in common/compare.hh
+cc::sort(values, [](auto& a, auto& b) { return a.score < b.score; });
+cc::sort_by(values, &entry::key);          // key fn / pointer-to-member / pointer-to-member-function
+cc::sort_descending(values);  cc::sort_by_descending(values, key);
+cc::sort_by_cached_key(values, key);       // evaluates key n times into a temp buffer (allocates); sort_by does it O(n log n) times
+
+cc::sort_multi(cmp, keys, a, b, ...);      // sorts keys, applies the SAME permutation to every other range
+cc::sort_multi_ascending(keys, a, b);  cc::sort_multi_descending(keys, a, b);   // the cmp-less spellings
+cc::sort_multi_by(key, cmp, xs, ys);       // key receives one element of EVERY range
+cc::sort_indices(order, keys);             // permutes `order`, keys untouched; ties break on the index => stable
+cc::sort_stable(values);  cc::sort_stable_by(values, key);   // equal elements keep their order.
+                                           // ALLOCATES n indices — never an element buffer, so no-parking survives
+
+cc::sort_and_dedup(values);                // -> isize new size; sorts, drops duplicates, SHRINKS the container
+                                           // (needs resize_down_to; for a view: sort + cc::dedup_sorted_ex)
+
+cc::partition_by(values, is_right);        // -> isize first index of the "right" block; O(n), not stable
+cc::partition_stable(values, is_right);    // same, order kept within each block; O(n log n) swaps, NO allocation
+                                           // (allocating alternative for big n: cc::sort_stable_by(v, is_right))
+cc::sort_at(values, idx);                  // element idx as a full sort would leave it; O(n) even worst case (+ _by)
+cc::sort_window(values, {.offset, .size}); // that whole window, sorted; O(n + size log size); may run past the end (+ _by)
+cc::sort_first(values, k);                 // the top-k spelling of sort_window({.offset = 0, .size = k})
+
+cc::is_sorted(values);  cc::is_sorted_by(values, key);              // -> bool, O(n)
+cc::is_strictly_sorted(values);  cc::is_strictly_sorted_by(v, key); // same, but no two elements may be equivalent
+```
+
+Sorting in parallel — its own header, since `sort.hh` must not pull in the async machinery:
+
+```cpp
+#include <clean-core/algorithm/sort_async.hh>
+auto const sorted = cc::sort_async(values);        // -> cc::shared_async<cc::unit>; NEVER SCHEDULED = NEVER SORTED
+auto const next = cc::make_async_lazy([&](cc::unit) { ... }, sorted);   // composing is the point, not the speedup
+cc::sort_async_ex(start, size, range, cmp, cutoff);  // seam form; `cutoff` exists so tests can drive the recursion
+// values must OUTLIVE it, not be resized, and not be read by anyone else — it permutes throughout.
+// The comparator is COPIED per task => must be a pure function. A non-strict-weak one is a data race here,
+// not just local corruption. ~6.9x on 31 workers for random i32 @4M; ~parity on already-ordered input.
+// No blocking convenience on purpose: pool.blocking_get asserts inside a worker of that same pool.
+```
+
+Rearranging by position rather than by comparison — all swap-only, so it composes with the rest:
+
+```cpp
+#include <clean-core/algorithm/permutation.hh>
+cc::reverse(values);                       // in place
+cc::rotate(values, k);                     // left by k, so values[k] ends up first; k is NORMALIZED (any value legal)
+cc::apply_permutation(values, indices);    // values[i] <- what indices[i] pointed at (a GATHER, matching sort_indices)
+                                           // CONSUMES indices, leaving it the identity — that is what buys O(n)
+cc::invert_permutation(indices);           // in place; a sort order becomes RANKS. Index type must be SIGNED.
+cc::reverse_ex(start, size, range);  cc::rotate_ex(start, size, k, range);   // seam forms
+cc::apply_permutation_ex(size, indices, range);   // + a _multi range => permute parallel arrays in step
+cc::partition_stable_ex(start, size, is_right, range);  // is_right takes an INDEX, called once per element
+```
+
+Binary search over an already-ordered range.
+`_in_sorted` is a contract marker: O(log n) against a precondition YOU must meet.
+
+```cpp
+#include <clean-core/algorithm/search.hh>
+cc::partition_point(values, pred);           // -> isize; first index where a MONOTONE pred goes false
+                                             //    precondition is "partitioned by pred", weaker than sorted => no suffix
+cc::first_at_least_in_sorted(values, x);     // -> isize  (std::lower_bound); size() when everything is below
+cc::first_greater_in_sorted(values, x);      // -> isize  (std::upper_bound)
+cc::find_in_sorted(values, x);               // -> cc::optional<isize>; an index, so finding + using is ONE search
+cc::find_range_in_sorted(values, x);         // -> cc::offset_size; ALL equivalents. size 0 = absent,
+                                             //    and offset is then the insertion point
+// all take an optional comparator, which must be the one the range is ordered by.
+// Scanning an UNordered range is cc::sequence's job (.find / .any / .count_if), not this header's.
+```
+
+The seam underneath, for data that is not a range — an SoA view, a GPU-side handle array, a proxy.
+Its own header, so partitioning and the orderedness queries cost nothing of the pdqsort machinery:
+
+```cpp
+#include <clean-core/algorithm/index_swap_range.hh>   // sort.hh includes this; the reverse is not true
+cc::index_swap_range<R>                    // concept: r.element_get(i) + r.element_swap(a, b). NO size().
+cc::as_index_swap_range(values);           // + _by(values, key), _multi(keys, vals...), _multi_by(key, vals...)
+cc::partition_ex(start, size, is_right, range); // is_right takes an INDEX
+cc::is_sorted_ex(start, size, range, cmp);      // + is_strictly_sorted_ex
+cc::dedup_sorted_ex(start, size, range, cmp);   // -> isize surviving count; compacts runs, does NOT shrink
+// an adapter must be trivially copyable and cheap — it is copied down the recursion (sort_ex static-asserts it).
+
+#include <clean-core/algorithm/sort.hh>
+cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 ```
 
 ## Sequence (lazy ranges — early prototype, see [sequence](docs/sequence.md))
@@ -547,6 +711,9 @@ auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold
 #include <clean-core/thread/thread.hh>
 cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux; no-op where unavailable)
 int p = cc::num_hardware_threads();       // >= 1 always; a "don't know" (0) from the platform becomes 1
+auto id = cc::current_thread_id();        // cc::thread_id (enum class : u64); equality only — NOT the OS id a debugger shows
+cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread; nothing does it implicitly
+                                          //   cc::thread_id::invalid (0) is the "no thread" sentinel
 
 #include <clean-core/thread/spin.hh>
 cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking
@@ -613,10 +780,17 @@ actx.require(dep);              // -> bool ready (NEITHER subscribes NOR schedul
                                 //    else records a pending dep, return wait
 actx.resolve_to_value(v)/success(v);  actx.resolve_to_value_emplace(args...);  // emplace: build T in place (immovable ok)
 actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  actx.wait_for_dependencies();  actx.yield();
-// RESOLVE IS TERMINAL (`delete this;`): the frame lives inline in the node and the value is built over its slot,
-// so resolving destroys the running closure. Never touch captures or ctx after it — `return actx.success(v);`.
+// RESOLVE IS TERMINAL (`delete this;`): the frame lives inline in the node and the value is built from payload
+// offset 0, so resolving destroys the running closure. Never touch captures or ctx after — `return actx.success(v);`.
 // State DOES persist across polls (the frame is never moved). *_emplace args must not alias the frame's captures
 // (nor a dep's value they pin) — they are forwarded by reference; the by-value resolves are always safe.
+// A frame that THROWS is contained: poll fails the node on E (async_error carries what()), so it is never stuck
+// `running` and never terminates a worker. Throwing AFTER resolving is the one unsupported case (asserts, dropped).
+template <> struct cc::custom::async_error_from_exception_trait<my_err>  // custom E opts in; without it: assert+rethrow
+{ static my_err make(cc::string_view message) { return my_err{cc::string(message)}; } };
+// INLINE FRAME BUDGET: 24 B on a one-line node, i.e. sizeof(captures) + 8*(dep count) <= 24; anything over is
+// heap-boxed (an alloc per node). Type-dependent — a big T/E widens it — and only 8-aligned, so ask, don't assume:
+static_assert(cc::async<int>::frame_fits_inline<my_frame>);   // the real predicate; a copied number goes stale
 
 // two schedulers, same surface. singlethreaded = drives inline + NEVER publishes, so deps cannot run
 // concurrently however many cores idle (single-threaded by construction, not by circumstance):
@@ -624,6 +798,7 @@ cc::singlethreaded_scheduler sched;  int v = sched.blocking_get(root);  // mirro
 cc::optional<...> o = sched.try_blocking_get(root);  // st: nullopt if pumped out but not ready (see async.md
                                                      // "Multi-scheduler correctness"); pool's try_ returns result
 cc::async_worker_scope scope(sched);   // bind scheduler to this thread (blocking_get does this itself)
+cc::async_no_worker_scope unbound;     // UNbind: run foreign code without its work landing in YOUR queue
 root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump; interleave external push here
 sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)
 
@@ -640,6 +815,20 @@ cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root
 // It starts nothing, worker_count() == 0, the ctor's count is ignored, and blocking_get drives the graph
 // inline on the caller (it reports no steal-capable peers, so nothing is published). It cannot WAIT though:
 // a graph parked on another thread's work never completes, and blocking_get's is_ready() assert says so.
+// ambient context — "which logical task is this work part of?", from anywhere inside a frame
+// (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
+CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)
+cc::async_ambient_scope const s(my_tag(), &my_state); // push; RAII and strictly LIFO. The only way to install one
+void* v = cc::async_ambient_lookup(my_tag());         // walk the calling thread's chain; null if absent
+void* v2 = cc::async_ambient_lookup_in(head, my_tag());  // same, from a head you already hold (no TLS)
+s.link();  s.outstanding();      // this scope's chain head / how much async work still carries it (racy; diagnostics)
+cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
+                                 // or escape a worker thread and terminate — the question before reporting by throw
+// DRIVE-SITE: a subtree driven from one work item is billed to that item's context, and an inline-driven dep
+// inherits its driver's. A node stores it only as a resume token, written once when it is queued/parked/yielded —
+// never by a thread merely WAKING it, so a shared dep completing under B cannot contaminate A's continuation.
+// Links are refcounted, so work may outlive the scope that named it (prewarming is legal, not a leak); cc does
+// not assert on that — read outstanding() and decide for yourself. A RESOLVED node carries no context at all.
 // Not here yet: co_await, plain (non-async) dep args, structured/owned children, error-type conversion across
 // a heterogeneous-E dependency graph (the make_async_* sugar assumes a single E; raw frames can bridge by hand).
 ```
@@ -650,6 +839,8 @@ cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root
 #include <clean-core/string/conversion.hh>
 cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> surrogate pair; bad -> U+FFFD
                                                   // NOT NUL-terminated (push_back(u'\0') if you need it)
+cc::string u8 = cc::utf16_to_utf8(u16);           // pair -> astral code point; an unpaired surrogate -> U+FFFD
+                                                  // takes a span, since a wide OS string is rarely NUL-terminated
 ```
 
 ## Platform
@@ -667,6 +858,13 @@ cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> su
                                                    // reach <rpcndr.h> past WIN32_LEAN_AND_MEAN.
 #include <clean-core/platform/native.hh>
 cc::demangle_symbol(symbol)                        // cc::string — human-readable C++ symbol name
+
+#include <clean-core/platform/file_path.hh>       // where scratch files go, and how to unmake one
+cc::temp_directory_path();                          // cc::string — no trailing separator; "." where none is named
+cc::temp_file_path(prefix, suffix = "");            // "<temp>/<prefix>-<pid>-<counter><suffix>" — CREATES NOTHING
+cc::remove_file(path);                              // true == gone, which includes never having been there
+                                                    // NOT a filesystem layer: no mkdir, no iteration, no metadata,
+                                                    // no path arithmetic. Reading and writing are the file streams'.
 
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
@@ -754,6 +952,15 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`string` / `string_view` are NOT null-terminated.**
   `data()` is not a C string — use `str.c_str_materialize()`, whose result is valid only until the next non-const operation.
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
+- **An `interned_string`'s identity is process-local and must never leave the process.**
+  Serialize `as_string_view()`, and hash durable data over those bytes — two runs will not agree on anything else.
+- **`interned_string` has no `<`, on purpose.** Everything about the type is a pointer operation except ordering by bytes, so making that cost visible beats a `<` that quietly memcmps.
+  `compare_bytes` is the reproducible one and the default choice; `compare_identity` is cheaper and its order changes every run, so never persist or display anything sorted by it.
+- **String ordering is by UNSIGNED byte value**, in `string_view::compare`, the `<` family built on it, and `interned_string::compare_bytes` alike.
+  `char` is signed here, so the naive comparison would sort every byte >= 0x80 ahead of all ASCII — an order that silently disagrees with every other implementation once it reaches a file or a hash.
+- **`hash256` orders by limb, not by its 32 canonical bytes.**
+  The order is total and deterministic, so it is fine as a tiebreak — it just is not the order the hex digests sort in.
+  Use `to_bytes` / `from_bytes` whenever the 32 bytes themselves are what matters.
 - **`optional` has no `operator*` / `operator->`.** Use `value()`, which
   *asserts* when empty rather than throwing.
 - **Return errors with `cc::error(...)`** — never an implicit conversion.
@@ -787,6 +994,15 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   Conversions only ever NARROW (`seekable_* -> plain`, `read_write -> read`/`write`; `read <-> write` never).
   An adapter converts to any legal narrowing; a stream narrows to another stream only **from an rvalue**, consuming it, so one backend never has two live views.
   A consumed or moved-from stream asserts on use, and narrowing away write capability with unflushed bytes pending asserts too.
+- **A sort comparator MUST be a strict weak ordering.**
+  The partition scans are deliberately unbounded, so one that is not walks off the range — `CC_ASSERT` catches it in debug and relwithdebinfo, and release has nothing to catch it with.
+  `<=` where `<` was meant, and floats that can be NaN, are the two usual causes.
+- **No sort here is stable**, and there is no `cc::stable_sort` — stability needs a buffer, which the swap-only design forbids.
+  `cc::sort_indices` over `0..n-1` is the stable spelling: it breaks ties on the index.
+- **`cc::sort_by` evaluates its key on every comparison**, i.e. O(n log n) times.
+  `cc::sort_by_cached_key` evaluates it exactly n times into a temporary buffer, and is worth it as soon as the key costs more than a member read.
+- **`cc::vector` is not an `index_swap_range`** — deliberately, so nothing models the seam by accident.
+  `cc::as_index_swap_range(v)` is the adapter, and a hand-written one must be trivially copyable because it is copied down the recursion.
 - **Flush a write stream before dropping its adapter** — buffered bytes are lost otherwise, since there is no auto-flush.
   A stream borrows into its adapter, so the adapter must outlive it.
   The file adapter's 4 KiB buffer is *inline*, so once a stream is taken the adapter is effectively pinned; do not move it.

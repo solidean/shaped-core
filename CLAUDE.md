@@ -36,6 +36,24 @@ One-liner per library:
   Its [docs/coding-guidelines.md](libs/io/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
   Namespace `babel`. Depends on clean-core + typed-geometry.
   Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
+* **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
+  Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
+  Ships **zero components** — the component set belongs entirely to the application.
+  Namespace `vdoc`. Depends on clean-core.
+  The in-memory library is complete; persistence is versioned-document-file — its [concept docs](libs/data/versioned-document/docs/_index.md#concepts) are the design, one file per concept.
+  [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices and what would reopen each.
+  **The edit path is incremental and realtime** — `build(graph, cache)`, `advance_snapshot`, `vdoc::apply` — so a one-entity edit is ~10 µs whatever the document's size.
+  [concepts/workloads.md](libs/data/versioned-document/docs/concepts/workloads.md) names the editing shapes that buys, and the one (a fanned drag) it does not.
+* **`libs/data/versioned-document-file`** — the `.vdoc` save format.
+  One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
+  Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
+  Complete: the store and its loader, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — snapshots with pruning, and recovery from an untrusted peer.
+  [docs/format.md](libs/data/versioned-document-file/docs/format.md) is the on-disk specification.
+* **`libs/data/blob-cache`** — a persistent, multi-process cache for expensive derived bytes: `(namespace, key, version)` → content-addressed blobs in one shared SQLite file.
+  In-process singleflight over the whole acquire pipeline, TTLs, and cost-aware eviction; one `cc::threaded_actor` owns the connection.
+  Everything follows from one invariant: **deleting all cache data can never affect correctness**, so a storage failure is a miss and never an error.
+  Namespace `bcache`. Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
+  See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan exist today (vulkan creates devices and resources but stubs its recording paths); metal/webgpu and opengl/webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
@@ -118,7 +136,11 @@ uv run dev.py check --fix        # run pre-commit checks, auto-fixing what's saf
 uv run dev.py doctor             # sanity-check the toolchain
 ```
 
-**Run `uv run dev.py lint shaped --dirty-only` once your first bigger chunk of work compiles** — don't save it for the pre-commit gate.
+**Run `uv run dev.py lint shaped --dirty-only` once your first bigger chunk of work lands** — don't save it for the pre-commit gate.
+"Bigger chunk" means the *first* substantial file, not all of them: one doc, one header, one implementation.
+This binds prose exactly as it binds code, and prose is where it is most often skipped.
+Writing several `.md` files before linting any of them turns a habit into a sweep, because the same reflex repeats in every file.
+Linting the first one calibrates the rest.
 [docs/guides/prose.md](docs/guides/prose.md) is the workflow around it, including what `--fix` will and won't do for you.
 
 **Before committing, run `uv run dev.py check --fix`** — the pre-commit gate, and manual rather than a git hook.
@@ -203,6 +225,10 @@ What binds you while writing:
 * **A short orphan line is the tell.** A line carrying only a few trailing words of the line above means you wrapped early — join them.
 * A sentence that ends mid-line, with the next point starting on that same line, is the other failure mode.
   The first words of each line must give the shape of the passage.
+  In a bullet list this shows up as `- **Lead.** Sentence one. Sentence two.` — one bold lead plus one sentence is fine, a second sentence starts a new line.
+  It is the single most common way to trip the rule, because it reads perfectly well and still hides the second point.
+* **Lint the first substantial file you write, not the fifteenth** (`uv run dev.py lint shaped --dirty-only`).
+  A prose reflex repeats itself in every file, so linting early is a correction and linting late is a sweep.
 * Front-load the surprising part.
   Preconditions, ownership, threading and edge cases outrank restating the signature.
 * `///` for type/member docs, `//` for inline.
@@ -295,6 +321,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Build & test reference           | [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md) |
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
+| Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
@@ -305,7 +332,8 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
-| Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
+| Benchmark / compare two implementations | a `nx::config::manual` test — never swept, needs no CHECK, prints its own table ([sort-benchmark.cc](libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model). A microbenchmark harness in nexus is still TODO |
+| Record a tracked metric for PGO  | `GUIDE_BENCHMARK` + `nx::guide` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Read hardware performance counters | `uv run dev.py profiling counters` ([docs/guides/profiling.md](docs/guides/profiling.md)) |
 | Find where a build/test/check run's time goes | `uv run dev.py check --fix --profile <file> --profile-type chrome-tracing` ([profiling a run](docs/guides/building-and-testing.md#profiling-a-run)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |

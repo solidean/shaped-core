@@ -11,3 +11,10 @@ double cc::current_time_steady_secs()
     auto const now = std::chrono::steady_clock::now().time_since_epoch();
     return std::chrono::duration<double>(now).count();
 }
+
+double cc::current_time_wall_secs()
+{
+    // system_clock's epoch is the Unix epoch as of C++20, so the doc comment's promise is the standard's.
+    auto const now = std::chrono::system_clock::now().time_since_epoch();
+    return std::chrono::duration<double>(now).count();
+}

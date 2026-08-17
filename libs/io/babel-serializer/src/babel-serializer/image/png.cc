@@ -12,16 +12,6 @@ constexpr byte png_signature[8] = {
     byte(0x0D), byte(0x0A), byte(0x1A), byte(0x0A),
 };
 
-/// Read a big-endian u32 at `offset` (caller guarantees 4 readable bytes).
-int read_be_u32(cc::span<byte const> bytes, isize offset)
-{
-    auto const b0 = int(u8(bytes[offset + 0]));
-    auto const b1 = int(u8(bytes[offset + 1]));
-    auto const b2 = int(u8(bytes[offset + 2]));
-    auto const b3 = int(u8(bytes[offset + 3]));
-    return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-}
-
 cc::result<color_type> color_type_from_byte(int v)
 {
     switch (v)

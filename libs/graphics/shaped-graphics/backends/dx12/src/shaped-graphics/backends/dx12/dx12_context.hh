@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
@@ -25,6 +26,17 @@
 #include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
+
+/// How bad one D3D12 debug-layer message is, mirroring D3D12_MESSAGE_SEVERITY so a listener needs no d3d12sdklayers.h.
+/// Ordered worst-first, so `severity <= dx12_message_severity::warning` is "something is wrong".
+enum class sg::backend::dx12::dx12_message_severity : sg::u8
+{
+    corruption,
+    error,
+    warning,
+    info,
+    message,
+};
 
 /// Creation config for the dx12 context.
 /// The flags are independent.
@@ -100,6 +112,15 @@ public:
     /// A build_blas / build_tlas requires a supported device.
     /// Surfaced through cmd.raytracing.is_supported().
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
+
+    /// Routes this device's debug-layer messages to `callback` instead of stderr.
+    /// Only ever called when the context was created with enable_debug_layer, and only for messages raised after creation returned.
+    /// The runtime raises a message on whatever thread provoked it, and this setter is not synchronized against that — set it before the context is driven from a second thread.
+    /// Passing an empty function restores the stderr default.
+    void set_message_callback(cc::unique_function<void(dx12_message_severity, cc::string_view)> callback)
+    {
+        _message_callback = cc::move(callback);
+    }
 
     // backend-typed API — prefer these when you already hold a dx12_context
 
@@ -351,6 +372,15 @@ public:
     // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5).
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
+
+    // Where debug-layer messages go; empty means stderr.
+    // See set_message_callback.
+    cc::unique_function<void(dx12_message_severity, cc::string_view)> _message_callback;
+
+    // The info-queue registration handing messages to this context, and 0 when there is none.
+    // Body in dx12_context.create.cc, which owns the debug-layer include; shutdown drops it before the device goes, so no message can reach a dying context.
+    u32 _message_callback_cookie = 0;
+    void unregister_message_callback();
 
     // Epoch machinery.
     // The epoch fence is signaled with the epoch value at the end of each epoch; the submission fence is a per-command-list timeline on the same queue.
