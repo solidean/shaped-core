@@ -12,7 +12,11 @@
 //
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image (same philosophy as the
 // raytraced-view test). Reaching the end without an assert/exception means every GPU stage succeeded.
-TEST("sv - path-traced Cornell box (headless)")
+// On the main thread, because `pathtrace_routine::init_declare` drives its shader compiles inline through
+// `try_async_blocking_get_singlethreaded` — which does not complete from inside a pool worker, leaving the routine
+// with no pipeline and `execute` silently doing nothing.
+// Same reason shaped-rendering pins its dispatch test (commit 9c9c6ef7).
+TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
@@ -99,13 +103,33 @@ TEST("sv - path-traced Cornell box (headless)")
          .height = size[1],
          .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
+    // The raygen writes its primary-hit geometry and samples its history unconditionally, so all three are bound
+    // even here, where a single dispatch reprojects nothing (`has_history` is false, so their contents are ignored).
+    // Transient rather than persistent: nothing outlives this frame.
+    auto const aux = [&]
+    {
+        return ctx.transient.create_texture_2d(
+            {.format = sg::pixel_format::rgba16_float,
+             .width = size[0],
+             .height = size[1],
+             .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+    };
+
     sv::pathtrace_routine::execute(*cmd, {.frame = frame,
                                           .background = background,
                                           .instances = instances,
                                           .output = target,
+                                          .gbuffer = aux(),
+                                          .history_color = aux(),
+                                          .history_gbuffer = aux(),
                                           .materials = mat_rec->materials,
                                           .vertices = mesh_rec->vertices,
                                           .indices = mesh_rec->indices});
+
+    // The routine degrades to a no-op when its shaders do not build, so without this every CPU-side check below
+    // still passes against a target nothing ever wrote.
+    // That silence is expensive: a shader break shows up as a debugging session on the image, not a failing test.
+    REQUIRE(sv::pathtrace_routine::is_ready(*cmd));
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();

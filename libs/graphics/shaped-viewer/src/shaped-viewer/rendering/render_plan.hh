@@ -117,6 +117,31 @@ struct sv::plan_trace
     u8 layer = 0; ///< which of the view's layers, so several traced layers cannot share one accumulator
 
     tg::vec2i resolution = tg::vec2i(0, 0);
+
+    /// Whether this trace records this frame, which is its owning target's answer.
+    ///
+    /// Carried rather than looked up, because the renderer needs it *before* it records: a throttled trace must not
+    /// rotate its history, or the image its parent re-presents would be the one from two frames ago.
+    bool refresh = true;
+};
+
+/// One temporal resource a reachable view keeps, with everything left unset on the declaration filled in.
+///
+/// This is where a `temporal_input` stops being a request and becomes an allocation: an unset resolution has taken
+/// the view's own, which only the measure pass knows.
+/// Sizing them here rather than in the renderer is what keeps a temporal resource a plan-level fact a test can read
+/// without a GPU.
+struct sv::plan_temporal
+{
+    view_id id;          ///< the view that keeps it
+    u64 temporal_id = 0; ///< which of that view's temporal resources — `temporal_input::id`
+
+    tg::vec2i resolution = tg::vec2i(0, 0);
+    sg::pixel_format format = sg::pixel_format::rgba16_float;
+
+    /// What makes this resource's history stale, as the declaration gave it.
+    /// The renderer compares it against what the store holds and restarts on a mismatch.
+    u64 reset_hash = 0;
 };
 
 /// One leaf mapped all the way up into window space, so a cursor can be routed into a nested view.
@@ -188,6 +213,12 @@ struct sv::render_plan
     /// In dependency order; the frame's output is always last.
     cc::vector<plan_target> targets;
     cc::vector<plan_trace> traces;
+
+    /// Every temporal resource every reachable view keeps, sized and formatted.
+    ///
+    /// Covers throttled views too, for the reason `reachable` exists: a view that records nothing this frame must
+    /// still keep its history, or the next refresh restarts from noise.
+    cc::vector<plan_temporal> temporals;
 
     /// Every target's draws, concatenated; target `i` owns `[target_first_draw[i], + target_draw_count[i])`.
     cc::vector<layout_draw> draws;

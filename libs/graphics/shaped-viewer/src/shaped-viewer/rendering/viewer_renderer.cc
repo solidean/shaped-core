@@ -9,19 +9,6 @@
 
 namespace sv
 {
-namespace
-{
-/// Whether the target that owns `trace` re-records this frame.
-/// A throttled view's parent re-presents its previous texture, so re-tracing into it would be wasted work.
-[[nodiscard]] bool trace_refreshes(render_plan const& plan, plan_trace const& trace)
-{
-    for (auto const& t : plan.targets)
-        if (t.view == trace.view)
-            return t.refresh;
-    return false;
-}
-} // namespace
-
 void viewer_renderer::init_declare(sg::context& ctx)
 {
     // The frame runs through these two, so warm the whole chain when this is first initialized rather than stalling on the first frame.
@@ -33,6 +20,7 @@ void viewer_renderer::execute(sg::command_list& cmd,
                               viewer_definition const& def,
                               render_plan const& plan,
                               scene_resources& resources,
+                              view_store& store,
                               sg::color_target const& output)
 {
     // Nothing of ours is read back — this is what runs init_declare (and so warms the chain) on first use.
@@ -41,7 +29,7 @@ void viewer_renderer::execute(sg::command_list& cmd,
     CC_ASSERT(plan.validate(), "a render plan must be in dependency order before it is recorded");
 
     // Allocate (or resize) every texture the plan names, and touch every view it reaches.
-    auto const res = view_renderer::resolve(cmd, plan);
+    auto const res = view_renderer::resolve(cmd, plan, store);
     auto const textures = res.textures();
 
     // Every trace first.
@@ -51,8 +39,8 @@ void viewer_renderer::execute(sg::command_list& cmd,
     // The loop below would still be correct if that stopped holding — it would just alternate more — which is what a
     // future compute post-process would need.
     for (auto i = u32(0); i < plan.traces.size(); ++i)
-        if (trace_refreshes(plan, plan.traces[i]))
-            view_renderer::trace(cmd, def, plan, i, res, resources);
+        if (plan.traces[i].refresh)
+            view_renderer::trace(cmd, def, plan, i, res, resources, store);
 
     // Then one pass per target, in dependency order, so a source is finished before anything samples it.
     // Each pass closes before the next begins, which is what releases the output-merger binding — a target still bound

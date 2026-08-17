@@ -18,6 +18,7 @@ add_library(shaped-viewer
     src/shaped-viewer/view/camera.cc
     src/shaped-viewer/view/camera_controller.cc
     src/shaped-viewer/view/view_data.cc
+    src/shaped-viewer/view/view_store.cc
     src/shaped-viewer/layout/box_style.cc
     src/shaped-viewer/layout/solvers.cc
     src/shaped-viewer/layout/layout_tree.cc

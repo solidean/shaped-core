@@ -9,6 +9,7 @@
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_data.hh>
+#include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 
 namespace sv
@@ -104,6 +105,7 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 
     fc.samples_per_pixel = l.settings.samples_per_pixel;
     fc.max_bounces = l.settings.max_bounces;
+    fc.debug_view = l.settings.debug_accumulation ? 1u : 0u;
 
     // `seed` and `accum_frame` are stamped by execute from the view's persistent record, once it knows whether this frame restarts.
     return fc;
@@ -120,15 +122,32 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 /// `resolution` is the one deliberate exception to "uploaded bytes only".
 /// It reaches the upload only through the camera's aspect ratio, so 960x540 and 1920x1080 hash identically; without it
 /// correctness would rest entirely on the resize check noticing, and a same-size texture handed back by a pool would blend two views.
-[[nodiscard]] u64 trace_hash(pt_frame_constants_gpu fc, background_gpu const& bg, resolved_view const& r, tg::vec2i resolution)
+///
+/// `shader_generation` is the second: the shaders are not uploaded bytes but they decide what the numbers mean, so a
+/// reload has to restart the estimator rather than average two different integrators together.
+///
+/// **The camera is deliberately excluded**, along with everything that describes the history rather than the image.
+/// Moving the eye no longer makes the accumulated image wrong — the raygen reprojects it and rejects per pixel what
+/// no longer matches — so hashing the camera would throw away exactly the convergence reprojection exists to keep.
+/// What is left means "the scene changed", which is the only thing a whole-image restart is still the right answer to.
+[[nodiscard]] u64 trace_hash(pt_frame_constants_gpu fc,
+                             background_gpu const& bg,
+                             resolved_view const& r,
+                             tg::vec2i resolution,
+                             u64 shader_generation)
 {
-    // The accumulation counter is the one field that legitimately differs every frame; hashing it would restart forever.
+    // Fields that legitimately differ every frame, or that describe the history rather than the image it holds.
+    // Hashing any of them would restart the estimator forever.
     fc.seed = 0;
     fc.accum_frame = 0;
+    fc.camera = {};
+    fc.prev_camera = {};
+    fc.has_history = false;
+    fc.history_max_frames = 0;
 
     auto h = cc::make_hash_of_bytes(cc::span<pt_frame_constants_gpu const>(&fc, 1).as_bytes());
     h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<background_gpu const>(&bg, 1).as_bytes()));
-    h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1]));
+    h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1], shader_generation));
 
     // tlas_instance holds a handle and an optional, so its padding is not hashable — take the fields the build reads.
     for (auto const& inst : r.instances)
@@ -150,45 +169,90 @@ constexpr u32 accumulation_frame_cap = 4096;
 {
     return isize(size[0]) * isize(size[1]) * 8;
 }
+
+/// How far a reprojected pixel's sample count may be carried once the camera has moved.
+///
+/// The hybrid: a still camera reprojects every pixel onto itself, so leaving the count uncapped keeps the exact
+/// running mean and lets a static view converge to ground truth exactly as it did before reprojection existed.
+/// Once the eye moves, a carried sample is an approximation — it came from a slightly different direction — so the
+/// cap bounds how long one can persist, trading a little noise for an image that stops smearing.
+constexpr u32 moving_history_frames = 32;
+
+/// Whether `a` and `b` describe the same eye, byte for byte.
+///
+/// A pure comparison of what was uploaded, so it cannot disagree with what the shader reprojects through.
+/// Padding counts, which is safe here only because every `camera_gpu` is built by `camera_gpu::from` with its pad
+/// lanes explicitly zeroed.
+[[nodiscard]] bool same_camera(camera_gpu const& a, camera_gpu const& b)
+{
+    return cc::memcmp(&a, &b, sizeof(camera_gpu)) == 0;
+}
+
+/// Fills in everything a trace needs to reuse its history, and reports the camera forward for the next frame.
+void apply_history(pt_frame_constants_gpu& fc, impl::view_state& rec, impl::temporal_slot const& slot)
+{
+    fc.has_history = slot.has_history && rec.has_last_traced_camera;
+    fc.prev_camera = rec.last_traced_camera;
+
+    // A still camera keeps the exact mean; a moved one ages its carried samples out.
+    fc.history_max_frames
+        = fc.has_history && same_camera(fc.camera, rec.last_traced_camera) ? u32(-1) : moving_history_frames;
+}
+
+/// The slot `store` keeps for `(id, temporal_id)`, its texture created or re-created if the extent moved.
+/// `resized` is what tells a caller its history is gone, since a fresh texture holds nothing to blend into.
+struct ensured_slot
+{
+    impl::temporal_slot* slot = nullptr;
+    bool resized = false;
+};
+
+[[nodiscard]] ensured_slot ensure_temporal(sg::context& ctx,
+                                           view_store& store,
+                                           view_id id,
+                                           u64 temporal_id,
+                                           tg::vec2i resolution,
+                                           sg::pixel_format format)
+{
+    auto& slot = store.get_or_create(id).temporal[temporal_id];
+
+    auto const resized = slot.texture.raw() == nullptr || slot.texture.width() != resolution[0]
+                      || slot.texture.height() != resolution[1];
+    if (resized)
+    {
+        // UAV-written by whatever fills it, sampled by whatever reads it back — every temporal resource needs both.
+        auto const desc = sg::texture_2d_description{
+            .format = format,
+            .width = resolution[0],
+            .height = resolution[1],
+            .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture};
+
+        if (slot.texture.raw() != nullptr)
+            slot.texture.raw()->expire();
+        if (slot.history.raw() != nullptr)
+            slot.history.raw()->expire();
+
+        slot.texture = ctx.persistent.create_texture_2d(desc);
+        slot.history = ctx.persistent.create_texture_2d(desc);
+        slot.has_history = false; // neither half holds a frame yet
+    }
+
+    return {.slot = &slot, .resized = resized};
+}
 } // namespace
 
 void view_renderer::init_declare(sg::context& ctx)
 {
     // The renderer traces through the leaf routine, so warm its shader compiles when it is first initialized rather than stalling on the first frame.
-    // It keeps no shader-derived state of its own here, so a reload must leave the accumulation cache alone.
     pathtrace_routine::prewarm(ctx);
 
-    // A view's accumulation target is megabytes and its identity is a handful of bytes, so they expire on different schedules.
-    _persistent.set_limits({.max_idle_frames_payload = sv::impl::keyed_cache_limits::view_payload_idle_frames,
-                            .max_idle_frames_entry = sv::impl::keyed_cache_limits::view_idle_frames,
-                            .max_payload_bytes = isize(256) << 20});
+    // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
+    ++_shader_generation;
 }
 
-void view_renderer::begin_frame(sg::command_list& cmd)
-{
-    auto self = acquire_exclusive(cmd);
-    self->_persistent.begin_frame(u64(cmd.context().current_epoch()),
-                                  [](view_id, persistent_view_resources& r)
-                                  {
-                                      for (auto& slot : r.accumulation)
-                                          if (slot.texture.raw() != nullptr)
-                                              slot.texture.raw()->expire();
-                                      if (r.composite.raw() != nullptr)
-                                          r.composite.raw()->expire();
-                                  });
-}
-
-u32 view_renderer::accumulated_frames(sg::command_list& cmd, view_id id)
-{
-    auto self = acquire_exclusive(cmd);
-    auto const* const r = self->_persistent.peek(id); // a query must not keep a view alive
-    return r == nullptr || r->accumulation.empty() ? 0 : r->accumulation.front().accum_frame;
-}
-
-plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& plan)
+plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& plan, view_store& store)
 {
     auto& ctx = cmd.context();
-    auto self = acquire_exclusive(cmd);
 
     auto out = plan_resources{};
     out.targets.resize_to_defaulted(plan.targets.size());
@@ -197,7 +261,7 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
     // Touch first, and touch everything: a view that is throttled this frame is still sampled by its parent, so
     // letting the idle reclaim pass over it would release a texture that is about to be read.
     for (auto const id : plan.reachable)
-        (void)self->_persistent.get_or_create(id);
+        (void)store.get_or_create(id);
 
     for (auto i = u32(0); i < plan.targets.size(); ++i)
     {
@@ -205,7 +269,7 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
         if (t.is_output)
             continue; // the caller's texture; nothing of ours allocates or keeps it
 
-        auto& rec = self->_persistent.get_or_create(t.id);
+        auto& rec = store.get_or_create(t.id);
         auto const stale = rec.composite.raw() == nullptr || rec.composite.width() != t.resolution[0]
                         || rec.composite.height() != t.resolution[1];
         if (stale)
@@ -221,47 +285,84 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
         out.targets[i] = rec.composite;
     }
 
+    // Every temporal resource every reachable view declared, whatever writes it — the tracer's accumulators are just
+    // the ones a scene_3d layer implies.
+    for (auto const& t : plan.temporals)
+    {
+        auto const e = ensure_temporal(ctx, store, t.id, t.temporal_id, t.resolution, t.format);
+
+        // A fresh texture holds no history, and a declaration that changed describes something else.
+        //
+        // Against `declared_hash`, never `reset_hash`: the latter belongs to whatever writes the resource, and is
+        // stamped later in the frame by `trace`. Comparing or overwriting it here would pit the two against each
+        // other and restart the accumulation on every frame.
+        if (e.resized || e.slot->declared_hash != t.reset_hash)
+            e.slot->accum_frame = 0;
+        e.slot->declared_hash = t.reset_hash;
+    }
+
+    // Rotate the pair on exactly the traces that record this frame.
+    // A reprojecting read must not alias its own write, and a throttled trace must be left alone or the image its
+    // parent re-presents would be the one from two frames ago.
+    for (auto const& tr : plan.traces)
+    {
+        if (!tr.refresh)
+            continue;
+
+        auto& rec = store.get_or_create(tr.id);
+
+        // Every slot this trace writes rotates together, on the *trace's* progress — which only the accumulator counts.
+        // Asking each slot for its own `accum_frame` freezes the G-buffer at zero forever, since nothing increments
+        // that one: its pair never rotates, the history half stays the texture nothing ever wrote, and every pixel
+        // fails the disocclusion test against garbage geometry.
+        auto const* const accumulator = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
+        auto const carries_history = accumulator != nullptr && accumulator->accum_frame > 0;
+
+        for (auto const tid : {temporal_id::accumulation(tr.layer), temporal_id::gbuffer(tr.layer)})
+        {
+            auto* const slot = rec.temporal.get_ptr(tid);
+            if (slot == nullptr)
+                continue;
+
+            slot->has_history = carries_history;
+            if (carries_history)
+            {
+                auto const written = slot->texture;
+                slot->texture = slot->history;
+                slot->history = written;
+            }
+        }
+    }
+
     for (auto i = u32(0); i < plan.traces.size(); ++i)
     {
         auto const& tr = plan.traces[i];
-        auto& rec = self->_persistent.get_or_create(tr.id);
+        auto const* const slot = store.get_or_create(tr.id).temporal.get_ptr(temporal_id::accumulation(tr.layer));
 
-        if (isize(tr.layer) >= rec.accumulation.size())
-            rec.accumulation.resize_to_defaulted(isize(tr.layer) + 1);
-
-        auto& slot = rec.accumulation[tr.layer];
-        auto const stale = slot.texture.raw() == nullptr || slot.texture.width() != tr.resolution[0]
-                        || slot.texture.height() != tr.resolution[1];
-        if (stale)
-        {
-            if (slot.texture.raw() != nullptr)
-                slot.texture.raw()->expire();
-            slot.texture = ctx.persistent.create_texture_2d(
-                {.format = sg::pixel_format::rgba16_float, // UAV-written by the raygen, sampled by the layout routine
-                 .width = tr.resolution[0],
-                 .height = tr.resolution[1],
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
-
-            // A fresh texture holds no history to blend into.
-            slot.accum_frame = 0;
-        }
-        out.traces[i] = slot.texture;
+        // The loop above allocated it, so a miss means the plan named a trace it declared no accumulator for.
+        CC_ASSERT(slot != nullptr, "a plan trace has no accumulator among its view's temporal inputs");
+        out.traces[i] = slot->texture;
     }
 
-    // One budget entry per view, covering everything it holds — the cache reclaims a view whole or not at all.
+    // One budget entry per view, covering everything it holds — the store reclaims a view's textures whole or not at all.
     for (auto const id : plan.reachable)
     {
-        auto const* const rec = self->_persistent.peek(id);
+        auto const* const rec = store.peek(id);
         if (rec == nullptr)
             continue;
 
         auto bytes = isize(0);
         if (rec->composite.raw() != nullptr)
             bytes += accumulation_bytes(tg::vec2i(rec->composite.width(), rec->composite.height()));
-        for (auto const& slot : rec->accumulation)
+        for (auto const& [temporal_id, slot] : rec->temporal)
+        {
+            // Both halves of the pair, since both stay resident for as long as the view does.
             if (slot.texture.raw() != nullptr)
                 bytes += accumulation_bytes(tg::vec2i(slot.texture.width(), slot.texture.height()));
-        self->_persistent.set_payload_bytes(id, bytes);
+            if (slot.history.raw() != nullptr)
+                bytes += accumulation_bytes(tg::vec2i(slot.history.width(), slot.history.height()));
+        }
+        store.set_payload_bytes(id, bytes);
     }
 
     return out;
@@ -272,7 +373,8 @@ void view_renderer::trace(sg::command_list& cmd,
                           render_plan const& plan,
                           u32 trace_index,
                           plan_resources const& res,
-                          scene_resources& resources)
+                          scene_resources& resources,
+                          view_store& store)
 {
     auto& ctx = cmd.context();
 
@@ -286,7 +388,7 @@ void view_renderer::trace(sg::command_list& cmd,
     if (output.raw() == nullptr)
         return; // resolve() refused it; nothing to trace into
 
-    // Held for the whole trace because _persistent is touched under it; nothing rasters here, so no scope is open across the lock.
+    // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
     auto self = acquire_exclusive(cmd);
 
     auto const resolved = resolve_scene(l, resources);
@@ -295,22 +397,26 @@ void view_renderer::trace(sg::command_list& cmd,
     // view's resolution is decided by the rect it landed in.
     auto fc = make_pt_frame_constants_gpu(v, l, primary_light(l), *resolved.mesh, tr.resolution);
     auto const bg = background_gpu::from(l.background);
-    auto const hash = trace_hash(fc, bg, resolved, tr.resolution);
+    auto const hash = trace_hash(fc, bg, resolved, tr.resolution, self->_shader_generation);
 
-    auto& rec = self->_persistent.get_or_create(v.id);
-    if (isize(tr.layer) >= rec.accumulation.size())
-        return;
-    auto& slot = rec.accumulation[tr.layer];
+    auto& rec = store.get_or_create(v.id);
+    auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
+    auto const* const gbuffer = rec.temporal.get_ptr(temporal_id::gbuffer(tr.layer));
+    if (slot == nullptr || gbuffer == nullptr)
+        return; // resolve() refused it; nothing to accumulate into
 
     // A different image must not be averaged into the old one.
-    if (slot.content_hash != hash)
-        slot.accum_frame = 0;
-    slot.content_hash = hash;
+    // The tracer publishes its own hash as this slot's reset rule: it covers the bytes actually uploaded, so it
+    // cannot drift away from what the shader reads the way a hand-declared one could.
+    if (slot->reset_hash != hash)
+        slot->accum_frame = 0;
+    slot->reset_hash = hash;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
     // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
-    fc.accum_frame = slot.accum_frame;
-    fc.seed = slot.accum_frame + 1;
+    fc.accum_frame = slot->accum_frame;
+    fc.seed = slot->accum_frame + 1;
+    apply_history(fc, rec, *slot);
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
         1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
@@ -324,22 +430,29 @@ void view_renderer::trace(sg::command_list& cmd,
                                      .background = background,
                                      .instances = resolved.instances,
                                      .output = output,
+                                     .gbuffer = gbuffer->texture,
+                                     .history_color = slot->history,
+                                     .history_gbuffer = gbuffer->history,
                                      .materials = resolved.materials->materials,
                                      .vertices = resolved.mesh->vertices,
                                      .indices = resolved.mesh->indices});
 
-    if (slot.accum_frame < accumulation_frame_cap)
-        ++slot.accum_frame;
+    // What the next frame reprojects through.
+    rec.last_traced_camera = fc.camera;
+    rec.has_last_traced_camera = true;
+
+    if (slot->accum_frame < accumulation_frame_cap)
+        ++slot->accum_frame;
 }
 
-sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v, scene_resources& resources)
+sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v, scene_resources& resources, view_store& store)
 {
     auto& ctx = cmd.context();
 
     auto const* const scene = primary_scene_3d(v);
     CC_ASSERT(scene != nullptr, "a traced view needs a scene_3d layer");
 
-    // Held for the whole trace because _persistent is touched under it; nothing rasters here, so no scope is open across the lock.
+    // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
     auto self = acquire_exclusive(cmd);
 
     // resolve_scene() touches the layer's meshes/materials (get_ptr), keeping this frame's working set resident.
@@ -347,37 +460,44 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v,
 
     auto fc = make_pt_frame_constants_gpu(v, *scene, primary_light(*scene), *resolved.mesh, v.resolution);
     auto const bg = background_gpu::from(scene->background);
-    auto const hash = trace_hash(fc, bg, resolved, v.resolution);
+    auto const hash = trace_hash(fc, bg, resolved, v.resolution, self->_shader_generation);
 
-    auto& rec = self->_persistent.get_or_create(v.id);
-    if (rec.accumulation.empty())
-        rec.accumulation.resize_to_defaulted(1);
-    auto& slot = rec.accumulation.front();
+    // No plan here to size the view's temporal inputs, so this path resolves the ones it needs itself.
+    // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
+    auto const layer = u8(scene - v.layers.begin());
+    auto const acc = ensure_temporal(ctx, store, v.id, temporal_id::accumulation(layer), v.resolution,
+                                     sg::pixel_format::rgba16_float);
+    auto const gb
+        = ensure_temporal(ctx, store, v.id, temporal_id::gbuffer(layer), v.resolution, sg::pixel_format::rgba16_float);
+    auto& slot = *acc.slot;
 
-    // The target outlives the frame so the trace has an image to blend into; only a size change forces a new one.
-    auto const resized = slot.texture.raw() == nullptr || slot.texture.width() != v.resolution[0]
-                      || slot.texture.height() != v.resolution[1];
-    if (resized)
-    {
-        if (slot.texture.raw() != nullptr)
-            slot.texture.raw()->expire();
-        slot.texture = ctx.persistent.create_texture_2d(
-            {.format = sg::pixel_format::rgba16_float, // UAV-written by the raygen, sampled by whatever composites it
-             .width = v.resolution[0],
-             .height = v.resolution[1],
-             .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
-        self->_persistent.set_payload_bytes(v.id, accumulation_bytes(v.resolution));
-    }
+    if (acc.resized || gb.resized)
+        store.set_payload_bytes(v.id, 4 * accumulation_bytes(v.resolution)); // two slots, a pair each
 
     // A fresh target holds no history, and a different image must not be averaged into the old one.
-    if (resized || slot.content_hash != hash)
+    if (acc.resized || slot.reset_hash != hash)
         slot.accum_frame = 0;
-    slot.content_hash = hash;
+    slot.reset_hash = hash;
+
+    // No plan drove a rotation here either, so this path rotates its own pair — see resolve() for why it is
+    // conditional on having recorded something.
+    auto& rec = store.get_or_create(v.id);
+    for (auto* const s : {acc.slot, gb.slot})
+    {
+        s->has_history = slot.accum_frame > 0;
+        if (s->has_history)
+        {
+            auto const written = s->texture;
+            s->texture = s->history;
+            s->history = written;
+        }
+    }
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
     // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot.accum_frame;
     fc.seed = slot.accum_frame + 1;
+    apply_history(fc, rec, slot);
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
         1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
@@ -394,9 +514,16 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v,
                                      .background = background,
                                      .instances = resolved.instances,
                                      .output = slot.texture,
+                                     .gbuffer = gb.slot->texture,
+                                     .history_color = slot.history,
+                                     .history_gbuffer = gb.slot->history,
                                      .materials = resolved.materials->materials,
                                      .vertices = resolved.mesh->vertices,
                                      .indices = resolved.mesh->indices});
+
+    // What the next frame reprojects through.
+    rec.last_traced_camera = fc.camera;
+    rec.has_last_traced_camera = true;
 
     if (slot.accum_frame < accumulation_frame_cap)
         ++slot.accum_frame;

@@ -35,10 +35,26 @@ What is left is the interaction on top of it, in dependency order:
 - **A traced layer has no alpha.** `pathtrace.hlsl`'s raygen writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.
-- **`temporal_input` is declared but not honoured.** `view_data` carries the list and the reset-hash rule, and the
-  renderer's record already holds a slot vector — but the path tracer's accumulation is still allocated as a special
-  case rather than as the one temporal input a `scene_3d` layer declares.
-  Folding it over removes a special case; it does not add a feature.
+- **The reprojection is unverified at the pixel level.** The temporal reuse landed — G-buffer, ping-pong pair,
+  disocclusion rejection, per-pixel estimator — and the tests pin the *policy* (a camera move keeps its counter, a
+  scene change resets it), but nothing checks that `reproject()` lands on the right texel.
+  A wrong sign or a transposed basis would still pass the suite and simply look smeared.
+  The cheap check is a readback test: converge a static view, translate the camera along its own right axis by
+  exactly one pixel's worth at the focal distance, and assert the image shifts by one texel.
+  Until that exists, `pathtraced-window-manual-test` is the only real confirmation.
+- **The GPU tests may be passing vacuously.** `pathtrace_routine::init_declare` drives its shader compiles inline with
+  `try_async_blocking_get_singlethreaded`, which does not complete when called from a nexus pool worker — so the
+  routine ends up with no pipeline and `execute` silently no-ops.
+  `pathtraced-view-test` proves it: `is_ready` holds when the test runs alone and fails in the concurrent sweep, which
+  is why that one is now pinned to the main thread.
+  Every other tracing test asserts only CPU-side facts, so none of them would notice tracing nothing at all.
+  The real fix is a pool-aware wait in `init_declare` — the hazard being that it blocks under the routine's own init
+  lock, which is presumably why the singlethreaded variant was chosen in the first place.
+  Until then, a tracing test that means anything needs `nx::config::main_thread` *and* an `is_ready` assertion.
+- **The disocclusion thresholds are guesses**: 1% of view depth on position, 0.9 on the normal dot.
+  They want tuning against real content, and probably want to be per-view rather than constants in the raygen.
+- **No spatial filter.** Reuse is purely temporal, so a freshly disoccluded pixel shows its raw estimate until it accumulates.
+  An A-trous / SVGF pass over the low-count pixels is the usual companion, and is not here.
 - **One traced layer per view is still assumed** in `view_renderer::execute`, the single-view convenience the GPU tests
   drive.
   The plan and `trace` are already per `(view, layer)`.
@@ -46,8 +62,12 @@ What is left is the interaction on top of it, in dependency order:
 ## Everything else
 
 - Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.
-- Replace the placeholder rotating cube: `scene_ref::add_mesh` authors real geometry now, but `viewer::finish_frame`
-  still injects a spinning cube into any scene layer that has none.
+- **A failing `CC_ASSERT` inside the frame loop turns into `std::terminate`**, not a test failure.
+  nexus reports the assert by throwing, the stack unwinds through `viewer::~viewer`, and `advance_epoch` asserts
+  again on the way out — a second assert during unwinding is an immediate abort.
+  So any assert reached from a viewer frame loses its own message behind an `abort()`, which is what made the empty
+  scene layer above expensive to find.
+  The viewer's destructor should be able to tear down a viewer whose frame did not complete.
 - **A view's display name is stored and never drawn.** `impl::view_state` keeps it (defaulting to the id up to its `##`) for the title bar a view has no way to draw yet —
   that needs the 2D/text renderer the `scene_2d` entry above is waiting on.
 - **`per_edge` attributes need an edge table on `triangle_geometry`.**

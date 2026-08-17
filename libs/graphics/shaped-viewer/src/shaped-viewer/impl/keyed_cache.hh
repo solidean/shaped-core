@@ -31,14 +31,6 @@ struct keyed_cache_limits
 
     /// over this, drop entries least-recently-used first
     isize max_entries = 0;
-
-    /// Frames a view may go unseen before its identity is dropped.
-    /// Both per-view caches read this, so a view cannot survive in one and vanish from the other.
-    static constexpr i64 view_idle_frames = 240;
-
-    /// Frames a view may go unseen before its GPU payload is released, its identity surviving.
-    /// Much shorter than `view_idle_frames`: an accumulation target is megabytes, a camera is not.
-    static constexpr i64 view_payload_idle_frames = 60;
 };
 
 /// A cache keyed by an identity the caller owns, reclaimed on a frame clock the caller ticks.
@@ -56,6 +48,10 @@ struct keyed_cache_limits
 /// A record counts as holding a payload exactly while it has declared bytes through `set_payload_bytes`.
 /// That is what the release hook fires on and what demotion looks at, so a record owning something reclaimable must declare it.
 /// The hook therefore runs exactly once per payload, whichever path drops it.
+///
+/// **Clearing the released fields is the hook's job, not the cache's.**
+/// A record is usually part payload and part identity — a view's accumulator and its camera — and demotion must drop
+/// only the first, so the cache never overwrites a record it did not construct.
 template <class Key, class Record>
 class keyed_cache
 {
@@ -71,8 +67,8 @@ public:
     [[nodiscard]] keyed_cache_limits const& limits() const { return _limits; }
 
     /// Reclaim, then advance to `tick`.
-    /// `on_release(Key, Record&)` runs for every payload dropped, by demotion or by eviction, and the record is reset right after it.
-    /// So a record holding GPU handles frees them there, exactly once, whichever path dropped it.
+    /// `on_release(Key, Record&)` runs for every payload dropped, by demotion or by eviction, exactly once whichever path dropped it.
+    /// It frees the record's expensive fields *and* clears them — an entry that survives demotion must be left holding nothing.
     template <class OnRelease>
     void begin_frame(u64 tick, OnRelease&& on_release)
     {
@@ -200,13 +196,13 @@ private:
     [[nodiscard]] static u64 _frames_behind(u64 a, u64 b) { return a - b; }
 
     /// Release `e`'s payload if it still holds one, so demotion followed by eviction fires the hook once, not twice.
+    /// The hook clears what it freed; the record is never overwritten here, or demotion would take the identity with it.
     template <class OnRelease>
     void _release(Key key, entry& e, OnRelease& on_release)
     {
         if (e.payload_bytes <= 0)
             return;
         on_release(key, e.record);
-        e.record = Record{};
         _total_bytes -= e.payload_bytes;
         e.payload_bytes = 0;
     }

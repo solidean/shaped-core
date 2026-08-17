@@ -72,6 +72,9 @@ TEST("sv - viewer window (manual)", nx::config::manual)
     auto controller = sv::orbit_camera_controller{};
     controller.orbit = {.target = tg::pos3d(0, 1, 0), .distance = 6.0};
 
+    // What the views keep across frames, held here because this loop is the frame — a viewer would own it instead.
+    auto store = sv::view_store{};
+
     auto const start = std::chrono::steady_clock::now();
     constexpr auto max_duration = std::chrono::minutes(10);
 
@@ -126,11 +129,11 @@ TEST("sv - viewer window (manual)", nx::config::manual)
         auto cmd = ctx.create_command_list();
         // Both once per frame, before any view resolves its ids or reaches for its accumulator.
         resources.begin_frame(ctx.current_epoch());
-        sv::view_renderer::begin_frame(*cmd);
+        store.begin_frame(u64(ctx.current_epoch()));
 
         // The whole frame in one call: flatten it into a plan, trace every view, then composite up to the back buffer.
         auto const plan = sv::build_render_plan(def, tg::vec2i(win->width(), win->height()), frame_index, {});
-        sv::viewer_renderer::execute(*cmd, def, plan, resources, rt.cleared(tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f)));
+        sv::viewer_renderer::execute(*cmd, def, plan, resources, store, rt.cleared(tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f)));
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch(sc->buffer_count());
         ++frame_index;

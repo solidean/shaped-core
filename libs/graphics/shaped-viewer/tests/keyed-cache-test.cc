@@ -15,6 +15,9 @@ namespace
 struct payload
 {
     int value = 0;
+
+    /// Part of the record the hook never touches — a view's camera, in the real thing.
+    int identity = 0;
 };
 
 using cache = sv::impl::keyed_cache<sv::view_id, payload>;
@@ -25,6 +28,8 @@ sv::view_id id_of(char const* name)
 }
 
 /// A release hook recording which keys it saw, so a test can check a payload is released exactly once.
+/// Clearing what it released is the hook's job, not the cache's — that is what lets a record keep an identity the
+/// payload does not own.
 struct release_log
 {
     cc::vector<sv::view_id> keys;
@@ -33,6 +38,7 @@ struct release_log
     {
         keys.push_back(key);
         CHECK(p.value != 0); // never called on an already-released record
+        p.value = 0;
     }
 };
 } // namespace
@@ -99,7 +105,7 @@ TEST("sv - keyed_cache demotion releases the payload but keeps the entry")
     CHECK(c.contains(a));
     CHECK(c.count() == 1);
     CHECK(c.payload_bytes() == 0);
-    CHECK(c.peek(a)->value == 0); // reset to a default record
+    CHECK(c.peek(a)->value == 0); // the hook cleared what it released
 
     // Nothing to release a second time, whether it idles further or is finally evicted.
     c.begin_frame(5, log);
@@ -108,6 +114,30 @@ TEST("sv - keyed_cache demotion releases the payload but keeps the entry")
     c.begin_frame(7, log); // idle 5 — past it
     CHECK(!c.contains(a));
     CHECK(log.keys.size() == 1);
+}
+
+// The invariant that lets one record hold both halves of a view: releasing the expensive part must not take the cheap one.
+// A camera surviving its own accumulator by ~180 frames is the whole reason the two idle tiers exist, so a demotion that
+// reset the record would quietly undo it — the view would come back framed at the origin instead of where it was left.
+TEST("sv - keyed_cache demotion leaves what the hook did not clear")
+{
+    auto c = cache{};
+    c.set_limits({.max_idle_frames_payload = 1, .max_idle_frames_entry = 100});
+
+    auto const a = id_of("main");
+    auto log = release_log{};
+
+    c.begin_frame(1, log);
+    c.get_or_create(a) = {.value = 5, .identity = 99};
+    c.set_payload_bytes(a, 1024);
+
+    c.begin_frame(2, log);
+    c.begin_frame(3, log);
+    c.begin_frame(4, log); // past the payload threshold
+    REQUIRE(log.keys.size() == 1);
+
+    CHECK(c.peek(a)->value == 0);     // the payload went
+    CHECK(c.peek(a)->identity == 99); // the identity stayed
 }
 
 TEST("sv - keyed_cache never reclaims this tick's working set")

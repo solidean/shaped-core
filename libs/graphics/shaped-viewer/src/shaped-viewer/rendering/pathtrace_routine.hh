@@ -37,9 +37,33 @@ struct sv::pt_frame_constants_gpu
     gpu_boolean mesh_is_indexed = false;
     f32 _padding5[3] = {};
 
+    /// The camera the previous recorded frame traced from, which is what this frame reprojects its history through.
+    /// Meaningless unless `has_history`.
+    camera_gpu prev_camera;
+
+    /// Whether the bound history textures hold a previous frame at all.
+    /// False on the first frame after any reset, where every pixel starts its estimate from nothing.
+    gpu_boolean has_history = false;
+
+    /// Ceiling on the per-pixel sample count a reprojected pixel may carry forward.
+    ///
+    /// The hybrid the viewer wants: left at `u32(-1)` while the camera is still, so a static view keeps the exact
+    /// running mean and converges to ground truth; lowered once it moves, so a sample dragged along by reprojection
+    /// ages out instead of smearing indefinitely.
+    u32 history_max_frames = u32(-1);
+
+    /// 0 renders normally; 1 replaces the written color with a false-color of each pixel's carried sample count.
+    ///
+    /// The one direct way to tell a *rejected* pixel from a merely high-variance one: rejection pins a pixel at
+    /// zero carried samples forever and reads as permanent noise, while a converging pixel just converges slowly.
+    /// Red is "kept nothing this frame", ramping through to green as the count climbs.
+    ///
+    /// It deliberately poisons the accumulated color while enabled, since that color is what the history stores.
+    /// The count itself keeps evolving untouched, which is what is being inspected; turning it off recovers.
+    u32 debug_view = 0;
+
     // Pad the block to a full 256-byte CBV range (see frame_constants.hh).
-    // The tail is the seam for the next per-frame path-tracer controls (temporal accumulation index, low-discrepancy sequence offset, ...).
-    f32 _reserved[20] = {};
+    f32 _reserved[1] = {};
 };
 
 namespace sv
@@ -57,9 +81,22 @@ struct sv::pt_trace_desc
     sg::buffer<background_gpu> background;       // the Background cbuffer (SH environment probe) the miss reads
     cc::span<sg::tlas_instance const> instances; // one per scene item; the TLAS is (re)built from these
     sg::texture_2d output;                       // rgba16f UAV the raygen writes the integrated color into
-    sg::buffer<pbr_material_gpu> materials;      // per-triangle PBR params, indexed by PrimitiveIndex()
-    sg::buffer<tg::pos3f> vertices;              // the hit mesh's positions, for the flat face normal
-    sg::buffer<u32> indices;                     // 3 indices per triangle, into `vertices`
+
+    /// rgba16f UAV taking this frame's primary-hit geometry: `float4(normal.xyz, hit_t)`, `hit_t < 0` where the ray escaped.
+    /// Same extent as `output` — the raygen writes both at the dispatch's own pixel.
+    sg::texture_2d gbuffer;
+
+    /// The previous recorded frame's `output` and `gbuffer`, sampled to reproject the history onto this frame.
+    ///
+    /// Must not alias `output` / `gbuffer`: the raygen reads them at a *different* pixel than it writes.
+    /// Both must be bound even when `pt_frame_constants_gpu::has_history` is false — the shader ignores their
+    /// contents, but the binding group still needs a view.
+    sg::texture_2d history_color;
+    sg::texture_2d history_gbuffer;
+
+    sg::buffer<pbr_material_gpu> materials; // per-triangle PBR params, indexed by PrimitiveIndex()
+    sg::buffer<tg::pos3f> vertices;         // the hit mesh's positions, for the flat face normal
+    sg::buffer<u32> indices;                // 3 indices per triangle, into `vertices`
 };
 
 /// The global-illumination path-tracing pass.
@@ -77,6 +114,13 @@ public:
     /// Builds the TLAS from `d.instances`, binds the scene, and integrates one path bundle per pixel over `d.output`'s extent into `d.output`.
     /// A no-op (leaves the target untouched) if the shaders did not compile.
     static void execute(sg::command_list& cmd, pt_trace_desc const& d);
+
+    /// Whether this routine has a pipeline to dispatch — false when the shaders did not compile or the bindings did not merge.
+    ///
+    /// `execute` degrades to a no-op rather than throwing, which is the right behavior for a live reload and the
+    /// wrong one for a test: a broken shader then leaves an untouched target that no CPU-side assertion notices.
+    /// So a test asserts on this, and a debug overlay can say why the image is empty.
+    [[nodiscard]] static bool is_ready(sg::command_list& cmd);
 
 protected:
     void init_declare(sg::context& ctx) override;

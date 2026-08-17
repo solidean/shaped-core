@@ -31,7 +31,9 @@ sv::layer_kind                   // layout | scene_3d | scene_2d | ui — compos
 sv::layer_blend                  // replace | over (premultiplied) — scene_3d is forced to replace until the raygen writes alpha
 sv::primary_scene_3d(v) / sv::ensure_scene_3d(v)  // -> layer const* / layer& — the view's first traced layer, appended on demand
 sv::refresh_policy               // { float rate; } — fraction of the loop's rate: 1 every frame, 0.5 every second, 0 only on invalidation
-sv::temporal_input               // { u64 id; optional<vec2i> resolution; pixel_format; u64 reset_hash; } — declared, not honoured yet
+sv::temporal_input               // { u64 id; optional<vec2i> resolution; pixel_format; u64 reset_hash; } — unset resolution = the view's own
+sv::temporal_inputs_of(view_data) -> vector<temporal_input>  // what the view declared, PLUS one accumulator per scene_3d layer
+sv::temporal_id::accumulation(layer) -> u64   // the id a traced layer accumulates under; >= caller_range_end, so a caller cannot collide
 sv::view_id                      // stable identity across frames; view_id::from_string("main", seed=0) — keys everything a view keeps
                                  //   the WHOLE string is hashed, `##` included, so "angle##0" and "angle##1" are two views
 sv::view_index                   // enum class : u32 — a view's slot in `viewer_definition::views` THIS frame; not an identity, so never persist one
@@ -240,18 +242,19 @@ A manager never hashes anything itself, so hash load stays where the caller sche
 ```cpp
 // Both the FRAME's job — once, before the first view resolves its ids or reaches for its accumulator.
 resources.begin_frame(ctx.current_epoch())
-sv::view_renderer::begin_frame(cmd)                       // reclaims idle accumulation targets; skipping it only means nothing is reclaimed
+store.begin_frame(u64(ctx.current_epoch()))               // reclaims idle view textures; skipping it only means nothing is reclaimed
 
-// One view -> the texture kept under its id. A convenience for a caller tracing a single view with no plan.
-sv::view_renderer::execute(cmd, view_data, resources) -> sg::texture_2d
+// One view -> the texture the store keeps under its id. A convenience for a caller tracing a single view with no plan.
+sv::view_renderer::execute(cmd, view_data, resources, store) -> sg::texture_2d
                                                           //   traces into a PERSISTENT rgba16f target keyed by v.id, sized from v.resolution
                                                           //   blends in place, restarting whenever the traced image changed at all
-                                                          //   the routine owns it: holding it past the next execute/begin_frame for that id is invalid
+                                                          //   the store owns it: holding it past the next execute/begin_frame for that id is invalid
                                                           //   assumes ONE traced layer per view; the plan path below is per (view, layer)
-sv::view_renderer::accumulated_frames(cmd, view_id) -> u32  // frames accumulated so far; 0 after a restart. For tests and debug overlays
+store.accumulated_frames(view_id) -> u32                  // frames accumulated so far; 0 after a restart. For tests and debug overlays
 
 // The whole frame, from its plan: every trace first, then one pass per refreshing target, the output last.
-sv::viewer_renderer::execute(cmd, def, plan, resources, output)   // output = a sg::color_target, e.g. rt.cleared(clear_color)
+sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // output = a sg::color_target, e.g. rt.cleared(clear_color)
+                                                          //   `store` MUST be the one `plan`'s view_history was read from
                                                           //   nothing writes the gaps a layout leaves — pass output.cleared(...)
                                                           //   an empty plan still opens no pass; an empty def leaves the clear alone to land
 
@@ -282,20 +285,28 @@ Hashing what is uploaded rather than what the view holds is what keeps it from d
 
 ## Persistent per-view state
 
-Everything a view keeps across frames hangs off its `view_id`, in two caches that never signal each other:
-the viewer holds the camera, the controller and the last rect; `view_renderer` holds the accumulation target and its counter.
-Both are `sv::impl::keyed_cache` instantiations on the same epoch clock, so their idle thresholds mean the same thing.
+Everything a view keeps across frames hangs off its `view_id`, in **one** store the frame owns — camera, controller, placement, zoom, composite target and accumulators together.
 
 ```cpp
-sv::impl::keyed_cache<Key, Record>   // externally-keyed cache with two-tier idle reclamation — lru_pool's counterpart for NAMED state
-c.begin_frame(tick, on_release)      // reclaim against the just-finished frame, then advance; never touches this tick's working set
-c.get_or_create(key) / find / peek   // peek does NOT touch, so a hit-test cannot keep a view alive
-c.set_payload_bytes(key, n)          // what marks a record as holding something reclaimable, and what the byte budget counts
+sv::view_store                       // owned by sv::viewer, or by whoever drives view_renderer directly; NOT thread-safe
+store.begin_frame(u64(ctx.current_epoch()))   // reclaim against the just-finished frame, then advance
+store.get_or_create(id) / find / peek         // peek does NOT touch, so a hit-test cannot keep a view alive
+store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
+store.accumulated_frames(id) -> u32
+sv::impl::view_state                 // the record: display_name, controller, camera, placement, zoom, composite, temporal, last_refresh_frame
+sv::impl::temporal_slot              // { texture_2d texture; u64 reset_hash; u32 accum_frame; }
+st.temporal                          // cc::map<u64, temporal_slot> — KEYED by temporal_input::id, not indexed by layer
+
+sv::impl::keyed_cache<Key, Record>   // what it is built on — lru_pool's counterpart for NAMED state
+c.begin_frame(tick, on_release)      // on_release frees the payload AND clears it; the cache never overwrites the record
 sv::impl::keyed_cache_limits         // { i64 max_idle_frames_payload, max_idle_frames_entry; isize max_payload_bytes, max_entries; }
 ```
 
-The two thresholds are the point: an accumulation target is megabytes and goes after ~60 idle frames, while the identity behind it costs a few dozen bytes and survives ~240.
-`sg::render_routine::evict` drops the GPU half wholesale, which is exactly why the camera lives in the other one.
+The two thresholds are the point: a view's textures are megabytes and go after ~60 idle frames, while the identity behind them costs a few dozen bytes and survives ~240.
+That only works because the release hook clears the textures alone — a demotion that reset the record would take the camera with it.
+
+`sg::render_routine::evict` no longer reaches an accumulated image, since none live on a routine.
+What restarts a view after a shader reload is the reload generation `view_renderer` folds into its trace hash.
 
 ## Viewer + authoring API
 
@@ -438,8 +449,8 @@ auto const plan = sv::build_render_plan(def, {w, h}, frame_index, history);
 auto rt = sc->acquire_backbuffer();
 auto cmd = ctx.create_command_list();
 resources.begin_frame(ctx.current_epoch());                 // both once per frame, before anything reaches for a texture
-sv::view_renderer::begin_frame(*cmd);
-sv::viewer_renderer::execute(*cmd, def, plan, resources, rt.cleared(clear_color));
+store.begin_frame(u64(ctx.current_epoch()));
+sv::viewer_renderer::execute(*cmd, def, plan, resources, store, rt.cleared(clear_color));
 ctx.submit_command_list_and_present(*sc, cc::move(cmd));
 
 // a GUI over the frame is a SECOND pass — every trace must precede any pass, so the frame's cannot be shared
@@ -450,12 +461,13 @@ sr::imgui_routine::execute(scope, ImGui::GetDrawData());
 ## Rendering internals
 
 ```cpp
-sv::view_renderer::resolve(cmd, plan) -> plan_resources    // allocates/resizes every texture the plan names, and TOUCHES EVERY REACHABLE VIEW
+sv::view_renderer::resolve(cmd, plan, store) -> plan_resources    // allocates/resizes every texture the plan names, and TOUCHES EVERY REACHABLE VIEW
                                                            //   even a throttled one, or the idle reclaim frees a texture its parent is about to sample
-sv::view_renderer::trace(cmd, def, plan, i, res, resources)  // one dispatch, with no rendering scope open
-sv::view_renderer::begin_frame(cmd) / ::accumulated_frames(cmd, id)
+                                                           //   plan.temporals is what it allocates from; a trace's output is looked up by temporal id
+sv::plan_temporal                // { view_id id; u64 temporal_id; vec2i resolution; pixel_format format; u64 reset_hash; } — a temporal_input, sized
+sv::view_renderer::trace(cmd, def, plan, i, res, resources, store)  // one dispatch, with no rendering scope open
 sv::plan_resources               // { vector<texture_2d> targets, traces; } — .textures() -> plan_textures spans; the output's slot is empty (it is the caller's)
-sv::viewer_renderer::execute(cmd, def, plan, resources, output)   // traces first, then one layout_routine pass per refreshing target
+sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // traces first, then one layout_routine pass per refreshing target
 sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + placed views + wipes; the ONLY thing that writes a target
 ```
 
@@ -493,6 +505,6 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   `view.add_scene()` is the opposite: it appends every time, so calling it twice in a frame gives a view two traced layers, of which only the last is visible.
 - **A dispatch may not be recorded inside a rendering scope.** dx12 tolerates it, Vulkan does not, and sg now asserts;
   it is why the plan's traces all hoist above every pass.
-- **`sg::render_routine::evict(ctx)` wipes the accumulation cache** with the routine instance, so every view restarts — a one-frame flash of noise after a shader reload.
-  The camera survives, because it lives in the viewer's cache rather than the routine's.
-- **The texture `view_renderer::execute` returns is not yours** — it is keyed by `view.id` and may be resized or released by the next `execute` / `begin_frame` for that id.
+- **`sg::render_routine::evict(ctx)` no longer restarts anything** — the accumulated images live in the caller's `view_store`, which outlives the routine instance.
+  A shader reload still restarts every view, but through the reload generation folded into the trace hash rather than through eviction.
+- **The texture `view_renderer::execute` returns is not yours** — it is keyed by `view.id` and may be resized or released by the next `execute` / `store.begin_frame` for that id.

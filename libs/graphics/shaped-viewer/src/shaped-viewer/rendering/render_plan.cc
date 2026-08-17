@@ -226,6 +226,19 @@ struct builder
         plan.reachable.push_back(v.id);
 
         auto const res = resolution[index];
+
+        // Sized here because an unset resolution means "the view's own", and this is the first point that knows it.
+        for (auto const& t : temporal_inputs_of(v))
+            plan.temporals.push_back({.id = v.id,
+                                      .temporal_id = t.id,
+                                      .resolution = t.resolution.has_value() ? t.resolution.value() : res,
+                                      .format = t.format,
+                                      .reset_hash = t.reset_hash});
+
+        // Decided before the layer walk so a trace can carry it: the renderer needs to know whether a trace records
+        // before it records, to rotate its history only on the frames that produce a new image.
+        auto const refreshes = should_refresh(v, res, history.lookup(v.id), frame_index);
+
         auto local = cc::vector<layout_draw>();
 
         for (auto layer_index = u32(0); layer_index < v.layers.size(); ++layer_index)
@@ -235,8 +248,15 @@ struct builder
             {
             case layer_kind::scene_3d:
             {
+                // A layer with no geometry renders nothing, so it gets no trace and no draw sampling one.
+                // Emitting them anyway hands the renderer a dispatch with nothing to bind, which it asserts on —
+                // and `add_scene().add_light(...)` before any mesh exists is ordinary authoring, not an error.
+                if (!is_traceable(l))
+                    break;
+
                 auto const trace = u32(plan.traces.size());
-                plan.traces.push_back({.id = v.id, .view = view, .layer = u8(layer_index), .resolution = res});
+                plan.traces.push_back(
+                    {.id = v.id, .view = view, .layer = u8(layer_index), .resolution = res, .refresh = refreshes});
                 local.push_back({.kind = draw_kind::view,
                                  .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
                                  .primary = {.kind = draw_source_kind::trace, .index = trace, .uv = full_uv},
@@ -264,10 +284,7 @@ struct builder
         for (auto& d : local)
             plan.draws.push_back(cc::move(d));
 
-        plan.targets.push_back({.id = v.id,
-                                .view = view,
-                                .resolution = res,
-                                .refresh = should_refresh(v, res, history.lookup(v.id), frame_index)});
+        plan.targets.push_back({.id = v.id, .view = view, .resolution = res, .refresh = refreshes});
         return target;
     }
 
@@ -493,6 +510,12 @@ render_plan build_render_plan(viewer_definition const& def,
     {
         b.plan.targets[root].is_output = true;
         b.plan.targets[root].refresh = true; // the caller's target holds nothing of ours to re-present
+
+        // A root view is normally a layout wrapper and traces nothing, but nothing forbids it a scene_3d layer —
+        // and a trace under a target forced to refresh has to be forced with it, or it re-presents into a cleared one.
+        for (auto& tr : b.plan.traces)
+            if (tr.view == def.root_view)
+                tr.refresh = true;
     }
 
     return cc::move(b.plan);

@@ -53,9 +53,10 @@ TEST("sv - view renderer end to end (headless)")
 
     auto cmd = ctx.create_command_list();
     resources.begin_frame(ctx.current_epoch()); // the frame's job, not the renderer's
+    auto store = sv::view_store{};              // and so is what the view keeps across frames
 
     // The renderer only ever hands back a texture — it never sees an output target.
-    auto const traced = sv::view_renderer::execute(*cmd, v, resources);
+    auto const traced = sv::view_renderer::execute(*cmd, v, resources, store);
     CHECK(traced.width() == size[0]);
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
 
@@ -117,7 +118,8 @@ TEST("sv - view renderer renders indexed geometry (headless)")
 
     auto cmd = ctx.create_command_list();
     resources.begin_frame(ctx.current_epoch());
-    (void)sv::view_renderer::execute(*cmd, v, resources);
+    auto store = sv::view_store{};
+    (void)sv::view_renderer::execute(*cmd, v, resources, store);
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
 

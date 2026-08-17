@@ -14,7 +14,8 @@
 /// Traces hoist above every pass because a ray-tracing dispatch may not be recorded inside one.
 /// The loop is kind-driven rather than two fixed phases, so a future stage that *does* interleave stays expressible.
 ///
-/// Nothing here advances `resources`: call `resources.begin_frame(ctx.current_epoch())` once per frame, before this.
+/// Nothing here advances `resources` or `store`: call `resources.begin_frame(ctx.current_epoch())` and
+/// `store.begin_frame(ctx.current_epoch())` once per frame, before this.
 ///
 /// It holds no state and takes no guard, so the lock order through the frame is view_renderer, then the layout routine.
 class sv::viewer_renderer : public sg::render_routine<viewer_renderer>
@@ -24,6 +25,8 @@ public:
     /// The caller submits (and presents) it.
     ///
     /// `plan` must have been built from `def` — the traces name views and layers by index into it.
+    /// `store` holds every texture the plan resolves to, and must be the one `plan`'s `view_history` was read from, or
+    /// a view the plan believes it can re-present has nothing to re-present.
     /// `output` is the plan's output target and names the format the pipelines are built for; nothing writes the gaps
     /// a layout leaves, so pass `output.cleared(...)` to define them.
     ///
@@ -32,6 +35,7 @@ public:
                         viewer_definition const& def,
                         render_plan const& plan,
                         scene_resources& resources,
+                        view_store& store,
                         sg::color_target const& output);
 
 protected:

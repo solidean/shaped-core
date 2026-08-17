@@ -30,14 +30,6 @@ TEST("sv - interactive viewer, a layout of views (manual)", nx::config::manual)
     if (ctx_r.has_error())
         SKIP("no rendering context available");
 
-    {
-        auto probe = ctx_r.value()->create_command_list();
-        auto const supported = probe->raytracing.is_supported();
-        ctx_r.value()->drop_command_list(cc::move(probe));
-        if (!supported)
-            SKIP("device reports no ray tracing support");
-    }
-
     auto frames = 0;
     for (auto f : sv::interactive("layout demo", {.title = "shaped-viewer — layout of views"}))
     {
@@ -89,14 +81,6 @@ TEST("sv - interactive viewer, the manual begin_frame/end_frame loop (manual)", 
     if (ctx_r.has_error())
         SKIP("no rendering context available");
 
-    {
-        auto probe = ctx_r.value()->create_command_list();
-        auto const supported = probe->raytracing.is_supported();
-        ctx_r.value()->drop_command_list(cc::move(probe));
-        if (!supported)
-            SKIP("device reports no ray tracing support");
-    }
-
     auto viewer = sv::viewer::create("raw loop demo", {.title = "shaped-viewer — raw begin_frame/end_frame"});
 
     auto frames = 0;
@@ -130,23 +114,17 @@ TEST("sv - interactive viewer, one scene with no ceremony (manual)", nx::config:
     if (ctx_r.has_error())
         SKIP("no rendering context available");
 
-    {
-        auto probe = ctx_r.value()->create_command_list();
-        auto const supported = probe->raytracing.is_supported();
-        ctx_r.value()->drop_command_list(cc::move(probe));
-        if (!supported)
-            SKIP("device reports no ray tracing support");
-    }
 
     // The shortest thing that renders: no window, no view, no layout named at all — and no title either, so the
     // viewer's own name titles the window.
     // `f.add_scene()` resolves to the default window's default view's 3D layer, and that view fills the window.
     for (auto f : sv::interactive("shaped-viewer — one scene"))
     {
-        f.add_scene().add_light({.center = tg::pos3f(0, 3, 0),
-                                 .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                 .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                 .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
+        auto scene = f.add_scene();
+        scene.add_light({.center = tg::pos3f(0, 3, 0),
+                         .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                         .half_extent_v = tg::vec3f(0, 0, 0.75f),
+                         .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
     }
 
     CHECK(true);

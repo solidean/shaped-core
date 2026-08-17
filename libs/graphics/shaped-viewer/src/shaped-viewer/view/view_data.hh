@@ -20,6 +20,7 @@
 struct sv::temporal_input
 {
     /// Names this resource within its view; a layer derives it from its own index, so two layers cannot collide.
+    /// `sv::temporal_id` mints the ones the renderer implies — a caller declaring their own must not collide with those.
     u64 id = 0;
 
     /// Unset means the view's own resolution, which is what an accumulator wants.
@@ -29,6 +30,31 @@ struct sv::temporal_input
 
     u64 reset_hash = 0;
 };
+
+namespace sv::temporal_id
+{
+/// The ids the renderer mints for a traced layer, keyed by the layer's own index so two layers cannot collide.
+///
+/// The high half of the id is the *kind* and the low half the layer, so a kind added later needs no renumbering.
+/// A caller declaring a `temporal_input` of their own keeps out of the reserved range by leaving the high half clear.
+inline constexpr u64 kind_shift = 32;
+inline constexpr u64 caller_range_end = u64(1) << kind_shift;
+
+/// Where a traced layer blends its running estimate — the path tracer's accumulator.
+[[nodiscard]] constexpr u64 accumulation(u8 layer)
+{
+    return (u64(1) << kind_shift) | u64(layer);
+}
+
+/// The traced layer's primary-hit geometry: `float4(normal.xyz, hit_t)`, with `hit_t < 0` where the ray escaped.
+///
+/// Written fresh every recorded frame rather than accumulated, and kept alongside the accumulator so a later frame
+/// can ask where this frame's pixels were — which is what reprojecting the history needs.
+[[nodiscard]] constexpr u64 gbuffer(u8 layer)
+{
+    return (u64(2) << kind_shift) | u64(layer);
+}
+} // namespace sv::temporal_id
 
 /// How often a view re-renders, as a fraction of the frame loop's rate.
 ///
@@ -82,4 +108,19 @@ namespace sv
 /// The view's first `scene_3d` layer, appending one if it has none.
 /// This is what an authoring call that adds a mesh or a light reaches for.
 [[nodiscard]] layer& ensure_scene_3d(view_data& v);
+
+/// Whether `l` holds anything a trace could actually render.
+///
+/// A `scene_3d` layer carrying only lights or only a background is legitimate authoring — `add_scene().add_light(...)`
+/// is the obvious way to light a view before its geometry exists — and it must render an empty image rather than
+/// reaching the renderer, which asserts that a trace has geometry to bind.
+/// The plan and the temporal inputs both key off this, so a layer that traces nothing also allocates nothing.
+[[nodiscard]] bool is_traceable(layer const& l);
+
+/// Every temporal resource `v` needs this frame: the ones it declared, plus one accumulator per traced layer.
+///
+/// The tracer's accumulator is *derived* rather than baked into the renderer, which is what makes it one temporal
+/// input among others instead of a special case — the plan sizes it and the store keeps it exactly like any other.
+/// A resolution left unset is still unset here; only the plan knows what the view settled on.
+[[nodiscard]] cc::vector<temporal_input> temporal_inputs_of(view_data const& v);
 } // namespace sv

@@ -33,6 +33,7 @@
 #include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_data.hh>
 #include <shaped-viewer/view/view_id.hh>
+#include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 
 // layout

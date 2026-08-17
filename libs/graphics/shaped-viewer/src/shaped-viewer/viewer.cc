@@ -12,13 +12,13 @@
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
-#include <shaped-viewer/impl/keyed_cache.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/rendering/shaders.hh> // sv::shader_package (path tracer)
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
+#include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
 
@@ -136,9 +136,9 @@ struct viewer::impl
     // Closed between the two, and unused by frames(), whose frame belongs to the loop variable.
     frame current_frame;
 
-    // The immediate half of a view's persistent state: its camera, its controller and where it last landed.
-    // The GPU half sits on view_renderer, and neither pool signals the other — see impl/view_state.hh.
-    sv::impl::keyed_cache<view_id, sv::impl::view_state> view_states;
+    // Everything this viewer's views keep across frames: cameras, controllers, placements and textures alike.
+    // Handed to the renderers rather than reached out of them — see view/view_store.hh.
+    sv::view_store views;
 
     // Where the cursor was at the last event that reported one, so a key event still routes somewhere.
     tg::pos2f last_cursor_pos = tg::pos2f(0, 0);
@@ -225,11 +225,6 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     im->swapchain = cc::move(sc);
     im->shader_library = cc::move(shader_library);
 
-    // A view's camera and placement are cheap enough to keep long, so only the entry threshold applies here.
-    // It matches the one the renderer's accumulation cache uses, so a view cannot survive in one and vanish from the other.
-    im->view_states.set_limits(
-        {.max_idle_frames_entry = sv::impl::keyed_cache_limits::view_idle_frames, .max_entries = 256});
-
     im->start_time = std::chrono::steady_clock::now();
     return viewer(cc::move(im));
 }
@@ -294,7 +289,7 @@ scene_resources& viewer::scene_resources_of()
 
 sv::impl::view_state& viewer::state_of(view_id id)
 {
-    return _impl->view_states.get_or_create(id);
+    return _impl->views.get_or_create(id);
 }
 
 void viewer::begin_move(tg::pos2f window_point)
@@ -306,7 +301,7 @@ void viewer::begin_move(tg::pos2f window_point)
         return;
 
     auto const& region = im.last_hit_regions[hit];
-    auto* const st = im.view_states.find(region.id);
+    auto* const st = im.views.find(region.id);
     if (st == nullptr || !st->movable_last_frame)
         return;
 
@@ -330,7 +325,7 @@ void viewer::move_to(tg::pos2f window_point)
     if (!im.moving_view.has_value())
         return;
 
-    auto* const st = im.view_states.find(im.moving_view.value());
+    auto* const st = im.views.find(im.moving_view.value());
     if (st == nullptr)
         return;
 
@@ -353,8 +348,12 @@ void viewer::zoom_at(tg::pos2f window_point, float ticks)
         return;
 
     auto const& region = im.last_hit_regions[hit];
-    auto* const st = im.view_states.find(region.id);
-    if (st == nullptr || st->target_resolution[0] <= 0 || st->target_resolution[1] <= 0)
+    auto* const st = im.views.find(region.id);
+    if (st == nullptr || st->composite.raw() == nullptr)
+        return; // a view with no image yet has nothing to magnify into
+
+    auto const resolution = tg::vec2i(st->composite.width(), st->composite.height());
+    if (resolution[0] <= 0 || resolution[1] <= 0)
         return;
 
     // The region maps this view's texels to window pixels, so inverting it says which texel the cursor is over.
@@ -363,8 +362,8 @@ void viewer::zoom_at(tg::pos2f window_point, float ticks)
     auto const texel_y = (window_point[1] - region.offset[1]) / (region.scale[1] != 0 ? region.scale[1] : 1.0f);
 
     st->zoom = cc::clamp(st->zoom * tg::pow(zoom_per_tick, ticks), 1.0f, max_zoom);
-    st->zoom_center = tg::pos2f(cc::clamp(texel_x / f32(st->target_resolution[0]), 0.0f, 1.0f),
-                                cc::clamp(texel_y / f32(st->target_resolution[1]), 0.0f, 1.0f));
+    st->zoom_center = tg::pos2f(cc::clamp(texel_x / f32(resolution[0]), 0.0f, 1.0f), //
+                                cc::clamp(texel_y / f32(resolution[1]), 0.0f, 1.0f));
 }
 
 void viewer::route_input()
@@ -415,7 +414,7 @@ void viewer::route_input()
         }
 
         // A live drag keeps its view even once the cursor leaves the rect; otherwise the frontmost leaf under it wins.
-        auto* st = im.active_view.has_value() ? im.view_states.find(im.active_view.value()) : nullptr;
+        auto* st = im.active_view.has_value() ? im.views.find(im.active_view.value()) : nullptr;
         auto owner = im.active_view;
         if (st == nullptr)
         {
@@ -425,7 +424,7 @@ void viewer::route_input()
             if (hit != invalid_hit_region)
             {
                 owner = im.last_hit_regions[hit].id;
-                st = im.view_states.find(owner.value());
+                st = im.views.find(owner.value());
             }
         }
 
@@ -447,9 +446,9 @@ frame viewer::acquire_frame()
     auto& im = *_impl;
     im.window_system->poll_events();
 
-    // Both per-view caches run on the context's epoch, so their idle thresholds mean the same thing.
-    // This one advances before authoring, because seeding and the hit-test below read it.
-    im.view_states.begin_frame(u64(im.ctx->current_epoch()));
+    // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
+    // texture, which is all its reclaim needs.
+    im.views.begin_frame(u64(im.ctx->current_epoch()));
     route_input();
 
     if (im.window->is_close_requested() || im.window_system->is_quit_requested())
@@ -538,7 +537,7 @@ void viewer::finish_frame(frame& f)
 
     for (auto& v : def.views)
     {
-        auto& st = im.view_states.get_or_create(v.id);
+        auto& st = im.views.get_or_create(v.id);
 
         // A caller that set a camera this frame owns it; otherwise the view renders from whatever it was orbited to.
         if (!st.camera_owned_this_frame)
@@ -579,7 +578,7 @@ void viewer::finish_frame(frame& f)
             for (auto i = u32(0); i < def.views.size(); ++i)
             {
                 auto const view = view_index(i);
-                auto const& st = im.view_states.get_or_create(def[view].id);
+                auto const& st = im.views.get_or_create(def[view].id);
                 if (!st.movable_this_frame || !st.placement_seeded)
                     continue;
 
@@ -596,7 +595,7 @@ void viewer::finish_frame(frame& f)
     // Cleared only now, since the lift above is the last thing to read it — a caller who stops offering a view stops
     // being able to drag it from the next frame on, while whatever a previous drag already did to it survives.
     for (auto const& v : def.views)
-        im.view_states.get_or_create(v.id).movable_this_frame = false;
+        im.views.get_or_create(v.id).movable_this_frame = false;
 
     // The zoom lives on the view it magnifies, but the *leaf* is what samples — so resolve it across before planning.
     // Passing it as data keeps `build_render_plan` a pure function, and keeps the zoom out of every trace hash.
@@ -607,18 +606,23 @@ void viewer::finish_frame(frame& f)
         if (isize(u32(node.leaf.views[0])) >= def.views.size())
             continue;
 
-        auto const& st = im.view_states.get_or_create(def[node.leaf.views[0]].id);
+        auto const& st = im.views.get_or_create(def[node.leaf.views[0]].id);
         node.leaf.zoom = st.zoom;
         node.leaf.zoom_center = st.zoom_center;
     }
 
-    // What the renderer already knows about each view, so the plan can decide what refreshes.
+    // What the store already holds for each view, so the plan can decide what refreshes.
+    // Read off the composite texture rather than a field stamped beside it, so "the plan believes this can be
+    // re-presented" and "there is something to re-present" cannot drift apart.
     auto history = view_history{};
     for (auto const& v : def.views)
     {
-        auto const& st = im.view_states.get_or_create(v.id);
+        auto const& st = im.views.get_or_create(v.id);
+        auto const exists = st.composite.raw() != nullptr;
         history.entries[v.id]
-            = {.exists = st.has_target, .resolution = st.target_resolution, .last_refresh_frame = st.last_refresh_frame};
+            = {.exists = exists,
+               .resolution = exists ? tg::vec2i(st.composite.width(), st.composite.height()) : tg::vec2i(0, 0),
+               .last_refresh_frame = st.last_refresh_frame};
     }
 
     auto const plan = build_render_plan(def, f._size, f._id, history);
@@ -628,26 +632,22 @@ void viewer::finish_frame(frame& f)
     // space and only the plan has carried it all the way up.
     im.last_hit_regions = plan.hit_regions;
 
+    // The one piece of history with no texture to read it back off.
     for (auto const& target : plan.targets)
-    {
-        auto& st = im.view_states.get_or_create(target.id);
-        st.has_target = true;
-        st.target_resolution = target.resolution;
         if (target.refresh)
-            st.last_refresh_frame = f._id;
-    }
+            im.views.get_or_create(target.id).last_refresh_frame = f._id;
 
     try
     {
-        // The frame owns both of these: reclaim stale / over-budget resources, then advance to this frame's epoch,
-        // before any view resolves its ids or reaches for its accumulator.
-        // The view-state cache already advanced on the same epoch, back in next_frame.
+        // Reclaim stale / over-budget resources and advance to this frame's epoch, before any view resolves its ids or
+        // reaches for its accumulator.
+        // The view store already advanced on the same epoch, back in next_frame.
         im.resources.begin_frame(im.ctx->current_epoch());
-        view_renderer::begin_frame(*im.current_cmd);
 
         // With no views authored this places nothing and the clear alone lands, so the window is never left with
         // stale contents.
-        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.current_backbuffer.cleared(clear_color));
+        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views,
+                                 im.current_backbuffer.cleared(clear_color));
         im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
         im.ctx->advance_epoch(im.swapchain->buffer_count());
     }

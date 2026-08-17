@@ -681,3 +681,113 @@ TEST("sv - a view lifted out of the flow leaves its siblings tiling as if it wer
     REQUIRE(hit != sv::invalid_hit_region);
     CHECK(plan.hit_regions[hit].id == sv::view_id::from_string("floated"));
 }
+
+// Temporal resources are a plan-level fact: the plan is what sizes them, because an unset resolution means "the
+// view's own" and only the measure pass knows that.
+// This is also where the accumulator stops being a special case baked into the renderer — a traced layer *implies*
+// a temporal input, and a caller can declare more beside it.
+TEST("sv - a traced layer implies an accumulation temporal input, sized by the plan")
+{
+    auto def = sv::viewer_definition{};
+    auto const traced = add_traced_view(def, "traced");
+    auto const root = add_layout_view(def, "root");
+    (void)add_leaf(def, layout_root_of(def, root), cc::span<sv::view_index const>(&traced, 1));
+    def.root_view = root;
+
+    auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
+    REQUIRE(plan.validate());
+
+    // Two per traced layer — the accumulator and the primary-hit geometry beside it — and none for the layout
+    // views, which accumulate nothing.
+    REQUIRE(plan.temporals.size() == 2);
+    auto const& t = plan.temporals[0];
+    CHECK(t.id == sv::view_id::from_string("traced"));
+    CHECK(t.temporal_id == sv::temporal_id::accumulation(0));
+    CHECK(t.resolution == tg::vec2i(128, 64)); // the view's own, taken from the rect it landed in
+    CHECK(t.format == sg::pixel_format::rgba16_float);
+
+    // The G-buffer shares the accumulator's extent: the raygen writes both at the dispatch's own pixel.
+    auto const& g = plan.temporals[1];
+    CHECK(g.temporal_id == sv::temporal_id::gbuffer(0));
+    CHECK(g.resolution == t.resolution);
+
+    // Both ids are outside the range a caller may declare in, so the two cannot collide.
+    CHECK(t.temporal_id >= sv::temporal_id::caller_range_end);
+    CHECK(g.temporal_id >= sv::temporal_id::caller_range_end);
+    CHECK(t.temporal_id != g.temporal_id);
+}
+
+// A layer inserted *above* a traced one must not hand its accumulator to a different layer.
+// This is the whole reason the slots are keyed by id rather than indexed by layer position: an id derived from the
+// layer's own index moves with it, so the history follows the layer that owns it.
+TEST("sv - a caller-declared temporal input rides alongside the implied one")
+{
+    auto def = sv::viewer_definition{};
+
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("declared");
+    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
+
+    // A caller's own resource: half resolution, its own format, and its own reset rule.
+    v.temporal_inputs.push_back(
+        {.id = 7, .resolution = tg::vec2i(32, 16), .format = sg::pixel_format::rgba8_unorm, .reset_hash = 0xABCD});
+    auto const declared = sv::view_index(def.views.size());
+    def.views.push_back(cc::move(v));
+
+    auto const root = add_layout_view(def, "root");
+    (void)add_leaf(def, layout_root_of(def, root), cc::span<sv::view_index const>(&declared, 1));
+    def.root_view = root;
+
+    auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
+    REQUIRE(plan.temporals.size() == 3); // the caller's, plus the traced layer's two
+
+    // The declaration is carried verbatim — a set resolution is NOT overwritten by the view's.
+    auto const& own = plan.temporals[0];
+    CHECK(own.temporal_id == 7u);
+    CHECK(own.resolution == tg::vec2i(32, 16));
+    CHECK(own.format == sg::pixel_format::rgba8_unorm);
+    CHECK(own.reset_hash == 0xABCDu);
+
+    // The implied pair still lands, at the view's own resolution.
+    CHECK(plan.temporals[1].temporal_id == sv::temporal_id::accumulation(0));
+    CHECK(plan.temporals[1].resolution == tg::vec2i(128, 64));
+    CHECK(plan.temporals[2].temporal_id == sv::temporal_id::gbuffer(0));
+    CHECK(plan.temporals[2].resolution == tg::vec2i(128, 64));
+}
+
+// A scene layer that is authored but holds no geometry.
+//
+// `f.add_scene().add_light(...)` before any mesh exists is ordinary authoring — you light a view, then fill it — and
+// it has to render an empty image.
+// Planning a trace for it instead hands `view_renderer` a dispatch with nothing to bind, and `resolve_scene` asserts,
+// which is a hard crash out of a perfectly reasonable frame.
+// That is what broke every interactive manual test once the placeholder cube was dropped (59d73bfe).
+TEST("sv - a scene layer with no geometry plans no trace")
+{
+    auto def = sv::viewer_definition{};
+
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("lit-but-empty");
+    sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
+                                                  .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                                                  .half_extent_v = tg::vec3f(0, 0, 0.75f),
+                                                  .emission = tg::vec3f(12, 12, 12)});
+    auto const empty = sv::view_index(def.views.size());
+    def.views.push_back(cc::move(v));
+
+    auto const root = add_layout_view(def, "root");
+    (void)add_leaf(def, layout_root_of(def, root), cc::span<sv::view_index const>(&empty, 1));
+    def.root_view = root;
+
+    auto const plan = sv::build_render_plan(def, tg::vec2i(64, 64), 0, {});
+    REQUIRE(plan.validate());
+
+    CHECK(plan.traces.empty());
+
+    // And nothing is allocated for it either: the trace and its accumulator key off the same predicate, so a layer
+    // that traces nothing cannot leave a pair of megabyte textures behind.
+    CHECK(plan.temporals.empty());
+
+    // The view is still reachable and still gets its own target — it renders, it just renders empty.
+    CHECK(plan.reachable.size() == 2); // the view and the root
+}

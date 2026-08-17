@@ -17,13 +17,17 @@ using namespace cc::primitive_defines;
 // Interactive demo: the path-traced Cornell box (global illumination via next-event estimation + diffuse
 // bounces) driven straight through sv::pathtrace_routine and blitted into a window, with a free-fly camera.
 //
-// Progressive accumulation: the trace blends into a persistent target each frame, so a still camera converges to a clean image within a second or two.
-// Any camera move restarts the average.
+// Temporal accumulation with reprojection: each frame reprojects the previous one's image through the camera it was
+// traced from and blends into it per pixel, so a still camera converges to a clean image within a second or two.
+// A camera move no longer restarts the average — it carries, and only the pixels failing the disocclusion test start
+// over — so moving stays far cleaner than a from-scratch trace would be.
 // Only a few samples are traced per frame, keeping it responsive while moving.
 //
 // Controls:
 //   hold right mouse button + move mouse — look around
 //   W / S — forward / back      A / D — strafe      E / Q — up / down      Shift — move faster
+//   Tab — toggle the accumulation debug view: red where a pixel kept no history, green as its count climbs.
+//         Red that never turns green is the history being rejected, which is what permanent noise looks like.
 //   Esc — quit
 //
 // nx::config::manual keeps it out of the default sweep.
@@ -43,7 +47,8 @@ struct fly_camera
     float move_speed = 2.0f;                                          // units / second
     tg::angle_f look_speed = tg::angle_f::make_from_radians(0.0035f); // per pixel of mouse motion
 
-    bool looking = false; // right mouse button held
+    bool looking = false;    // right mouse button held
+    bool debug_view = false; // Tab: show carried sample counts instead of the image
     bool key_forward = false, key_back = false, key_left = false, key_right = false;
     bool key_up = false, key_down = false, key_fast = false;
 
@@ -85,6 +90,10 @@ struct fly_camera
                 case sr::scancode::right_shift:
                     key_fast = down;
                     break;
+                case sr::scancode::tab:
+                    if (down)
+                        debug_view = !debug_view;
+                    break;
                 case sr::scancode::escape:
                     if (down)
                         win.request_close();
@@ -114,7 +123,7 @@ struct fly_camera
             [](sr::mouse_wheel_event const&) {}, [](sr::text_event const&) {});
     }
 
-    /// Returns whether the camera actually moved this step (so the caller can restart the accumulation).
+    /// Returns whether the camera moved this step, which is what decides how long a reprojected sample lives.
     [[nodiscard]] bool update(float dt)
     {
         auto velocity = tg::vec3f(0, 0, 0);
@@ -139,7 +148,7 @@ struct fly_camera
             auto const speed = move_speed * (key_fast ? 3.0f : 1.0f);
             position = position + velocity * (speed * dt);
         }
-        return moving || looking; // a look this frame also invalidates the accumulation
+        return moving || looking; // a look this frame counts as motion too
     }
 
     void apply(sv::camera& cam) const
@@ -206,10 +215,20 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
 
     auto controller = fly_camera{};
 
-    // Persistent accumulation target, (re)created to match the window; accum restarts on move / resize.
-    auto target = sg::texture_2d{};
+    // A ping-pong pair, not one texture: the raygen reprojects, so it reads at a different pixel than it writes and
+    // cannot do that in place.
+    // `write` names the half this frame fills; the other is last frame's, read-only.
+    // The G-buffer needs the same treatment, since the disocclusion test reads the previous frame's geometry.
+    sg::texture_2d color[2] = {};
+    sg::texture_2d gbuffer[2] = {};
+    auto write = 0;
+
     auto target_size = tg::vec2i(0, 0);
     auto accum = u32(0);
+
+    // What the reprojection maps through, and whether there is a frame to map at all.
+    auto prev_camera = sv::camera_gpu{};
+    auto has_history = false;
 
     auto last = std::chrono::steady_clock::now();
     auto const start = last;
@@ -233,20 +252,28 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
 
         auto const moved = controller.update(dt);
 
-        // (Re)create the accumulation target on a size change, restarting accumulation.
+        // (Re)create both pairs on a size change.
+        // Nothing survives a resize to reproject, so this is the one thing that still restarts the whole image — a
+        // camera move no longer does.
         auto const size = tg::vec2i(win->width(), win->height());
         if (size != target_size)
         {
-            target = ctx.persistent.create_texture_2d(
-                {.format = sg::pixel_format::rgba16_float,
-                 .width = size[0],
-                 .height = size[1],
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+            auto const desc = sg::texture_2d_description{
+                .format = sg::pixel_format::rgba16_float,
+                .width = size[0],
+                .height = size[1],
+                .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture};
+
+            for (auto i = 0; i < 2; ++i)
+            {
+                color[i] = ctx.persistent.create_texture_2d(desc);
+                gbuffer[i] = ctx.persistent.create_texture_2d(desc);
+            }
+
             target_size = size;
             accum = 0;
+            has_history = false;
         }
-        if (moved)
-            accum = 0;
 
         auto cam = sv::camera{};
         controller.apply(cam);
@@ -266,6 +293,14 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
         fc.seed = accum + 1;
         fc.mesh_is_indexed = mesh_rec->is_indexed;
 
+        fc.prev_camera = prev_camera;
+        fc.has_history = has_history;
+
+        // Uncapped while still, so a parked camera converges to the exact mean.
+        // Capped once moving, so a sample dragged along by reprojection ages out instead of smearing.
+        fc.history_max_frames = moved ? 32u : u32(-1);
+        fc.debug_view = controller.debug_view ? 1u : 0u;
+
         // Trace this frame's samples into the persistent target (blending in place when accum_frame > 0).
         {
             auto trace_cmd = ctx.create_command_list();
@@ -278,10 +313,14 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
                 1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
             trace_cmd->upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
 
+            auto const read = 1 - write;
             sv::pathtrace_routine::execute(*trace_cmd, {.frame = frame,
                                                         .background = background,
                                                         .instances = instances,
-                                                        .output = target,
+                                                        .output = color[write],
+                                                        .gbuffer = gbuffer[write],
+                                                        .history_color = color[read],
+                                                        .history_gbuffer = gbuffer[read],
                                                         .materials = mat_rec->materials,
                                                         .vertices = mesh_rec->vertices,
                                                         .indices = mesh_rec->indices});
@@ -293,10 +332,15 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
         auto cmd = ctx.create_command_list();
         {
             auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.0f, 0.0f, 0.0f, 1.0f))}});
-            sr::blit_routine::execute(pass, target);
+            sr::blit_routine::execute(pass, color[write]); // the half this frame just wrote
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch(sc->buffer_count());
+
+        // What this frame wrote becomes next frame's history — both halves of the pair, and the camera behind them.
+        prev_camera = fc.camera;
+        has_history = true;
+        write = 1 - write;
 
         if (accum < 4096) // cap so the running mean's weight stays well within half-float precision
             ++accum;

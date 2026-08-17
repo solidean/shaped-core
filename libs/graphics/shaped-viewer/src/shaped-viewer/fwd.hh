@@ -63,6 +63,9 @@ struct refresh_policy;
 struct view_data;
 struct viewer_definition;
 
+/// What every view keeps across frames — cameras, placements and textures alike, keyed by view_id (view_store.hh).
+class view_store;
+
 /// A view's slot in the frame's view pool — `viewer_definition::views`, which a layout leaf and the plan both name it by.
 ///
 /// Distinct from `view_id`, the identity a view keeps across frames: this only says where the view sits in *this* frame.
@@ -97,6 +100,7 @@ struct draw_source;
 struct layout_draw;
 struct plan_target;
 struct plan_trace;
+struct plan_temporal;
 struct hit_region;
 struct plan_diagnostic;
 struct view_history_entry;
@@ -116,7 +120,6 @@ struct plan_resources;
 namespace impl
 {
 struct layout_pipeline_key;
-struct accumulation_slot;
 } // namespace impl
 
 // rendering

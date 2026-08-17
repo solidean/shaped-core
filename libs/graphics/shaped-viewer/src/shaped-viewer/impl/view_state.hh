@@ -1,6 +1,8 @@
 #pragma once
 
+#include <clean-core/container/map.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/resource/texture.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -10,12 +12,50 @@
 
 namespace sv::impl
 {
-/// What a view keeps across frames on the CPU side, keyed by its view_id.
+/// One temporal resource a view keeps across frames, and how far whatever writes it has run.
 ///
-/// This is the half a caller or the built-in controller reads and writes; the GPU half — the textures and their
-/// counters — lives on view_renderer, next to the trace that owns them.
-/// The two never exchange a signal: the trace decides for itself whether its image is still valid, by hashing what it
-/// uploads, so this state going missing simply restarts the image rather than corrupting it.
+/// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
+/// now asking for it means the history describes something else, and `accum_frame` restarts at 0.
+/// A resize does the same, since a fresh texture holds nothing to blend into.
+struct temporal_slot
+{
+    /// What the frame writes, and what everything downstream samples.
+    sg::texture_2d texture;
+
+    /// The previous *recorded* frame's `texture`, read-only for this frame.
+    ///
+    /// A pair rather than one texture because reprojection reads at a different pixel than it writes, which in place
+    /// would be a race — and the two rotate only on frames that record, so a throttled view keeps re-presenting the
+    /// last image it actually produced rather than the one before it.
+    sg::texture_2d history;
+
+    /// Whether `history` holds a frame at all, as opposed to an allocated texture nothing has written yet.
+    bool has_history = false;
+
+    /// The reset rule of whatever *writes* this resource, as of the last frame it did.
+    /// For a traced layer that is the tracer's own content hash, covering the bytes it uploads.
+    u64 reset_hash = 0;
+
+    /// The reset rule the *declaration* carried, as of the last frame that resolved this slot.
+    ///
+    /// Deliberately not the same field as `reset_hash`, though both are "what invalidates this".
+    /// They answer for different parties and are written at different points in the frame, so sharing one field
+    /// makes each frame's resolve clobber the writer's rule — and an accumulator whose rule is clobbered restarts
+    /// every single frame, which looks exactly like the temporal reuse never having been wired up.
+    u64 declared_hash = 0;
+
+    u32 accum_frame = 0;
+};
+
+/// Everything a view keeps across frames, keyed by its view_id — held by `sv::view_store`.
+///
+/// One record rather than two: the camera a caller drives and the accumulator the trace blends into are reclaimed on
+/// one clock and against one budget, so a view cannot survive as an identity while its texture is released out from
+/// under the parent that samples it.
+///
+/// Nothing here signals the trace.
+/// It decides for itself whether its image is still valid, by hashing the bytes it uploads, so a field going stale
+/// restarts the image rather than corrupting it.
 struct view_state
 {
     /// What this view is called where a human reads it — the id up to its `##`, unless the caller set one.
@@ -65,13 +105,30 @@ struct view_state
     float zoom = 1.0f;
     tg::pos2f zoom_center = tg::pos2f(0.5f, 0.5f);
 
-    /// What the renderer already holds for this view, which is what a refresh policy is measured against.
+    /// This view's composited image — what its parent samples, and what it re-presents on a throttled frame.
     ///
-    /// Kept on the CPU half rather than read back out of the renderer, so building a plan stays a pure function of
-    /// values a test can supply.
-    /// Losing it only costs one extra refresh.
-    bool has_target = false;
-    tg::vec2i target_resolution = tg::vec2i(0, 0);
+    /// Null for the frame's output, whose texture is the caller's, and null before the first `view_renderer::resolve`
+    /// that sizes it.
+    /// Its presence and extent are what a refresh policy is measured against, so nothing mirrors them: `view_history`
+    /// is read off this texture rather than stamped alongside it.
+    sg::texture_2d composite;
+
+    /// What the view keeps across frames beyond its composite, keyed by `temporal_input::id`.
+    ///
+    /// Keyed rather than indexed because a temporal resource names itself: a traced layer's accumulator, and whatever
+    /// else a view declares, have to survive a layer being inserted above them.
+    cc::map<u64, temporal_slot> temporal;
+
+    /// The camera the last recorded trace of this view drew from, and whether there was one.
+    ///
+    /// Reprojection maps this frame's pixels back through it to find where they were, so this is what makes a camera
+    /// move reuse the converged image instead of discarding it.
+    /// Per view rather than per temporal slot: every layer of a view is traced from the one camera.
+    camera_gpu last_traced_camera = {};
+    bool has_last_traced_camera = false;
+
+    /// The frame this view last re-recorded, which is what its refresh rate is measured against.
+    /// The one piece of history with no texture to read it off, so the frame stamps it.
     u64 last_refresh_frame = 0;
 };
 } // namespace sv::impl
