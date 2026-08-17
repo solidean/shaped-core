@@ -1,5 +1,6 @@
 #pragma once
 
+#include <versioned-document/change_set.hh>
 #include <versioned-document/change_summary.hh>
 #include <versioned-document/document_builder.hh>
 #include <versioned-document/op_graph.hh>
@@ -32,10 +33,35 @@ struct vdoc::incremental_apply_options
     bool force_full_reparse = false;
 };
 
-/// What one apply did, for a test that has to see which path ran.
+/// Why an apply re-parsed instead of evolving the document it was handed.
+///
+/// A fallback is correct and slow, so this is never an error — but it is the difference between a history that is
+/// genuinely branchy and a caller driving the API wrong, and those want opposite responses.
+enum class vdoc::apply_fallback_reason : vdoc::u8
+{
+    /// The fast path ran.
+    none,
+
+    /// `incremental_apply_options::force_full_reparse`, which is a test pinning the slow path.
+    forced,
+
+    /// A merge, a skeleton or a missing op on the way back, or a `to` that does not reach `from` at all.
+    /// Single-parentage is what makes a chain's own assignments the complete delta, so none of these has a delta to read.
+    no_single_parent_chain,
+
+    /// A chain that was the right shape and longer than `max_chain_ops`.
+    /// A statement about the bound rather than about the history, and the one reason worth raising the bound over.
+    chain_too_long,
+};
+
+/// What one apply did, for a caller or a test that has to see which path ran and why.
 struct vdoc::incremental_apply_stats
 {
     bool took_fast_path = false;
+
+    /// `none` exactly when `took_fast_path`.
+    apply_fallback_reason fallback_reason = apply_fallback_reason::none;
+
     isize chain_ops = 0;
     isize touched_entities = 0;
     bool compacted = false;

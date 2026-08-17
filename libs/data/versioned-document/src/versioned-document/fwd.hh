@@ -157,6 +157,16 @@ class snapshot_cache;
 
 /// When installing a snapshot is worth its memory.
 struct snapshot_policy;
+
+/// How much of each entry's path a change set actually addresses.
+enum class change_granularity : u8;
+
+/// The paths that have to be re-interpreted — the input side of an incremental re-interpretation.
+/// Over-reports at worst, so every consumer is correct at every granularity.
+class change_set;
+
+/// Collects paths in any order and establishes a change set's invariant once.
+class change_set_builder;
 } // namespace vdoc
 
 // ---- interpretation ----------------------------------------------------------------------------
@@ -217,6 +227,9 @@ struct change_summary;
 
 /// Knobs on an incremental apply: how far it will look for the chain, and where its materialization may terminate.
 struct incremental_apply_options;
+
+/// Why an apply re-parsed instead of evolving the document it was handed.
+enum class apply_fallback_reason : u8;
 
 /// What one apply did, for a caller that has to see whether the fast path ran.
 struct incremental_apply_stats;

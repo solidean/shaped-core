@@ -5,6 +5,7 @@ project(versioned-document LANGUAGES CXX)
 # Knows nothing about what a component means — the component set belongs entirely to the application.
 # See readme.md and docs/_index.md.
 add_library(versioned-document
+    src/versioned-document/change_set.cc
     src/versioned-document/component.cc
     src/versioned-document/document.cc
     src/versioned-document/document_builder.cc
@@ -33,6 +34,7 @@ target_sources(versioned-document
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
+    src/versioned-document/change_set.hh
     src/versioned-document/change_summary.hh
     src/versioned-document/component.hh
     src/versioned-document/document.hh
@@ -84,6 +86,7 @@ if(SC_BUILD_TESTS)
 
         tests/benchmarks/edit-latency-benchmark.cc
 
+        tests/change_set-test.cc
         tests/component-test.cc
         tests/document-test.cc
         tests/document_builder-test.cc

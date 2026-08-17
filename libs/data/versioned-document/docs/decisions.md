@@ -764,6 +764,63 @@ Predictable was preferred, and the asymmetry is documented in [interpretation](c
 **Reopen when:** a UI shows a stale `unsupported_component_type` and users notice.
 The fix is then a periodic full re-parse, not a per-apply scan.
 
+### A re-interpretation is driven by a dirty path set, and coarsening one is conservative
+
+**Decided in milestone 8.**
+
+`change_set` is a sorted `property_path` vector plus a `change_granularity` of property, component or entity, plus an `everything` state.
+It is what an incremental re-interpretation consumes, and `(graph, from, to)` became one way to *produce* one rather than the only way to ask for one.
+
+The reason is that a single-parent op chain is not the only thing that knows a delta.
+A directly written source knows its own, and a composition knows the union of its parts' — none of which can be phrased as a pair of ops.
+Generalizing the input was cheaper than growing a second apply beside the first.
+
+**The invariant is that `covers` over-reports at worst and never under-reports.**
+That is what makes granularity a speed dial rather than a correctness risk: every consumer is correct at every granularity, and only the amount of recomputation varies.
+So a producer that cannot be precise is free to be coarse, and is never forced to be wrong.
+`coarsen_to` asserts on a request to *refine*, because inventing the finer information would turn a conservative set into a lying one, and no consumer could detect that.
+
+Coarsening is one forward pass because `property_path::compare_bytes` is entity-major, so everything that collapses together is already adjacent.
+That ordering was chosen for the op hash, and this falls out of it for free.
+
+Below the granularity an entry's fields are default ids that **must not be read**.
+An id has no invalid state — a default-constructed one equals `of("")`, a legal id that sorts first — so the granularity and never the data is what says how much of a path means anything.
+Note this is the *opposite* convention to `parse_report::drop_for_entities`, where an empty entity id means "matches nothing" so that a document-scoped diagnostic survives.
+Identical bytes, opposite readings, and the two must not borrow each other's wording.
+
+**Reopen when:** a consumer wants a granularity between property and component, or wants to subtract one set from another.
+Subtraction is the one operation deliberately absent: layering needs "minus what a higher layer shadows", and that is a query against the layer stack rather than a set operation.
+
+### A change summary keeps its enumeration rather than gaining an `everything` flag
+
+**Decided in milestone 8**, when `change_set` gained exactly that flag and the symmetry looked obvious.
+
+It is not symmetric, because the two face opposite directions.
+On an *input* set, `everything` is the safe over-approximation — the honest thing to say when no delta is available.
+On an *output* summary it is a **loss**: the slow path already enumerates every entity and component explicitly, and that list is strictly more useful to an invalidator than a flag would be.
+
+A flag would also be a second representation of the same fact, which every consumer would have to remember to check before reading the vectors.
+Forgetting it is silent under-invalidation, which is the failure mode this library spends the most effort making unreachable.
+
+**Reopen when:** the slow path's O(document) summary enumeration shows up in a profile.
+The fix is then a flag *plus* an audit of every consumer, not a flag alone.
+
+### A fallback names its reason
+
+**Decided in milestone 8.**
+
+`incremental_apply_stats::fallback_reason` says why an apply re-parsed: `forced`, `no_single_parent_chain`, or `chain_too_long`.
+
+Before this, only `took_fast_path == false` was observable, which conflates three situations wanting three different responses.
+`chain_too_long` is a statement about `max_chain_ops` and is fixed by raising it.
+`no_single_parent_chain` is a statement about the history and is not fixed by anything.
+`forced` is a test pinning the slow path, and should never be read as either.
+
+It costs one enum on a struct a caller already passes, and it is what makes a fallback that should not be happening findable instead of merely slow.
+
+**Reopen when:** nothing.
+This is an observability field, and the cost of another enumerator is one line.
+
 ---
 
 ## Hashing

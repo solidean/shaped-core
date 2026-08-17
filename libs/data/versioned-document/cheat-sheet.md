@@ -217,8 +217,29 @@ doc = vdoc::apply(cc::move(doc), graph, from, to,       // CONSUMES doc; `from` 
                   {.cache = &cache}, &stats);           // .max_chain_ops, .compaction_ratio, .force_full_reparse
 
 stats.took_fast_path;                                   // false = it re-parsed, and `changes` then says "everything"
+stats.fallback_reason;                                  // why: forced | no_single_parent_chain | chain_too_long
 changes.entities; changes.components;                   // sorted; added / removed / modified
 ```
+
+**Only `chain_too_long` is fixed by raising `max_chain_ops`** — `no_single_parent_chain` is a statement about the history.
+
+### The dirty set an apply consumes
+
+```cpp
+auto b = vdoc::change_set_builder();               // or (change_granularity::entity) for a coarse producer
+b.add(path);  b.add_entity(entity);                // any order, duplicates free; add_entity COARSENS the whole set
+b.add_everything();                                // no honest delta available
+auto dirty = cc::move(b).build();                  // sorts + dedups under the granularity
+
+dirty.covers(path);  dirty.covers_entity(e);       // the only supported way to ask
+dirty.entities();                                  // sorted, unique; what a touched set wants
+dirty.coarsen_to(vdoc::change_granularity::entity); // O(n); ASSERTS on a request to refine
+dirty.union_with(other);                           // takes the coarser granularity; `everything` absorbs
+```
+
+**`covers` over-reports at worst and never under-reports.**
+That is what makes granularity a speed dial: every consumer is correct at every granularity, and only the recomputation varies.
+Below the granularity an entry's fields are default ids that **must not be read** — an id has no invalid state, so the granularity and never the data says how much of a path means anything.
 
 **The fast path needs a single-parent chain from `to` back to `from`, within `max_chain_ops` (64).**
 A merge, a longer chain, or a `to` that does not descend from `from` re-materializes and re-parses — correct, and slow.
