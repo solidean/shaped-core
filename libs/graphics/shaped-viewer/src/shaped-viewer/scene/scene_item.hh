@@ -1,7 +1,6 @@
 #pragma once
 
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/resources/resource_ids.hh>
 #include <typed-geometry/transform/transform.hh>
 
 /// What kind of thing a scene item is.

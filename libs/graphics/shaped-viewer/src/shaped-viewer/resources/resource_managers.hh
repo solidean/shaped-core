@@ -8,7 +8,6 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <shaped-viewer/resources/resource_data.hh>
-#include <shaped-viewer/resources/resource_ids.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <typed-geometry/linalg/pos.hh>
 

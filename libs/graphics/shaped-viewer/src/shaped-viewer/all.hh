@@ -42,7 +42,6 @@
 
 // resources
 #include <shaped-viewer/resources/resource_data.hh>
-#include <shaped-viewer/resources/resource_ids.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 
 // rendering

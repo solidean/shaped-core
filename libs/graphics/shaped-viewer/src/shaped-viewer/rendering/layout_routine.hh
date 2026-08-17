@@ -11,15 +11,6 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/render_plan.hh>
 
-/// Which window a layout is being drawn for.
-///
-/// Windows differ in backbuffer format and, later, in color space, so a routine that serves several keys its pipelines
-/// by this alongside the format.
-/// One window is `window_id{0}`.
-enum class sv::window_id : sv::u32
-{
-};
-
 /// Everything a layout pipeline bakes in.
 ///
 /// The sampler and the source sub-rects are deliberately absent: the sampler is a dynamic one in the transient group

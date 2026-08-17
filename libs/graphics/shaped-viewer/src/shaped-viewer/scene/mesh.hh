@@ -3,7 +3,6 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/resources/resource_ids.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/mesh_flags.hh>
 #include <shaped-viewer/scene/mesh_parameter.hh>

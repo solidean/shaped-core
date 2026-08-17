@@ -75,6 +75,7 @@ struct frame_constants_gpu;
 struct triangle_data;
 struct indexed_triangle_data;
 struct material_data;
+// the resource ids are defined at the bottom of this header, since they carry an `invalid` enumerator
 enum class mesh_id : u32;
 enum class material_set_id : u32;
 enum class material_id : u32;
@@ -101,6 +102,11 @@ struct plan_diagnostic;
 struct view_history_entry;
 struct view_history;
 struct render_plan;
+/// Which window a layout is being drawn for.
+///
+/// Windows differ in backbuffer format and, later, in color space, so a routine that serves several keys its pipelines
+/// by this alongside the format.
+/// One window is `window_id{0}`.
 enum class window_id : u32;
 struct plan_textures;
 class layout_routine;
@@ -176,3 +182,46 @@ inline constexpr layout_node_id invalid_node = layout_node_id(-1);
 enum class post_process_kind : u8;
 struct post_process;
 } // namespace sv
+
+/// Strongly-typed resource handles a scene item references.
+///
+/// Each is an opaque integer newtype minted by the matching manager (see resources/resource_managers.hh).
+/// A scene item names *what* it draws by id, and the renderer resolves the id to the concrete GPU resource through the managers.
+/// Being `enum class`, they hash and compare out of the box, so they key a cc::map with no extra boilerplate.
+///
+/// `invalid` (`u32(-1)`, all bits set) is the reserved null id every manager skips when handing ids out.
+/// The managers mint from 0 upward, so 0 is a usable id and only the top of the range is the sentinel.
+enum class sv::mesh_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::material_set_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Names ONE material definition — how a mesh is drawn — rather than a per-triangle array of them.
+///
+/// This is the thin handle an `sv::mesh` carries: the definition lives outside the mesh and is shared across many.
+/// It is what gives a mesh's attributes, parameters, textures and flags their meaning.
+/// No manager mints these yet — the material library is still to come — so a mesh only ever carries `invalid` today.
+enum class sv::material_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::tlas_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::texture_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::buffer_id : sv::u32
+{
+    invalid = u32(-1)
+};

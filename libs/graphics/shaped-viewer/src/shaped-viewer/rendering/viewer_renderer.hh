@@ -4,11 +4,6 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-viewer/fwd.hh>
 
-namespace sg
-{
-struct color_target;
-}
-
 /// Records a whole frame from its render plan: every trace, then one pass per texture the plan writes.
 ///
 /// The plan is the frame flattened into recording order, so nothing here walks a layout or resolves a rect — it

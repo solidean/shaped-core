@@ -74,7 +74,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/impl/content_hash.hh
     src/shaped-viewer/impl/keyed_cache.hh
     src/shaped-viewer/impl/view_state.hh
-    src/shaped-viewer/resources/resource_ids.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
     src/shaped-viewer/rendering/frame_constants.hh

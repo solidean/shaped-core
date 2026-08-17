@@ -3,10 +3,10 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+#include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/resources/resource_data.hh>
-#include <shaped-viewer/resources/resource_ids.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
