@@ -480,6 +480,24 @@ rng.uniform_in(range);  rng.shuffle(range); // pick element / in-place permute (
 rng.clone();                              // independent generator at the same stream position
 ```
 
+## Timing
+
+The seam that replaces `<chrono>` — which only `time.cc` may include, being the most expensive header MSVC ships.
+Seconds as a `double` is the vocabulary; there are no `time_point` / `duration` types.
+
+```cpp
+#include <clean-core/common/time.hh>
+cc::current_time_steady_secs();            // -> double; MONOTONIC, arbitrary zero => only a DIFFERENCE means anything
+                                           //    the one to measure "how long did this take" with
+cc::current_time_wall_secs();              // -> double; seconds since the Unix epoch, comparable across processes/runs
+                                           //    the one to PERSIST (an expiry, a timestamp) — and it can step either way,
+                                           //    so a difference of two readings is not a duration
+cc::has_cycle_counter();                   // -> constexpr bool; false on ARM and WASM
+cc::current_cycles();                      // -> u64 TSC on x86, 0 where there is none; inline, for a benchmark's inner loop
+                                           //    constant-rate, so it tracks wall time rather than work done, and nothing
+                                           //    here converts it to seconds (the rate needs calibration you do yourself)
+```
+
 ## Flags
 
 One macro at global scope, taking the enum's namespace separately — it emits the `cc::custom::enum_traits` specialization,

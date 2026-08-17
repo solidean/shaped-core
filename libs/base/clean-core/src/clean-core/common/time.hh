@@ -18,9 +18,16 @@ namespace cc
 /// That is what makes it the right clock for measuring how long something took.
 ///
 /// This IS the monotonic clock; there is no separate coarser or finer one to ask for.
-/// For a wall-clock timestamp — a date, something to write into a report — this is the wrong function.
-/// There is no right one yet.
+/// For a wall-clock timestamp — a date, a persisted expiry — this is the wrong function; current_time_wall_secs is.
 [[nodiscard]] double current_time_steady_secs();
+
+/// Seconds since the Unix epoch (1970-01-01 00:00:00 UTC).
+/// Comparable ACROSS processes and across runs, which is what makes this the one to persist — a steady reading is not.
+///
+/// It can step, forwards or backwards, whenever the system clock is set or an NTP correction lands.
+/// So a difference of two readings is NOT a duration: for how long something took, use current_time_steady_secs.
+/// A double holds present-day epoch seconds to about a microsecond, finer than any platform's wall clock resolves.
+[[nodiscard]] double current_time_wall_secs();
 
 /// Whether current_cycles() returns a real reading on this architecture, known at compile time.
 /// False on ARM and WASM, where a caller must fall back to current_time_steady_secs().
