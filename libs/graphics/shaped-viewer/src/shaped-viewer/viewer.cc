@@ -227,7 +227,8 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
 
     // A view's camera and placement are cheap enough to keep long, so only the entry threshold applies here.
     // It matches the one the renderer's accumulation cache uses, so a view cannot survive in one and vanish from the other.
-    im->view_states.set_limits({.max_idle_frames_entry = sv::impl::view_idle_frames, .max_entries = 256});
+    im->view_states.set_limits(
+        {.max_idle_frames_entry = sv::impl::keyed_cache_limits::view_idle_frames, .max_entries = 256});
 
     im->start_time = std::chrono::steady_clock::now();
     return viewer(cc::move(im));

@@ -159,8 +159,8 @@ void view_renderer::init_declare(sg::context& ctx)
     pathtrace_routine::prewarm(ctx);
 
     // A view's accumulation target is megabytes and its identity is a handful of bytes, so they expire on different schedules.
-    _persistent.set_limits({.max_idle_frames_payload = sv::impl::view_payload_idle_frames,
-                            .max_idle_frames_entry = sv::impl::view_idle_frames,
+    _persistent.set_limits({.max_idle_frames_payload = sv::impl::keyed_cache_limits::view_payload_idle_frames,
+                            .max_idle_frames_entry = sv::impl::keyed_cache_limits::view_idle_frames,
                             .max_payload_bytes = isize(256) << 20});
 }
 

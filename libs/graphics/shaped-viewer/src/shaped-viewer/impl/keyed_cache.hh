@@ -31,6 +31,14 @@ struct keyed_cache_limits
 
     /// over this, drop entries least-recently-used first
     isize max_entries = 0;
+
+    /// Frames a view may go unseen before its identity is dropped.
+    /// Both per-view caches read this, so a view cannot survive in one and vanish from the other.
+    static constexpr i64 view_idle_frames = 240;
+
+    /// Frames a view may go unseen before its GPU payload is released, its identity surviving.
+    /// Much shorter than `view_idle_frames`: an accumulation target is megabytes, a camera is not.
+    static constexpr i64 view_payload_idle_frames = 60;
 };
 
 /// A cache keyed by an identity the caller owns, reclaimed on a frame clock the caller ticks.
@@ -279,12 +287,4 @@ private:
     isize _total_bytes = 0;
     keyed_cache_limits _limits;
 };
-
-/// Frames a view may go unseen before its identity is dropped.
-/// Both per-view caches read this, so a view cannot survive in one and vanish from the other.
-constexpr i64 view_idle_frames = 240;
-
-/// Frames a view may go unseen before its GPU payload is released, its identity surviving.
-/// Much shorter than `view_idle_frames`: an accumulation target is megabytes, a camera is not.
-constexpr i64 view_payload_idle_frames = 60;
 } // namespace sv::impl
