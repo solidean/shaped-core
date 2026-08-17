@@ -25,7 +25,6 @@ add_library(shaped-viewer
     src/shaped-viewer/refs.cc
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/viewer.cc
-    src/shaped-viewer/impl/cube_mesh.cc
     src/shaped-viewer/resources/resource_managers.cc
     src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
@@ -73,7 +72,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/layout/layout_tree.hh
     src/shaped-viewer/resources/resource_data.hh
     src/shaped-viewer/impl/content_hash.hh
-    src/shaped-viewer/impl/cube_mesh.hh
     src/shaped-viewer/impl/format_id.hh
     src/shaped-viewer/impl/keyed_cache.hh
     src/shaped-viewer/impl/view_state.hh

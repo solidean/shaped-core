@@ -12,7 +12,6 @@
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
-#include <shaped-viewer/impl/cube_mesh.hh>
 #include <shaped-viewer/impl/keyed_cache.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
@@ -20,11 +19,8 @@
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
-#include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
-#include <typed-geometry/linalg/mat.hh>
-#include <typed-geometry/scalar/angle.hh>
 
 #include <chrono>
 
@@ -121,8 +117,6 @@ struct viewer::impl
     cc::unique_ptr<slib::shader_library> shader_library; // the viewer owns its shader library
 
     scene_resources resources;
-    mesh_id cube_mesh = mesh_id::invalid;
-    material_set_id cube_materials = material_set_id::invalid;
 
     u64 frame_index = 0;
     bool stopped = false; // device lost
@@ -234,12 +228,6 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     // A view's camera and placement are cheap enough to keep long, so only the entry threshold applies here.
     // It matches the one the renderer's accumulation cache uses, so a view cannot survive in one and vanish from the other.
     im->view_states.set_limits({.max_idle_frames_entry = sv::impl::view_idle_frames, .max_entries = 256});
-
-    // The placeholder geometry every view shows for now — uploaded once (content-addressed), referenced by
-    // every view each frame.
-    auto const cube = sv::impl::make_cube();
-    im->cube_mesh = im->resources.meshes.acquire(triangle_data::create(cube.positions));
-    im->cube_materials = im->resources.materials.acquire(material_data::create(cube.materials));
 
     im->start_time = std::chrono::steady_clock::now();
     return viewer(cc::move(im));
@@ -542,9 +530,6 @@ void viewer::finish_frame(frame& f)
     // The frame's authored views become the definition verbatim, and the frame's layout tree becomes the one layer of
     // a synthetic root view.
     // The root is appended last, so every leaf's existing view index stays valid.
-    // The placeholder animation reads the frame's own timestamp rather than the clock, so it matches whatever the
-    // caller animated with.
-    auto const t = f._seconds;
     auto def = viewer_definition{};
     def.views = f._views;
     def.nodes = f._nodes;
@@ -563,20 +548,6 @@ void viewer::finish_frame(frame& f)
         st.camera_owned_last_frame = st.camera_owned_this_frame;
         st.camera_owned_this_frame = false;
         st.movable_last_frame = st.movable_this_frame;
-
-        // No authored geometry yet -> the placeholder rotating cube, offset per view so they spin out of sync.
-        auto& scene = ensure_scene_3d(v);
-        if (scene.items.empty())
-        {
-            auto const phase = f32(v.id.value % 360);
-            auto const yaw = tg::angle_f::make_from_degree(phase + f32(t) * 45.0f);
-            auto const pitch = tg::angle_f::make_from_degree(25.0f);
-            // quat multiplication applies the right side first, so this tips the cube and then spins it about +y.
-            auto const spin = tg::quat_f::make_rotation_y(yaw) * tg::quat_f::make_rotation_x(pitch);
-            scene.items.push_back({.mesh = im.cube_mesh,
-                                   .materials = im.cube_materials,
-                                   .transform = tg::affine_transform3f::make_rotation(spin)});
-        }
     }
 
     // The root exists only to own the frame's layout; it holds no scene of its own and its target is the backbuffer.
