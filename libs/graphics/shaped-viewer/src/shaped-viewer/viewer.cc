@@ -436,8 +436,9 @@ void viewer::route_input()
         if (st->controller.handle(e))
             st->camera = st->controller.camera();
 
-        st->is_active = st->controller.is_dragging();
-        im.active_view = st->is_active ? owner : cc::optional<view_id>();
+        // The drag holder lives here rather than on the view: only one view can hold it, and it must survive the
+        // cursor leaving that view's rect.
+        im.active_view = st->controller.is_dragging() ? owner : cc::optional<view_id>();
     }
 }
 
@@ -626,13 +627,6 @@ void viewer::finish_frame(frame& f)
     // It comes from the plan rather than a layout solve, because a nested leaf's rect lives in its parent's texture
     // space and only the plan has carried it all the way up.
     im.last_hit_regions = plan.hit_regions;
-    for (auto const& region : plan.hit_regions)
-    {
-        auto& st = im.view_states.get_or_create(region.id);
-        st.rect = region.window_rect;
-        st.has_rect = true;
-        st.order = region.order;
-    }
 
     for (auto const& target : plan.targets)
     {

@@ -5,7 +5,8 @@
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>
-#include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/linalg/pos.hh>
+#include <typed-geometry/linalg/vec.hh>
 
 namespace sv::impl
 {
@@ -40,16 +41,6 @@ struct view_state
     bool camera_owned_this_frame = false;
     bool camera_owned_last_frame = false;
 
-    /// Where this view landed last frame, in window space, taken from the plan's hit region.
-    /// Nothing hit-tests against it any more — `pick_hit_region` does that — but a drag reads it to size the pane it lifts.
-    tg::aabb2i rect = {};
-
-    /// False until the view has been resolved once; a rect that means nothing yet must not be read.
-    bool has_rect = false;
-
-    /// Draw order within the frame, for debugging and for a caller that wants to know what was in front.
-    u32 order = 0;
-
     /// Whether the caller offered this view for dragging, re-asserted every frame like `camera_owned_this_frame`.
     ///
     /// Routing runs before authoring, so a drag starting this frame has to consult the *previous* frame's answer —
@@ -82,8 +73,5 @@ struct view_state
     bool has_target = false;
     tg::vec2i target_resolution = tg::vec2i(0, 0);
     u64 last_refresh_frame = 0;
-
-    /// Whether this view holds the camera drag, so motion keeps reaching it once the cursor leaves its rect.
-    bool is_active = false;
 };
 } // namespace sv::impl
