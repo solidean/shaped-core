@@ -135,8 +135,10 @@ struct acquire_frame
         if (held == nullptr || !held->has_actor() || held->is_closed.load())
             return;
 
+        // Only where the caller said nothing: a measurement it supplied is the one it meant, and ours would include
+        // however long the compute sat queued before anything drove it.
         auto put = options.put;
-        if (put.compute_time_secs <= 0)
+        if (!put.compute_time_secs.has_value())
             put.compute_time_secs = steady_now() - compute_began;
 
         // Fire and forget: the promise is dropped here, and a failure to store never touches the value we return.

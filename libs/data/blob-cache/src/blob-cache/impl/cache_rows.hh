@@ -3,6 +3,7 @@
 #include <blob-cache/fwd.hh>
 #include <blob-cache/keys.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 
 /// The plain structs that cross the storage boundary.
 /// No sqlite type appears in any signature here, which is what lets everything above cache_io stay engine-agnostic.
@@ -17,7 +18,7 @@ struct entry_row
     content_hash hash;
     i64 size = 0;
     i64 chunk_count = 0;
-    double expires_at = 0; ///< 0 means never
+    cc::optional<double> expires_at; ///< absent means never
     cc::vector<byte> metadata;
 };
 
@@ -28,8 +29,8 @@ struct put_row
     content_hash hash;
     i64 size = 0;
     double created_at = 0;
-    double expires_at = 0;
-    double compute_secs = 0;
+    cc::optional<double> expires_at;
+    cc::optional<double> compute_secs;
     cc::vector<byte> metadata;
 };
 

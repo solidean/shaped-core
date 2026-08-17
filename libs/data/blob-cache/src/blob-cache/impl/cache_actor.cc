@@ -103,7 +103,7 @@ public:
         auto const& entry = found.value().value();
 
         // Expiry is a LOGICAL check, resolved here rather than by waiting for a collection: an expired entry is a miss the instant it expires, whether or not its row still exists.
-        if (entry.expires_at > 0 && entry.expires_at <= wall_now())
+        if (entry.expires_at.has_value() && entry.expires_at.value() <= wall_now())
         {
             // Never deleted on the read path — a get must not take a write lock.
             // Noted for the next pass instead.
@@ -162,7 +162,9 @@ public:
                                  .hash = hash,
                                  .size = size,
                                  .created_at = now,
-                                 .expires_at = msg.options.ttl_secs > 0 ? now + msg.options.ttl_secs : 0.0,
+                                 .expires_at = msg.options.ttl_secs.has_value()
+                                                 ? cc::optional<double>(now + msg.options.ttl_secs.value())
+                                                 : cc::nullopt,
                                  .compute_secs = msg.options.compute_time_secs,
                                  .metadata = cc::move(msg.options.metadata)};
 

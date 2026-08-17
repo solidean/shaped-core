@@ -79,13 +79,13 @@ bcache::cache_config{
     .unthreaded = false};                 // drive via pump() instead of an actor thread
 
 bcache::cache_limits{
-    .max_total_bytes = 1 << 30,           // decoded OBJECT bytes — not pages, indexes, freelist or WAL
+    .max_total_bytes = i64(50) << 30,     // decoded OBJECT bytes — not pages, indexes, freelist or WAL
     .target_total_bytes = 0,              // what a pass drives down to; 0 means 90% of max (the hysteresis)
     .max_entries = 0,                     // 0 = unlimited
-    .max_object_bytes = 256 << 20};       // over this is never stored, and never takes a write lock
+    .max_object_bytes = i64(5) << 30};    // over this is never stored, and never takes a write lock
 
-bcache::put_options{.ttl_secs = 0,             // <= 0 never expires
-                    .compute_time_secs = 0,    // <= 0 means UNKNOWN, and scoring charges the default
+bcache::put_options{.ttl_secs = {},            // cc::optional — ABSENT never expires, and 0 is already expired
+                    .compute_time_secs = {},   // cc::optional — ABSENT is unknown, and 0 is "free to rebuild"
                     .metadata = {}};           // handed back with a hit; keep it SMALL, GC scans this row
 bcache::acquire_options{.put = {...}, .bypass_lookup = false};
 
@@ -123,8 +123,10 @@ Only what the signatures above cannot tell you.
   Pages, indexes, the freelist and the WAL push the real file to roughly 1.1-1.3x; `cache_stats::file_bytes` is the number for the disk.
 - **Evicting an entry can free zero bytes.** Under deduplication the object survives until its last entry is gone,
   which is why a collection alternates eviction with reclamation rather than counting evicted entries as space.
-- **An unrecorded `compute_time_secs` means unknown, not free.** It is charged `default_compute_time_secs` — but
-  that is a substitute, not a floor, so an honestly-measured small cost stays small.
+- **Both `put_options` times are optionals, and absent differs from zero.**
+  No `ttl_secs` never expires, where `0` is already expired; no `compute_time_secs` is unknown and gets charged
+  `default_compute_time_secs`, where `0` says free to rebuild and goes first.
+  The default is a substitute for the absent case, not a floor, so an honestly-measured small cost stays small.
 - **`metadata` sits inline in the row every candidate scan reads.** Megabytes there wreck eviction.
 - **An incompatible file is discarded and recreated, silently.** A `user_version` mismatch in EITHER direction, a
   foreign `application_id`, or a missing column all wipe it.

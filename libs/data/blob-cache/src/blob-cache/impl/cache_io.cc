@@ -61,8 +61,9 @@ cc::result<cc::optional<entry_row>> cache_reader::find_entry(cache_key const& ke
                          .object_id = row.as_i64(1),
                          .hash = hash_from(row.as_blob(4)),
                          .size = row.as_i64(5),
-                         .chunk_count = row.as_i64(6),
-                         .expires_at = row.as_double(2)};
+                         .chunk_count = row.as_i64(6)};
+    if (!row.is_null(2))
+        out.expires_at = row.as_double(2);
     if (!row.is_null(3))
         out.metadata = cc::vector<byte>::create_copy_of(row.as_blob(3));
 
@@ -216,8 +217,26 @@ cc::result<put_status> cache_writer::insert(put_row const& row, blob const& data
         CC_RETURN_IF_ERROR(stmt.value().bind(3, i64(row.key.version)));
         CC_RETURN_IF_ERROR(stmt.value().bind(4, object_id));
         CC_RETURN_IF_ERROR(stmt.value().bind(5, row.created_at));
-        CC_RETURN_IF_ERROR(stmt.value().bind(6, row.expires_at));
-        CC_RETURN_IF_ERROR(stmt.value().bind(7, row.compute_secs));
+
+        // NULL rather than a sentinel: "never expires" and "cost unknown" are absences, and a 0 in either column
+        // would read as "already expired" and "free to rebuild" — the two most damaging things GC could believe.
+        if (row.expires_at.has_value())
+        {
+            CC_RETURN_IF_ERROR(stmt.value().bind(6, row.expires_at.value()));
+        }
+        else
+        {
+            CC_RETURN_IF_ERROR(stmt.value().bind_null(6));
+        }
+
+        if (row.compute_secs.has_value())
+        {
+            CC_RETURN_IF_ERROR(stmt.value().bind(7, row.compute_secs.value()));
+        }
+        else
+        {
+            CC_RETURN_IF_ERROR(stmt.value().bind_null(7));
+        }
         // Braced because CC_RETURN_IF_ERROR expands to an if, which would otherwise take this else.
         if (row.metadata.empty())
         {

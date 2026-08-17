@@ -60,8 +60,8 @@ cc::vector<known_table> known_tables()
                              " object_id    INTEGER NOT NULL,"
                              " created_at   REAL NOT NULL,"
                              " accessed_at  REAL NOT NULL," // quantized to cache_config::access_epoch_secs
-                             " expires_at   REAL NOT NULL," // 0 means never
-                             " compute_secs REAL NOT NULL," // <= 0 means unknown
+                             " expires_at   REAL,"          // NULL means never
+                             " compute_secs REAL,"          // NULL means unknown, which is not the same as 0
                              " metadata     BLOB,"
                              " UNIQUE(namespace, key, version),"
                              " FOREIGN KEY(object_id) REFERENCES objects(id)"
@@ -85,7 +85,7 @@ cc::span<cc::string_view const> known_indexes()
 {
     static constexpr cc::string_view indexes[] = {
         "CREATE INDEX IF NOT EXISTS entries_by_object ON entries(object_id)",
-        "CREATE INDEX IF NOT EXISTS entries_by_expiry ON entries(expires_at) WHERE expires_at > 0",
+        "CREATE INDEX IF NOT EXISTS entries_by_expiry ON entries(expires_at) WHERE expires_at IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS entries_by_access ON entries(accessed_at)",
         // `<= 0` rather than `= 0`, to match reclaim_orphan_batch's query exactly.
         // SQLite only uses a partial index where the query's WHERE provably implies the index predicate, and

@@ -100,9 +100,15 @@ Cross-process singleflight is deliberately absent — the closing section says w
 ```
 
 The separation is semantic, not incidental.
-`created_at`, `accessed_at`, `expires_at` and `compute_secs` belong to the **entry**: two computations can reach identical bytes at wildly different cost and with completely different
-lifetimes, so none of those may become a property of the shared object.
+`created_at`, `accessed_at`, `expires_at` and `compute_secs` belong to the **entry**.
+Two computations can reach identical bytes at wildly different cost and with completely different lifetimes, so none of those may become a property of the shared object.
 The object carries only what is intrinsic to the bytes — the hash, the size, the chunk count — plus the refcount that says how many entries name it.
+
+`expires_at` and `compute_secs` are **nullable, and NULL is load-bearing**.
+Absent means "never expires" and "cost unknown", and both differ from a stored zero: a zero expiry is an entry that is already expired, and a zero cost is a caller saying this is free to rebuild.
+Encoding either absence as a sentinel would collapse two answers a caller can legitimately give into one.
+Both collapses point the wrong way, too: GC would read "never expires" as "expire it now", or "unknown" as "throw it away first".
+That is why the public options are `cc::optional<double>` rather than doubles with a `<= 0` convention.
 
 Objects are chunked at 1 MiB.
 Chunking is not optional: SQLite caps a single value near a gigabyte.

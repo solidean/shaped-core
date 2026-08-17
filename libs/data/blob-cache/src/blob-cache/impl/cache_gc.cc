@@ -75,8 +75,8 @@ cc::result<i64> cache_collector::remove_known_expired(cc::span<i64 const> entry_
 
 cc::result<i64> cache_collector::remove_expired_batch(double now)
 {
-    // `expires_at > 0` matches the partial index, so this is an index range scan and not a table scan.
-    auto stmt = _db.query("SELECT id FROM entries WHERE expires_at > 0 AND expires_at <= ?1 LIMIT ?2");
+    // `expires_at IS NOT NULL` matches the partial index, so this is an index range scan and not a table scan.
+    auto stmt = _db.query("SELECT id FROM entries WHERE expires_at IS NOT NULL AND expires_at <= ?1 LIMIT ?2");
     CC_RETURN_IF_ERROR(stmt);
     CC_RETURN_IF_ERROR(stmt.value().bind(1, now));
     CC_RETURN_IF_ERROR(stmt.value().bind(2, _budget.entries_per_batch));
@@ -89,12 +89,11 @@ cc::result<i64> cache_collector::remove_expired_batch(double now)
 cc::result<i64> cache_collector::evict_batch(score_parameters const& params, i64 bytes_to_shed, i64 entries_to_shed)
 {
     // A full scan and sort per batch: the score is computed, and nothing indexes it.
-    // CASE rather than max(compute_secs, default): the default stands in for an UNKNOWN cost, and a floor would
+    // COALESCE rather than max(compute_secs, default): the default stands in for an UNKNOWN cost, and a floor would
     // also overwrite a small cost somebody honestly measured, making a cheap entry indistinguishable from one that never said.
-    // Only `<= 0` means unknown.
+    // NULL is what unknown looks like in the column, so the substitution is exactly a COALESCE.
     auto stmt = _db.query("SELECT e.id, e.object_id, o.size FROM entries e JOIN objects o ON o.id = e.object_id"
-                          " ORDER BY ((CASE WHEN e.compute_secs > 0 THEN e.compute_secs ELSE ?1 END)"
-                          "           / max(o.size, 4096.0))"
+                          " ORDER BY (COALESCE(e.compute_secs, ?1) / max(o.size, 4096.0))"
                           "        / (1.0 + (?2 - e.accessed_at) / ?3) ASC"
                           " LIMIT ?4");
     CC_RETURN_IF_ERROR(stmt);

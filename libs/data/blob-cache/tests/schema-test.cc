@@ -115,6 +115,8 @@ TEST("bcache stamps a fresh file as its own")
                           REQUIRE(id.has_value());
                           CHECK(id.value() == 0x42434845); // 'BCHE'
 
+                          // A literal rather than the constant: this pins the stamp an OLDER build would read, so
+                          // bumping the format has to come here and decide that discarding those files is intended.
                           auto const version = db.get_user_version();
                           REQUIRE(version.has_value());
                           CHECK(version.value() == 1);

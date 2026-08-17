@@ -50,6 +50,25 @@ TEST("bcache collects an expired entry and the object behind it")
     CHECK(f.cache().get_stats().stored_bytes == 0);
 }
 
+TEST("bcache tells a ttl of zero apart from no ttl at all")
+{
+    if (!blob_cache::is_storage_available())
+        SKIP("no SQLite backend was compiled in");
+
+    // What the optional buys: absent means never, and 0 means already expired.
+    // A sentinel-carrying double could only ever have meant one of the two.
+    auto f = cache_fixture();
+    auto const never = key_of("ttl", "absent");
+    auto const immediate = key_of("ttl", "zero");
+
+    f.settle_only(f.cache().put(never, make_blob("no ttl")));
+    f.settle_only(f.cache().put(immediate, make_blob("ttl of zero"), {.ttl_secs = 0}));
+
+    CHECK(f.settle(f.cache().get(never)).has_value());
+    CHECK(!f.settle(f.cache().get(immediate)).has_value());
+    CHECK(f.cache().get_stats().expired_as_miss == 1);
+}
+
 TEST("bcache leaves an entry with no ttl alone forever")
 {
     if (!blob_cache::is_storage_available())

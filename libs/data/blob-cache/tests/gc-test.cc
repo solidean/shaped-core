@@ -88,12 +88,42 @@ TEST("bcache treats an unrecorded compute cost as unknown rather than free")
     CHECK(!f.settle(f.cache().get(known_cheap)).has_value());
 }
 
+TEST("bcache tells a declared cost of zero apart from no declared cost")
+{
+    if (!blob_cache::is_storage_available())
+        SKIP("no SQLite backend was compiled in");
+
+    // The other half of what the optional buys.
+    // Absent is charged the default and survives; an explicit 0 is a caller saying this costs nothing to rebuild,
+    // and goes first — which a sentinel could not have told apart.
+    auto f = cache_fixture(
+        [](cache_config& c)
+        {
+            c.limits.max_total_bytes = 12 * 1024;
+            c.limits.target_total_bytes = 4 * 1024;
+            c.default_compute_time_secs = 10;
+        });
+
+    auto const undeclared = key_of("score", "undeclared");
+    auto const declared_free = key_of("score", "declared-free");
+
+    f.settle_only(f.cache().put(undeclared, make_blob_of_size(4096, 1)));
+    f.settle_only(f.cache().put(declared_free, make_blob_of_size(4096, 2), {.compute_time_secs = 0}));
+    f.settle_only(f.cache().put(key_of("score", "filler"), make_blob_of_size(4096, 3), {.compute_time_secs = 0}));
+
+    f.settle_only(f.cache().collect_garbage());
+
+    CHECK(f.settle(f.cache().get(undeclared)).has_value());
+    CHECK(!f.settle(f.cache().get(declared_free)).has_value());
+}
+
 TEST("bcache frees nothing until the last entry naming an object is gone")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
-    // The deduplication property, and the reason an eviction phase must never stop because a batch freed zero bytes.
+    // The deduplication property.
+    // It is also the reason an eviction phase must never stop because a batch freed zero bytes.
     auto f = cache_fixture();
     auto const shared = make_blob_of_size(4096, 5);
 

@@ -49,12 +49,14 @@ struct bcache::cache_hit
 
 struct bcache::put_options
 {
-    /// Seconds from now until this entry stops being returned; <= 0 never expires.
-    double ttl_secs = 0;
+    /// Seconds from now until this entry stops being returned.
+    /// Absent means it never expires, which is a different statement from a TTL of zero — that one is already expired.
+    cc::optional<double> ttl_secs;
 
     /// What producing these bytes cost, in seconds — the recompute price GC weighs against the space they occupy.
-    /// <= 0 means unknown, and GC then charges cache_config::default_compute_time_secs rather than treating it as free.
-    double compute_time_secs = 0;
+    /// Absent means UNKNOWN, and GC then charges cache_config::default_compute_time_secs rather than reading it as free.
+    /// acquire() fills this in from its own measurement when the caller left it absent.
+    cc::optional<double> compute_time_secs;
 
     /// Opaque bytes handed back with a hit.
     /// Must stay SMALL: they sit inline in the row every GC candidate scan reads, so megabytes here wreck eviction.
@@ -78,7 +80,7 @@ struct bcache::acquire_options
 /// cache_stats::file_bytes is the number to read when the disk is what matters rather than the policy.
 struct bcache::cache_limits
 {
-    i64 max_total_bytes = i64(1) << 30;
+    i64 max_total_bytes = i64(50) << 30;
 
     /// What a pass drives down to once it starts — the hysteresis that keeps GC off the put path.
     /// 0, or anything above max_total_bytes, is silently taken as 90% of it rather than rejected.
@@ -89,7 +91,7 @@ struct bcache::cache_limits
 
     /// An object larger than this is never stored: holding it would evict most of the cache to make room.
     /// 0 means no limit.
-    i64 max_object_bytes = i64(256) << 20;
+    i64 max_object_bytes = i64(5) << 30;
 };
 
 struct bcache::cache_config
