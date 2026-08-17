@@ -7,22 +7,22 @@ namespace sg::backend::vulkan
 {
 namespace
 {
-VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usage usage)
+VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
 {
     VkBufferUsageFlags flags = 0;
-    if (sg::has_flag(usage, sg::buffer_usage::copy_src))
+    if (usage.has(sg::buffer_usage::copy_src))
         flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::copy_dst))
+    if (usage.has(sg::buffer_usage::copy_dst))
         flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::vertex_buffer))
+    if (usage.has(sg::buffer_usage::vertex_buffer))
         flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::index_buffer))
+    if (usage.has(sg::buffer_usage::index_buffer))
         flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::uniform_buffer))
+    if (usage.has(sg::buffer_usage::uniform_buffer))
         flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     // Vulkan does not distinguish read-only from read-write storage at the usage-bit level — that is a descriptor/access concern.
     // So both map to the same STORAGE_BUFFER_BIT.
-    if (sg::has_flag(usage, sg::buffer_usage::readonly_buffer) || sg::has_flag(usage, sg::buffer_usage::readwrite_buffer))
+    if (usage.has(sg::buffer_usage::readonly_buffer) || usage.has(sg::buffer_usage::readwrite_buffer))
         flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
     // Vulkan rejects a zero-usage buffer, so a usage-less non-empty buffer keeps a benign transfer-dst bit and stays valid.
@@ -47,7 +47,7 @@ vulkan_buffer::~vulkan_buffer()
 }
 
 cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size_in_bytes,
-                                                                      sg::buffer_usage usage,
+                                                                      sg::buffer_usages usage,
                                                                       sg::allocation_info const& alloc)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");

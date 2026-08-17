@@ -60,12 +60,13 @@ sg::bytes_waiter                    // abstract poll handle a backend subclasses
 #include <shaped-graphics/types.hh>
 sg::backend_kind          // dx12, vulkan, metal, webgpu, opengl, webgl
 sg::thread_model          // single_threaded | multi_threaded (see docs/concepts/threading.md)
-sg::buffer_usage          // bit flags named by operation: none/copy_src/copy_dst/vertex_buffer/index_buffer/
+sg::buffer_usage          // ONE usage named by operation: copy_src/copy_dst/vertex_buffer/index_buffer/
                           //   uniform_buffer/readonly_buffer/readwrite_buffer/indirect_command_buffer/
                           //   accel_structure_{storage,build_input}
                           //   (granularity set by Vulkan; DX12 typeless, Metal untyped — they consume a subset)
-a | b                     // combine usages
-sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
+sg::buffer_usages         // cc::flags<buffer_usage> — the SET, which is what every API takes and reports
+a | b                     // combine usages into a buffer_usages
+usage.has(flag)           // bool — cc::flags members: has / has_any / has_all / without / is_empty
 sg::present_mode          // vsync | immediate  (swapchain frame pacing — see the swapchain section)
 ```
 
@@ -240,7 +241,7 @@ ctx.wait_for_seconds(t)         // -> cc::optional<double>   — same, returns s
 #include <shaped-graphics/resource/raw_buffer.hh>
 // abstract; a backend subclasses it. protected ctor: raw_buffer(size_in_bytes, usage)  (size 0 = empty)
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
-b.usage()                          // sg::buffer_usage
+b.usage()                          // sg::buffer_usages
 b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient auto-expires at advance_epoch
 b.expire()                         // void    — free storage now (deferred); explicit early-free for persistent
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
@@ -282,7 +283,7 @@ sg::buffer<T>::from_raw_clamped(raw_handle) // wrap, flooring to whole elements 
 buf.reinterpret_as<U>()                     // -> buffer<U>; static_assert sizeof(T)%sizeof(U)==0 (U tiles T, e.g. buffer<vec3f>->buffer<float>)
 buf.try_reinterpret_as<U>()                 // -> cc::optional<buffer<U>>; general case (any U); nullopt when size % sizeof(U) != 0
 buf.element_count()                        // isize — size_in_bytes / sizeof(T) (truncates)
-buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usage
+buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usages
 // view factories infer the element type from T (no <T> spelled), else identical to raw_buffer's:
 buf.as_uniform_buffer(element_index=0)     // -> uniform_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a uniform_element)
 buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_buffer_view<T>   (only where T is a view_element; range in elements of T)
@@ -325,7 +326,8 @@ t->width()/height()/depth()  // int — extents (height/depth per dimension)
 t->mip_levels()/sample_count()/array_layers()  // int
 t->format()                  // sg::pixel_format
 t->is_array()/is_cube()/is_multisampled()      // bool  — derived shape queries
-sg::texture_usage            // flags: copy_src/copy_dst, readonly_texture, readwrite_texture, render_target, depth_stencil
+sg::texture_usage            // ONE usage: copy_src/copy_dst, readonly_texture, readwrite_texture, render_target, depth_stencil
+sg::texture_usages           // cc::flags<texture_usage> — the SET a description carries and a texture reports
 // create the raw resource (full desc; untyped handle):
 ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedicated; throws sg::allocation_exception; + try_ twin)
 ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
@@ -506,12 +508,12 @@ sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_s
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
                                   //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={} }
-sg::color_target_state            // { pixel_format format; optional<blend_state> blend={}; color_write_mask write_mask=all }  — one color target's PSO state
+sg::color_target_state            // { pixel_format format; optional<blend_state> blend={}; color_write_mask write_mask=color_write_mask_all }  — one color target's PSO state
 sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; vector<vertex_attribute> attributes }; static create<Vs...>() derives one slot per type
                                   //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }
 // state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
 //   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip,patch_list}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
-//   blend_factor / blend_op / color_write_mask (r|g|b|a|all bit flags)  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
+//   blend_factor / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public

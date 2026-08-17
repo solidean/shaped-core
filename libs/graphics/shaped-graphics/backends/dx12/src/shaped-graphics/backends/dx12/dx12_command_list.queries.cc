@@ -61,7 +61,7 @@ void dx12_command_list::finalize_queries_before_close()
     CC_ASSERT(resolve != nullptr, "transient resolve buffer is not a dx12 buffer");
 
     // 3. Declare the whole buffer COPY_DEST and flush, then resolve every leased heap into its slice.
-    track_buffer_access(resolve, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write);
+    track_buffer_access(resolve, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     flush_barriers();
     isize offset_bytes = 0;
     for (auto const& lease : _leased_query_heaps)
@@ -74,7 +74,7 @@ void dx12_command_list::finalize_queries_before_close()
 
     // 4. Barrier COPY_DEST→COPY_SOURCE, then start one inline readback per heap into its slice and assign
     //    the heap's shared future in place so handed-out handles see it.
-    track_buffer_access(resolve, sg::pipeline_stage_flags::copy, sg::access_flags::copy_read);
+    track_buffer_access(resolve, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     flush_barriers();
     offset_bytes = 0;
     for (auto& lease : _leased_query_heaps)

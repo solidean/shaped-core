@@ -144,20 +144,20 @@ VkImageType to_vk_image_type(sg::texture_dimension d)
     return VK_IMAGE_TYPE_2D;
 }
 
-VkImageUsageFlags to_vk_image_usage(sg::texture_usage u)
+VkImageUsageFlags to_vk_image_usage(sg::texture_usages u)
 {
     VkImageUsageFlags flags = 0;
-    if (sg::has_flag(u, sg::texture_usage::copy_src))
+    if (u.has(sg::texture_usage::copy_src))
         flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    if (sg::has_flag(u, sg::texture_usage::copy_dst))
+    if (u.has(sg::texture_usage::copy_dst))
         flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (sg::has_flag(u, sg::texture_usage::readonly_texture))
+    if (u.has(sg::texture_usage::readonly_texture))
         flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
-    if (sg::has_flag(u, sg::texture_usage::readwrite_texture))
+    if (u.has(sg::texture_usage::readwrite_texture))
         flags |= VK_IMAGE_USAGE_STORAGE_BIT;
-    if (sg::has_flag(u, sg::texture_usage::render_target))
+    if (u.has(sg::texture_usage::render_target))
         flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    if (sg::has_flag(u, sg::texture_usage::depth_stencil))
+    if (u.has(sg::texture_usage::depth_stencil))
         flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
     // Vulkan rejects a zero-usage image, so a usage-less texture keeps a benign SAMPLED bit and stays valid.

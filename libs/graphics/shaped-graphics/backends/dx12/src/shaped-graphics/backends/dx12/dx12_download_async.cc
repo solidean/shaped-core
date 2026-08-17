@@ -416,8 +416,8 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
         return sg::bytes_future(cc::pinned_data<byte const>(), std::make_shared<sg::ready_bytes_waiter>());
 
     CC_ASSERT(src->_resource, "async download source buffer has no storage");
-    CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "async download source buffer must have "
-                                                                      "buffer_usage::copy_src");
+    CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "async download source buffer must have "
+                                                            "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
     // Forward cross-queue sync vs a pending async UPLOAD to the same buffer: the read must observe it.
@@ -467,8 +467,8 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     CC_ASSERT(src != nullptr, "texture is not a dx12 texture");
     CC_ASSERT(!src->is_expired(), "async download source is a transient texture used past its epoch (expired)");
     CC_ASSERT(src->_resource, "async download source texture has no storage");
-    CC_ASSERT(sg::has_flag(src->usage(), sg::texture_usage::copy_src), "async download source texture must have "
-                                                                       "texture_usage::copy_src");
+    CC_ASSERT(src->usage().has(sg::texture_usage::copy_src), "async download source texture must have "
+                                                             "texture_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.

@@ -50,11 +50,11 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
     // DENY_SHADER_RESOURCE is left off, so a depth/RT texture can also be sampled.
     // can also be sampled.
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    if (sg::has_flag(d.usage, sg::texture_usage::readwrite_texture))
+    if (d.usage.has(sg::texture_usage::readwrite_texture))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-    if (sg::has_flag(d.usage, sg::texture_usage::render_target))
+    if (d.usage.has(sg::texture_usage::render_target))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-    if (sg::has_flag(d.usage, sg::texture_usage::depth_stencil))
+    if (d.usage.has(sg::texture_usage::depth_stencil))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
     return desc;

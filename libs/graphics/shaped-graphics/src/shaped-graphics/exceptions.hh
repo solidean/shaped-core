@@ -5,7 +5,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/types.hh> // buffer_usage
+#include <shaped-graphics/types.hh> // buffer_usages
 
 /// Base of every shaped-graphics exception, carrying a formatted message.
 /// Catch a concrete derived type for structured context, or `sg::exception` for "any sg failure".

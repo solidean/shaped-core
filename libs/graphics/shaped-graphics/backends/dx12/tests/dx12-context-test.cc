@@ -31,10 +31,10 @@ INVOCABLE_TEST("sg dx12 - context brings up lists and buffers", (dx12::dx12_cont
     auto buf = ctx.persistent.create_raw_buffer(256, sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
     CHECK(buf->size_in_bytes() == 256);
-    CHECK(sg::has_flag(buf->usage(), sg::buffer_usage::copy_dst));
+    CHECK(buf->usage().has(sg::buffer_usage::copy_dst));
 
     // Empty buffer: valid and zero-length (the "no backing GPU resource" invariant is pinned separately below).
-    auto empty = ctx.persistent.create_raw_buffer(0, sg::buffer_usage::none);
+    auto empty = ctx.persistent.create_raw_buffer(0, {});
     REQUIRE(empty != nullptr);
     CHECK(empty->size_in_bytes() == 0);
 
@@ -69,7 +69,7 @@ INVOCABLE_TEST("sg dx12 - a zero-size buffer allocates no backing resource", (dx
     REQUIRE(buf.has_value());
     CHECK(buf.value()->_resource != nullptr); // real storage -> a backing resource
 
-    auto empty = c.create_dx12_buffer(0, sg::buffer_usage::none, sg::allocation_info{});
+    auto empty = c.create_dx12_buffer(0, {}, sg::allocation_info{});
     REQUIRE(empty.has_value());
     CHECK(empty.value()->_resource == nullptr); // size 0 -> no resource allocated
 }

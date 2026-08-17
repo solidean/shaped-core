@@ -14,7 +14,7 @@ public:
     vulkan_buffer(vulkan_context& ctx,
                   sg::epoch created_in,
                   isize size_in_bytes,
-                  sg::buffer_usage usage,
+                  sg::buffer_usages usage,
                   VkBuffer buffer,
                   VkDeviceMemory memory)
       : sg::raw_buffer(size_in_bytes, usage), _ctx(ctx), _creation_epoch(created_in), _buffer(buffer), _memory(memory)

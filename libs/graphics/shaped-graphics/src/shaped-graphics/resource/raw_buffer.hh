@@ -27,7 +27,7 @@ public:
     [[nodiscard]] isize size_in_bytes() const { return _size_in_bytes; }
 
     /// How the buffer may be used (copy source/dest, vertex, index, ...).
-    [[nodiscard]] buffer_usage usage() const { return _usage; }
+    [[nodiscard]] buffer_usages usage() const { return _usage; }
 
     // Byte-level views onto this buffer — the low-level path.
     // Every factory here addresses in bytes and takes no C++ element type — a `cc::offset_size` range, plus an explicit stride where the view is structured.
@@ -44,7 +44,7 @@ public:
     /// The range must fit, its offset must be 256-byte aligned, and its size must be at most the 64 KiB max CBV.
     [[nodiscard]] raw_buffer_view as_raw_uniform_buffer(cc::offset_size byte_range) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
         assert_uniform_range(byte_range);
         return raw_buffer_view{.access = view_class::uniform,
                                .shape = view_shape::uniform_block,
@@ -56,7 +56,7 @@ public:
     /// Checked as_raw_uniform_buffer — nullopt when the byte range breaks the uniform block rules.
     [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_uniform_buffer(cc::offset_size byte_range) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
         if (!is_valid_uniform_range(byte_range))
             return {};
         return as_raw_uniform_buffer(byte_range);
@@ -71,7 +71,7 @@ public:
     /// A raw, byte-addressed read-only view of `byte_range` bytes (SRV, `shape == raw`).
     [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         assert_storage_range(byte_range);
         return raw_buffer_view{.access = view_class::readonly,
                                .shape = view_shape::raw,
@@ -84,7 +84,7 @@ public:
     /// `element_count` is `byte_range.size / stride`.
     [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range, isize stride_in_bytes) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         assert_strided_range(byte_range, stride_in_bytes);
         return raw_buffer_view{.access = view_class::readonly,
                                .shape = view_shape::structured,
@@ -103,7 +103,7 @@ public:
     /// Checked as_raw_readonly — nullopt when the byte range breaks the storage rules.
     [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readonly(cc::offset_size byte_range) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         if (!is_valid_storage_range(byte_range))
             return {};
         return as_raw_readonly(byte_range);
@@ -112,7 +112,7 @@ public:
     /// Checked structured as_raw_readonly — nullopt when the byte range / stride break the structured rules.
     [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readonly(cc::offset_size byte_range, isize stride_in_bytes) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         if (!is_valid_strided_range(byte_range, stride_in_bytes))
             return {};
         return as_raw_readonly(byte_range, stride_in_bytes);
@@ -127,7 +127,7 @@ public:
     /// A raw, byte-addressed read-write view of `byte_range` bytes (UAV, `shape == raw`).
     [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         assert_storage_range(byte_range);
         return raw_buffer_view{.access = view_class::readwrite,
                                .shape = view_shape::raw,
@@ -140,7 +140,7 @@ public:
     /// `element_count` is `byte_range.size / stride`.
     [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range, isize stride_in_bytes) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         assert_strided_range(byte_range, stride_in_bytes);
         return raw_buffer_view{.access = view_class::readwrite,
                                .shape = view_shape::structured,
@@ -159,7 +159,7 @@ public:
     /// Checked as_raw_readwrite — nullopt when the byte range breaks the storage rules.
     [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readwrite(cc::offset_size byte_range) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         if (!is_valid_storage_range(byte_range))
             return {};
         return as_raw_readwrite(byte_range);
@@ -168,7 +168,7 @@ public:
     /// Checked structured as_raw_readwrite — nullopt when the byte range / stride break the structured rules.
     [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readwrite(cc::offset_size byte_range, isize stride_in_bytes) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         if (!is_valid_strided_range(byte_range, stride_in_bytes))
             return {};
         return as_raw_readwrite(byte_range, stride_in_bytes);
@@ -181,7 +181,7 @@ public:
     /// The stride must match the pipeline's slot.
     [[nodiscard]] vertex_buffer_view as_raw_vertex_buffer(cc::offset_size byte_range, isize stride_in_bytes) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
         CC_ASSERT(byte_range.offset >= 0 && byte_range.size >= 0 && stride_in_bytes >= 0, "view range / stride must be "
                                                                                           "non-negative");
         CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "view range exceeds buffer size");
@@ -194,7 +194,7 @@ public:
     /// The whole buffer as an index buffer of `format` elements.
     [[nodiscard]] index_buffer_view as_index_buffer(index_format format = index_format::uint16) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::index_buffer), "buffer lacks index_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::index_buffer), "buffer lacks index_buffer usage");
         return index_buffer_view{.buffer = shared_from_this(),
                                  .format = format,
                                  .offset_in_bytes = 0,
@@ -204,7 +204,7 @@ public:
     /// Raw index buffer view over an explicit byte range; the index width follows `format`.
     [[nodiscard]] index_buffer_view as_raw_index_buffer(index_format format, cc::offset_size byte_range) const
     {
-        CC_ASSERT(has_flag(_usage, buffer_usage::index_buffer), "buffer lacks index_buffer usage");
+        CC_ASSERT(_usage.has(buffer_usage::index_buffer), "buffer lacks index_buffer usage");
         CC_ASSERT(byte_range.offset >= 0 && byte_range.size >= 0, "view range must be non-negative");
         CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "view range exceeds buffer size");
         return index_buffer_view{.buffer = shared_from_this(),
@@ -247,7 +247,7 @@ public:
     }
 
 protected:
-    raw_buffer(isize size_in_bytes, buffer_usage usage);
+    raw_buffer(isize size_in_bytes, buffer_usages usage);
 
     /// Backend hook run once from `expire()`, after the buffer is marked expired: release the GPU storage.
     /// Backends defer that until the owning epoch retires, and the default has nothing to release.
@@ -326,7 +326,7 @@ protected:
     }
 
     isize _size_in_bytes = 0;
-    buffer_usage _usage = buffer_usage::none;
+    buffer_usages _usage = {};
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
 };

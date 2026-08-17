@@ -69,14 +69,15 @@ TEST("sg - raster vertex_input_layout::create assigns one slot per type in order
 
 TEST("sg - raster color_write_mask flag ops")
 {
-    using sg::color_write_mask;
-    CHECK(sg::has_flag(color_write_mask::all, color_write_mask::r));
-    CHECK(sg::has_flag(color_write_mask::all, color_write_mask::a));
+    using sg::color_channel;
+    CHECK(sg::color_write_mask_all.has(color_channel::r));
+    CHECK(sg::color_write_mask_all.has(color_channel::a));
 
-    auto const rg = color_write_mask::r | color_write_mask::g;
-    CHECK(sg::has_flag(rg, color_write_mask::r));
-    CHECK(sg::has_flag(rg, color_write_mask::g));
-    CHECK(!sg::has_flag(rg, color_write_mask::b));
+    auto const rg = color_channel::r | color_channel::g;
+    CHECK(rg.has(color_channel::r));
+    CHECK(rg.has(color_channel::g));
+    CHECK(!rg.has(color_channel::b));
+    CHECK(rg.without(color_channel::r) == sg::color_write_mask(color_channel::g));
 }
 
 TEST("sg - raster fixed-function state defaults")

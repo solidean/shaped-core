@@ -107,13 +107,13 @@ D3D12_BLEND_OP to_d3d12_blend_op(sg::blend_op op)
 UINT8 to_d3d12_color_write_mask(sg::color_write_mask m)
 {
     UINT8 out = 0;
-    if (sg::has_flag(m, sg::color_write_mask::r))
+    if (m.has(sg::color_channel::r))
         out |= D3D12_COLOR_WRITE_ENABLE_RED;
-    if (sg::has_flag(m, sg::color_write_mask::g))
+    if (m.has(sg::color_channel::g))
         out |= D3D12_COLOR_WRITE_ENABLE_GREEN;
-    if (sg::has_flag(m, sg::color_write_mask::b))
+    if (m.has(sg::color_channel::b))
         out |= D3D12_COLOR_WRITE_ENABLE_BLUE;
-    if (sg::has_flag(m, sg::color_write_mask::a))
+    if (m.has(sg::color_channel::a))
         out |= D3D12_COLOR_WRITE_ENABLE_ALPHA;
     return out;
 }

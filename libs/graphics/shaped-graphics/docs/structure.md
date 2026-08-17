@@ -33,7 +33,7 @@ src/shaped-graphics/
   bytes_future.hh/.cc             [done]       bytes_waiter / bytes_future / data_future<T> — the result vocabulary every download shares
 
   barrier/                                     # the access-tracking substrate; shared vocabulary, per-backend emission
-    resource_access.hh            [done]       access_flags / pipeline_stage_flags / texture_layout / access_barrier
+    resource_access.hh            [done]       access_flag(s) / pipeline_stage_flag(s) / texture_layout / access_barrier
     resource_access_state.hh      [done]       the three-timeline declare/flush state machine
     subresource_state.hh          [done]       subresource_box + the covering partition over a texture's subresource domain
     access_inference.hh           [done]       which access/layout an op or a bound view implies

@@ -131,7 +131,7 @@ void dx12_command_list::transition_texture_to(dx12_texture_handle const& texture
     // e.g. Present). track_texture_access reads the tracked source state to build the barrier, so this
     // composes with whatever layout the frame's render pass left the texture in.
     auto const whole = sg::subresource_range::whole(subresource_extent_of(texture->description()));
-    track_texture_access(texture, whole, sg::pipeline_stage_flags::none, sg::access_flags::none, layout);
+    track_texture_access(texture, whole, {}, {}, layout);
     flush_barriers();
 }
 
@@ -221,12 +221,12 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
 
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flags::compute, sg::shader_access_of(view.access));
+                track_buffer_access(view.buffer, sg::pipeline_stage_flag::compute, sg::shader_access_of(view.access));
 
         // Bound textures also transition to the layout their access class needs (a sampled texture to
         // shader_readonly, a storage texture to shader_readwrite) — the inferred layout is shader_layout_of.
         for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flags::compute,
+            track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flag::compute,
                                  sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
@@ -294,15 +294,15 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
 
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flags::raytracing, sg::shader_access_of(view.access));
+                track_buffer_access(view.buffer, sg::pipeline_stage_flag::raytracing, sg::shader_access_of(view.access));
 
         for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flags::raytracing,
+            track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flag::raytracing,
                                  sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
     // The shader table buffer is read by the fixed-function ray dispatch.
-    track_buffer_access(dt->buffer, sg::pipeline_stage_flags::raytracing, sg::access_flags::shader_read);
+    track_buffer_access(dt->buffer, sg::pipeline_stage_flag::raytracing, sg::access_flag::shader_read);
 
     flush_barriers();
 
@@ -351,11 +351,11 @@ void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                                                                              "the buffer's bounds");
     if (data.empty())
         return;
-    CC_ASSERT(sg::has_flag(dst->usage(), sg::buffer_usage::copy_dst), "upload target buffer must have "
-                                                                      "buffer_usage::copy_dst");
+    CC_ASSERT(dst->usage().has(sg::buffer_usage::copy_dst), "upload target buffer must have "
+                                                            "buffer_usage::copy_dst");
     // Order this write against any prior use of the buffer in this list (precise, no bounce through COMMON)
     // and fold in the forward async-upload wait, then record the copy.
-    track_buffer_access(dst, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write);
+    track_buffer_access(dst, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     flush_barriers();
     _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
 }
@@ -373,13 +373,13 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_ha
               "download range is out of the buffer's bounds");
     if (size_in_bytes > 0)
     {
-        CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "download source buffer must have "
-                                                                          "buffer_usage::copy_src");
+        CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "download source buffer must have "
+                                                                "buffer_usage::copy_src");
     }
     // Order this read against any prior write of the buffer in this list, and fold in the forward
     // async-upload wait, then record the readback copy.
     if (size_in_bytes > 0)
-        track_buffer_access(src, sg::pipeline_stage_flags::copy, sg::access_flags::copy_read);
+        track_buffer_access(src, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     flush_barriers();
     return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
 }
@@ -393,15 +393,15 @@ void dx12_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture,
     auto const dst = std::dynamic_pointer_cast<dx12_texture const>(texture);
     CC_ASSERT(dst != nullptr, "texture is not a dx12 texture");
     CC_ASSERT(!dst->is_expired(), "upload target is a transient texture used past its epoch (expired)");
-    CC_ASSERT(sg::has_flag(dst->usage(), sg::texture_usage::copy_dst), "upload target texture must have "
-                                                                       "texture_usage::copy_dst");
+    CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "upload target texture must have "
+                                                             "texture_usage::copy_dst");
 
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
     CC_ASSERT(pixels.size() == fp.tight_size(), "pixel data size does not match the copy region");
 
     // Transition the target subresource to copy_dst (from whatever it was last used as), then record the copy.
-    track_texture_access(dst, subresource, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write,
+    track_texture_access(dst, subresource, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                          sg::texture_layout::copy_dst);
     flush_barriers();
     _ctx._upload_inline.upload_texture(*this, dst->_resource.Get(), fp, pixels);
@@ -415,14 +415,14 @@ sg::bytes_future dx12_command_list::download_bytes_from_texture(sg::raw_texture_
     auto const src = std::dynamic_pointer_cast<dx12_texture const>(texture);
     CC_ASSERT(src != nullptr, "texture is not a dx12 texture");
     CC_ASSERT(!src->is_expired(), "download source is a transient texture used past its epoch (expired)");
-    CC_ASSERT(sg::has_flag(src->usage(), sg::texture_usage::copy_src), "download source texture must have "
-                                                                       "texture_usage::copy_src");
+    CC_ASSERT(src->usage().has(sg::texture_usage::copy_src), "download source texture must have "
+                                                             "texture_usage::copy_src");
 
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
     // Transition the source subresource to copy_src, then record the readback copy.
-    track_texture_access(src, subresource, sg::pipeline_stage_flags::copy, sg::access_flags::copy_read,
+    track_texture_access(src, subresource, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read,
                          sg::texture_layout::copy_src);
     flush_barriers();
     return _ctx._download_inline.download_texture(*this, src->_resource.Get(), fp);
@@ -447,10 +447,10 @@ void dx12_command_list::copy_buffer_region(sg::raw_buffer_handle src,
               "copy dest range is out of the buffer's bounds");
     if (size_in_bytes == 0)
         return;
-    CC_ASSERT(sg::has_flag(s->usage(), sg::buffer_usage::copy_src), "copy source buffer must have "
-                                                                    "buffer_usage::copy_src");
-    CC_ASSERT(sg::has_flag(d->usage(), sg::buffer_usage::copy_dst), "copy dest buffer must have "
-                                                                    "buffer_usage::copy_dst");
+    CC_ASSERT(s->usage().has(sg::buffer_usage::copy_src), "copy source buffer must have "
+                                                          "buffer_usage::copy_src");
+    CC_ASSERT(d->usage().has(sg::buffer_usage::copy_dst), "copy dest buffer must have "
+                                                          "buffer_usage::copy_dst");
     // Same-buffer copy: the source and destination ranges must not overlap.
     bool const same_resource = s->_resource.Get() == d->_resource.Get();
     if (same_resource)
@@ -461,12 +461,11 @@ void dx12_command_list::copy_buffer_region(sg::raw_buffer_handle src,
     // Order the copy against prior use of each buffer.
     // A self-copy reads and writes one resource, so it is declared as a single combined access — one barrier; distinct buffers are ordered independently.
     if (same_resource)
-        track_buffer_access(s, sg::pipeline_stage_flags::copy,
-                            sg::access_flags::copy_read | sg::access_flags::copy_write);
+        track_buffer_access(s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read | sg::access_flag::copy_write);
     else
     {
-        track_buffer_access(s, sg::pipeline_stage_flags::copy, sg::access_flags::copy_read);
-        track_buffer_access(d, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write);
+        track_buffer_access(s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+        track_buffer_access(d, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     }
 
     flush_barriers();

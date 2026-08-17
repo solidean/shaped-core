@@ -11,8 +11,8 @@ Add entries as we discover them, and remove them as they land.
   The catch is that only ONE specialization of `cc::custom::enum_traits<E>` may exist, so a names-only macro cannot sit alongside a `CC_FLAG_ENUM_*` one for the same enum.
   The two have to converge into one macro that declares everything, with `is_flag_enum` telling a nameable enum from a flag enum.
 - **Migrate the remaining hand-rolled flag enums to `cc::flags`.**
-  `sg::buffer_usage`, `sg::texture_usage`, `sg::access_flags`, `sg::pipeline_stage_flags`, `sg::color_write_mask` and `sr::key_modifiers` still carry their own operators.
-  Retiring `sg::has_flag` along with them touches ~50 call sites, most of them inside `CC_ASSERT`.
+  `sr::key_modifiers` is the last one still carrying its own operators plus a free `has_all`.
+  All of sg's have migrated — `buffer_usages`, `texture_usages`, `access_flags`, `pipeline_stage_flags`, `color_write_mask`, `accel_build_flags`.
 
 ## container
 

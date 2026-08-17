@@ -339,7 +339,7 @@ private:
     [[nodiscard]] readonly_texture_view<texture_view_traits<Dim>> _make_readonly(cc::start_end array_range,
                                                                                  cc::start_end mip_range) const
     {
-        CC_ASSERT(has_flag(_raw->usage(), texture_usage::readonly_texture), "texture lacks readonly_texture usage");
+        CC_ASSERT(_raw->usage().has(texture_usage::readonly_texture), "texture lacks readonly_texture usage");
         subresource_range r;
         r.mip_range = mip_range;
         r.array_range = array_range;
@@ -352,7 +352,7 @@ private:
                                                                                    int mip,
                                                                                    cc::start_end depth_slice_range) const
     {
-        CC_ASSERT(has_flag(_raw->usage(), texture_usage::readwrite_texture), "texture lacks readwrite_texture usage");
+        CC_ASSERT(_raw->usage().has(texture_usage::readwrite_texture), "texture lacks readwrite_texture usage");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "readwrite view mip level out of range");
         subresource_range r;
         r.mip_range = {.start = mip, .end = mip + 1}; // a UAV targets a single mip level
@@ -366,7 +366,7 @@ private:
 
     [[nodiscard]] render_target_view _make_render_target(texture_view_dimension dim, cc::start_end array_range, int mip) const
     {
-        CC_ASSERT(has_flag(_raw->usage(), texture_usage::render_target), "texture lacks render_target usage");
+        CC_ASSERT(_raw->usage().has(texture_usage::render_target), "texture lacks render_target usage");
         CC_ASSERT(is_render_target_format(_raw->format()), "texture format is not a renderable color format");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "render-target view mip level out of range");
         subresource_range r;
@@ -378,7 +378,7 @@ private:
 
     [[nodiscard]] depth_stencil_view _make_depth_stencil(texture_view_dimension dim, cc::start_end array_range, int mip) const
     {
-        CC_ASSERT(has_flag(_raw->usage(), texture_usage::depth_stencil), "texture lacks depth_stencil usage");
+        CC_ASSERT(_raw->usage().has(texture_usage::depth_stencil), "texture lacks depth_stencil usage");
         CC_ASSERT(is_depth_format(_raw->format()), "texture format is not a depth / depth-stencil format");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "depth-stencil view mip level out of range");
         subresource_range r;

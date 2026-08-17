@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/flags.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// Color-blend state for one render target of a raster pipeline: how a fragment's output combines with the value already in the target.
@@ -31,38 +32,27 @@ enum class sg::blend_op
     max,              // DX12 BLEND_OP_MAX          / Vk BLEND_OP_MAX
 };
 
-/// Which color channels a render target write touches.
-/// Bit flags — combine with `|`, test with `has_flag`.
+/// One color channel a render target write may touch.
+/// A set of them is a `color_write_mask` — combine with `|`, test with `has`.
 /// Maps to DX12 D3D12_COLOR_WRITE_ENABLE / Vk VkColorComponentFlags.
-enum class sg::color_write_mask : sg::u8
+enum class sg::color_channel : sg::u8
 {
-    none = 0,
-    r = 1u << 0,
-    g = 1u << 1,
-    b = 1u << 2,
-    a = 1u << 3,
-    all = r | g | b | a,
+    r,
+    g,
+    b,
+    a,
 };
+
+CC_FLAG_ENUM_INDEXED(sg, color_channel, u8);
 
 namespace sg
 {
+/// A SET of color_channel — which channels a render target write touches, never the bare enum.
+using color_write_mask = cc::flags<color_channel>;
 
-[[nodiscard]] constexpr color_write_mask operator|(color_write_mask x, color_write_mask y)
-{
-    return color_write_mask(u8(x) | u8(y));
-}
-
-[[nodiscard]] constexpr color_write_mask operator&(color_write_mask x, color_write_mask y)
-{
-    return color_write_mask(u8(x) & u8(y));
-}
-
-/// True if every bit in `flag` is set in `mask`.
-[[nodiscard]] constexpr bool has_flag(color_write_mask mask, color_write_mask flag)
-{
-    return (u8(mask) & u8(flag)) == u8(flag);
-}
-
+/// Every channel — the default write mask, since the empty set discards the fragment's output entirely.
+inline constexpr color_write_mask color_write_mask_all
+    = color_channel::r | color_channel::g | color_channel::b | color_channel::a;
 } // namespace sg
 
 /// One channel group's blend: `src * source + dst * ...` combined by `op`.

@@ -65,7 +65,7 @@ public:
     [[nodiscard]] raw_buffer_handle const& raw() const { return _raw; }
 
     [[nodiscard]] isize size_in_bytes() const { return _raw->size_in_bytes(); }
-    [[nodiscard]] buffer_usage usage() const { return _raw->usage(); }
+    [[nodiscard]] buffer_usages usage() const { return _raw->usage(); }
 
     /// Number of whole `T` elements the buffer holds (byte size / sizeof(T), truncating).
     [[nodiscard]] isize element_count() const { return _raw->size_in_bytes() / isize(sizeof(T)); }
@@ -116,7 +116,7 @@ public:
     [[nodiscard]] uniform_buffer_view<U> as_uniform_buffer(isize element_index = 0) const
         requires(std::is_same_v<U, T> && uniform_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
         auto const offset = element_index * isize(sizeof(U));
         CC_ASSERT(offset % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte aligned");
         CC_ASSERT(offset >= 0 && offset + isize(sizeof(U)) <= _raw->size_in_bytes(), "uniform block does not fit in "
@@ -132,7 +132,7 @@ public:
     [[nodiscard]] readonly_buffer_view<U> as_readonly_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         _assert_storage_placement(0, element_count() * isize(sizeof(T)));
         return readonly_buffer_view<U>{.buffer = _raw, .offset_in_bytes = 0, .element_count = element_count()};
     }
@@ -142,7 +142,7 @@ public:
     [[nodiscard]] readonly_buffer_view<U> as_readonly_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         auto const offset = _element_offset(range);
         _assert_storage_placement(offset, range.size * isize(sizeof(T)));
         return readonly_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .element_count = range.size};
@@ -153,7 +153,7 @@ public:
     [[nodiscard]] readwrite_buffer_view<U> as_readwrite_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         _assert_storage_placement(0, element_count() * isize(sizeof(T)));
         return readwrite_buffer_view<U>{.buffer = _raw, .offset_in_bytes = 0, .element_count = element_count()};
     }
@@ -163,7 +163,7 @@ public:
     [[nodiscard]] readwrite_buffer_view<U> as_readwrite_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         auto const offset = _element_offset(range);
         _assert_storage_placement(offset, range.size * isize(sizeof(T)));
         return readwrite_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .element_count = range.size};
@@ -179,7 +179,7 @@ public:
     [[nodiscard]] cc::optional<readonly_buffer_view<U>> try_as_readonly_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         if (!_is_valid_storage_placement(0, element_count() * isize(sizeof(T))))
             return {};
         return as_readonly_buffer();
@@ -190,7 +190,7 @@ public:
     [[nodiscard]] cc::optional<readonly_buffer_view<U>> try_as_readonly_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         if (!_is_valid_element_range(range)
             || !_is_valid_storage_placement(range.offset * isize(sizeof(T)), range.size * isize(sizeof(T))))
             return {};
@@ -202,7 +202,7 @@ public:
     [[nodiscard]] cc::optional<readwrite_buffer_view<U>> try_as_readwrite_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         if (!_is_valid_storage_placement(0, element_count() * isize(sizeof(T))))
             return {};
         return as_readwrite_buffer();
@@ -213,7 +213,7 @@ public:
     [[nodiscard]] cc::optional<readwrite_buffer_view<U>> try_as_readwrite_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         if (!_is_valid_element_range(range)
             || !_is_valid_storage_placement(range.offset * isize(sizeof(T)), range.size * isize(sizeof(T))))
             return {};
@@ -225,7 +225,7 @@ public:
     [[nodiscard]] cc::optional<uniform_buffer_view<U>> try_as_uniform_buffer(isize element_index = 0) const
         requires(std::is_same_v<U, T> && uniform_element<U>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
         auto const offset = element_index * isize(sizeof(U));
         if (offset % uniform_buffer_offset_alignment != 0)
             return {};
@@ -244,7 +244,7 @@ public:
     /// The whole buffer as a vertex buffer with per-vertex stride `sizeof(T)`.
     [[nodiscard]] vertex_buffer_view as_vertex_buffer() const
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
         return vertex_buffer_view{.buffer = _raw,
                                   .offset_in_bytes = 0,
                                   .size_in_bytes = _raw->size_in_bytes(),
@@ -254,7 +254,7 @@ public:
     /// A vertex buffer over `range` vertices of `T`, stride `sizeof(T)`.
     [[nodiscard]] vertex_buffer_view as_vertex_buffer(cc::offset_size range) const
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
         return vertex_buffer_view{.buffer = _raw,
                                   .offset_in_bytes = _element_offset(range),
                                   .size_in_bytes = range.size * isize(sizeof(T)),
@@ -266,7 +266,7 @@ public:
     [[nodiscard]] index_buffer_view as_index_buffer() const
         requires(std::is_same_v<T, u16> || std::is_same_v<T, u32>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::index_buffer), "buffer lacks index_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::index_buffer), "buffer lacks index_buffer usage");
         return index_buffer_view{.buffer = _raw,
                                  .format = _index_format(),
                                  .offset_in_bytes = 0,
@@ -278,7 +278,7 @@ public:
     [[nodiscard]] index_buffer_view as_index_buffer(cc::offset_size range) const
         requires(std::is_same_v<T, u16> || std::is_same_v<T, u32>)
     {
-        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::index_buffer), "buffer lacks index_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::index_buffer), "buffer lacks index_buffer usage");
         return index_buffer_view{.buffer = _raw,
                                  .format = _index_format(),
                                  .offset_in_bytes = _element_offset(range),

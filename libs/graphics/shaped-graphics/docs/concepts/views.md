@@ -64,7 +64,7 @@ Two things this factoring settles:
   `sizeof(T)`) *are* different backend descriptors, so the distinction survives — derived from `T`,
   not spelled in the type name.
 
-The relationship a caller must uphold: a buffer's creation `buffer_usage` must be a **superset** of
+The relationship a caller must uphold: a buffer's creation `buffer_usages` must be a **superset** of
 every view's access (a `readwrite_buffer_view` requires `readwrite_buffer`, etc.). The factories assert this.
 
 ## The erased `raw_view`

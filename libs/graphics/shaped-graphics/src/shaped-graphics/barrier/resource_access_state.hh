@@ -20,10 +20,10 @@
 struct sg::access_barrier
 {
     bool needed = false;
-    pipeline_stage_flags src_stages = pipeline_stage_flags::none;
-    pipeline_stage_flags dst_stages = pipeline_stage_flags::none;
-    access_flags src_access = access_flags::none;
-    access_flags dst_access = access_flags::none;
+    pipeline_stage_flags src_stages = {};
+    pipeline_stage_flags dst_stages = {};
+    access_flags src_access = {};
+    access_flags dst_access = {};
     texture_layout src_layout = texture_layout::general;
     texture_layout dst_layout = texture_layout::general;
 };
@@ -31,32 +31,32 @@ struct sg::access_barrier
 struct sg::resource_access_state
 {
     // curr — accumulated for the next op
-    pipeline_stage_flags curr_read_stages = pipeline_stage_flags::none;
-    access_flags curr_read_access = access_flags::none;
-    pipeline_stage_flags curr_write_stages = pipeline_stage_flags::none;
-    access_flags curr_write_access = access_flags::none;
+    pipeline_stage_flags curr_read_stages = {};
+    access_flags curr_read_access = {};
+    pipeline_stage_flags curr_write_stages = {};
+    access_flags curr_write_access = {};
 
     // reads already barriered against the last write (subset of inflight reads)
-    pipeline_stage_flags barriered_read_stages = pipeline_stage_flags::none;
-    access_flags barriered_read_access = access_flags::none;
+    pipeline_stage_flags barriered_read_stages = {};
+    access_flags barriered_read_access = {};
 
     // in-flight since the last write / command-list start
-    pipeline_stage_flags inflight_read_stages = pipeline_stage_flags::none;
-    access_flags inflight_read_access = access_flags::none;
-    pipeline_stage_flags inflight_write_stages = pipeline_stage_flags::none;
-    access_flags inflight_write_access = access_flags::none;
+    pipeline_stage_flags inflight_read_stages = {};
+    access_flags inflight_read_access = {};
+    pipeline_stage_flags inflight_write_stages = {};
+    access_flags inflight_write_access = {};
 
     // buffers are always `general`; textures transition between layouts
     texture_layout curr_layout = texture_layout::general;
     texture_layout prev_layout = texture_layout::general;
 
     // queries
-    [[nodiscard]] bool has_inflight_writes() const { return has_any(inflight_write_access); }
+    [[nodiscard]] bool has_inflight_writes() const { return !inflight_write_access.is_empty(); }
     [[nodiscard]] bool has_any_inflight_access() const
     {
-        return has_any(inflight_read_access) || has_any(inflight_write_access);
+        return !inflight_read_access.is_empty() || !inflight_write_access.is_empty();
     }
-    [[nodiscard]] bool has_curr_writes() const { return has_any(curr_write_access); }
+    [[nodiscard]] bool has_curr_writes() const { return !curr_write_access.is_empty(); }
     [[nodiscard]] bool has_pending_layout_change() const { return curr_layout != prev_layout; }
     [[nodiscard]] pipeline_stage_flags all_inflight_stages() const
     {
@@ -103,8 +103,8 @@ struct sg::resource_access_state
                 inflight_read_access = curr_read_access;
                 inflight_write_stages = curr_write_stages;
                 inflight_write_access = curr_write_access;
-                barriered_read_stages = pipeline_stage_flags::none;
-                barriered_read_access = access_flags::none;
+                barriered_read_stages = {};
+                barriered_read_access = {};
             }
             else
             {
@@ -128,7 +128,7 @@ struct sg::resource_access_state
             }
             prev_layout = curr_layout;
         }
-        else if (has_any(curr_read_access))
+        else if (!curr_read_access.is_empty())
         {
             if (!has_inflight_writes())
             {
@@ -139,9 +139,9 @@ struct sg::resource_access_state
             else
             {
                 // Sync only the *new* reads (stages/access not already barriered) against the last write.
-                pipeline_stage_flags const new_stages = without(curr_read_stages, barriered_read_stages);
-                access_flags const new_access = without(curr_read_access, barriered_read_access);
-                if (has_any(new_stages) || has_any(new_access))
+                pipeline_stage_flags const new_stages = curr_read_stages.without(barriered_read_stages);
+                access_flags const new_access = curr_read_access.without(barriered_read_access);
+                if (!new_stages.is_empty() || !new_access.is_empty())
                 {
                     b.needed = true;
                     b.src_stages = inflight_write_stages;
@@ -158,15 +158,18 @@ struct sg::resource_access_state
             }
         }
 
-        curr_read_stages = pipeline_stage_flags::none;
-        curr_read_access = access_flags::none;
-        curr_write_stages = pipeline_stage_flags::none;
-        curr_write_access = access_flags::none;
+        curr_read_stages = {};
+        curr_read_access = {};
+        curr_write_stages = {};
+        curr_write_access = {};
         return b;
     }
 
     /// True if any access has been declared for the next op but not yet flushed.
-    [[nodiscard]] bool has_pending_declares() const { return has_any(curr_read_access) || has_any(curr_write_access); }
+    [[nodiscard]] bool has_pending_declares() const
+    {
+        return !curr_read_access.is_empty() || !curr_write_access.is_empty();
+    }
 
     /// Reset the timelines to a fresh state, preserving the achieved layout so the committed layout carries into the next command list.
     /// Used at command-list release.

@@ -28,9 +28,9 @@ INVOCABLE_TEST("sg - allocates a persistent buffer", (sg::context_handle const& 
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
     CHECK(buf->size_in_bytes() == 256);
-    CHECK(sg::has_flag(buf->usage(), sg::buffer_usage::copy_src));
-    CHECK(sg::has_flag(buf->usage(), sg::buffer_usage::copy_dst));
-    CHECK(!sg::has_flag(buf->usage(), sg::buffer_usage::vertex_buffer));
+    CHECK(buf->usage().has(sg::buffer_usage::copy_src));
+    CHECK(buf->usage().has(sg::buffer_usage::copy_dst));
+    CHECK(!buf->usage().has(sg::buffer_usage::vertex_buffer));
 }
 
 INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle const& ctx))
@@ -38,7 +38,7 @@ INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle const
     REQUIRE(ctx != nullptr);
 
     // A spread of usages a backend must accept at creation; the shape round-trips through the handle.
-    sg::buffer_usage const usages[] = {
+    sg::buffer_usages const usages[] = {
         sg::buffer_usage::vertex_buffer,
         sg::buffer_usage::index_buffer,
         sg::buffer_usage::uniform_buffer,
@@ -59,7 +59,7 @@ INVOCABLE_TEST("sg - zero-size buffer allocates nothing", (sg::context_handle co
     REQUIRE(ctx != nullptr);
 
     // A zero-size buffer is valid and allocates nothing.
-    auto empty = ctx->persistent.create_raw_buffer(0, sg::buffer_usage::none);
+    auto empty = ctx->persistent.create_raw_buffer(0, {});
     REQUIRE(empty != nullptr);
     CHECK(empty->size_in_bytes() == 0);
 }

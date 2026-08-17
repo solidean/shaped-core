@@ -14,7 +14,7 @@ namespace
 {
 struct test_buffer final : sg::raw_buffer
 {
-    test_buffer(isize size_in_bytes, sg::buffer_usage usage) : sg::raw_buffer(size_in_bytes, usage) {}
+    test_buffer(isize size_in_bytes, sg::buffer_usages usage) : sg::raw_buffer(size_in_bytes, usage) {}
 };
 
 // A 16-byte element (structured views require sizeof % 4 == 0).
@@ -29,7 +29,7 @@ struct two_bytes
     u8 a, b;
 };
 
-std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usage usage)
+std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usages usage)
 {
     return std::make_shared<test_buffer>(size, usage);
 }

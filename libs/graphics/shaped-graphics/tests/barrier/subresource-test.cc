@@ -50,7 +50,7 @@ TEST("sg subresource - touching a sub-range splits while preserving the cover")
     p.for_each_in(sg::subresource_range{{1, 2}, {0, 1}, {0, 1}},
                   [&](sg::resource_access_state& s)
                   {
-                      s.declare(sg::pipeline_stage_flags::compute, sg::access_flags::shader_write);
+                      s.declare(sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
                       ++touched;
                   });
 
@@ -101,7 +101,7 @@ TEST("sg subresource - try_merge keeps distinct states apart")
 
     // Give mip 0 a different state than mip 1.
     p.for_each_in(sg::subresource_range{{0, 1}, {0, 1}, {0, 1}}, [](sg::resource_access_state& s)
-                  { s.declare(sg::pipeline_stage_flags::compute, sg::access_flags::shader_write); });
+                  { s.declare(sg::pipeline_stage_flag::compute, sg::access_flag::shader_write); });
 
     p.try_merge();
     CHECK(p.box_count() == 2); // differing states must not merge

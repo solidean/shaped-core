@@ -16,7 +16,7 @@ namespace
 {
 namespace dx12 = sg::backend::dx12;
 
-sg::texture_description tex_desc(sg::texture_usage usage)
+sg::texture_description tex_desc(sg::texture_usages usage)
 {
     sg::texture_description d;
     d.format = sg::pixel_format::rgba8_unorm;

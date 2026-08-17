@@ -22,7 +22,7 @@ struct test_texture final : sg::raw_texture
     return sg::as_texture_view(v);
 }
 
-sg::texture_description desc_base(sg::texture_usage usage)
+sg::texture_description desc_base(sg::texture_usages usage)
 {
     sg::texture_description d;
     d.format = sg::pixel_format::rgba8_unorm;
@@ -33,7 +33,7 @@ sg::texture_description desc_base(sg::texture_usage usage)
     return d;
 }
 
-sg::texture_description desc_2d(sg::texture_usage usage, int mips = 1, int samples = 1)
+sg::texture_description desc_2d(sg::texture_usages usage, int mips = 1, int samples = 1)
 {
     auto d = desc_base(usage);
     d.mip_levels = mips;
@@ -41,7 +41,7 @@ sg::texture_description desc_2d(sg::texture_usage usage, int mips = 1, int sampl
     return d;
 }
 
-sg::texture_description desc_2d_array(sg::texture_usage usage, int layers, int mips = 1)
+sg::texture_description desc_2d_array(sg::texture_usages usage, int layers, int mips = 1)
 {
     auto d = desc_base(usage);
     d.mip_levels = mips;
@@ -49,7 +49,7 @@ sg::texture_description desc_2d_array(sg::texture_usage usage, int layers, int m
     return d;
 }
 
-sg::texture_description desc_cube(sg::texture_usage usage, int mips = 1)
+sg::texture_description desc_cube(sg::texture_usages usage, int mips = 1)
 {
     auto d = desc_base(usage);
     d.mip_levels = mips;
@@ -57,7 +57,7 @@ sg::texture_description desc_cube(sg::texture_usage usage, int mips = 1)
     return d;
 }
 
-sg::texture_description desc_cube_array(sg::texture_usage usage, int cubes, int mips = 1)
+sg::texture_description desc_cube_array(sg::texture_usages usage, int cubes, int mips = 1)
 {
     auto d = desc_base(usage);
     d.mip_levels = mips;
@@ -66,7 +66,7 @@ sg::texture_description desc_cube_array(sg::texture_usage usage, int cubes, int 
     return d;
 }
 
-sg::texture_description desc_3d(sg::texture_usage usage, int depth, int mips = 1)
+sg::texture_description desc_3d(sg::texture_usages usage, int depth, int mips = 1)
 {
     auto d = desc_base(usage);
     d.dimension = sg::texture_dimension::d3;
@@ -77,7 +77,7 @@ sg::texture_description desc_3d(sg::texture_usage usage, int depth, int mips = 1
 
 // A 2D texture with a chosen format, for the render-target / depth-stencil format-validity tests.
 // That is a depth DSV target, or a deliberately wrong format.
-sg::texture_description desc_2d_fmt(sg::texture_usage usage, sg::pixel_format format, int mips = 1)
+sg::texture_description desc_2d_fmt(sg::texture_usages usage, sg::pixel_format format, int mips = 1)
 {
     auto d = desc_2d(usage, mips);
     d.format = format;

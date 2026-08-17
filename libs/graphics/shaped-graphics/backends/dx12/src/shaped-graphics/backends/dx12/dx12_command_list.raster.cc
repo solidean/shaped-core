@@ -47,15 +47,15 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     // 1) Transition each target to its output layout (color -> render_target, depth -> depth_readwrite) and register it with this list.
     //    Flush the barriers up-front: enhanced barriers are illegal once the targets are bound, unlike a compute dispatch which flushes right before each op.
     for (auto const& ct : info.color_targets)
-        track_texture_access(as_dx12_texture(ct.view.texture()), ct.view.range(), sg::pipeline_stage_flags::render_target,
-                             sg::access_flags::color_write, sg::texture_layout::render_target);
+        track_texture_access(as_dx12_texture(ct.view.texture()), ct.view.range(), sg::pipeline_stage_flag::render_target,
+                             sg::access_flag::color_write, sg::texture_layout::render_target);
     if (info.depth_stencil_target.has_value())
     {
         // The depth_readwrite layout (LAYOUT_DEPTH_STENCIL_WRITE) permits only DEPTH_STENCIL_WRITE access, so pairing it with depth_read is rejected.
         // depth_read pairs with the depth_readonly layout; this scope binds every depth target read-write.
         auto const& dt = info.depth_stencil_target.value();
         track_texture_access(as_dx12_texture(dt.view.texture()), dt.view.range(),
-                             sg::pipeline_stage_flags::depth_stencil_target, sg::access_flags::depth_write,
+                             sg::pipeline_stage_flag::depth_stencil_target, sg::access_flag::depth_write,
                              sg::texture_layout::depth_readwrite);
     }
     flush_barriers();
@@ -312,20 +312,20 @@ void dx12_command_list::declare_raster_draw_barriers(bool indexed)
             continue;
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flags::vertex | sg::pipeline_stage_flags::fragment,
+                track_buffer_access(view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
                                     sg::shader_access_of(view.access));
         for (auto const& tv : bound_group->texture_hazard_views)
             track_texture_access(tv.texture, tv.range,
-                                 sg::pipeline_stage_flags::vertex | sg::pipeline_stage_flags::fragment,
+                                 sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
                                  sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
     // The IA vertex fetch reads the bound vertex buffers; an indexed draw also fetches the index buffer.
     for (auto const& vb : _bound_vertex_buffers)
         if (vb)
-            track_buffer_access(vb, sg::pipeline_stage_flags::vertex, sg::access_flags::vertex_read);
+            track_buffer_access(vb, sg::pipeline_stage_flag::vertex, sg::access_flag::vertex_read);
     if (indexed && _bound_index_buffer)
-        track_buffer_access(_bound_index_buffer, sg::pipeline_stage_flags::vertex, sg::access_flags::index_read);
+        track_buffer_access(_bound_index_buffer, sg::pipeline_stage_flag::vertex, sg::access_flag::index_read);
 }
 
 void dx12_command_list::raster_draw(sg::draw_config const& config)
