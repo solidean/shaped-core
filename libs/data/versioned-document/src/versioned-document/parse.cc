@@ -1,8 +1,7 @@
 #include "parse.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
-
-#include <algorithm>
 
 using namespace cc::primitive_defines;
 
@@ -124,6 +123,18 @@ vdoc::default_parse_policy vdoc::default_parse_policy::create_with_local_heads(c
     return p;
 }
 
+void vdoc::default_parse_policy::extend_local_closure(cc::span<op_id const> new_ops)
+{
+    if (_local_closure.empty() || new_ops.empty())
+        return;
+
+    for (auto const& id : new_ops)
+        if (!contains_sorted(_local_closure, id))
+            _local_closure.push_back(id);
+
+    cc::sort(_local_closure, op_id::by_bytes{});
+}
+
 vdoc::component_schema const* vdoc::default_parse_policy::query_component_schema(component_type_id type) const
 {
     return _registry == nullptr ? nullptr : _registry->try_get(type);
@@ -174,6 +185,65 @@ cc::optional<vdoc::value_view> vdoc::default_parse_policy::resolve_multi_value(p
     return candidates[0].value;
 }
 
+vdoc::impl::entity_selection vdoc::impl::select_entity(entity_id entity,
+                                                       raw_entity const& raw,
+                                                       parse_policy const& policy,
+                                                       parse_report& report,
+                                                       cc::vector<component_type_id>& out_unsupported)
+{
+    auto out = entity_selection();
+    if (!policy.should_instantiate_entity(entity, raw, report))
+        return out;
+
+    out.instantiate = true;
+
+    for (auto const& c : raw.components)
+    {
+        if (c.component == reserved::entity())
+            continue;
+
+        auto const* const schema = policy.query_component_schema(c.component);
+        if (schema == nullptr)
+        {
+            // Once per type, not once per occurrence: a large document would otherwise report one per entity.
+            auto known = false;
+            for (auto const& t : out_unsupported)
+                if (t == c.component)
+                {
+                    known = true;
+                    break;
+                }
+
+            if (!known)
+                out_unsupported.push_back(c.component);
+
+            continue;
+        }
+
+        auto const alive_path = property_path{.entity = entity, .component = c.component, .property = reserved::alive()};
+        if (!is_alive(c.value, alive_path, report))
+            continue;
+
+        auto const version = read_schema_version(c.value);
+        if (version.agreed_writers > 0)
+            report.agreed_multi_values.push_back(
+                {.path = {.entity = entity, .component = c.component, .property = reserved::schema_version()},
+                 .writer_count = version.agreed_writers});
+
+        if (version.contested || version.version > schema->current_version)
+        {
+            report.diagnostics.push_back({.kind = diagnostic_kind::unknown_schema_version,
+                                          .path = {.entity = entity, .component = c.component},
+                                          .writer_count = version.contested ? isize(2) : isize(1)});
+            continue;
+        }
+
+        out.components.push_back({.type = c.component, .schema = schema, .raw = &c.value, .version = version.version});
+    }
+
+    return out;
+}
+
 namespace
 {
 /// One component that survived selection, and the version its parse will see.
@@ -195,12 +265,10 @@ struct pending_column
 
 vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, parse_report& report)
 {
-    auto const entity_marker = reserved::entity();
-
     // Selection walks the raw document once, in its own sorted order, and decides everything structural:
     // which entities exist, which components survive `$alive`, and which schema versions this build understands.
     //
-    // **Every structural diagnostic is filed here, and construction files none.**
+    // **Every structural diagnostic is filed there, and construction files none.**
     // Construction consumes what selection recorded rather than re-deciding it, which is what makes it impossible for
     // the two to disagree or to double-report.
     auto surviving_entities = cc::vector<entity_id>();
@@ -209,56 +277,17 @@ vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, 
 
     for (auto const& e : raw.entities)
     {
-        if (!policy.should_instantiate_entity(e.entity, e.value, report))
+        auto const selection = impl::select_entity(e.entity, e.value, policy, report, unsupported);
+        if (!selection.instantiate)
             continue;
 
         surviving_entities.push_back(e.entity);
 
-        for (auto const& c : e.value.components)
+        for (auto const& sc : selection.components)
         {
-            if (c.component == entity_marker)
-                continue;
-
-            auto const* const schema = policy.query_component_schema(c.component);
-            if (schema == nullptr)
-            {
-                // Once per type, not once per occurrence: a large document would otherwise report one per entity.
-                auto known = false;
-                for (auto const& t : unsupported)
-                    if (t == c.component)
-                    {
-                        known = true;
-                        break;
-                    }
-
-                if (!known)
-                    unsupported.push_back(c.component);
-
-                continue;
-            }
-
-            auto const alive_path
-                = property_path{.entity = e.entity, .component = c.component, .property = reserved::alive()};
-            if (!is_alive(c.value, alive_path, report))
-                continue;
-
-            auto const version = read_schema_version(c.value);
-            if (version.agreed_writers > 0)
-                report.agreed_multi_values.push_back(
-                    {.path = {.entity = e.entity, .component = c.component, .property = reserved::schema_version()},
-                     .writer_count = version.agreed_writers});
-
-            if (version.contested || version.version > schema->current_version)
-            {
-                report.diagnostics.push_back({.kind = diagnostic_kind::unknown_schema_version,
-                                              .path = {.entity = e.entity, .component = c.component},
-                                              .writer_count = version.contested ? isize(2) : isize(1)});
-                continue;
-            }
-
             auto found = isize(-1);
             for (isize i = 0; i < columns.size(); ++i)
-                if (columns[i].type == c.component)
+                if (columns[i].type == sc.type)
                 {
                     found = i;
                     break;
@@ -266,22 +295,21 @@ vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, 
 
             if (found < 0)
             {
-                columns.push_back({.type = c.component, .schema = schema});
+                columns.push_back({.type = sc.type, .schema = sc.schema});
                 found = columns.size() - 1;
             }
 
             // Entities are walked in ascending id order, so each column's candidates come out sorted for free.
-            columns[found].candidates.push_back({.entity = e.entity, .raw = &c.value, .version = version.version});
+            columns[found].candidates.push_back({.entity = e.entity, .raw = sc.raw, .version = sc.version});
         }
     }
 
-    std::sort(unsupported.begin(), unsupported.end(), component_type_id::by_bytes{});
+    cc::sort(unsupported, component_type_id::by_bytes{});
     for (auto const& t : unsupported)
         report.diagnostics.push_back({.kind = diagnostic_kind::unsupported_component_type, .path = {.component = t}});
 
     // Columns are built in ascending component type id order, which the per-entity walk above cannot produce.
-    std::sort(columns.begin(), columns.end(),
-              [](pending_column const& a, pending_column const& b) { return a.type.compare_bytes(b.type) < 0; });
+    cc::sort(columns, [](pending_column const& a, pending_column const& b) { return a.type.compare_bytes(b.type) < 0; });
 
     auto builder = impl::parser();
     builder.set_entities(surviving_entities);

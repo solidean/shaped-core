@@ -1,116 +1,8 @@
 #include "document.hh"
 
-#include <clean-core/memory/allocation.hh>
+#include "impl/document_arena.hh"
 
 using namespace cc::primitive_defines;
-
-/// A bump allocator behind a cc::memory_resource, so a whole document's storage frees in one release.
-///
-/// **TEMPORARY, and vdoc-local.**
-/// This belongs in clean-core as a general bump resource — a `cc::arena_memory_resource` next to
-/// `cc::system_memory_resource` — and this copy goes when that lands; `cc::impl::intern_shard` already hand-rolls the
-/// same thing privately, which is the second copy that makes it worth having once.
-/// See [decisions.md](../../docs/decisions.md#the-document-arena-is-vdoc-local-until-clean-core-grows-one).
-///
-/// Deallocation is a no-op and there is no in-place resize, so a container backed by this must be created at its final
-/// capacity and never grown.
-class vdoc::impl::document_arena
-{
-    // lifetime
-public:
-    document_arena()
-    {
-        _resource.allocate_bytes = &allocate_through;
-        _resource.deallocate_bytes = &deallocate_through;
-        _resource.userdata = this;
-    }
-
-    ~document_arena()
-    {
-        for (auto const& b : _blocks)
-            cc::default_memory_resource->deallocate_bytes(b.data, b.size, block_alignment,
-                                                          cc::default_memory_resource->userdata);
-    }
-
-    document_arena(document_arena const&) = delete;
-    document_arena(document_arena&&) = delete;
-    document_arena& operator=(document_arena const&) = delete;
-    document_arena& operator=(document_arena&&) = delete;
-
-    // allocation
-public:
-    /// Uninitialized bytes valid until the arena dies.
-    /// `alignment` must be a power of two, and `bytes` may be 0.
-    [[nodiscard]] byte* allocate(isize bytes, isize alignment)
-    {
-        CC_ASSERT(bytes >= 0 && alignment > 0, "a bump allocation needs a non-negative size and a positive alignment");
-        if (bytes == 0)
-            return nullptr;
-
-        if (!_blocks.empty())
-        {
-            auto& b = _blocks.back();
-            auto const aligned = align_up(b.used, alignment);
-            if (aligned + bytes <= b.size)
-            {
-                b.used = aligned + bytes;
-                return b.data + aligned;
-            }
-        }
-
-        // An oversized request gets its own block rather than burning the doubling sequence on it.
-        auto const next = _next_block_size < bytes + alignment ? bytes + alignment : _next_block_size;
-        add_block(next);
-        _next_block_size = next * 2;
-
-        auto& b = _blocks.back();
-        auto const aligned = align_up(b.used, alignment);
-        b.used = aligned + bytes;
-        return b.data + aligned;
-    }
-
-    [[nodiscard]] cc::memory_resource const* as_memory_resource() const { return &_resource; }
-
-private:
-    struct block
-    {
-        byte* data = nullptr;
-        isize size = 0;
-        isize used = 0;
-    };
-
-    static constexpr isize block_alignment = 16;
-
-    [[nodiscard]] static isize align_up(isize v, isize alignment) { return (v + alignment - 1) & ~(alignment - 1); }
-
-    void add_block(isize size)
-    {
-        byte* data = nullptr;
-        auto const actual = cc::default_memory_resource->allocate_bytes(&data, size, size, block_alignment,
-                                                                        cc::default_memory_resource->userdata);
-        _blocks.push_back({.data = data, .size = actual, .used = 0});
-    }
-
-    static isize allocate_through(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
-    {
-        if (min_bytes == 0)
-        {
-            *out_ptr = nullptr;
-            return 0;
-        }
-
-        // The arena hands out exactly what was asked for; there is no size class to round up into.
-        (void)max_bytes;
-        *out_ptr = static_cast<document_arena*>(userdata)->allocate(min_bytes, alignment);
-        return min_bytes;
-    }
-
-    static void deallocate_through(byte*, isize, isize, void*) {}
-
-    cc::vector<block> _blocks;
-    isize _next_block_size = 16 * 1024;
-    cc::memory_resource _resource = {};
-};
 
 isize vdoc::impl::component_column::index_of(entity_id entity) const
 {
@@ -142,10 +34,12 @@ vdoc::document::document(document&& rhs) noexcept
   : _arena(cc::move(rhs._arena)),
     _entities(rhs._entities),
     _entity_count(rhs._entity_count),
+    _entity_capacity(rhs._entity_capacity),
     _columns(cc::move(rhs._columns))
 {
     rhs._entities = nullptr;
     rhs._entity_count = 0;
+    rhs._entity_capacity = 0;
 }
 
 vdoc::document& vdoc::document::operator=(document&& rhs) noexcept
@@ -159,10 +53,12 @@ vdoc::document& vdoc::document::operator=(document&& rhs) noexcept
     _arena = cc::move(rhs._arena);
     _entities = rhs._entities;
     _entity_count = rhs._entity_count;
+    _entity_capacity = rhs._entity_capacity;
     _columns = cc::move(rhs._columns);
 
     rhs._entities = nullptr;
     rhs._entity_count = 0;
+    rhs._entity_capacity = 0;
     return *this;
 }
 
@@ -175,6 +71,7 @@ void vdoc::document::destroy_components()
     _columns.clear();
     _entities = nullptr;
     _entity_count = 0;
+    _entity_capacity = 0;
 }
 
 bool vdoc::document::contains(entity_id entity) const
@@ -204,6 +101,12 @@ cc::vector<vdoc::component_type_id> vdoc::document::component_types() const
         out.push_back(c.schema.type);
 
     return out;
+}
+
+bool vdoc::document::has_component(component_type_id type, entity_id entity) const
+{
+    auto const* const c = try_find_column(type);
+    return c != nullptr && c->index_of(entity) >= 0;
 }
 
 isize vdoc::document::count_of(component_type_id type) const
@@ -259,6 +162,7 @@ void vdoc::impl::parser::set_entities(cc::span<entity_id const> entities)
 
     _doc._entities = storage;
     _doc._entity_count = entities.size();
+    _doc._entity_capacity = entities.size();
 }
 
 void vdoc::impl::parser::begin_column(component_schema const& schema, isize capacity)
@@ -275,7 +179,8 @@ void vdoc::impl::parser::begin_column(component_schema const& schema, isize capa
         component_column{.schema = schema,
                          .entities = _open_entities,
                          .components = _doc._arena->allocate(capacity * schema.component_size, schema.component_align),
-                         .count = 0});
+                         .count = 0,
+                         .capacity = capacity});
 
     _open_column = _doc._columns.size() - 1;
     _open_capacity = capacity;

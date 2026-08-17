@@ -12,10 +12,13 @@
 /// A raw_document borrows the payload of the op that wrote each value.
 /// A snapshot must survive those ops being pruned away, so its values live in an arena of its own.
 ///
-/// **The arena is filled once and never grown afterwards.** Every value_view in the document points into it, and
-/// growing a cc::vector reallocates, which would dangle every one of them at once.
+/// **The arena is a chunk list, and a chunk is never grown past the capacity it was reserved with.**
+/// Every value_view in the document points into one, and growing a cc::vector reallocates, which would dangle every
+/// view in that chunk at once.
+/// Appending a new chunk is safe: the outer vector reallocating moves the inner vector OBJECTS, and a cc::vector's
+/// move is a steal, so the bytes keep their address.
 ///
-/// Moving is safe: cc::allocation holds only pointers and its move is a steal, so the buffer keeps its address.
+/// Chunks rather than one buffer are what makes advancing a snapshot possible — see `set_single_writer`.
 class vdoc::snapshot_document
 {
 public:
@@ -33,8 +36,20 @@ public:
 
     [[nodiscard]] raw_document const& document() const { return _document; }
 
+    /// Replaces every writer of `path` with `writer` alone, over a copy of `bytes`.
+    /// The entity, component or property is inserted in sorted position where absent.
+    ///
+    /// **This is a document edit and says nothing about whether it is a sound one.**
+    /// The only place it is — where the result is still `surviving` of some op — is a single-parent child's
+    /// assignments applied to its parent's snapshot, which is what `advance_snapshot` does and checks.
+    void set_single_writer(property_path const& path, op_id const& writer, cc::span<byte const> bytes);
+
     /// The value bytes this snapshot owns, which is what a cache budget counts.
-    [[nodiscard]] isize owned_byte_size() const { return _arena.size(); }
+    [[nodiscard]] isize owned_byte_size() const { return _owned_bytes; }
+
+    /// Bytes no writer points at any more, left behind by `set_single_writer`.
+    /// A caller advancing a snapshot repeatedly watches this and rebuilds once it outgrows the live bytes.
+    [[nodiscard]] isize dead_byte_size() const { return _dead_bytes; }
 
     snapshot_document(snapshot_document&&) noexcept = default;
     snapshot_document& operator=(snapshot_document&&) noexcept = default;
@@ -42,6 +57,14 @@ public:
     snapshot_document& operator=(snapshot_document const&) = delete;
 
 private:
-    cc::vector<byte> _arena;
+    /// Copies `bytes` into the chunk list and returns a view of the copy.
+    [[nodiscard]] value_view impl_append(cc::span<byte const> bytes);
+
+    /// Each reserved once and never grown, so appending cannot dangle a view into an earlier chunk.
+    cc::vector<cc::vector<byte>> _chunks;
+
+    isize _owned_bytes = 0;
+    isize _dead_bytes = 0;
+
     raw_document _document;
 };

@@ -1,3 +1,4 @@
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/set.hh>
 #include <versioned-document/op_graph.hh>
@@ -24,6 +25,17 @@ void vdoc::snapshot_cache::install(op_id const& id, snapshot_document doc, bool 
 bool vdoc::snapshot_cache::erase(op_id const& id)
 {
     return _entries.erase(id);
+}
+
+cc::optional<vdoc::snapshot_document> vdoc::snapshot_cache::take(op_id const& id)
+{
+    auto* const e = _entries.get_ptr(id);
+    if (e == nullptr)
+        return {};
+
+    auto doc = cc::move(e->doc);
+    _entries.erase(id);
+    return doc;
 }
 
 void vdoc::snapshot_cache::clear_unpinned()
@@ -81,8 +93,13 @@ isize vdoc::snapshot_cache::owned_byte_size() const
 
 void vdoc::snapshot_cache::impl_trim()
 {
-    while (_entries.size() - pinned_count() > _budget.max_unpinned_entries)
+    // Counted once rather than re-scanned per iteration: a pin cannot appear or vanish inside this loop, and only
+    // unpinned entries are erased.
+    auto unpinned = _entries.size() - pinned_count();
+
+    while (unpinned > _budget.max_unpinned_entries)
     {
+        --unpinned;
         auto oldest = op_id();
         auto oldest_tick = u64(0);
         auto found = false;
@@ -156,4 +173,36 @@ bool vdoc::install_snapshot_if_useful(op_graph const& graph, op_id const& head, 
         return false;
 
     return install_snapshot(graph, head, cache);
+}
+
+bool vdoc::advance_snapshot(op_graph const& graph, snapshot_cache& cache, op_id const& parent, op_id const& child)
+{
+    auto const* const o = graph.find(child);
+
+    // A skeleton is refused rather than treated as writing nothing: its assignments are GONE, not empty, so advancing
+    // onto one would claim surviving(child) == surviving(parent) on no evidence at all.
+    if (o == nullptr || o->is_skeleton() || o->parents.size() != 1 || !(o->parents[0] == parent))
+        return false;
+
+    if (!cache.contains(parent))
+        return false;
+
+    auto const pinned = cache.is_pinned(parent);
+
+    auto taken = cache.take(parent);
+    CC_ASSERT(taken.has_value(), "the entry vanished between contains and take");
+    auto doc = cc::move(taken.value());
+
+    for (auto const a : o->assignments())
+        doc.set_single_writer(a.path, child, a.value.bytes());
+
+    // Overwriting leaves the old value bytes stranded in a chunk, so a long run of advances grows the snapshot without
+    // bound unless it is periodically rebuilt.
+    // Once the dead bytes outweigh the live ones the rebuild costs less than carrying them, and it is the only
+    // O(document) event on this path — O(log) times per session rather than once per op.
+    if (doc.dead_byte_size() * 2 > doc.owned_byte_size())
+        doc = snapshot_document::create_owning_copy(doc.document());
+
+    cache.install(child, cc::move(doc), pinned);
+    return true;
 }

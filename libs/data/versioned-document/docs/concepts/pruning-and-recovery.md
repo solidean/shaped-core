@@ -20,6 +20,18 @@ That is a semantic change caused by a storage-layer operation, which is why the 
 The trade-off, stated where a user can see it: less storage and a faster load, against losing deep history and shortening the range over which two replicas can still synchronize.
 Pruning is always optional, and never automatic.
 
+### Dropping a leaf is the opposite situation, and looks the same
+
+`op_graph::drop_leaf` removes an op outright — id, payload and parent edges — where `skeletonize` keeps all three but the payload.
+The similar shape hides that they are for opposite cases.
+
+A skeleton exists because **ancestry must survive**: something descends from the pruned op, and severing the path through it would turn ordered writes into concurrent ones.
+`drop_leaf` is for an op with **no ancestry to preserve**, because nothing came after it and nothing outside has seen it — a [discarded editing frame](workloads.md#continuous-editing-goes-wide).
+It asserts if the op has children, so the two can never be confused at a call site.
+
+Forgetting is safe rather than lossy only because the DAG is content-addressed: the op is a pure function of its content, so if it ever comes back, `add` recreates it byte-identically.
+That is also why it needs no place in the file format — it is an in-memory operation on ops that were never published.
+
 ### How far a document may prune
 
 Further than the obvious answer, and less far than the convenient one.

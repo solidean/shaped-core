@@ -32,10 +32,12 @@ public:
     [[nodiscard]] bool contains(op_id const& id) const { return find(id) != nullptr; }
     [[nodiscard]] isize size() const { return _ops.size(); }
 
-    /// The ops naming this one as a parent, sorted by id bytes.
+    /// The ops naming this one as a parent, in the order they were added.
     ///
     /// These are the inverted parent edges, which a parent-only op cannot answer and a downstream walk needs.
-    /// Keys may name ops the graph does not have, since a child can arrive first.
+    /// Keys may name ops the graph does not have, since a child can arrive first; the values are always ops that are.
+    ///
+    /// **The order is arrival order, not content order** — a caller that needs a reproducible one sorts by id bytes.
     [[nodiscard]] cc::span<op_id const> children(op_id const& id) const;
 
     /// Every op reachable from `heads` through parent edges, including the heads, sorted by id bytes.
@@ -71,6 +73,25 @@ public:
     /// An op that already has its payload is left alone, since content addressing makes the two byte-identical.
     /// False where the graph does not have the op.
     bool fill_payload(op_id const& id, op_payload payload);
+
+    /// Forgets an op entirely — id, payload and parent edges — where nothing descends from it.
+    ///
+    /// This is the opposite situation from skeletonize, which the similar shape hides.
+    /// A skeleton exists because ancestry must survive a pruned op; this is for an op that has **no ancestry to
+    /// preserve** because nothing came after it, and that nothing outside has seen.
+    /// The case is a [discarded editing frame](../../docs/concepts/workloads.md#continuous-editing-goes-wide): every
+    /// frame of a drag is a new op off the same state, and all but the last are thrown away.
+    ///
+    /// Content addressing is what makes forgetting safe rather than lossy: the op is a pure function of its content,
+    /// so if it ever comes back — from an undo, from a peer — `add` recreates it byte-identically.
+    ///
+    /// **Asserts if the op has children in this graph.** Severing ancestry is skeletonize's job and never this one.
+    /// False where the graph does not have the op.
+    bool drop_leaf(op_id const& id);
+
+    /// Every op in the graph that nothing descends from, sorted by id bytes.
+    /// What a session sweeps to find the frames it abandoned, so it need not have tracked them.
+    [[nodiscard]] cc::vector<op_id> leaves() const;
 
     /// Materializes the document as of one head, or as of several merged.
     ///
@@ -119,6 +140,13 @@ struct materialize_stats
 
     /// 1 where the sweep was seeded from a snapshot, 0 where it replayed.
     isize snapshots_used = 0;
+
+    /// Entities read out of the seeding snapshot.
+    ///
+    /// A FILTERED sweep must read only the entities it was asked for, or seeding a one-entity diff costs a walk of the
+    /// whole document and the snapshot buys nothing at exactly the size it was meant for.
+    /// That is invisible in a result comparison, so it is reported rather than trusted.
+    isize snapshot_entities_read = 0;
 
     /// True where a snapshot was found and the validity gate then rejected it, so the sweep re-ran without one.
     bool fell_back = false;

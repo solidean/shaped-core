@@ -26,12 +26,17 @@ struct component_column
     component_schema schema;
 
     /// `count` entity ids, sorted by id bytes, parallel to `components`.
-    entity_id const* entities = nullptr;
+    /// Mutable because document_builder shifts them; every way out of a document hands out a const span.
+    entity_id* entities = nullptr;
 
     /// `count` components of `schema.component_size` bytes each.
     byte* components = nullptr;
 
     isize count = 0;
+
+    /// How many the two arrays were allocated for.
+    /// A builder inserting past this reallocates both from the arena and leaves the old bytes behind as dead.
+    isize capacity = 0;
 
     [[nodiscard]] cc::span<entity_id const> entity_ids() const { return cc::span<entity_id const>(entities, count); }
 
@@ -46,6 +51,10 @@ struct component_column
 /// That is not a limitation to be lifted later: edits go through an op and re-materialize, which is the only path that
 /// keeps history honest, and immutability is what makes a document safe to hand to another thread and hold
 /// indefinitely.
+///
+/// The way to the NEXT document without a full parse is [document_builder](document_builder.hh), which consumes one to
+/// produce another.
+/// A document you are holding still cannot change; getting a new one takes the old one away.
 ///
 ///     auto const doc = vdoc::parse(raw, policy, report);
 ///     if (auto const* const t = doc.get<my_transform>(vdoc::entity_id::of("wall-17")))
@@ -113,6 +122,10 @@ public:
     {
         return get<ComponentT>(entity) != nullptr;
     }
+
+    /// Whether this entity carries a component of that type, without knowing the C++ type it is.
+    /// The untyped counterpart of `has<C>`, for a caller walking `component_types()`.
+    [[nodiscard]] bool has_component(component_type_id type, entity_id entity) const;
 
     /// Calls `f(entity_id, ComponentTs const&...)` for every entity carrying all of them, in ascending entity id bytes.
     ///
@@ -231,13 +244,15 @@ private:
     cc::unique_ptr<impl::document_arena> _arena;
 
     /// Sorted by entity id bytes, in the arena.
-    entity_id const* _entities = nullptr;
+    entity_id* _entities = nullptr;
     isize _entity_count = 0;
+    isize _entity_capacity = 0;
 
     /// Sorted by component type id bytes.
     cc::vector<impl::component_column> _columns;
 
     friend class impl::parser;
+    friend class document_builder;
 };
 
 /// Fills a document, and the only thing that can.

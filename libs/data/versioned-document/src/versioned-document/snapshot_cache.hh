@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/error/optional.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/snapshot_document.hh>
 
@@ -53,6 +54,14 @@ public:
 
     /// Drops `id`, pinned or not — the in-memory half of deleting a persisted snapshot.
     bool erase(op_id const& id);
+
+    /// Hands the entry at `id` out and removes it, so a caller can derive the next snapshot from it instead of
+    /// recomputing one.
+    ///
+    /// `advance_snapshot` is what this exists for, and taking a snapshot in order to install it somewhere else is the
+    /// only sound use: what comes back is `surviving(id)`, and installing it under any other op is a lie the cache
+    /// cannot detect.
+    [[nodiscard]] cc::optional<snapshot_document> take(op_id const& id);
 
     /// Drops every unpinned entry.
     /// **Must be invisible**: this may change how long a materialization takes, and nothing else about it.
@@ -124,4 +133,25 @@ bool install_snapshot_if_useful(op_graph const& graph,
                                 op_id const& head,
                                 snapshot_cache& cache,
                                 snapshot_policy policy = {});
+
+/// Moves the snapshot at `parent` forward onto its single-parent child, in place.
+///
+/// **`surviving(child) = surviving(parent)` with the child's assignments overwriting their paths, and that identity
+/// holds exactly on a single-parent edge**: the child dominates every writer it overwrites and contributes no other.
+/// So this costs the child's assignments rather than a materialization, and a session that calls it per accepted op
+/// keeps the head permanently one op from a snapshot.
+///
+/// The entry is **re-keyed**: it is removed from `parent` and installed at `child`, pin and all.
+/// Nothing about "an op id commits to everything behind it" is bent — the content really is surviving(child) — but
+/// every `raw_document` borrowing the old entry is invalidated, exactly as raw_document.hh says a cache modification
+/// does.
+///
+/// **Caller-driven on purpose.** During a wide fan the frames are siblings, so advancing onto one would leave every
+/// other frame with no snapshot to terminate at and a whole history to replay.
+/// The snapshot stays at the branch point until a frame is accepted as history, and only the application knows when
+/// that is.
+///
+/// False, changing nothing, where the graph does not have `child`, where `child` is a skeleton or does not have
+/// exactly the one parent `parent`, or where the cache has no entry at `parent`.
+bool advance_snapshot(op_graph const& graph, snapshot_cache& cache, op_id const& parent, op_id const& child);
 } // namespace vdoc

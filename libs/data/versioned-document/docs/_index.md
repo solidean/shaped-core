@@ -12,6 +12,11 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
 - [decisions.md](decisions.md) — every settled decision, its reasoning, and what would reopen it.
   Read this before proposing a change that contradicts one, and note that several are recorded as reversals.
 
+## Benchmarks
+
+- [edit-latency-benchmark.md](benchmarks/edit-latency-benchmark.md) — what one user action costs against an existing document, per stage, as a distribution.
+  The acceptance harness for the incremental edit path.
+
 ## Concepts
 
 The design, one file per question a reader arrives with.
@@ -20,6 +25,8 @@ It is not the full API — that is the [cheat-sheet](../cheat-sheet.md) — and 
 
 Read [the model](concepts/the-model.md) first if you are reading only one.
 
+- [the workload](concepts/workloads.md) — the editing shapes this is tuned for, the sub-millisecond acceptance number, and what every fast path falls back to.
+  Several decisions elsewhere point here rather than restating it, so read it before arguing that one of them is too optimistic.
 - [the model](concepts/the-model.md) — entity → component → property, why entities are created implicitly, and why an entity id is just a string.
   The property path is the addressable unit of the whole system, and this is where that is established.
 - [values](concepts/values.md) — the canonical binary codec: the eight kinds, what a length prefix counts, and why equality is byte equality.

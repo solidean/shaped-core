@@ -1,6 +1,9 @@
+#include "op_graph_corpus.hh"
+
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <versioned-document/op_builder.hh>
+#include <versioned-document/snapshot_document.hh>
 #include <versioned-document/value_builder.hh>
 
 using namespace cc::primitive_defines;
@@ -181,4 +184,41 @@ TEST("vdoc - staging the same path twice is a caller bug")
 
     CHECK_ASSERTS(op_builder().set_raw(p, value::of(1)).set_raw(p, value::of(2)));
     (void)graph;
+}
+
+TEST("vdoc - a cached build is the same op as an uncached one, over the whole corpus")
+{
+    // Content addressing makes this check total: the same id means the same parents, the same metadata and the same
+    // assignment bytes, so there is nothing left for a cache to have changed.
+    auto const corpus = vdoc_test::generate_corpus();
+    REQUIRE(corpus.size() > 20);
+
+    auto ever_used = false;
+
+    for (auto const& c : corpus)
+        for (auto const& heads : c.head_sets)
+        {
+            // an edit that touches an entity the corpus already writes, so the diff has something to compare against
+            auto staged = op_builder();
+            staged.set_parents(heads);
+            for (auto const& p : c.paths)
+                staged.set_raw(p, value::of_i64(4242));
+
+            auto const plain = staged.build(c.graph);
+
+            for (auto const& at : c.ops)
+            {
+                auto cache = vdoc::snapshot_cache({.max_unpinned_entries = 1 << 20});
+                cache.install(at, vdoc::snapshot_document::create_owning_copy(c.graph.materialize(at)));
+
+                CHECK(staged.build(c.graph, cache).id == plain.id);
+
+                // the cache is only worth checking against if it was ever actually reachable
+                auto stats = vdoc::impl::materialize_stats();
+                (void)vdoc::impl::materialize(c.graph, heads, {}, {.cache = &cache, .stats = &stats});
+                ever_used = ever_used || stats.snapshots_used == 1;
+            }
+        }
+
+    CHECK(ever_used);
 }

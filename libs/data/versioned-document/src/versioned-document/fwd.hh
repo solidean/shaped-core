@@ -206,6 +206,32 @@ struct parse_report;
 /// The typed document: an immutable index, built once, queried many times, shareable as a snapshot.
 class document;
 
+/// Evolves a document by consuming it — the only way from one document to the next without a full parse.
+class document_builder;
+
+/// Whether an apply added, removed or re-parsed a thing.
+enum class change_kind : u8;
+
+/// What an apply did, so an application can invalidate its own projections without diffing two documents.
+struct change_summary;
+
+/// Knobs on an incremental apply: how far it will look for the chain, and where its materialization may terminate.
+struct incremental_apply_options;
+
+/// What one apply did, for a caller that has to see whether the fast path ran.
+struct incremental_apply_stats;
+
+/// Evolves a document from one op to a descendant, incrementally where it can and by re-parsing where it cannot.
+[[nodiscard]] document apply(document&& doc,
+                             op_graph const& graph,
+                             op_id const& from,
+                             op_id const& to,
+                             parse_policy const& policy,
+                             parse_report& report,
+                             change_summary& out_changes,
+                             incremental_apply_options options,
+                             incremental_apply_stats* stats);
+
 /// Interprets a raw document into a typed one.
 /// Never fails: everything questionable lands in the report.
 [[nodiscard]] document parse(raw_document const& raw, parse_policy const& policy, parse_report& report);

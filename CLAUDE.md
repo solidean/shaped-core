@@ -42,6 +42,8 @@ One-liner per library:
   Namespace `vdoc`. Depends on clean-core.
   The in-memory library is complete; persistence is versioned-document-file — its [concept docs](libs/data/versioned-document/docs/_index.md#concepts) are the design, one file per concept.
   [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices and what would reopen each.
+  **The edit path is incremental and realtime** — `build(graph, cache)`, `advance_snapshot`, `vdoc::apply` — so a one-entity edit is ~10 µs whatever the document's size.
+  [concepts/workloads.md](libs/data/versioned-document/docs/concepts/workloads.md) names the editing shapes that buys, and the one (a fanned drag) it does not.
 * **`libs/data/versioned-document-file`** — the `.vdoc` save format.
   One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
   Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).

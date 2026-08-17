@@ -40,6 +40,41 @@ Everything else falls back to a plain replay, which costs time and never a resul
 The rule that had to be recorded rather than merely fixed: *"every source is cached"* is **unsound**.
 Materializing `{T, X}` with X a distant ancestor of T gives two cached sources, and unions their surviving sets into a multi-value nobody wrote.
 
+## Seeding a filtered sweep costs the filter, not the snapshot
+
+A snapshot is a whole document, so reading one is O(document) — which would make it worthless to the call that needs it most.
+`op_builder::build` materializes the touched entities of an edit, usually one, and it does that on every keystroke.
+
+So a filtered sweep reaches into the snapshot by entity lookup rather than walking it: `|wanted| · log(entities)`.
+`materialize_stats::snapshot_entities_read` reports what it actually touched, because a result comparison cannot tell a lookup from a walk.
+
+## A snapshot can be advanced instead of recomputed
+
+`surviving(child)` is `surviving(parent)` with the child's assignments overwriting their paths — **on a single-parent edge, and only there**.
+The child dominates every writer it overwrites, and it contributes no other, so nothing else in the set can change.
+
+`advance_snapshot` moves the cache entry from parent to child for the cost of the child's assignments.
+No `create_owning_copy`, no walk of the document, nothing that scales with the document at all.
+A session that calls it on every accepted op keeps its head **permanently one op from a snapshot**, so a materialization never gets slower with the session.
+
+Two consequences worth stating rather than discovering:
+
+- **The entry is re-keyed, not mutated under its old key.**
+  What is installed at the child genuinely is `surviving(child)`, so nothing about "an op id commits to everything behind it" is bent.
+  Every `raw_document` borrowing the old entry is invalidated, exactly as one is by any cache modification.
+- **Overwriting strands the old value bytes**, since the arena is append-only chunks and a view already handed out must not move.
+  They are counted, and the snapshot is rebuilt from scratch once they outweigh the live ones.
+  That rebuild is the only O(document) event on this path, and it happens a logarithmic number of times rather than once per op.
+
+**It is caller-driven on purpose.**
+During a wide fan — a gizmo emitting one op per frame off the same state — the frames are siblings of each other.
+Advancing onto one would leave every other frame with no snapshot to terminate at and a whole history to replay.
+So the snapshot stays at the branch point for the duration, and moves only when a frame is accepted as history, which only the application knows.
+
+A merge cannot be advanced onto, because two parents means the identity above does not hold.
+Deriving it there would need the parent's `superseded` set, which is the thing a snapshot deliberately does not store.
+Nor can a skeleton, whose assignments are gone rather than empty.
+
 ## The cache is derived, and dropping it is invisible
 
 The in-memory cache holds whole materializations, so it is bounded and evicts least-recently-used.
