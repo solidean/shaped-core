@@ -52,8 +52,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   See [blessed-stdlib-headers.md](../../../base/clean-core/docs/blessed-stdlib-headers.md).
   The migration is mechanical, since with threads `cc::atomic` **is** `std::atomic`.
   It becomes load-bearing when WebGPU-on-wasm lands: that build has no threads, and every one of those atomics would keep its interlock for a concurrency that cannot happen.
-- **`cc::flags`:** `buffer_usage`, `texture_usage` and `accel_build_flags` use a hand-rolled `enum class` plus bitwise operators.
-  `cc::flags` has landed in clean-core, so these can migrate; retiring `sg::has_flag` with them touches ~50 call sites, most inside `CC_ASSERT`.
+- **`cc::flags`:** `buffer_usage` and `texture_usage` still use a hand-rolled `enum class` plus bitwise operators.
+  `cc::flags` has landed in clean-core and `accel_build_flags` has migrated to it; retiring `sg::has_flag` with the rest touches ~50 call sites, most inside `CC_ASSERT`.
 - **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
   - **reflection-driven validation** of a view's `T` and access class against the shader;

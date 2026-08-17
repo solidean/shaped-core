@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/flags.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -15,38 +16,25 @@
 /// Built through `cmd.raytracing.build_blas(...)` / `build_tlas(...)` (command_list/raytracing.hh).
 /// See libs/graphics/shaped-graphics/docs/concepts/acceleration-structures.md.
 
-/// Trade-offs baked into a structure at build time, which cannot change afterward.
-/// Bit flags — combine with `|`, test with `has_flag`.
+/// One trade-off baked into a structure at build time, which cannot change afterward.
+/// A set of them is an accel_build_flags — combine with `|`, test with `has`.
 /// `fast_trace` and `fast_build` must not both be set.
-/// Migrates to `cc::flags`, same status as buffer_usage.
-enum class sg::accel_build_flags : sg::u32
+enum class sg::accel_build_flag
 {
-    none = 0,
-    fast_trace = 1u << 0,       ///< optimize traversal speed (the default): DX12/Vk PREFER_FAST_TRACE
-    fast_build = 1u << 1,       ///< optimize build speed:                   DX12/Vk PREFER_FAST_BUILD
-    allow_update = 1u << 2,     ///< permit a later refit:                   DX12/Vk ALLOW_UPDATE
-    allow_compaction = 1u << 3, ///< BLAS only — copy to a smaller buffer later: DX12/Vk ALLOW_COMPACTION
-    minimize_memory = 1u << 4,  ///< TLAS only — smaller scratch/result:     DX12/Vk MINIMIZE_MEMORY
+    fast_trace,       ///< optimize traversal speed (the default): DX12/Vk PREFER_FAST_TRACE
+    fast_build,       ///< optimize build speed:                   DX12/Vk PREFER_FAST_BUILD
+    allow_update,     ///< permit a later refit:                   DX12/Vk ALLOW_UPDATE
+    allow_compaction, ///< BLAS only — copy to a smaller buffer later: DX12/Vk ALLOW_COMPACTION
+    minimize_memory,  ///< TLAS only — smaller scratch/result:     DX12/Vk MINIMIZE_MEMORY
 };
+
+CC_FLAG_ENUM_INDEXED(sg, accel_build_flag, u32);
 
 namespace sg
 {
-
-[[nodiscard]] constexpr accel_build_flags operator|(accel_build_flags a, accel_build_flags b)
-{
-    return accel_build_flags(u32(a) | u32(b));
-}
-[[nodiscard]] constexpr accel_build_flags operator&(accel_build_flags a, accel_build_flags b)
-{
-    return accel_build_flags(u32(a) & u32(b));
-}
-
-/// True if every bit in `flag` is set in `flags`.
-[[nodiscard]] constexpr bool has_flag(accel_build_flags flags, accel_build_flags flag)
-{
-    return (u32(flags) & u32(flag)) == u32(flag);
-}
-
+/// A SET of accel_build_flag — what a build takes and a structure stores, never the bare enum.
+/// The empty set asks for no trade-off at all, which the driver reads as its own defaults.
+using accel_build_flags = cc::flags<accel_build_flag>;
 } // namespace sg
 
 /// One triangle geometry in a BLAS, indexed when an index buffer is given.
@@ -152,7 +140,7 @@ public:
 
     [[nodiscard]] accel_build_flags build_flags() const { return _build_flags; }
     [[nodiscard]] int geometry_count() const { return _geometry_count; }
-    [[nodiscard]] bool allows_update() const { return has_flag(_build_flags, accel_build_flags::allow_update); }
+    [[nodiscard]] bool allows_update() const { return _build_flags.has(accel_build_flag::allow_update); }
 
     /// Registers a callback to run once this structure is released and no longer in flight — see raw_buffer.
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
@@ -185,7 +173,7 @@ protected:
     isize _size_in_bytes = 0;
     isize _build_scratch_size_in_bytes = 0;
     isize _update_scratch_size_in_bytes = 0;
-    accel_build_flags _build_flags = accel_build_flags::none;
+    accel_build_flags _build_flags = {};
     int _geometry_count = 0;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
@@ -207,7 +195,7 @@ public:
     [[nodiscard]] isize update_scratch_size_in_bytes() const { return _update_scratch_size_in_bytes; }
     [[nodiscard]] accel_build_flags build_flags() const { return _build_flags; }
     [[nodiscard]] int instance_count() const { return _instance_count; }
-    [[nodiscard]] bool allows_update() const { return has_flag(_build_flags, accel_build_flags::allow_update); }
+    [[nodiscard]] bool allows_update() const { return _build_flags.has(accel_build_flag::allow_update); }
 
     /// A shader-bindable view of this TLAS — HLSL `RaytracingAccelerationStructure`.
     /// Pass it into a binding_group like any other view; the view carries this tlas, which each backend binds its own way.
@@ -238,7 +226,7 @@ protected:
     isize _size_in_bytes = 0;
     isize _build_scratch_size_in_bytes = 0;
     isize _update_scratch_size_in_bytes = 0;
-    accel_build_flags _build_flags = accel_build_flags::none;
+    accel_build_flags _build_flags = {};
     int _instance_count = 0;
     cc::vector<blas_handle> _referenced_blases; // the ownership edge: keeps every referenced BLAS alive
     mutable cc::vector<cc::unique_function<void()>> _finalizers;

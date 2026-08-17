@@ -69,7 +69,7 @@ class tlas;                         // top-level acceleration structure (see ray
 struct blas_triangles;              // value type — one triangle geometry input to build_blas
 struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
 struct tlas_instance;               // value type — one instance input to build_tlas
-enum class accel_build_flags : u32; // build-time trade-offs (see raytracing/acceleration_structure.hh)
+enum class accel_build_flag;        // one build-time trade-off; a set of them is accel_build_flags
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
 
 } // namespace sg

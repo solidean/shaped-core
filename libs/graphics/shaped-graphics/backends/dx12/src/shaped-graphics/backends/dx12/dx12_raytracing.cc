@@ -13,18 +13,18 @@ namespace
 {
 [[nodiscard]] D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS to_dxr_build_flags(sg::accel_build_flags f)
 {
-    CC_ASSERT(!(sg::has_flag(f, sg::accel_build_flags::fast_trace) && sg::has_flag(f, sg::accel_build_flags::fast_build)),
+    CC_ASSERT(!f.has_all(sg::accel_build_flag::fast_trace | sg::accel_build_flag::fast_build),
               "fast_trace and fast_build are mutually exclusive");
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS out = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-    if (sg::has_flag(f, sg::accel_build_flags::fast_trace))
+    if (f.has(sg::accel_build_flag::fast_trace))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-    if (sg::has_flag(f, sg::accel_build_flags::fast_build))
+    if (f.has(sg::accel_build_flag::fast_build))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
-    if (sg::has_flag(f, sg::accel_build_flags::allow_update))
+    if (f.has(sg::accel_build_flag::allow_update))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
-    if (sg::has_flag(f, sg::accel_build_flags::allow_compaction))
+    if (f.has(sg::accel_build_flag::allow_compaction))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
-    if (sg::has_flag(f, sg::accel_build_flags::minimize_memory))
+    if (f.has(sg::accel_build_flag::minimize_memory))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
     return out;
 }
