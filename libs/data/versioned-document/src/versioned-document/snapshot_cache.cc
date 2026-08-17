@@ -193,8 +193,15 @@ bool vdoc::advance_snapshot(op_graph const& graph, snapshot_cache& cache, op_id 
     CC_ASSERT(taken.has_value(), "the entry vanished between contains and take");
     auto doc = cc::move(taken.value());
 
+    // An abstention withdraws the path instead of writing it, and must leave the snapshot byte-identical to a fresh
+    // materialization — which is why clear_writers prunes the component and entity it empties.
     for (auto const a : o->assignments())
-        doc.set_single_writer(a.path, child, a.value.bytes());
+    {
+        if (a.is_abstain())
+            doc.clear_writers(a.path);
+        else
+            doc.set_single_writer(a.path, child, a.value.bytes());
+    }
 
     // Overwriting leaves the old value bytes stranded in a chunk, so a long run of advances grows the snapshot without
     // bound unless it is periodically rebuilt.

@@ -11,6 +11,7 @@ namespace
 {
 using vdoc::assignment;
 using vdoc::assignment_encoding;
+using vdoc::assignment_kind;
 using vdoc::op_decode_error;
 using vdoc::op_id;
 
@@ -22,6 +23,9 @@ constexpr cc::string_view op_domain = "vdoc::op/v1";
 constexpr isize id_byte_size = op_id::byte_size;
 constexpr isize length_prefix_size = 4;
 constexpr isize encoding_tag_size = 1;
+
+/// The per-entry kind byte that opens every assignment record.
+constexpr isize assignment_kind_size = 1;
 
 // Byte offsets inside one encoded value, mirroring value.cc — enough to bound-check a value's extent without decoding it.
 // A length prefix counts the bytes that follow it, in all four length-prefixed kinds.
@@ -130,6 +134,10 @@ vdoc::assignment vdoc::assignment_cursor::get() const
     CC_ASSERT(!at_end(), "no assignment at the cursor");
 
     auto cursor = _cursor;
+
+    auto const kind = assignment_kind(u8(_bytes[cursor]));
+    cursor += assignment_kind_size;
+
     auto const read_id = [&]
     {
         auto const size = isize(cc::load_bytes_le<u32>(_bytes, cursor));
@@ -143,17 +151,27 @@ vdoc::assignment vdoc::assignment_cursor::get() const
     auto const component = read_id();
     auto const property = read_id();
 
+    auto const path = property_path{.entity = entity_id::of(entity),
+                                    .component = component_type_id::of(component),
+                                    .property = property_id::of(property)};
+
+    // An abstain has no value in the blob at all, so there is nothing here to view.
+    if (kind == assignment_kind::abstain)
+        return assignment{.path = path, .kind = kind};
+
     auto const value_bytes = cc::span<byte const>(_bytes.data() + cursor, _bytes.size() - cursor);
-    return assignment{.path = {.entity = entity_id::of(entity),
-                               .component = component_type_id::of(component),
-                               .property = property_id::of(property)},
+    return assignment{.path = path,
                       .value = value_view::from_validated_bytes(
-                          cc::span<byte const>(value_bytes.data(), vdoc::encoded_size(value_bytes)))};
+                          cc::span<byte const>(value_bytes.data(), vdoc::encoded_size(value_bytes))),
+                      .kind = kind};
 }
 
 void vdoc::assignment_cursor::advance()
 {
     CC_ASSERT(!at_end(), "no assignment at the cursor");
+
+    auto const kind = assignment_kind(u8(_bytes[_cursor]));
+    _cursor += assignment_kind_size;
 
     for (isize i = 0; i < 3; ++i)
     {
@@ -161,8 +179,12 @@ void vdoc::assignment_cursor::advance()
         _cursor += length_prefix_size + size;
     }
 
-    auto const value_bytes = cc::span<byte const>(_bytes.data() + _cursor, _bytes.size() - _cursor);
-    _cursor += vdoc::encoded_size(value_bytes);
+    if (kind != assignment_kind::abstain)
+    {
+        auto const value_bytes = cc::span<byte const>(_bytes.data() + _cursor, _bytes.size() - _cursor);
+        _cursor += vdoc::encoded_size(value_bytes);
+    }
+
     --_remaining;
 }
 
@@ -285,6 +307,15 @@ cc::result<vdoc::op, vdoc::op_decode_error> vdoc::try_decode_op(op_id const& exp
     auto previous = property_path();
     for (isize i = 0; i < count; ++i)
     {
+        if (cursor + assignment_kind_size > assignment_bytes.size())
+            return cc::error(op_decode_error::truncated);
+
+        auto const kind = assignment_kind(u8(assignment_bytes[cursor]));
+        if (kind != assignment_kind::set && kind != assignment_kind::abstain)
+            return cc::error(op_decode_error::unknown_assignment_kind);
+
+        cursor += assignment_kind_size;
+
         auto const entity = try_read_id_bytes(assignment_bytes, cursor);
         if (entity.has_error())
             return cc::error(entity.error());
@@ -295,17 +326,21 @@ cc::result<vdoc::op, vdoc::op_decode_error> vdoc::try_decode_op(op_id const& exp
         if (property.has_error())
             return cc::error(property.error());
 
-        auto const extent = try_value_extent(assignment_bytes, cursor);
-        if (extent.has_error())
-            return cc::error(extent.error());
-        if (cursor + extent.value() > assignment_bytes.size())
-            return cc::error(op_decode_error::truncated);
+        // An abstain carries no value, so there is no extent to establish and nothing to prove canonical.
+        if (kind != assignment_kind::abstain)
+        {
+            auto const extent = try_value_extent(assignment_bytes, cursor);
+            if (extent.has_error())
+                return cc::error(extent.error());
+            if (cursor + extent.value() > assignment_bytes.size())
+                return cc::error(op_decode_error::truncated);
 
-        // the extent only says where the value ends; this is what proves it is canonical
-        auto const value_bytes = cc::span<byte const>(assignment_bytes.data() + cursor, extent.value());
-        if (vdoc::try_decode(value_bytes).has_error())
-            return cc::error(op_decode_error::invalid_value);
-        cursor += extent.value();
+            // the extent only says where the value ends; this is what proves it is canonical
+            auto const value_bytes = cc::span<byte const>(assignment_bytes.data() + cursor, extent.value());
+            if (vdoc::try_decode(value_bytes).has_error())
+                return cc::error(op_decode_error::invalid_value);
+            cursor += extent.value();
+        }
 
         auto const path = property_path{.entity = entity_id::of(entity.value()),
                                         .component = component_type_id::of(component.value()),
@@ -360,9 +395,17 @@ cc::vector<byte> vdoc::encode_assignments(cc::span<assignment const> sorted_assi
         CC_ASSERT(i == 0 || sorted_assignments[i - 1].path.compare_bytes(a.path) < 0,
                   "assignments must be sorted by path and free of duplicates before encoding");
 
+        auto const kind_at = out.size();
+        out.resize_to_uninitialized(kind_at + assignment_kind_size);
+        out[kind_at] = byte(u8(a.kind));
+
         append_id(a.path.entity.as_string_view());
         append_id(a.path.component.as_string_view());
         append_id(a.path.property.as_string_view());
+
+        // An abstain writes no value at all; a `null` would be a second spelling of the same thing.
+        if (a.is_abstain())
+            continue;
 
         auto const value_bytes = a.value.bytes();
         auto const at = out.size();

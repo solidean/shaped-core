@@ -109,6 +109,14 @@ auto const head2 = graph.add(cc::move(op));               // keyed by content ha
 `build(graph, cache)` is the same op, with the diff's walk allowed to terminate at a cached snapshot.
 The filter applies to assignments and never to edges, so a snapshot is the only thing that shortens a build — **use this overload in any edit loop**.
 
+```cpp
+staged.abstain(path);                                     // or abstain(entity, component, property)
+```
+
+**`abstain` is the only way to un-write a property** — `$alive` removes a whole component or entity, nothing else removes one property.
+It withdraws this history's contribution and lets whatever is below show through, so it is what reverts an override or a stored value to absent.
+Its diff is the **mirror** of `set_raw`'s: abstaining over a path nobody wrote emits nothing, so re-staging the same withdrawal every frame gives the same op id and costs nothing.
+
 - **`add` is not append.** It inserts by content hash and moves no head, so two identical ops collapse to one entry.
 - **`build` diffs.** Re-setting an unchanged property emits no assignments at all.
 - **A multi-valued path always emits**, even when every surviving writer holds identical bytes — that op is how a conflict is resolved.
@@ -365,6 +373,10 @@ Concurrent writers where neither dominates leave several, and **that includes wr
   Never hash persistent data by a raw interned id.
 - **Verification never re-serializes.** It re-hashes the bytes as stored, so no formatting change can look like tampering.
   The op holds those bytes and decodes on demand, so there is no encoder near a loaded op to change.
+- **An abstention never reaches the raw document.** It supersedes inside the sweep and is then dropped, so a withdrawn path is absent rather than special.
+  The consequence: a **concurrent write beats a concurrent abstention, undiagnosably** — the non-vanishing side wins, as with `$alive`.
+  It cannot arise on a linear history, which is where withdrawals are used.
+- **Every assignment record carries a kind byte**, so adding abstain moved every op id — free while nothing has written a `.vdoc` outside the tests.
 - **A pruned parent is a skeleton op** — id and parents, no payload — and is unverifiable by construction, never a mismatch.
 - **Op ids do not commit to asset content**, so a document is reproducible only relative to an asset resolution.
   See [decisions.md](docs/decisions.md#the-asset-mapping-is-mutable-and-remapping-is-retroactive).

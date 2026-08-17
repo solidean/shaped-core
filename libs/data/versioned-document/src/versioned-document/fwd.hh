@@ -81,6 +81,9 @@ namespace vdoc
 /// Content hash of an op: a 32-byte BLAKE3 digest that recursively commits to the whole history behind it.
 struct op_id;
 
+/// What an assignment does to its path: write a value, or withdraw this op's contribution to it.
+enum class assignment_kind : u8;
+
 /// One property assignment — the unit an op is made of.
 struct assignment;
 

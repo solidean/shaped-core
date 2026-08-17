@@ -27,6 +27,9 @@ struct vdoc_test::property_write
 {
     vdoc::property_path path;
     i64 value;
+
+    /// Withdraws the path instead of writing it; `value` is then unused.
+    bool abstain = false;
 };
 
 /// `name` is carried so a failure over ~40 cases says which shape broke rather than which index.
@@ -73,6 +76,9 @@ namespace vdoc_test
 /// This is what the real pass is checked against.
 /// It is exponentially worse and obviously correct, which is the point: the snapshot cache is checked against the real
 /// pass, so the real pass needs an oracle of its own.
+///
+/// **An abstention is a writer for dominance and not for the result.** It supersedes what it descends from exactly as a
+/// write does, and is then dropped — so the two rules are separate steps here, in the order the sweep applies them.
 [[nodiscard]] cc::vector<vdoc::op_id> oracle_writers(vdoc::op_graph const& graph,
                                                      cc::span<vdoc::op_id const> heads,
                                                      vdoc::property_path const& path);

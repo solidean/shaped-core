@@ -36,6 +36,27 @@ void insert_at(cc::vector<T>& values, isize at, T value)
         cc::swap(values[i], values[i - 1]);
 }
 
+/// Removes the entry at `at`, shifting the tail down by one.
+/// The sibling of `insert_at`, and it goes when clean-core's vector grows the pair.
+template <class T>
+void remove_at(cc::vector<T>& values, isize at)
+{
+    for (auto i = at; i + 1 < values.size(); ++i)
+        cc::swap(values[i], values[i + 1]);
+
+    values.remove_back();
+}
+
+/// The index of the entry keyed by `id`, or -1 where there is none.
+template <class EntryT, class IdT>
+[[nodiscard]] isize index_of(cc::vector<EntryT> const& entries, IdT EntryT::* key, IdT id)
+{
+    auto const at = cc::first_at_least_in_sorted(
+        entries, id, [key](EntryT const& e, IdT const& k) { return (e.*key).compare_bytes(k) < 0; });
+
+    return at < entries.size() && entries[at].*key == id ? at : isize(-1);
+}
+
 /// The entry keyed by `id`, inserted in sorted position where absent.
 /// Every level of a raw_document is a vector of `{id, value}` sorted by the id's canonical bytes, so one helper covers
 /// all three.
@@ -155,4 +176,37 @@ void vdoc::snapshot_document::set_single_writer(property_path const& path, op_id
 
     property.value.writers.clear();
     property.value.writers.push_back({.writer = writer, .value = impl_append(bytes)});
+}
+
+void vdoc::snapshot_document::clear_writers(property_path const& path)
+{
+    auto const entity_at = index_of(_document.entities, &raw_document::entry::entity, path.entity);
+    if (entity_at < 0)
+        return;
+
+    auto& entity = _document.entities[entity_at];
+    auto const component_at = index_of(entity.value.components, &raw_entity::entry::component, path.component);
+    if (component_at < 0)
+        return;
+
+    auto& component = entity.value.components[component_at];
+    auto const property_at = index_of(component.value.properties, &raw_component::entry::property, path.property);
+    if (property_at < 0)
+        return;
+
+    // Same accounting as an overwrite: the bytes stay in their chunk and are counted so a caller knows when to rebuild.
+    for (auto const& w : component.value.properties[property_at].value.writers)
+        _dead_bytes += w.value.bytes().size();
+
+    remove_at(component.value.properties, property_at);
+
+    // Then prune upwards, because an empty component or entity entry is a shape a fresh materialization never produces
+    // and a parse would misread — see the header.
+    if (!component.value.properties.empty())
+        return;
+
+    remove_at(entity.value.components, component_at);
+
+    if (entity.value.components.empty())
+        remove_at(_document.entities, entity_at);
 }

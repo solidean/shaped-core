@@ -116,6 +116,9 @@ Removing data would break immutability, synchronization and history — the thre
 
 Contested `$alive` keeps the thing alive, because resurrecting is recoverable and vanishing is not.
 
+An **abstention** does not weaken this: it removes a *write*, never a *thing*.
+The op that abstained is still in the history, still hashed, and still says what it did — what stops being there is one property's value, which is the same kind of statement as overwriting it.
+
 **Reopen when:** nothing.
 
 ### Ops and blobs stay in separate tables
@@ -634,6 +637,61 @@ So spending complexity on relaying ops nobody can decode buys a compatibility ax
 
 **Reopen when:** a tag 2 is actually proposed.
 At that point the question is whether tag-1-only builds must relay tag-2 ops, and the byte-first op has kept that door open.
+
+### An abstention is an assignment kind, carried by a per-record byte in `sorted_v1`
+
+**Decided in milestone 8.**
+
+An op could only ever *write*.
+Deletion via `$alive` removes a whole component or entity, so there was no way to un-write one property — and reverting an override to whatever is underneath is exactly that.
+`assignment_kind::abstain` is it: an assignment that supersedes its ancestors as a write does, and then contributes nothing.
+
+**It is a property of the assignment, not of the value**, which is what decided where it goes.
+A `value_kind::absent` would have widened a format constant validated by a hard upper-bound tag check in three separate switches.
+And `value.hh` is consumed by `versioned-document-file` for assets and the workspace, so every value consumer in two libraries could then receive a value that is not a value.
+A third blob in `op_payload` was worse still: it changes the hash preimage, and `op_payload`'s two-blob shape is what the file layer stores.
+
+So every assignment record now opens with a kind byte, and an abstention carries no value at all.
+Not a `null` — two spellings of one thing is the canonicality problem again.
+
+**It went into `sorted_v1` rather than a new tag 2, and that was deliberate.**
+A second encoding was drafted first: written only when something abstained, so abstain-free ops kept their bytes and their ids and stayed readable by an older build.
+That is the right shape *once something depends on it*, and nothing does: vdoc has no users outside its own tests.
+So all the compatibility apparatus bought was two decode paths, a canonicality rule the decoder had to enforce, and an extra decode error.
+Changing `sorted_v1` costs one round of op ids and nothing else, and it leaves one code path where there would have been two forever.
+
+Every op id therefore moved.
+A golden test over fixed inputs pins the new ones, because an op id *is* the content address.
+If the encoding or the preimage drifts again, every stored op silently stops matching its own id, and no other test would notice.
+
+**Reopen when:** a `.vdoc` exists that someone would be upset to lose.
+From that point a format change needs the tag, and the drafted two-encoding scheme above is how to do it.
+
+### An abstention never reaches the raw document
+
+**Decided in milestone 8.**
+
+Inside the sweep an abstaining writer is an ordinary survivor carrying a flag; `build_document` drops it, and a path whose every survivor abstained is simply absent.
+So `property_value`, `raw_property` and the snapshot format are all untouched, and `versioned-document-file` needed no change at all.
+
+**The consequence to state plainly: a concurrent write beats a concurrent abstention, and nothing reports it.**
+That is storage resolving a conflict, and it sits against [equal concurrent writes are still structurally multi-valued](#equal-concurrent-writes-are-still-structurally-multi-valued).
+That entry is the rule that storage records what happened and never collapses anything.
+
+It is taken anyway, on two arguments.
+The direction is the one `$alive` already established: the non-vanishing side wins deterministically, because losing a value is not recoverable and a re-attempted withdrawal is.
+And the permanence is asymmetric — op bytes are forever, while `raw_document`'s shape and the snapshot encoding are recomputable and already versioned.
+So this is the half that can be revisited later at no cost to anything stored.
+
+The alternative, designed and deliberately not built: a parallel `cc::vector<op_id> abstaining_writers` beside `raw_property::writers`.
+It keeps "every entry in `writers` is a real value" intact, leaves each per-writer record byte-identical, and makes the conflict diagnosable.
+Its cost is a `snapshot-v2` in `versioned-document-file`, plus the few sites that read writer lists directly.
+That is pre-planned there: the codec is versioned in its own name, and a snapshot that will not decode is a load issue rather than a failure.
+
+Worth noting the motivating case cannot hit it: a per-frame override layer is a linear rebase, so it has no concurrency at all.
+
+**Reopen when:** a UI has to explain why a reset-to-default did not take.
+That is the diagnostic this cannot produce, and the parallel channel above is the answer.
 
 ---
 

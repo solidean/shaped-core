@@ -73,6 +73,8 @@ enum class vdoc::op_decode_error : cc::u8
     duplicate_parent,
     /// The assignment blob's leading encoding tag is not one this build knows.
     unknown_assignment_encoding,
+    /// An assignment's kind byte is not one this build knows.
+    unknown_assignment_kind,
     /// An assignment's value, or the metadata, is not a canonically encoded value.
     invalid_value,
     /// Assignments are not in ascending (entity, component, property) order.
@@ -113,19 +115,48 @@ struct vdoc::op_payload
     cc::vector<byte> assignment_bytes;
 };
 
+/// What an assignment does to its path.
+/// A FORMAT CONSTANT: these numbers open every assignment record in the blob, and are hashed.
+enum class vdoc::assignment_kind : vdoc::u8
+{
+    /// Writes the value that follows it in the record.
+    set = 0,
+
+    /// Withdraws this op's contribution to the path, leaving whatever is *below* to show through.
+    ///
+    /// It supersedes its ancestors' writes exactly as a `set` does, and then contributes nothing — so the path ends up
+    /// absent rather than holding some other value.
+    /// In a single graph that is the only way to un-write a property, and where documents are composed in layers it is
+    /// how an override is reverted to the layer below.
+    ///
+    /// **Transparent, never masking.** It withdraws this layer's opinion and cannot hide a lower layer's.
+    ///
+    /// It carries no value in the blob at all — a `null` would be a second spelling of the same thing.
+    abstain = 1,
+};
+
 /// One property assignment, as a cursor's current position.
 /// The value is a view into the op's own bytes, so it outlives nothing the op does not.
 struct vdoc::assignment
 {
     property_path path;
+
+    /// **Meaningless when `kind` is `abstain`**, where it reads as the null value because a default view is null.
+    /// An abstain carries no value at all, and `null` is a real value — so a consumer must branch on the kind rather
+    /// than on what this happens to say.
     value_view value;
+
+    assignment_kind kind = assignment_kind::set;
+
+    [[nodiscard]] bool is_abstain() const { return kind == assignment_kind::abstain; }
 };
 
 /// The assignment encodings this build knows.
 /// A FORMAT CONSTANT: the tag lets the encoding change without touching the hashing rule, so these numbers are pinned.
 enum class vdoc::assignment_encoding : vdoc::u8
 {
-    /// u32 count, then per assignment the three ids as u32 length plus bytes, then the encoded value.
+    /// u32 count, then per assignment a `assignment_kind` byte, the three ids as u32 length plus bytes, and — for a
+    /// `set` — the encoded value.
     sorted_v1 = 1,
 };
 

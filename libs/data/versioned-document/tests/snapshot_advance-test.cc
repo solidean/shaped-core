@@ -14,6 +14,7 @@
 
 using namespace cc::primitive_defines;
 
+using vdoc::entity_id;
 using vdoc::op_graph;
 using vdoc::op_id;
 using vdoc::snapshot_cache;
@@ -129,6 +130,47 @@ TEST("vdoc - a view handed out before an advance still reads afterwards")
 
     // the value was not overwritten, so its bytes are still live and still where they were
     CHECK(held.as_i64() == 11);
+}
+
+TEST("vdoc - advancing across an abstention prunes the entries it empties")
+{
+    // The fiddly half of clearing a path is what it leaves behind.
+    // A component entry with zero properties is a shape a materialization never produces, and a parse would SELECT it —
+    // schema found, `$alive` absent so alive, version 0 — and build an all-defaults component out of nothing.
+    // So this compares against a fresh materialization, which is the only thing that can catch it.
+    auto graph = op_graph();
+
+    auto const p = path_of("e0", "T", "x");
+    auto const q = path_of("e0", "T", "y");
+    auto const other = path_of("e1", "T", "x");
+
+    property_write const w0[] = {{.path = p, .value = 1}, {.path = q, .value = 2}, {.path = other, .value = 3}};
+    auto const a = add_op(graph, {}, w0);
+
+    auto cache = unbounded_cache();
+    cache.install(a, snapshot_document::create_owning_copy(graph.materialize(a)));
+
+    // withdraw one property: the component survives, with one property fewer
+    op_id const from_a[] = {a};
+    property_write const w1[] = {{.path = p, .value = 0, .abstain = true}};
+    auto const b = add_op(graph, from_a, w1);
+
+    REQUIRE(vdoc::advance_snapshot(graph, cache, a, b));
+    REQUIRE(cache.find(b) != nullptr);
+    CHECK(same_document(cache.find(b)->document(), graph.materialize(b)));
+
+    // withdraw the sibling too: now the component AND the entity have to go
+    op_id const from_b[] = {b};
+    property_write const w2[] = {{.path = q, .value = 0, .abstain = true}};
+    auto const c = add_op(graph, from_b, w2);
+
+    REQUIRE(vdoc::advance_snapshot(graph, cache, b, c));
+    REQUIRE(cache.find(c) != nullptr);
+    CHECK(same_document(cache.find(c)->document(), graph.materialize(c)));
+
+    // stated directly, so a failure says which invariant broke rather than only that two documents differ
+    CHECK(cache.find(c)->document().try_get(entity_id::of("e0")) == nullptr);
+    CHECK(cache.find(c)->document().try_get(entity_id::of("e1")) != nullptr);
 }
 
 TEST("vdoc - advancing refuses anything that is not a single-parent child")

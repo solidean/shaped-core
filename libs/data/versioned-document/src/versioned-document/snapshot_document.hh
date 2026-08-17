@@ -44,6 +44,16 @@ public:
     /// assignments applied to its parent's snapshot, which is what `advance_snapshot` does and checks.
     void set_single_writer(property_path const& path, op_id const& writer, cc::span<byte const> bytes);
 
+    /// Removes every writer of `path`, and then the component and entity it leaves empty.
+    ///
+    /// **Pruning the empty parents is the load-bearing half.** A component entry with zero properties is not what a
+    /// fresh materialization would ever produce, and a parse would *select* it — schema found, `$alive` absent so alive,
+    /// version 0 — and construct an all-defaults component out of nothing.
+    ///
+    /// Same soundness caveat as `set_single_writer`: this is a document edit, and the one place it is a sound one is a
+    /// single-parent child's abstention applied to its parent's snapshot.
+    void clear_writers(property_path const& path);
+
     /// The value bytes this snapshot owns, which is what a cache budget counts.
     [[nodiscard]] isize owned_byte_size() const { return _owned_bytes; }
 
