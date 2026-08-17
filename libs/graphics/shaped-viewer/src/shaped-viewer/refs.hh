@@ -1,11 +1,14 @@
 #pragma once
 
+#include <clean-core/common/utility.hh> // cc::forward
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/impl/format_id.hh>
 #include <shaped-viewer/layout/box_style.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/view/view_data.hh>
+
+#include <type_traits>
 
 /// The authoring handles a caller actually touches.
 ///
@@ -151,8 +154,7 @@ public:
                            Arg0&& arg0,
                            Args&&... args)
     {
-        auto const name = impl::formatted_id(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...);
-        return display_name(name.view());
+        return display_name(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
     }
 
     [[nodiscard]] cc::string_view display_name() const;
@@ -186,8 +188,7 @@ public:
                                     Arg0&& arg0,
                                     Args&&... args)
     {
-        auto const id = impl::formatted_id(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...);
-        return add_view(id.view());
+        return add_view(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
     }
 
     /// Combines this leaf's views into one image.
@@ -225,8 +226,7 @@ public:
                                     Arg0&& arg0,
                                     Args&&... args)
     {
-        auto const id = impl::formatted_id(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...);
-        return add_view(id.view());
+        return add_view(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
     }
 
     /// Adds an empty leaf, for a caller that wants several views in one cell or a post-process over them.

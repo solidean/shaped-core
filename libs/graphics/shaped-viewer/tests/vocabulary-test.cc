@@ -1,8 +1,9 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/gpu_types.hh>
-#include <shaped-viewer/impl/format_id.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_ids.hh>
@@ -85,15 +86,15 @@ TEST("sv - a ## suffix separates ids that share a display name")
 TEST("sv - a formatted id is the string it spells out")
 {
     // What `add_view("angle##{}", i)` hashes must be exactly what the pre-formatted string would.
-    auto const short_id = sv::impl::formatted_id("angle##{}", 2);
-    CHECK(short_id.view() == "angle##2");
-    CHECK(sv::view_id::from_string(short_id.view()) == sv::view_id::from_string("angle##2"));
+    auto const short_id = cc::format("angle##{}", 2);
+    CHECK(short_id == "angle##2");
+    CHECK(sv::view_id::from_string(short_id) == sv::view_id::from_string("angle##2"));
 
-    // Past the inline buffer it falls back to a heap string rather than truncating.
+    // A long id is spelled out in full rather than truncated.
     auto const padding = cc::string::create_filled(400, 'x');
-    auto const long_id = sv::impl::formatted_id("{}", padding);
-    CHECK(long_id.view().size() == 400);
-    CHECK(long_id.view() == padding);
+    auto const long_id = cc::format("{}", padding);
+    CHECK(long_id.size() == 400);
+    CHECK(long_id == padding);
 }
 
 TEST("sv - view_id keys a map")

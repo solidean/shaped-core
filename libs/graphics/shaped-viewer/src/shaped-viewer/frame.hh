@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh> // cc::move, for the frame a frame_scope adopts
 #include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/view_state.hh>
@@ -100,8 +101,7 @@ public:
                                     Arg0&& arg0,
                                     Args&&... args)
     {
-        auto const id = impl::formatted_id(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...);
-        return window(id.view());
+        return window(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
     }
 
     /// The default window's view — what `window_api` forwards every view call to.
@@ -117,8 +117,7 @@ public:
                  Arg0&& arg0,
                  Args&&... args)
     {
-        auto const id = impl::formatted_id(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...);
-        push_id(id.view());
+        push_id(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
     }
 
     /// Pops the innermost id-stack scope, which must exist.
@@ -133,8 +132,7 @@ public:
                                      Arg0&& arg0,
                                      Args&&... args)
     {
-        auto const id = impl::formatted_id(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...);
-        return scoped_id(id.view());
+        return scoped_id(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
     }
 
     /// The seed view names currently derive from — for a caller minting a view_id by hand.

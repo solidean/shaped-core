@@ -72,7 +72,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/layout/layout_tree.hh
     src/shaped-viewer/resources/resource_data.hh
     src/shaped-viewer/impl/content_hash.hh
-    src/shaped-viewer/impl/format_id.hh
     src/shaped-viewer/impl/keyed_cache.hh
     src/shaped-viewer/impl/view_state.hh
     src/shaped-viewer/resources/resource_ids.hh
