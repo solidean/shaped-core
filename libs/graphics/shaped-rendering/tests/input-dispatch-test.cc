@@ -100,7 +100,7 @@ TEST("sr - events keep their order across windows", main_thread)
     CHECK(wsys->events()[2].as_key().scancode == scancode::num_3);
 }
 
-TEST("sr - an event answers is_* for exactly the kind it holds")
+TEST("sr - an event answers is_* for exactly the kind it holds", main_thread)
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "w"});
