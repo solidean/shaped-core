@@ -26,6 +26,7 @@ from .lib.pipeline.diagjobs import BuildMark
 from .lib.pipeline.diagjobs import harvest as harvest_build_jobs
 from .lib.pipeline.diagjobs import mark as mark_build
 from .lib.pipeline.eligibility import select_eligible_binaries
+from .lib.pipeline.examples import drop_testless_examples
 from .lib.pipeline.test import test
 from .lib.project.compdb import find_entry, load_entries, split_command, strip_pch_flags, suggest_files
 from .lib.project.flags import extract_flags

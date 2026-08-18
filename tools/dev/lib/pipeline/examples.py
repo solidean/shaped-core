@@ -7,9 +7,13 @@ That is the same nexus query `eligibility.py` uses before a filtered test run.
 Probing the whole corpus on every invocation would not scale, so listings are cached per artifact under the build dir
 and revalidated by (mtime, size) — a rebuilt binary re-probes, an untouched one does not.
 
+An example binary may also carry ordinary TESTs — the machinery a bigger example grew is worth pinning — so
+`drop_testless_examples` is what lets `dev.py test` include the ones that do and skip the ones that do not.
+
 Public API:
     collect_examples(preset, targets, root, ...) -> list[Example]
     resolve_example(examples, match) -> (example, diagnostic)
+    drop_testless_examples(preset, targets, names, ...) -> list[str]
 """
 
 from __future__ import annotations
@@ -147,3 +151,37 @@ def resolve_example(examples: list[Example], match: str) -> tuple[Example | None
     if suggestions := _suggest(match, [e.name for e in examples]):
         message += ". Did you mean: " + ", ".join(suggestions)
     return None, message
+
+
+def drop_testless_examples(
+    preset: Preset,
+    targets: list[Target],
+    binary_names: list[str],
+    *,
+    is_example,
+    test_name: str | None,
+    root: Path,
+    extra_args: list[str] | None = None,
+) -> list[str]:
+    """`binary_names` minus the example binaries that carry no ordinary test.
+
+    An example binary is a legitimate place for TESTs, so `dev.py test` runs the ones that have them.
+    Most have none — their EXAMPLEs live in another bucket entirely — and a sweep that ran one anyway would fail on
+    "the current schedule did not select any tests", which is exactly right for a test binary and wrong for this.
+
+    Test binaries are never dropped: an empty one IS a failure, and this must not quietly turn that into a pass.
+    A binary that cannot answer the query is kept, so a probe that fails never silently removes coverage.
+    """
+    by_name = {t.name: t for t in targets}
+    out: list[str] = []
+    for name in binary_names:
+        target = by_name.get(name)
+        if target is None or not is_example(target):
+            out.append(name)
+            continue
+        listing = query_listing(
+            preset, target, test_name=test_name, extra_args=list(extra_args or []), root=root
+        )
+        if listing is None or listing.eligible_count > 0 or listing.eligible_alias_count > 0:
+            out.append(name)
+    return out

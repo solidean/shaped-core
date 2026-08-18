@@ -128,6 +128,8 @@ It is written with `file(CONFIGURE)` into the build directory, so it is copy-if-
 **One `EXAMPLE` per file is the convention, not a rule.**
 A binary with several is exactly right when related examples want to share setup headers and show different aspects over them — a viewer and a full editor over one scene, say.
 Such a binary may also carry ordinary `TEST`s, for the machinery it grew along the way.
+`dev.py test` runs them: an example binary joins the sweep exactly when it reports tests of its own, and is skipped when it has none.
+Its `EXAMPLE`s are in another bucket and never run there.
 
 ## What binds an example, and what does not
 
