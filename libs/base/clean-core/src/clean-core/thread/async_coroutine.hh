@@ -59,14 +59,6 @@ namespace cc::impl
 template <class...>
 inline constexpr bool async_coro_always_false = false;
 
-/// Whether scheduling a node from here would reach a scheduler at all.
-/// async_node_base::schedule() asserts with neither a bound worker scope nor an installed default pool, and "start it now" must not be the call that trips that.
-/// A node left cold is not a lost computation — it runs when something requires it, or when a driver schedules it.
-[[nodiscard]] inline bool async_can_schedule_here()
-{
-    return cc::async_scheduler::current_or_null() != nullptr || cc::async_scheduler::default_or_null() != nullptr;
-}
-
 /// Type-erased "may the coroutine be resumed?" check, run by the frame BEFORE it resumes.
 /// Returns false when it wrote the promise's failure slot instead, which short-circuits the rest of the body.
 using async_coro_check_fn = bool (*)(void* awaiter, void* promise);

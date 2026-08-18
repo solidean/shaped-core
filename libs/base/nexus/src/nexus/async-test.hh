@@ -1,6 +1,6 @@
 #pragma once
 
-// ASYNC_TEST: a test whose body hands back a graph instead of running to completion.
+// ASYNC_TEST: a test whose body may co_await.
 //
 // A separate header on purpose.
 // TEST is already an async test underneath — one whose body simply never suspends — so nexus/test.hh has no reason to
@@ -8,23 +8,24 @@
 //
 //   ASYNC_TEST("cache - resolves a miss")
 //   {
-//       auto entry = cache.acquire_async("shader.hlsl");
-//       return cc::make_async_lazy<cc::unit>(
-//           [entry](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-//           {
-//               if (!actx.require(entry))
-//                   return actx.wait_for_dependencies();
-//               CHECK(entry->has_value());
-//               return actx.resolve_to_value(cc::unit{});
-//           });
+//       auto const entry = co_await cache.acquire_async("shader.hlsl");
+//       CHECK(entry.is_compiled());
 //   }
 //
-// The body runs to its `return` exactly like a TEST body does — same thread, no scheduler bound, its own graphs its own business.
-// What it RETURNS is different: nexus schedules that root under this test's context and makes the test wait on it.
-// So a park inside the graph parks the test rather than blocking a worker, and every check the graph reports still finds this test from whichever thread ran it.
+// The body is the graph.
+// Nexus schedules it under this test's context and makes the test wait on it, so a park inside parks the TEST rather
+// than blocking a worker, and every check it reports still finds this test from whichever thread ran it.
+// That holds at any depth: a check inside a coroutine the body awaited, which nexus never saw, is billed here too.
 //
-// **The returned root must be COLD** — a `make_async_lazy` graph, not one already scheduled or already resolved.
-// Nexus stamps this test's context onto it when it schedules it, and that stamp only happens on a cold node.
+// C++ needs at least one co_ keyword to make a body a coroutine.
+// A body that awaits nothing therefore ends in a bare `co_return;`, or stays a plain body that RETURNS the graph to
+// await — the pre-coroutine spelling, still supported:
+//
+//   ASYNC_TEST("...") { return cc::make_async_lazy<cc::unit>(/* ... */); }
+//
+// **A returned graph must be COLD** — a `make_async_lazy` root, not one already scheduled or resolved — since nexus
+// stamps this test's context onto it as it schedules it, and that stamp only happens on a cold node.
+// A coroutine body is cold by construction, so the rule binds only the returning form.
 //
 // Two further limits, both deliberate for now:
 //
@@ -32,10 +33,12 @@
 //   The section machinery replays the body once per section path, which is single-threaded state, and an async body runs once.
 // * A graph resolving to an ERROR fails the test, naming the error, and is never propagated onward.
 //   A test node always resolves to a value, or an exclusivity edge would carry the failure into every test ordered behind it.
+//   An awaited dependency that fails is exactly that case: it short-circuits the rest of the body, then fails the test.
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh> // cc::unit
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/test.hh>
 
 namespace nx::impl
@@ -48,8 +51,8 @@ template <class F>
 cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
 {
     static_assert(std::is_same_v<decltype((*fn)()), cc::shared_async<cc::unit>>,
-                  "an ASYNC_TEST body must return cc::shared_async<cc::unit>; wrap a graph of another type in a "
-                  "make_async_lazy<cc::unit> that requires it");
+                  "an ASYNC_TEST body must co_return nothing, or return cc::shared_async<cc::unit>; wrap a graph of "
+                  "another type in a make_async_lazy<cc::unit> that requires it");
     return [fn](async_test_sink& sink) { submit_test_async(sink, (*fn)()); };
 }
 } // namespace nx::impl
@@ -69,6 +72,6 @@ cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
            true);                                                                               \
     static ::cc::shared_async<::cc::unit> CC_MACRO_JOIN(_nx_async_test_fn_, unique_id)()
 
-// A test whose body returns the graph nexus should await.
+// A test whose body may co_await; nexus awaits it.
 // Config items compose exactly as with TEST.
 #define ASYNC_TEST(name, ...) NX_IMPL_ASYNC_TEST(name, __COUNTER__, __VA_ARGS__)

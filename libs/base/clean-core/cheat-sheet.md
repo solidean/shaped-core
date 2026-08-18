@@ -758,7 +758,7 @@ cc::shared_async<T, E = async_error> = cc::shared_ptr<cc::async<T, E>, impl::asy
 // cc::async_context<T, E>& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
 // values before f runs; errors short-circuit. T deduced (context-free) or explicit; E defaults to async_error.
 auto a = cc::make_async_lazy([]{ return 40; });                             // cold; no context, no deps
-auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager (scheduled if worker scope active)
+auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager: worker scope, else default pool
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed

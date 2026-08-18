@@ -158,6 +158,7 @@ TEST("async coroutine - async_yield reschedules and resumes")
         co_return *s;
     }(&steps);
 
+    CHECK(steps == 0); // cold: creating the coroutine ran none of its body
     CHECK(cc::async_blocking_get_singlethreaded(co) == 2);
     CHECK(steps == 2);
 }
