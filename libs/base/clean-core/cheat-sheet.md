@@ -1004,8 +1004,9 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **A sort comparator MUST be a strict weak ordering.**
   The partition scans are deliberately unbounded, so one that is not walks off the range — `CC_ASSERT` catches it in debug and relwithdebinfo, and release has nothing to catch it with.
   `<=` where `<` was meant, and floats that can be NaN, are the two usual causes.
-- **No sort here is stable**, and there is no `cc::stable_sort` — stability needs a buffer, which the swap-only design forbids.
-  `cc::sort_indices` over `0..n-1` is the stable spelling: it breaks ties on the index.
+- **No sort here is stable by default** — the plain `cc::sort` / `sort_by` leave equal elements in an unspecified order.
+  `cc::sort_stable` / `cc::sort_stable_by` are the stable spellings, and they permute an index array rather than buffering elements, so the swap-only design survives.
+  `cc::sort_indices` over `0..n-1` is stable for the same reason: it breaks ties on the index.
 - **`cc::sort_by` evaluates its key on every comparison**, i.e. O(n log n) times.
   `cc::sort_by_cached_key` evaluates it exactly n times into a temporary buffer, and is worth it as soon as the key costs more than a member read.
 - **`cc::vector` is not an `index_swap_range`** — deliberately, so nothing models the seam by accident.

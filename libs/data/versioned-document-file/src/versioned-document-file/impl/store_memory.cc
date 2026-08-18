@@ -1,8 +1,8 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <versioned-document-file/impl/store_memory.hh>
 
-#include <algorithm>
 
 namespace vdoc::file::impl
 {
@@ -125,8 +125,7 @@ public:
                                .chunk_index = row.chunk_index,
                                .data = copy_of(cc::span<byte const>(row.data))});
 
-        std::sort(out.begin(), out.end(), [](snapshot_chunk_row const& a, snapshot_chunk_row const& b)
-                  { return a.chunk_index < b.chunk_index; });
+        cc::sort_by(out, &snapshot_chunk_row::chunk_index);
         return out;
     }
 

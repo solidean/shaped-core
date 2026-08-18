@@ -1,10 +1,10 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/value_builder.hh>
 
-#include <algorithm>
 
 using namespace cc::primitive_defines;
 
@@ -59,8 +59,7 @@ struct op_parts
         entries.push_back(assignment{.path = paths[i], .value = out.owned_values[i]});
 
     // encode_assignments requires the canonical order, which is op_builder's job in the real flow
-    std::sort(entries.begin(), entries.end(),
-              [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
+    cc::sort(entries, [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
 
     out.assignment_bytes = vdoc::encode_assignments(entries);
     return out;

@@ -1,5 +1,6 @@
 #include "engine.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/set.hh>
@@ -82,11 +83,10 @@ cc::result<cc::unit> write_file(cc::string_view path, cc::string_view content)
 
 cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits)
 {
-    // Apply highest-offset-first so earlier offsets stay valid.
-    // Insertion sort of pointers by
-    // descending begin, then by descending end — a file carries only a handful of edits.
+    // Apply highest-offset-first so earlier offsets stay valid, ordering by descending begin and then descending end.
     // The second key matters when an insertion (an empty span) shares its offset with a replacement that
     // starts there: the wider edit has to go first, or the overlap guard below sees the pair out of order.
+    // Stable because two edits with identical spans tie under both keys, and emission order is what decides them.
     cc::vector<text_edit const*> ordered;
     for (auto const& e : edits)
         ordered.push_back(&e);
@@ -96,13 +96,7 @@ cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits
             return a.span.byte_begin < b.span.byte_begin;
         return a.span.byte_end < b.span.byte_end;
     };
-    for (isize i = 1; i < ordered.size(); ++i)
-        for (isize j = i; j > 0 && precedes(*ordered[j - 1], *ordered[j]); --j)
-        {
-            auto const* tmp = ordered[j - 1];
-            ordered[j - 1] = ordered[j];
-            ordered[j] = tmp;
-        }
+    cc::sort_stable(ordered, [&](text_edit const* a, text_edit const* b) { return precedes(*b, *a); });
 
     auto text = cc::string(original);
     // Overlap guard: edits are descending, so each end must not exceed the previous begin.
