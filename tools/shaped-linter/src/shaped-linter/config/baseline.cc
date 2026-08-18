@@ -98,8 +98,9 @@ cc::string apply_baseline_block(cc::string_view config_text, cc::span<cc::string
     {
         auto const end_marker = config_text.find(k_baseline_end, begin);
         auto const tail_from = end_marker < 0 ? config_text.size() : end_of_line(config_text, end_marker);
-        return cc::string(config_text.subview({.start = 0, .end = begin})) + block
-             + cc::string(config_text.subview({.start = tail_from, .end = config_text.size()}));
+        auto out = cc::string(config_text);
+        out.replace({.start = begin, .end = tail_from}, block);
+        return out;
     }
 
     if (includes.empty())

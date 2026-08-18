@@ -24,18 +24,6 @@ namespace
     return total;
 }
 
-/// Inserts `value` at `at`, shifting the tail up by one.
-///
-/// clean-core's vector has no insert-at-position yet — container/vector.hh tracks it as a TODO — so this is the local
-/// stand-in, and the place to delete once it grows one.
-template <class T>
-void insert_at(cc::vector<T>& values, isize at, T value)
-{
-    values.push_back(cc::move(value));
-    for (auto i = values.size() - 1; i > at; --i)
-        cc::swap(values[i], values[i - 1]);
-}
-
 /// The entry keyed by `id`, inserted in sorted position where absent.
 /// Every level of a raw_document is a vector of `{id, value}` sorted by the id's canonical bytes, so one helper covers
 /// all three.
@@ -48,9 +36,9 @@ template <class EntryT, class IdT>
     if (at < entries.size() && entries[at].*key == id)
         return entries[at];
 
-    insert_at(entries, at, EntryT{});
-    entries[at].*key = id;
-    return entries[at];
+    auto& entry = entries.emplace_at(at);
+    entry.*key = id;
+    return entry;
 }
 } // namespace
 

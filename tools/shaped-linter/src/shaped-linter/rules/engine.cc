@@ -114,9 +114,8 @@ cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits
         CC_ASSERT(e->span.byte_end <= prev_begin, "overlapping fix edits");
         prev_begin = e->span.byte_begin;
 
-        auto const head = cc::string_view(text).subview({.start = 0, .end = isize(e->span.byte_begin)});
-        auto const tail = cc::string_view(text).subview({.start = isize(e->span.byte_end), .end = text.size()});
-        text = cc::string(head) + e->replacement + cc::string(tail);
+        // In place: `replacement` is owned by the edit and never a view into `text`, so no rebuild is needed.
+        text.replace({.start = isize(e->span.byte_begin), .end = isize(e->span.byte_end)}, e->replacement);
     }
     return text;
 }

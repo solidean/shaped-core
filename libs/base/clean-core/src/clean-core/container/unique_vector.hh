@@ -138,10 +138,6 @@ public:
     using base::clear; // destroy all elements, size becomes 0
     using base::fill;  // fill all elements with value
 
-    // TODO: insert(Iterator pos, T const& value) - insert element at position
-    // TODO: insert(Iterator pos, T&& value) - insert element at position
-    // TODO: insert(Iterator pos, isize count, T const& value) - insert multiple copies
-
     // ctors / allocation management
 public:
     // unique_vector has move-only semantics
