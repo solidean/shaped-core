@@ -310,14 +310,14 @@ What restarts a view after a shader reload is the reload generation `view_render
 ## Viewer + authoring API
 
 `sv::interactive` opens a viewer and hands back its frame loop, which **owns** it — so nothing needs a variable for the viewer and nothing needs tearing down.
-No context is threaded through: one is acquired through `sv::acquire_context`, or from a built-in default.
+No context is threaded through: one is acquired through the provider `sv::set_acquire_context` installs, or from a built-in default.
 
 A frame carries the whole *window* surface, which carries the whole *view* surface, so the shorthand and the long form are the same call:
 `f.add_scene()` is exactly `f.window().view().add_scene()`.
 
 ```cpp
-sv::acquire_context              // cc::unique_function<cc::result<sg::context_handle>()>; unset by default
-                                 //   sv::acquire_context = [] { return sg::create_dx12_context({.use_warp = true}); };
+sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_function<cc::result<sg::context_handle>()>; unset by default
+                                 //   sv::set_acquire_context([] { return sg::create_dx12_context({.use_warp = true}); }); pass {} to clear
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
 

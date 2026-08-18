@@ -1,3 +1,4 @@
+#include <clean-core/common/utility.hh> // cc::move
 #include <shaped-viewer/context.hh>
 
 #if SV_HAS_DEFAULT_BACKEND
@@ -6,6 +7,20 @@
 
 namespace sv
 {
+namespace
+{
+/// The caller's provider, unset until `set_acquire_context` is called.
+///
+/// It lives here rather than in the header so the only way to reach it is the setter — nothing can read it, and no
+/// translation unit can race the others to initialize it.
+context_provider g_acquire_context;
+} // namespace
+
+void set_acquire_context(context_provider provider)
+{
+    g_acquire_context = cc::move(provider);
+}
+
 cc::result<sg::context_handle> impl::acquire_default_context()
 {
 #if SV_HAS_DEFAULT_BACKEND
@@ -20,7 +35,8 @@ cc::result<sg::context_handle> impl::acquire_default_context()
 
     return cc::error("shaped-viewer: could not create a Direct3D 12 context (no adapter, and WARP was refused)");
 #else
-    return cc::error("shaped-viewer: built with no default graphics backend — set sv::acquire_context to supply one");
+    return cc::error("shaped-viewer: built with no default graphics backend — call sv::set_acquire_context to supply "
+                     "one");
 #endif
 }
 
@@ -35,9 +51,9 @@ cc::result<sg::context_handle> acquire_viewer_context()
     if (cached != nullptr)
         return cached;
 
-    auto r = acquire_context ? acquire_context() : impl::acquire_default_context();
+    auto r = g_acquire_context ? g_acquire_context() : impl::acquire_default_context();
 
-    // A failure is deliberately not cached: it leaves a caller free to set `acquire_context` and try again, which is
+    // A failure is deliberately not cached: it leaves a caller free to call `set_acquire_context` and try again, which is
     // exactly what someone who hit the no-backend error is about to do.
     if (r.has_error())
         return r;

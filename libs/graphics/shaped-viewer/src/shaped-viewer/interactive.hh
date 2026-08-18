@@ -14,7 +14,7 @@ namespace sv
 /// The viewer lives as long as the returned range, so a caller needs no variable for it and nothing to tear down.
 /// `id` names the viewer's persistent state, so the same string reopens the same cameras and accumulated images.
 ///
-/// The context comes from `sv::acquire_context`, or from the built-in default when that is unset — so the common case
+/// The context comes from `sv::set_acquire_context`, or from the built-in default when no provider was set — so the common case
 /// needs no context at all, and a caller who wants their own sets that hook once instead of threading one through.
 /// Everything else — the window, swapchain, shader library and scene resources — the viewer brings up itself.
 ///

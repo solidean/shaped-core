@@ -15,21 +15,22 @@ namespace sv
 /// The handle is refcounted, so every viewer holding one keeps the context alive whatever else lets go of it.
 using context_provider = cc::unique_function<cc::result<sg::context_handle>()>;
 
-/// The hook a caller overrides to decide which context viewers run on.
+/// Sets the hook that decides which context viewers run on.
 ///
-///     sv::acquire_context = [] { return sg::create_dx12_context({.use_warp = true}); };
+///     sv::set_acquire_context([] { return sg::create_dx12_context({.use_warp = true}); });
 ///
 /// Unset by default, and then `impl::acquire_default_context` answers instead — so a caller who never touches this
 /// gets a working viewer, and one who does is in full control.
+/// Passing `{}` clears it again, which is how a test hands the default back.
 ///
 /// Set it before the first viewer is created.
-/// Once a provider has answered successfully its context is kept for the process, so assigning this afterwards has no
+/// Once a provider has answered successfully its context is kept for the process, so setting this afterwards has no
 /// effect; a provider that *failed* is retried, which is the case where setting it late is exactly the fix.
-inline context_provider acquire_context;
+void set_acquire_context(context_provider provider);
 
 namespace impl
 {
-/// Creates the context viewers use when `acquire_context` is unset, preferring a hardware device and falling back to WARP.
+/// Creates the context viewers use when no provider was set, preferring a hardware device and falling back to WARP.
 ///
 /// Today that is always dx12; which backend it reaches for is a per-target choice that will grow with the platforms sv
 /// supports, and is why this sits behind a hook rather than in the viewer.

@@ -31,7 +31,7 @@ struct sv::viewer_config
 /// The viewer: owns the window, swapchain, shader library and scene resources, and drives the per-frame loop.
 /// Each frame is flattened into a render plan and recorded through viewer_renderer.
 ///
-/// It acquires its rendering context through `sv::acquire_context`, falling back to a built-in default, and holds the
+/// It acquires its rendering context through the provider `sv::set_acquire_context` installed, falling back to a built-in default, and holds the
 /// handle for its whole life — so a caller needs no context of their own, and one who wants a particular device sets
 /// that hook once rather than threading a context through every call.
 /// Everything else the viewer sets up itself.
@@ -62,16 +62,16 @@ struct sv::viewer_config
 class sv::viewer
 {
 public:
-    /// Brings up a viewer on whatever `sv::acquire_context` hands back, or the built-in default when it is unset.
+    /// Brings up a viewer on whatever the provider hands back, or the built-in default when none was set.
     /// `id` names this viewer's persistent state.
     ///
     /// The viewer holds the context handle for its whole life, so the context outlives it whatever else lets go.
     [[nodiscard]] static cc::result<viewer> try_create(cc::string_view id, viewer_config config = {});
 
-    /// Brings up a viewer on a context the caller owns, bypassing `sv::acquire_context` entirely.
+    /// Brings up a viewer on a context the caller owns, bypassing the provider entirely.
     ///
     /// `ctx` must outlive the viewer: nothing here can hold a reference count on a context it was handed by reference.
-    /// Prefer the overload above, or set `sv::acquire_context`, unless the lifetime is genuinely the caller's to manage.
+    /// Prefer the overload above, or call `sv::set_acquire_context`, unless the lifetime is genuinely the caller's to manage.
     [[nodiscard]] static cc::result<viewer> try_create(sg::context& ctx, cc::string_view id, viewer_config config = {});
 
     /// Throwing counterparts of try_create.
