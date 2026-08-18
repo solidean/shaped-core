@@ -68,8 +68,11 @@ private:
 
     // The graphs sg and vdoc::file complete on their own threads need somewhere to resume.
     // Without an installed default, the first completion off a worker thread asserts.
+    //
+    // The guard is held by pointer rather than by optional: it has no default constructor, and an `app` that could
+    // not be default-constructed could not be make_unique'd either.
     cc::async_thread_pool _pool;
-    cc::optional<cc::scoped_default_async_pool> _default_pool;
+    cc::unique_ptr<cc::scoped_default_async_pool> _default_pool;
 
     float _delta_time = 1.0f / 60.0f;
     double _last_time = 0.0;
