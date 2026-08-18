@@ -34,8 +34,11 @@ struct style
     tg::vec3f color = tg::vec3f(0.8f, 0.8f, 0.85f);
 };
 
-/// The registry both examples build their parse policy from.
-[[nodiscard]] vdoc::component_registry make_registry();
+/// The registry every parse policy here is built from.
+///
+/// One per process rather than one per document: the component set is a property of the APPLICATION, and a parse
+/// policy holds the registry by reference — so a per-document copy would dangle the moment the document was moved.
+[[nodiscard]] vdoc::component_registry const& registry();
 } // namespace cube_editor
 
 template <>

@@ -32,7 +32,7 @@ EXAMPLE("vdoc/cube-viewer")
     auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
 
     cc::println("{} entities over {} revisions; drag to orbit, scroll to zoom",
-                doc.value().visible().entities().size(), doc.value().history().size());
+                doc.value().current().entities().size(), doc.value().timeline().size());
 
     auto dragging = false;
     while (app->begin_frame())
@@ -53,8 +53,8 @@ EXAMPLE("vdoc/cube-viewer")
 
         ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
         ImGui::Begin("cube viewer");
-        ImGui::Text("%d cubes", int(doc.value().visible().entities().size()));
-        ImGui::Text("%d revisions", int(doc.value().history().size()));
+        ImGui::Text("%d cubes", int(doc.value().current().entities().size()));
+        ImGui::Text("%d revisions", int(doc.value().timeline().size()));
         ImGui::Separator();
         ImGui::TextWrapped("The camera is workspace state, not document state: moving it writes no op and leaves "
                            "the document saved.");
@@ -62,7 +62,7 @@ EXAMPLE("vdoc/cube-viewer")
         ImGui::TextWrapped("Run vdoc/cube-editor to change the scene.");
         ImGui::End();
 
-        app->end_frame(doc.value().visible(), camera, vdoc::entity_id());
+        app->end_frame(doc.value().current(), camera, vdoc::entity_id());
     }
 
     // Written on every exit, and flushed by the store's close(). No op, no ref move, no dirty document.

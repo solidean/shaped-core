@@ -5,25 +5,28 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
+#include <nexus/test.hh>
 
 #include <limits> // no cc:: numeric limits yet
-#include <nexus/test.hh>
 
 #if SR_HAS_WINDOW
 
-/// A mini editor over a versioned document: pick a cube, change it, watch the history grow, scrub back through it.
+/// A mini editor over a versioned document: pick a cube, drag it, watch the history grow, scrub back through it.
 ///
 ///     uv run dev.py example vdoc/cube-editor
 ///
 /// What it is here to show, in order of how easy it is to miss:
 ///
-///   - **Every edit is an op.** The history list is the document's actual op DAG, walked first-parent, and the
-///     labels come from each op's metadata. Nothing maintains an undo stack.
+///   - **Nothing is ever edited in place.** A document IS an op, and every change builds a new one on top of it.
+///     The timeline is that chain of ops walked first-parent, labelled from each op's own metadata — there is no undo
+///     stack anywhere in this example.
+///   - **Editing a past revision is ordinary.** Scrub back, move a cube, and you have branched.
+///     A DAG has no opinion about that, so nothing here needs a mode or a guard.
+///   - **A drag is hundreds of ops and one history entry.** Every frame chains an op onto the last, so the document
+///     evolves incrementally instead of re-parsing; on release those frames are dropped and one op from start to
+///     finish takes their place.
 ///   - **Deletion removes nothing.** It writes `$alive = false`; scrub back and the cube returns.
 ///   - **The camera is not an edit.** It lives in the file's workspace, which creates no op and never dirties.
-///   - **Scrubbing is read-only.** History is immutable, so editing is disabled until the slider is back at the end.
-///   - **Editing stays fast whatever the history's length**, because a snapshot is advanced onto every accepted op
-///     and the typed document is evolved incrementally rather than re-parsed.
 
 namespace
 {
@@ -49,11 +52,28 @@ using namespace cube_editor;
     return best;
 }
 
-/// The inspector for one cube. Each committed change is one op, labelled for the history list.
+/// Wraps the imgui widget on the line above into a continuous edit.
+///
+/// `write` runs on every frame the widget reports a change, so the view is live; the whole gesture becomes one op
+/// when the widget is released, whatever it did in between.
+template <class F>
+void as_continuous_edit(document& doc, bool changed, F&& write, cc::string_view label)
+{
+    if (ImGui::IsItemActivated())
+        doc.begin_continuous_edit();
+    if (changed)
+        write();
+    // IsItemDeactivated rather than its AfterEdit sibling: a drag released back where it started still has to end,
+    // and the collapse writes nothing when the net change is nothing.
+    if (ImGui::IsItemDeactivated())
+        doc.end_continuous_edit(label);
+}
+
+/// The inspector for one cube.
 void draw_inspector(document& doc, vdoc::entity_id selected)
 {
-    auto const* const p = doc.visible().get<placement>(selected);
-    auto const* const s = doc.visible().get<style>(selected);
+    auto const* const p = doc.current().get<placement>(selected);
+    auto const* const s = doc.current().get<style>(selected);
     if (p == nullptr || s == nullptr)
     {
         ImGui::TextUnformatted("nothing selected — click a cube");
@@ -62,40 +82,39 @@ void draw_inspector(document& doc, vdoc::entity_id selected)
 
     ImGui::Text("entity: %.*s", int(selected.as_string_view().size()), selected.as_string_view().data());
 
-    // Edited on a copy, then committed only when imgui reports the drag finished.
-    // A frame-by-frame commit would work too, but each frame would be its own op — and a fanned drag is the one
-    // shape vdoc's incremental path does NOT make cheap, so a real editor chains the frames instead.
     auto edited = *p;
     auto position = tg::vec3f(edited.center - tg::pos3f::zero);
     auto color = s->color;
 
-    ImGui::DragFloat3("position", &position[0], 0.05f);
-    ImGui::DragFloat("size", &edited.half_extent, 0.02f, 0.05f, 8.0f);
-    ImGui::ColorEdit3("color", &color[0]);
+    auto const moved = ImGui::DragFloat3("position", &position[0], 0.05f);
+    as_continuous_edit(
+        doc, moved,
+        [&]
+        {
+            edited.center = tg::pos3f::zero + position;
+            doc.set_placement(selected, edited, "move");
+        },
+        cc::format("move {}", selected.as_string_view()));
 
-    if (!doc.is_editable())
-    {
-        ImGui::TextUnformatted("(viewing history — editing is off)");
-        return;
-    }
+    auto const resized = ImGui::DragFloat("size", &edited.half_extent, 0.02f, 0.05f, 8.0f);
+    as_continuous_edit(
+        doc, resized, [&] { doc.set_placement(selected, edited, "resize"); },
+        cc::format("resize {}", selected.as_string_view()));
 
-    if (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-    {
-        edited.center = tg::pos3f::zero + position;
-        if (edited.center != p->center || edited.half_extent != p->half_extent)
-            doc.set_placement(selected, edited, cc::format("move {}", selected.as_string_view()));
-        if (color != s->color)
-            doc.set_style(selected, style{.color = color}, cc::format("recolor {}", selected.as_string_view()));
-    }
+    auto const recolored = ImGui::ColorEdit3("color", &color[0]);
+    as_continuous_edit(
+        doc, recolored, [&] { doc.set_style(selected, style{.color = color}, "recolor"); },
+        cc::format("recolor {}", selected.as_string_view()));
 
     if (ImGui::Button("delete"))
         doc.remove(selected);
 }
 
-/// The history slider, over the document's own first-parent op chain.
-void draw_history(document& doc)
+/// The timeline, over the document's own first-parent op chain.
+/// Moving it writes no op at all — it only changes which op the document is derived from.
+void draw_timeline(document& doc)
 {
-    auto const count = int(doc.history().size());
+    auto const count = int(doc.timeline().size());
     auto revision = doc.revision();
 
     ImGui::Text("%d revisions", count);
@@ -104,11 +123,10 @@ void draw_history(document& doc)
 
     ImGui::TextWrapped("%.*s", int(doc.revision_label(revision).size()), doc.revision_label(revision).data());
 
-    if (!doc.is_editable())
+    if (revision != count - 1)
     {
-        ImGui::TextUnformatted("viewing history — this revision cannot be edited");
-        ImGui::SameLine();
-        if (ImGui::Button("back to now"))
+        ImGui::TextWrapped("Editing from here branches — the revisions after this one are simply left behind.");
+        if (ImGui::Button("back to the newest"))
             doc.show_revision(count - 1);
     }
 }
@@ -123,13 +141,13 @@ EXAMPLE("vdoc/cube-editor")
         return;
     }
 
-    auto app = cube_editor::app::create("vdoc cube editor — click a cube, drag to orbit, close to end");
+    auto app = cube_editor::app::create("vdoc cube editor — click a cube, right-drag to orbit, close to end");
     if (app == nullptr)
         return; // create() already said what was missing
 
     auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
     auto selected = vdoc::entity_id();
-    auto dragging = false;
+    auto orbiting = false;
 
     while (app->begin_frame())
     {
@@ -144,34 +162,33 @@ EXAMPLE("vdoc/cube-editor")
             {
                 auto const& b = e.as_mouse_button();
                 if (b.button == sr::mouse_button::left && b.is_down)
-                    selected = pick(doc.value().visible(), camera, app->vertical_fov(), b.cursor_pos,
-                                    app->viewport());
+                    selected = pick(doc.value().current(), camera, app->vertical_fov(), b.cursor_pos, app->viewport());
                 if (b.button == sr::mouse_button::right)
-                    dragging = b.is_down;
+                    orbiting = b.is_down;
             }
-            else if (e.is_mouse_move() && dragging)
+            else if (e.is_mouse_move() && orbiting)
                 camera.orbit(e.as_mouse_move().delta);
             else if (e.is_mouse_wheel())
                 camera.zoom(e.as_mouse_wheel().delta[1]);
         }
 
         ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(340, 480), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(360, 520), ImGuiCond_FirstUseEver);
         ImGui::Begin("cube editor");
 
         ImGui::TextUnformatted("left-click a cube to select, right-drag to orbit, scroll to zoom");
         ImGui::Separator();
 
         ImGui::SeparatorText("scene");
-        ImGui::Text("%d cubes", int(doc.value().visible().entities().size()));
-        if (ImGui::Button("add a cube") && doc.value().is_editable())
+        ImGui::Text("%d cubes", int(doc.value().current().entities().size()));
+        if (ImGui::Button("add a cube"))
             selected = doc.value().add_cube({.center = camera.target, .half_extent = 0.8f}, {});
 
         ImGui::SeparatorText("selection");
         draw_inspector(doc.value(), selected);
 
-        ImGui::SeparatorText("history");
-        draw_history(doc.value());
+        ImGui::SeparatorText("timeline");
+        draw_timeline(doc.value());
 
         ImGui::SeparatorText("file");
         ImGui::Text("saved: %s", doc.value().is_saved() ? "yes" : "no");
@@ -182,13 +199,12 @@ EXAMPLE("vdoc/cube-editor")
 
         ImGui::End();
 
-        app->end_frame(doc.value().visible(), camera, selected);
+        app->end_frame(doc.value().current(), camera, selected);
     }
 
     doc.value().store_camera(camera);
     doc.value().save();
-    cc::println("{} revisions in the document; reopen to find it exactly as you left it",
-                doc.value().history().size());
+    cc::println("{} revisions in the document; reopen to find it exactly as you left it", doc.value().timeline().size());
 }
 
 #endif // SR_HAS_WINDOW

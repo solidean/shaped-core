@@ -15,6 +15,7 @@ sc_add_example(vdoc-cube-editor-example
     cube_renderer.cc
     example-viewer.cc
     example-editor.cc
+    document-test.cc
     LINK
     versioned-document
     versioned-document-file

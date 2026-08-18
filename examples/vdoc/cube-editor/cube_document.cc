@@ -16,7 +16,7 @@ constexpr cc::string_view main_ref = "main";
 constexpr cc::string_view camera_key = "viewport/camera";
 constexpr i32 camera_version = 1;
 
-/// The op's label, which is what the history slider shows.
+/// The op's label, which is what the timeline shows.
 /// Metadata is free-form and informational — and still hashed into the op id, so it is part of what is versioned.
 [[nodiscard]] vdoc::value label_metadata(cc::string_view label)
 {
@@ -75,22 +75,20 @@ cc::optional<document> document::open(cc::string_view path)
         return cc::nullopt;
     }
 
-    out._registry = make_registry();
-    out._policy = vdoc::default_parse_policy::create_with_registry(out._registry);
+    out._policy = vdoc::default_parse_policy::create_with_registry(registry());
 
     if (auto const* const head = out._file->refs().get_ptr(main_ref))
         out._head = *head;
 
-    auto const raw = out._file->ops().materialize(out._head, out._file->snapshot_cache());
-    out._doc = vdoc::parse(raw, out._policy, out._report);
+    out.reparse();
 
-    // One snapshot pinned after the load, then advanced on every accepted op.
-    // That is what keeps an edit ~10 us whatever the document's size: a build and a materialization never walk
-    // further back than one op.
+    // One snapshot pinned after the load, then advanced onto every op accepted as history.
+    // That is what keeps an edit ~10 us whatever the document's size: a build and a materialization never walk further
+    // back than one op.
     // A file with no ops yet has nothing to snapshot; the first commit installs it instead.
     if (out._file->ops().find(out._head) != nullptr)
         vdoc::install_snapshot(out._file->ops(), out._head, out._file->snapshot_cache());
-    out.rebuild_history();
+    out.rebuild_timeline();
 
     if (out._doc.entities().empty())
     {
@@ -105,59 +103,98 @@ cc::optional<document> document::open(cc::string_view path)
     return out;
 }
 
-void document::commit(vdoc::op_builder&& stage, cc::string_view label)
+void document::reparse()
 {
-    CC_ASSERT(this->is_editable(), "an edit while a past revision is shown would fork history behind the user's back");
+    auto const raw = _file->ops().materialize(_head, _file->snapshot_cache());
+    _report = vdoc::parse_report();
+    _doc = vdoc::parse(raw, _policy, _report);
+}
 
+void document::commit(vdoc::op_builder&& stage, cc::string_view label, bool transient)
+{
     auto const& graph = _file->ops();
 
     // An empty parent list means "a new document", so the very first op must have one — passing the default op_id
-    // would make the root descend from an op that does not exist, and every history walk would then run off the end.
+    // would make the root descend from an op that does not exist, and every timeline walk would run off the end.
     auto const has_history = graph.find(_head) != nullptr;
     auto const parents = has_history ? cc::span<vdoc::op_id const>(&_head, 1) : cc::span<vdoc::op_id const>();
 
     // The cache overload: the diff walk terminates at the pinned snapshot instead of replaying the whole history.
     auto op = cc::move(stage).set_parents(parents).set_metadata(label_metadata(label)).build(graph, _file->snapshot_cache());
 
+    // build() diffs, so re-setting an unchanged property emits nothing — but an op with no assignments is still an op,
+    // with its own id and its own place in the DAG. Refusing it here is what keeps "drag it and put it back" out of
+    // the history entirely.
+    if (has_history && op.assignments().at_end())
+        return;
+
     auto const previous = _head;
     _head = _file->add_op(cc::move(op));
-    if (has_history && _head == previous)
-        return; // the edit changed nothing, so the builder emitted no assignments and add() collapsed it
 
-    if (has_history)
+    if (!has_history)
     {
-        vdoc::advance_snapshot(graph, _file->snapshot_cache(), previous, _head);
-
-        auto changes = vdoc::change_summary();
-        _doc = vdoc::apply(cc::move(_doc), graph, previous, _head, _policy, _report, changes,
-                           {.cache = &_file->snapshot_cache()});
+        // The first op has nothing to evolve from, so it is a plain parse — and the snapshot every later edit
+        // advances from is installed here.
+        this->reparse();
+        vdoc::install_snapshot(graph, _head, _file->snapshot_cache());
     }
     else
     {
-        // The first op has nothing to evolve from, so it is a plain parse — and the snapshot the edit loop advances
-        // from every frame after this one is installed here.
-        auto const raw = graph.materialize(_head, _file->snapshot_cache());
-        _doc = vdoc::parse(raw, _policy, _report);
-        vdoc::install_snapshot(graph, _head, _file->snapshot_cache());
+        // A single-parent child of where the document currently is, which is exactly what the fast path wants — and
+        // the reason a drag chains its frames rather than fanning them off one parent.
+        auto changes = vdoc::change_summary();
+        _doc = vdoc::apply(cc::move(_doc), graph, previous, _head, _policy, _report, changes,
+                           {.cache = &_file->snapshot_cache()});
+
+        // Only an op accepted as history may carry the snapshot: a drag frame is about to be dropped, and a snapshot
+        // sitting on a dropped op would leave the next materialization with nothing to terminate at.
+        if (!transient)
+            vdoc::advance_snapshot(graph, _file->snapshot_cache(), previous, _head);
     }
 
-    _history.push_back(_head);
+    if (transient)
+        return;
+
+    this->push_revision(label);
+}
+
+void document::push_revision(cc::string_view label)
+{
+    // Committing from a past revision abandons whatever followed it — an ordinary undo-then-edit.
+    // The abandoned ops stay in the graph, reachable by nothing, which is all "abandoned" means here.
+    // `_revision` is -1 while the timeline is empty, so the first revision truncates to nothing rather than growing.
+    _timeline.resize_down_to(_revision + 1);
+    _labels.resize_down_to(_revision + 1);
+
+    _timeline.push_back(_head);
     _labels.push_back(cc::string(label));
-    _revision = int(_history.size()) - 1;
+    _revision = int(_timeline.size()) - 1;
 }
 
 void document::set_placement(vdoc::entity_id entity, placement p, cc::string_view label)
 {
     auto stage = vdoc::op_builder{};
     stage.set(entity, p);
-    this->commit(cc::move(stage), label);
+    this->note_touched(entity);
+    this->commit(cc::move(stage), label, this->is_editing_continuously());
 }
 
 void document::set_style(vdoc::entity_id entity, style s, cc::string_view label)
 {
     auto stage = vdoc::op_builder{};
     stage.set(entity, s);
-    this->commit(cc::move(stage), label);
+    this->note_touched(entity);
+    this->commit(cc::move(stage), label, this->is_editing_continuously());
+}
+
+void document::note_touched(vdoc::entity_id entity)
+{
+    if (!_edit_origin.has_value())
+        return;
+    for (auto const seen : _touched)
+        if (seen == entity)
+            return;
+    _touched.push_back(entity);
 }
 
 vdoc::entity_id document::add_cube(placement p, style s)
@@ -178,29 +215,112 @@ vdoc::entity_id document::add_cube(placement p, style s)
 void document::remove(vdoc::entity_id entity)
 {
     // Deletion is interpretation, not storage: this writes $alive = false and removes nothing.
-    // Which is exactly why scrubbing back through the history brings the cube straight back.
+    // Which is exactly why moving back down the timeline brings the cube straight back.
     auto stage = vdoc::op_builder{};
     stage.remove_entity(entity);
     this->commit(cc::move(stage), cc::format("delete {}", entity.as_string_view()));
 }
 
-void document::rebuild_history()
+void document::begin_continuous_edit()
 {
-    _history.clear();
+    if (_edit_origin.has_value())
+        return;
+    _edit_origin = _head;
+    _touched.clear();
+}
+
+void document::stage_current_state(vdoc::op_builder& stage, vdoc::entity_id entity) const
+{
+    auto const* const p = _doc.get<placement>(entity);
+    auto const* const s = _doc.get<style>(entity);
+
+    // An entity the drag removed has neither, and the collapse must say so rather than silently keeping it.
+    if (p == nullptr && s == nullptr)
+    {
+        stage.remove_entity(entity);
+        return;
+    }
+    if (p != nullptr)
+        stage.set(entity, *p);
+    if (s != nullptr)
+        stage.set(entity, *s);
+}
+
+void document::end_continuous_edit(cc::string_view label)
+{
+    if (!_edit_origin.has_value())
+        return;
+
+    auto const origin = _edit_origin.value();
+    _edit_origin = cc::nullopt;
+
+    if (_touched.empty() || _head == origin)
+    {
+        _touched.clear();
+        return; // the drag never changed anything
+    }
+
+    auto const& graph = _file->ops();
+
+    // One op from where the drag started to where it ended.
+    // op_builder diffs against its parents, so staging the final state of every touched entity against `origin`
+    // yields exactly the net change and nothing in between — which is why the history gets one entry for a drag
+    // that produced hundreds of frames.
+    auto stage = vdoc::op_builder{};
+    for (auto const entity : _touched)
+        this->stage_current_state(stage, entity);
+
+    auto op = cc::move(stage)
+                  .set_parents(cc::span<vdoc::op_id const>(&origin, 1))
+                  .set_metadata(label_metadata(label))
+                  .build(graph, _file->snapshot_cache());
+
+    // A drag that ended where it started diffs to nothing against `origin`, and then the whole gesture is simply not
+    // history: the frames are dropped and the current op goes back to where the drag began.
+    auto const collapsed = op.assignments().at_end() ? origin : _file->add_op(cc::move(op));
+
+    // Forget the frames. They were never history and were never published — nothing descends from them, which is
+    // exactly the situation drop_leaf is for. Newest first, since a leaf is all it will remove.
+    // `collapsed` is skipped: a drag that ended where its first frame already was produces the very same op.
+    for (auto id = _head; id != origin;)
+    {
+        auto const* const frame = graph.find(id);
+        if (frame == nullptr || frame->parents.empty())
+            break;
+        auto const parent = frame->parents[0];
+        if (id != collapsed)
+            (void)_file->drop_leaf_op(id);
+        id = parent;
+    }
+
+    // The collapsed op produces the same document the last frame did, so `_doc` is already the document at it.
+    _head = collapsed;
+    _touched.clear();
+
+    if (collapsed == origin)
+        return; // nothing changed, so there is no revision to record and no snapshot to move
+
+    vdoc::advance_snapshot(graph, _file->snapshot_cache(), origin, _head);
+    this->push_revision(label);
+}
+
+void document::rebuild_timeline()
+{
+    _timeline.clear();
     _labels.clear();
 
-    // A file with no `main` ref yet has no head and therefore no history — not one revision that does not exist.
+    // A file with no `main` ref yet has no head and therefore no timeline — not one revision that does not exist.
     auto const& graph = _file->ops();
     if (graph.find(_head) == nullptr)
     {
-        _revision = 0;
+        _revision = -1; // no revisions at all, which is not the same as being parked on the first one
         return;
     }
 
     for (auto id = _head;;)
     {
         auto const* const op = graph.find(id);
-        _history.push_back(id);
+        _timeline.push_back(id);
         _labels.push_back(label_of(op));
 
         if (op == nullptr || op->parents.empty())
@@ -208,13 +328,13 @@ void document::rebuild_history()
         id = op->parents[0]; // single-user file, so first-parent ancestry IS the history
     }
 
-    // Walked newest-first; the slider reads oldest-first.
-    for (auto i = isize(0), j = _history.size() - 1; i < j; ++i, --j)
+    // Walked newest-first; the timeline reads oldest-first.
+    for (auto i = isize(0), j = _timeline.size() - 1; i < j; ++i, --j)
     {
-        cc::swap(_history[i], _history[j]);
+        cc::swap(_timeline[i], _timeline[j]);
         cc::swap(_labels[i], _labels[j]);
     }
-    _revision = int(_history.size()) - 1;
+    _revision = int(_timeline.size()) - 1;
 }
 
 cc::string_view document::revision_label(int index) const
@@ -226,22 +346,20 @@ cc::string_view document::revision_label(int index) const
 
 void document::show_revision(int index)
 {
-    index = cc::clamp(index, 0, int(_history.size()) - 1);
-    _revision = index;
-
-    if (index == int(_history.size()) - 1)
-    {
-        _preview = cc::nullopt; // back at the head, so editing is live again
+    if (_timeline.empty())
         return;
-    }
 
-    // An arbitrary jump re-materializes and re-parses: vdoc::apply's fast path is forward-only along a single-parent
-    // chain within max_chain_ops.
-    // Fine for scrubbing an example's history, and NOT the pattern for a real editor's undo stack, which walks one op
-    // at a time and stays on that fast path.
-    auto const raw = _file->ops().materialize(_history[index], _file->snapshot_cache());
-    _preview_report = vdoc::parse_report();
-    _preview = vdoc::parse(raw, _policy, _preview_report);
+    index = cc::clamp(index, 0, int(_timeline.size()) - 1);
+    if (index == _revision)
+        return;
+
+    _revision = index;
+    _head = _timeline[index];
+
+    // Re-materialized and re-parsed rather than applied: vdoc::apply's fast path is forward-only along a single-parent
+    // chain, so it cannot serve a move backwards at all, and a long jump forwards falls back to this anyway.
+    // Correct in both directions, and the honest cost of scrubbing to an arbitrary point.
+    this->reparse();
 }
 
 void document::save()
@@ -287,11 +405,15 @@ cc::optional<orbit_camera> document::load_camera() const
     return cam;
 }
 
-vdoc::component_registry make_registry()
+vdoc::component_registry const& registry()
 {
-    auto registry = vdoc::component_registry();
-    registry.register_component<placement>();
-    registry.register_component<style>();
-    return registry;
+    static auto const the_registry = []
+    {
+        auto r = vdoc::component_registry();
+        r.register_component<placement>();
+        r.register_component<style>();
+        return r;
+    }();
+    return the_registry;
 }
 } // namespace cube_editor
