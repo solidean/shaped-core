@@ -311,6 +311,8 @@ template <class T, class E = async_error>
 struct async_context;
 template <class T, class E = async_error>
 struct async;
+template <class T, class E = async_error>
+struct async_lazy; // the lazy coroutine return type (thread/async_coroutine.hh)
 
 /// The normal async handle: an 8 B intrusive cc::shared_ptr over one slab node (see thread/async.hh).
 template <class T, class E = async_error>
