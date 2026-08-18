@@ -48,7 +48,12 @@ constexpr int cube_index_count = 36;
     for (auto face = 0; face < 6; ++face)
     {
         auto const base = u16(face * 4);
-        u16 const quad[] = {0, 1, 2, 0, 2, 3};
+
+        // Reversed relative to the corner order below, because the (u, v, n) basis those corners are laid out in is
+        // right-handed while the camera's projection is left-handed: a face wound counter-clockwise in that basis
+        // reaches the screen clockwise. sg's default front face is counter-clockwise, so the un-reversed order
+        // culls every outward face and leaves the cube inside out.
+        u16 const quad[] = {0, 2, 1, 0, 3, 2};
         for (auto i = 0; i < 6; ++i)
             out[face * 6 + i] = u16(base + quad[i]);
     }

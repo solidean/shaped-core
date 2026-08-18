@@ -79,7 +79,7 @@ struct orbit_camera
     void orbit(tg::vec2f drag)
     {
         auto const limit = tg::angle_f::make_from_degree(89.0f);
-        yaw = yaw - tg::angle_f::make_from_degree(drag[0] * 0.4f);
+        yaw = yaw + tg::angle_f::make_from_degree(drag[0] * 0.4f);
         pitch = cc::clamp(pitch + tg::angle_f::make_from_degree(drag[1] * 0.4f), -limit, limit);
     }
 
