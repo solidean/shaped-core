@@ -72,6 +72,10 @@ __pycache__/
 # ─── Misc ───────────────────────────────────────────────────
 # workdir spam
 imgui.ini
+# the vdoc cube-editor example's document, written next to whatever launched it
+cube-editor.vdoc
+cube-editor.vdoc-shm
+cube-editor.vdoc-wal
 # macos
 *.DS_Store
 # local scratch: handover notes, throwaway experiments

@@ -55,6 +55,19 @@ function(sc_add_example target)
     if(EX_PCH)
         sc_target_pch(${target} ${EX_PCH})
     endif()
+
+    # Stage the shared libraries an example links, so it starts when run from its own build directory.
+    # A test binary that needs this does it by hand; an example is always launched directly, so the helper owes it.
+    #
+    # The whole command sits inside the genex rather than only its arguments: TARGET_RUNTIME_DLLS is empty for most
+    # examples, and `cmake -E copy_if_different` with no sources is an error rather than a no-op.
+    # An empty COMMAND is skipped instead.
+    if(WIN32)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "$<$<BOOL:$<TARGET_RUNTIME_DLLS:${target}>>:${CMAKE_COMMAND};-E;copy_if_different;$<TARGET_RUNTIME_DLLS:${target}>;$<TARGET_FILE_DIR:${target}>>"
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endfunction()
 
 function(sc_add_single_file_examples prefix)
