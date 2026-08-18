@@ -11,6 +11,7 @@ docs/guides/examples.md is the concept behind all of it.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -36,6 +37,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
     p.add_argument("--timeout", type=float, default=0.0, metavar="SECS",
                    help="Kill the example after SECS (default: 0, no limit — an example may be interactive)")
+    p.add_argument("--background", action="store_true",
+                   help="Ask the example not to steal focus: its windows appear without being activated. "
+                        "Sets SC_REQUEST_BACKGROUND=1, which sr::window_system reads (sr::background_request_env_var).")
     p.add_argument("match", nargs="?",
                    help="Example name, or a substring of one. Must select exactly one; omit to list them all.")
     # Everything dev.py does not recognize is forwarded verbatim to the example, collected into args.runner_args.
@@ -84,12 +88,18 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     print(console.dim(f"{example.name}  ({example.target}, {example.file}:{example.line})"), file=sys.stderr)
 
+    # An environment variable rather than a flag: the example binary is a program dev.py did not write, and nexus has no say over what a window system does.
+    # sr::window_system reads this one; see docs/guides/examples.md.
+    env = None
+    if args.background:
+        env = {**os.environ, "SC_REQUEST_BACKGROUND": "1"}
+
     # The exact name plus the bucket flag: an example is never swept, so it must be named to run.
     # Mirrored, because watching the example run is the entire point of the command.
     result = dev.run_step(
         [str(artifact), example.name, "--examples", *program_args],
         step_type="example", name=example.target,
-        build_dir=preset.build_dir, cwd=ctx.root,
+        build_dir=preset.build_dir, cwd=ctx.root, env=env,
         timeout=args.timeout if args.timeout else None,
         mirror=True, verbose=args.verbose,
     )

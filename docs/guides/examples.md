@@ -34,6 +34,21 @@ The match never does.
 Anything `dev.py` does not recognize is forwarded to the example, so `dev.py example x -- --my-flag` reaches its `main`.
 There is deliberately **no `--all`**: executing the whole corpus would open every window it has, and nobody wants that.
 
+### `--background`, for a run that should not take over the screen
+
+`dev.py example <match> --background` asks a graphical example to appear without stealing the foreground.
+Its windows are shown without being activated and sunk to the bottom of the z-order, so the run is watchable while you keep working.
+Clicking one brings it forward and leaves it there.
+
+The mechanism is an environment variable, `SC_REQUEST_BACKGROUND`.
+`sr::window_system_description::background` defaults from it — see [sr::background_request_env_var](../../libs/graphics/shaped-rendering/src/shaped-rendering/window.hh).
+An env var rather than an API because `dev.py` launches a program it did not write, and neither nexus nor the example itself is in the conversation.
+It is an escape hatch, named in one place so a real API can replace it later without hunting for `getenv` calls.
+The shared reader is `cc::is_environment_flag_set` ([clean-core/platform/environment.hh](../../libs/base/clean-core/src/clean-core/platform/environment.hh)).
+Preview rendering will use the same convention.
+
+An example that constructs its own `window_system_description` can override it in either direction; one that does not gets the environment's answer for free.
+
 ## Declaring one
 
 ```cpp
