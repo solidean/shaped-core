@@ -7,10 +7,8 @@
 // - sequence entry points
 // - retyping APIs
 // - equality, order, hashing
-// - insert/emplace at arbitrary positions
 // - contains/contains_where/find/find_where/count/count_where
 // - sort
-// - assign (replace parts of content)
 
 
 /// Dynamically allocated vector of T elements with value semantics.
@@ -72,6 +70,13 @@ public:
     using base::push_back_range_stable; // append a range at back (requires capacity)
     using base::push_back_stable;       // add element at back (requires capacity)
 
+    // insertion at a position
+public:
+    using base::emplace_at;      // construct element at index (idx == size() appends)
+    using base::insert_at;       // insert element at index (idx == size() appends)
+    using base::insert_range_at; // insert a sized range at index -> span of inserted elements
+    using base::replace_range;   // replace [start, start+count) with a sized range, moving the tail once
+
     // single element removal
 public:
     using base::pop_back;    // remove and return last element
@@ -132,10 +137,6 @@ public:
 public:
     using base::clear; // destroy all elements, size becomes 0
     using base::fill;  // fill all elements with value
-
-    // TODO: insert(Iterator pos, T const& value) - insert element at position
-    // TODO: insert(Iterator pos, T&& value) - insert element at position
-    // TODO: insert(Iterator pos, isize count, T const& value) - insert multiple copies
 
     // ctors / allocation management
 public:

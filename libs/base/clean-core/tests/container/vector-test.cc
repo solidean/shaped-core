@@ -103,6 +103,46 @@ struct TrackedMove
     }
 };
 
+// Throws out of its copy constructor once `throw_after` copies have been made, to drive the insertion family's basic exception guarantee.
+// `alive` must return to 0 once everything is gone.
+struct ThrowOnCopy
+{
+    int value = 0;
+    static inline thread_local int throw_after = -1; // -1 never throws
+    static inline thread_local int copies = 0;
+    static inline thread_local int alive = 0;
+
+    static void reset_counters()
+    {
+        throw_after = -1;
+        copies = 0;
+        alive = 0;
+    }
+
+    ThrowOnCopy() { ++alive; }
+    explicit ThrowOnCopy(int v) : value(v) { ++alive; }
+
+    ThrowOnCopy(ThrowOnCopy const& rhs) : value(rhs.value)
+    {
+        if (throw_after >= 0 && copies >= throw_after)
+            throw 42;
+        ++copies;
+        ++alive;
+    }
+
+    ThrowOnCopy(ThrowOnCopy&& rhs) noexcept : value(rhs.value) { ++alive; }
+
+    ThrowOnCopy& operator=(ThrowOnCopy const&) = default;
+
+    ThrowOnCopy& operator=(ThrowOnCopy&& rhs) noexcept
+    {
+        value = rhs.value;
+        return *this;
+    }
+
+    ~ThrowOnCopy() { --alive; }
+};
+
 struct MoveOnly
 {
     MoveOnly() = default;
@@ -966,6 +1006,452 @@ TEST("vector - remove_from_to_unordered")
         CHECK(v.size() == 7);
         CHECK(v[0] == 0);
     }
+}
+
+TEST("vector - insert_at")
+{
+    SECTION("insert into middle")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i * 10); // 0 10 20 30
+
+        auto& r = v.insert_at(2, 99);
+
+        CHECK(v.size() == 5);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 10);
+        CHECK(v[2] == 99);
+        CHECK(v[3] == 20);
+        CHECK(v[4] == 30);
+        CHECK(&r == &v[2]);
+    }
+
+    SECTION("insert at front")
+    {
+        cc::vector<int> v;
+        v.push_back(1);
+        v.push_back(2);
+
+        v.insert_at(0, 0);
+
+        CHECK(v.size() == 3);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 1);
+        CHECK(v[2] == 2);
+    }
+
+    SECTION("insert at size() appends")
+    {
+        cc::vector<int> v;
+        v.push_back(1);
+
+        v.insert_at(v.size(), 2);
+
+        CHECK(v.size() == 2);
+        CHECK(v[1] == 2);
+    }
+
+    SECTION("insert into empty")
+    {
+        cc::vector<int> v;
+
+        v.insert_at(0, 7);
+
+        CHECK(v.size() == 1);
+        CHECK(v[0] == 7);
+    }
+}
+
+TEST("vector - emplace_at")
+{
+    SECTION("constructs in place")
+    {
+        cc::vector<Tracked> v;
+        v.push_back(Tracked(1));
+        v.push_back(Tracked(3));
+
+        v.emplace_at(1, 2);
+
+        REQUIRE(v.size() == 3);
+        CHECK(v[0].value == 1);
+        CHECK(v[1].value == 2);
+        CHECK(v[2].value == 3);
+    }
+
+    SECTION("argument may reference the container - in place")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+        v.reserve(64); // force the non-reallocating path
+
+        v.emplace_at(1, v[0] + 100);
+
+        REQUIRE(v.size() == 5);
+        CHECK(v[1] == 100);
+    }
+
+    SECTION("argument may reference the container - reallocating")
+    {
+        cc::vector<int> v;
+        v.reserve_exact(4);
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+
+        v.emplace_at(1, v[3] + 100); // must reallocate, and must read the OLD v[3]
+
+        REQUIRE(v.size() == 5);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 103);
+        CHECK(v[2] == 1);
+        CHECK(v[4] == 3);
+    }
+
+    SECTION("move-only element type")
+    {
+        cc::vector<TrackedMove> v;
+        v.emplace_back(1);
+        v.emplace_back(3);
+
+        v.emplace_at(1, 2);
+
+        REQUIRE(v.size() == 3);
+        CHECK(v[0].value == 1);
+        CHECK(v[1].value == 2);
+        CHECK(v[2].value == 3);
+    }
+}
+
+TEST("vector - insert_range_at")
+{
+    SECTION("insert into middle")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i); // 0 1 2 3
+
+        cc::vector<int> src;
+        src.push_back(100);
+        src.push_back(200);
+
+        auto const inserted = v.insert_range_at(2, src);
+
+        REQUIRE(v.size() == 6);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 1);
+        CHECK(v[2] == 100);
+        CHECK(v[3] == 200);
+        CHECK(v[4] == 2);
+        CHECK(v[5] == 3);
+        REQUIRE(inserted.size() == 2);
+        CHECK(inserted.data() == v.data() + 2);
+    }
+
+    SECTION("insert from a span over a C array")
+    {
+        int const source[] = {7, 8, 9};
+
+        cc::vector<int> v;
+        v.push_back(1);
+
+        v.insert_range_at(0, cc::span<int const>(source));
+
+        REQUIRE(v.size() == 4);
+        CHECK(v[0] == 7);
+        CHECK(v[2] == 9);
+        CHECK(v[3] == 1);
+    }
+
+    SECTION("insert at size() appends")
+    {
+        cc::vector<int> v;
+        v.push_back(1);
+
+        cc::vector<int> src;
+        src.push_back(2);
+        src.push_back(3);
+
+        v.insert_range_at(v.size(), src);
+
+        REQUIRE(v.size() == 3);
+        CHECK(v[2] == 3);
+    }
+
+    SECTION("empty range is a no-op")
+    {
+        cc::vector<int> v;
+        v.push_back(1);
+        v.push_back(2);
+
+        auto const inserted = v.insert_range_at(1, cc::vector<int>());
+
+        CHECK(v.size() == 2);
+        CHECK(v[0] == 1);
+        CHECK(v[1] == 2);
+        CHECK(inserted.size() == 0);
+    }
+
+    // The gap is wider than the tail, so every displaced element is move-CONSTRUCTED into raw storage and none is move-assigned.
+    // Getting that split wrong assigns onto uninitialized memory.
+    SECTION("gap wider than the tail, non-trivial elements")
+    {
+        cc::vector<Tracked> v;
+        v.push_back(Tracked(1));
+
+        cc::vector<Tracked> src;
+        for (int i = 0; i < 3; ++i)
+            src.push_back(Tracked(10 + i));
+
+        v.insert_range_at(0, src);
+
+        REQUIRE(v.size() == 4);
+        CHECK(v[0].value == 10);
+        CHECK(v[1].value == 11);
+        CHECK(v[2].value == 12);
+        CHECK(v[3].value == 1);
+    }
+}
+
+TEST("vector - replace_range")
+{
+    SECTION("replacement is longer")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 6; ++i)
+            v.push_back(i); // 0 1 2 3 4 5
+
+        cc::vector<int> src;
+        for (int i = 0; i < 4; ++i)
+            src.push_back(100 + i);
+
+        auto const window = v.replace_range(1, 2, src); // drop 1,2
+
+        REQUIRE(v.size() == 8);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 100);
+        CHECK(v[4] == 103);
+        CHECK(v[5] == 3);
+        CHECK(v[7] == 5);
+        CHECK(window.size() == 4);
+        CHECK(window.data() == v.data() + 1);
+    }
+
+    SECTION("replacement is shorter")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 6; ++i)
+            v.push_back(i);
+
+        cc::vector<int> src;
+        src.push_back(100);
+
+        v.replace_range(1, 4, src); // drop 1,2,3,4
+
+        REQUIRE(v.size() == 3);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 100);
+        CHECK(v[2] == 5);
+    }
+
+    SECTION("replacement is the same size")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+
+        cc::vector<int> src;
+        src.push_back(100);
+        src.push_back(200);
+
+        v.replace_range(1, 2, src);
+
+        REQUIRE(v.size() == 4);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 100);
+        CHECK(v[2] == 200);
+        CHECK(v[3] == 3);
+    }
+
+    SECTION("count 0 inserts")
+    {
+        cc::vector<int> v;
+        v.push_back(0);
+        v.push_back(1);
+
+        cc::vector<int> src;
+        src.push_back(9);
+
+        v.replace_range(1, 0, src);
+
+        REQUIRE(v.size() == 3);
+        CHECK(v[1] == 9);
+        CHECK(v[2] == 1);
+    }
+
+    SECTION("empty range removes")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+
+        v.replace_range(1, 2, cc::vector<int>());
+
+        REQUIRE(v.size() == 2);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 3);
+    }
+
+    SECTION("replace the whole vector")
+    {
+        cc::vector<int> v;
+        for (int i = 0; i < 3; ++i)
+            v.push_back(i);
+
+        cc::vector<int> src;
+        src.push_back(9);
+        src.push_back(8);
+
+        v.replace_range(0, v.size(), src);
+
+        REQUIRE(v.size() == 2);
+        CHECK(v[0] == 9);
+        CHECK(v[1] == 8);
+    }
+}
+
+// Exhaustive sweep over (size, start, count, new_count): every ordering off-by-one in the gap
+// primitive shows up as a wrong value, and every lifetime off-by-one as a non-zero live count.
+TEST("vector - replace_range object lifetimes")
+{
+    for (int old_size = 0; old_size <= 4; ++old_size)
+        for (int start = 0; start <= old_size; ++start)
+            for (int count = 0; count <= old_size - start; ++count)
+                for (int new_count = 0; new_count <= 4; ++new_count)
+                    for (int reserve_extra : {0, 64}) // 0 exercises reallocation, 64 the in-place path
+                    {
+                        Tracked::reset_counters();
+                        {
+                            cc::vector<Tracked> v;
+                            v.reserve(old_size + reserve_extra);
+                            for (int i = 0; i < old_size; ++i)
+                                v.push_back(Tracked(i));
+
+                            cc::vector<Tracked> src;
+                            for (int i = 0; i < new_count; ++i)
+                                src.push_back(Tracked(100 + i));
+
+                            // model the expected result independently
+                            std::vector<int> model;
+                            for (int i = 0; i < start; ++i)
+                                model.push_back(i);
+                            for (int i = 0; i < new_count; ++i)
+                                model.push_back(100 + i);
+                            for (int i = start + count; i < old_size; ++i)
+                                model.push_back(i);
+
+                            auto const window = v.replace_range(start, count, src);
+
+                            REQUIRE(v.size() == isize(model.size()));
+                            CHECK(window.size() == new_count);
+                            for (isize i = 0; i < v.size(); ++i)
+                                CHECK(v[i].value == model[size_t(i)]);
+                        }
+
+                        auto const created
+                            = Tracked::default_ctor_count + Tracked::copy_ctor_count + Tracked::move_ctor_count;
+                        CHECK(created == Tracked::dtor_count);
+                    }
+}
+
+TEST("vector - insertion allocates at most once")
+{
+    SECTION("growing insert_range_at allocates exactly once")
+    {
+        CountingResource res;
+        auto v = cc::vector<int>::create_with_resource(&res);
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+
+        cc::vector<int> src;
+        for (int i = 0; i < 100; ++i)
+            src.push_back(i);
+
+        auto const before = res.allocations;
+        v.insert_range_at(1, src);
+
+        CHECK(res.allocations - before <= 1);
+        CHECK(v.size() == 104);
+        CHECK(v[0] == 0);
+        CHECK(v[101] == 1);
+    }
+
+    SECTION("in-place insert_range_at does not allocate")
+    {
+        CountingResource res;
+        auto v = cc::vector<int>::create_with_resource(&res);
+        v.reserve(256);
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+
+        cc::vector<int> src;
+        for (int i = 0; i < 8; ++i)
+            src.push_back(i);
+
+        auto const before = res.allocations;
+        v.insert_range_at(1, src);
+
+        CHECK(res.allocations == before);
+        CHECK(v.size() == 12);
+    }
+}
+
+TEST("vector - insertion source must not alias the container")
+{
+    cc::vector<int> v;
+    for (int i = 0; i < 4; ++i)
+        v.push_back(i);
+    v.reserve(64); // the in-place path is where aliasing actually corrupts
+
+    CHECK_ASSERTS(v.insert_range_at(1, v));
+    CHECK_ASSERTS(v.replace_range(1, 1, cc::span<int const>(v).first_n(2)));
+}
+
+TEST("vector - insertion with a throwing element constructor")
+{
+    ThrowOnCopy::reset_counters();
+    {
+        cc::vector<ThrowOnCopy> v;
+        v.reserve(64); // in-place path, so the tail really is displaced before the throw
+        for (int i = 0; i < 5; ++i)
+            v.push_back(ThrowOnCopy(i));
+
+        cc::vector<ThrowOnCopy> src;
+        for (int i = 0; i < 3; ++i)
+            src.push_back(ThrowOnCopy(100 + i));
+
+        ThrowOnCopy::copies = 0;
+        ThrowOnCopy::throw_after = 2; // the third copy into the gap throws
+
+        CHECK_THROWS(v.insert_range_at(1, src));
+        ThrowOnCopy::throw_after = -1;
+
+        // Basic guarantee: head plus what was built, structurally valid and iterable.
+        REQUIRE(v.size() == 3);
+        CHECK(v[0].value == 0);
+        CHECK(v[1].value == 100);
+        CHECK(v[2].value == 101);
+
+        isize seen = 0;
+        for (auto const& e : v)
+        {
+            CC_UNUSED(e);
+            ++seen;
+        }
+        CHECK(seen == 3);
+    }
+    // The displaced tail was destroyed rather than leaked, and nothing was destroyed twice.
+    CHECK(ThrowOnCopy::alive == 0);
 }
 
 TEST("vector - remove_first_where")

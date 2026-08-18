@@ -157,6 +157,8 @@ Any container that reallocates needs `T` to be move-constructible before it can 
 **Every runtime index is checked with `CC_ASSERT`, which means checked in debug and `relwithdebinfo` and unchecked in `release`** (unless `CC_ENABLE_ASSERT_IN_RELEASE` is defined).
 An out-of-range index in a release build is undefined behavior, not a trap — the check is a development aid, not a safety guarantee.
 This covers `operator[]`, the `remove_at*` / `remove_from_to*` / subspan ranges, and the `pop_at*` family.
+The insertion family checks a *position* index rather than an element index, so `idx == size()` is in range there and means "append" — that holds for `insert_at`, `emplace_at` and `insert_range_at`.
+`replace_range(start, count, …)` takes an element range and checks `start + count <= size()` like the removals do.
 The types that check: `vector`, `array`, `unique_*`, `small_vector`, `fixed_vector`, `ringbuffer`, `fixed_ringbuffer`, `span`, `strided_span`, `pinned_data`.
 `front`/`back` assert on those too, but **not** on `fixed_array`, whose accessors are unchecked.
 
@@ -183,9 +185,12 @@ What moves them differs per family, and the difference is the reason to pick one
 * **`small_vector`** has `vector`'s reallocation behavior and its `_stable` members.
   It adds one transition the others do not have: the first spill from the inline buffer to the heap moves every element.
   A reference taken while `is_inline()` is true does not survive the spill.
-* **`fixed_vector`** never reallocates, so growth is always safe.
+* **`fixed_vector`** never reallocates, so appending is always safe.
   Removal is not: the order-preserving `remove_at` / `remove_from_to` shift the tail down, and `remove_at_unordered` moves the last element into the hole.
   References to elements after the removal point then refer to a different element.
+  Insertion in the middle is the mirror image and just as unsafe: `insert_at` / `insert_range_at` / `replace_range` shift the tail up.
+  A reference past the insertion point then refers to a different element.
+  This is the one place where "never reallocates" does not imply "references survive", and it applies to `small_vector`'s inline mode identically.
 * **`ringbuffer` and `fixed_ringbuffer`** never shift an element, which is a stronger guarantee than any of the above.
   A reference survives pushes and pops at either end, and dies only when the element itself is removed.
   The heap ring adds exactly one other way to lose one: growth, which the `_stable` members never trigger.

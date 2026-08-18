@@ -525,6 +525,33 @@ public:
     /// Appends a single character.
     void append(char c) { push_back(c); }
 
+    /// Inserts the bytes of `sv` at byte index `idx`, shifting the rest of the string up.
+    /// `sv` must NOT point into this string — copy it first if it does; replace() is the member that handles an aliasing source.
+    /// `idx == size()` is the append position and is legal.
+    /// Precondition: 0 <= idx <= size().
+    /// Stays inline while the result fits, and otherwise moves to or grows the heap allocation.
+    /// Complexity: O(size() - idx + sv.size()).
+    void insert_range_at(isize idx, string_view sv)
+    {
+        CC_ASSERT(idx >= 0 && idx <= size(), "insert_range_at index out of bounds");
+
+        if (sv.empty())
+            return;
+
+        CC_ASSERT(sv.data() + sv.size() <= data() || sv.data() >= data() + size(),
+                  "insert_range_at source must not point into this string — copy it first");
+
+        auto const old_size = size();
+        resize_to_uninitialized(old_size + sv.size()); // owns the inline-to-heap move and any growth
+        auto* const d = data();                        // re-read, since the resize above may have reallocated
+        cc::memmove(d + idx + sv.size(), d + idx, size_t(old_size - idx));
+        cc::memcpy(d + idx, sv.data(), size_t(sv.size()));
+    }
+
+    /// Inserts a single character at byte index `idx`, shifting the rest of the string up.
+    /// See insert_range_at for guarantees and complexity.
+    void insert_at(isize idx, char c) { insert_range_at(idx, string_view(&c, 1)); }
+
     /// Appends the contents of a string_view and returns *this for chaining.
     string& operator+=(string_view sv)
     {

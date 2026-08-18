@@ -7,11 +7,8 @@
 // - sequence entry points
 // - retyping APIs
 // - equality, order, hashing
-// - insert/emplace at arbitrary positions
-// - push_back_range
 // - contains/contains_where/find/find_where/count/count_where
 // - sort
-// - assign (replace parts of content)
 
 
 /// Dynamically allocated vector of T elements with move-only semantics.
@@ -66,10 +63,19 @@ public:
 
     // appending operations
 public:
-    using base::emplace_back;        // construct element at back (with allocation if needed)
-    using base::emplace_back_stable; // construct element at back (requires capacity)
-    using base::push_back;           // add element at back (with allocation if needed)
-    using base::push_back_stable;    // add element at back (requires capacity)
+    using base::emplace_back;           // construct element at back (with allocation if needed)
+    using base::emplace_back_stable;    // construct element at back (requires capacity)
+    using base::push_back;              // add element at back (with allocation if needed)
+    using base::push_back_range;        // append a range at back (sized range -> one reservation)
+    using base::push_back_range_stable; // append a range at back (requires capacity)
+    using base::push_back_stable;       // add element at back (requires capacity)
+
+    // insertion at a position
+public:
+    using base::emplace_at;      // construct element at index (idx == size() appends)
+    using base::insert_at;       // insert element at index (idx == size() appends)
+    using base::insert_range_at; // insert a sized range at index -> span of inserted elements
+    using base::replace_range;   // replace [start, start+count) with a sized range, moving the tail once
 
     // single element removal
 public:

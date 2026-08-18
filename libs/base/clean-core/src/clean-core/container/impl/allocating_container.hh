@@ -2,6 +2,7 @@
 
 #include <clean-core/common/hash.hh> // derived containers define structural-hash hidden friends
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/span.hh> // the insertion family returns a span over the inserted elements
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/allocation.hh>
 
@@ -63,6 +64,18 @@
 /// Any reallocation invalidates pointers, references, and iterators.
 ///
 /// Design favors predictable behavior over preserving values when moves throw.
+///
+/// The insertion family — emplace_at, insert_at, insert_range_at, replace_range — differs, and must not be read off the paragraphs above.
+///
+/// emplace_at and insert_at are STRONG against a throwing T(args...): the element is built into a temporary before anything moves, so a failure leaves size, live range and every value untouched.
+///
+/// insert_range_at and replace_range are BASIC.
+/// If an element's copy or move constructor throws partway, the container is left holding the head plus the elements built so far — structurally valid, correctly sized and fully iterable.
+/// The tail that was displaced to make room is destroyed rather than leaked.
+/// The tail's VALUES are lost.
+/// Buffering the whole range to do better is the caller's call, not ours.
+///
+/// Where an insertion reallocates it is strong against everything except a throwing move, since the entire result is built in the new buffer and the old one is only released at the very end.
 template <class T, class ContainerT>
 struct cc::allocating_container
 {
@@ -321,6 +334,113 @@ private:
         // Replace the current allocation
         // This destroys _data (cleaning up the moved-from old elements) and adopts new_allocation
         _data = cc::move(new_allocation);
+    }
+
+    /// Scratch state threaded from _resize_gap_begin to _resize_gap_finalize.
+    ///
+    /// Its destructor is the unwind path.
+    /// While a gap is open the container's live range covers only the head, and the tail sits above the gap alive but unowned.
+    /// If the caller's element construction throws in between, this destroys that tail rather than leaking it.
+    /// The container is then structurally valid, truncated to the head plus whatever was filled.
+    /// On the reallocating path `new_allocation` cleans up the same way, and the container is left untouched.
+    struct gap_scratch
+    {
+        cc::allocation<T> new_allocation; // valid only when begin had to build a fresh buffer
+        T* displaced_start = nullptr;     // the in-place path's relocated tail, unowned until finalize re-adopts it
+        T* displaced_end = nullptr;
+        isize start = 0;
+        isize old_count = 0;
+
+        gap_scratch() = default;
+        gap_scratch(gap_scratch const&) = delete;
+        gap_scratch& operator=(gap_scratch const&) = delete;
+        ~gap_scratch() { impl::destroy_objects_in_reverse(displaced_start, displaced_end); }
+    };
+
+    /// Opens a window of `new_count` RAW slots at index `start`, replacing the `old_count` live elements sitting there, and returns the cursor to construct through.
+    /// The tail behind the replaced run moves exactly once, in whichever direction it needs to go, on both the in-place and the reallocating path.
+    ///
+    /// While the window is open the container's live range is deliberately only [obj_start, obj_start + start).
+    /// The tail has already been relocated to its final position but is NOT owned by the container, so a throwing element construction truncates it instead of leaving raw slots inside a live range.
+    /// `scratch`'s destructor destroys that tail on unwind, and _resize_gap_finalize re-adopts it on success.
+    ///
+    /// Preconditions: 0 <= start, 0 <= old_count, start + old_count <= size() and 0 <= new_count must hold.
+    ///
+    /// Usage pattern (begin/finalize sandwich, mirroring ensure_capacity_back_begin):
+    ///   gap_scratch scratch;
+    ///   auto p_obj_end = this->_resize_gap_begin(scratch, start, old_count, new_count);
+    ///   auto* const gap = *p_obj_end;
+    ///   for (...) { new (cc::placement_new, *p_obj_end) T(...); (*p_obj_end)++; }
+    ///   this->_resize_gap_finalize(scratch);
+    [[nodiscard]] constexpr T** _resize_gap_begin(gap_scratch& scratch, isize start, isize old_count, isize new_count)
+    {
+        CC_ASSERT(0 <= start && 0 <= old_count && start + old_count <= size(), "gap range out of bounds");
+        CC_ASSERT(0 <= new_count, "gap size must be non-negative");
+
+        scratch.start = start;
+        scratch.old_count = old_count;
+
+        auto const old_size = size();
+        auto const tail_count = old_size - start - old_count;
+        auto const delta = new_count - old_count;
+
+        if (delta > 0 && !has_capacity_back_for(delta)) [[unlikely]]
+        {
+            // Same growth policy as ensure_capacity_back_begin, down to the slack and the in-place attempt.
+            auto const new_capacity_front = container_t::uses_capacity_front ? capacity_front() : 0;
+            auto const new_size_request_min = allocating_container::alloc_grow_size_for(
+                (new_capacity_front + old_size) * sizeof(T), (new_capacity_front + old_size + delta) * sizeof(T));
+            auto const new_size_request_max = new_size_request_min + cc::min(new_size_request_min, alloc_max_slack);
+
+            if (!_data.try_resize_alloc_inplace(new_size_request_min, new_size_request_max))
+            {
+                scratch.new_allocation = cc::allocation<T>::create_empty_bytes(
+                    new_size_request_min, new_size_request_max, alloc_alignment(), _data.custom_resource,
+                    new_capacity_front);
+
+                // Park the new allocation's live range exactly where the gap belongs, so it owns only the elements the caller is about to build.
+                // A throw there destroys just those and leaves *this completely untouched, which is also what keeps the old elements readable for the whole construction phase.
+                // Finalize then moves the head down in front of them and the tail up behind them, each landing directly in its final position.
+                scratch.new_allocation.obj_start += start;
+                scratch.new_allocation.obj_end = scratch.new_allocation.obj_start;
+                return &scratch.new_allocation.obj_end;
+            }
+            // the in-place widening succeeded, so fall through with the room we now have
+        }
+
+        auto* const gap = _data.obj_start + start;
+        impl::resize_object_window(gap, old_count, new_count, tail_count);
+
+        // Hand the relocated tail to `scratch` and shrink the live range down to the head, so the open gap is never inside it.
+        scratch.displaced_start = gap + new_count;
+        scratch.displaced_end = scratch.displaced_start + tail_count;
+        _data.obj_end = gap;
+
+        return &_data.obj_end;
+    }
+
+    /// Closes the window opened by _resize_gap_begin and restores the container's live range.
+    /// Precondition: the caller has constructed into every slot of the window and advanced the returned cursor past it.
+    constexpr void _resize_gap_finalize(gap_scratch& scratch)
+    {
+        if (scratch.new_allocation.is_valid()) [[unlikely]]
+        {
+            auto* const head_start = _data.obj_start;
+            auto* const head_end = _data.obj_start + scratch.start;
+            auto* const tail_start = head_end + scratch.old_count;
+
+            // Reverse for the head, so a throwing move still leaves new_allocation holding one contiguous live range.
+            impl::move_create_objects_to_reverse(scratch.new_allocation.obj_start, head_start, head_end);
+            impl::move_create_objects_to(scratch.new_allocation.obj_end, tail_start, _data.obj_end);
+
+            // Adopting the new allocation destroys the old one, and with it the replaced elements — which is exactly why they stayed readable throughout the construction phase.
+            _data = cc::move(scratch.new_allocation);
+            return;
+        }
+
+        CC_ASSERT(_data.obj_end == scratch.displaced_start, "the gap was not filled completely");
+        _data.obj_end = scratch.displaced_end;
+        scratch.displaced_start = scratch.displaced_end = nullptr; // dismiss the unwind cleanup
     }
 
 public:
@@ -785,6 +905,127 @@ public:
     // - emplace_front
     // - push_front
     // - push_front_range
+
+    // insertions
+public:
+    /// Constructs a new element at index `idx` from `args...`, shifting everything at or after `idx` up by one, and returns a reference to it.
+    ///
+    /// The element is built into a temporary FIRST and only then moved into place.
+    /// That is what makes `v.emplace_at(i, v[0])` safe and what keeps a throwing T(args...) from changing the container at all, unlike emplace_back, which can construct straight into its destination.
+    /// `idx == size()` is the append position and is legal.
+    /// Precondition: 0 <= idx <= size().
+    /// Amortized O(size() - idx); allocates at most once.
+    /// Invalidates pointers, references and iterators at or after `idx`, and all of them if the container grew.
+    template <class... Args>
+    constexpr T& emplace_at(isize idx, Args&&... args)
+    {
+        static_assert(
+            requires { T(cc::forward<Args>(args)...); }, "emplace_at: T is not constructible from "
+                                                         "the provided argument types");
+        static_assert(std::is_move_constructible_v<T>, "emplace_at: T must be move constructible to make room for the "
+                                                       "new element");
+        CC_ASSERT(0 <= idx && idx <= size(), "emplace_at index out of bounds");
+
+        // Built before anything moves, so args may reference this container's own elements and a throwing constructor leaves the container untouched.
+        auto value = T(cc::forward<Args>(args)...);
+
+        gap_scratch scratch;
+        auto p_obj_end = this->_resize_gap_begin(scratch, idx, 0, 1);
+        auto const p = new (cc::placement_new, *p_obj_end) T(cc::move(value));
+        (*p_obj_end)++; // _after_ so exceptions in T(T&&) leave state valid
+        this->_resize_gap_finalize(scratch);
+
+        return *p;
+    }
+
+    /// Inserts a copy of `value` at index `idx`.
+    /// See emplace_at for guarantees and complexity.
+    constexpr T& insert_at(isize idx, T const& value) { return this->emplace_at(idx, value); }
+
+    /// Inserts `value` at index `idx` by move.
+    /// See emplace_at for guarantees and complexity.
+    constexpr T& insert_at(isize idx, T&& value) { return this->emplace_at(idx, cc::move(value)); }
+
+    /// Inserts every element of `range` at index `idx`, and returns the span of the newly inserted elements.
+    ///
+    /// `range` must be sized, and must not alias this container's own elements — see replace_range, which this forwards to with an empty replaced run.
+    /// `idx == size()` is the append position and is legal.
+    /// Precondition: 0 <= idx <= size().
+    /// Amortized O(size() - idx + range size); allocates at most once.
+    /// Invalidates pointers, references and iterators at or after `idx`, and all of them if the container grew.
+    template <class Range>
+    constexpr cc::span<T> insert_range_at(isize idx, Range const& range)
+    {
+        CC_ASSERT(0 <= idx && idx <= size(), "insert_range_at index out of bounds");
+        return this->replace_range(idx, 0, range);
+    }
+
+    /// Replaces the `count` elements at `start` with every element of `range`, and returns the span of the elements now occupying that position.
+    ///
+    /// The tail behind the replaced run moves exactly ONCE, whether `range` is shorter, equal or longer than what it replaces.
+    /// That single-shuffle property is the whole reason this exists next to a remove_at_range followed by an insert_range_at, which would move the tail twice.
+    ///
+    /// `range` must be SIZED, i.e. expose `.size()`.
+    /// Unlike push_back_range there is no per-element fallback for an unsized range, because the gap has to be opened before a single element can be read.
+    /// `range` must also NOT alias this container's own elements: on the non-reallocating path the tail has already been shifted by the time the range is read.
+    /// push_back_range carries no such restriction — copy the range first if it overlaps.
+    /// Precondition: 0 <= start && 0 <= count && start + count <= size().
+    /// Fast path: a contiguous range of exactly T with trivially-copyable T is copied into the gap in one `cc::memcpy`.
+    /// Amortized O(size() - start + range size); allocates at most once.
+    /// Basic exception safety, and strong when it reallocates — see the guarantees at the top of this header.
+    /// Invalidates pointers, references and iterators at or after `start`, and all of them if the container grew.
+    template <class Range>
+    constexpr cc::span<T> replace_range(isize start, isize count, Range const& range)
+    {
+        static_assert(
+            requires(Range const& r) { isize(r.size()); },
+            "replace_range / insert_range_at need a SIZED range (one exposing .size()): the gap has to be "
+            "opened before any element can be read, so there is no per-element fallback the way "
+            "push_back_range has one. Materialize the range into a cc::vector first.");
+        CC_ASSERT(0 <= start && 0 <= count && start + count <= size(), "replace_range range out of bounds");
+
+        auto const new_count = isize(range.size());
+
+        // Aliasing is only checkable for the case we can see: a contiguous range of exactly our element type.
+        // It is worth asserting rather than only documenting, because the failure is capacity-dependent — it "works" whenever the container has to grow.
+        if constexpr (requires(Range const& r) {
+                          r.data();
+                          requires std::is_same_v<std::remove_cv_t<std::remove_pointer_t<decltype(r.data())>>, T>;
+                      })
+        {
+            auto const* const p_src = range.data();
+            CC_ASSERT(new_count == 0 || p_src + new_count <= _data.obj_start || p_src >= _data.obj_end,
+                      "replace_range source must not alias the container's own elements — copy it first");
+        }
+
+        gap_scratch scratch;
+        auto p_obj_end = this->_resize_gap_begin(scratch, start, count, new_count);
+        auto* const gap = *p_obj_end;
+
+        // A contiguous range of exactly T (trivially copyable) is a bulk memory copy, no per-element ctor.
+        if constexpr (std::is_trivially_copyable_v<T> && requires(Range const& r) {
+                          r.data();
+                          requires std::is_same_v<std::remove_cv_t<std::remove_pointer_t<decltype(r.data())>>, T>;
+                      })
+        {
+            if (new_count > 0)
+                cc::memcpy(gap, range.data(), size_t(new_count) * sizeof(T));
+            *p_obj_end += new_count;
+        }
+        else
+        {
+            for (auto&& e : range)
+            {
+                new (cc::placement_new, *p_obj_end) T(cc::forward<decltype(e)>(e));
+                (*p_obj_end)++; // _after_ so a throwing element ctor leaves state valid
+            }
+            CC_ASSERT(*p_obj_end == gap + new_count, "range.size() disagreed with the elements the range yielded");
+        }
+
+        this->_resize_gap_finalize(scratch);
+
+        return cc::span<T>(gap, new_count);
+    }
 
     // removals
 public:

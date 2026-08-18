@@ -6,6 +6,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
+#include <clean-core/memory/impl/object_lifetime_util.hh> // the shared gap-resize primitive behind the insertion family
 
 #include <initializer_list>
 #include <type_traits>
@@ -204,6 +205,113 @@ public:
         new (cc::placement_new, slot) T(cc::forward<Args>(args)...);
         ++_size;
         return *slot;
+    }
+
+    /// Appends every element of `range` to the back.
+    /// Precondition: size() + <range size> <= N; a sized range checks that up front rather than one element short of the end.
+    template <class Range>
+    void push_back_range(Range const& range)
+    {
+        if constexpr (requires { isize(range.size()); })
+            CC_ASSERT(has_capacity_back_for(isize(range.size())), "push_back_range exceeds fixed_vector capacity");
+
+        for (auto&& e : range)
+            emplace_back(cc::forward<decltype(e)>(e));
+    }
+
+    // insertion at a position
+public:
+    /// Constructs an element at `idx` from `args...`, shifting everything at or after `idx` up by one, and returns a reference to it.
+    /// The element is built into a temporary first, so `v.emplace_at(i, v[0])` is safe and a throwing constructor leaves the vector unchanged.
+    /// `idx == size()` is the append position and is legal.
+    /// Precondition: 0 <= idx <= size() and size() < N.
+    /// O(size() - idx).
+    template <class... Args>
+    T& emplace_at(isize idx, Args&&... args)
+    {
+        CC_ASSERT(idx >= 0 && idx <= size(), "emplace_at index out of bounds");
+        CC_ASSERT(size() < N, "fixed_vector capacity exceeded");
+
+        // Built before anything moves, so args may reference this vector's own elements.
+        auto value = T(cc::forward<Args>(args)...);
+
+        T* const d = data();
+        isize const old_size = size();
+        cc::impl::resize_object_window(d + idx, 0, 1, old_size - idx);
+
+        // While the hole is open the tail is parked above it, alive but outside the size, so a throw truncates instead of leaking.
+        auto guard = gap_guard{.start = d + idx + 1, .end = d + old_size + 1};
+        _size = size_type(idx);
+        T* const p = new (cc::placement_new, d + idx) T(cc::move(value));
+        guard.dismiss();
+        _size = size_type(old_size + 1);
+
+        return *p;
+    }
+
+    /// Inserts a copy of `value` at `idx`.
+    /// See emplace_at for guarantees and complexity.
+    T& insert_at(isize idx, T const& value) { return emplace_at(idx, value); }
+
+    /// Inserts `value` at `idx` by move.
+    /// See emplace_at for guarantees and complexity.
+    T& insert_at(isize idx, T&& value) { return emplace_at(idx, cc::move(value)); }
+
+    /// Inserts every element of `range` at `idx`, and returns the span of the newly inserted elements.
+    /// `range` must be sized, and must not alias this vector's own elements.
+    /// Precondition: 0 <= idx <= size() and size() + <range size> <= N.
+    template <class Range>
+    cc::span<T> insert_range_at(isize idx, Range const& range)
+    {
+        CC_ASSERT(idx >= 0 && idx <= size(), "insert_range_at index out of bounds");
+        return replace_range(idx, 0, range);
+    }
+
+    /// Replaces the `count` elements at `start` with every element of `range`, and returns the span of the elements now there.
+    /// The tail behind the replaced run moves exactly once, whether `range` is shorter, equal or longer than what it replaces.
+    /// `range` must be SIZED, and must not alias this vector's own elements.
+    /// The replaced run frees room, so a full fixed_vector still takes an equal-sized replacement.
+    /// Precondition: 0 <= start && 0 <= count && start + count <= size() and size() - count + <range size> <= N.
+    template <class Range>
+    cc::span<T> replace_range(isize start, isize count, Range const& range)
+    {
+        static_assert(
+            requires(Range const& r) { isize(r.size()); },
+            "replace_range / insert_range_at need a SIZED range (one exposing .size()): the gap has to be "
+            "opened before any element can be read. Materialize the range into a cc::vector first.");
+        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "replace_range out of bounds");
+
+        isize const new_count = isize(range.size());
+        isize const old_size = size();
+        CC_ASSERT(old_size - count + new_count <= N, "replace_range exceeds fixed_vector capacity");
+
+        T* const d = data();
+
+        if constexpr (requires(Range const& r) {
+                          r.data();
+                          requires std::is_same_v<std::remove_cv_t<std::remove_pointer_t<decltype(r.data())>>, T>;
+                      })
+        {
+            auto const* const p_src = range.data();
+            CC_ASSERT(new_count == 0 || p_src + new_count <= d || p_src >= d + old_size,
+                      "replace_range source must not alias the vector's own elements — copy it first");
+        }
+
+        isize const tail_count = old_size - start - count;
+        cc::impl::resize_object_window(d + start, count, new_count, tail_count);
+
+        auto guard = gap_guard{.start = d + start + new_count, .end = d + start + new_count + tail_count};
+        _size = size_type(start);
+        for (auto&& e : range)
+        {
+            new (cc::placement_new, d + size()) T(cc::forward<decltype(e)>(e));
+            _size = size_type(size() + 1);
+        }
+        CC_ASSERT(size() == start + new_count, "range.size() disagreed with the elements the range yielded");
+        guard.dismiss();
+        _size = size_type(start + new_count + tail_count);
+
+        return cc::span<T>(d + start, new_count);
     }
 
     // single element removal
@@ -470,6 +578,17 @@ public:
 
     // implementation
 private:
+    /// Destroys the tail parked above an open insertion gap, unless it has been dismissed.
+    /// While the gap is open that tail is alive but sits outside the vector's size, so without this a throwing element constructor would skip its destructors.
+    struct gap_guard
+    {
+        T* start = nullptr;
+        T* end = nullptr;
+
+        void dismiss() { start = end = nullptr; }
+        ~gap_guard() { cc::impl::destroy_objects_in_reverse(start, end); }
+    };
+
     /// Destroys elements [new_size, size()) and sets the size.
     /// Precondition: 0 <= new_size <= size().
     void _shrink_to(isize new_size)

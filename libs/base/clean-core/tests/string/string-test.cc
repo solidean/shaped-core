@@ -1085,6 +1085,75 @@ TEST("string - replace range")
         s.replace({.offset = 0, .size = 3}, "xyz");
         CHECK(s == cc::string_view{"xyz"});
     }
+
+    // An overlapping `with` is the one case that cannot be done in place, so it must still take the rebuild path.
+    SECTION("source aliasing the string itself")
+    {
+        cc::string s = cc::string("abcdef");
+        s.replace({.offset = 0, .size = 2}, s.subview({.start = isize(3), .end = isize(6)}));
+        CHECK(s == cc::string_view{"defcdef"});
+    }
+
+    SECTION("aliasing source on a heap string")
+    {
+        cc::string s = cc::string("0123456789012345678901234567890123456789012345");
+        REQUIRE(s.size() > 39);
+        s.replace({.offset = 0, .size = 5}, s.subview({.start = isize(10), .end = isize(15)}));
+        CHECK(s == cc::string_view{"0123456789012345678901234567890123456789012345"});
+    }
+
+    SECTION("shrinking on a heap string keeps the tail")
+    {
+        cc::string s = cc::string("0123456789abcdefghijklmnopqrstuvwxyz0123456789");
+        REQUIRE(s.size() > 39);
+        s.replace({.offset = 5, .size = 20}, "-");
+        CHECK(s == cc::string_view{"01234-pqrstuvwxyz0123456789"});
+    }
+}
+
+TEST("string - insert_at / insert_range_at")
+{
+    SECTION("insert into an inline string")
+    {
+        cc::string s = cc::string("ac");
+        s.insert_range_at(1, "b");
+        CHECK(s == cc::string_view{"abc"});
+
+        s.insert_at(0, 'x');
+        CHECK(s == cc::string_view{"xabc"});
+
+        s.insert_at(s.size(), 'y');
+        CHECK(s == cc::string_view{"xabcy"});
+    }
+
+    SECTION("empty insert is a no-op")
+    {
+        cc::string s = cc::string("abc");
+        s.insert_range_at(1, "");
+        CHECK(s == cc::string_view{"abc"});
+    }
+
+    SECTION("insert that grows past the inline capacity")
+    {
+        cc::string s = cc::string("head|tail");
+        s.insert_range_at(5, "0123456789012345678901234567890123456789");
+        CHECK(s.size() == 49);
+        CHECK(s == cc::string_view{"head|0123456789012345678901234567890123456789tail"});
+    }
+
+    SECTION("insert into a heap string")
+    {
+        cc::string s = cc::string("0123456789012345678901234567890123456789012345");
+        REQUIRE(s.size() > 39);
+        s.insert_range_at(0, "xy");
+        CHECK(s == cc::string_view{"xy0123456789012345678901234567890123456789012345"});
+    }
+
+    SECTION("an aliasing source asserts")
+    {
+        cc::string s = cc::string("abcdef");
+        CHECK_ASSERTS(s.insert_range_at(0, s.subview({.start = isize(1), .end = isize(3)})));
+    }
 }
 
 TEST("string - as_span / as_bytes")

@@ -231,6 +231,28 @@ public:
         return heap_ptr()->emplace_back(cc::forward<Args>(args)...);
     }
 
+    /// Appends every element of `range` to the back.
+    /// A sized range that will not fit inline spills once, sized for the finished vector, rather than growing element by element.
+    template <class Range>
+    void push_back_range(Range const& range)
+    {
+        if constexpr (requires { isize(range.size()); })
+        {
+            auto const count = isize(range.size());
+            if (is_small() && isize(sso_size()) + count > k_inline_cap)
+                _spill_to_heap(isize(sso_size()) + count);
+        }
+
+        if (!is_small())
+        {
+            heap_ptr()->push_back_range(range);
+            return;
+        }
+
+        for (auto&& e : range)
+            emplace_back(cc::forward<decltype(e)>(e));
+    }
+
     /// Removes and returns the last element.
     /// Precondition: !empty().
     [[nodiscard]] T pop_back()
@@ -271,6 +293,116 @@ public:
     }
     T& push_back_stable(T const& value) { return emplace_back_stable(value); }
     T& push_back_stable(T&& value) { return emplace_back_stable(cc::move(value)); }
+
+    // insertion at a position
+public:
+    /// Constructs an element at `idx` from `args...`, shifting everything at or after `idx` up by one, and returns a reference to it.
+    /// The element is built into a temporary first, so `v.emplace_at(i, v[0])` stays safe across a spill to the heap.
+    /// `idx == size()` is the append position and is legal.
+    /// Precondition: 0 <= idx <= size().
+    /// O(size() - idx).
+    template <class... Args>
+    T& emplace_at(isize idx, Args&&... args)
+    {
+        CC_ASSERT(idx >= 0 && idx <= size(), "emplace_at index out of bounds");
+
+        // Built before any spill, so args may reference our own elements.
+        auto value = T(cc::forward<Args>(args)...);
+
+        if (is_small())
+        {
+            if (isize(sso_size()) < k_inline_cap)
+            {
+                isize const old_size = isize(sso_size());
+                T* const d = sso_ptr();
+                cc::impl::resize_object_window(d + idx, 0, 1, old_size - idx);
+
+                // While the hole is open the tail is parked above it, alive but outside the size, so a throw truncates instead of leaking.
+                auto guard = gap_guard{.start = d + idx + 1, .end = d + old_size + 1};
+                sso_size() = u32(idx);
+                T* const p = new (cc::placement_new, d + idx) T(cc::move(value));
+                guard.dismiss();
+                sso_size() = u32(old_size + 1);
+
+                return *p;
+            }
+            _spill_to_heap(isize(sso_size()) + 1);
+        }
+        return heap_ptr()->emplace_at(idx, cc::move(value));
+    }
+
+    /// Inserts a copy of `value` at `idx`.
+    /// See emplace_at for guarantees and complexity.
+    T& insert_at(isize idx, T const& value) { return emplace_at(idx, value); }
+
+    /// Inserts `value` at `idx` by move.
+    /// See emplace_at for guarantees and complexity.
+    T& insert_at(isize idx, T&& value) { return emplace_at(idx, cc::move(value)); }
+
+    /// Inserts every element of `range` at `idx`, and returns the span of the newly inserted elements.
+    /// `range` must be sized, and must not alias this vector's own elements.
+    /// Precondition: 0 <= idx <= size().
+    template <class Range>
+    cc::span<T> insert_range_at(isize idx, Range const& range)
+    {
+        CC_ASSERT(idx >= 0 && idx <= size(), "insert_range_at index out of bounds");
+        return replace_range(idx, 0, range);
+    }
+
+    /// Replaces the `count` elements at `start` with every element of `range`, and returns the span of the elements now there.
+    /// The tail behind the replaced run moves exactly once, whether `range` is shorter, equal or longer than what it replaces.
+    /// `range` must be SIZED, and must not alias this vector's own elements.
+    /// A replacement that shrinks the vector never leaves the inline buffer, and one that outgrows it spills exactly once.
+    /// Precondition: 0 <= start && 0 <= count && start + count <= size().
+    template <class Range>
+    cc::span<T> replace_range(isize start, isize count, Range const& range)
+    {
+        static_assert(
+            requires(Range const& r) { isize(r.size()); },
+            "replace_range / insert_range_at need a SIZED range (one exposing .size()): the gap has to be "
+            "opened before any element can be read. Materialize the range into a cc::vector first.");
+        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "replace_range out of bounds");
+
+        isize const new_count = isize(range.size());
+        isize const final_size = size() - count + new_count;
+
+        // Spill on the RESULT size rather than the current one, so a shrinking replace on a full inline buffer stays
+        // inline and a growing one allocates exactly once, already sized for the finished vector.
+        if (is_small() && final_size > k_inline_cap)
+            _spill_to_heap(final_size);
+
+        if (!is_small())
+            return heap_ptr()->replace_range(start, count, range);
+
+        isize const old_size = isize(sso_size());
+        T* const d = sso_ptr();
+
+        if constexpr (requires(Range const& r) {
+                          r.data();
+                          requires std::is_same_v<std::remove_cv_t<std::remove_pointer_t<decltype(r.data())>>, T>;
+                      })
+        {
+            auto const* const p_src = range.data();
+            CC_ASSERT(new_count == 0 || p_src + new_count <= d || p_src >= d + old_size,
+                      "replace_range source must not alias the vector's own elements — copy it first");
+        }
+
+        isize const tail_count = old_size - start - count;
+        cc::impl::resize_object_window(d + start, count, new_count, tail_count);
+
+        auto guard = gap_guard{.start = d + start + new_count, .end = d + start + new_count + tail_count};
+        sso_size() = u32(start);
+        for (auto&& e : range)
+        {
+            new (cc::placement_new, d + isize(sso_size())) T(cc::forward<decltype(e)>(e));
+            ++sso_size();
+        }
+        CC_ASSERT(isize(sso_size()) == start + new_count, "range.size() disagreed with the elements the range yielded");
+        guard.dismiss();
+        sso_size() = u32(final_size);
+
+        return cc::span<T>(d + start, new_count);
+    }
 
     /// Removes and returns the element at `idx`, preserving order.
     /// Precondition: 0 <= idx < size().
@@ -696,6 +828,17 @@ private:
         // placement-new writes the untagged resource onto the tag word => is_small() becomes false
         ::new (static_cast<void*>(_storage + k_heap_off)) data_heap(cc::move(heap));
     }
+
+    // Destroys the tail parked above an open insertion gap, unless it has been dismissed.
+    // While the gap is open that tail is alive but sits outside the vector's size, so without this a throwing element constructor would skip its destructors.
+    struct gap_guard
+    {
+        T* start = nullptr;
+        T* end = nullptr;
+
+        void dismiss() { start = end = nullptr; }
+        ~gap_guard() { cc::impl::destroy_objects_in_reverse(start, end); }
+    };
 
     // Shrink to `n` (n <= size()), destroying the trailing elements.
     void _shrink_to(isize n)

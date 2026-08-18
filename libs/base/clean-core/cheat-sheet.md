@@ -66,6 +66,10 @@ auto v = cc::vector<int>::create_defaulted(n);   // also: create_filled(n, val),
 v.push_back(x);  v.emplace_back(args...);        // append (reallocates if needed)
 v.push_back_stable(x);                           // append, asserts spare capacity (no realloc)
 v.push_back_range(rng);                          // append a whole range (sized -> single reservation); push_back_range_stable(rng) needs capacity
+v.insert_at(i, x);  v.emplace_at(i, args...);    // insert at index -> T&; i == size() appends; arg may reference v
+v.insert_range_at(i, rng);                       // insert a SIZED range at index -> cc::span<T> of what landed
+v.replace_range(start, count, rng);              // drop count at start, put rng there -> span; tail moves ONCE
+                                                 // insert_range_at / replace_range: rng must NOT alias v (asserts)
 v.pop_back();                                    // -> T (moved out);  remove_back() discards
 v.remove_at(i);  v.remove_at_unordered(i);       // erase by index (ordered / O(1) swap-with-last)
 v.remove_all_where(pred);  v.remove_all_value(x);// -> isize removed;  also remove_first/last_*
@@ -108,12 +112,14 @@ cc::variant<int, immovable>::create_emplaced<1>(7);// prvalue, so immovable alte
 #include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, N-min inline (SVO)
 cc::small_vector<int, 4> sv;                       // 48 B here; N is a MINIMUM inline cap; over-aligned T OK
 sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop_back/clear/resize/reserve
+sv.push_back_range(rng);                           // also insert_at/emplace_at/insert_range_at/replace_range
 sv.is_inline();                                    // true while still on the inline buffer (no heap held)
 sv.inline_capacity();                              // actual inline cap >= N (auto-grows to fill footprint; 9 here)
 
 #include <clean-core/container/fixed_vector.hh>  // cc::fixed_vector<T, N> — inline, N is a HARD capacity cap
 cc::fixed_vector<int, 4> fv;                       // never allocates; pushing past N ASSERTS (no heap spill)
 fv.push_back(1); fv.emplace_back(2);               // mirrors vector, minus reserve*/shrink_to_fit/extract_allocation
+fv.push_back_range(rng);                           // also insert_at/emplace_at/insert_range_at/replace_range
 fv.full();  fv.capacity();                         // -> bool;  -> N (static constexpr)
 
 #include <clean-core/container/ringbuffer.hh>     // cc::ringbuffer<T> — O(1) push/pop at BOTH ends, grows
@@ -290,7 +296,8 @@ str.subview(off / {.offset,.size} / {.start,.end});   // -> string_view (dies on
 str.substring(off / {.offset,.size} / {.start,.end}); // -> owning cc::string copy
 str.replace_all(from, to);                        // -> isize count; char/char or sv/sv (empty from = no-op)
 str.replace_first(from, to);  str.replace_last(from, to);   // -> bool; char/char or sv/sv
-str.replace({.offset,.size} / {.start,.end}, with);         // replace a range with a string_view
+str.replace({.offset,.size} / {.start,.end}, with);         // replace a range with a string_view; in place unless `with` aliases str
+str.insert_at(i, c);  str.insert_range_at(i, sv);           // insert at byte index; i == size() appends; sv must NOT alias str
 str.is_small();                                   // -> bool (currently in SSO mode)
 str.as_span();  str.as_mutable_span();            // -> span<char const> / span<char> (content only, no terminator)
 str.as_bytes();  str.as_mutable_bytes();          // -> span<byte const> / span<byte>
