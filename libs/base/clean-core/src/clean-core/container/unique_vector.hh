@@ -75,7 +75,7 @@ public:
     using base::emplace_at;      // construct element at index (idx == size() appends)
     using base::insert_at;       // insert element at index (idx == size() appends)
     using base::insert_range_at; // insert a sized range at index -> span of inserted elements
-    using base::replace_range;   // replace [start, start+count) with a sized range, moving the tail once
+    using base::replace_range;   // swap the run {.offset, .size} out for a sized range, moving the tail once
 
     // single element removal
 public:
@@ -89,8 +89,8 @@ public:
 
     // range removal
 public:
-    using base::remove_at_range;           // remove range [start, start+count) (preserves order)
-    using base::remove_at_range_unordered; // remove range [start, start+count) (O(count), does not preserve order)
+    using base::remove_at_range;           // remove the run {.offset, .size} (preserves order)
+    using base::remove_at_range_unordered; // remove the run {.offset, .size} (O(size), does not preserve order)
     using base::remove_from_to;            // remove range [start, end) (preserves order)
     using base::remove_from_to_unordered;  // remove range [start, end) (O(end-start), does not preserve order)
 

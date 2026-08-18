@@ -434,7 +434,7 @@ TEST("small_vector - ordered and unordered element removal")
     SECTION("range removal")
     {
         auto v = make();
-        v.remove_at_range(1, 2); // drop 1,2
+        v.remove_at_range({.offset = 1, .size = 2}); // drop 1,2
         CHECK(v.size() == 4);
         CHECK(v[0] == 0);
         CHECK(v[1] == 3);
@@ -612,7 +612,7 @@ TEST("small_vector - replace_range")
         cc::vector<int> src;
         src.push_back(9);
 
-        v.replace_range(1, cap - 1, src);
+        v.replace_range({.offset = 1, .size = cap - 1}, src);
 
         REQUIRE(v.size() == 2);
         CHECK(v.is_inline());
@@ -632,7 +632,7 @@ TEST("small_vector - replace_range")
         for (isize i = 0; i < cap + 4; ++i)
             src.push_back(int(10 + i));
 
-        v.replace_range(1, 1, src);
+        v.replace_range({.offset = 1, .size = 1}, src);
 
         REQUIRE(v.size() == cap + 6);
         CHECK(!v.is_inline());
@@ -666,8 +666,8 @@ TEST("small_vector - replace_range matches vector and balances lifetimes")
                         for (int i = 0; i < new_count; ++i)
                             src.push_back(Tracked(100 + i));
 
-                        v.replace_range(start, count, src);
-                        model.replace_range(start, count, src);
+                        v.replace_range({.offset = start, .size = count}, src);
+                        model.replace_range({.offset = start, .size = count}, src);
 
                         REQUIRE(v.size() == model.size());
                         for (isize i = 0; i < v.size(); ++i)

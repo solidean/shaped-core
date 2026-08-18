@@ -339,30 +339,39 @@ public:
     /// See emplace_at for guarantees and complexity.
     T& insert_at(isize idx, T&& value) { return emplace_at(idx, cc::move(value)); }
 
-    /// Inserts every element of `range` at `idx`, and returns the span of the newly inserted elements.
+    /// Inserts the elements of `range` at `idx`, and returns the span of the newly inserted elements.
+    ///
+    ///   [head][tail]  ->  [head][range][tail]        with `idx` elements in the head
+    ///
     /// `range` must be sized, and must not alias this vector's own elements.
     /// Precondition: 0 <= idx <= size().
     template <class Range>
     cc::span<T> insert_range_at(isize idx, Range const& range)
     {
         CC_ASSERT(idx >= 0 && idx <= size(), "insert_range_at index out of bounds");
-        return replace_range(idx, 0, range);
+        return replace_range({.offset = idx, .size = 0}, range);
     }
 
-    /// Replaces the `count` elements at `start` with every element of `range`, and returns the span of the elements now there.
-    /// The tail behind the replaced run moves exactly once, whether `range` is shorter, equal or longer than what it replaces.
+    /// Swaps the run of elements `r` out for the elements of `range`, and returns the span the range now occupies.
+    ///
+    ///   [head][r.size elements at r.offset][tail]  ->  [head][range][tail]
+    ///
+    /// `r.size` and `range.size()` are independent, so the vector grows or shrinks by the difference and either may be zero.
+    /// The tail behind the replaced run moves exactly once, whichever way that goes.
     /// `range` must be SIZED, and must not alias this vector's own elements.
     /// A replacement that shrinks the vector never leaves the inline buffer, and one that outgrows it spills exactly once.
-    /// Precondition: 0 <= start && 0 <= count && start + count <= size().
+    /// Precondition: 0 <= r.offset && 0 <= r.size && r.offset + r.size <= size().
     template <class Range>
-    cc::span<T> replace_range(isize start, isize count, Range const& range)
+    cc::span<T> replace_range(cc::offset_size r, Range const& range)
     {
         static_assert(
-            requires(Range const& r) { isize(r.size()); },
+            requires(Range const& r2) { isize(r2.size()); },
             "replace_range / insert_range_at need a SIZED range (one exposing .size()): the gap has to be "
             "opened before any element can be read. Materialize the range into a cc::vector first.");
-        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "replace_range out of bounds");
+        CC_ASSERT(r.offset >= 0 && r.size >= 0 && r.offset + r.size <= size(), "replace_range out of bounds");
 
+        isize const start = r.offset;
+        isize const count = r.size;
         isize const new_count = isize(range.size());
         isize const final_size = size() - count + new_count;
 
@@ -372,7 +381,7 @@ public:
             _spill_to_heap(final_size);
 
         if (!is_small())
-            return heap_ptr()->replace_range(start, count, range);
+            return heap_ptr()->replace_range(r, range);
 
         isize const old_size = isize(sso_size());
         T* const d = sso_ptr();
@@ -438,39 +447,40 @@ public:
         _shrink_to(last);
     }
 
-    /// Removes `count` elements starting at `start`, preserving order.
-    /// Precondition: start + count <= size().
-    void remove_at_range(isize start, isize count)
+    /// Removes the `r.size` elements at `r.offset`, preserving order.
+    /// Precondition: r.offset + r.size <= size().
+    void remove_at_range(cc::offset_size r)
     {
-        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range out of bounds");
-        if (count == 0)
+        CC_ASSERT(r.offset >= 0 && r.size >= 0 && r.offset + r.size <= size(), "remove_at_range out of bounds");
+        if (r.size == 0)
             return;
         T* const d = data();
-        cc::impl::compact_move_objects_backward(d + start, d + start + count, d + size());
-        _shrink_to(size() - count);
+        cc::impl::compact_move_objects_backward(d + r.offset, d + r.offset + r.size, d + size());
+        _shrink_to(size() - r.size);
     }
-    /// Removes `count` elements starting at `start` by moving trailing elements into the gap (unordered).
-    void remove_at_range_unordered(isize start, isize count)
+    /// Removes the `r.size` elements at `r.offset` by moving trailing elements into the gap (unordered).
+    void remove_at_range_unordered(cc::offset_size r)
     {
-        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range_unordered out of bounds");
-        if (count == 0)
+        CC_ASSERT(r.offset >= 0 && r.size >= 0 && r.offset + r.size <= size(), "remove_at_range_unordered out of "
+                                                                               "bounds");
+        if (r.size == 0)
             return;
         T* const d = data();
-        cc::impl::compact_move_objects_backward(d + start, d + size() - count, d + size());
-        _shrink_to(size() - count);
+        cc::impl::compact_move_objects_backward(d + r.offset, d + size() - r.size, d + size());
+        _shrink_to(size() - r.size);
     }
     /// Removes the range [start, end), preserving order.
     /// Precondition: start <= end <= size().
     void remove_from_to(isize start, isize end)
     {
         CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to out of bounds");
-        remove_at_range(start, end - start);
+        remove_at_range({.offset = start, .size = end - start});
     }
     /// Removes the range [start, end) by moving trailing elements into the gap (unordered).
     void remove_from_to_unordered(isize start, isize end)
     {
         CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to_unordered out of bounds");
-        remove_at_range_unordered(start, end - start);
+        remove_at_range_unordered({.offset = start, .size = end - start});
     }
 
     /// Removes every element for which `pred` is true (preserving order); returns the number removed.

@@ -158,7 +158,9 @@ Any container that reallocates needs `T` to be move-constructible before it can 
 An out-of-range index in a release build is undefined behavior, not a trap — the check is a development aid, not a safety guarantee.
 This covers `operator[]`, the `remove_at*` / `remove_from_to*` / subspan ranges, and the `pop_at*` family.
 The insertion family checks a *position* index rather than an element index, so `idx == size()` is in range there and means "append" — that holds for `insert_at`, `emplace_at` and `insert_range_at`.
-`replace_range(start, count, …)` takes an element range and checks `start + count <= size()` like the removals do.
+`replace_range({.offset, .size}, …)` names the run it replaces with a `cc::offset_size` and checks `offset + size <= size()` like the removals do.
+The members that take a run — `remove_at_range*` and `replace_range` — all take that struct rather than two bare `isize`s, so a call site cannot silently swap the two.
+The `remove_from_to*` pair keeps its two scalars, because its name already says which argument is which.
 The types that check: `vector`, `array`, `unique_*`, `small_vector`, `fixed_vector`, `ringbuffer`, `fixed_ringbuffer`, `span`, `strided_span`, `pinned_data`.
 `front`/`back` assert on those too, but **not** on `fixed_array`, whose accessors are unchecked.
 

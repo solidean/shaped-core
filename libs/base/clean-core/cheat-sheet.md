@@ -68,10 +68,13 @@ v.push_back_stable(x);                           // append, asserts spare capaci
 v.push_back_range(rng);                          // append a whole range (sized -> single reservation); push_back_range_stable(rng) needs capacity
 v.insert_at(i, x);  v.emplace_at(i, args...);    // insert at index -> T&; i == size() appends; arg may reference v
 v.insert_range_at(i, rng);                       // insert a SIZED range at index -> cc::span<T> of what landed
-v.replace_range(start, count, rng);              // drop count at start, put rng there -> span; tail moves ONCE
+v.replace_range({.offset = i, .size = n}, rng);  // [head][n at i][tail] -> [head][rng][tail]; n and rng.size() are
+                                                 // independent, tail moves ONCE -> span the rng now occupies
                                                  // insert_range_at / replace_range: rng must NOT alias v (asserts)
 v.pop_back();                                    // -> T (moved out);  remove_back() discards
 v.remove_at(i);  v.remove_at_unordered(i);       // erase by index (ordered / O(1) swap-with-last)
+v.remove_at_range({.offset = i, .size = n});     // erase a run; also remove_at_range_unordered
+v.remove_from_to(start, end);                    // the [start, end) spelling; also remove_from_to_unordered
 v.remove_all_where(pred);  v.remove_all_value(x);// -> isize removed;  also remove_first/last_*
 v.retain_all_where(pred);                        // keep only matching
 v.resize_to_defaulted(n);                        // also resize_to_filled/_uninitialized/_constructed,

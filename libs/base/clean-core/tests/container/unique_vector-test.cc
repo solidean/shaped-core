@@ -81,7 +81,7 @@ TEST("unique_vector - insertion family")
             v.push_back(i); // 0 1 2 3 4
 
         int const source[] = {7, 8, 9};
-        v.replace_range(1, 2, cc::span<int const>(source));
+        v.replace_range({.offset = 1, .size = 2}, cc::span<int const>(source));
 
         REQUIRE(v.size() == 6);
         CHECK(v[0] == 0);

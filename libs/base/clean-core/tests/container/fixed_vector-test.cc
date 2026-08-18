@@ -197,14 +197,14 @@ TEST("fixed_vector - remove_at preserves order; unordered swaps last")
 TEST("fixed_vector - range removal")
 {
     cc::fixed_vector<int, 8> v = {0, 1, 2, 3, 4};
-    v.remove_at_range(1, 2); // remove 1,2 -> 0 3 4
+    v.remove_at_range({.offset = 1, .size = 2}); // remove 1,2 -> 0 3 4
     CHECK(v.size() == 3);
     CHECK(v[0] == 0);
     CHECK(v[1] == 3);
     CHECK(v[2] == 4);
 
     cc::fixed_vector<int, 8> u = {0, 1, 2, 3, 4};
-    u.remove_at_range_unordered(1, 2); // fill the gap with tail -> keeps {0,3,4}
+    u.remove_at_range_unordered({.offset = 1, .size = 2}); // fill the gap with tail -> keeps {0,3,4}
     CHECK(u.size() == 3);
     CHECK(u[0] == 0);
     // the two survivors after index 0 are 3 and 4 in some order
@@ -323,13 +323,13 @@ TEST("fixed_vector - replace_range")
         src.push_back(8);
         src.push_back(9);
 
-        v.replace_range(1, 1, src); // -> 0 7 8 9 2 3
+        v.replace_range({.offset = 1, .size = 1}, src); // -> 0 7 8 9 2 3
         REQUIRE(v.size() == 6);
         CHECK(v[1] == 7);
         CHECK(v[3] == 9);
         CHECK(v[4] == 2);
 
-        v.replace_range(1, 3, cc::fixed_vector<int, 1>()); // -> 0 2 3
+        v.replace_range({.offset = 1, .size = 3}, cc::fixed_vector<int, 1>()); // -> 0 2 3
         REQUIRE(v.size() == 3);
         CHECK(v[0] == 0);
         CHECK(v[1] == 2);
@@ -347,7 +347,7 @@ TEST("fixed_vector - replace_range")
         for (int i = 0; i < 4; ++i)
             src.push_back(10 + i);
 
-        v.replace_range(0, 4, src);
+        v.replace_range({.offset = 0, .size = 4}, src);
 
         REQUIRE(v.size() == 4);
         CHECK(v[0] == 10);
@@ -364,7 +364,7 @@ TEST("fixed_vector - replace_range")
         src.push_back(1);
         src.push_back(2);
 
-        CHECK_ASSERTS(v.replace_range(0, 1, src));
+        CHECK_ASSERTS(v.replace_range({.offset = 0, .size = 1}, src));
     }
 }
 
@@ -385,7 +385,7 @@ TEST("fixed_vector - replace_range object lifetimes")
                         for (int i = 0; i < new_count; ++i)
                             src.push_back(Tracked(100 + i));
 
-                        v.replace_range(start, count, src);
+                        v.replace_range({.offset = start, .size = count}, src);
 
                         REQUIRE(v.size() == old_size - count + new_count);
                         for (int i = 0; i < start; ++i)

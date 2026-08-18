@@ -938,7 +938,7 @@ TEST("vector - remove_at_range")
         for (int i = 0; i < 10; ++i)
             v.push_back(i);
 
-        v.remove_at_range(3, 4);
+        v.remove_at_range({.offset = 3, .size = 4});
 
         CHECK(v.size() == 6);
         CHECK(v[0] == 0);
@@ -953,7 +953,7 @@ TEST("vector - remove_at_range")
         v.push_back(10);
         v.push_back(20);
 
-        v.remove_at_range(1, 0);
+        v.remove_at_range({.offset = 1, .size = 0});
 
         CHECK(v.size() == 2);
     }
@@ -985,7 +985,7 @@ TEST("vector - remove_at_range_unordered")
         for (int i = 0; i < 10; ++i)
             v.push_back(i);
 
-        v.remove_at_range_unordered(2, 3);
+        v.remove_at_range_unordered({.offset = 2, .size = 3});
 
         CHECK(v.size() == 7);
         CHECK(v[0] == 0);
@@ -1225,7 +1225,7 @@ TEST("vector - replace_range")
         for (int i = 0; i < 4; ++i)
             src.push_back(100 + i);
 
-        auto const window = v.replace_range(1, 2, src); // drop 1,2
+        auto const window = v.replace_range({.offset = 1, .size = 2}, src); // drop 1,2
 
         REQUIRE(v.size() == 8);
         CHECK(v[0] == 0);
@@ -1246,7 +1246,7 @@ TEST("vector - replace_range")
         cc::vector<int> src;
         src.push_back(100);
 
-        v.replace_range(1, 4, src); // drop 1,2,3,4
+        v.replace_range({.offset = 1, .size = 4}, src); // drop 1,2,3,4
 
         REQUIRE(v.size() == 3);
         CHECK(v[0] == 0);
@@ -1264,7 +1264,7 @@ TEST("vector - replace_range")
         src.push_back(100);
         src.push_back(200);
 
-        v.replace_range(1, 2, src);
+        v.replace_range({.offset = 1, .size = 2}, src);
 
         REQUIRE(v.size() == 4);
         CHECK(v[0] == 0);
@@ -1282,7 +1282,7 @@ TEST("vector - replace_range")
         cc::vector<int> src;
         src.push_back(9);
 
-        v.replace_range(1, 0, src);
+        v.replace_range({.offset = 1, .size = 0}, src);
 
         REQUIRE(v.size() == 3);
         CHECK(v[1] == 9);
@@ -1295,7 +1295,7 @@ TEST("vector - replace_range")
         for (int i = 0; i < 4; ++i)
             v.push_back(i);
 
-        v.replace_range(1, 2, cc::vector<int>());
+        v.replace_range({.offset = 1, .size = 2}, cc::vector<int>());
 
         REQUIRE(v.size() == 2);
         CHECK(v[0] == 0);
@@ -1312,7 +1312,7 @@ TEST("vector - replace_range")
         src.push_back(9);
         src.push_back(8);
 
-        v.replace_range(0, v.size(), src);
+        v.replace_range({.offset = 0, .size = v.size()}, src);
 
         REQUIRE(v.size() == 2);
         CHECK(v[0] == 9);
@@ -1350,7 +1350,7 @@ TEST("vector - replace_range object lifetimes")
                             for (int i = start + count; i < old_size; ++i)
                                 model.push_back(i);
 
-                            auto const window = v.replace_range(start, count, src);
+                            auto const window = v.replace_range({.offset = start, .size = count}, src);
 
                             REQUIRE(v.size() == isize(model.size()));
                             CHECK(window.size() == new_count);
@@ -1414,7 +1414,7 @@ TEST("vector - insertion source must not alias the container")
     v.reserve(64); // the in-place path is where aliasing actually corrupts
 
     CHECK_ASSERTS(v.insert_range_at(1, v));
-    CHECK_ASSERTS(v.replace_range(1, 1, cc::span<int const>(v).first_n(2)));
+    CHECK_ASSERTS(v.replace_range({.offset = 1, .size = 1}, cc::span<int const>(v).first_n(2)));
 }
 
 TEST("vector - insertion with a throwing element constructor")

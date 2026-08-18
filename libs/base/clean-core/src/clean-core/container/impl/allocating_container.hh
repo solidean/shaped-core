@@ -946,7 +946,9 @@ public:
     /// See emplace_at for guarantees and complexity.
     constexpr T& insert_at(isize idx, T&& value) { return this->emplace_at(idx, cc::move(value)); }
 
-    /// Inserts every element of `range` at index `idx`, and returns the span of the newly inserted elements.
+    /// Inserts the elements of `range` at index `idx`, and returns the span of the newly inserted elements.
+    ///
+    ///   [head][tail]  ->  [head][range][tail]        with `idx` elements in the head
     ///
     /// `range` must be sized, and must not alias this container's own elements — see replace_range, which this forwards to with an empty replaced run.
     /// `idx == size()` is the append position and is legal.
@@ -957,32 +959,41 @@ public:
     constexpr cc::span<T> insert_range_at(isize idx, Range const& range)
     {
         CC_ASSERT(0 <= idx && idx <= size(), "insert_range_at index out of bounds");
-        return this->replace_range(idx, 0, range);
+        return this->replace_range({.offset = idx, .size = 0}, range);
     }
 
-    /// Replaces the `count` elements at `start` with every element of `range`, and returns the span of the elements now occupying that position.
+    /// Swaps the run of elements `r` out for the elements of `range`, and returns the span the range now occupies.
     ///
-    /// The tail behind the replaced run moves exactly ONCE, whether `range` is shorter, equal or longer than what it replaces.
+    ///   [head][r.size elements at r.offset][tail]  ->  [head][range][tail]
+    ///
+    /// `range` replaces the run as a whole, so `r.size` and `range.size()` are independent — the container grows or
+    /// shrinks by the difference, and either may be zero.
+    /// `r.size == 0` inserts at `r.offset` without removing anything, and an empty `range` removes the run.
+    ///
+    /// The tail behind the replaced run moves exactly ONCE, whether `range` is shorter, equal or longer than the run.
     /// That single-shuffle property is the whole reason this exists next to a remove_at_range followed by an insert_range_at, which would move the tail twice.
     ///
     /// `range` must be SIZED, i.e. expose `.size()`.
     /// Unlike push_back_range there is no per-element fallback for an unsized range, because the gap has to be opened before a single element can be read.
     /// `range` must also NOT alias this container's own elements: on the non-reallocating path the tail has already been shifted by the time the range is read.
     /// push_back_range carries no such restriction — copy the range first if it overlaps.
-    /// Precondition: 0 <= start && 0 <= count && start + count <= size().
+    /// Precondition: 0 <= r.offset && 0 <= r.size && r.offset + r.size <= size().
     /// Fast path: a contiguous range of exactly T with trivially-copyable T is copied into the gap in one `cc::memcpy`.
-    /// Amortized O(size() - start + range size); allocates at most once.
+    /// Amortized O(size() - r.offset + range size); allocates at most once.
     /// Basic exception safety, and strong when it reallocates — see the guarantees at the top of this header.
-    /// Invalidates pointers, references and iterators at or after `start`, and all of them if the container grew.
+    /// Invalidates pointers, references and iterators at or after `r.offset`, and all of them if the container grew.
     template <class Range>
-    constexpr cc::span<T> replace_range(isize start, isize count, Range const& range)
+    constexpr cc::span<T> replace_range(cc::offset_size r, Range const& range)
     {
         static_assert(
-            requires(Range const& r) { isize(r.size()); },
+            requires(Range const& r2) { isize(r2.size()); },
             "replace_range / insert_range_at need a SIZED range (one exposing .size()): the gap has to be "
             "opened before any element can be read, so there is no per-element fallback the way "
             "push_back_range has one. Materialize the range into a cc::vector first.");
-        CC_ASSERT(0 <= start && 0 <= count && start + count <= size(), "replace_range range out of bounds");
+        CC_ASSERT(0 <= r.offset && 0 <= r.size && r.offset + r.size <= size(), "replace_range range out of bounds");
+
+        auto const start = r.offset;
+        auto const count = r.size;
 
         auto const new_count = isize(range.size());
 
@@ -1163,15 +1174,18 @@ public:
         _data.obj_end->~T();
     }
 
-    /// Removes a range of elements by moving trailing elements into the gap.
+    /// Removes the `r.size` elements at `r.offset` by moving trailing elements into the gap.
     /// Does not preserve relative order of elements (hence _unordered suffix).
-    /// Precondition: 0 <= start && start + count <= size().
-    /// O(count) complexity.
-    /// References and pointers to elements before start remain valid.
+    /// Precondition: 0 <= r.offset && r.offset + r.size <= size().
+    /// O(r.size) complexity.
+    /// References and pointers to elements before r.offset remain valid.
     /// More efficient than ordered removal when element order doesn't matter.
-    constexpr void remove_at_range_unordered(isize start, isize count)
+    constexpr void remove_at_range_unordered(cc::offset_size r)
     {
-        CC_ASSERT(0 <= start && start + count <= size(), "range out of bounds");
+        CC_ASSERT(0 <= r.offset && r.offset + r.size <= size(), "range out of bounds");
+
+        auto const start = r.offset;
+        auto const count = r.size;
 
         if (count == 0)
             return;
@@ -1194,16 +1208,19 @@ public:
     constexpr void remove_from_to_unordered(isize start, isize end)
     {
         CC_ASSERT(0 <= start && start <= end && end <= size(), "range out of bounds");
-        this->remove_at_range_unordered(start, end - start);
+        this->remove_at_range_unordered({.offset = start, .size = end - start});
     }
 
-    /// Removes a range of elements while preserving relative order.
-    /// Precondition: 0 <= start && start + count <= size().
+    /// Removes the `r.size` elements at `r.offset` while preserving relative order.
+    /// Precondition: 0 <= r.offset && r.offset + r.size <= size().
     /// O(n) complexity due to element compaction.
-    /// References and pointers to elements before start remain valid.
-    constexpr void remove_at_range(isize start, isize count)
+    /// References and pointers to elements before r.offset remain valid.
+    constexpr void remove_at_range(cc::offset_size r)
     {
-        CC_ASSERT(0 <= start && start + count <= size(), "range out of bounds");
+        CC_ASSERT(0 <= r.offset && r.offset + r.size <= size(), "range out of bounds");
+
+        auto const start = r.offset;
+        auto const count = r.size;
 
         if (count == 0)
             return;
@@ -1225,7 +1242,7 @@ public:
     constexpr void remove_from_to(isize start, isize end)
     {
         CC_ASSERT(0 <= start && start <= end && end <= size(), "range out of bounds");
-        this->remove_at_range(start, end - start);
+        this->remove_at_range({.offset = start, .size = end - start});
     }
 
     /// Removes all elements for which the predicate returns true.
