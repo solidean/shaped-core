@@ -9,8 +9,11 @@ EXAMPLE("clean-core/map")
     cc::map<cc::string, int> word_counts;
 
     // Heterogeneous lookup: a string_view probes a map keyed by string without materializing one.
-    // It must be a string_view and not a bare literal — every lookup deduces its probe type, and a literal deduces to char[N], which has no hash.
-    // Naming the view is the whole fix.
+    //
+    // TODO(clean-core): make a bare literal work — `word_counts["axis"]` SHOULD compile.
+    // Every lookup takes `K2 const&` and so deduces a literal to char[N], which has no hash.
+    // Naming the view is the workaround; a char[N] overload forwarding to string_view is the fix.
+    // Until then this is the sharpest edge on the most ordinary call the type has.
     cc::string_view const words[] = {"axis", "vector", "axis", "matrix", "axis", "vector"};
     for (auto const word : words)
         word_counts[word] += 1;
