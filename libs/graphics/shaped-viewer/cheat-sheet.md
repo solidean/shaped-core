@@ -261,7 +261,6 @@ sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // outp
 // The leaf routines they drive — each an sg::render_routine<> (everything that traces/draws is a routine):
 sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches the GI integrator into the UAV target (no-op if the shaders did not compile)
 sv::pt_frame_constants_gpu                           // { camera_gpu camera; area_light_gpu light; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; } — 256 bytes
-sv::gpu_boolean                                      // { u32 value; } — a bool as a cbuffer lane: implicit from bool, explicit to bool, false==0/true==1 (shader may declare it bool or uint)
 
 // Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
 sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
@@ -489,7 +488,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
   `mesh_record::is_indexed` says which a record is, and it must reach the closest-hit through `frame_constants_gpu::mesh_is_indexed` / `pt_frame_constants_gpu::mesh_is_indexed`.
-  That field is a `gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  That field is an `sr::gpu_boolean` (shaped-rendering owns it), so the plain `bool` off the record assigns straight into it.
   The `view_renderer` sets it for you; a test driving a routine directly must set it, or the flat path will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.

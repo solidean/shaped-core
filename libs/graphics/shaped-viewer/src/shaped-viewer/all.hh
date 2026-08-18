@@ -8,7 +8,6 @@
 // immediate-mode viewer
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
-#include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/interactive.hh>
 #include <shaped-viewer/refs.hh>
 #include <shaped-viewer/viewer.hh>

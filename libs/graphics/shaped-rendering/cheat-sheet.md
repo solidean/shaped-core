@@ -14,6 +14,19 @@ Headers are included by full path from `src/`: `#include <shaped-rendering/<name
 #include <shaped-rendering/all.hh>   // umbrella (window API + concrete routines as they land)
 ```
 
+## GPU vocabulary
+
+Types that exist only to match what a GPU constant buffer expects, shared by every library recording draws above sg.
+
+```cpp
+#include <shaped-rendering/gpu_types.hh>
+
+sr::gpu_boolean   // { u32 value; } — a bool as a cbuffer lane: implicit from bool, explicit to bool, false==0/true==1
+```
+
+- **A C++ `bool` is one byte, so it can never be a cbuffer field** — every `*_gpu` struct spells its flags `sr::gpu_boolean` and assigns a plain `bool` to them.
+- **The shader may declare the lane `bool` or `uint`** — any non-zero value reads as `true`, which is why two `gpu_boolean`s compare by truth rather than by bit pattern.
+
 ## Windows
 
 Always available.

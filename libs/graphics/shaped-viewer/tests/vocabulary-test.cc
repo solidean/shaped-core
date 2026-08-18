@@ -4,7 +4,6 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/background.hh>
@@ -22,7 +21,6 @@
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 
-#include <type_traits>
 
 using namespace cc::primitive_defines;
 
@@ -535,29 +533,7 @@ TEST("sv - a mesh carries the data its material draws it with")
     CHECK(copy.geometry.positions.data() == m.geometry.positions.data());
 }
 
-TEST("sv - gpu_boolean packs a bool into one 32-bit lane")
-{
-    static_assert(sizeof(sv::gpu_boolean) == 4);
-    static_assert(std::is_trivially_copyable_v<sv::gpu_boolean>); // it rides into a cbuffer by memcpy
-
-    auto const t = sv::gpu_boolean(true);
-    auto const f = sv::gpu_boolean();
-
-    CHECK(t.value == 1u);
-    CHECK(f.value == 0u);
-    CHECK(bool(t));
-    CHECK(!bool(f));
-    CHECK(t == sv::gpu_boolean(true));
-    CHECK(t != f);
-
-    // A shader reads any non-zero lane as `true`, so an off-by-one bit pattern is still equal to `true` here.
-    auto raw = sv::gpu_boolean();
-    raw.value = 0xFFFFFFFFu;
-    CHECK(bool(raw));
-    CHECK(raw == t);
-}
-
-TEST("sv - gpu_boolean is a drop-in cbuffer field")
+TEST("sv - frame_constants_gpu takes a plain bool for its gpu_boolean lane")
 {
     static_assert(sizeof(sv::frame_constants_gpu) == 256);
 

@@ -22,7 +22,6 @@ struct mesh_record;
 struct material_record;
 struct scene_resources_config;
 
-struct gpu_boolean;
 struct view_id;
 struct camera;
 struct camera_basis;
