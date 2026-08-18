@@ -115,7 +115,7 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     bool has_xml_reporter = false;
     bool has_durations = false;
 
-    // Set by --manual / --guide-benchmarks.
+    // Set by --manual / --guide-benchmarks / --examples.
     // With a bucket chosen explicitly, an exact filter narrows within that bucket rather than crossing into another.
     bool explicit_bucket = false;
 
@@ -142,6 +142,13 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         else if (arg == "--guide-benchmarks")
         {
             config.selected_bucket = config::test_bucket::guide_benchmark;
+            explicit_bucket = true;
+            continue;
+        }
+        // Example mode: select the example bucket (the EXAMPLE declarations demonstrating an API in practice).
+        else if (arg == "--examples")
+        {
+            config.selected_bucket = config::test_bucket::example;
             explicit_bucket = true;
             continue;
         }

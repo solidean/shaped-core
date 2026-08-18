@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-rendering/fwd.hh>
@@ -133,6 +134,15 @@ public:
     /// A request, not a guarantee — a window manager may refuse to steal focus, so read is_focused after the next poll_events rather than assuming it took.
     void focus();
 
+    /// Asks the window manager to put this window behind every other one, without touching the focus.
+    /// The opposite half of `focus`, for a run that should be watchable without being in the way.
+    ///
+    /// Best-effort and unverifiable: there is no portable way to read the z-order back, and a window manager may decline.
+    /// Windows-only today, and a no-op elsewhere.
+    /// A background window_system applies this on every poll_events until the window is focused, because creating a
+    /// swapchain raises the window again — see window_system_description::background.
+    void send_to_back();
+
     [[nodiscard]] cc::string_view title() const { return _title; }
 
     /// Whether anything has asked this window to close — the title bar's X, Alt+F4, a system quit, request_close.
@@ -219,12 +229,29 @@ struct sr::display_info
 };
 
 /// How a window_system is created.
+/// The environment variable that asks a run not to steal focus (see window_system_description::background).
+///
+/// An escape hatch rather than an API: a tool that launches a program it did not write — `dev.py example` is the one that made this necessary — has no other way to say
+/// "show your window, but do not take over my screen".
+/// Named here so the convention has one home, and can be replaced by a real API without hunting for getenv calls.
+namespace sr
+{
+inline constexpr cc::string_view background_request_env_var = "SC_REQUEST_BACKGROUND";
+} // namespace sr
+
 struct sr::window_system_description
 {
     /// Run without a display: windows are created and tracked as usual but never appear.
     /// Their native handles stay null, so nothing can present.
     /// This is what lets a window test run unattended.
     bool headless = false;
+
+    /// Show windows without activating them, and keep them at the bottom of the z-order until one is focused.
+    /// Everything else is unchanged — a background window is fully usable the moment it IS clicked.
+    ///
+    /// Defaults to whatever `SC_REQUEST_BACKGROUND` says, so a launcher can ask for it without the program opting in.
+    /// Set it explicitly to override the environment in either direction.
+    bool background = cc::is_environment_flag_set(sr::background_request_env_var);
 };
 
 /// The window subsystem: owns the platform-level init and shutdown and the event pump, and creates windows.
@@ -276,6 +303,9 @@ public:
 
     /// Throwing counterpart of try_create_window.
     [[nodiscard]] cc::unique_ptr<window> create_window(window_description const& desc = {});
+
+    /// Whether this system shows its windows without activating them (see window_system_description::background).
+    [[nodiscard]] bool is_background() const { return _is_background; }
 
     /// Every window currently alive, in creation order.
     /// Non-owning — an element dangles as soon as its owner destroys it.
@@ -366,5 +396,6 @@ private:
 
     u64 _owning_thread_id = 0;
     bool _is_headless = false;
+    bool _is_background = false;
     bool _is_quit_requested = false;
 };

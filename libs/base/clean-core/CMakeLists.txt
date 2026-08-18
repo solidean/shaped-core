@@ -21,6 +21,7 @@ add_library(clean-core
     src/clean-core/common/time.cc
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
+    src/clean-core/platform/environment.cc
     src/clean-core/platform/file_path.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
@@ -79,6 +80,7 @@ target_sources(clean-core
 
     src/clean-core/platform/native.hh
     src/clean-core/platform/console.hh
+    src/clean-core/platform/environment.hh
     src/clean-core/platform/file_path.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
@@ -332,6 +334,7 @@ if(SC_BUILD_TESTS)
         tests/common/time-test.cc
 
         tests/platform/console-test.cc
+        tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
 
         tests/algorithm/sort-test.cc
@@ -418,6 +421,9 @@ if(SC_BUILD_TESTS)
     # Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(clean-core-test)
 endif()
+
+# Examples: how the API reads in practice, one binary per file. See docs/guides/examples.md.
+add_subdirectory(examples)
 
 # Coverage
 option(CC_COVERAGE_MSVC "Enable MSVC native coverage" OFF)

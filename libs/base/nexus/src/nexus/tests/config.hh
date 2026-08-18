@@ -9,7 +9,7 @@ enum class scheduler_mode;
 } // namespace nx::config
 
 // Which selection bucket a test belongs to; a test lives in exactly one.
-// An automatic sweep selects a single bucket — normal by default, manual via --manual, guide_benchmark via --guide-benchmarks.
+// An automatic sweep selects a single bucket — normal by default, manual via --manual, guide_benchmark via --guide-benchmarks, example via --examples.
 // An exact (non-substring) filter naming a test can also pull it in from another bucket, but only when no bucket flag was given.
 // The set is intentionally extensible.
 enum class nx::config::test_bucket
@@ -17,6 +17,7 @@ enum class nx::config::test_bucket
     normal,
     manual,
     guide_benchmark,
+    example,
 };
 
 // How a test's body is driven.
@@ -79,6 +80,15 @@ constexpr struct
 {
     void apply(cfg& result) const { result.bucket = test_bucket::guide_benchmark; }
 } guide_benchmark;
+
+// An example demonstrates an API in practice rather than pinning an invariant, and is swept only via --examples.
+// Naming it exactly also runs it, as long as no bucket flag was given; like a manual test it otherwise stays out of automatic runs.
+// Its body needs no CHECK at all — being free of the testable-only bias is the point — but a CHECK that fails still fails.
+// EXAMPLE in test.hh is the macro.
+constexpr struct
+{
+    void apply(cfg& result) const { result.bucket = test_bucket::example; }
+} example;
 
 // No two tests holding `tag` run at the same time; with no tag, this test runs alone, concurrent with nothing.
 // Expressed as an ordering edge between test nodes rather than a lock, so it is deadlock-free by construction and reproducible: holders run in schedule order.

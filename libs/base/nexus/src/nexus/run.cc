@@ -173,6 +173,13 @@ int nx::run(int argc, char** argv)
             return 0;
         }
 
+        // Same for examples: `dev.py example` probes every binary to resolve a name, and most carry none.
+        if (config.selected_bucket == nx::config::test_bucket::example)
+        {
+            cc::println("No examples in this binary");
+            return 0;
+        }
+
         cc::eprintln("Error: The current schedule did not select any tests");
         for (int i = 0; i < argc; ++i)
             cc::eprintln("  arg[{}] = `{}'", i, argv[i]);
