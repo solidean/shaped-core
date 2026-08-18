@@ -51,7 +51,7 @@ Call these immediately before the C call and never store the result.
 **A pointer, reference or `string_view` into a `cc::string` is valid until the next non-const operation on that string.**
 
 Non-const is the right boundary rather than "mutation": `c_str_materialize()` changes no content and can still reallocate.
-Everything that appends, resizes, reserves, replaces, or shrinks can invalidate, as can assigning or destroying the string.
+Everything that appends, inserts, resizes, reserves, replaces, or shrinks can invalidate, as can assigning or destroying the string.
 A `subview` is a `string_view` into the string and dies with the same rule.
 
 `string_view` itself owns nothing, so the question always belongs to whatever holds the bytes — a `string`, a literal, or a buffer.

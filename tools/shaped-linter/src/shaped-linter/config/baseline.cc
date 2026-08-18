@@ -1,5 +1,6 @@
 #include "baseline.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
@@ -29,14 +30,6 @@ bool precedes_ignoring_case(cc::string_view a, cc::string_view b)
             return x < y;
     }
     return a.size() < b.size();
-}
-
-/// Insertion sort over a small vector of strings — a library blesses a few dozen headers at most.
-void sort_strings(cc::vector<cc::string>& v)
-{
-    for (auto i = isize(1); i < v.size(); ++i)
-        for (auto j = i; j > 0 && precedes_ignoring_case(v[j], v[j - 1]); --j)
-            cc::swap(v[j], v[j - 1]);
 }
 
 /// The offset just past the line containing `pos`, or the end of the text.
@@ -69,12 +62,12 @@ void add_to_baseline(cc::vector<baseline_group>& groups, cc::string_view config_
 
 void sort_baseline(cc::vector<baseline_group>& groups)
 {
-    for (auto i = isize(1); i < groups.size(); ++i)
-        for (auto j = i; j > 0 && groups[j].config_path < groups[j - 1].config_path; --j)
-            cc::swap(groups[j], groups[j - 1]);
+    // No ties on either level: add_to_baseline merges on an exact config_path and rejects a case-insensitively
+    // equal include, so an unstable sort is enough.
+    cc::sort_by(groups, &baseline_group::config_path);
 
     for (auto& g : groups)
-        sort_strings(g.includes);
+        cc::sort(g.includes, [](cc::string_view a, cc::string_view b) { return precedes_ignoring_case(a, b); });
 }
 
 cc::string render_baseline_block(cc::span<cc::string const> includes)
@@ -98,8 +91,9 @@ cc::string apply_baseline_block(cc::string_view config_text, cc::span<cc::string
     {
         auto const end_marker = config_text.find(k_baseline_end, begin);
         auto const tail_from = end_marker < 0 ? config_text.size() : end_of_line(config_text, end_marker);
-        return cc::string(config_text.subview({.start = 0, .end = begin})) + block
-             + cc::string(config_text.subview({.start = tail_from, .end = config_text.size()}));
+        auto out = cc::string(config_text);
+        out.replace({.start = begin, .end = tail_from}, block);
+        return out;
     }
 
     if (includes.empty())

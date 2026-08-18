@@ -6,6 +6,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
+#include <clean-core/memory/impl/object_lifetime_util.hh> // the shared gap-resize primitive behind the insertion family
 
 #include <initializer_list>
 #include <type_traits>
@@ -206,6 +207,122 @@ public:
         return *slot;
     }
 
+    /// Appends every element of `range` to the back.
+    /// Precondition: size() + <range size> <= N; a sized range checks that up front rather than one element short of the end.
+    template <class Range>
+    void push_back_range(Range const& range)
+    {
+        if constexpr (requires { isize(range.size()); })
+            CC_ASSERT(has_capacity_back_for(isize(range.size())), "push_back_range exceeds fixed_vector capacity");
+
+        for (auto&& e : range)
+            emplace_back(cc::forward<decltype(e)>(e));
+    }
+
+    // insertion at a position
+public:
+    /// Constructs an element at `idx` from `args...`, shifting everything at or after `idx` up by one, and returns a reference to it.
+    /// The element is built into a temporary first, so `v.emplace_at(i, v[0])` is safe and a throwing constructor leaves the vector unchanged.
+    /// `idx == size()` is the append position and is legal.
+    /// Precondition: 0 <= idx <= size() and size() < N.
+    /// O(size() - idx).
+    template <class... Args>
+    T& emplace_at(isize idx, Args&&... args)
+    {
+        CC_ASSERT(idx >= 0 && idx <= size(), "emplace_at index out of bounds");
+        CC_ASSERT(size() < N, "fixed_vector capacity exceeded");
+
+        // Built before anything moves, so args may reference this vector's own elements.
+        auto value = T(cc::forward<Args>(args)...);
+
+        T* const d = data();
+        isize const old_size = size();
+        cc::impl::resize_object_window(d + idx, 0, 1, old_size - idx);
+
+        // While the hole is open the tail is parked above it, alive but outside the size, so a throw truncates instead of leaking.
+        auto guard = gap_guard{.start = d + idx + 1, .end = d + old_size + 1};
+        _size = size_type(idx);
+        T* const p = new (cc::placement_new, d + idx) T(cc::move(value));
+        guard.dismiss();
+        _size = size_type(old_size + 1);
+
+        return *p;
+    }
+
+    /// Inserts a copy of `value` at `idx`.
+    /// See emplace_at for guarantees and complexity.
+    T& insert_at(isize idx, T const& value) { return emplace_at(idx, value); }
+
+    /// Inserts `value` at `idx` by move.
+    /// See emplace_at for guarantees and complexity.
+    T& insert_at(isize idx, T&& value) { return emplace_at(idx, cc::move(value)); }
+
+    /// Inserts the elements of `range` at `idx`, and returns the span of the newly inserted elements.
+    ///
+    ///   [head][tail]  ->  [head][range][tail]        with `idx` elements in the head
+    ///
+    /// `range` must be sized, and must not alias this vector's own elements.
+    /// Precondition: 0 <= idx <= size() and size() + <range size> <= N.
+    template <class Range>
+    cc::span<T> insert_range_at(isize idx, Range const& range)
+    {
+        CC_ASSERT(idx >= 0 && idx <= size(), "insert_range_at index out of bounds");
+        return replace_range({.offset = idx, .size = 0}, range);
+    }
+
+    /// Swaps the run of elements `r` out for the elements of `range`, and returns the span the range now occupies.
+    ///
+    ///   [head][r.size elements at r.offset][tail]  ->  [head][range][tail]
+    ///
+    /// `r.size` and `range.size()` are independent, so the vector grows or shrinks by the difference and either may be zero.
+    /// The tail behind the replaced run moves exactly once, whichever way that goes.
+    /// `range` must be SIZED, and must not alias this vector's own elements.
+    /// The replaced run frees room, so a full fixed_vector still takes an equal-sized replacement.
+    /// Precondition: 0 <= r.offset && 0 <= r.size && r.offset + r.size <= size() and size() - r.size + <range size> <= N.
+    template <class Range>
+    cc::span<T> replace_range(cc::offset_size r, Range const& range)
+    {
+        static_assert(
+            requires(Range const& r2) { isize(r2.size()); },
+            "replace_range / insert_range_at need a SIZED range (one exposing .size()): the gap has to be "
+            "opened before any element can be read. Materialize the range into a cc::vector first.");
+        CC_ASSERT(r.offset >= 0 && r.size >= 0 && r.offset + r.size <= size(), "replace_range out of bounds");
+
+        isize const start = r.offset;
+        isize const count = r.size;
+        isize const new_count = isize(range.size());
+        isize const old_size = size();
+        CC_ASSERT(old_size - count + new_count <= N, "replace_range exceeds fixed_vector capacity");
+
+        T* const d = data();
+
+        if constexpr (requires(Range const& r) {
+                          r.data();
+                          requires std::is_same_v<std::remove_cv_t<std::remove_pointer_t<decltype(r.data())>>, T>;
+                      })
+        {
+            auto const* const p_src = range.data();
+            CC_ASSERT(new_count == 0 || p_src + new_count <= d || p_src >= d + old_size,
+                      "replace_range source must not alias the vector's own elements — copy it first");
+        }
+
+        isize const tail_count = old_size - start - count;
+        cc::impl::resize_object_window(d + start, count, new_count, tail_count);
+
+        auto guard = gap_guard{.start = d + start + new_count, .end = d + start + new_count + tail_count};
+        _size = size_type(start);
+        for (auto&& e : range)
+        {
+            new (cc::placement_new, d + size()) T(cc::forward<decltype(e)>(e));
+            _size = size_type(size() + 1);
+        }
+        CC_ASSERT(size() == start + new_count, "range.size() disagreed with the elements the range yielded");
+        guard.dismiss();
+        _size = size_type(start + new_count + tail_count);
+
+        return cc::span<T>(d + start, new_count);
+    }
+
     // single element removal
 public:
     /// Removes and returns the last element.
@@ -264,40 +381,41 @@ public:
 
     // range removal
 public:
-    /// Removes `count` elements starting at `start`, preserving order.
-    /// Precondition: start + count <= size().
-    void remove_at_range(isize start, isize count)
+    /// Removes the `r.size` elements at `r.offset`, preserving order.
+    /// Precondition: r.offset + r.size <= size().
+    void remove_at_range(cc::offset_size r)
     {
-        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range out of bounds");
+        CC_ASSERT(r.offset >= 0 && r.size >= 0 && r.offset + r.size <= size(), "remove_at_range out of bounds");
         T* const d = data();
-        isize const new_size = size() - count;
-        for (isize i = start; i < new_size; ++i)
-            d[i] = cc::move(d[i + count]);
+        isize const new_size = size() - r.size;
+        for (isize i = r.offset; i < new_size; ++i)
+            d[i] = cc::move(d[i + r.size]);
         _shrink_to(new_size);
     }
-    /// Removes `count` elements starting at `start` by moving trailing elements into the gap (unordered).
-    void remove_at_range_unordered(isize start, isize count)
+    /// Removes the `r.size` elements at `r.offset` by moving trailing elements into the gap (unordered).
+    void remove_at_range_unordered(cc::offset_size r)
     {
-        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range_unordered out of bounds");
+        CC_ASSERT(r.offset >= 0 && r.size >= 0 && r.offset + r.size <= size(), "remove_at_range_unordered out of "
+                                                                               "bounds");
         T* const d = data();
-        isize const avail = size() - (start + count);  // untouched elements after the removed range
-        isize const k = avail < count ? avail : count; // how many tail elements move into the gap
+        isize const avail = size() - (r.offset + r.size); // untouched elements after the removed range
+        isize const k = avail < r.size ? avail : r.size;  // how many tail elements move into the gap
         for (isize i = 0; i < k; ++i)
-            d[start + i] = cc::move(d[size() - k + i]);
-        _shrink_to(size() - count);
+            d[r.offset + i] = cc::move(d[size() - k + i]);
+        _shrink_to(size() - r.size);
     }
     /// Removes the range [start, end), preserving order.
     /// Precondition: start <= end <= size().
     void remove_from_to(isize start, isize end)
     {
         CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to out of bounds");
-        remove_at_range(start, end - start);
+        remove_at_range({.offset = start, .size = end - start});
     }
     /// Removes the range [start, end) by moving trailing elements into the gap (unordered).
     void remove_from_to_unordered(isize start, isize end)
     {
         CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to_unordered out of bounds");
-        remove_at_range_unordered(start, end - start);
+        remove_at_range_unordered({.offset = start, .size = end - start});
     }
 
     // predicate-based removal
@@ -470,6 +588,17 @@ public:
 
     // implementation
 private:
+    /// Destroys the tail parked above an open insertion gap, unless it has been dismissed.
+    /// While the gap is open that tail is alive but sits outside the vector's size, so without this a throwing element constructor would skip its destructors.
+    struct gap_guard
+    {
+        T* start = nullptr;
+        T* end = nullptr;
+
+        void dismiss() { start = end = nullptr; }
+        ~gap_guard() { cc::impl::destroy_objects_in_reverse(start, end); }
+    };
+
     /// Destroys elements [new_size, size()) and sets the size.
     /// Precondition: 0 <= new_size <= size().
     void _shrink_to(isize new_size)

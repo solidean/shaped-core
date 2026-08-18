@@ -197,14 +197,14 @@ TEST("fixed_vector - remove_at preserves order; unordered swaps last")
 TEST("fixed_vector - range removal")
 {
     cc::fixed_vector<int, 8> v = {0, 1, 2, 3, 4};
-    v.remove_at_range(1, 2); // remove 1,2 -> 0 3 4
+    v.remove_at_range({.offset = 1, .size = 2}); // remove 1,2 -> 0 3 4
     CHECK(v.size() == 3);
     CHECK(v[0] == 0);
     CHECK(v[1] == 3);
     CHECK(v[2] == 4);
 
     cc::fixed_vector<int, 8> u = {0, 1, 2, 3, 4};
-    u.remove_at_range_unordered(1, 2); // fill the gap with tail -> keeps {0,3,4}
+    u.remove_at_range_unordered({.offset = 1, .size = 2}); // fill the gap with tail -> keeps {0,3,4}
     CHECK(u.size() == 3);
     CHECK(u[0] == 0);
     // the two survivors after index 0 are 3 and 4 in some order
@@ -247,4 +247,154 @@ TEST("fixed_vector - resize family and fill")
     v.clear_resize_to_defaulted(3);
     CHECK(v.size() == 3);
     CHECK(v[2] == 0);
+}
+
+TEST("fixed_vector - push_back_range")
+{
+    cc::fixed_vector<int, 8> v;
+    v.push_back(0);
+
+    cc::fixed_vector<int, 4> src;
+    src.push_back(1);
+    src.push_back(2);
+
+    v.push_back_range(src);
+
+    REQUIRE(v.size() == 3);
+    CHECK(v[1] == 1);
+    CHECK(v[2] == 2);
+}
+
+TEST("fixed_vector - insert_at / emplace_at")
+{
+    SECTION("insert into middle, front and at size()")
+    {
+        cc::fixed_vector<int, 8> v;
+        for (int i = 0; i < 3; ++i)
+            v.push_back(i); // 0 1 2
+
+        v.insert_at(1, 9);        // -> 0 9 1 2
+        v.insert_at(0, 8);        // -> 8 0 9 1 2
+        v.insert_at(v.size(), 7); // -> 8 0 9 1 2 7
+
+        REQUIRE(v.size() == 6);
+        CHECK(v[0] == 8);
+        CHECK(v[1] == 0);
+        CHECK(v[2] == 9);
+        CHECK(v[3] == 1);
+        CHECK(v[4] == 2);
+        CHECK(v[5] == 7);
+    }
+
+    SECTION("move-only elements")
+    {
+        cc::fixed_vector<MoveOnly, 4> v;
+        v.emplace_back(1);
+        v.emplace_back(3);
+
+        v.emplace_at(1, 2);
+
+        REQUIRE(v.size() == 3);
+        CHECK(v[0].value == 1);
+        CHECK(v[1].value == 2);
+        CHECK(v[2].value == 3);
+    }
+
+    SECTION("overflowing the capacity asserts")
+    {
+        cc::fixed_vector<int, 2> v;
+        v.push_back(0);
+        v.push_back(1);
+
+        CHECK_ASSERTS(v.insert_at(0, 2));
+    }
+}
+
+TEST("fixed_vector - replace_range")
+{
+    SECTION("longer, shorter and equal replacements")
+    {
+        cc::fixed_vector<int, 8> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i); // 0 1 2 3
+
+        cc::fixed_vector<int, 8> src;
+        src.push_back(7);
+        src.push_back(8);
+        src.push_back(9);
+
+        v.replace_range({.offset = 1, .size = 1}, src); // -> 0 7 8 9 2 3
+        REQUIRE(v.size() == 6);
+        CHECK(v[1] == 7);
+        CHECK(v[3] == 9);
+        CHECK(v[4] == 2);
+
+        v.replace_range({.offset = 1, .size = 3}, cc::fixed_vector<int, 1>()); // -> 0 2 3
+        REQUIRE(v.size() == 3);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 2);
+        CHECK(v[2] == 3);
+    }
+
+    // The replaced run frees room, so a full vector still takes an equal-sized replacement.
+    SECTION("equal-sized replacement on a full vector")
+    {
+        cc::fixed_vector<int, 4> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+
+        cc::fixed_vector<int, 4> src;
+        for (int i = 0; i < 4; ++i)
+            src.push_back(10 + i);
+
+        v.replace_range({.offset = 0, .size = 4}, src);
+
+        REQUIRE(v.size() == 4);
+        CHECK(v[0] == 10);
+        CHECK(v[3] == 13);
+    }
+
+    SECTION("a replacement that would overflow asserts")
+    {
+        cc::fixed_vector<int, 4> v;
+        for (int i = 0; i < 4; ++i)
+            v.push_back(i);
+
+        cc::fixed_vector<int, 4> src;
+        src.push_back(1);
+        src.push_back(2);
+
+        CHECK_ASSERTS(v.replace_range({.offset = 0, .size = 1}, src));
+    }
+}
+
+TEST("fixed_vector - replace_range object lifetimes")
+{
+    for (int old_size = 0; old_size <= 4; ++old_size)
+        for (int start = 0; start <= old_size; ++start)
+            for (int count = 0; count <= old_size - start; ++count)
+                for (int new_count = 0; new_count <= 4; ++new_count)
+                {
+                    Tracked::alive = 0;
+                    {
+                        cc::fixed_vector<Tracked, 8> v;
+                        for (int i = 0; i < old_size; ++i)
+                            v.push_back(Tracked(i));
+
+                        cc::fixed_vector<Tracked, 8> src;
+                        for (int i = 0; i < new_count; ++i)
+                            src.push_back(Tracked(100 + i));
+
+                        v.replace_range({.offset = start, .size = count}, src);
+
+                        REQUIRE(v.size() == old_size - count + new_count);
+                        for (int i = 0; i < start; ++i)
+                            CHECK(v[i].value == i);
+                        for (int i = 0; i < new_count; ++i)
+                            CHECK(v[start + i].value == 100 + i);
+                        for (int i = 0; i < old_size - start - count; ++i)
+                            CHECK(v[start + new_count + i].value == start + count + i);
+                    }
+                    CHECK(Tracked::alive == 0);
+                }
 }

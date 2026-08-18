@@ -1,6 +1,7 @@
 #include <clean-core/common/macros.hh> // CC_HAS_64BIT_POINTERS
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/small_vector.hh>
+#include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -433,7 +434,7 @@ TEST("small_vector - ordered and unordered element removal")
     SECTION("range removal")
     {
         auto v = make();
-        v.remove_at_range(1, 2); // drop 1,2
+        v.remove_at_range({.offset = 1, .size = 2}); // drop 1,2
         CHECK(v.size() == 4);
         CHECK(v[0] == 0);
         CHECK(v[1] == 3);
@@ -507,4 +508,171 @@ TEST("small_vector - over-aligned element type spills and re-inlines")
     CHECK((reinterpret_cast<u64>(v.data()) % 16) == 0);
     CHECK(v[0].value == 0);
     CHECK(v[1].value == 1);
+}
+
+TEST("small_vector - push_back_range")
+{
+    SECTION("stays inline when it fits")
+    {
+        cc::small_vector<int, 8> v;
+        v.push_back(0);
+
+        cc::vector<int> src;
+        src.push_back(1);
+        src.push_back(2);
+
+        v.push_back_range(src);
+
+        REQUIRE(v.size() == 3);
+        CHECK(v.is_inline());
+        CHECK(v[2] == 2);
+    }
+
+    SECTION("spills once when it does not")
+    {
+        cc::small_vector<int, 4> v;
+        v.push_back(0);
+
+        cc::vector<int> src;
+        for (int i = 0; i < 20; ++i)
+            src.push_back(i);
+
+        v.push_back_range(src);
+
+        REQUIRE(v.size() == 21);
+        CHECK(!v.is_inline());
+        CHECK(v[0] == 0);
+        CHECK(v[20] == 19);
+    }
+}
+
+TEST("small_vector - insert_at / emplace_at")
+{
+    SECTION("inline insert")
+    {
+        cc::small_vector<int, 8> v;
+        for (int i = 0; i < 3; ++i)
+            v.push_back(i);
+
+        v.insert_at(1, 9);
+
+        REQUIRE(v.size() == 4);
+        CHECK(v.is_inline());
+        CHECK(v[1] == 9);
+        CHECK(v[3] == 2);
+    }
+
+    SECTION("insert that crosses the inline boundary")
+    {
+        // N is only a MINIMUM inline capacity, so fill to the real one.
+        auto const cap = cc::small_vector<int, 4>::inline_capacity();
+
+        cc::small_vector<int, 4> v;
+        for (isize i = 0; i < cap; ++i)
+            v.push_back(int(i));
+        REQUIRE(v.is_inline());
+
+        v.insert_at(1, 99);
+
+        REQUIRE(v.size() == cap + 1);
+        CHECK(!v.is_inline());
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 99);
+        CHECK(v[2] == 1);
+        CHECK(v[cap] == int(cap - 1));
+    }
+
+    SECTION("insert on a heap vector")
+    {
+        cc::small_vector<int, 2> v;
+        for (int i = 0; i < 10; ++i)
+            v.push_back(i);
+        REQUIRE(!v.is_inline());
+
+        v.insert_at(0, 99);
+
+        REQUIRE(v.size() == 11);
+        CHECK(v[0] == 99);
+        CHECK(v[1] == 0);
+        CHECK(v[10] == 9);
+    }
+}
+
+TEST("small_vector - replace_range")
+{
+    // A shrinking replace on a full inline buffer must not spill: the replaced run frees the room.
+    SECTION("shrinking replace stays inline")
+    {
+        auto const cap = cc::small_vector<int, 4>::inline_capacity();
+
+        cc::small_vector<int, 4> v;
+        for (isize i = 0; i < cap; ++i)
+            v.push_back(int(i));
+
+        cc::vector<int> src;
+        src.push_back(9);
+
+        v.replace_range({.offset = 1, .size = cap - 1}, src);
+
+        REQUIRE(v.size() == 2);
+        CHECK(v.is_inline());
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 9);
+    }
+
+    SECTION("growing replace spills")
+    {
+        auto const cap = cc::small_vector<int, 4>::inline_capacity();
+
+        cc::small_vector<int, 4> v;
+        for (int i = 0; i < 3; ++i)
+            v.push_back(i);
+
+        cc::vector<int> src;
+        for (isize i = 0; i < cap + 4; ++i)
+            src.push_back(int(10 + i));
+
+        v.replace_range({.offset = 1, .size = 1}, src);
+
+        REQUIRE(v.size() == cap + 6);
+        CHECK(!v.is_inline());
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 10);
+        CHECK(v[cap + 4] == int(10 + cap + 3));
+        CHECK(v[cap + 5] == 2);
+    }
+}
+
+// Every (size, start, count, new_count) combination must agree with a cc::vector driven identically,
+// and every element must be destroyed exactly once regardless of which side of the spill it landed on.
+TEST("small_vector - replace_range matches vector and balances lifetimes")
+{
+    for (int old_size = 0; old_size <= 5; ++old_size)
+        for (int start = 0; start <= old_size; ++start)
+            for (int count = 0; count <= old_size - start; ++count)
+                for (int new_count = 0; new_count <= 5; ++new_count)
+                {
+                    Tracked::alive = 0;
+                    {
+                        cc::small_vector<Tracked, 4> v;
+                        cc::vector<Tracked> model;
+                        for (int i = 0; i < old_size; ++i)
+                        {
+                            v.push_back(Tracked(i));
+                            model.push_back(Tracked(i));
+                        }
+
+                        cc::vector<Tracked> src;
+                        for (int i = 0; i < new_count; ++i)
+                            src.push_back(Tracked(100 + i));
+
+                        v.replace_range({.offset = start, .size = count}, src);
+                        model.replace_range({.offset = start, .size = count}, src);
+
+                        REQUIRE(v.size() == model.size());
+                        for (isize i = 0; i < v.size(); ++i)
+                            CHECK(v[i].value == model[i].value);
+                    }
+                    CHECK(Tracked::alive == 0);
+                }
 }

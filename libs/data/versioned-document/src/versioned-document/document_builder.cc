@@ -226,9 +226,7 @@ isize vdoc::document_builder::impl_column_for(component_schema const& schema)
     }
 
     // An empty column is a legal intermediate state here, and impl_drop_if_empty removes it again if nothing lands.
-    _doc._columns.push_back(component_column{.schema = schema});
-    for (auto i = _doc._columns.size() - 1; i > at; --i)
-        cc::swap(_doc._columns[i], _doc._columns[i - 1]);
+    _doc._columns.insert_at(at, component_column{.schema = schema});
 
     return at;
 }
@@ -263,10 +261,7 @@ void vdoc::document_builder::impl_drop_if_empty(isize index)
 
     _doc._arena->note_dead(_doc._columns[index].capacity * slot_bytes(_doc._columns[index]));
 
-    for (auto i = index; i + 1 < _doc._columns.size(); ++i)
-        cc::swap(_doc._columns[i], _doc._columns[i + 1]);
-
-    _doc._columns.remove_back();
+    _doc._columns.remove_at(index);
 }
 
 void vdoc::document_builder::compact()
