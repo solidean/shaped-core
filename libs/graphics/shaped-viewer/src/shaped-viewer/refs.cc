@@ -15,10 +15,9 @@ scene_item& mesh_ref::target() const
     return _frame->_views[u32(_view)].layers[_layer].items[_item];
 }
 
-mesh_ref& mesh_ref::transform(tg::affine_transform3f const& t)
+void mesh_ref::transform(tg::affine_transform3f const& t)
 {
     target().transform = t;
-    return *this;
 }
 
 area_light& light_ref::target() const
@@ -26,10 +25,9 @@ area_light& light_ref::target() const
     return _frame->_views[u32(_view)].layers[_layer].area_lights[_light];
 }
 
-light_ref& light_ref::light(area_light const& l)
+void light_ref::light(area_light const& l)
 {
     target() = l;
-    return *this;
 }
 
 // ---- scene_ref -------------------------------------------------------------------------------------------
@@ -64,16 +62,14 @@ light_ref scene_ref::add_light(area_light const& light)
     return light_ref(_frame, _view, _layer, u32(lights.size() - 1));
 }
 
-scene_ref& scene_ref::background(sv::background const& bg)
+void scene_ref::background(sv::background const& bg)
 {
     target().background = bg;
-    return *this;
 }
 
-scene_ref& scene_ref::settings(render_settings const& s)
+void scene_ref::settings(render_settings const& s)
 {
     target().settings = s;
-    return *this;
 }
 
 // ---- leaf_ref --------------------------------------------------------------------------------------------
@@ -90,28 +86,24 @@ view_ref leaf_ref::add_view(cc::string_view id)
     return view_ref(_frame, index);
 }
 
-leaf_ref& leaf_ref::post_process(sv::post_process const& p)
+void leaf_ref::post_process(sv::post_process const& p)
 {
     target().post_processes.push_back(p);
-    return *this;
 }
 
-leaf_ref& leaf_ref::fit(fit_mode m)
+void leaf_ref::fit(fit_mode m)
 {
     target().fit = m;
-    return *this;
 }
 
-leaf_ref& leaf_ref::sampler(sampler_mode m)
+void leaf_ref::sampler(sampler_mode m)
 {
     target().sampler = m;
-    return *this;
 }
 
-leaf_ref& leaf_ref::allow_zoom(bool v)
+void leaf_ref::allow_zoom(bool v)
 {
     target().allow_zoom = v;
-    return *this;
 }
 
 // ---- layout_ref ------------------------------------------------------------------------------------------
@@ -156,10 +148,9 @@ layout_ref layout_ref::relative(relative_placement placement, box_style style)
     return layout_ref(_frame, _frame->_nodes.add_relative(_node, placement, style));
 }
 
-layout_ref& layout_ref::style(box_style const& s)
+void layout_ref::style(box_style const& s)
 {
     _frame->_nodes[_node].style = s;
-    return *this;
 }
 
 // ---- view_ref --------------------------------------------------------------------------------------------
@@ -222,15 +213,14 @@ layout_ref view_ref::layout_auto_grid(box_style style, grid_params params)
     return open_layout(style, params);
 }
 
-view_ref& view_ref::camera(sv::camera const& cam)
+void view_ref::camera(sv::camera const& cam)
 {
     target().camera = cam;
     // Claiming the camera this frame is what keeps the built-in controller off this view.
     _frame->state_of(_view).camera_owned_this_frame = true;
-    return *this;
 }
 
-view_ref& view_ref::initial_camera(sv::camera const& cam)
+void view_ref::initial_camera(sv::camera const& cam)
 {
     auto& st = _frame->state_of(_view);
     if (!st.camera_seeded)
@@ -239,10 +229,9 @@ view_ref& view_ref::initial_camera(sv::camera const& cam)
         st.camera = cam;
         st.controller.orbit = orbit_state::from_camera(cam, st.controller.orbit.distance);
     }
-    return *this;
 }
 
-view_ref& view_ref::initial_orbit(orbit_state const& o)
+void view_ref::initial_orbit(orbit_state const& o)
 {
     auto& st = _frame->state_of(_view);
     if (!st.camera_seeded)
@@ -251,33 +240,28 @@ view_ref& view_ref::initial_orbit(orbit_state const& o)
         st.controller.orbit = o;
         st.camera = o.to_camera();
     }
-    return *this;
 }
 
-view_ref& view_ref::resolution(tg::vec2i r)
+void view_ref::resolution(tg::vec2i r)
 {
     auto& v = target();
     v.resolution = r;
     v.resolution_follows_layout = false;
-    return *this;
 }
 
-view_ref& view_ref::refresh_rate(float rate)
+void view_ref::refresh_rate(float rate)
 {
     target().refresh.rate = rate;
-    return *this;
 }
 
-view_ref& view_ref::movable(bool v)
+void view_ref::movable(bool v)
 {
     _frame->state_of(_view).movable_this_frame = v;
-    return *this;
 }
 
-view_ref& view_ref::display_name(cc::string_view name)
+void view_ref::display_name(cc::string_view name)
 {
     _frame->state_of(_view).display_name = name;
-    return *this;
 }
 
 cc::string_view view_ref::display_name() const

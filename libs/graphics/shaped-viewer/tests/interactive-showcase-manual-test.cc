@@ -86,7 +86,8 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
             left_scene.add_light(key_light);
 
             // Nearest sampling, so Ctrl+wheel here reads out texels rather than smearing them.
-            auto pixels = inner.leaf().sampler(sv::sampler_mode::nearest);
+            auto pixels = inner.leaf();
+            pixels.sampler(sv::sampler_mode::nearest);
             auto right = pixels.add_view("pixels");
             right.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 4.0});
 
