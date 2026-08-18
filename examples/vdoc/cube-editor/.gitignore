@@ -1,2 +1,5 @@
-# The example's own document: it is state a run leaves behind, not source.
+# The document a run leaves behind, plus the two sidecars SQLite keeps beside it.
+# `dev.py example` runs an example from its own directory, which is what makes a local ignore the right place for this.
 *.vdoc
+*.vdoc-wal
+*.vdoc-shm

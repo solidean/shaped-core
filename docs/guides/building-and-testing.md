@@ -508,6 +508,8 @@ uv run dev.py example                     # list every example, grouped by binar
 uv run dev.py example clean-core/vector   # build, resolve and run exactly one
 ```
 
+Each example runs in its own source directory, so a relative path in one resolves next to the example rather than next to wherever `dev.py` was invoked.
+
 Resolution is a **name** lookup across binaries, not a target lookup: every `*-example` target is built, then probed with nexus' `--list-tests-json - --examples`.
 An exact name wins; otherwise a case-insensitive substring must select exactly one, and anything else is an error naming the candidates.
 `--target` narrows which binaries are probed, and the match never does.

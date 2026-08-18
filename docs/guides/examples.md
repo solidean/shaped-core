@@ -31,6 +31,11 @@ Ambiguity is an error listing the candidates, and a miss is an error with sugges
 `--target` narrows which binaries are probed.
 The match never does.
 
+**An example runs in its own source directory**, not in whatever directory `dev.py` was invoked from.
+So a relative path in an example — the document it keeps, the assets it loads — resolves next to the example.
+The state a run leaves behind is then ignored by that directory's own `.gitignore`, rather than by a rule in the repo root.
+A single-file example shares its library's `examples/` folder with its siblings; one with its own directory gets that directory.
+
 Anything `dev.py` does not recognize is forwarded to the example, so `dev.py example x -- --my-flag` reaches its `main`.
 There is deliberately **no `--all`**: executing the whole corpus would open every window it has, and nobody wants that.
 

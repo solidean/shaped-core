@@ -99,11 +99,25 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     result = dev.run_step(
         [str(artifact), example.name, "--examples", *program_args],
         step_type="example", name=example.target,
-        build_dir=preset.build_dir, cwd=ctx.root, env=env,
+        build_dir=preset.build_dir, cwd=_working_directory(ctx, example), env=env,
         timeout=args.timeout if args.timeout else None,
         mirror=True, verbose=args.verbose,
     )
     sys.exit(result.returncode)
+
+
+def _working_directory(ctx: Context, example) -> Path:
+    """The directory an example runs in: the one its source sits in.
+
+    An example's relative paths — the document it keeps, the assets it loads — should resolve next to the example
+    rather than next to whatever the user happened to invoke dev.py from.
+    That also lets the example's own directory carry the .gitignore for what a run leaves behind.
+
+    Falls back to the repo root when the recorded source path is not on this machine, which is what a binary built
+    elsewhere reports.
+    """
+    directory = Path(example.file).parent
+    return directory if directory.is_dir() else ctx.root
 
 
 def _print_listing(ctx: Context, examples: list) -> None:
