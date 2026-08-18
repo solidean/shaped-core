@@ -301,7 +301,7 @@ void viewer::begin_move(tg::pos2f window_point)
         return;
 
     auto const& region = im.last_hit_regions[hit];
-    auto* const st = im.views.find(region.id);
+    auto* const st = im.views.get_ptr(region.id);
     if (st == nullptr || !st->movable_last_frame)
         return;
 
@@ -325,7 +325,7 @@ void viewer::move_to(tg::pos2f window_point)
     if (!im.moving_view.has_value())
         return;
 
-    auto* const st = im.views.find(im.moving_view.value());
+    auto* const st = im.views.get_ptr(im.moving_view.value());
     if (st == nullptr)
         return;
 
@@ -348,7 +348,7 @@ void viewer::zoom_at(tg::pos2f window_point, float ticks)
         return;
 
     auto const& region = im.last_hit_regions[hit];
-    auto* const st = im.views.find(region.id);
+    auto* const st = im.views.get_ptr(region.id);
     if (st == nullptr || st->composite.raw() == nullptr)
         return; // a view with no image yet has nothing to magnify into
 
@@ -414,7 +414,7 @@ void viewer::route_input()
         }
 
         // A live drag keeps its view even once the cursor leaves the rect; otherwise the frontmost leaf under it wins.
-        auto* st = im.active_view.has_value() ? im.views.find(im.active_view.value()) : nullptr;
+        auto* st = im.active_view.has_value() ? im.views.get_ptr(im.active_view.value()) : nullptr;
         auto owner = im.active_view;
         if (st == nullptr)
         {
@@ -424,7 +424,7 @@ void viewer::route_input()
             if (hit != invalid_hit_region)
             {
                 owner = im.last_hit_regions[hit].id;
-                st = im.views.find(owner.value());
+                st = im.views.get_ptr(owner.value());
             }
         }
 

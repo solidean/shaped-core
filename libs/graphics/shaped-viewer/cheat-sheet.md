@@ -289,7 +289,8 @@ Everything a view keeps across frames hangs off its `view_id`, in **one** store 
 ```cpp
 sv::view_store                       // owned by sv::viewer, or by whoever drives view_renderer directly; NOT thread-safe
 store.begin_frame(u64(ctx.current_epoch()))   // reclaim against the just-finished frame, then advance
-store.get_or_create(id) / find / peek         // peek does NOT touch, so a hit-test cannot keep a view alive
+store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_ptr is null when absent; both mark it used
+store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
 store.accumulated_frames(id) -> u32
 sv::impl::view_state                 // the record: display_name, controller, camera, placement, zoom, composite, temporal, last_refresh_frame
