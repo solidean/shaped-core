@@ -18,7 +18,6 @@
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/mesh_flags.hh>
-#include <shaped-viewer/scene/mesh_parameter.hh>
 #include <shaped-viewer/scene/mesh_texture.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/scene_item.hh>

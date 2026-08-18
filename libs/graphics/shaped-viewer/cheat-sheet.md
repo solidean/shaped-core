@@ -134,11 +134,11 @@ Three properties worth knowing:
 
 ## Mesh authoring — geometry + what a material reads
 
-One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh`, `mesh_parameter.hh` and `mesh_texture.hh`.
+One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh` and `mesh_texture.hh`.
 
 ```cpp
 sv::mesh                         // { string name; triangle_geometry geometry; vector<mesh_attribute> attributes; affine_transform3f transform;
-                                 //   material_id material; mesh_flags flags; vector<mesh_parameter> parameters; vector<mesh_texture> textures; }
+                                 //   material_id material; mesh_flags flags; vector<mesh_texture> textures; }
 m.is_visible()                   // -> bool (flags.has(mesh_flag::visible)); the rest of a mesh is plain public data
 sv::triangle_geometry            // { pinned_data<pos3f const> positions; pinned_data<u32 const> indices; hash128 hash; } — raw or indexed, one type
 sv::triangle_geometry::create_from_triangles(triangles)            // -> from a range of tg::triangle3f; the pin is reinterpreted onto the positions, never copied
@@ -147,25 +147,24 @@ g.is_indexed() / g.is_empty() / g.vertex_count() / g.triangle_count()  // triang
 sv::triangle_data::from(g) / sv::indexed_triangle_data::from(g)    // -> the mesh_manager payload, same hash, sharing the pin (asserts on the wrong layout)
 sv::mesh_attribute               // { string name; attribute_format format; attribute_frequency frequency; pinned_data<byte const> data; hash128 hash; }
 sv::mesh_attribute::create(name, frequency, elements)       // -> mesh_attribute; format deduced from the element type, bytes pinned + hashed
+sv::mesh_attribute::create_value(name, x)                   // -> a per_instance attribute of exactly one element — what a per-mesh material input is
 a.element_count() / a.elements_as<tg::vec3f>()              // -> isize / span<T const> (asserts if T is not what format names)
+a.holds<T>() / a.value_as<T>()                              // -> bool / T; holds<T>() is what a material asks first, value_as reads the per_instance element
 sv::scalar_type                  // i8 i16 i32 i64 | u8 u16 u32 u64 | f32 f64 | boolean (1 byte, 0/1) — the complete set; scalar_type_size(t) -> i32 bytes
 sv::attribute_format             // { scalar_type scalar; int dim0, dim1; } — scalar + dimensionality, so every scalar/shape combination exists
                                  //   dim0 alone is a vector's component count; for a matrix dim0 is its rows and dim1 its columns
 attribute_format::of_scalar(s) / of_vector(s, dim) / of_matrix(s, rows, cols)  // both dims in 1..4; of_matrix is column-major, matching tg::mat<C, R, T>
 f.size_bytes() / f.component_count() / f.is_scalar() / f.is_vector() / f.is_matrix()
 sv::attribute_format_of<T>       // the format of an element type — scalars and tg vec / pos / comp / mat over them
-sv::attribute_frequency          // per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle | per_edge (RESERVED, create asserts)
+sv::attribute_frequency          // per_instance (exactly 1 element, create asserts) | per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle
+                                 //   per_edge is RESERVED and create asserts on it
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
-sv::mesh_parameter               // { string name; parameter_value value; } — per-mesh (instance) values the material reads by name
-sv::parameter_value              // { attribute_format format; byte storage[max_bytes]; } — typed by the SAME format an attribute's elements are
-                                 //   parameter_value::max_bytes is 32: 4 components of 8 bytes, so every scalar and vector fits inline
-sv::parameter_value::of(x)       // -> parameter_value from any scalar or vector (matrices don't fit the inline budget and assert)
-p.holds<T>() / p.as<T>()         // -> bool / T (as asserts on the wrong type); holds<T>() is what a material asks first
 sv::mesh_texture                 // { string name; texture_id texture; } — a texture offered under a slot name the material binds
 sv::material_id                  // thin handle naming ONE material definition (owned elsewhere); nothing mints one yet
 ```
 
-The material is what gives the four lists their meaning: it decides which attribute names it samples, which parameters it reads, which texture slots it binds, and how the flags change what it emits.
+The material is what gives the three lists their meaning: it decides which attribute names it samples, which texture slots it binds, and how the flags change what it emits.
+Per-mesh values are attributes too, at `per_instance` — one list, so a renderer can pack every instance's values into one buffer and index it by instance.
 So a mesh may carry data no material uses and miss data another would want — a material falls back rather than failing.
 The mesh offers no by-name lookup, deliberately: a material resolves the names it wants once, into whatever binding table it draws from, rather than scanning strings per draw.
 Copying a mesh shares the pinned payloads (a refcount bump), so passing one around is cheap.

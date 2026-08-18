@@ -56,7 +56,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/mesh.hh
     src/shaped-viewer/scene/mesh_attribute.hh
     src/shaped-viewer/scene/mesh_flags.hh
-    src/shaped-viewer/scene/mesh_parameter.hh
     src/shaped-viewer/scene/mesh_texture.hh
     src/shaped-viewer/scene/scene_item.hh
     src/shaped-viewer/view/view_id.hh

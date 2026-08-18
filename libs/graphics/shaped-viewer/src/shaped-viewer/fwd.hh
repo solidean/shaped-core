@@ -48,8 +48,6 @@ struct attribute_format;
 enum class attribute_frequency : u8;
 enum class mesh_flag; // per-mesh rendering opt-ins (mesh_flags.hh)
 struct mesh_attribute;
-struct parameter_value;
-struct mesh_parameter;
 struct mesh_texture;
 struct mesh;
 
