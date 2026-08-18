@@ -237,11 +237,44 @@ string(APPEND _cc "\nnamespace\n{\n")
 
 # Sources are embedded as raw string literals so a shipped binary carries its own shaders and needs no
 # source tree. A delimiter keeps a shader containing )" from ending the literal early.
+#
+# MSVC caps ONE string literal at 16380 bytes and truncates past it with C2026, which a path tracer's worth of HLSL passes.
+# Adjacent literals are concatenated only *after* that per-literal limit applies, so every source goes out as a run of chunks.
+# Clang and gcc have no such cap, and do not care either way.
+# What survives chunking is MSVC's 65535-byte ceiling on the concatenated result, which is the real per-shader budget.
+#
+# Splitting on byte offsets rather than lines is safe, and deliberately so.
+# `)slibsrc"` may not appear in the source at all, so no boundary can grow one.
+# Nothing requires a chunk to be a whole line either — concatenation restores the exact byte sequence, mid-codepoint splits included.
+set(_embed_chunk_bytes 8000)
+
+function(_slib_embed_literal _text_var _out_var)
+    string(LENGTH "${${_text_var}}" _len)
+    set(_literal "")
+    set(_offset 0)
+    while(_offset LESS _len)
+        math(EXPR _remaining "${_len} - ${_offset}")
+        set(_take ${_embed_chunk_bytes})
+        if(_remaining LESS _embed_chunk_bytes)
+            set(_take ${_remaining})
+        endif()
+        string(SUBSTRING "${${_text_var}}" ${_offset} ${_take} _chunk)
+        string(APPEND _literal "\n    R\"slibsrc(${_chunk})slibsrc\"")
+        math(EXPR _offset "${_offset} + ${_take}")
+    endwhile()
+    # An empty shader file still has to yield a literal rather than nothing.
+    if(_literal STREQUAL "")
+        set(_literal " R\"slibsrc()slibsrc\"")
+    endif()
+    set(${_out_var} "${_literal}" PARENT_SCOPE)
+endfunction()
+
 set(_embed_index 0)
 set(_embedded_entries "")
 foreach(_file IN LISTS _files_to_embed)
     file(READ "${_source_dir}/${_file}" _text)
-    string(APPEND _cc "constexpr char const* k_source_${_embed_index} = R\"slibsrc(${_text})slibsrc\";\n")
+    _slib_embed_literal(_text _literal)
+    string(APPEND _cc "constexpr char const* k_source_${_embed_index} =${_literal};\n")
     list(APPEND _embedded_entries "{.path = \"${_file}\", .text = k_source_${_embed_index}}")
     math(EXPR _embed_index "${_embed_index} + 1")
 endforeach()

@@ -56,6 +56,12 @@ cmake/
   GenerateShaderPackage.cmake     [done]        build-time codegen: symbols, table, embedded include closure
 ```
 
+Each embedded source is emitted as a run of ~8 KB adjacent raw string literals rather than as one literal.
+MSVC caps a single literal at 16380 bytes and truncates past it with C2026, which one path-tracer-sized shader is enough to hit.
+Adjacent literals are concatenated only after that limit applies, so chunking removes the cap entirely.
+What remains is MSVC's 65535-byte ceiling on the concatenated result, and that is the real per-shader budget.
+A shader approaching it has to be split into includes.
+
 ## Compiler chains
 
 Today a compiler is a **single edge**: `source_language -> sg::shader_format`, and resolution is a
