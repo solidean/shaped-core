@@ -51,7 +51,7 @@ struct sv::viewer_config
 ///     while (viewer.is_running())
 ///     {
 ///         auto& frame = viewer.begin_frame();
-///         if (!frame)
+///         if (!frame.is_open())
 ///             continue; // the window cannot draw right now
 ///         frame.add_scene().add_mesh(mesh);
 ///         viewer.end_frame();
@@ -100,7 +100,7 @@ public:
     /// Opens the next frame, for a loop the caller drives.
     /// The viewer owns it, so the reference is good until `end_frame` — which every open frame needs.
     ///
-    /// A closed frame (`operator bool` false) is one the window cannot draw right now: it needs no `end_frame`, so
+    /// A closed frame (`is_open()` false) is one the window cannot draw right now: it needs no `end_frame`, so
     /// `continue` and loop again.
     [[nodiscard]] frame& begin_frame();
 

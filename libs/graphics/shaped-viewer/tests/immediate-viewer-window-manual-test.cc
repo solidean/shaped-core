@@ -88,7 +88,7 @@ TEST("sv - interactive viewer, the manual begin_frame/end_frame loop (manual)", 
     while (viewer.is_running())
     {
         auto& f = viewer.begin_frame();
-        if (!f)
+        if (!f.is_open())
             continue; // the window cannot draw right now — minimized, or closing; a closed frame needs no end_frame
 
         auto rows = f.window().view().layout_rows({.padding = 8, .spacing = 6});

@@ -30,7 +30,7 @@ auto viewer = sv::viewer::create("my viewer");
 while (viewer.is_running())
 {
     auto& f = viewer.begin_frame();
-    if (!f) // the window cannot draw right now (minimized)
+    if (!f.is_open()) // the window cannot draw right now (minimized)
         continue;
     f.add_scene().add_mesh(mesh);
     viewer.end_frame();

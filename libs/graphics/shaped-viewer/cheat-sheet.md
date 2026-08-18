@@ -332,7 +332,7 @@ viewer.frames() -> frame_range;  viewer.request_close()
 
 // the manual loop, for an application whose own loop must stay in charge — same frame, same authoring calls
 viewer.is_running()             // -> bool; not close-requested, not quit, not device-lost
-auto& f = viewer.begin_frame()  // -> frame&, owned by the viewer; a falsy frame means it cannot draw right now, so `continue`
+auto& f = viewer.begin_frame()  // -> frame&, owned by the viewer; `!f.is_open()` means it cannot draw right now, so `continue`
 viewer.end_frame()              // presents it — a bare frame ends nothing itself, so every open one needs this
 
 // on a frame — plus everything a window and a view offer, inherited
