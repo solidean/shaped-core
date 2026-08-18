@@ -27,10 +27,11 @@ Findings we want to keep, but that are not a guide to anything.
 
 ## Guides
 
-[guides/_index.md](guides/_index.md) lists all eleven; the ones most often wanted:
+[guides/_index.md](guides/_index.md) lists all thirteen; the ones most often wanted:
 
 - [guides/building-and-testing.md](guides/building-and-testing.md) — drive `dev.py`, and diagnose with the `repo_tools` tools.
 - [guides/ci.md](guides/ci.md) — the GitHub Actions workflows and what each uploads.
+- [guides/examples.md](guides/examples.md) — the `examples/` corpus and `dev.py example`: how a library shows what it feels like to use.
 - [guides/prose.md](guides/prose.md) — `dev.py lint`, the prose rules in practice, and reworking a documentation surface.
 - [guides/compile-times.md](guides/compile-times.md) — `dev.py compile-time`: which headers and TUs the compiler spends its time on.
 - [guides/precompiled-headers.md](guides/precompiled-headers.md) — the per-target PCH tiers, how to pick one, and the no-PCH gate.

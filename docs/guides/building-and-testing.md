@@ -20,6 +20,7 @@ uv run dev.py <command> [options]
 | `test`         | Build, then run test binaries (`*-test`). Optional name/binary filter.        |
 | `test-web`     | Build the Emscripten browser pages and serve them (see [WebAssembly](#webassembly-emscripten)). |
 | `run`          | Build one **non-test** executable and run it, forwarding the rest of the command line. |
+| `example`      | List the repo's examples, or build and run exactly one ([examples.md](examples.md)).  |
 | `format`       | clang-format our C++ sources in place (see [Formatting](#formatting)).        |
 | `lint`         | The linting front door: `clang-tidy`, `shaped`, `prose-apply`, `prose-stats`. |
 | `check`        | Run pre-commit checks (lint, format, crossrefs, test) and report one green/red verdict. |
@@ -47,6 +48,8 @@ uv run dev.py build                 # build everything
 uv run dev.py build -t nexus        # build one target
 uv run dev.py run shaped-linter --fix libs/base/clean-core/src/clean-core/vector.hh
 uv run dev.py run instruction-tracer -- --help   # `--` when a program flag collides with one of ours
+uv run dev.py example               # list every example
+uv run dev.py example clean-core/vector   # build, resolve and run exactly one
 uv run dev.py coverage run          # LLVM test coverage (see guides/coverage.md)
 uv run dev.py pgo run               # profile-guided optimization (see guides/pgo.md)
 uv run dev.py doctor
@@ -495,6 +498,23 @@ So a binary that **crashes before printing anything** is still recorded as a fai
 
 Never run a test binary directly — always go through `dev.py test`, so discovery, capture, and result recording stay consistent.
 
+## Examples (`example`)
+
+Example executables follow the convention `<lib>-<name>-example` and are built on nexus like the tests, but in the `example` bucket: every build compiles them and no sweep ever runs one.
+[examples.md](examples.md) is the concept — what an example is for, how to declare one, and where it lives.
+
+```bash
+uv run dev.py example                     # list every example, grouped by binary
+uv run dev.py example clean-core/vector   # build, resolve and run exactly one
+```
+
+Resolution is a **name** lookup across binaries, not a target lookup: every `*-example` target is built, then probed with nexus' `--list-tests-json - --examples`.
+An exact name wins; otherwise a case-insensitive substring must select exactly one, and anything else is an error naming the candidates.
+`--target` narrows which binaries are probed, and the match never does.
+Listings are cached under `build/<preset>/example-listings.json` and revalidated by mtime and size, so only a rebuilt binary is re-probed.
+
+There is deliberately no `--all`: running the whole corpus would open every window it has.
+
 ## Running a non-test executable (`run`)
 
 `dev.py run <target> [args…]` is the counterpart for everything that is *not* a test: shaped-linter, instruction-tracer, a sample.
@@ -515,6 +535,7 @@ A program flag that collides with one of dev.py's own needs the `--` separator.
 `--timeout SECS` bounds a program that might hang; it defaults to `0`, meaning no limit — unlike `test --timeout`, which defaults to 60.
 
 `run` **refuses `*-test` targets** and points at `dev.py test` — bypassing discovery and result recording is exactly what the rule above forbids.
+It refuses `*-example` targets the same way, pointing at `dev.py example`, which resolves an example name across every example binary rather than making you find the one that holds it.
 
 ## Sanitizers
 
@@ -559,6 +580,7 @@ It stays available for manually ASan-checking exception-free code paths.
 ## Related
 
 - [.claude/skills/building-and-testing/SKILL.md](../../.claude/skills/building-and-testing/SKILL.md) — the skill this doc backs.
+- [examples.md](examples.md) — the `example` command's concept half: what an example is for, and how to declare one.
 - [prose.md](prose.md) — `dev.py lint`'s prose half: `prose-apply`, `prose-stats`, and reworking a surface.
 - [profiling.md](profiling.md) — the *other* profiling: what the CPU spent running our C++, rather than what the build spent producing it.
 - [docs/coding-guidelines.md](../coding-guidelines.md) — how to write the code you're building.

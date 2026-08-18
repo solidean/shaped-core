@@ -16,12 +16,15 @@ uv run dev.py test <file>.cc     # …a pattern matching no test name selects by
 uv run dev.py test               # build + run the full suite
 uv run dev.py build -t <target>  # build one target
 uv run dev.py run <target> [args…]  # build + run a NON-test executable (a tool, a sample)
+uv run dev.py example <match>    # build + run exactly one EXAMPLE (no arg lists them all)
 uv run dev.py doctor             # sanity-check the toolchain
 ```
 
 `run` is how you invoke one of our tools.
 Never hand-write `build/<preset>/tools/…/foo.exe`: that pins one preset and silently runs a stale binary.
 `run` builds first, mirrors the program's output, and propagates its exit code, and it refuses `*-test` targets — those are `dev.py test`.
+It refuses `*-example` targets too: an example is addressed by its name, not by its binary, and `dev.py example <match>` resolves that name across every example binary.
+A match selecting more than one example is an error, so the command never silently runs the wrong one.
 
 `dev.py` is **quiet by default**: it captures each step to `build/<preset>/run-logs/` and prints only a one-line trace per step plus a pass/fail summary.
 So the loop is **dev.py, then diagnose with the MCP tools**:

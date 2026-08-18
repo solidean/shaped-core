@@ -419,6 +419,9 @@ if(SC_BUILD_TESTS)
     sc_add_nexus_web_runner(clean-core-test)
 endif()
 
+# Examples: how the API reads in practice, one binary per file. See docs/guides/examples.md.
+add_subdirectory(examples)
+
 # Coverage
 option(CC_COVERAGE_MSVC "Enable MSVC native coverage" OFF)
 

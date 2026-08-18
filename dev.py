@@ -35,6 +35,7 @@ from tools.dev.cmd import (  # noqa: E402
     coverage,
     diagnose,
     doctor,
+    example,
     format,
     info,
     lint,
@@ -56,6 +57,7 @@ COMMANDS = [
     test,
     test_web,
     run,
+    example,
     format,
     lint,
     check,
@@ -220,12 +222,12 @@ def main() -> None:
     for module in COMMANDS:
         module.add_parser(sub)
 
-    # parse_known_args (not parse_args) so `test` and `run` can forward unrecognized trailing tokens verbatim to the child process.
+    # parse_known_args (not parse_args) so `test`, `run` and `example` can forward unrecognized trailing tokens verbatim to the child process.
     # dev.py's own options must still parse wherever they sit relative to the positional.
     # --preset above all: a catch-all positional would silently drop it and run the default preset instead.
     # Everywhere else an unknown argument stays a hard error, so a typo fails loudly.
     args, forwarded = parser.parse_known_args()
-    if forwarded and args.command not in ("test", "run"):
+    if forwarded and args.command not in ("test", "run", "example"):
         parser.error("unrecognized arguments: %s" % " ".join(forwarded))
     args.runner_args = forwarded
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")

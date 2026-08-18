@@ -45,7 +45,7 @@ __all__ = [
 
 # llvm-cov regex matching the files to drop from the report.
 # Separator-agnostic, so it works with Windows backslash paths: we measure library sources, not the tests that exercise them nor vendored code under extern/.
-DEFAULT_IGNORE_REGEX = r"([/\\]extern[/\\]|[/\\]tests[/\\])"
+DEFAULT_IGNORE_REGEX = r"([/\\]extern[/\\]|[/\\]tests[/\\]|[/\\]examples[/\\])"
 
 # Coverage metrics we surface in the distilled summary, in report order.
 _METRICS = ("lines", "functions", "regions", "branches")
