@@ -27,12 +27,12 @@ void exercise_context(vulkan::vulkan_context& ctx)
     auto buf = ctx.create_vulkan_buffer(256, sg::buffer_usage::copy_dst, sg::allocation_info{});
     REQUIRE(buf.has_value());
     CHECK(buf.value()->size_in_bytes() == 256);
-    CHECK(sg::has_flag(buf.value()->usage(), sg::buffer_usage::copy_dst));
+    CHECK(buf.value()->usage().has(sg::buffer_usage::copy_dst));
     CHECK(buf.value()->_buffer != VK_NULL_HANDLE);
     CHECK(buf.value()->_memory != VK_NULL_HANDLE);
 
     // Empty buffer: valid, and allocates no GPU resource.
-    auto empty = ctx.create_vulkan_buffer(0, sg::buffer_usage::none, sg::allocation_info{});
+    auto empty = ctx.create_vulkan_buffer(0, {}, sg::allocation_info{});
     REQUIRE(empty.has_value());
     CHECK(empty.value()->size_in_bytes() == 0);
     CHECK(empty.value()->_buffer == VK_NULL_HANDLE);

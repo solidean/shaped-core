@@ -63,7 +63,7 @@ public:
 
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();
     [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(isize size_in_bytes,
-                                                                        sg::buffer_usage usage,
+                                                                        sg::buffer_usages usage,
                                                                         sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
                                                                           sg::allocation_info const& alloc);
@@ -83,7 +83,7 @@ public:
     }
 
     [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
-                                                                          sg::buffer_usage usage,
+                                                                          sg::buffer_usages usage,
                                                                           sg::allocation_info const& alloc) override
     {
         return cc::result<sg::raw_buffer_handle>(create_vulkan_buffer(size_in_bytes, usage, alloc));

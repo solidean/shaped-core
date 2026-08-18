@@ -105,12 +105,23 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         auto const dst = ctx._descriptor_heap.cpu_at(view_base + s.table_offset);
         if (auto const* av = sg::try_as_tlas_view(nv.view))
         {
-            auto dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
-            CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
-            create_accel_view(ctx._device.Get(), *dx_tlas, dst);
-            // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
-            group->referenced.push_back(dx_tlas->_dx12_storage);
-            group->hazard_views.push_back({dx_tlas->_dx12_storage, sg::view_class::acceleration_structure});
+            // A null handle is the null acceleration structure, not a mistake: it binds a valid descriptor that
+            // every ray misses, so there is no storage to keep alive and nothing to declare a hazard on.
+            auto dx_tlas = std::shared_ptr<dx12_tlas const>();
+            if (av->tlas != nullptr)
+            {
+                dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
+                CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
+            }
+
+            create_accel_view(ctx._device.Get(), dx_tlas.get(), dst);
+
+            if (dx_tlas != nullptr)
+            {
+                // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
+                group->referenced.push_back(dx_tlas->_dx12_storage);
+                group->hazard_views.push_back({dx_tlas->_dx12_storage, sg::view_class::acceleration_structure});
+            }
         }
         else if (auto const* tv = sg::try_as_texture_view(nv.view))
         {

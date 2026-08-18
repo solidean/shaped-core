@@ -1,8 +1,8 @@
 #pragma once
 
-#include <shaped-viewer/camera.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/gpu_types.hh>
+#include <shaped-viewer/view/camera.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 /// The per-view constant block every flat-PBR ray-tracing shader reads at `b0` (the `FrameConstants` cbuffer in shaders/common.hlsli).

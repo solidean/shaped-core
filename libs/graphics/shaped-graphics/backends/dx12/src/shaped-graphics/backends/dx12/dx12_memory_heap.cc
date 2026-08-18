@@ -30,7 +30,7 @@ cc::result<dx12_memory_heap_handle> dx12_memory_heap::create(ID3D12Device* devic
     return dx12_memory_heap_handle(std::make_shared<dx12_memory_heap>(cc::move(dev), cc::move(heap), size_in_bytes));
 }
 
-sg::memory_requirements dx12_memory_heap::query_buffer_requirements(isize size_in_bytes, sg::buffer_usage usage) const
+sg::memory_requirements dx12_memory_heap::query_buffer_requirements(isize size_in_bytes, sg::buffer_usages usage) const
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
     // An empty buffer occupies nothing; report the default placement alignment so any valid offset works.

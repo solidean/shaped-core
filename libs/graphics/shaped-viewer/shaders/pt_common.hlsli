@@ -19,6 +19,11 @@ cbuffer FrameConstants : register(b0)
     int  samples_per_pixel;  int max_bounces;  uint rng_seed;  uint accum_frame;
 
     uint mesh_is_indexed; // 0 => the bound mesh is a plain triangle list; see mesh.hlsli
+
+    Camera prev_camera;        // the previous recorded frame's camera; meaningless unless has_history
+    uint   has_history;        // 0 => the history textures hold nothing; every pixel starts from scratch
+    uint   history_max_frames; // ceiling on a reprojected pixel's carried sample count (u32(-1) => uncapped)
+    uint   debug_view;         // 1 => write a false-color of the carried sample count instead of the image
 };
 
 // One path segment's hit result. The raygen (caller) reads it back; the closest-hit fills the surface fields;

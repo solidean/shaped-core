@@ -17,7 +17,7 @@ using namespace cc::primitive_defines;
 
 enum class backend_kind;            // which graphics API a context runs on (see types.hh)
 enum class thread_model;            // what a context promises about concurrent use (see types.hh)
-enum class buffer_usage : u32;      // buffer usage flags (see types.hh)
+enum class buffer_usage : u32;      // one buffer usage; a set of them is buffer_usages (see types.hh)
 enum class texture_aspect : u32;    // color / depth / stencil planes of a subresource (see resource/subresource.hh)
 enum class command_list_slot : int; // a recorder's slot in the per-context pool (see barrier/command_list_slot.hh)
 
@@ -69,7 +69,7 @@ class tlas;                         // top-level acceleration structure (see ray
 struct blas_triangles;              // value type — one triangle geometry input to build_blas
 struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
 struct tlas_instance;               // value type — one instance input to build_tlas
-enum class accel_build_flags : u32; // build-time trade-offs (see raytracing/acceleration_structure.hh)
+enum class accel_build_flag;        // one build-time trade-off; a set of them is accel_build_flags
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
 
 } // namespace sg
@@ -101,7 +101,7 @@ struct texture_cube_ms_description;
 struct texture_cube_array_ms_description;
 
 enum class pixel_format : u16;     // texel format (see resource/pixel_format.hh)
-enum class texture_usage : u32;    // texture usage flags (see types.hh)
+enum class texture_usage : u32;    // one texture usage; a set of them is texture_usages (see types.hh)
 enum class texture_dimension : u8; // 1D / 2D / 3D (see resource/raw_texture.hh)
 class bytes_waiter;
 class ready_bytes_waiter; // the already-satisfied waiter (see bytes_future.hh)
@@ -131,8 +131,8 @@ namespace sg
 
 // Backend-neutral access-state vocabulary (see barrier/resource_access.hh / barrier/resource_access_state.hh) — the
 // shared, opt-in building blocks a backend uses to track state and emit barriers.
-enum class access_flags : u32;
-enum class pipeline_stage_flags : u32;
+enum class access_flag : u32;         // a set of them is access_flags
+enum class pipeline_stage_flag : u32; // a set of them is pipeline_stage_flags
 enum class texture_layout : u32;
 struct access_barrier;
 struct resource_access_state;
@@ -212,7 +212,7 @@ enum class front_face;
 struct rasterization_state;
 enum class blend_factor;
 enum class blend_op;
-enum class color_write_mask : u8;
+enum class color_channel : u8; // a set of them is color_write_mask
 struct blend_component;
 struct blend_state;
 enum class stencil_op;

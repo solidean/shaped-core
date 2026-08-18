@@ -36,19 +36,21 @@ public:
 
     /// Backend memory requirements for a buffer of this shape — the alignment its offset must satisfy, and the size it occupies.
     /// Query this first, since the external allocator uses it to pick a valid offset.
-    [[nodiscard]] memory_requirements memory_requirements_for_buffer(isize size_in_bytes, buffer_usage usage) const;
+    [[nodiscard]] memory_requirements memory_requirements_for_buffer(isize size_in_bytes, buffer_usages usage) const;
 
     /// Mints a placement for a buffer of the given shape at `offset` within this heap.
     /// `offset` must be non-negative, aligned per memory_requirements_for_buffer, and leave room for the required size inside the heap.
     /// The placement's size is the backend-reported size, not the requested one, and the returned allocation_info holds a handle back to this heap.
     /// It does not track the allocation — the caller's external allocator owns that.
-    [[nodiscard]] allocation_info acquire_allocation_for_buffer(isize size_in_bytes, buffer_usage usage, isize offset) const;
+    [[nodiscard]] allocation_info acquire_allocation_for_buffer(isize size_in_bytes,
+                                                                buffer_usages usage,
+                                                                isize offset) const;
 
 protected:
     explicit memory_heap(isize size_in_bytes);
 
     /// Backend hook: the memory requirements for a buffer of this shape.
-    [[nodiscard]] virtual memory_requirements query_buffer_requirements(isize size_in_bytes, buffer_usage usage) const
+    [[nodiscard]] virtual memory_requirements query_buffer_requirements(isize size_in_bytes, buffer_usages usage) const
         = 0;
 
     isize _size_in_bytes = 0;

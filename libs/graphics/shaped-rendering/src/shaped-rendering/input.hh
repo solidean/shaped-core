@@ -263,9 +263,13 @@ struct sr::mouse_wheel_event
 /// Both the span and any text inside it live until the next poll_events.
 ///
 ///     for (auto const& e : wsys->events())
-///         if (auto const* k = e.try_as_key())
-///             if (k->is_down && k->scancode == sr::scancode::escape)
-///                 e.window->request_close();
+///         e.payload.visit(
+///             [&](sr::key_event const& k)
+///             {
+///                 if (k.is_down && k.scancode == sr::scancode::escape)
+///                     e.window->request_close();
+///             },
+///             [](auto const&) {});
 struct sr::input_event
 {
     /// The window the event went to, or null when none had focus.
@@ -273,13 +277,26 @@ struct sr::input_event
     sr::window* window = nullptr;
 
     /// What happened, as one of the five event payloads.
-    /// Visit it for an exhaustive handler, or reach for one of the `try_as_*` accessors below to pick a single kind out.
+    ///
+    /// Visiting it is the way to consume an event: each handler receives its payload named and typed, with no probe first.
+    /// Handlers are combined into one overload set, so a trailing `[](auto const&) {}` absorbs the kinds a handler does not care about
+    /// — spell all five instead, and a sixth event kind becomes a compile error here rather than silence.
+    /// The `is_*` / `as_*` accessors below are for what a visit cannot express: a predicate, or a loop body that must `continue`.
     cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
 
-    /// The payload as one specific kind, or null when the event was a different one.
-    [[nodiscard]] key_event const* try_as_key() const { return payload.try_as<key_event>(); }
-    [[nodiscard]] text_event const* try_as_text() const { return payload.try_as<text_event>(); }
-    [[nodiscard]] mouse_move_event const* try_as_mouse_move() const { return payload.try_as<mouse_move_event>(); }
-    [[nodiscard]] mouse_button_event const* try_as_mouse_button() const { return payload.try_as<mouse_button_event>(); }
-    [[nodiscard]] mouse_wheel_event const* try_as_mouse_wheel() const { return payload.try_as<mouse_wheel_event>(); }
+    /// Which kind the payload holds.
+    /// For a predicate — code that then wants the payload is usually a visit instead.
+    [[nodiscard]] bool is_key() const { return payload.is<key_event>(); }
+    [[nodiscard]] bool is_text() const { return payload.is<text_event>(); }
+    [[nodiscard]] bool is_mouse_move() const { return payload.is<mouse_move_event>(); }
+    [[nodiscard]] bool is_mouse_button() const { return payload.is<mouse_button_event>(); }
+    [[nodiscard]] bool is_mouse_wheel() const { return payload.is<mouse_wheel_event>(); }
+
+    /// The payload as one specific kind, which the event must hold.
+    /// Ask the matching is_* first unless the kind is already known.
+    [[nodiscard]] key_event const& as_key() const { return payload.as<key_event>(); }
+    [[nodiscard]] text_event const& as_text() const { return payload.as<text_event>(); }
+    [[nodiscard]] mouse_move_event const& as_mouse_move() const { return payload.as<mouse_move_event>(); }
+    [[nodiscard]] mouse_button_event const& as_mouse_button() const { return payload.as<mouse_button_event>(); }
+    [[nodiscard]] mouse_wheel_event const& as_mouse_wheel() const { return payload.as<mouse_wheel_event>(); }
 };

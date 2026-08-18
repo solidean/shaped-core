@@ -59,7 +59,7 @@ That plain readable buffer is the storage today, and the table's own abstraction
 
 [`cmd.raytracing.dispatch_rays(table, raygen, width, height, depth)`](../../src/shaped-graphics/command_list/raytracing.hh) records the trace.
 In dx12 it binds the state object with `SetPipelineState1` and binds groups through the compute root signature.
-It then runs the same **declare-hazards → flush → op** rhythm as `compute_dispatch`, at `pipeline_stage_flags::raytracing`.
+It then runs the same **declare-hazards → flush → op** rhythm as `compute_dispatch`, at `pipeline_stage_flag::raytracing`.
 A bound `tlas` surfaces as `accel_read` and the shader-table buffer is declared `shader_read`, before `ID3D12GraphicsCommandList4::DispatchRays`.
 
 ## See also

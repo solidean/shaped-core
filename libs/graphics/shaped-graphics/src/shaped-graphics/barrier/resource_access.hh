@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/flags.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// Backend-neutral vocabulary for resource access tracking.
@@ -11,50 +12,61 @@
 /// Buffers only ever use the `general` layout — layouts matter for textures.
 /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
 
-/// What a GPU operation does to a resource.
-/// Bit flags — combine with `|`, test with `has_all` / `has_any`.
-/// Migrates to `cc::flags` (same status as `buffer_usage`).
+/// One thing a GPU operation does to a resource.
+/// A set of them is an `access_flags` — combine with `|`, test with `has` / `has_any` / `has_all`.
 ///
 /// Read vs write is explicit in the suffix.
 /// `is_unordered_write` marks the accesses that create a hazard needing a barrier — shader, transfer and accel writes.
 /// Color/depth *target* writes are ROP-ordered by the hardware, and are not unordered.
-enum class sg::access_flags : sg::u32
+enum class sg::access_flag : sg::u32
 {
-    none = 0,
-    uniform_read = 1u << 0,  // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
-    index_read = 1u << 1,    // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
-    vertex_read = 1u << 2,   // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
-    shader_read = 1u << 3,   // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
-    shader_write = 1u << 4,  // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
-    copy_read = 1u << 5,     // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
-    copy_write = 1u << 6,    // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
-    indirect_read = 1u << 7, // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
+    uniform_read,  // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
+    index_read,    // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
+    vertex_read,   // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
+    shader_read,   // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
+    shader_write,  // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
+    copy_read,     // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
+    copy_write,    // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
+    indirect_read, // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
 
     // Texture / render-target / raytracing families.
     // A buffer only ever uses the accel_* pair, through cmd.raytracing.
-    color_write = 1u << 8,  // render-target write:     DX12 RENDER_TARGET   / Vk COLOR_ATTACHMENT_WRITE
-    depth_read = 1u << 9,   // depth/stencil test:      DX12 DEPTH_STENCIL_READ  / Vk DEPTH_STENCIL_ATTACHMENT_READ
-    depth_write = 1u << 10, // depth/stencil write:    DX12 DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_WRITE
-    accel_read = 1u << 11,  // AS read/trace:          DX12 / Vk ACCELERATION_STRUCTURE_READ
-    accel_write = 1u << 12, // AS build:               DX12 / Vk ACCELERATION_STRUCTURE_WRITE
+    color_write, // render-target write:     DX12 RENDER_TARGET   / Vk COLOR_ATTACHMENT_WRITE
+    depth_read,  // depth/stencil test:      DX12 DEPTH_STENCIL_READ  / Vk DEPTH_STENCIL_ATTACHMENT_READ
+    depth_write, // depth/stencil write:    DX12 DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_WRITE
+    accel_read,  // AS read/trace:          DX12 / Vk ACCELERATION_STRUCTURE_READ
+    accel_write, // AS build:               DX12 / Vk ACCELERATION_STRUCTURE_WRITE
 };
 
-/// Pipeline stages that may perform an access — bit flags, combined with `|`.
+CC_FLAG_ENUM_INDEXED(sg, access_flag, u32);
+
+/// One pipeline stage that may perform an access.
+/// A set of them is a `pipeline_stage_flags` — combine with `|`, test with `has` / `has_any` / `has_all`.
 /// Coarse on purpose — tessellation/geometry fold into `vertex`, early/late depth into `depth_stencil_target`.
 /// That mirrors how DX12 `BARRIER_SYNC` and Vulkan `PIPELINE_STAGE_2` are typically consumed.
-enum class sg::pipeline_stage_flags : sg::u32
+enum class sg::pipeline_stage_flag : sg::u32
 {
-    none = 0,
-    draw_indirect = 1u << 0,        // DX12 EXECUTE_INDIRECT / Vk DRAW_INDIRECT
-    vertex = 1u << 1,               // vertex-processing stages: DX12 VERTEX_SHADING / Vk VERTEX_SHADER (+ pre-raster)
-    fragment = 1u << 2,             // DX12 PIXEL_SHADING / Vk FRAGMENT_SHADER
-    compute = 1u << 3,              // DX12 COMPUTE_SHADING / Vk COMPUTE_SHADER
-    copy = 1u << 4,                 // copy/resolve: DX12 COPY / Vk (ALL_)TRANSFER
-    render_target = 1u << 5,        // color output:         DX12 RENDER_TARGET / Vk COLOR_ATTACHMENT_OUTPUT
-    depth_stencil_target = 1u << 6, // depth/stencil output: DX12 DEPTH_STENCIL / Vk EARLY|LATE_FRAGMENT_TESTS
-    raytracing = 1u << 7,           // DX12 RAYTRACING / Vk RAY_TRACING_SHADER
-    accel_build = 1u << 8,          // DX12 BUILD_RAYTRACING_ACCELERATION_STRUCTURE / Vk ACCELERATION_STRUCTURE_BUILD
+    draw_indirect,        // DX12 EXECUTE_INDIRECT / Vk DRAW_INDIRECT
+    vertex,               // vertex-processing stages: DX12 VERTEX_SHADING / Vk VERTEX_SHADER (+ pre-raster)
+    fragment,             // DX12 PIXEL_SHADING / Vk FRAGMENT_SHADER
+    compute,              // DX12 COMPUTE_SHADING / Vk COMPUTE_SHADER
+    copy,                 // copy/resolve: DX12 COPY / Vk (ALL_)TRANSFER
+    render_target,        // color output:         DX12 RENDER_TARGET / Vk COLOR_ATTACHMENT_OUTPUT
+    depth_stencil_target, // depth/stencil output: DX12 DEPTH_STENCIL / Vk EARLY|LATE_FRAGMENT_TESTS
+    raytracing,           // DX12 RAYTRACING / Vk RAY_TRACING_SHADER
+    accel_build,          // DX12 BUILD_RAYTRACING_ACCELERATION_STRUCTURE / Vk ACCELERATION_STRUCTURE_BUILD
 };
+
+CC_FLAG_ENUM_INDEXED(sg, pipeline_stage_flag, u32);
+
+namespace sg
+{
+/// A SET of access_flag — what an op declares and a state machine accumulates, never the bare enum.
+using access_flags = cc::flags<access_flag>;
+
+/// A SET of pipeline_stage_flag — the stages one declared access spans.
+using pipeline_stage_flags = cc::flags<pipeline_stage_flag>;
+} // namespace sg
 
 /// Memory layout a texture subresource is in; buffers are always `general`.
 /// Maps to DX12 `BARRIER_LAYOUT` / Vulkan `ImageLayout`.
@@ -75,88 +87,26 @@ enum class sg::texture_layout : sg::u32
 
 namespace sg
 {
-
-// access_flags bit ops
-[[nodiscard]] constexpr access_flags operator|(access_flags a, access_flags b)
-{
-    return access_flags(u32(a) | u32(b));
-}
-[[nodiscard]] constexpr access_flags operator&(access_flags a, access_flags b)
-{
-    return access_flags(u32(a) & u32(b));
-}
-[[nodiscard]] constexpr access_flags operator~(access_flags a)
-{
-    return access_flags(~u32(a));
-}
-constexpr access_flags& operator|=(access_flags& a, access_flags b)
-{
-    return a = a | b;
-}
-
-/// True if any bit is set.
-[[nodiscard]] constexpr bool has_any(access_flags a)
-{
-    return u32(a) != 0;
-}
-/// True if every bit of `part` is set in `a`.
-[[nodiscard]] constexpr bool has_all(access_flags a, access_flags part)
-{
-    return (u32(a) & u32(part)) == u32(part);
-}
-/// `a` with every bit of `remove` cleared.
-[[nodiscard]] constexpr access_flags without(access_flags a, access_flags remove)
-{
-    return a & ~remove;
-}
-
-// pipeline_stage_flags bit ops
-[[nodiscard]] constexpr pipeline_stage_flags operator|(pipeline_stage_flags a, pipeline_stage_flags b)
-{
-    return pipeline_stage_flags(u32(a) | u32(b));
-}
-[[nodiscard]] constexpr pipeline_stage_flags operator&(pipeline_stage_flags a, pipeline_stage_flags b)
-{
-    return pipeline_stage_flags(u32(a) & u32(b));
-}
-[[nodiscard]] constexpr pipeline_stage_flags operator~(pipeline_stage_flags a)
-{
-    return pipeline_stage_flags(~u32(a));
-}
-constexpr pipeline_stage_flags& operator|=(pipeline_stage_flags& a, pipeline_stage_flags b)
-{
-    return a = a | b;
-}
-
-[[nodiscard]] constexpr bool has_any(pipeline_stage_flags a)
-{
-    return u32(a) != 0;
-}
-[[nodiscard]] constexpr bool has_all(pipeline_stage_flags a, pipeline_stage_flags part)
-{
-    return (u32(a) & u32(part)) == u32(part);
-}
-[[nodiscard]] constexpr pipeline_stage_flags without(pipeline_stage_flags a, pipeline_stage_flags remove)
-{
-    return a & ~remove;
-}
-
 /// The accesses that constitute an *unordered write* — one the hardware does not auto-serialize, so a following access, read or write, needs an explicit barrier.
 /// Color/depth target writes are excluded: they are ROP-ordered (globally serialized) and act as ordered freebies.
+inline constexpr access_flags unordered_write_accesses
+    = access_flag::shader_write | access_flag::copy_write | access_flag::accel_write;
+
+/// True if `a` contains an unordered write.
 [[nodiscard]] constexpr bool is_unordered_write(access_flags a)
 {
-    return has_any(a & (access_flags::shader_write | access_flags::copy_write | access_flags::accel_write));
+    return a.has_any(unordered_write_accesses);
 }
 
 /// Every access that only observes the resource.
 /// An op can carry both halves at once — a copy whose source and destination are the same resource does.
 inline constexpr access_flags read_accesses
-    = access_flags::uniform_read | access_flags::index_read | access_flags::vertex_read | access_flags::shader_read
-    | access_flags::copy_read | access_flags::indirect_read | access_flags::depth_read | access_flags::accel_read;
+    = access_flag::uniform_read | access_flag::index_read | access_flag::vertex_read | access_flag::shader_read
+    | access_flag::copy_read | access_flag::indirect_read | access_flag::depth_read | access_flag::accel_read;
 
 /// True if `a` observes the resource at all, whatever else it does to it.
 [[nodiscard]] constexpr bool has_read_access(access_flags a)
 {
-    return has_any(a & read_accesses);
+    return a.has_any(read_accesses);
 }
 } // namespace sg

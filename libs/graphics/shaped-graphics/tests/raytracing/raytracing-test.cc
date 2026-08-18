@@ -125,7 +125,7 @@ INVOCABLE_TEST("sg - acceleration-structure builds validate their inputs", (sg::
     {
         auto cmd = ctx->create_command_list();
         CHECK_ASSERTS(cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1),
-                                                 sg::accel_build_flags::fast_trace | sg::accel_build_flags::fast_build));
+                                                 sg::accel_build_flag::fast_trace | sg::accel_build_flag::fast_build));
         ctx->drop_command_list(cc::move(cmd));
     }
 

@@ -24,7 +24,8 @@ What a call does today differs by family: the buffer form silently ignores its e
 ## The vocabulary is backend-neutral
 
 [resource_access.hh](../../src/shaped-graphics/barrier/resource_access.hh) defines three vocabularies.
-`access_flags` says what an op does (`shader_read`, `copy_write`, …), and `pipeline_stage_flags` says where (`compute`, `copy`, …).
+`access_flag` says what an op does (`shader_read`, `copy_write`, …), and `pipeline_stage_flag` says where (`compute`, `copy`, …).
+Both are `cc::flags` sets — `access_flags` and `pipeline_stage_flags` — so a declared access carries several of each at once.
 `texture_layout` says how the texels are arranged, and buffers are always `general`.
 A texture uses `shader_readonly` / `shader_readwrite` / `render_target` / `depth_readonly` / `depth_readwrite` / `copy_src` / `copy_dst` / `present`.
 None of it is any one backend's spelling, and each value documents its D3D12 and Vulkan mapping.

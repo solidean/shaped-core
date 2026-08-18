@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/flags.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// Small vocabulary enums shared across the shaped-graphics public API.
@@ -26,9 +27,8 @@ enum class sg::thread_model
                      ///< epoch management (advance, waits) and shutdown must be externally synchronized
 };
 
-/// How a buffer may be used across the pipeline.
-/// Bit flags — combine with `|`, test with `has_flag`.
-/// Migrates to `cc::flags`, which has landed.
+/// One way a buffer may be used across the pipeline.
+/// A set of them is a `buffer_usages` — combine with `|`, test with `has`.
 ///
 /// Names describe the *operation the buffer serves* at draw/dispatch time, not any one backend's flag.
 /// Each value's trailing comment gives that per-backend mapping.
@@ -37,20 +37,19 @@ enum class sg::thread_model
 /// A write-only buffer is deliberately not representable — that is a shader/binding access mode rather than a creation usage, and collapses into `readwrite_buffer`.
 enum class sg::buffer_usage : sg::u32
 {
-    none = 0,
-    copy_src = 1u << 0,                // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 & Metal implicit
-    copy_dst = 1u << 1,                // Vk TRANSFER_DST / WGPU COPY_DST; DX12 initial state; Metal implicit
-    vertex_buffer = 1u << 2,           // Vk VERTEX / WGPU VERTEX
-    index_buffer = 1u << 3,            // Vk INDEX / WGPU INDEX
-    uniform_buffer = 1u << 4,          // constant buffer: Vk UNIFORM / WGPU UNIFORM (size-capped)
-    readonly_buffer = 1u << 5,         // read-only structured/raw SRV: Vk STORAGE / WGPU STORAGE; DX12 no flag
-    readwrite_buffer = 1u << 6,        // UAV: Vk STORAGE / WGPU STORAGE; DX12 ALLOW_UNORDERED_ACCESS
-    indirect_command_buffer = 1u << 7, // Vk INDIRECT / WGPU INDIRECT
+    copy_src,                // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 & Metal implicit
+    copy_dst,                // Vk TRANSFER_DST / WGPU COPY_DST; DX12 initial state; Metal implicit
+    vertex_buffer,           // Vk VERTEX / WGPU VERTEX
+    index_buffer,            // Vk INDEX / WGPU INDEX
+    uniform_buffer,          // constant buffer: Vk UNIFORM / WGPU UNIFORM (size-capped)
+    readonly_buffer,         // read-only structured/raw SRV: Vk STORAGE / WGPU STORAGE; DX12 no flag
+    readwrite_buffer,        // UAV: Vk STORAGE / WGPU STORAGE; DX12 ALLOW_UNORDERED_ACCESS
+    indirect_command_buffer, // Vk INDIRECT / WGPU INDIRECT
 
     // Acceleration-structure (raytracing). Vulkan also needs a buffer device address for these; the
     // backend adds it implicitly (no separate `device_address` usage for now).
-    accel_structure_storage = 1u << 8,     // Vk AS_STORAGE_KHR; DX12 AS resource state
-    accel_structure_build_input = 1u << 9, // Vk AS_BUILD_INPUT_READ_ONLY_KHR; DX12 plain SRV
+    accel_structure_storage,     // Vk AS_STORAGE_KHR; DX12 AS resource state
+    accel_structure_build_input, // Vk AS_BUILD_INPUT_READ_ONLY_KHR; DX12 plain SRV
 
     // Not yet modeled — add one when a backend needs it:
     // texel_buffer          — typed buffer view (Vk UNIFORM/STORAGE_TEXEL / DX12 typed SRV/UAV); a texture or a structured buffer covers most cases
@@ -61,60 +60,34 @@ enum class sg::buffer_usage : sg::u32
     // Cross-device sharing is absent on purpose: it is a memory property, so it belongs on memory_heap / allocation_info.
 };
 
+CC_FLAG_ENUM_INDEXED(sg, buffer_usage, u32);
+
 namespace sg
 {
-
-[[nodiscard]] constexpr buffer_usage operator|(buffer_usage a, buffer_usage b)
-{
-    return buffer_usage(u32(a) | u32(b));
-}
-
-[[nodiscard]] constexpr buffer_usage operator&(buffer_usage a, buffer_usage b)
-{
-    return buffer_usage(u32(a) & u32(b));
-}
-
-/// True if every bit in `flag` is set in `usage`.
-[[nodiscard]] constexpr bool has_flag(buffer_usage usage, buffer_usage flag)
-{
-    return (u32(usage) & u32(flag)) == u32(flag);
-}
-
+/// A SET of buffer_usage — what a buffer is created with and reports, never the bare enum.
+/// The empty set is legal and means no operation may touch the buffer, which every backend must still accept.
+using buffer_usages = cc::flags<buffer_usage>;
 } // namespace sg
 
-/// How a texture may be used across the pipeline.
-/// Bit flags — combine with `|`, test with `has_flag`.
-/// Migrates to `cc::flags`, like `buffer_usage`.
+/// One way a texture may be used across the pipeline.
+/// A set of them is a `texture_usages` — combine with `|`, test with `has`.
 ///
 /// Modeled at Vulkan's granularity, one flag per `VkImageUsageFlagBit`, since Vulkan needs every usage declared at creation and D3D12 is coarser.
 /// Vulkan-only `INPUT_ATTACHMENT` / `TRANSIENT_ATTACHMENT` are omitted deliberately, having no D3D12 analogue.
 enum class sg::texture_usage : sg::u32
 {
-    none = 0,
-    copy_src = 1u << 0,          // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
-    copy_dst = 1u << 1,          // Vk TRANSFER_DST / WGPU COPY_DST; DX12 implicit
-    readonly_texture = 1u << 2,  // read-only sampled/SRV: Vk SAMPLED; DX12 no flag (default)
-    readwrite_texture = 1u << 3, // read-write UAV / storage image: Vk STORAGE; DX12 ALLOW_UNORDERED_ACCESS
-    render_target = 1u << 4,     // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
-    depth_stencil = 1u << 5,     // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
+    copy_src,          // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
+    copy_dst,          // Vk TRANSFER_DST / WGPU COPY_DST; DX12 implicit
+    readonly_texture,  // read-only sampled/SRV: Vk SAMPLED; DX12 no flag (default)
+    readwrite_texture, // read-write UAV / storage image: Vk STORAGE; DX12 ALLOW_UNORDERED_ACCESS
+    render_target,     // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
+    depth_stencil,     // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
 };
+
+CC_FLAG_ENUM_INDEXED(sg, texture_usage, u32);
 
 namespace sg
 {
-
-[[nodiscard]] constexpr texture_usage operator|(texture_usage a, texture_usage b)
-{
-    return texture_usage(u32(a) | u32(b));
-}
-
-[[nodiscard]] constexpr texture_usage operator&(texture_usage a, texture_usage b)
-{
-    return texture_usage(u32(a) & u32(b));
-}
-
-/// True if every bit in `flag` is set in `usage`.
-[[nodiscard]] constexpr bool has_flag(texture_usage usage, texture_usage flag)
-{
-    return (u32(usage) & u32(flag)) == u32(flag);
-}
+/// A SET of texture_usage — what a texture is created with and reports, never the bare enum.
+using texture_usages = cc::flags<texture_usage>;
 } // namespace sg

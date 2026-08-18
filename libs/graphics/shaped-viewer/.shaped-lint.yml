@@ -3,7 +3,11 @@
 # The root's entries apply here too; what follows extends them, and the last matching entry decides.
 # See tools/shaped-linter/docs/configuration.md.
 #
-# sv reaches for nothing outside cc:: and tg::, its tests included, so this file has no entries.
+# sv reaches for nothing outside cc:: and tg::, its tests included, bar the one entry below.
 # That is the state to keep it in: a new one here is a claim that sv needs something the libraries below it do not provide.
 
-rules: []
+rules:
+  - kind: allow-include
+    value: <memory>
+    reason: sg hands out command lists as std::unique_ptr<sg::command_list> — polymorphic, so not cc::unique_ptr (shaped-graphics/docs/coding-guidelines.md argues it). fwd.hh is sv's single door to it; everything else includes fwd.hh
+    files: src/shaped-viewer/fwd.hh

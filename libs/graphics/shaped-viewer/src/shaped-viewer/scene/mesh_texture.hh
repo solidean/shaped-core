@@ -2,7 +2,6 @@
 
 #include <clean-core/string/string.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/resources/resource_ids.hh>
 
 /// A texture the mesh offers its material, bound to the slot `name` identifies (`"albedo"`, `"normal"`, ...).
 ///

@@ -24,9 +24,9 @@ public:
     /// Allocates a transient buffer of `size_in_bytes` from the current epoch's bump window; the storage is reused once the epoch changes.
     /// Size must be >= 0, and 0 is a valid empty buffer.
     /// Throws sg::allocation_exception on allocation failure.
-    [[nodiscard]] raw_buffer_handle create_raw_buffer(isize size_in_bytes, buffer_usage usage);
+    [[nodiscard]] raw_buffer_handle create_raw_buffer(isize size_in_bytes, buffer_usages usage);
 
-    [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes, buffer_usage usage);
+    [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes, buffer_usages usage);
 
     // Typed buffer factory — allocates `element_count` elements of `T`, so element_count * sizeof(T) bytes.
     // Returns the wrapped `buffer<T>`, whose view factories are typed by `T`.
@@ -34,13 +34,13 @@ public:
     // Error behaviour mirrors create_raw_buffer.
 
     template <class T>
-    [[nodiscard]] buffer<T> create_buffer(isize element_count, buffer_usage usage)
+    [[nodiscard]] buffer<T> create_buffer(isize element_count, buffer_usages usage)
     {
         return buffer<T>::from_raw(create_raw_buffer(element_count * isize(sizeof(T)), usage));
     }
 
     template <class T>
-    [[nodiscard]] cc::result<buffer<T>> try_create_buffer(isize element_count, buffer_usage usage)
+    [[nodiscard]] cc::result<buffer<T>> try_create_buffer(isize element_count, buffer_usages usage)
     {
         auto r = try_create_raw_buffer(element_count * isize(sizeof(T)), usage);
         if (r.has_value())

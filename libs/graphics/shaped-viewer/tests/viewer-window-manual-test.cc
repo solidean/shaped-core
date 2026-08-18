@@ -6,137 +6,24 @@
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/window.hh>
 #include <shaped-viewer/all.hh>
-#include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
-#include <typed-geometry/scalar/angle.hh>
 
 #include <chrono>
 
-// Interactive demo: a random cloud of flat-shaded PBR triangles, ray-traced into a view target and blitted
-// into a window, with a simple fly-camera you drive yourself.
+using namespace cc::primitive_defines;
+
+// Interactive demo: a random cloud of flat-shaded PBR triangles, ray-traced into a view target and blitted into a window.
+//
+// It drives the retained path by hand — its own window, swapchain and frame loop — so it is also where sv::orbit_camera_controller
+// is exercised outside the immediate-mode viewer, on a caller that owns its own event pump.
+// The view accumulates while the camera is still, and restarts whenever the controller reports motion.
 //
 // Controls:
-//   hold right mouse button + move mouse — look around
-//   W / S — forward / back      A / D — strafe      E / Q — up / down      Shift — move faster
-//   Esc — quit
+//   left mouse drag — orbit      middle mouse drag — pan      wheel — zoom
 //
 // nx::config::manual keeps it out of the default sweep.
 // Run it explicitly:
 //   uv run dev.py test "sv - viewer window (manual)" --manual --timeout 0
 // Prefers a hardware GPU, falls back to WARP; SKIPs if the device has no ray tracing or there is no window.
-
-namespace
-{
-/// A minimal free-fly camera controller — the kind of thing an app would grow into a real class, kept here in the test for now.
-/// Holds its own position + yaw/pitch, consumes sr input events, and writes an sv::camera.
-struct fly_camera
-{
-    tg::pos3f position = tg::pos3f(0, 1.4f, -5.0f);
-    tg::angle_f yaw;   // around +Y; 0 looks toward +Z
-    tg::angle_f pitch; // around the camera's right axis
-
-    float move_speed = 3.0f;                                          // units / second
-    tg::angle_f look_speed = tg::angle_f::make_from_radians(0.0035f); // per pixel of mouse motion
-
-    bool looking = false; // right mouse button held
-    bool key_forward = false, key_back = false, key_left = false, key_right = false;
-    bool key_up = false, key_down = false, key_fast = false;
-
-    [[nodiscard]] tg::vec3f forward() const
-    {
-        auto const cp = pitch.cos();
-        return tg::vec3f(yaw.sin() * cp, pitch.sin(), yaw.cos() * cp).normalized();
-    }
-
-    [[nodiscard]] tg::vec3f right() const { return tg::dual(tg::cross(tg::vec3f(0, 1, 0), forward())).normalized(); }
-
-    void handle(sr::input_event const& e, sr::window& win)
-    {
-        if (auto const* const k = e.try_as_key())
-        {
-            auto const down = k->is_down;
-            switch (k->scancode)
-            {
-            case sr::scancode::w:
-                key_forward = down;
-                break;
-            case sr::scancode::s:
-                key_back = down;
-                break;
-            case sr::scancode::a:
-                key_left = down;
-                break;
-            case sr::scancode::d:
-                key_right = down;
-                break;
-            case sr::scancode::e:
-                key_up = down;
-                break;
-            case sr::scancode::q:
-                key_down = down;
-                break;
-            case sr::scancode::left_shift:
-            case sr::scancode::right_shift:
-                key_fast = down;
-                break;
-            case sr::scancode::escape:
-                if (down)
-                    win.request_close();
-                break;
-            default:
-                break;
-            }
-        }
-        else if (auto const* const b = e.try_as_mouse_button())
-        {
-            if (b->button == sr::mouse_button::right)
-            {
-                looking = b->is_down;
-                win.set_relative_mouse_mode(looking); // capture the cursor while looking
-            }
-        }
-        else if (auto const* const m = e.try_as_mouse_move())
-        {
-            if (looking)
-            {
-                yaw += look_speed * float(m->delta[0]);
-                pitch -= look_speed * float(m->delta[1]);
-                auto const limit = tg::angle_f::make_from_radians(1.5f); // keep just shy of straight up/down
-                pitch = pitch < -limit ? -limit : (pitch > limit ? limit : pitch);
-            }
-        }
-    }
-
-    void update(float dt)
-    {
-        auto velocity = tg::vec3f(0, 0, 0);
-        auto const f = forward();
-        auto const r = right();
-        if (key_forward)
-            velocity += f;
-        if (key_back)
-            velocity -= f;
-        if (key_right)
-            velocity += r;
-        if (key_left)
-            velocity -= r;
-        if (key_up)
-            velocity += tg::vec3f(0, 1, 0);
-        if (key_down)
-            velocity -= tg::vec3f(0, 1, 0);
-
-        auto const speed = move_speed * (key_fast ? 3.0f : 1.0f);
-        position = position + velocity * (speed * dt);
-    }
-
-    void apply(sv::camera& cam) const
-    {
-        auto const eye = tg::pos3d(position[0], position[1], position[2]);
-        auto const f = forward();
-        cam.position = eye;
-        cam.orientation = sv::camera::look_rotation(eye, eye + tg::vec3d(f[0], f[1], f[2]));
-    }
-};
-} // namespace
 
 TEST("sv - viewer window (manual)", nx::config::manual)
 {
@@ -182,57 +69,74 @@ TEST("sv - viewer window (manual)", nx::config::manual)
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
 
-    auto controller = fly_camera{};
+    auto controller = sv::orbit_camera_controller{};
+    controller.orbit = {.target = tg::pos3d(0, 1, 0), .distance = 6.0};
 
-    auto last = std::chrono::steady_clock::now();
-    auto const start = last;
+    // What the views keep across frames, held here because this loop is the frame — a viewer would own it instead.
+    auto store = sv::view_store{};
+
+    auto const start = std::chrono::steady_clock::now();
     constexpr auto max_duration = std::chrono::minutes(10);
 
+    auto frame_index = u64(0);
     while (!win->is_close_requested())
     {
         wsys->poll_events();
         if (wsys->is_quit_requested())
             break;
+        // The controller is time-free, so there is no dt to integrate — each event carries the motion it caused.
         for (auto const& e : wsys->events())
-            controller.handle(e, *win);
+            (void)controller.handle(e);
 
-        auto const now = std::chrono::steady_clock::now();
-        auto const dt = std::chrono::duration<float>(now - last).count();
-        last = now;
-        if (now - start > max_duration)
+        if (std::chrono::steady_clock::now() - start > max_duration)
             break;
         if (win->is_minimized())
             continue;
 
-        controller.update(dt);
-
         auto def = sv::viewer_definition{};
-        {
-            auto v = sv::view{};
-            v.id = sv::view_id::from_string("main");
-            v.size = tg::vec2i(win->width(), win->height());
-            controller.apply(v.camera);
-            v.items.push_back({.mesh = mesh, .materials = materials});
-            // an overhead rect facing down (cross(+x, +z) is -y)
-            v.area_lights.push_back({.center = tg::pos3f(0, 3, 0),
-                                     .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                     .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                     .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
+        auto v = sv::view_data{};
+        v.id = sv::view_id::from_string("main");
+        v.resolution = tg::vec2i(win->width(), win->height());
+        // The camera is the only thing that changes, and the trace notices on its own — no restart to signal here.
+        v.camera = controller.camera();
+        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        // an overhead rect facing down (cross(+x, +z) is -y)
+        sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
+                                                      .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                                                      .half_extent_v = tg::vec3f(0, 0, 0.75f),
+                                                      .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
 
-            // A cool-blue SH sky: a bright ambient DC term plus a vertical gradient (brighter toward the zenith,
-            // +y). The path tracer's miss shows it behind the cloud, and env NEE lights the cloud from it.
-            v.background.sh[0] = tg::vec3f(1.6f, 2.2f, 3.2f);
-            v.background.sh[1] = tg::vec3f(0.5f, 0.7f, 1.1f);
+        // A cool-blue SH sky, brighter toward the zenith (+y).
+        // The path tracer's miss shows it behind the cloud, and env NEE lights the cloud from it.
+        sv::ensure_scene_3d(v).background
+            = sv::background::gradient(tg::vec3f(0.70f, 0.96f, 1.44f), tg::vec3f(0.21f, 0.28f, 0.37f));
 
-            def.views.push_back(cc::move(v));
-        }
+        def.views.push_back(cc::move(v));
+
+        // One view filling the window: a root whose single layout leaf names it.
+        auto const root_node = def.nodes.add_container(sv::invalid_node);
+        auto leaf = sv::layout_leaf{};
+        leaf.views.push_back(sv::view_index(0));
+        def.nodes.add_leaf(root_node, cc::move(leaf));
+
+        auto root = sv::view_data{};
+        root.id = sv::view_id::from_string("root");
+        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+        def.root_view = sv::view_index(def.views.size());
+        def.views.push_back(cc::move(root));
 
         auto rt = sc->acquire_backbuffer(); // auto-resizes to the window
         auto cmd = ctx.create_command_list();
-        // The view_renderer path-traces the view and blits it into the back buffer, opening the scope itself.
-        sv::view_renderer::execute(*cmd, def, resources, rt.cleared(tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f)));
+        // Both once per frame, before any view resolves its ids or reaches for its accumulator.
+        resources.begin_frame(ctx.current_epoch());
+        store.begin_frame(u64(ctx.current_epoch()));
+
+        // The whole frame in one call: flatten it into a plan, trace every view, then composite up to the back buffer.
+        auto const plan = sv::build_render_plan(def, tg::vec2i(win->width(), win->height()), frame_index, {});
+        sv::viewer_renderer::execute(*cmd, def, plan, resources, store, rt.cleared(tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f)));
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch(sc->buffer_count());
+        ++frame_index;
     }
 
     ctx.advance_epoch_and_wait_for_idle();

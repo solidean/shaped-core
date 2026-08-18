@@ -4,7 +4,7 @@
 #include <clean-core/common/utility.hh> // cc::memcpy
 #include <clean-core/string/string.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/mesh_attribute.hh> // attribute_format + attribute_format_of
+#include <shaped-viewer/scene/mesh_attribute.hh> // attribute_format + attribute_format_of
 
 #include <type_traits>
 

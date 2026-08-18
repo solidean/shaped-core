@@ -6,10 +6,10 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-viewer/background.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
+#include <shaped-viewer/scene/background.hh>
+#include <shaped-viewer/scene/pbr_material.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 

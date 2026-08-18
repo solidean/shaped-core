@@ -58,11 +58,8 @@ TEST("sv - flat-PBR raytraced view (headless)")
     fc.camera = sv::camera_gpu::from(cam);
     fc.mesh_is_indexed = mesh_rec->is_indexed;
 
-    // A simple SH environment: a bright DC term plus a vertical (y) gradient, so the surfaces get diffuse
-    // irradiance (and a missed ray sees a sky).
-    auto bg = sv::background{};
-    bg.sh[0] = tg::vec3f(1.40f, 1.72f, 2.20f); // constant (DC) radiance — the ambient sky level
-    bg.sh[1] = tg::vec3f(0.30f, 0.42f, 0.60f); // Y(1,-1): brighter overhead, darker below
+    // A simple SH environment, so the surfaces get diffuse irradiance (and a missed ray sees a sky).
+    auto const bg = sv::background::gradient(tg::vec3f(0.54f, 0.69f, 0.91f), tg::vec3f(0.25f, 0.28f, 0.33f));
 
     auto cmd = ctx.create_command_list();
 

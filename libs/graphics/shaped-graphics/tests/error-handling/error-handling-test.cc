@@ -34,9 +34,9 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-sg::buffer_usage const copy_dst = sg::buffer_usage::copy_dst;
-sg::buffer_usage const copy_src = sg::buffer_usage::copy_src;
-sg::buffer_usage const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
+sg::buffer_usages const copy_dst = sg::buffer_usage::copy_dst;
+sg::buffer_usages const copy_src = sg::buffer_usage::copy_src;
+sg::buffer_usages const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 } // namespace
 
 INVOCABLE_TEST("sg error handling - buffer creation validates its size", (sg::context_handle const& ctx))
@@ -44,8 +44,8 @@ INVOCABLE_TEST("sg error handling - buffer creation validates its size", (sg::co
     REQUIRE(ctx != nullptr);
 
     // Size must be >= 0. The check lives in the backend; the public entry must reach it.
-    CHECK_ASSERTS(ctx->persistent.try_create_raw_buffer(-1, sg::buffer_usage::none));
-    CHECK_ASSERTS(ctx->transient.try_create_raw_buffer(-16, sg::buffer_usage::none));
+    CHECK_ASSERTS(ctx->persistent.try_create_raw_buffer(-1, {}));
+    CHECK_ASSERTS(ctx->transient.try_create_raw_buffer(-16, {}));
 }
 
 INVOCABLE_TEST("sg error handling - buffer view factories validate usage and bounds", (sg::context_handle const& ctx))

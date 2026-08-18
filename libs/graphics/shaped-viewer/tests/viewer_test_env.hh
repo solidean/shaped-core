@@ -6,8 +6,9 @@
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
-#include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/rendering/shaders.hh>
+#include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/pbr_material.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
@@ -54,7 +55,7 @@ namespace sv_test
 /// The one shader library for this test binary, with sv's and sr's packages registered.
 /// `has_compiler` is false when DXC is not installed — a caller SKIPs, since nothing will compile.
 ///
-/// sr's package carries the blit shader (sr::blit_routine), which the view_renderer drives — so both packages
+/// sr's package carries the blit shader (sr::blit_routine), which the viewer_renderer drives to place each view — so both packages
 /// must be registered, or acquiring the blit shader faults.
 inline env const& shared_env()
 {
@@ -117,6 +118,20 @@ inline triangle_cloud make_triangle_cloud(int triangle_count, u64 seed = 0x5EED1
                                  .emissive = tg::vec3f(0, 0, 0)});
     }
     return out;
+}
+
+} // namespace sv_test
+
+namespace sv_test
+{
+
+/// A raw triangle list plus its per-face materials, as the `sv::mesh` the authoring API takes.
+/// The materials are scalarized into per_triangle attributes, which is where per-face data belongs.
+inline sv::mesh as_mesh(cc::string name, cc::span<tg::pos3f const> positions, cc::span<sv::pbr_material const> materials)
+{
+    return {.name = cc::move(name),
+            .geometry = sv::triangle_geometry::create_from_positions(positions),
+            .attributes = sv::pbr_material_attributes(materials)};
 }
 
 } // namespace sv_test

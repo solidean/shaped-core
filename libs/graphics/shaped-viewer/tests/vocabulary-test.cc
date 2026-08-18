@@ -1,21 +1,26 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/test.hh>
-#include <shaped-viewer/camera.hh>
+#include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/gpu_types.hh>
-#include <shaped-viewer/light.hh>
-#include <shaped-viewer/mesh.hh>
-#include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/resources/resource_data.hh>
-#include <shaped-viewer/resources/resource_ids.hh>
-#include <shaped-viewer/triangle_geometry.hh>
-#include <shaped-viewer/view_id.hh>
-#include <shaped-viewer/viewer_definition.hh>
+#include <shaped-viewer/scene/background.hh>
+#include <shaped-viewer/scene/light.hh>
+#include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/pbr_material.hh>
+#include <shaped-viewer/scene/triangle_geometry.hh>
+#include <shaped-viewer/view/camera.hh>
+#include <shaped-viewer/view/view_id.hh>
+#include <shaped-viewer/view/viewer_definition.hh>
 #include <typed-geometry/geometry/primitives/triangle.hh>
+#include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 
 #include <type_traits>
 
@@ -33,6 +38,63 @@ TEST("sv - view_id from_string is stable and distinct")
     CHECK(a.value == b.value);
     CHECK(a != c);
     CHECK(a.value != c.value);
+}
+
+TEST("sv - the id stack separates views that share a name")
+{
+    auto const bare = sv::view_id::from_string("view");
+
+    // The default seed is the unseeded hash, so pushing nothing changes nothing.
+    CHECK(sv::view_id::from_string("view", 0) == bare);
+
+    // Same name, two scopes: the whole point of scoped_id in a loop.
+    auto const in_0 = sv::view_id::from_string("view", sv::push_id_seed(0, i64(0)));
+    auto const in_1 = sv::view_id::from_string("view", sv::push_id_seed(0, i64(1)));
+    CHECK(in_0 != in_1);
+    CHECK(in_0 != bare);
+
+    // Seeding is deterministic, or a view would lose its state every run.
+    CHECK(in_0 == sv::view_id::from_string("view", sv::push_id_seed(0, i64(0))));
+
+    // Nesting composes, and the order of the path matters.
+    auto const outer = sv::push_id_seed(0, cc::string_view("panel"));
+    auto const inner = sv::push_id_seed(outer, i64(2));
+    CHECK(sv::view_id::from_string("view", inner) != sv::view_id::from_string("view", outer));
+    CHECK(sv::push_id_seed(sv::push_id_seed(0, cc::string_view("a")), cc::string_view("b"))
+          != sv::push_id_seed(sv::push_id_seed(0, cc::string_view("b")), cc::string_view("a")));
+}
+
+TEST("sv - a ## suffix separates ids that share a display name")
+{
+    // The whole string is hashed, so the suffix is what makes these two views rather than one.
+    CHECK(sv::view_id::from_string("angle##0") != sv::view_id::from_string("angle##1"));
+    CHECK(sv::view_id::from_string("angle##0") != sv::view_id::from_string("angle"));
+
+    // What a human reads is the part in front of it.
+    CHECK(sv::display_name_of("angle##0") == "angle");
+    CHECK(sv::display_name_of("angle") == "angle");
+    CHECK(sv::display_name_of("") == "");
+
+    // Only the FIRST marker splits, and an id that is nothing but a suffix has no display name at all.
+    CHECK(sv::display_name_of("a##b##c") == "a");
+    CHECK(sv::display_name_of("##7") == "");
+
+    // A single '#' is not a marker.
+    CHECK(sv::display_name_of("a#b") == "a#b");
+}
+
+TEST("sv - a formatted id is the string it spells out")
+{
+    // What `add_view("angle##{}", i)` hashes must be exactly what the pre-formatted string would.
+    auto const short_id = cc::format("angle##{}", 2);
+    CHECK(short_id == "angle##2");
+    CHECK(sv::view_id::from_string(short_id) == sv::view_id::from_string("angle##2"));
+
+    // A long id is spelled out in full rather than truncated.
+    auto const padding = cc::string::create_filled(400, 'x');
+    auto const long_id = cc::format("{}", padding);
+    CHECK(long_id.size() == 400);
+    CHECK(long_id == padding);
 }
 
 TEST("sv - view_id keys a map")
@@ -167,6 +229,135 @@ TEST("sv - area_light_gpu::from lays out the rect and its emitting face")
     }
 }
 
+namespace
+{
+/// The radiance `shaders/background.hlsli` reconstructs along `d`, evaluated on the CPU so the factories can be
+/// checked against the basis they are written for rather than against their own coefficients.
+/// `d` must be unit.
+/// The shader's `max(L, 0)` clamp is deliberately left out — a factory's promise is the unclamped function, and clamping would hide a sign error.
+[[nodiscard]] tg::vec3f radiance_along(sv::background const& bg, tg::vec3f d)
+{
+    auto const x = d[0];
+    auto const y = d[1];
+    auto const z = d[2];
+
+    f32 const basis[16] = {0.282095f,
+                           0.488603f * y,
+                           0.488603f * z,
+                           0.488603f * x,
+                           1.092548f * x * y,
+                           1.092548f * y * z,
+                           0.315392f * (3 * z * z - 1),
+                           1.092548f * x * z,
+                           0.546274f * (x * x - y * y),
+                           0.590044f * y * (3 * x * x - y * y),
+                           2.890611f * x * y * z,
+                           0.457046f * y * (5 * z * z - 1),
+                           0.373176f * z * (5 * z * z - 3),
+                           0.457046f * x * (5 * z * z - 1),
+                           1.445306f * z * (x * x - y * y),
+                           0.590044f * x * (x * x - 3 * y * y)};
+
+    auto l = tg::vec3f(0, 0, 0);
+    for (auto i = 0; i < sv::background::sh_coefficient_count; ++i)
+        l = l + bg.sh[i] * basis[i];
+    return l;
+}
+
+[[nodiscard]] bool near(tg::vec3f a, tg::vec3f b, f32 eps = 1e-4f)
+{
+    for (auto i = 0; i < 3; ++i)
+        if (a[i] - b[i] > eps || b[i] - a[i] > eps)
+            return false;
+    return true;
+}
+} // namespace
+
+TEST("sv - background factories reconstruct the radiance they promise")
+{
+    auto const up = tg::vec3f(0, 1, 0);
+    auto const down = tg::vec3f(0, -1, 0);
+    auto const side = tg::vec3f(1, 0, 0);
+
+    SECTION("uniform is the same radiance in every direction")
+    {
+        auto const c = tg::vec3f(0.25f, 0.5f, 0.75f);
+        auto const bg = sv::background::uniform(c);
+
+        CHECK(near(radiance_along(bg, up), c));
+        CHECK(near(radiance_along(bg, down), c));
+        CHECK(near(radiance_along(bg, tg::normalize(tg::vec3f(1, 2, -3))), c));
+    }
+
+    SECTION("gradient hits zenith and nadir exactly, averaging on the horizon")
+    {
+        auto const zenith = tg::vec3f(0.2f, 0.6f, 1.0f);
+        auto const nadir = tg::vec3f(0.4f, 0.2f, 0.1f);
+        auto const bg = sv::background::gradient(zenith, nadir);
+
+        CHECK(near(radiance_along(bg, up), zenith));
+        CHECK(near(radiance_along(bg, down), nadir));
+        CHECK(near(radiance_along(bg, side), (zenith + nadir) * 0.5f));
+        CHECK(near(radiance_along(bg, tg::normalize(tg::vec3f(0, 0, 1))), (zenith + nadir) * 0.5f));
+    }
+
+    SECTION("sun peaks at its direction and falls off as the clamped cosine")
+    {
+        auto const dir = tg::normalize(tg::vec3f(0.3f, 0.9f, -0.2f));
+        auto const c = tg::vec3f(1.0f, 0.8f, 0.6f);
+        auto const bg = sv::background::sun(dir, c);
+
+        // Some unit vector across the lobe's axis, to walk away from the peak with.
+        auto const across = tg::dual(tg::cross(dir, tg::vec3f(0, 0, 1))).normalized();
+
+        // The peak is exactly the requested radiance — that is what the 16/17 rescale in `sun` buys.
+        CHECK(near(radiance_along(bg, dir), c, 1e-3f));
+
+        // Off the axis it is the TRUNCATED clamped cosine, not the clamped cosine: bands 0..2 leave a floor
+        // where the clamp would have given zero — 3/34 of the peak across the lobe, 1/17 behind it.
+        CHECK(near(radiance_along(bg, across), c * (3.0f / 34.0f), 1e-3f));
+        CHECK(near(radiance_along(bg, -dir), c * (1.0f / 17.0f), 1e-3f));
+
+        // Still a lobe: monotonically brighter as the direction swings back toward the axis.
+        auto const at_60 = radiance_along(bg, tg::normalize(dir + across * 1.7320508f)); // tan(60 deg)
+        CHECK(at_60[0] > radiance_along(bg, across)[0]);
+        CHECK(at_60[0] < c[0]);
+
+        // The direction is normalized for the caller, so its length cannot change the lobe.
+        CHECK(near(radiance_along(sv::background::sun(dir * 7.0f, c), dir), c, 1e-3f));
+    }
+
+    SECTION("backgrounds superpose, which is what lets the presets compose")
+    {
+        auto const sky = sv::background::gradient(tg::vec3f(0.2f, 0.6f, 1.0f), tg::vec3f(0.1f, 0.1f, 0.1f));
+        auto const sun = sv::background::sun(up, tg::vec3f(2, 2, 2));
+        auto const d = tg::normalize(tg::vec3f(1, 3, -2));
+
+        CHECK(near(radiance_along(sky.combined_with(sun), d), radiance_along(sky, d) + radiance_along(sun, d)));
+        CHECK(near(radiance_along(sky.scaled(0.5f), d), radiance_along(sky, d) * 0.5f));
+    }
+
+    SECTION("the presets stay non-negative everywhere a ray can look")
+    {
+        // Not free: a `sun` dips below zero in a ring behind its lobe, so a preset built on one only reads as a sky if its ambient outweighs that dip.
+        // The miss clamps, but a clamp hides that rather than fixing it.
+        auto worst = 1.0f;
+        for (auto const& bg : {sv::background::daylight(), sv::background::studio()})
+            for (auto ix = -2; ix <= 2; ++ix)
+                for (auto iy = -2; iy <= 2; ++iy)
+                    for (auto iz = -2; iz <= 2; ++iz)
+                    {
+                        if (ix == 0 && iy == 0 && iz == 0)
+                            continue;
+
+                        auto const l = radiance_along(bg, tg::normalize(tg::vec3f(f32(ix), f32(iy), f32(iz))));
+                        for (auto ch = 0; ch < 3; ++ch)
+                            worst = l[ch] < worst ? l[ch] : worst;
+                    }
+        CHECK(worst >= 0.0f);
+    }
+}
+
 TEST("sv - geometry holds both triangle layouts behind one type")
 {
     auto const positions
@@ -223,6 +414,40 @@ TEST("sv - a mesh attribute is typed, pinned and content-hashed")
                                      cc::vector<tg::vec3f>{tg::vec3f(1, 0, 0)})
               .hash
           != a.hash);
+}
+
+TEST("sv - per-face pbr materials scalarize into per_triangle attributes")
+{
+    auto const materials = cc::vector<sv::pbr_material>{
+        {.base_color = tg::vec3f(1, 0, 0), .metallic = 0.25f, .roughness = 0.5f, .emissive = tg::vec3f(0, 0, 0)},
+        {.base_color = tg::vec3f(0, 1, 0), .metallic = 0.75f, .roughness = 0.125f, .emissive = tg::vec3f(2, 2, 2)}};
+
+    auto const attributes = sv::pbr_material_attributes(materials);
+    CHECK(attributes.size() == 4);
+
+    auto const by_name = [&](cc::string_view name) -> sv::mesh_attribute const&
+    {
+        for (auto const& a : attributes)
+            if (a.name == name)
+                return a;
+        CHECK(false);
+        return attributes[0];
+    };
+
+    for (auto const& a : attributes)
+    {
+        CHECK(a.frequency == sv::attribute_frequency::per_triangle); // one element per face, whatever the field
+        CHECK(a.element_count() == 2);
+    }
+
+    // Every field survives the round trip, in triangle order and at the type its name documents.
+    CHECK(by_name(sv::pbr_attribute::base_color).elements_as<tg::vec3f>()[1] == tg::vec3f(0, 1, 0));
+    CHECK(by_name(sv::pbr_attribute::metallic).elements_as<f32>()[0] == 0.25f);
+    CHECK(by_name(sv::pbr_attribute::roughness).elements_as<f32>()[1] == 0.125f);
+    CHECK(by_name(sv::pbr_attribute::emissive).elements_as<tg::vec3f>()[1] == tg::vec3f(2, 2, 2));
+
+    // Content-hashed like every other attribute, so an unchanged mesh re-acquires rather than re-uploads.
+    CHECK(sv::pbr_material_attributes(materials)[0].hash == attributes[0].hash);
 }
 
 TEST("sv - attribute_format spans scalars, vectors and matrices")
@@ -392,14 +617,69 @@ TEST("sv - viewer_definition assembles a view")
 {
     auto def = sv::viewer_definition{};
 
-    auto v = sv::view{};
+    auto v = sv::view_data{};
     v.id = sv::view_id::from_string("v0");
-    v.size = tg::vec2i(640, 480);
-    v.items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
+    v.resolution = tg::vec2i(640, 480);
+    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
     def.views.push_back(cc::move(v));
 
     REQUIRE(def.views.size() == 1);
-    CHECK(def.views[0].items.size() == 1);
-    CHECK(def.views[0].size == tg::vec2i(640, 480));
-    CHECK(def.views[0].items[0].kind == sv::scene_item_kind::triangle_mesh);
+    CHECK(def.views[0].resolution == tg::vec2i(640, 480));
+
+    auto const* const scene = sv::primary_scene_3d(def.views[0]);
+    REQUIRE(scene != nullptr);
+    CHECK(scene->items.size() == 1);
+    CHECK(scene->items[0].kind == sv::scene_item_kind::triangle_mesh);
+    CHECK(scene->items[0].transform == tg::affine_transform3f::identity); // an unplaced item sits at the origin
+}
+
+TEST("sv - a view's geometry lives on a layer, not on the view")
+{
+    auto v = sv::view_data{};
+    CHECK(sv::primary_scene_3d(v) == nullptr); // a fresh view has no layers at all
+
+    auto& scene = sv::ensure_scene_3d(v);
+    REQUIRE(v.layers.size() == 1);
+    CHECK(v.layers[0].kind == sv::layer_kind::scene_3d);
+
+    // A traced layer writes no meaningful alpha, so it must overwrite rather than blend.
+    CHECK(v.layers[0].blend == sv::layer_blend::replace);
+
+    // Asking again returns the same layer rather than appending a second one.
+    scene.items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
+    CHECK(sv::ensure_scene_3d(v).items.size() == 1);
+    CHECK(v.layers.size() == 1);
+}
+
+TEST("sv - a view starts following its layout and can be pinned to a resolution")
+{
+    auto v = sv::view_data{};
+
+    // The default is "whatever rect I land in", which is what a caller who never mentions resolution wants.
+    CHECK(v.resolution_follows_layout);
+
+    v.resolution = tg::vec2i(320, 240);
+    v.resolution_follows_layout = false;
+    CHECK(v.resolution == tg::vec2i(320, 240));
+
+    // Refresh is a fraction of the loop's rate, not a frequency: 1 is every frame.
+    CHECK(v.refresh.rate == 1.0f);
+    CHECK(v.temporal_inputs.empty());
+}
+
+TEST("sv - a scene item's placement is an affine tg transform")
+{
+    auto const quarter_turn = tg::angle_f::make_from_degree(90);
+    auto const spin = tg::affine_transform3f::make_rotation(tg::quat_f::make_rotation_y(quarter_turn));
+    auto const shift = tg::affine_transform3f::make_translation(tg::vec3f(0, 2, 0));
+
+    // compose(a, b) applies b first, so this rotates the mesh about +y and then lifts it.
+    auto const item = sv::scene_item{.transform = tg::compose(shift, spin)};
+
+    // +x turns onto -z under a quarter turn about +y, then the lift moves it up.
+    auto const placed = item.transform.transform(tg::pos3f(1, 0, 0));
+    CHECK(tg::distance(placed, tg::pos3f(0, 2, -1)) < 1e-5f);
+
+    // The renderer packs these two halves, not a mat4 — the linear part carries no translation of its own.
+    CHECK(item.transform.translation() == tg::vec3f(0, 2, 0));
 }

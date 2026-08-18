@@ -5,7 +5,7 @@ namespace sg
 {
 raw_buffer::~raw_buffer() = default;
 
-raw_buffer::raw_buffer(isize size_in_bytes, buffer_usage usage) : _size_in_bytes(size_in_bytes), _usage(usage)
+raw_buffer::raw_buffer(isize size_in_bytes, buffer_usages usage) : _size_in_bytes(size_in_bytes), _usage(usage)
 {
     // Zero is allowed — an empty buffer, like an empty span or vector, for which a backend allocates no GPU storage.
     // Only a negative size is programmer misuse.

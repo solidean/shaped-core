@@ -126,7 +126,7 @@ public:
 
     [[nodiscard]] cc::result<std::unique_ptr<dx12_command_list>> create_dx12_command_list();
     [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(isize size_in_bytes,
-                                                                    sg::buffer_usage usage,
+                                                                    sg::buffer_usages usage,
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
@@ -194,7 +194,7 @@ public:
     }
 
     [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
-                                                                          sg::buffer_usage usage,
+                                                                          sg::buffer_usages usage,
                                                                           sg::allocation_info const& alloc) override
     {
         return note_device_loss_on_error(

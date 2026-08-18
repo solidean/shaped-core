@@ -23,7 +23,7 @@ namespace
 {
 auto pattern = [](int i) { return byte(i & 0xFF); };
 
-sg::buffer_usage const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
+sg::buffer_usages const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
 // Uploads 256 bytes of pattern(seed+i) into a fresh transient buffer, downloads them, and returns whether
 // every byte matched — the round-trip that proves a transient buffer names live, distinct storage.
@@ -71,7 +71,7 @@ INVOCABLE_TEST("sg - transient buffer has the requested shape", (sg::context_han
     auto buf = ctx->transient.create_raw_buffer(1024, sg::buffer_usage::uniform_buffer);
     REQUIRE(buf != nullptr);
     CHECK(buf->size_in_bytes() == 1024);
-    CHECK(sg::has_flag(buf->usage(), sg::buffer_usage::uniform_buffer));
+    CHECK(buf->usage().has(sg::buffer_usage::uniform_buffer));
     CHECK(buf->is_valid()); // fresh: created in the current epoch
 }
 
@@ -79,7 +79,7 @@ INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context
 {
     REQUIRE(ctx != nullptr);
 
-    auto buf = ctx->transient.create_raw_buffer(0, sg::buffer_usage::none);
+    auto buf = ctx->transient.create_raw_buffer(0, {});
     REQUIRE(buf != nullptr);
     CHECK(buf->size_in_bytes() == 0);
     CHECK(buf->is_valid());

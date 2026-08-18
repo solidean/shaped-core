@@ -16,15 +16,15 @@ namespace sg
     switch (c)
     {
     case view_class::uniform:
-        return access_flags::uniform_read;
+        return access_flag::uniform_read;
     case view_class::readonly:
-        return access_flags::shader_read;
+        return access_flag::shader_read;
     case view_class::readwrite:
-        return access_flags::shader_write;
+        return access_flag::shader_write;
     case view_class::acceleration_structure:
-        return access_flags::accel_read;
+        return access_flag::accel_read;
     }
-    return access_flags::shader_read; // unreachable for the closed set above
+    return access_flag::shader_read; // unreachable for the closed set above
 }
 
 /// The layout a bound texture view of this class needs (the single inference point for the texture bind

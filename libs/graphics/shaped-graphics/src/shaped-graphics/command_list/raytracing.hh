@@ -22,12 +22,12 @@ public:
     /// Throws sg::allocation_exception if the result buffer cannot be allocated.
     /// Requires is_supported().
     [[nodiscard]] blas_handle build_blas(cc::span<blas_triangles const> geometries,
-                                         accel_build_flags flags = accel_build_flags::fast_trace);
+                                         accel_build_flags flags = accel_build_flag::fast_trace);
 
     /// Build a procedural (AABB) BLAS.
     /// Same contract as the triangle overload; a BLAS is triangles or AABBs, never both.
     [[nodiscard]] blas_handle build_blas(cc::span<blas_aabbs const> geometries,
-                                         accel_build_flags flags = accel_build_flags::fast_trace);
+                                         accel_build_flags flags = accel_build_flag::fast_trace);
 
     /// Build a TLAS over `instances`.
     /// Each instance's `blas` must be non-null and already built, and the TLAS holds every referenced blas_handle alive.
@@ -35,7 +35,7 @@ public:
     /// Throws sg::allocation_exception if the result buffer cannot be allocated.
     /// Requires is_supported().
     [[nodiscard]] tlas_handle build_tlas(cc::span<tlas_instance const> instances,
-                                         accel_build_flags flags = accel_build_flags::fast_trace);
+                                         accel_build_flags flags = accel_build_flag::fast_trace);
 
     /// Binds a raytracing_pipeline for the following bind_group / dispatch_rays.
     /// Requires is_supported().

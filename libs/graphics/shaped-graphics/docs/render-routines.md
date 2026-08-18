@@ -140,6 +140,7 @@ A reload on another thread re-runs `init_declare` while this thread reads.
 So **a routine whose `execute` touches anything `init_declare` writes belongs on `acquire_exclusive`**, which in practice is nearly all of them.
 
 Taking a *different* routine's guard while holding your own is fine — `sv::view_renderer` drives its leaf routines under its own guard, and today they take none of their own.
+`sv::viewer_renderer` sits above it and takes none itself, so the chain through a frame is viewer_renderer, then view_renderer, then leaf.
 The lock is not recursive, so the two rules are: never re-acquire the *same* routine under its own guard, and take any two routines in the same order everywhere.
 
 Both halves of that are an approximation of the model this actually wants, and the gap is a missing clean-core type:

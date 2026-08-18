@@ -76,15 +76,20 @@ wsys->has_clipboard_text();
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
-    if (auto const* k = e.try_as_key())
-        k->scancode;    // sr::scancode — PHYSICAL position; WASD stays WASD on AZERTY
-        k->character;   // char32_t — layout-mapped codepoint, 0 if unprintable; for ctrl+Z-style shortcuts
-        k->modifiers;   // sr::key_modifiers bit set; has_all(k->modifiers, ctrl | shift)
-        k->is_down;  k->is_repeat;
-    if (auto const* t = e.try_as_text())  t->text;        // cc::string, UTF-8
-    if (auto const* m = e.try_as_mouse_move())    m->cursor_pos, m->delta;  // pos2f, vec2f
-    if (auto const* b = e.try_as_mouse_button())  b->button, b->is_down, b->cursor_pos;
-    if (auto const* w = e.try_as_mouse_wheel())   w->delta;  // ticks, may be fractional
+    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event>
+
+    e.payload.visit(                   // THE way to consume an event; every handler must return the same type
+        [&](sr::key_event const& k)
+        {
+            k.scancode;    // sr::scancode — PHYSICAL position; WASD stays WASD on AZERTY
+            k.character;   // char32_t — layout-mapped codepoint, 0 if unprintable; for ctrl+Z-style shortcuts
+            k.modifiers;   // sr::key_modifiers bit set; has_all(k.modifiers, ctrl | shift)
+            k.is_down;  k.is_repeat;
+        },
+        [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
+
+    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`
+    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_* too)
 }
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
@@ -103,6 +108,7 @@ win->start_text_input();              // begin text_events + IME for this window
   tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
 - **`input_event::payload` is a `cc::variant`**, and the `try_as_*` accessors above are one-liners over its `try_as<T>()`.
   Reach for them, or for `payload.visit(...)` with one handler per alternative for an exhaustive dispatch.
+- **A missed `try_as_*` builds an error, which allocates** — branch once per kind you handle, and `visit` the payload when you dispatch over all five.
 
 ## Dear ImGui
 

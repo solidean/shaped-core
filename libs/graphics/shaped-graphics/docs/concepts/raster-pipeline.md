@@ -31,7 +31,7 @@ the two stages are **both-or-neither**, they require `topology == primitive_topo
 `patch_list` adds a `primitive_topology_type::patch` family (PSO `PRIMITIVE_TOPOLOGY_TYPE_PATCH`);
 the concrete IA topology also encodes the control-point count (`D3D_PRIMITIVE_TOPOLOGY_N_CONTROL_POINT_PATCHLIST`), computed at build and set at `bind_pipeline`.
 The backend asserts these invariants.
-For barrier tracking, geometry/tessellation reads fold into the `vertex` pipeline stage (as `pipeline_stage_flags` already documents), so no new draw-time hazard wiring is needed.
+For barrier tracking, geometry/tessellation reads fold into the `vertex` pipeline stage (as `pipeline_stage_flag` already documents), so no new draw-time hazard wiring is needed.
 
 ### Vertex input: explicit or type-driven
 

@@ -16,4 +16,15 @@ struct sv::render_settings
 
     /// Path length: the primary hit plus this many diffuse bounces.
     i32 max_bounces = 5;
+
+    /// Renders how much history each pixel kept, instead of the image.
+    ///
+    /// Red is a pixel that carried nothing this frame — its history was rejected, so it is showing a raw
+    /// single-frame estimate and will keep doing so.
+    /// Green means it is accumulating.
+    /// That distinction is otherwise invisible: a rejection bug and a genuinely high-variance region look identical
+    /// in the final image, and only this separates them.
+    ///
+    /// Toggling it restarts the estimator once, since it changes what the trace writes.
+    bool debug_accumulation = false;
 };

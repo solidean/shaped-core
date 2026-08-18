@@ -50,10 +50,18 @@ That is what imgui's multi-viewport support is built on — see [docs/imgui.md](
 
 ```cpp
 for (auto const& e : wsys->events())
-    if (auto const* k = e.try_as_key())
-        if (k->is_down && k->scancode == sr::scancode::escape)
-            e.window->request_close();
+    e.payload.visit(
+        [&](sr::key_event const& k)
+        {
+            if (k.is_down && k.scancode == sr::scancode::escape)
+                e.window->request_close();
+        },
+        [](auto const&) {});
 ```
+
+Visiting the payload is how an event is consumed: each handler gets its payload named and typed, with no probe first.
+Spell out all five handlers and a sixth event kind would break the visit at compile time, rather than being silently dropped.
+`e.is_key()` / `e.as_key()` cover what a visit cannot express — a predicate, or a loop body that must `continue`.
 
 Keyboard events carry both a **physical** `scancode` (position, so WASD survives AZERTY) and the layout-mapped `character`,
 because movement wants position while a ctrl+Z-style shortcut wants the letter.

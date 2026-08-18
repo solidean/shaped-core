@@ -6,19 +6,19 @@
 // These pin the freebie / hazard logic — what makes barriers minimal — without needing a GPU.
 // Buffers only, so layout stays `general` throughout.
 
-using sg::access_flags;
-using sg::pipeline_stage_flags;
+using sg::access_flag;
+using sg::pipeline_stage_flag;
 
 namespace
 {
-constexpr auto compute = pipeline_stage_flags::compute;
-constexpr auto copy = pipeline_stage_flags::copy;
-constexpr auto fragment = pipeline_stage_flags::fragment;
+constexpr auto compute = pipeline_stage_flag::compute;
+constexpr auto copy = pipeline_stage_flag::copy;
+constexpr auto fragment = pipeline_stage_flag::fragment;
 
-constexpr auto shader_write = access_flags::shader_write;
-constexpr auto shader_read = access_flags::shader_read;
-constexpr auto copy_read = access_flags::copy_read;
-constexpr auto copy_write = access_flags::copy_write;
+constexpr auto shader_write = access_flag::shader_write;
+constexpr auto shader_read = access_flag::shader_read;
+constexpr auto copy_read = access_flag::copy_read;
+constexpr auto copy_write = access_flag::copy_write;
 } // namespace
 
 TEST("sg access_state - is_unordered_write predicate")
@@ -27,7 +27,7 @@ TEST("sg access_state - is_unordered_write predicate")
     CHECK(sg::is_unordered_write(copy_write));
     CHECK(!sg::is_unordered_write(shader_read));
     CHECK(!sg::is_unordered_write(copy_read));
-    CHECK(!sg::is_unordered_write(access_flags::color_write)); // ROP-ordered, not an unordered write
+    CHECK(!sg::is_unordered_write(access_flag::color_write)); // ROP-ordered, not an unordered write
 }
 
 TEST("sg access_state - first write is a freebie")
@@ -52,9 +52,9 @@ TEST("sg access_state - a first access that both reads and writes is spelled out
 
     auto const b = s.flush();
     REQUIRE(b.needed);
-    CHECK(sg::has_all(b.dst_access, copy_read | copy_write));
-    CHECK(sg::has_all(b.dst_stages, copy));
-    CHECK(!sg::has_any(b.src_access)); // nothing was in flight, so there is nothing to wait for
+    CHECK(b.dst_access.has_all(copy_read | copy_write));
+    CHECK(b.dst_stages.has_all(copy));
+    CHECK(!!b.src_access.is_empty()); // nothing was in flight, so there is nothing to wait for
 }
 
 TEST("sg access_state - read after write emits a RAW barrier")
@@ -66,10 +66,10 @@ TEST("sg access_state - read after write emits a RAW barrier")
     s.declare(copy, copy_read);
     auto const b = s.flush();
     REQUIRE(b.needed);
-    CHECK(sg::has_all(b.src_access, shader_write));
-    CHECK(sg::has_all(b.dst_access, copy_read));
-    CHECK(sg::has_all(b.src_stages, compute));
-    CHECK(sg::has_all(b.dst_stages, copy));
+    CHECK(b.src_access.has_all(shader_write));
+    CHECK(b.dst_access.has_all(copy_read));
+    CHECK(b.src_stages.has_all(compute));
+    CHECK(b.dst_stages.has_all(copy));
 }
 
 TEST("sg access_state - read after read is free, new stage syncs only the delta")
@@ -89,9 +89,9 @@ TEST("sg access_state - read after read is free, new stage syncs only the delta"
     s.declare(fragment, shader_read);
     auto const b = s.flush();
     REQUIRE(b.needed);
-    CHECK(sg::has_all(b.dst_stages, fragment));
-    CHECK(!sg::has_all(b.dst_stages, copy)); // copy read was already barriered
-    CHECK(sg::has_all(b.src_access, shader_write));
+    CHECK(b.dst_stages.has_all(fragment));
+    CHECK(!b.dst_stages.has_all(copy)); // copy read was already barriered
+    CHECK(b.src_access.has_all(shader_write));
 }
 
 TEST("sg access_state - write after write serializes")
@@ -103,8 +103,8 @@ TEST("sg access_state - write after write serializes")
     s.declare(compute, shader_write);
     auto const b = s.flush();
     REQUIRE(b.needed);
-    CHECK(sg::has_all(b.src_access, shader_write));
-    CHECK(sg::has_all(b.dst_access, shader_write));
+    CHECK(b.src_access.has_all(shader_write));
+    CHECK(b.dst_access.has_all(shader_write));
 }
 
 TEST("sg access_state - write after read serializes (WAR)")
@@ -116,8 +116,8 @@ TEST("sg access_state - write after read serializes (WAR)")
     s.declare(compute, shader_write);
     auto const b = s.flush();
     REQUIRE(b.needed);
-    CHECK(sg::has_all(b.src_access, shader_read));
-    CHECK(sg::has_all(b.dst_access, shader_write));
+    CHECK(b.src_access.has_all(shader_read));
+    CHECK(b.dst_access.has_all(shader_write));
 }
 
 TEST("sg access_state - reset_keep_layout clears timelines")

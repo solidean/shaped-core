@@ -598,6 +598,38 @@ TEST("optional - move-only types")
     }
 }
 
+TEST("optional - copying a non-const lvalue")
+{
+    // The forwarding constructor must not claim these: it deduces U = optional& and out-ranks the copy constructor,
+    // which would then try to build the value type out of a whole optional.
+    // A T that is constructible from anything makes that a silent wrong copy rather than an error, so it is checked here.
+    SECTION("direct initialization")
+    {
+        auto src = cc::optional<int>(42);
+        auto const copy = cc::optional<int>(src);
+        CHECK(copy.has_value());
+        CHECK(copy.value() == 42);
+        CHECK(src.has_value());
+    }
+
+    SECTION("in a conditional expression")
+    {
+        auto src = cc::optional<int>(42);
+        auto const taken = true ? src : cc::optional<int>();
+        auto const skipped = false ? src : cc::optional<int>();
+        CHECK(taken.has_value());
+        CHECK(taken.value() == 42);
+        CHECK(!skipped.has_value());
+    }
+
+    SECTION("empty stays empty")
+    {
+        auto src = cc::optional<int>();
+        auto const copy = cc::optional<int>(src);
+        CHECK(!copy.has_value());
+    }
+}
+
 TEST("optional - equality operator")
 {
     SECTION("both empty")

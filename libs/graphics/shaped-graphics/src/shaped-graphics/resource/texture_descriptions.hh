@@ -14,7 +14,7 @@ struct sg::texture_1d_description
     pixel_format format = pixel_format::undefined;
     int width = 1;
     int mip_levels = 1;
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_1d;
 
@@ -34,7 +34,7 @@ struct sg::texture_2d_description
     int width = 1;
     int height = 1;
     int mip_levels = 1;
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_2d;
 
@@ -56,7 +56,7 @@ struct sg::texture_3d_description
     int height = 1;
     int depth = 1;
     int mip_levels = 1;
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_3d;
 
@@ -77,7 +77,7 @@ struct sg::texture_cube_description
     pixel_format format = pixel_format::undefined;
     int size = 1; ///< edge length; cube faces are square (width == height == size)
     int mip_levels = 1;
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_cube;
 
@@ -99,7 +99,7 @@ struct sg::texture_1d_array_description
     int width = 1;
     int mip_levels = 1;
     int array_layers = 1;
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_1d_array;
 
@@ -121,7 +121,7 @@ struct sg::texture_2d_array_description
     int height = 1;
     int mip_levels = 1;
     int array_layers = 1;
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_2d_array;
 
@@ -143,7 +143,7 @@ struct sg::texture_cube_array_description
     int size = 1; ///< edge length; cube faces are square (width == height == size)
     int mip_levels = 1;
     int cube_count = 1; ///< number of cubes (the backend expands to 6 * cube_count faces)
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_cube_array;
 
@@ -166,7 +166,7 @@ struct sg::texture_2d_ms_description
     int width = 1;
     int height = 1;
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_2d_ms;
 
@@ -188,7 +188,7 @@ struct sg::texture_2d_array_ms_description
     int height = 1;
     int array_layers = 1;
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_2d_array_ms;
 
@@ -209,7 +209,7 @@ struct sg::texture_cube_ms_description
     pixel_format format = pixel_format::undefined;
     int size = 1;         ///< edge length; cube faces are square (width == height == size)
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_cube_ms;
 
@@ -231,7 +231,7 @@ struct sg::texture_cube_array_ms_description
     int size = 1;         ///< edge length; cube faces are square (width == height == size)
     int cube_count = 1;   ///< number of cubes (the backend expands to 6 * cube_count faces)
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     using texture_type = texture_cube_array_ms;
 

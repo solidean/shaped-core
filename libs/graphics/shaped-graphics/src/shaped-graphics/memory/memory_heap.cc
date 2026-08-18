@@ -11,13 +11,13 @@ memory_heap::memory_heap(isize size_in_bytes) : _size_in_bytes(size_in_bytes)
     CC_ASSERT(size_in_bytes >= 0, "memory heap size must be non-negative");
 }
 
-memory_requirements memory_heap::memory_requirements_for_buffer(isize size_in_bytes, buffer_usage usage) const
+memory_requirements memory_heap::memory_requirements_for_buffer(isize size_in_bytes, buffer_usages usage) const
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
     return query_buffer_requirements(size_in_bytes, usage);
 }
 
-allocation_info memory_heap::acquire_allocation_for_buffer(isize size_in_bytes, buffer_usage usage, isize offset) const
+allocation_info memory_heap::acquire_allocation_for_buffer(isize size_in_bytes, buffer_usages usage, isize offset) const
 {
     memory_requirements const reqs = memory_requirements_for_buffer(size_in_bytes, usage);
     CC_ASSERT(reqs.alignment_in_bytes > 0, "backend must report a positive alignment");

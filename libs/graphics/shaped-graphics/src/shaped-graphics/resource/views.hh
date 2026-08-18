@@ -607,11 +607,15 @@ struct sg::texture_view
 /// A ray-tracing acceleration structure (TLAS) bound as a shader resource — HLSL `RaytracingAccelerationStructure`.
 /// It has no element type, no layout and no range, and carries the abstract `tlas` so each backend can bind it its own way.
 /// Obtain one from `tlas::as_view()`.
+///
+/// **A null `tlas` is legal**, and binds the null acceleration structure: every `TraceRay` against it misses.
+/// That is what a scene with no geometry yet wants — the miss shader runs and paints the environment — and it needs
+/// no structure built and nothing allocated, so "nothing to trace" costs nothing rather than needing a stand-in.
 struct sg::tlas_view
 {
     static constexpr view_class access = view_class::acceleration_structure;
 
-    tlas_handle tlas; ///< the top-level acceleration structure to bind
+    tlas_handle tlas; ///< the top-level acceleration structure to bind; null binds the null acceleration structure
 
     [[nodiscard]] raw_view to_raw() const { return raw_tlas_view{.tlas = tlas}; }
 
