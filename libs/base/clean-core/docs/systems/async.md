@@ -343,27 +343,45 @@ Including that header is what makes a function returning `shared_async<T, E>` a 
 A graph that does not await pays nothing: no field on the node, no branch in `poll()`.
 
 ```cpp
-cc::shared_async<int> load(cc::string path)      // eager: scheduled at its initial suspend
+cc::shared_async<int> load(cc::string path)      // COLD: calling load() runs nothing
 {
     auto const& bytes = co_await read(path);     // a failed read short-circuits
     co_return parse(bytes);
 }
 ```
 
-**`co_await` never starts work — creation does.**
-`require()` is a wakeup edge; parallelism comes from a node being `scheduled` and stealable.
-So `co_await a; co_await b;` serializes nothing as long as `a` and `b` were created eagerly, which is the default a coroutine gives you.
-Eager scheduling happens at the **initial suspend**, not in `get_return_object` — the coroutine has to be fully suspended before the node can be handed to a peer.
-That is also why laziness lives in the return type: by the time the caller holds the handle, the choice is already made.
-`cc::async_lazy<T, E>` is the cold twin, and converts to `shared_async<T, E>`.
+### Lazy by default, like every other spelling here
 
-`cc::async_all` is for the other case, where the fan-out is built **at** the await site.
-It requires every dependency before parking, so a fan-out parks once on all of them rather than walking them in sequence.
-It hands back nothing: read each value with a plain `co_await`, which no longer suspends once the node is ready.
+The two coroutine return types map one-for-one onto the two factories, and the plain one is the lazy one:
+
+| return type | means | mirrors |
+|---|---|---|
+| `cc::shared_async<T, E>` | **cold** until something requires or schedules it | `make_async_lazy` |
+| `cc::async_scheduled<T, E>` | scheduled at its initial suspend; converts to `shared_async<T, E>` | `make_async_scheduled` |
+
+That is the same rule the rest of the system follows — *"there is deliberately no plain `map` that hides which of the two you get"* — and a coroutine must not be the exception.
+An eager default would also make the meaning of a call site depend on **ambient** state, since scheduling is a no-op with nothing bound to route to.
+The same line would then start work in production and nothing in a test, with neither reading written down anywhere.
+
+Eager scheduling has to live in the **return type** rather than in something the caller opts into afterwards.
+It happens at the initial suspend, which is over before the caller ever sees the handle.
+It cannot move into `get_return_object` either: the coroutine is not suspended there yet, so a peer could resume a frame still inside its own ramp.
+
+`cc::async_start(h)` is the explicit "and go" for a handle you already hold.
+It is idempotent, and a no-op where nothing could be reached — no worker scope bound and no default pool — which leaves the node cold rather than asserting.
+
+**`co_await` never starts work.**
+`require()` is a wakeup edge, and one await parks on one dependency, so **awaiting two cold asyncs in sequence runs them in sequence**.
+That is the cost of the lazy default, and `cc::async_all` is the answer: it requires every dependency before parking, so the poll loop can publish the rest for peers to steal.
+It hands back nothing — read each value with a plain `co_await`, which no longer suspends once the node is ready.
 
 ```cpp
-co_await cc::async_all(a, b, c);          // one park, on all three
-auto const sum = co_await a + co_await b; // neither suspends
+co_await cc::async_all(a, b, c);            // one park, on all three
+auto const sum = co_await a + co_await b;   // neither suspends
+
+auto const x = cc::async_start(load(p));    // the other way: start them, then await
+auto const y = cc::async_start(load(q));
+auto const both = co_await x + co_await y;
 ```
 
 ### Failure short-circuits without unwinding
@@ -390,6 +408,14 @@ The node's stored frame is that one handle: **8 B, always inline**, so a corouti
 The useful comparison is therefore *a lambda frame that spills* — above the 24 B budget a closure boxes anyway, so at that size a coroutine costs the same.
 Below it, the small lambda frame remains the zero-allocation path, deliberately.
 
+### `async_yield`
+
+`co_await cc::async_yield()` maps onto `async_step_status::yield`: the node goes running → scheduled and is re-enqueued.
+It is deliberately a narrow tool, and it is **not** cooperative multitasking.
+A worker pops its own deque bottom LIFO, so an otherwise idle one pops the yielding node straight back — a re-poll plus a queue round trip.
+What it does buy: the node becomes **stealable** by a peer while it sits there, and work pushed after it runs first.
+It is not how you wait for something external — that is a manual node, pushed by whatever completes it, rather than a yield loop burning a worker.
+
 ### The sharp edges
 
 * **Coroutine parameters are captured by their declared type**, so a reference parameter dangles across the first suspend.
@@ -398,7 +424,8 @@ Below it, the small lambda frame remains the zero-allocation path, deliberately.
   An immovable `T` stays on the raw-frame emplace API.
 * **A coroutine can resume on a different thread than it suspended on.**
   Nothing may be held across a `co_await` that is bound to a thread.
-* **Dropping an eager coroutine's handle does not cancel it**: the schedule queue holds the node, and the system is cooperative throughout.
+* **Dropping a started coroutine's handle does not cancel it**: the schedule queue holds the node, and the system is cooperative throughout.
+  Dropping a *cold* one, by contrast, simply destroys it — nothing ever ran.
 * `co_await a` yields a `U const&` **into the node's payload**, so reading it copies nothing — but binding `auto const&` to the result of awaiting a *temporary* dangles once the full-expression ends.
 
 ## Concurrent execution: `async_thread_pool`

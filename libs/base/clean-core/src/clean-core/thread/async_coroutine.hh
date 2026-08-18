@@ -19,16 +19,21 @@
 // A graph that does not use co_await pays nothing: no field, no poll-loop branch, and <coroutine> stays out of async.hh.
 // Including THIS header is what makes a function returning shared_async<T, E> a coroutine.
 //
-//   cc::shared_async<int> load(cc::string p)      // eager: scheduled at its initial suspend
+//   cc::shared_async<int> load(cc::string p)      // COLD, like make_async_lazy: calling load() runs nothing
 //   {
 //       auto const& bytes = co_await read(p);     // short-circuits if read(p) failed
 //       co_return parse(bytes);
 //   }
 //
-// co_await never STARTS work — creation does.
-// require() is a wakeup edge; parallelism comes from a node being scheduled and stealable.
-// So `co_await a; co_await b;` serializes nothing as long as a and b were created eagerly, which is what the default gives you.
-// cc::async_all is for the other case, where the fan-out is built at the await site.
+// Laziness is the default, matching make_async_lazy — the plain spelling starts no work, and which of lazy/scheduled you get is never hidden.
+// cc::async_scheduled<T, E> is the eager return type, and cc::async_start schedules a handle you already hold.
+//
+// The consequence to know: awaiting two cold asyncs in sequence RUNS them in sequence.
+// require() is a wakeup edge, so parallelism comes from a node being scheduled and stealable, and one await parks on one dependency.
+// cc::async_all is the fan-out spelling — it requires every dependency before parking, so the poll loop can publish the rest for peers to steal.
+//
+//   co_await cc::async_all(a, b);                 // concurrent
+//   auto x = co_await a; auto y = co_await b;     // SEQUENTIAL if a and b were cold
 //
 // Parameters are captured by their DECLARED type, so a reference parameter dangles across the first suspend.
 // Take coroutine parameters by value.
@@ -36,11 +41,11 @@
 // T must be movable here, since co_return moves the result through the promise.
 // An immovable T stays on the raw-frame emplace API.
 
-/// The return type of a LAZY coroutine — the escape hatch from eager scheduling.
-/// The node is born cold, exactly like make_async_lazy, and runs only once something requires or schedules it.
-/// Eager scheduling has to happen at the initial suspend, which is over before the caller sees the handle, so the choice lives in the return type.
+/// The return type of an EAGER coroutine — scheduled at its initial suspend, exactly like make_async_scheduled.
+/// The plain shared_async<T, E> return type is cold instead, so which of the two a coroutine is stays visible in its signature.
+/// It has to be the return type rather than something the caller opts into: the initial suspend is over before the caller ever sees the handle.
 template <class T, class E> // the default E lives on the fwd.hh declaration
-struct cc::async_lazy
+struct cc::async_scheduled
 {
     cc::shared_async<T, E> node;
 
@@ -53,6 +58,14 @@ namespace cc::impl
 {
 template <class...>
 inline constexpr bool async_coro_always_false = false;
+
+/// Whether scheduling a node from here would reach a scheduler at all.
+/// async_node_base::schedule() asserts with neither a bound worker scope nor an installed default pool, and "start it now" must not be the call that trips that.
+/// A node left cold is not a lost computation — it runs when something requires it, or when a driver schedules it.
+[[nodiscard]] inline bool async_can_schedule_here()
+{
+    return cc::async_scheduler::current_or_null() != nullptr || cc::async_scheduler::default_or_null() != nullptr;
+}
 
 /// Type-erased "may the coroutine be resumed?" check, run by the frame BEFORE it resumes.
 /// Returns false when it wrote the promise's failure slot instead, which short-circuits the rest of the body.
@@ -240,9 +253,9 @@ struct async_promise : async_promise_return<T, E, std::is_same_v<T, cc::unit>>
         node->set_frame(async_coro_frame<async_promise>(std::coroutine_handle<async_promise>::from_promise(*this)));
 
         if constexpr (Eager)
-            return node;
+            return cc::async_scheduled<T, E>{cc::move(node)};
         else
-            return cc::async_lazy<T, E>{cc::move(node)};
+            return node;
     }
 
     struct initial_awaiter
@@ -256,7 +269,7 @@ struct async_promise : async_promise_return<T, E, std::is_same_v<T, cc::unit>>
             {
                 // The coroutine is fully suspended here, so publishing the node is safe — which is why this cannot live in get_return_object.
                 // Nothing may touch the coroutine after the schedule: a peer can steal, run and destroy it before this returns.
-                if (cc::async_scheduler::current_or_null() != nullptr)
+                if (async_can_schedule_here())
                     node->schedule();
             }
         }
@@ -551,7 +564,27 @@ template <class U, class Ue>
     return {deps};
 }
 
+/// Start a cold async now, and hand the same handle back.
+/// This is the explicit half of the lazy default: a coroutine starts nothing when you call it, and this is how you say "and go".
+///
+///   auto const a = cc::async_start(load(x));   // in flight
+///   auto const b = cc::async_start(load(y));   // in flight, concurrently
+///   auto const v = co_await a + co_await b;    // neither await starts anything
+///
+/// Idempotent, and safe on a node that is already scheduled, running or ready.
+/// A no-op where nothing could be reached — no worker scope bound here and no default pool installed — which leaves the node cold rather than asserting.
+template <class T, class E>
+shared_async<T, E> async_start(shared_async<T, E> h)
+{
+    if (h != nullptr && h->is_cold() && impl::async_can_schedule_here())
+        h->schedule();
+    return h;
+}
+
 /// Yield cooperatively: the node is rescheduled and the coroutine resumes on a later poll.
+/// It does NOT give up the worker in any strong sense — the deque is LIFO, so an otherwise idle worker pops the same node straight back.
+/// What it does buy is narrow and real: the node becomes stealable by a peer, and work pushed after it runs first.
+/// It is not a way to wait for something external — that is a manual node, pushed by whatever completes it.
 [[nodiscard]] inline impl::async_awaiter_yield async_yield()
 {
     return {};
@@ -574,16 +607,16 @@ template <size_t N>
 }
 } // namespace cc
 
-/// A coroutine returning shared_async<T, E> is EAGER: scheduled at its initial suspend if a worker scope is bound, exactly like make_async_scheduled.
+/// A coroutine returning shared_async<T, E> is COLD, exactly like make_async_lazy: calling it runs nothing until something requires or schedules the node.
 template <class T, class E, class... Args>
 struct std::coroutine_traits<cc::shared_ptr<cc::async<T, E>, cc::impl::async_node_traits>, Args...>
 {
-    using promise_type = cc::impl::async_promise<T, E, true>;
+    using promise_type = cc::impl::async_promise<T, E, false>;
 };
 
-/// A coroutine returning async_lazy<T, E> is COLD until something requires or schedules it.
+/// A coroutine returning async_scheduled<T, E> is EAGER: scheduled at its initial suspend, exactly like make_async_scheduled.
 template <class T, class E, class... Args>
-struct std::coroutine_traits<cc::async_lazy<T, E>, Args...>
+struct std::coroutine_traits<cc::async_scheduled<T, E>, Args...>
 {
-    using promise_type = cc::impl::async_promise<T, E, false>;
+    using promise_type = cc::impl::async_promise<T, E, true>;
 };

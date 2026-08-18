@@ -842,16 +842,19 @@ cc::async_is_polling();          // inside a poll? i.e. would a throw from here 
 // co_await / co_return (#include <clean-core/thread/async_coroutine.hh> — INCLUDING it is what enables coroutines)
 // A coroutine IS a compute frame: the node stores one coroutine_handle (8 B, always inline). T must be MOVABLE.
 // Take coroutine parameters BY VALUE — they are captured by declared type, so a reference dangles across a suspend.
-cc::shared_async<int> load(cc::string p) { auto const& b = co_await read(p); co_return parse(b); } // EAGER
-cc::async_lazy<int> build(cc::string p) { co_return 1; }   // cold until required/scheduled; converts to shared_async
+cc::shared_async<int> load(cc::string p) { auto const& b = co_await read(p); co_return parse(b); } // COLD (= lazy)
+cc::async_scheduled<int> spawn(cc::string p) { co_return 1; }  // eager at initial suspend; converts to shared_async
+auto a = cc::async_start(load(p));    // "and go": idempotent; no-op if nothing could route (stays cold, drives later)
 int const& v = co_await a;            // -> U const& into the node; a FAILED dep short-circuits (locals destroyed,
                                       // rest of the body skipped, error propagates) — no unwind, no catch runs
 co_await cc::async_all(a, b, c);      // require ALL, park once; then `co_await a` no longer suspends. Also a span
-                                      // overload. Only for a fan-out built AT the await site: eagerly created deps
-                                      // are already in flight, so awaiting them one by one costs no concurrency
+                                      // overload. THE fan-out spelling: awaiting two COLD asyncs in sequence runs
+                                      // them in sequence, since one await parks on one dependency
 co_await cc::async_settled(a);        // wait WITHOUT short-circuiting, then read a->try_value()/try_error() (no copy)
 cc::result<int> r = co_await cc::async_as_result(a);   // same, as a value (copies; needs a copyable U)
-co_await cc::async_yield();           // cooperative yield -> async_step_status::yield
+co_await cc::async_yield();           // -> async_step_status::yield; makes the node stealable and lets newer local
+                                      // work go first. NOT a fairness knob (LIFO deque pops it back), NOT a way to
+                                      // wait on something external — that is a manual node
 co_await cc::async_fail("boom");      // never resumes; the uniform failure spelling
 co_return cc::error("boom");          // non-unit T only (return_void and return_value cannot coexist)
 // Not here yet: plain (non-async) dep args, structured/owned children, immovable T through co_return, error-type

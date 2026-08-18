@@ -43,7 +43,7 @@ cc::shared_async<cc::unit> coro_unit(int* counter)
     co_return;
 }
 
-cc::async_lazy<int> coro_lazy(int v)
+cc::async_scheduled<int> coro_eager(int v)
 {
     co_return v;
 }
@@ -355,26 +355,61 @@ TEST("async coroutine - async_all requires every dependency before parking")
 // eager vs lazy, and teardown
 // ============================================================================
 
-TEST("async coroutine - an eager coroutine schedules itself, a lazy one stays cold")
+TEST("async coroutine - the plain return type is cold, async_scheduled is not")
 {
     cc::singlethreaded_scheduler sched;
     cc::async_worker_scope scope(sched);
 
-    auto const eager = coro_constant(1);
-    CHECK(!eager->is_cold());
-
-    auto const lazy = coro_lazy(2);
+    // calling a coroutine that returns shared_async runs NOTHING — the same contract make_async_lazy has
+    auto const lazy = coro_constant(1);
     CHECK(lazy->is_cold());
 
-    sched.drain();
-    REQUIRE(eager->is_ready());
-    CHECK(*eager->try_value() == 1);
-    CHECK(lazy->is_cold()); // nothing required it, so nothing ran it
+    auto const eager = coro_eager(2);
+    CHECK(!eager->is_cold());
 
-    CHECK(sched.blocking_get(cc::shared_async<int>(lazy)) == 2);
+    sched.drain();
+    CHECK(lazy->is_cold()); // nothing required it, so nothing ran it
+    REQUIRE(eager->is_ready());
+    CHECK(*eager->try_value() == 2);
+
+    CHECK(sched.blocking_get(lazy) == 1);
 }
 
-TEST("async coroutine - an eager coroutine runs even after its handle is dropped")
+TEST("async coroutine - async_start schedules a cold coroutine and is idempotent")
+{
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope scope(sched);
+
+    auto const a = cc::async_start(coro_constant(7));
+    CHECK(!a->is_cold());
+
+    (void)cc::async_start(a); // already scheduled: a no-op, not a second enqueue
+    sched.drain();
+
+    REQUIRE(a->is_ready());
+    CHECK(*a->try_value() == 7);
+
+    (void)cc::async_start(a); // and on a ready node too
+    CHECK(a->is_ready());
+}
+
+
+TEST("async coroutine - a started coroutine runs even after its handle is dropped")
+{
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope scope(sched);
+
+    auto ran = 0;
+    {
+        auto const dropped = cc::async_start(coro_unit(&ran));
+    }
+    sched.drain();
+
+    // the schedule queue held the node, so dropping the handle is not a cancellation — we are cooperative
+    CHECK(ran == 1);
+}
+
+TEST("async coroutine - a cold coroutine whose handle is dropped never runs")
 {
     cc::singlethreaded_scheduler sched;
     cc::async_worker_scope scope(sched);
@@ -385,15 +420,14 @@ TEST("async coroutine - an eager coroutine runs even after its handle is dropped
     }
     sched.drain();
 
-    // the schedule queue held the node, so dropping the handle is not a cancellation — we are cooperative
-    CHECK(ran == 1);
+    CHECK(ran == 0); // nothing required it and nothing started it
 }
 
-TEST("async coroutine - destroying a never-run lazy coroutine destroys its parameters")
+TEST("async coroutine - destroying a never-run coroutine destroys its parameters")
 {
     auto destroyed = 0;
     {
-        auto const lazy = [](destruction_probe) -> cc::async_lazy<int> { co_return 1; }(destruction_probe(&destroyed));
+        auto const lazy = [](destruction_probe) -> cc::shared_async<int> { co_return 1; }(destruction_probe(&destroyed));
         CHECK(lazy->is_cold());
         CHECK(destroyed == 0); // the parameter lives in the coroutine frame, which the node owns
     }
@@ -428,7 +462,8 @@ TEST("async coroutine - a coroutine parked forever is torn down with the node")
 namespace
 {
 // A balanced sum tree built out of coroutines: depth d has 2^d leaves, so a correct drive returns 2^d.
-// Each level creates its two children EAGERLY, which is what puts them in flight before either is awaited — the whole point of the eager default.
+// The children are COLD when created, so async_all is what fans them out: it requires both before parking, and the poll loop then publishes one for a peer to steal.
+// Awaiting them one after the other instead would run the whole tree on one thread.
 cc::shared_async<i64> coro_sum_tree(int depth)
 {
     if (depth == 0)
@@ -448,7 +483,6 @@ TEST("async coroutine - a coroutine fan-out tree is correct on one thread")
 }
 
 // Not gated on CC_HAS_THREADS: the pool exists everywhere and falls back to driving inline, and the answer must be the same either way.
-// With threads this is also the path where a peer can steal a coroutine's node before its creating call has even returned.
 TEST("async coroutine - a coroutine fan-out tree is correct on a pool")
 {
     cc::async_thread_pool pool;
