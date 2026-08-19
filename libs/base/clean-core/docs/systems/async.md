@@ -465,8 +465,17 @@ int v = cc::async_blocking_get(root);                    // participate in the p
 
 `participate_until_ready` is what a drive on a pool does: the calling thread borrows a pool slot and runs the graph itself, stealing like any worker.
 It parks only once there is nothing left for it to run.
-With every external slot already claimed it falls back to submitting the root and blocking on a one-shot completion hook.
+
+**Parked, it is still a sleeper of the pool**, registered the same way an idle worker is, so injected work wakes it as well as its own root completing.
+That is not an optimization but the thing that keeps a nested drive from deadlocking the pool.
+A graph parked on an EXTERNAL push finishes in two steps: a foreign thread resolves the promise, then a pool thread runs the continuation.
+A participant asleep on the root alone would never hear the second.
+With every thread of the pool parked that way the continuation strands in the injection queue, each thread waiting for work only another of them could run.
+It still returns only once the root is done, so `async_blocking_get_on` keeps its meaning.
+
 It is legal from inside a worker, where it becomes a nested drive — the price being that unrelated work then runs on that thread in the middle of a frame.
+A nested drive REUSES the slot the thread already holds rather than claiming a second one: there are only `external_slot_count` of them, and one per nesting level runs them out.
+Only a genuinely foreign thread finding every slot taken falls back to submitting the root and blocking on the completion hook alone, which is the one park that stays deaf to the pool.
 
 The node machinery is thread-safe under this — see [Multi-scheduler correctness](#multi-scheduler-correctness) for exactly what is and is not guaranteed.
 

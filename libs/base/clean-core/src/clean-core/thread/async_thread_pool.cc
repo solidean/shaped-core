@@ -375,7 +375,15 @@ bool cc::async_thread_pool::try_run_one()
 
 void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 {
-    worker* const slot = try_claim_external_slot();
+    // A nested drive on this pool reuses the slot this thread already holds rather than claiming a second one.
+    //
+    // There are only external_slot_count of them, so claiming per nesting level runs them out — and the fallback below
+    // parks on the root alone, deaf to the very work that would have freed it.
+    // Reuse is also what the slot is FOR: the deque belongs to this thread, and a nested drive is still this thread.
+    worker* const held_slot = current_worker();
+    bool const reuse = held_slot != nullptr && held_slot->pool == this;
+
+    worker* const slot = reuse ? held_slot : try_claim_external_slot();
     if (slot == nullptr)
     {
         // No free slot: hand the root over and park on it alone.
@@ -418,21 +426,23 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         async_thread_pool& pool;
         worker* const claimed;
         worker* const previous;
+        bool const owned; // false for a reused slot: it is the outer drive's to release, not ours
 
-        slot_scope(async_thread_pool& p, worker* s) : pool(p), claimed(s), previous(current_worker())
+        slot_scope(async_thread_pool& p, worker* s, bool o) : pool(p), claimed(s), previous(current_worker()), owned(o)
         {
             set_current_worker(s);
         }
         ~slot_scope()
         {
             set_current_worker(previous);
-            claimed->claimed.store(false, cc::memory_order_release);
+            if (owned)
+                claimed->claimed.store(false, cc::memory_order_release);
         }
         slot_scope(slot_scope const&) = delete;
         slot_scope& operator=(slot_scope const&) = delete;
     };
 
-    slot_scope const held(*this, slot);
+    slot_scope const held(*this, slot, !reuse);
     {
         async_worker_scope const scope(*this); // binds THIS pool, so the root's children route to our own deque
 
@@ -537,7 +547,12 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                 break;
         }
 
-        drain_slot_to_injection(*slot);
+        // Only for a slot we borrowed: it goes back to the pool when we leave, and a node left `scheduled` in a deque
+        // nobody owns any more would strand forever.
+        // A reused slot outlives this frame — the outer drive still owns it — so draining would only take that drive's
+        // own work away from it.
+        if (!reuse)
+            drain_slot_to_injection(*slot);
     }
 }
 
