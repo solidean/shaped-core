@@ -58,6 +58,10 @@ class Context:
         """Project convention: test executables are named '*-test'."""
         return target.kind == "EXECUTABLE" and target.name.endswith("-test")
 
+    def is_example_target(self, target: dev.Target) -> bool:
+        """Project convention: example executables are named '*-example'."""
+        return target.kind == "EXECUTABLE" and target.name.endswith("-example")
+
     def default_preset_name(self) -> str:
         name = self.policy.default_build.get(platform.system())
         if name is None:

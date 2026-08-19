@@ -24,6 +24,9 @@ Without a backend (SDL3 not fetched) `try_create` fails instead of the API disap
 #include <shaped-rendering/window.hh>
 
 auto const wsys = sr::window_system::create({.headless = false});  // -> cc::unique_ptr<window_system>; try_create -> cc::result
+//   .background — show windows WITHOUT activating them, and keep them at the bottom of the z-order until focused.
+//   Defaults from the SC_REQUEST_BACKGROUND env var (sr::background_request_env_var), which `dev.py example
+//   --background` sets; pass it explicitly to override the environment either way.
 auto const win  = wsys->create_window({.title = "viewer", .width = 1280, .height = 720,
                                        .is_resizable = true, .is_visible = true,
                                        .has_decoration = true, .is_always_on_top = false,
@@ -39,6 +42,8 @@ win->width();  win->height();     // -> int, pixels, as of the last poll_events
 win->position();                  // -> tg::pos2i, desktop coords, may be negative on a multi-monitor desktop
 win->set_position(tg::pos2i(x, y));  win->set_size(tg::vec2i(w, h));  // write-through: the getter reads it back at once
 win->is_focused();                // -> bool, as of the last poll_events;  win->focus() asks for it
+win->send_to_back();              // the opposite of focus(): behind everything, focus untouched. Windows-only, best-effort
+wsys->is_background();            // -> bool; is this system keeping its windows out of the way
 win->is_minimized();              // 0x0 while true
 win->is_close_requested();        // latched; request_close() / clear_close_request()
 win->title();  win->set_title(sv);

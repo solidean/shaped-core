@@ -44,9 +44,25 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexu
     CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
 }                                        // no co_ keyword? then `return` a COLD cc::shared_async<cc::unit> instead
 
-// Buckets: every test is in one bucket — normal (default), manual, or guide_benchmark. A sweep selects one
-// bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
+// Buckets: every test is in one bucket — normal (default), manual, guide_benchmark, or example. A sweep selects
+// one bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
+```
+
+## Examples (`EXAMPLE`)
+
+A runnable demonstration of an API **in practice**, in the `example` bucket, run one at a time by `dev.py example`.
+Every build compiles them and no sweep runs one; [docs/guides/examples.md](../../../docs/guides/examples.md) is the concept and the CMake side.
+
+```cpp
+EXAMPLE("clean-core/vector")             // swept only via `--examples`, or run by its exact name
+{                                        //   no CHECK required — a failing one still fails
+    auto v = cc::vector<int>::create_filled(5, 1);
+    cc::println("{} elements", v.size());
+}
+// The name is a slash path: it is the CLI argument and the gallery entry, so it is an identifier, not a sentence.
+// `no_scheduler` is baked in, so the body runs on the thread nx::run was entered on — the process main thread.
+// A trailing config item overrides it: EXAMPLE("x", main_thread) for a subject that asserts on it.
 ```
 
 ## Guide benchmarks (PGO metrics)
@@ -205,7 +221,7 @@ uv run dev.py test                       # build + run the whole suite
 // Catch2-compatible CLI (for IDEs/tooling, not daily use): --list-tests, --reporter xml,
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
-// --perf-json <file> (write recorded-metric sidecar).
+// --examples (sweep example bucket), --perf-json <file> (write recorded-metric sidecar).
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
 //   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.

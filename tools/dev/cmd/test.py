@@ -74,12 +74,20 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # Determine which test binaries to run and the optional test-name filter.
     all_targets = ctx.discover(primary, args.emsdk_path)
     wanted = ctx.resolve_target_names(primary, args.target, args.emsdk_path) if args.target else None
+    # Example binaries are candidates too: one may carry ordinary TESTs for machinery it grew, and those are tests like any other.
+    # Its EXAMPLEs are in their own bucket and never run here.
     binary_names, test_name, err = dev.select_test_binaries(
-        all_targets, is_test=ctx.is_test_target,
+        all_targets, is_test=lambda t: ctx.is_test_target(t) or ctx.is_example_target(t),
         wanted_names=wanted, name_arg=args.test_name, target_label=args.target,
     )
     if err:
         ctx.die(err)
+
+    # ...and then the example binaries that turn out to have none are dropped, so a sweep does not fail on them.
+    binary_names = dev.drop_testless_examples(
+        primary, all_targets, binary_names,
+        is_example=ctx.is_example_target, test_name=test_name, root=ctx.root, extra_args=runner_args,
+    )
 
     # With a filter, only the binaries that actually contain a matching test run, queried via nexus' --list-tests-json on the primary preset.
     # A binary that cannot answer the query is kept and run as before.

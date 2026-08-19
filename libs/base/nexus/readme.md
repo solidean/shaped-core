@@ -28,6 +28,7 @@ Four capabilities are easy to miss from the macros alone:
 | parametrized / data-driven tests | `INVOCABLE_TEST` + `nx::invoke_tests` | [docs/invocable-tests.md](docs/invocable-tests.md) |
 | API-sequence fuzzing with shrinking and emitted reproducers | `nx::fuzz::test` | [docs/fuzz-testing.md](docs/fuzz-testing.md) |
 | recorded perf metrics, consumed by `dev.py pgo` | `GUIDE_BENCHMARK` + `nx::guide` | [docs/guides/perf-results.md](../../../docs/guides/perf-results.md) |
+| runnable demonstrations of an API in practice | `EXAMPLE` + `dev.py example` | [docs/guides/examples.md](../../../docs/guides/examples.md) |
 | hardware performance counters around a workload | `nx::bench::measure_hw_counters` | [docs/guides/profiling.md](../../../docs/guides/profiling.md) |
 
 ## File organization

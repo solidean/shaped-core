@@ -65,8 +65,8 @@ The fallback is decided once per binary, by `resolve_filter_mode`, before anythi
 
 ### Buckets and disabled tests
 
-Every test lives in exactly one **bucket** — `normal` (the default), `manual`, or `guide_benchmark` — set via `nx::config::manual` / `nx::config::guide_benchmark`.
-A sweep selects exactly one bucket: the default selects `normal`, `--manual` selects `manual`, `--guide-benchmarks` selects `guide_benchmark`.
+Every test lives in exactly one **bucket** — `normal` (the default), `manual`, `guide_benchmark` or `example` — set via `nx::config::manual` / `guide_benchmark` / `example`.
+A sweep selects exactly one bucket: the default selects `normal`, `--manual` selects `manual`, `--guide-benchmarks` selects `guide_benchmark`, `--examples` selects `example`.
 The bucket set is intentionally extensible.
 
 `disabled` (`enabled = false`) is **orthogonal** to buckets: it can apply to any bucket, and excludes a test from sweeps until it is named exactly or `run_disabled_tests` is set.
@@ -76,8 +76,10 @@ The bucket set is intentionally extensible.
   Swept only under `--manual`.
 - **guide_benchmark** — perf benchmarks that report metrics via `nx::guide`, covered by [perf-results.md](../../../../docs/guides/perf-results.md).
   Swept only under `--guide-benchmarks`.
+- **example** — `EXAMPLE` declarations demonstrating an API in practice, covered by [examples.md](../../../../docs/guides/examples.md).
+  Swept only under `--examples`, and normally reached one at a time by exact name, which is what `dev.py example` sends.
 
-Tests in the `manual` and `guide_benchmark` buckets are exempt from the "no CHECK/REQUIRE is a failure" rule, so a benchmark that only prints (or only records metrics) still passes.
+Only the `normal` bucket is subject to the "no CHECK/REQUIRE is a failure" rule, so a benchmark that only prints, or an example that only demonstrates, still passes.
 
 Two ways to reach a test outside the swept bucket, and no others:
 

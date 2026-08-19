@@ -22,6 +22,10 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 option(SC_BUILD_TESTS "Build the per-library *-test executables" ${PROJECT_IS_TOP_LEVEL})
 option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEVEL})
 
+# Examples are built by every normal and CI build and executed by nobody automatically — building them is
+# what keeps them compiling against the API they demonstrate. `dev.py example <match>` runs exactly one.
+option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVEL})
+
 # Threading mode for the whole project. OFF reaches the compiler as CC_SINGLE_THREADED, which forces
 # clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set
 # it. Forcing single-threaded on a native host is what makes that mode developable without a wasm build.
@@ -100,6 +104,10 @@ endif()
 # nexus can build an Emscripten `*-web.html` runner; a no-op on native toolchains.
 include(libs/base/nexus/cmake/NexusWebRunner.cmake)
 
+# Example helper (sc_add_example / sc_add_single_file_examples). Included before the libs so each can add
+# its own examples/ subdirectory; a no-op when SC_BUILD_EXAMPLES is off.
+include(libs/base/nexus/cmake/Examples.cmake)
+
 # Shader-package helper (sc_add_shader_package). Included before the libs so any of them — including a
 # library whose *test* declares a package, like shaped-graphics — can call it.
 include(libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake)
@@ -151,6 +159,13 @@ endif()
 # so it gates on SC_BUILD_TOOLS alone; clean-core and nexus are already added above.
 if(SC_BUILD_TOOLS)
     add_subdirectory(tools/shaped-linter)
+endif()
+
+# Cross-library examples: the ones that demonstrate several libraries together and so belong to no single
+# one. Added last, after every library it may reach, and before sc_finalize_shader_packages() below because
+# a graphical example declares its own shader package.
+if(SC_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
+    add_subdirectory(examples)
 endif()
 
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):

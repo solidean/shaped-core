@@ -73,3 +73,6 @@ if(SC_BUILD_TESTS)
 
     sc_add_nexus_web_runner(blob-cache-test)
 endif()
+
+# Examples: the cache as a caller meets it. See docs/guides/examples.md.
+add_subdirectory(examples)
