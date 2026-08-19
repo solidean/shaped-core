@@ -310,35 +310,16 @@ void cc::async_thread_pool::worker_main(worker& w)
     set_current_worker(nullptr);
 }
 
-// Park the calling thread until `root` completes.
-// Does NOT schedule it: the caller has already placed it, and re-scheduling a running node would only force a redundant re-poll.
-void cc::async_thread_pool::wait_for_completion(async_node_base& root)
+// Wake every sleeper, workers and parked participants alike.
+// One bump of the shared epoch, so a waiter that has not registered yet still sees it — same protocol as wake_one, but
+// unconditional: a completion latch fires exactly once and must not be lost to a stale _sleepers read.
+void cc::async_thread_pool::wake_all()
 {
-    struct sync
     {
-        std::mutex m;
-        std::condition_variable cv;
-        bool done = false;
-    };
-    sync s;
-
-    // notify UNDER the lock so this hook (running on a worker) fully returns before wait_for_completion's frame
-    // (and thus `s`) is destroyed.
-    bool const already = root.install_completion_hook_or_ready(
-        [](void* p)
-        {
-            auto* sp = static_cast<sync*>(p);
-            std::lock_guard<std::mutex> lk(sp->m);
-            sp->done = true;
-            sp->cv.notify_one();
-        },
-        &s);
-
-    if (already)
-        return; // completed before we installed the hook: no wait, no notify pending
-
-    std::unique_lock<std::mutex> lk(s.m);
-    s.cv.wait(lk, [&] { return s.done; });
+        std::lock_guard<std::mutex> const lk(_wait_m);
+        _wake_epoch.fetch_add(1, cc::memory_order_relaxed);
+    }
+    _wait_cv.notify_all();
 }
 
 cc::async_thread_pool::worker* cc::async_thread_pool::try_claim_external_slot()
@@ -397,9 +378,35 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     worker* const slot = try_claim_external_slot();
     if (slot == nullptr)
     {
-        // No free slot: fall back to handing the root over and parking.
+        // No free slot: hand the root over and park on it alone.
+        // Deaf to injected work, but harmlessly so — with no slot there is nothing this thread could have run anyway.
         root.schedule_on(*this);
-        wait_for_completion(root);
+
+        struct sync
+        {
+            std::mutex m;
+            std::condition_variable cv;
+            bool done = false;
+        };
+        sync s;
+
+        // notify UNDER the lock so this hook (running on a worker) fully returns before this frame — and thus `s` —
+        // is destroyed.
+        bool const already = root.install_completion_hook_or_ready(
+            [](void* p)
+            {
+                auto* sp = static_cast<sync*>(p);
+                std::lock_guard<std::mutex> lk(sp->m);
+                sp->done = true;
+                sp->cv.notify_one();
+            },
+            &s);
+
+        if (already)
+            return; // completed before we installed the hook: no wait, no notify pending
+
+        std::unique_lock<std::mutex> lk(s.m);
+        s.cv.wait(lk, [&] { return s.done; });
         return;
     }
 
@@ -435,7 +442,37 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         // Anything the root forks off is still published normally by the poll loop, so a real graph still spreads.
         root.poll();
 
-        while (!root.is_ready())
+        // A parked participant sleeps in the pool's OWN protocol rather than on the root alone, so that work arriving
+        // for the pool wakes it exactly as it wakes a worker.
+        //
+        // That is what keeps a nested drive from deadlocking the pool.
+        // A graph parked on an EXTERNAL push completes in two steps — the foreign thread resolves the promise, and then
+        // a pool thread has to run the continuation — and a participant asleep on the root alone is deaf to the second.
+        // With every thread of the pool parked that way, the continuation sits in the injection queue and each thread
+        // waits for work only another of them could run.
+        //
+        // The latch is installed at most once and lives for the whole call: it may fire at any point after, so its
+        // context has to outlast every park below.
+        // Which is also why the loop may only leave once the latch has RUN, never merely once the root reads ready —
+        // returning in that window would destroy the frame under a latch about to touch it.
+        struct parked_waiter
+        {
+            cc::atomic<bool> done = {false};
+            async_thread_pool* pool = nullptr;
+
+            static void fire(void* p)
+            {
+                auto* const self = static_cast<parked_waiter*>(p);
+                self->done.store(true, cc::memory_order_release);
+                self->pool->wake_all();
+            }
+        };
+
+        parked_waiter waiter;
+        waiter.pool = this;
+        auto latched = false;
+
+        while (latched ? !waiter.done.load(cc::memory_order_acquire) : !root.is_ready())
         {
             if (auto n = try_get_work(*slot))
             {
@@ -456,13 +493,48 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                     break;
                 }
             }
-            if (found || root.is_ready())
+            if (found || (!latched && root.is_ready()))
                 continue;
 
-            // Genuinely nothing for us and the root is still out there — park on it rather than burn a core the pool wants.
+            if (!latched)
+            {
+                // Genuinely nothing for us and the root is still out there, so commit to sleeping on it.
+                if (root.install_completion_hook_or_ready(&parked_waiter::fire, &waiter))
+                    break; // completed before we installed: nothing was installed, so nothing can fire
+                latched = true;
+                continue; // re-check under the latch, which is the state the loop condition now reads
+            }
+
+            // Registered the same way a worker does, and for the same reason: capture the epoch BEFORE announcing
+            // ourselves, then re-scan, so a push that raced our registration cannot strand.
             // Anything we queued stays stealable while we sleep.
-            wait_for_completion(root);
-            break;
+            i64 const epoch = _wake_epoch.load(cc::memory_order_acquire);
+            _sleepers.fetch_add(1, cc::memory_order_seq_cst);
+            cc::atomic_thread_fence(cc::memory_order_seq_cst);
+
+            if (auto n = try_get_work(*slot, /*authoritative*/ true))
+            {
+                _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+                n->poll();
+                continue;
+            }
+
+            {
+                std::unique_lock<std::mutex> lk(_wait_m);
+                _wait_cv.wait(lk,
+                              [&]
+                              {
+                                  return waiter.done.load(cc::memory_order_relaxed)
+                                      || _stop.load(cc::memory_order_relaxed)
+                                      || _wake_epoch.load(cc::memory_order_relaxed) != epoch;
+                              });
+            }
+            _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+
+            // _stop without the latch having fired means the pool is going away under us; nothing will complete the
+            // root, and staying here would hang shutdown.
+            if (_stop.load(cc::memory_order_relaxed) && !waiter.done.load(cc::memory_order_acquire))
+                break;
         }
 
         drain_slot_to_injection(*slot);
