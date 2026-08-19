@@ -27,16 +27,16 @@ One-liner per library:
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
-* **`libs/io/babel-serializer`** — serialization / deserialization of various formats.
+* **`libs/data/babel-serializer`** — serialization / deserialization of various formats.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
   The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
   So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`).
   Plus Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`).
   Also PNG/JPEG codecs in `babel::png` / `babel::jpg`, with the `babel::image` aggregator on top (`image/`).
-  Its [docs/coding-guidelines.md](libs/io/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
+  Its [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
   Namespace `babel`. Depends on clean-core + typed-geometry.
-  Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
+  Early stage — see its [docs/structure.md](libs/data/babel-serializer/docs/structure.md) roadmap.
 * **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
   Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
   Ships **zero components** — the component set belongs entirely to the application.

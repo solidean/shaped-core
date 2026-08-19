@@ -117,12 +117,11 @@ add_subdirectory(libs/base/clean-core)
 add_subdirectory(libs/base/nexus)
 add_subdirectory(libs/base/typed-geometry)
 
-# io stack: serialization / format codecs (babel-serializer), layered on base.
-add_subdirectory(libs/io/babel-serializer)
-
-# data stack: versioned-document (vdoc) -> versioned-document-file, plus blob-cache (bcache) beside them.
-# Added in dependency order, and after babel-serializer because both persist through babel::sqlite.
+# data stack: babel-serializer (babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
+# plus blob-cache (bcache) beside them.
+# Added in dependency order, babel-serializer first because both persisting libraries store through babel::sqlite.
 # The model library itself depends on clean-core alone, so an in-memory document never links a database engine.
+add_subdirectory(libs/data/babel-serializer)
 add_subdirectory(libs/data/versioned-document)
 add_subdirectory(libs/data/versioned-document-file)
 add_subdirectory(libs/data/blob-cache)
