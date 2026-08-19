@@ -135,8 +135,8 @@ void imgui_routine::init_declare(sg::context& ctx)
     auto ps = sr::shaders::imgui.fragment.main_ps->acquire(ctx);
 
     // No async pool is guaranteed here, so drive the compiles inline.
-    (void)cc::try_async_blocking_get_singlethreaded(vs);
-    (void)cc::try_async_blocking_get_singlethreaded(ps);
+    (void)cc::try_async_blocking_get(vs);
+    (void)cc::try_async_blocking_get(ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();

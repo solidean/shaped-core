@@ -167,7 +167,7 @@ void slib::shader_asset::stage_reload()
         // Drive the compile here, on the watcher's own thread.
         // A cc::async node is cold until a scheduler runs it, and nothing else ever looks at this one — a consumer only sees it after promotion, and promotion needs it ready.
         // With a default async pool installed this returns nullopt because the pool already owns the node and finishes it; without one, this call is what runs the compile.
-        (void)cc::try_async_blocking_get_singlethreaded(outcome.shader);
+        (void)cc::try_async_blocking_get(outcome.shader);
 
         _state.lock(
             [&](state& s)

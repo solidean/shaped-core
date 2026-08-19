@@ -3,7 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
-#include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/async.hh>
 #include <versioned-document/incremental_parse.hh>
 #include <versioned-document/op_builder.hh>
 #include <versioned-document/value_builder.hh>
@@ -77,8 +77,7 @@ cc::optional<document> document::open(cc::string_view path)
     out._file = cc::move(opened.store);
 
     // A hard load failure rides `loaded`'s error channel; a soft one lands in report() and the file still opened.
-    auto pool = cc::async_thread_pool();
-    if (auto result = pool.try_blocking_get(opened.loaded); result.has_error())
+    if (auto const result = cc::try_async_blocking_get(opened.loaded); result.has_error())
     {
         cc::eprintln("could not load {}: {}", path, result.error().underlying().to_string());
         return cc::nullopt;
@@ -106,7 +105,7 @@ cc::optional<document> document::open(cc::string_view path)
         // Waited on, unlike every later save: a publish is fire-and-forget, so a first run closed or killed before it
         // lands would leave a ref pointing at an op whose bytes never arrived — and the next run would then load an
         // empty document and seed a second time.
-        (void)pool.try_blocking_get(out._file->publish({.refs = {{cc::string(main_ref), out._head}}}));
+        (void)cc::try_async_blocking_get(out._file->publish({.refs = {{cc::string(main_ref), out._head}}}));
     }
 
     return out;

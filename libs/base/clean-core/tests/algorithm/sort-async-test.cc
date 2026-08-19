@@ -25,11 +25,10 @@ using namespace sort_test;
 
 namespace
 {
-/// Drives the graph to completion on a real pool, which is also the inline path under -DSC_THREADS=OFF.
+/// Drives the graph to completion on the run's ambient scheduler, which is the inline path under -DSC_THREADS=OFF.
 void drive(cc::shared_async<cc::unit> const& root)
 {
-    cc::async_thread_pool pool(4);
-    (void)pool.blocking_get(root);
+    (void)cc::async_blocking_get(root);
 }
 
 /// Wide enough that the pivot is bound by reference and the block partition is off, i.e. the other partition path.
@@ -153,8 +152,7 @@ TEST("sort_async - composes as a dependency of other async work")
     // the dependency is unwrapped to its plain value before the continuation runs, hence the cc::unit parameter
     auto const checked = cc::make_async_lazy([&values](cc::unit) { return cc::is_sorted(values) ? 1 : 0; }, sorted);
 
-    cc::async_thread_pool pool(4);
-    CHECK(pool.blocking_get(checked) == 1);
+    CHECK(cc::async_blocking_get(checked) == 1);
 }
 
 TEST("sort_async - two disjoint sorts in one graph")
@@ -170,11 +168,10 @@ TEST("sort_async - two disjoint sorts in one graph")
     auto const both = cc::make_async_lazy(
         [&a, &b](cc::unit, cc::unit) { return (cc::is_sorted(a) && cc::is_sorted(b)) ? 1 : 0; }, sa, sb);
 
-    cc::async_thread_pool pool(4);
-    CHECK(pool.blocking_get(both) == 1);
+    CHECK(cc::async_blocking_get(both) == 1);
 }
 
-TEST("sort_async - completes on a singlethreaded scheduler, with no pool installed")
+TEST("sort_async - completes inline on a singlethreaded scheduler", nx::config::singlethreaded)
 {
     cc::random rng(58);
     isize const n = 3000;
@@ -183,7 +180,7 @@ TEST("sort_async - completes on a singlethreaded scheduler, with no pool install
     auto values = original;
 
     auto const sorted = cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_less{}, isize(16));
-    cc::async_blocking_get_singlethreaded(sorted);
+    cc::async_blocking_get(sorted);
 
     CHECK(cc::is_sorted(values));
     CHECK(is_permutation_of(original, values));

@@ -5,7 +5,6 @@
 
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/unique_ptr.hh>
-#include <clean-core/thread/async_thread_pool.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/window.hh>
@@ -25,8 +24,7 @@ public:
     /// Null when there is no window backend, no D3D12 device at all, no shader compiler, or a broken shader.
     /// Reports why on stderr, since an example that silently does nothing is worse than one that says what is missing.
     ///
-    /// Heap-held: the installed default async pool is scoped to this object's lifetime, and a scope guard is pinned
-    /// by construction — so an app that could be moved would move the guard out from under the pool it named.
+    /// Heap-held for the renderer's sake: a pipeline cache guards its map with a mutex, so nothing around it can move either.
     [[nodiscard]] static cc::unique_ptr<app> create(cc::string_view title);
 
     ~app();
@@ -65,14 +63,6 @@ private:
     sg::swapchain_handle _swapchain;
     sr::imgui_context _imgui;
     cc::unique_ptr<renderer> _renderer;
-
-    // The graphs sg and vdoc::file complete on their own threads need somewhere to resume.
-    // Without an installed default, the first completion off a worker thread asserts.
-    //
-    // The guard is held by pointer rather than by optional: it has no default constructor, and an `app` that could
-    // not be default-constructed could not be make_unique'd either.
-    cc::async_thread_pool _pool;
-    cc::unique_ptr<cc::scoped_default_async_pool> _default_pool;
 
     float _delta_time = 1.0f / 60.0f;
     double _last_time = 0.0;

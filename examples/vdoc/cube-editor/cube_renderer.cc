@@ -1,6 +1,7 @@
 #include "cube_renderer.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <cube_shaders.hh>
 
@@ -91,6 +92,21 @@ struct sg::vertex_layout_of<cube_editor::cube_instance>
     }
 };
 
+namespace
+{
+/// Why one shader acquire produced no value, in words worth printing.
+[[nodiscard]] cc::string acquire_failure(sg::async_compiled_shader const& shader)
+{
+    auto const* const error = shader->try_error();
+    if (error == nullptr)
+        return cc::string("no result and no error — the compile never ran");
+    if (error->is_cancelled())
+        return cc::string("the compile was cancelled");
+
+    return error->underlying().to_string();
+}
+} // namespace
+
 namespace cube_editor
 {
 cc::vector<cube_instance> collect_instances(vdoc::document const& doc, vdoc::entity_id selected)
@@ -114,14 +130,22 @@ cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::sh
     auto vs = shaders::cube.vertex.main_vs->acquire(ctx);
     auto ps = shaders::cube.fragment.main_ps->acquire(ctx);
 
-    // Driven inline rather than on a pool: this runs once at startup, and the caller owes nothing.
-    (void)cc::try_async_blocking_get_singlethreaded(vs);
-    (void)cc::try_async_blocking_get_singlethreaded(ps);
+    // Driven on the ambient scheduler, which is the one the compiles were submitted to.
+    (void)cc::try_async_blocking_get(vs);
+    (void)cc::try_async_blocking_get(ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
     if (compiled_vs == nullptr || compiled_ps == nullptr)
-        return cc::error(cc::any_error("cube.hlsl did not compile"));
+    {
+        // The compiler's diagnostics ride on the async's failure channel, so reporting only "it did not compile" throws away the one thing worth reading.
+        auto message = cc::string("cube.hlsl did not compile");
+        if (compiled_vs == nullptr)
+            message += cc::format("\n  vertex main_vs: {}", acquire_failure(vs));
+        if (compiled_ps == nullptr)
+            message += cc::format("\n  fragment main_ps: {}", acquire_failure(ps));
+        return cc::error(cc::any_error(cc::move(message)));
+    }
 
     // The only binding is the vertex stage's 64-byte view-projection block, and it rides as inline constants —
     // so there are no binding groups at all, which is why nothing here builds one.

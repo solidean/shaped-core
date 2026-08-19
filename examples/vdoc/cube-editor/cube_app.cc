@@ -50,8 +50,6 @@ cc::unique_ptr<app> app::create(cc::string_view title)
     }
     out->_ctx = cc::move(context.value());
 
-    out->_default_pool = cc::make_unique<cc::scoped_default_async_pool>(out->_pool);
-
     auto compiler = slib::create_dxc_compiler();
     if (compiler.has_error())
     {

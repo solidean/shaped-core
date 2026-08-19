@@ -196,7 +196,7 @@ void emit(char const* name, isize n, isize grain, double ns_per_elem)
 
 void run_all()
 {
-    // Hardware concurrency MINUS ONE: blocking_get makes this thread participate as a worker, so P workers
+    // Hardware concurrency MINUS ONE: driving makes this thread participate as a worker, so P workers
     // would put P+1 threads on P cores and measure the oversubscription rather than the grain.
     int const p = cc::async_thread_pool::default_worker_count();
     std::printf("\n### cc::async_thread_pool grain sweep (median of 5, %d workers + this thread) ###\n", p);
@@ -219,7 +219,7 @@ void run_all()
                                                           [&]
                                                           {
                                                               auto root = async_pfor(rg);
-                                                              (void)pool.blocking_get(root);
+                                                              pool.participate_until_ready(*root);
                                                               return u64(g_data[0]);
                                                           });
             emit("pfor", n, grain, ns);
@@ -237,7 +237,8 @@ void run_all()
                                                           [&]
                                                           {
                                                               auto root = async_reduce(rg);
-                                                              return u64(pool.blocking_get(root));
+                                                              pool.participate_until_ready(*root);
+                                                              return u64(*root->try_value());
                                                           });
             emit("reduce", n, grain, ns);
         }
@@ -283,7 +284,7 @@ void run_fork_floor()
                                                           [&]
                                                           {
                                                               auto root = async_pfor(rg);
-                                                              (void)pool.blocking_get(root);
+                                                              pool.participate_until_ready(*root);
                                                               return u64(g_data[0]);
                                                           });
             std::printf("FLOORCSV %d,%lld,%.3f\n", w, (long long)n, ns);
@@ -301,7 +302,7 @@ void run_fork_floor()
 // Two context switches would be a constant, whereas contention on the shared injection mutex grows with the number of idle workers scanning it.
 void run_latency()
 {
-    std::printf("\n=== blocking_get round-trip, one trivial node (median of 5) ===\n");
+    std::printf("\n=== drive round-trip, one trivial node (median of 5) ===\n");
     std::printf("%-10s %15s\n", "workers", "ns/roundtrip");
     std::printf("%-10s %15s\n", "-------", "------------");
 
@@ -318,7 +319,8 @@ void run_latency()
                                           {
                                               auto root = cc::make_async_lazy<i64>([](cc::async_context<i64>& actx)
                                                                                    { return actx.success(i64(1)); });
-                                              return u64(pool.blocking_get(root));
+                                              pool.participate_until_ready(*root);
+                                              return u64(*root->try_value());
                                           });
         std::printf("%-10d %15.1f\n", w, ns);
         std::fflush(stdout);

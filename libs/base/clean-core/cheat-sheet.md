@@ -771,11 +771,12 @@ auto p = cc::make_async_lazy_emplace<int, cc::async_error, PinnedFrame>(7); // b
 auto rv = cc::make_async_from_value(42);   auto re = cc::make_async_from_error<int>(async_error::make_cancelled());
 auto rvE = cc::make_async_from_value_emplace<Immovable>(7);  // T explicit; also *_from_error_emplace<T, E>(...)
 
-// you never block on an async: a SCHEDULER drives it. These build a throwaway singlethreaded_scheduler and
-// BLOCK the calling thread — top-level/tests only, never in a frame. Verbose name = deliberately discouraged:
-int v = cc::async_blocking_get_singlethreaded(a);                    // -> T (asserts on error/cancel/no-progress)
-cc::optional<cc::result<int, cc::async_error>> r = cc::try_async_blocking_get_singlethreaded(a); // nullopt if it
-                    // couldn't complete here (parked on an unpushed manual node, or migrated to another scheduler)
+// you never block on an async: a SCHEDULER drives it. These drive on the AMBIENT one and BLOCK the calling
+// thread — a bridge from sync code, not a way to write it. Ready on return: value or error, never pending.
+int v = cc::async_blocking_get(a);                                   // -> T (asserts on error/cancel)
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a);  // fallible; no "not yet" to handle
+cc::try_async_blocking_get_for(a, 50);                               // -> cc::optional<result>, the only "not yet"
+int v2 = cc::async_blocking_get_on(pool, a);                         // drive on THIS scheduler, not the ambient one
 cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
 int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value
@@ -817,11 +818,11 @@ sched.drain();  sched.empty();      // pump till empty / is anything queued (a q
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
 cc::async_thread_pool pool;                              // >=1 workers; default = hardware concurrency - 1 (below)
-cc::install_default_async_pool(pool);                    // compute nodes route here when off-worker
-int v = pool.blocking_get(root);                         // caller PARTICIPATES (runs the graph, steals), then blocks
-// ^ hence the -1 default: the calling thread is a worker for the duration. A graph that never forks stays on it
+cc::scoped_default_async_scheduler const ambient(pool);  // THE ambient scheduler: every async belongs to it
+int v = cc::async_blocking_get(root);                    // caller PARTICIPATES (runs the graph, steals), then blocks
+// ^ hence the -1 default: the driving thread is a worker for the duration. A graph that never forks stays on it
 //   entirely — tens of ns, no cross-thread round trip (docs/systems/async.md "Driving").
-//   Never call blocking_get from inside a worker of that pool.
+//   An app installs one at startup; a nexus run installs one per phase (nx::no_scheduler opts out).
 // route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
 cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
 // WITHOUT THREADS (CC_HAS_THREADS == 0) the pool still exists with the same API — no #if at the call site.

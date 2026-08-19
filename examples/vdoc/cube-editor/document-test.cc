@@ -2,7 +2,6 @@
 
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 
@@ -15,17 +14,6 @@
 namespace
 {
 using namespace cube_editor;
-
-/// The process-wide default async pool the store needs.
-///
-/// A `.vdoc` store completes async nodes on its own actor thread, and a completion off a worker has to route
-/// somewhere — without an installed default it asserts. The application installs one at startup (cube_app does);
-/// these tests install one lazily and share it, because a default may only be installed once per process.
-void ensure_default_async_pool()
-{
-    static cc::async_thread_pool pool;
-    static cc::scoped_default_async_pool const installed(pool);
-}
 
 /// Opens a document on a private file, with everything a store needs already standing.
 [[nodiscard]] cc::optional<document> open_scratch_document();
@@ -42,11 +30,7 @@ void ensure_default_async_pool()
     return path;
 }
 
-cc::optional<document> open_scratch_document()
-{
-    ensure_default_async_pool();
-    return document::open(scratch_path());
-}
+cc::optional<document> open_scratch_document() { return document::open(scratch_path()); }
 
 [[nodiscard]] placement at(float x) { return {.center = tg::pos3f(x, 0, 0), .half_extent = 0.8f}; }
 } // namespace
@@ -134,7 +118,6 @@ TEST("cube-editor - an imgui layout round-trips per example and writes no histor
     if (!vdoc::file::store::is_file_storage_available())
         SKIP("no SQLite backend was compiled in");
 
-    ensure_default_async_pool();
     auto const path = scratch_path();
 
     {
