@@ -40,7 +40,11 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
     auto const hit_h = rpd.add_hit_shader({.closest_hit = *compiled_ch});
-    _pipeline = ctx.uncached.create_raytracing_pipeline(rpd);
+    // The build is async and no pool is guaranteed here, so drive it inline like the compiles above.
+    auto pipeline_r = cc::try_async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
+    if (pipeline_r.has_error())
+        return; // the state object did not build — execute no-ops, as for a broken shader
+    _pipeline = cc::move(pipeline_r).value();
 
     auto stbd = sg::raytracing_shader_table_description{.pipeline = _pipeline};
     _raygen = stbd.add_raygen_shader(raygen_h);
@@ -55,7 +59,7 @@ void pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
     auto& ctx = cmd.context();
 
     if (self._pipeline == nullptr || self._table == nullptr)
-        return; // shaders did not compile; leave the target untouched
+        return; // shaders did not compile, or the pipeline did not build; leave the target untouched
 
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
