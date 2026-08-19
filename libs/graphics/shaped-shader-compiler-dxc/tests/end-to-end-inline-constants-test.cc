@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -66,7 +67,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias
             out_bindings.push_back(b);
     REQUIRE(out_bindings.size() == 1);
 
-    auto group_layout = ctx.uncached.create_binding_group_layout(out_bindings);
+    auto group_layout = ctx.cached.acquire_binding_group_layout(out_bindings);
     REQUIRE(group_layout != nullptr);
 
     sg::pipeline_layout_description pld;
@@ -79,9 +80,10 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias
         .type = sg::binding_type::uniform_buffer,
         .block_size = isize(sizeof(params)),
     };
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout(pld);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    auto pipeline
+        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
     REQUIRE(pipeline != nullptr);
 
     // Two independent outputs so the two dispatches don't alias: out1 for the full set, out2 for the partial.

@@ -219,7 +219,7 @@ TEST("async-ambient - a node driven under a scope observes it")
     auto n = cc::make_async_lazy<i64>([] { return observed(); });
 
     cc::async_ambient_scope const s(tag_a(), &value_a);
-    CHECK(cc::async_blocking_get_singlethreaded(n) == value_a);
+    CHECK(cc::async_blocking_get(n) == value_a);
 }
 
 TEST("async-ambient - drive site wins over creation site")
@@ -229,7 +229,7 @@ TEST("async-ambient - drive site wins over creation site")
     auto n = cc::make_async_lazy<i64>([] { return observed(); });
 
     cc::async_ambient_scope const s(tag_a(), &value_a);
-    CHECK(cc::async_blocking_get_singlethreaded(n) == value_a);
+    CHECK(cc::async_blocking_get(n) == value_a);
 }
 
 TEST("async-ambient - a lazy node outliving its creating scope is driven under the LIVE one")
@@ -245,7 +245,7 @@ TEST("async-ambient - a lazy node outliving its creating scope is driven under t
     CHECK(no_scope_of_ours()); // c0 is gone
 
     cc::async_ambient_scope const c1(tag_a(), &value_b);
-    CHECK(cc::async_blocking_get_singlethreaded(lazy) == value_b);
+    CHECK(cc::async_blocking_get(lazy) == value_b);
 }
 
 TEST("async-ambient - an inline-driven dependency inherits its driver's context")
@@ -256,7 +256,7 @@ TEST("async-ambient - an inline-driven dependency inherits its driver's context"
     auto parent = cc::make_async_lazy<i64>([](i64 from_dep) { return from_dep * 100 + observed(); }, dep);
 
     cc::async_ambient_scope const s(tag_a(), &value_a);
-    CHECK(cc::async_blocking_get_singlethreaded(parent) == value_a * 100 + value_a);
+    CHECK(cc::async_blocking_get(parent) == value_a * 100 + value_a);
 }
 
 TEST("async-ambient - a nested scope inside a frame flows to the nodes it spawns")
@@ -267,11 +267,11 @@ TEST("async-ambient - a nested scope inside a frame flows to the nodes it spawns
         {
             cc::async_ambient_scope const inner(tag_a(), &value_b);
             auto child = cc::make_async_lazy<i64>([] { return observed(); });
-            return cc::async_blocking_get_singlethreaded(child);
+            return cc::async_blocking_get(child);
         });
 
     cc::async_ambient_scope const s(tag_a(), &value_a);
-    CHECK(cc::async_blocking_get_singlethreaded(outer) == value_b); // the inner scope, not the outer
+    CHECK(cc::async_blocking_get(outer) == value_b); // the inner scope, not the outer
 }
 
 TEST("async-ambient - the scope is restored after a drive")
@@ -279,7 +279,7 @@ TEST("async-ambient - the scope is restored after a drive")
     auto n = cc::make_async_lazy<i64>([] { return observed(); });
     {
         cc::async_ambient_scope const s(tag_a(), &value_a);
-        CHECK(cc::async_blocking_get_singlethreaded(n) == value_a);
+        CHECK(cc::async_blocking_get(n) == value_a);
         CHECK(cc::async_ambient_lookup(tag_a()) == &value_a); // poll() restored what it installed
     }
     CHECK(no_scope_of_ours());

@@ -1,5 +1,6 @@
 #include <clean-core/container/vector.hh>
-#include <clean-core/fwd.hh> // offsetof
+#include <clean-core/fwd.hh>          // offsetof
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -78,7 +79,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleare
     sg::compiled_shader ps = compile("main_ps", sg::shader_stage::fragment);
 
     // No resource bindings, so the pipeline layout is empty (an IA-only root signature).
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout({});
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout({});
     REQUIRE(pipeline_layout != nullptr);
 
     sg::raster_pipeline_description desc;
@@ -89,7 +90,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleare
     desc.topology = sg::primitive_topology::triangle_list;
     desc.rasterization.cull = sg::cull_mode::none; // avoid winding-vs-culling concerns in the test
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = ctx.uncached.create_raster_pipeline(desc);
+    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
     REQUIRE(pipeline != nullptr);
 
     // The render target (rgba8, readable back) and the triangle's vertices (all red).

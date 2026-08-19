@@ -93,7 +93,7 @@ public:
         CC_ASSERT(self._pipeline != nullptr, "pattern_fill routine failed to initialize");
 
         // Force the compute pipeline only now — init_declare merely kicked off the background compile.
-        auto const pipeline = cc::async_blocking_get_singlethreaded(self._pipeline);
+        auto const pipeline = cc::async_blocking_get(self._pipeline);
 
         auto const group = cmd.context().transient.create_binding_group(
             self._group_layout, {{.name = "gValues", .views = {out.as_readwrite_buffer()}}});
@@ -107,7 +107,7 @@ protected:
     void init_declare(sg::context& ctx) override
     {
         auto const shader = sg::test::shaders::pattern_fill.compute.main->acquire(ctx);
-        (void)cc::try_async_blocking_get_singlethreaded(shader); // no async pool here, so drive it inline
+        (void)cc::try_async_blocking_get(shader); // no async pool here, so drive it inline
         auto const* const compiled = shader->try_value();
         if (compiled == nullptr)
             return; // the context cannot produce a format we can use; execute() then asserts

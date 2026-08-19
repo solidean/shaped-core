@@ -15,9 +15,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core import console, profile
+from ..core import console
 from ..core.models import StepResult
 from ..core.process import response_file, run_step
+from .changes import ChangeScope, changed_files
 
 
 class FormatSetupError(Exception):
@@ -30,11 +31,12 @@ class FormatResult:
 
     `nothing` flags "no files in scope" (a success). In check mode `offenders`
     lists the non-conforming files when `ok` is False.
+    `scope` is the change set the run was restricted to, or None for the whole tree, and the summary wording follows it.
     """
 
     ok: bool
     check: bool
-    dirty_only: bool
+    scope: ChangeScope | None
     files: int
     duration_s: float = 0.0
     nothing: bool = False
@@ -105,117 +107,6 @@ def required_major(root: Path) -> int:
     return int(m.group(1)) if m else _DEFAULT_MAJOR
 
 
-def _git_dirty_files(root: Path) -> list[Path]:
-    """Files that are git-dirty or untracked — what is reasonably part of the next commit.
-
-    Deletions are dropped, since there is nothing to format, and a rename yields its new path.
-    Returns absolute paths, with nonexistent entries filtered out.
-    """
-    try:
-        with profile.span("git status", type="git"):
-            out = subprocess.run(
-                ["git", "status", "--porcelain", "--untracked-files=all"],
-                cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-            )
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    if out.returncode != 0:
-        return []
-
-    paths: list[Path] = []
-    for line in out.stdout.splitlines():
-        if len(line) < 4:
-            continue
-        # Porcelain v1: a 2-char status field, a space, then the path; a rename is 'R  <old> -> <new>'.
-        # A 'D' in either status column is a deletion.
-        status, rest = line[:2], line[3:]
-        if "D" in status:
-            continue
-        path_part = rest.split(" -> ")[-1].strip().strip('"')
-        p = (root / path_part).resolve()
-        if p.is_file():
-            paths.append(p)
-    return paths
-
-
-# A whole untracked file is "changed", and its length is not worth a stat — the linter clamps anyway.
-_ALL_LINES = 0xFFFFFFFF
-
-
-def changed_line_ranges(root: Path) -> dict[Path, list[tuple[int, int]]]:
-    """The 1-based line ranges each dirty file changed, as absolute paths -> [(first, last), ...].
-
-    This is what makes a dirty-only prose run line-exact instead of file-wide.
-    A prose finding sits on one line, so it either changed or it did not; a code finding can be caused by
-    a line the edit never touched, which is why only prose rules are scoped this way.
-
-    Tracked changes come from `git diff -U0 HEAD`, so staged and unstaged both count.
-    An untracked file has no diff and is reported as changed end to end.
-    A pure-deletion hunk marks the surviving line above it, which is the one the edit could have broken.
-    """
-    ranges: dict[Path, list[tuple[int, int]]] = {}
-
-    try:
-        with profile.span("git diff HEAD", type="git"):
-            out = subprocess.run(
-                ["git", "diff", "--unified=0", "--no-color", "HEAD"],
-                cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-            )
-    except (OSError, subprocess.TimeoutExpired):
-        out = None
-
-    if out is not None and out.returncode == 0:
-        current: Path | None = None
-        for line in out.stdout.splitlines():
-            if line.startswith("+++ "):
-                target = line[4:].strip()
-                if target == "/dev/null":
-                    current = None
-                else:
-                    current = (root / (target[2:] if target.startswith("b/") else target)).resolve()
-                continue
-            if current is None or not line.startswith("@@"):
-                continue
-
-            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
-            if not m:
-                continue
-            start = int(m.group(1))
-            count = int(m.group(2)) if m.group(2) is not None else 1
-            if count == 0:
-                ranges.setdefault(current, []).append((max(1, start), max(1, start)))
-            else:
-                ranges.setdefault(current, []).append((start, start + count - 1))
-
-    try:
-        with profile.span("git ls-files --others", type="git"):
-            untracked = subprocess.run(
-                ["git", "ls-files", "--others", "--exclude-standard"],
-                cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-            )
-    except (OSError, subprocess.TimeoutExpired):
-        untracked = None
-
-    if untracked is not None and untracked.returncode == 0:
-        for name in untracked.stdout.splitlines():
-            if not name.strip():
-                continue
-            p = (root / name.strip()).resolve()
-            if p.is_file():
-                ranges.setdefault(p, []).append((1, _ALL_LINES))
-
-    return ranges
-
-
-def format_changed_line_spec(ranges: dict[Path, list[tuple[int, int]]]) -> str:
-    """Render `changed_line_ranges` as shaped-linter's `--changed-lines` spec: `<path>:a-b,c-d` per line."""
-    lines = []
-    for path in sorted(ranges):
-        spec = ",".join(f"{first}-{last}" for first, last in ranges[path])
-        lines.append(f"{path}:{spec}")
-    return "\n".join(lines) + ("\n" if lines else "")
-
-
 def source_roots(root: Path) -> list[Path]:
     """The directories whose `.cc`/`.hh` files clang-format owns.
 
@@ -229,16 +120,16 @@ def source_roots(root: Path) -> list[Path]:
     ]
 
 
-def discover_files(root: Path, *, dirty_only: bool) -> list[Path]:
+def discover_files(root: Path, *, scope: ChangeScope | None) -> list[Path]:
     """Return the sorted list of `.cc`/`.hh` files under the source roots to format.
 
-    With `dirty_only`, restrict to git-dirty/untracked files (intersected with the same scope).
+    A `scope` restricts the set to what that change set touched (see quality/changes.py); None means the whole tree.
     """
     roots = [r for r in source_roots(root) if r.is_dir()]
 
-    if dirty_only:
+    if scope is not None:
         selected = [
-            p for p in _git_dirty_files(root)
+            p for p in changed_files(root, scope)
             if p.suffix in _SOURCE_SUFFIXES and any(r in p.parents for r in roots)
         ]
         return sorted(set(selected))
@@ -283,17 +174,17 @@ def _is_lintable(path: Path, roots: list[Path], root: Path) -> bool:
     return path.parent == root and path.name in _LINT_ROOT_FILES
 
 
-def discover_lint_files(root: Path, *, dirty_only: bool) -> list[Path]:
+def discover_lint_files(root: Path, *, scope: ChangeScope | None) -> list[Path]:
     """Return the sorted list of files shaped-linter should lint.
 
     Wider than `discover_files`: it covers `.md` and `.py` too, and reaches docs/ and .claude/skills/,
     because the linter's prose rules bind every file a human writes sentences in.
-    With `dirty_only`, restrict to git-dirty/untracked files (intersected with the same scope).
+    A `scope` restricts the set to what that change set touched (see quality/changes.py); None means the whole tree.
     """
     roots = [r for r in lint_roots(root) if r.is_dir()]
 
-    if dirty_only:
-        return sorted({p for p in _git_dirty_files(root) if _is_lintable(p, roots, root)})
+    if scope is not None:
+        return sorted({p for p in changed_files(root, scope) if _is_lintable(p, roots, root)})
 
     found: list[Path] = []
     for lint_root in roots:
@@ -366,7 +257,7 @@ def run_format(
     root: Path,
     *,
     check: bool,
-    dirty_only: bool,
+    scope: ChangeScope | None,
     allow_different_version: bool,
     mirror: bool = False,
     verbose: bool = False,
@@ -401,9 +292,9 @@ def run_format(
                 f"{msg}. Install clang-format {need}.x, or pass --allow-different-version to proceed anyway."
             )
 
-    files = discover_files(root, dirty_only=dirty_only)
+    files = discover_files(root, scope=scope)
     if not files:
-        return FormatResult(ok=True, check=check, dirty_only=dirty_only, files=0, nothing=True)
+        return FormatResult(ok=True, check=check, scope=scope, files=0, nothing=True)
 
     result = format_sources(
         files, root=root, clang_format=clang_format, check=check, mirror=mirror, verbose=verbose,
@@ -412,7 +303,7 @@ def run_format(
     return FormatResult(
         ok=result.ok,
         check=check,
-        dirty_only=dirty_only,
+        scope=scope,
         files=len(files),
         duration_s=result.duration_s,
         stderr_log=result.stderr_log,

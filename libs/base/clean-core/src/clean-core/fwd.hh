@@ -302,6 +302,7 @@ struct async_worker_scope;
 struct async_no_worker_scope;
 struct singlethreaded_scheduler;
 struct async_thread_pool;
+struct scoped_default_async_scheduler;
 struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)
 struct async_ambient_scope;
 struct async_ambient_handle; // a captured chain head, re-installable on another thread
@@ -311,6 +312,8 @@ template <class T, class E = async_error>
 struct async_context;
 template <class T, class E = async_error>
 struct async;
+template <class T, class E = async_error>
+struct async_scheduled; // the eager coroutine return type (thread/async_coroutine.hh)
 
 /// The normal async handle: an 8 B intrusive cc::shared_ptr over one slab node (see thread/async.hh).
 template <class T, class E = async_error>

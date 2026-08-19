@@ -49,6 +49,11 @@ rules:
     files: src/clean-core/math/bit.hh
 
   - kind: allow-include
+    value: <coroutine>
+    reason: the language requires it for coroutine_handle and coroutine_traits, and this header is the only place cc::async's co_await layer needs them
+    files: src/clean-core/thread/async_coroutine.hh
+
+  - kind: allow-include
     value: <source_location>
     reason: cc::source_location wraps it, and only the compiler can produce one
     files: src/clean-core/platform/source_location.hh
@@ -137,6 +142,11 @@ rules:
     value: [<cstdio>, <cstdlib>]
     reason: std::remove deletes a file and std::getenv names the temp directory; POSIX offers no other route to either
     files: src/clean-core/platform/file_path.cc
+
+  - kind: allow-include
+    value: <cstdlib>
+    reason: std::getenv is the only portable way to read the environment
+    files: src/clean-core/platform/environment.cc
 
   - kind: allow-include
     value: <iostream>

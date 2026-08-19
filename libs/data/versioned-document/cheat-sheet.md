@@ -109,6 +109,14 @@ auto const head2 = graph.add(cc::move(op));               // keyed by content ha
 `build(graph, cache)` is the same op, with the diff's walk allowed to terminate at a cached snapshot.
 The filter applies to assignments and never to edges, so a snapshot is the only thing that shortens a build — **use this overload in any edit loop**.
 
+```cpp
+staged.abstain(path);                                     // or abstain(entity, component, property)
+```
+
+**`abstain` is the only way to un-write a property** — `$alive` removes a whole component or entity, nothing else removes one property.
+It withdraws this history's contribution and lets whatever is below show through, so it is what reverts an override or a stored value to absent.
+Its diff is the **mirror** of `set_raw`'s: abstaining over a path nobody wrote emits nothing, so re-staging the same withdrawal every frame gives the same op id and costs nothing.
+
 - **`add` is not append.** It inserts by content hash and moves no head, so two identical ops collapse to one entry.
 - **`build` diffs.** Re-setting an unchanged property emits no assignments at all.
 - **A multi-valued path always emits**, even when every surviving writer holds identical bytes — that op is how a conflict is resolved.
@@ -217,8 +225,29 @@ doc = vdoc::apply(cc::move(doc), graph, from, to,       // CONSUMES doc; `from` 
                   {.cache = &cache}, &stats);           // .max_chain_ops, .compaction_ratio, .force_full_reparse
 
 stats.took_fast_path;                                   // false = it re-parsed, and `changes` then says "everything"
+stats.fallback_reason;                                  // why: forced | no_single_parent_chain | chain_too_long
 changes.entities; changes.components;                   // sorted; added / removed / modified
 ```
+
+**Only `chain_too_long` is fixed by raising `max_chain_ops`** — `no_single_parent_chain` is a statement about the history.
+
+### The dirty set an apply consumes
+
+```cpp
+auto b = vdoc::change_set_builder();               // or (change_granularity::entity) for a coarse producer
+b.add(path);  b.add_entity(entity);                // any order, duplicates free; add_entity COARSENS the whole set
+b.add_everything();                                // no honest delta available
+auto dirty = cc::move(b).build();                  // sorts + dedups under the granularity
+
+dirty.covers(path);  dirty.covers_entity(e);       // the only supported way to ask
+dirty.entities();                                  // sorted, unique; what a touched set wants
+dirty.coarsen_to(vdoc::change_granularity::entity); // O(n); ASSERTS on a request to refine
+dirty.union_with(other);                           // takes the coarser granularity; `everything` absorbs
+```
+
+**`covers` over-reports at worst and never under-reports.**
+That is what makes granularity a speed dial: every consumer is correct at every granularity, and only the recomputation varies.
+Below the granularity an entry's fields are default ids that **must not be read** — an id has no invalid state, so the granularity and never the data says how much of a path means anything.
 
 **The fast path needs a single-parent chain from `to` back to `from`, within `max_chain_ops` (64).**
 A merge, a longer chain, or a `to` that does not descend from `from` re-materializes and re-parses — correct, and slow.
@@ -239,6 +268,45 @@ doc = vdoc::apply(cc::move(doc), graph, previous, head, policy, report, changes,
 **Chain a drag's frames, do not fan them.**
 Sibling frames force a full re-parse each; single-parent frames stay on the fast path, and `drop_leaf` discards them on release.
 See [workloads](docs/concepts/workloads.md#at-the-typed-layer-chain-the-frames-instead-of-fanning-them).
+
+### Layering
+
+```cpp
+#include <versioned-document/layer_stack.hh>
+
+auto base = vdoc::direct_layer("base");            // no op graph; owns its bytes
+base.set(path, vdoc::value::of(1.0));              // DIFFED: identical bytes bump nothing
+base.begin_rebuild(); /* rewrite everything */ base.finish_rebuild();  // unwritten paths are dropped
+base.abstain(path);  base.mark_dirty(path);  base.clear();
+
+vdoc::layer_stack stack;
+auto const b = stack.push_direct_layer("base", base);        // bottom-first
+auto const u = stack.push_graph_layer("user", graph, head, &cache);
+stack.set_head(u, new_head);                       // the ONLY way a graph layer moves
+stack.set_muted(u, true);                          // forces a full recompose
+
+stack.rebuild(policy, report, changes);            // always correct, O(document)
+stack.apply(policy, report, changes, {}, &stats);  // O(dirty entities x layers)
+stack.composed();                                  // an ORDINARY vdoc::document
+stack.provenance_of(path);                         // -> layer_handle; a UI query, not a loop
+```
+
+**A higher layer replaces a lower one per property path**, and its whole writer list replaces the lower's.
+So overriding `transform/position` leaves `transform/rotation` coming from below — component granularity would freeze it.
+Conflicts stay layer-local: a contested path inside the winning layer reaches the policy exactly as it would unlayered.
+
+- **The stack pulls every delta.** It owns each graph layer's head and each direct layer bumps its own version, so a forgotten change set is not expressible.
+- **`apply` is O(dirty entities × layers)** — measured flat at 0.01–0.03 ms from 500 to 8,000 entities.
+  **A wholesale `begin_rebuild` is O(n) at ~100 ns per property**: 0.3 ms at 500 entities, 1.3 ms at 2,000, 6 ms at 8,000.
+  Comfortable to a couple of thousand; past that write only what moved.
+- **Nothing downstream of `composed()` knows about layering** — dense columns, `each<A,B>`, immutability, all unchanged.
+- **`$alive` composes per path and that is intended**: a higher layer revives or kills what the base did.
+  Withdraw a deletion by *abstaining* `$alive`, not by writing `true`.
+- **`$schema_version` composes per path and that is a hazard.**
+  Every layer supplying a real property *and* stamping must agree with the winning stamp, or the component is dropped with `layered_schema_version_conflict`.
+  A layer that does not stamp has no opinion — which is what an override layer should be.
+- **Never install a composed document into a `snapshot_cache`.** It is several histories at once, and a direct layer's writer ids name no op.
+- Layering is **runtime composition, not persistence** — each layer saves as an ordinary single-graph `.vdoc`.
 
 ```cpp
 doc.get<my_transform>(entity);                       // pointer, null if absent; binary search
@@ -344,6 +412,10 @@ Concurrent writers where neither dominates leave several, and **that includes wr
   Never hash persistent data by a raw interned id.
 - **Verification never re-serializes.** It re-hashes the bytes as stored, so no formatting change can look like tampering.
   The op holds those bytes and decodes on demand, so there is no encoder near a loaded op to change.
+- **An abstention never reaches the raw document.** It supersedes inside the sweep and is then dropped, so a withdrawn path is absent rather than special.
+  The consequence: a **concurrent write beats a concurrent abstention, undiagnosably** — the non-vanishing side wins, as with `$alive`.
+  It cannot arise on a linear history, which is where withdrawals are used.
+- **Every assignment record carries a kind byte**, so adding abstain moved every op id — free while nothing has written a `.vdoc` outside the tests.
 - **A pruned parent is a skeleton op** — id and parents, no payload — and is unverifiable by construction, never a mismatch.
 - **Op ids do not commit to asset content**, so a document is reproducible only relative to an asset resolution.
   See [decisions.md](docs/decisions.md#the-asset-mapping-is-mutable-and-remapping-is-retroactive).

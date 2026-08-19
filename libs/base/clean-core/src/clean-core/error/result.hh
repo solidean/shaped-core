@@ -122,6 +122,11 @@ public:
                                      context_site);
     }
 
+    /// The wrapped error, moved out, and the site it was made at.
+    /// For a sink other than cc::result that has to build its own error type — the async failure channel does exactly that from a coroutine's `co_return cc::error(...)`.
+    [[nodiscard]] constexpr E&& take_error() && { return cc::move(_e); }
+    [[nodiscard]] constexpr cc::source_location site() const { return _site; }
+
 private:
     E _e;
     cc::source_location _site;

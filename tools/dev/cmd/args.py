@@ -1,11 +1,14 @@
 """Shared argparse fragments reused across command subparsers.
 
 A command owns its own subparser; these keep the flags several of them share — preset selection, the build-dir overrides, the emsdk path, the profiling flags — defined once.
+`change_scope` and `scope_from_args` are a pair: the flags, and the ChangeScope they mean.
 """
 
 from __future__ import annotations
 
 import argparse
+
+from tools import dev
 
 
 def preset(p: argparse.ArgumentParser) -> None:
@@ -66,3 +69,34 @@ def emsdk(p: argparse.ArgumentParser) -> None:
              "environment itself, so no permanent/--system activation is needed. Falls back to "
              "SC_EMSDK_PATH / EMSDK / emcc-on-PATH.",
     )
+
+
+def change_scope(p: argparse.ArgumentParser, *, default_all: bool) -> None:
+    """The `--dirty-only` / `--commit` pair that narrows a lint or format run to one change set.
+
+    `default_all` says what no flag at all means: True for a command that sweeps the whole tree by default (`format`, `lint`),
+    False for one that is already dirty-only by default (`check`, which spells the whole tree `--all` instead).
+    Both flags replace the default scope, so they go in a mutually exclusive group.
+    """
+    group = p.add_mutually_exclusive_group()
+    if default_all:
+        group.add_argument("--dirty-only", action="store_true",
+                           help="Only the next commit's files — git-dirty and untracked")
+    else:
+        group.add_argument("--all", action="store_true",
+                           help="Widen from dirty-only to the whole tree")
+    group.add_argument("--commit", metavar="REV", default=None,
+                       help="Use a commit or `A..B` range instead of the working tree; "
+                            "a single commit means its first-parent diff, so a merge yields everything it brought in")
+
+
+def scope_from_args(args: argparse.Namespace) -> dev.ChangeScope | None:
+    """The ChangeScope a `change_scope` flag pair asked for, where None means the whole tree.
+
+    Does not validate the revision — the caller decides where a bad one should surface.
+    """
+    if args.commit is not None:
+        return dev.ChangeScope(args.commit)
+    if hasattr(args, "dirty_only"):
+        return dev.ChangeScope() if args.dirty_only else None
+    return None if args.all else dev.ChangeScope()

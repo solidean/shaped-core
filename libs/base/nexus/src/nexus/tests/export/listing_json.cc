@@ -16,6 +16,8 @@ cc::string_view bucket_name(nx::config::test_bucket bucket)
         return "manual";
     case nx::config::test_bucket::guide_benchmark:
         return "guide_benchmark";
+    case nx::config::test_bucket::example:
+        return "example";
     }
     return "unknown";
 }

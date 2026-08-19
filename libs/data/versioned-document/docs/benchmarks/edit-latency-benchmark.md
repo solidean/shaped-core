@@ -119,11 +119,49 @@ The same machine as the [document loop benchmark](../../../versioned-document-fi
 Read trends, not third decimals.
 At these magnitudes a p95 of 7 µs and one of 26 µs are the same answer.
 
+## Layering, per frame
+
+The second harness in the same file measures the shape [layering](../concepts/layering.md) exists for.
+A computed base is rewritten wholesale every frame, user overrides sit on top, and forced values above those.
+
+| stage | what it is |
+|---|---|
+| `produce` | the base layer's `begin_rebuild` … `finish_rebuild`, rewriting every entity |
+| `apply` | `layer_stack::apply` — recomposing and re-interpreting what actually moved |
+| `rebuild` | `layer_stack::rebuild` on a throwaway stack, for the comparison |
+
+Four of the entities move each frame; the rest are rewritten with identical bytes, which is the case the diff exists for.
+
+| entities | produce p95 | apply p95 | frame p95 | rebuild p95 |
+|---|---|---|---|---|
+| 500 | 0.34 ms | 0.014 ms | 0.35 ms | 0.51 ms |
+| 2,000 | 1.31 ms | 0.011 ms | 1.32 ms | 1.65 ms |
+| 8,000 | 6.03 ms | 0.029 ms | 6.06 ms | 7.70 ms |
+
+**`apply` is flat and `rebuild` is not**, which is the property under test.
+Composing and re-interpreting costs O(dirty entities × layers), so it does not care how large the document is — 0.03 ms at 8,000 entities against a 7.7 ms recompose, a factor of 250.
+If those two ever converge, the composition has started walking the whole document, and no other test would notice.
+
+**`produce` is the frame's real cost, and it is the producer's rather than the stack's.**
+Each write walks three nested sorted vectors with an interned-string comparison at every step, at roughly 100 ns.
+That is comfortable to a couple of thousand entities and no further.
+Past that a producer should write only what moved rather than rebuilding wholesale — `mark_dirty` skips even the byte compares for one that already knows.
+
+Two findings from writing this harness are worth keeping, because both were invisible until measured:
+
+- **The mark-and-sweep in `finish_rebuild` was the whole frame.** Sorting one entry per written property and searching for each cost 3× everything else at 8,000 entities.
+  A steady-state frame inserts nothing and writes exactly as many paths as the layer holds, so the sweep is skipped entirely on that condition.
+- **Interning and formatting dominated the first version of the harness**, not the layer.
+  `entity_id::of(cc::format(...))` per entity per frame attributed the intern table to the thing under test.
+  The paths and stable values are now hoisted out of the loop, as a real producer would hold them.
+
 ## Reproducing
 
 ```bash
 uv run dev.py test "bench-vdoc-edit-latency (one op at a time)" --preset release-clang --timeout 0
 uv run dev.py test "bench-vdoc-edit-latency (full sweep)" --preset release-clang --timeout 0 --manual
+uv run dev.py test "bench-vdoc-layered-frame (three layers, per frame)" --preset release-clang --timeout 0
+uv run dev.py test "bench-vdoc-layered-frame (full sweep)" --preset release-clang --timeout 0 --manual
 ```
 
 The first records the representative point (2,000 entities) as guide metrics; the second prints the table above.

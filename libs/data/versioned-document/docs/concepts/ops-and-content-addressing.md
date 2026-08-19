@@ -48,6 +48,23 @@ u64 length | assignments bytes
 The assignment payload opens with a **one-byte encoding tag**, so the assignment encoding can evolve without changing the hashing rule.
 An unknown tag is a decode error naming the tag, not a corruption report.
 
+## An assignment either writes or abstains
+
+Each assignment record opens with an **`assignment_kind` byte** saying what it does to its path:
+
+| kind | meaning |
+|---|---|
+| `set` | writes a value, which follows in the record |
+| `abstain` | withdraws this history's contribution to the path, and carries no value at all |
+
+An abstention supersedes its ancestors' writes exactly as a write does, and then contributes nothing — so the path ends up **absent** rather than holding some other value.
+It is the only way to un-write a property: `$alive` removes a whole component or entity, and nothing else removes a single one.
+
+**It is transparent, never masking.**
+It withdraws this history's opinion, and cannot hide someone else's.
+
+An abstention encodes no value rather than a `null`, because two spellings of one thing is exactly the canonicality problem the whole format is built to avoid.
+
 The builder's canonical order is: parents sorted and deduplicated, assignments sorted by `(entity, component, property)`, and no path assigned twice within one op.
 Identical content therefore produces an identical `op_id`, whatever order the caller supplied.
 

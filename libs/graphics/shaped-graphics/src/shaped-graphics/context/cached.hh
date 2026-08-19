@@ -5,7 +5,7 @@
 
 /// Cache facade for a context's built-in pipeline_cache, reached as `ctx.cached`.
 /// `acquire` is the get-or-create verb: identical arguments return the already-built handle / async node instead of rebuilding.
-/// Layouts are cached synchronously; compute and raytracing pipelines build asynchronously.
+/// Layouts are cached synchronously; compute, raster and raytracing pipelines build asynchronously.
 ///
 /// Use cache() to install extra tiers (e.g. a disk-backed provider) or run bookkeeping.
 /// A context installs default in-memory tiers at construction, so dedup works without any setup.
@@ -25,12 +25,19 @@ public:
     [[nodiscard]] pipeline_layout_handle acquire_pipeline_layout(pipeline_layout_description const& desc);
 
     /// The async compute_pipeline for `desc`, built on a miss.
-    /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     /// Acquire the pipeline layout through this scope too for full dedup (see pipeline_cache).
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(compute_pipeline_description const& desc);
 
+    /// The async raster_pipeline for `desc`, built on a miss.
+    /// The key covers the shaders, the vertex-input layout and every fixed-function state.
+    /// NOT `desc.cached_pipeline` though — that blob is a best-effort build accelerator, not part of the pipeline's identity.
+    /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    /// Acquire the pipeline layout through this scope too for full dedup (see pipeline_cache).
+    [[nodiscard]] async_raster_pipeline acquire_raster_pipeline(raster_pipeline_description const& desc);
+
     /// The async raytracing_pipeline for `desc`, built on a miss.
-    /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     /// Acquire the pipeline layout through this scope too for full dedup (see pipeline_cache).
     [[nodiscard]] async_raytracing_pipeline acquire_raytracing_pipeline(raytracing_pipeline_description const& desc);
 

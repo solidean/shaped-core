@@ -15,7 +15,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
-  - **PSO caching** — `ctx.cached.acquire_raster_pipeline` plus `pipeline_cache` description hashing and `async_raster_pipeline`, the compute/RT parity piece;
   - **indirect draws** — `draw_indirect` and count buffers;
   - **dynamic primitive topology** and **dynamic depth bias**, both baked into the PSO for now;
   - **mesh / task** stages;

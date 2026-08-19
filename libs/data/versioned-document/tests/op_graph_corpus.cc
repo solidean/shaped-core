@@ -71,7 +71,8 @@ op_id vdoc_test::add_op(op_graph& graph, cc::span<op_id const> parents, cc::span
 
     auto entries = cc::vector<assignment>();
     for (isize i = 0; i < writes.size(); ++i)
-        entries.push_back(assignment{.path = writes[i].path, .value = owned[i]});
+        entries.push_back(writes[i].abstain ? assignment{.path = writes[i].path, .kind = vdoc::assignment_kind::abstain}
+                                            : assignment{.path = writes[i].path, .value = owned[i]});
 
     cc::sort(entries, [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
 
@@ -162,13 +163,19 @@ cc::vector<op_id> vdoc_test::oracle_writers(op_graph const& graph, cc::span<op_i
 {
     auto const reachable = graph.collect_reachable(heads);
 
-    auto writers = cc::vector<op_id>();
+    struct oracle_writer
+    {
+        op_id id;
+        bool abstains = false;
+    };
+
+    auto writers = cc::vector<oracle_writer>();
     for (auto const& id : reachable)
     {
         auto const* const o = graph.find(id);
         for (auto const a : o->assignments())
             if (a.path == path)
-                writers.push_back(id);
+                writers.push_back({.id = id, .abstains = a.is_abstain()});
     }
 
     auto const descends_from = [&](op_id const& from, op_id const& ancestor)
@@ -208,10 +215,17 @@ cc::vector<op_id> vdoc_test::oracle_writers(op_graph const& graph, cc::span<op_i
     {
         auto dominated = false;
         for (auto const& other : writers)
-            dominated = dominated || (!(other == w) && descends_from(other, w));
+            dominated = dominated || (!(other.id == w.id) && descends_from(other.id, w.id));
 
-        if (!dominated)
-            out.push_back(w);
+        if (dominated)
+            continue;
+
+        // Maximal, and then dropped if it withdrew: an abstention decides who else survives and contributes nothing
+        // of its own, so the path ends up absent when every maximal writer abstained.
+        if (w.abstains)
+            continue;
+
+        out.push_back(w.id);
     }
 
     cc::sort(out, op_id::by_bytes{});
@@ -336,14 +350,88 @@ void finish_case(vdoc_test::corpus_case& c)
     return c;
 }
 
+/// A linear run that writes a path, withdraws it, and writes it again — the shape a reset-to-default produces.
+[[nodiscard]] vdoc_test::corpus_case make_abstain_chain()
+{
+    auto c = vdoc_test::corpus_case{.name = "abstain-chain"};
+    c.paths.push_back(vdoc_test::path_of("e", "T", "p"));
+    c.paths.push_back(vdoc_test::path_of("e", "T", "q"));
+
+    auto prev = cc::vector<op_id>();
+    auto const step = [&](cc::span<vdoc_test::property_write const> writes)
+    {
+        auto const id = vdoc_test::add_op(c.graph, prev, writes);
+        c.ops.push_back(id);
+        prev = cc::vector<op_id>{id};
+    };
+
+    vdoc_test::property_write const w0[] = {{.path = c.paths[0], .value = 1}, {.path = c.paths[1], .value = 2}};
+    step(w0);
+
+    // withdraw one, leaving the sibling — so the component survives with fewer properties
+    vdoc_test::property_write const w1[] = {{.path = c.paths[0], .value = 0, .abstain = true}};
+    step(w1);
+
+    // write it again, which must resurrect it exactly as an ordinary write would
+    vdoc_test::property_write const w2[] = {{.path = c.paths[0], .value = 3}};
+    step(w2);
+
+    // and withdraw both, which empties the component and the entity
+    vdoc_test::property_write const w3[]
+        = {{.path = c.paths[0], .value = 0, .abstain = true}, {.path = c.paths[1], .value = 0, .abstain = true}};
+    step(w3);
+
+    finish_case(c);
+    return c;
+}
+
+/// A merge where one branch writes a path and the other withdraws it — the concurrency case abstain has to decide.
+[[nodiscard]] vdoc_test::corpus_case make_abstain_diamond()
+{
+    auto c = vdoc_test::corpus_case{.name = "abstain-diamond"};
+    c.paths.push_back(vdoc_test::path_of("e", "T", "p"));
+    c.paths.push_back(vdoc_test::path_of("e", "T", "q"));
+
+    vdoc_test::property_write const w0[] = {{.path = c.paths[0], .value = 0}};
+    auto const root = vdoc_test::add_op(c.graph, {}, w0);
+    c.ops.push_back(root);
+
+    op_id const from_root[] = {root};
+    vdoc_test::property_write const w1[] = {{.path = c.paths[0], .value = 1}};
+    vdoc_test::property_write const w2[] = {{.path = c.paths[0], .value = 0, .abstain = true}};
+    auto const writes = vdoc_test::add_op(c.graph, from_root, w1);
+    auto const withdraws = vdoc_test::add_op(c.graph, from_root, w2);
+    c.ops.push_back(writes);
+    c.ops.push_back(withdraws);
+
+    // both tips are maximal, so the head set {writes, withdraws} is where the two rules meet
+    op_id const both[] = {writes, withdraws};
+    c.ops.push_back(vdoc_test::add_op(c.graph, both, {}));
+
+    // A second concurrent withdrawal of the same path, so `p` is withdrawn twice over and must end up absent rather
+    // than multi-valued.
+    // It has to carry a sibling write to exist at all: an abstention encodes no value, so two withdrawals of one path
+    // from one parent are byte-identical and content addressing collapses them into one op.
+    vdoc_test::property_write const w3[]
+        = {{.path = c.paths[0], .value = 0, .abstain = true}, {.path = c.paths[1], .value = 5}};
+    c.ops.push_back(vdoc_test::add_op(c.graph, from_root, w3));
+
+    finish_case(c);
+    return c;
+}
+
 /// A generated DAG: mostly linear, with branches and merges at the requested rate.
 ///
 /// This is the shape real editing produces — long linear runs with occasional local splits — so it is what the
 /// snapshot cache is actually tuned against.
-[[nodiscard]] vdoc_test::corpus_case make_generated(u32 seed, isize op_count, isize path_count, u32 merge_percent)
+[[nodiscard]] vdoc_test::corpus_case make_generated(u32 seed,
+                                                    isize op_count,
+                                                    isize path_count,
+                                                    u32 merge_percent,
+                                                    u32 abstain_percent)
 {
-    auto c = vdoc_test::corpus_case{
-        .name = cc::format("generated-s{}-n{}-p{}-m{}", seed, op_count, path_count, merge_percent)};
+    auto c = vdoc_test::corpus_case{.name = cc::format("generated-s{}-n{}-p{}-m{}-a{}", seed, op_count, path_count,
+                                                       merge_percent, abstain_percent)};
     for (isize i = 0; i < path_count; ++i)
         c.paths.push_back(vdoc_test::path_of("e", "T", cc::format("p{}", i)));
 
@@ -370,7 +458,9 @@ void finish_case(vdoc_test::corpus_case& c)
         auto writes = cc::vector<vdoc_test::property_write>();
         auto const write_count = rng.next_below(u32(path_count) + 1);
         for (u32 w = 0; w < write_count; ++w)
-            writes.push_back({.path = c.paths[rng.next_below(u32(path_count))], .value = i});
+            writes.push_back({.path = c.paths[rng.next_below(u32(path_count))],
+                              .value = i,
+                              .abstain = rng.next_below(100) < abstain_percent});
 
         // duplicate paths in one op are not encodable, so keep the first of each
         auto unique = cc::vector<vdoc_test::property_write>();
@@ -401,12 +491,17 @@ cc::vector<vdoc_test::corpus_case> vdoc_test::generate_corpus()
     out.push_back(make_diamond(true));
     out.push_back(make_criss_cross());
     out.push_back(make_multi_valued());
+    out.push_back(make_abstain_chain());
+    out.push_back(make_abstain_diamond());
 
     // Small enough that the O(n^2) install-at-every-pair sweep stays fast, varied enough to hit every merge shape.
+    //
+    // Abstentions ride on the seed's parity rather than on a fourth loop, so half the generated cases carry them and
+    // the corpus does not double in size — this sweep is quadratic per case, and every suite iterates it.
     for (u32 seed = 0; seed < 6; ++seed)
         for (auto const path_count : {isize(1), isize(3)})
             for (auto const merge_percent : {u32(0), u32(20), u32(50)})
-                out.push_back(make_generated(seed, 14, path_count, merge_percent));
+                out.push_back(make_generated(seed, 14, path_count, merge_percent, seed % 2 == 0 ? 0u : 25u));
 
     return out;
 }

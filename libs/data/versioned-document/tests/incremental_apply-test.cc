@@ -255,7 +255,7 @@ TEST("vdoc - a fast apply and a full re-parse agree, over the whole corpus")
     CHECK(ever_slow);
 }
 
-TEST("vdoc - the fast path fires on a chain and falls back on a merge")
+TEST("vdoc - the fast path fires on a chain and falls back on a merge, naming why")
 {
     auto const registry = test_registry();
     auto graph = op_graph();
@@ -281,6 +281,7 @@ TEST("vdoc - the fast path fires on a chain and falls back on a merge")
         auto const doc
             = vdoc::apply(parse_at(graph, root, policy, report), graph, root, a, policy, report, changes, {}, &stats);
         CHECK(stats.took_fast_path);
+        CHECK(stats.fallback_reason == vdoc::apply_fallback_reason::none);
         CHECK(stats.chain_ops == 1);
         CHECK(doc.contains(entity_id::of("e1")));
     }
@@ -291,16 +292,41 @@ TEST("vdoc - the fast path fires on a chain and falls back on a merge")
         auto const doc
             = vdoc::apply(parse_at(graph, a, policy, report), graph, a, merge, policy, report, changes, {}, &stats);
         CHECK(!stats.took_fast_path);
+        CHECK(stats.fallback_reason == vdoc::apply_fallback_reason::no_single_parent_chain);
         CHECK(doc.contains(entity_id::of("e3")));
     }
 
-    // and a chain longer than the bound falls back too
+    // and a chain longer than the bound falls back too — reported apart from a merge, because raising the bound is the
+    // fix for exactly one of the two
     {
         auto changes = change_summary();
         auto stats = vdoc::incremental_apply_stats();
         auto const doc = vdoc::apply(parse_at(graph, root, policy, report), graph, root, a, policy, report, changes,
                                      {.max_chain_ops = 0}, &stats);
         CHECK(!stats.took_fast_path);
+        CHECK(stats.fallback_reason == vdoc::apply_fallback_reason::chain_too_long);
+        CHECK(doc.contains(entity_id::of("e1")));
+    }
+
+    // a forced slow path says so, rather than blaming the history it never looked at
+    {
+        auto changes = change_summary();
+        auto stats = vdoc::incremental_apply_stats();
+        auto const doc = vdoc::apply(parse_at(graph, root, policy, report), graph, root, a, policy, report, changes,
+                                     {.force_full_reparse = true}, &stats);
+        CHECK(!stats.took_fast_path);
+        CHECK(stats.fallback_reason == vdoc::apply_fallback_reason::forced);
+        CHECK(doc.contains(entity_id::of("e1")));
+    }
+
+    // and a `from` the graph does not have is not a chain at all
+    {
+        auto changes = change_summary();
+        auto stats = vdoc::incremental_apply_stats();
+        auto const doc
+            = vdoc::apply(parse_at(graph, a, policy, report), graph, b, a, policy, report, changes, {}, &stats);
+        CHECK(!stats.took_fast_path);
+        CHECK(stats.fallback_reason == vdoc::apply_fallback_reason::no_single_parent_chain);
         CHECK(doc.contains(entity_id::of("e1")));
     }
 }

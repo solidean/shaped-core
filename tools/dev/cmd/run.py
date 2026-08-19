@@ -2,6 +2,7 @@
 
 The counterpart to `test` for everything that is not a test: a tool, a benchmark, a sample.
 `*-test` targets are refused rather than bypassing `dev.py test`, which discovers, filters and records results.
+`*-example` targets likewise belong to `dev.py example`, which resolves an example name across every example binary.
 docs/guides/building-and-testing.md says why hand-writing an artifact path is the thing this replaces.
 """
 
@@ -84,7 +85,7 @@ def _resolve_one(ctx: Context, targets: list[dev.Target], spec: str) -> str:
     matches = exact or [t for t in runnable if fnmatch.fnmatch(t.name, spec)]
 
     if not matches:
-        available = sorted(t.name for t in runnable if not ctx.is_test_target(t))
+        available = sorted(t.name for t in runnable if not ctx.is_test_target(t) and not ctx.is_example_target(t))
         ctx.die(f"no executable target matches {spec!r}. Runnable: {', '.join(available)}")
     if len(matches) > 1:
         ctx.die(f"{spec!r} matches several targets: {', '.join(sorted(t.name for t in matches))}")
@@ -93,4 +94,7 @@ def _resolve_one(ctx: Context, targets: list[dev.Target], spec: str) -> str:
     if ctx.is_test_target(target):
         ctx.die(f"{target.name!r} is a test binary — run it with `dev.py test`, which discovers, "
                 f"filters and records results. `run` is for non-test executables.")
+    if ctx.is_example_target(target):
+        ctx.die(f"{target.name!r} is an example binary — run one of its examples with `dev.py example <name>`, "
+                f"which resolves the name across every example binary. `run` is for plain executables.")
     return target.name

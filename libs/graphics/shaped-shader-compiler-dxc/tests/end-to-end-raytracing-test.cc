@@ -1,5 +1,6 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -132,11 +133,11 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
             has_accel = true;
     CHECK(has_accel);
 
-    auto group_layout = ctx.uncached.create_binding_group_layout(raygen.bindings);
+    auto group_layout = ctx.cached.acquire_binding_group_layout(raygen.bindings);
     REQUIRE(group_layout != nullptr);
     sg::pipeline_layout_description pld;
     pld.groups = {group_layout};
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout(pld);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
 
     // Build the pipeline: register each shader, keeping the returned handles for the shader table.
@@ -149,7 +150,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
     hs.closest_hit = cc::move(closest_hit);
     auto const hit_h = rpd.add_hit_shader(cc::move(hs));
 
-    auto pipeline = ctx.uncached.create_raytracing_pipeline(rpd);
+    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
     REQUIRE(pipeline != nullptr);
 
     // Build the shader table: one record per section, in the order TraceRay addresses them.

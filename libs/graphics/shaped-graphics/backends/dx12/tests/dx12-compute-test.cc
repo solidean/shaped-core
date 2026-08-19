@@ -1,5 +1,6 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -53,13 +54,12 @@ INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::d
                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(buf != nullptr);
 
-    auto group_layout = ctx->uncached.create_binding_group_layout(shader.bindings);
+    auto group_layout = ctx->cached.acquire_binding_group_layout(shader.bindings);
     REQUIRE(group_layout != nullptr);
-    auto pipeline_layout
-        = ctx->uncached.create_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    auto pipeline_layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = ctx->uncached.create_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
+    auto pipeline = cc::async_blocking_get(ctx->cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
     REQUIRE(pipeline != nullptr);
 
     // Bind the output buffer's read-write structured view to "Output".
@@ -106,13 +106,12 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
     sg::compiled_shader const shader = make_double_shader();
 
     // Layouts + pipeline are cached schemas — always persistent, built once.
-    auto group_layout = ctx->uncached.create_binding_group_layout(shader.bindings);
+    auto group_layout = ctx->cached.acquire_binding_group_layout(shader.bindings);
     REQUIRE(group_layout != nullptr);
-    auto pipeline_layout
-        = ctx->uncached.create_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    auto pipeline_layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = ctx->uncached.create_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
+    auto pipeline = cc::async_blocking_get(ctx->cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
     REQUIRE(pipeline != nullptr);
 
     for (int e = 0; e < 40; ++e)
@@ -161,7 +160,7 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
     auto ctx = ctx_r.value();
 
     sg::compiled_shader const shader = make_double_shader();
-    auto group_layout = ctx->uncached.create_binding_group_layout(shader.bindings);
+    auto group_layout = ctx->cached.acquire_binding_group_layout(shader.bindings);
     REQUIRE(group_layout != nullptr);
 
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);

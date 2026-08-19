@@ -5,11 +5,15 @@ project(versioned-document LANGUAGES CXX)
 # Knows nothing about what a component means — the component set belongs entirely to the application.
 # See readme.md and docs/_index.md.
 add_library(versioned-document
+    src/versioned-document/change_set.cc
     src/versioned-document/component.cc
     src/versioned-document/document.cc
+    src/versioned-document/direct_layer.cc
     src/versioned-document/document_builder.cc
     src/versioned-document/fwd.cc
+    src/versioned-document/impl/compose.cc
     src/versioned-document/incremental_parse.cc
+    src/versioned-document/layer_stack.cc
     src/versioned-document/op.cc
     src/versioned-document/op_builder.cc
     src/versioned-document/op_graph.cc
@@ -33,13 +37,16 @@ target_sources(versioned-document
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
+    src/versioned-document/change_set.hh
     src/versioned-document/change_summary.hh
     src/versioned-document/component.hh
+    src/versioned-document/direct_layer.hh
     src/versioned-document/document.hh
     src/versioned-document/document_builder.hh
     src/versioned-document/fwd.hh
     src/versioned-document/ids.hh
     src/versioned-document/incremental_parse.hh
+    src/versioned-document/layer_stack.hh
     src/versioned-document/op.hh
     src/versioned-document/op_builder.hh
     src/versioned-document/op_graph.hh
@@ -84,11 +91,14 @@ if(SC_BUILD_TESTS)
 
         tests/benchmarks/edit-latency-benchmark.cc
 
+        tests/change_set-test.cc
         tests/component-test.cc
         tests/document-test.cc
         tests/document_builder-test.cc
         tests/ids-test.cc
+        tests/direct_layer-test.cc
         tests/incremental_apply-test.cc
+        tests/layering-test.cc
         tests/op-test.cc
         tests/op-fuzz-test.cc
         tests/op_builder-test.cc

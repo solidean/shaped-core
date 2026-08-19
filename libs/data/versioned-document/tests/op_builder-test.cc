@@ -67,6 +67,104 @@ TEST("vdoc - re-setting an unchanged property produces an op with no assignments
     CHECK(changed.assignments().get().value.as_i64() == 99);
 }
 
+TEST("vdoc - abstaining is the mirror of a write in every case of the diff")
+{
+    auto graph = op_graph();
+
+    auto const p = path_of("e1", "T", "x");
+    auto const q = path_of("e1", "T", "y");
+
+    auto const first = graph.add(op_builder().set_raw(p, value::of(1)).build(graph));
+    op_id const head[] = {first};
+
+    // absent: a write emits, a withdrawal has nothing to withdraw
+    {
+        auto const o = op_builder().set_parents(head).abstain(q).build(graph);
+        CHECK(assignment_count(o) == 0);
+    }
+
+    // one writer: a withdrawal emits whatever the bytes say, which is where it is the mirror of a write
+    {
+        auto const o = op_builder().set_parents(head).abstain(p).build(graph);
+        REQUIRE(assignment_count(o) == 1);
+        CHECK(o.assignments().get().path == p);
+        CHECK(o.assignments().get().is_abstain());
+    }
+
+    // and withdrawing what nobody wrote gives byte-identical ops, so re-staging it every frame costs nothing
+    {
+        auto const a = op_builder().set_parents(head).abstain(q).build(graph);
+        auto const b = op_builder().set_parents(head).abstain(q).set_raw(p, value::of(1)).build(graph);
+        CHECK(a.id == b.id);
+    }
+}
+
+TEST("vdoc - abstaining removes the path from the materialized document")
+{
+    auto graph = op_graph();
+
+    auto const p = path_of("e1", "T", "x");
+    auto const q = path_of("e1", "T", "y");
+
+    auto const first = graph.add(op_builder().set_raw(p, value::of(1)).set_raw(q, value::of(2)).build(graph));
+    op_id const head[] = {first};
+
+    auto const second = graph.add(op_builder().set_parents(head).abstain(p).build(graph));
+
+    auto const raw = graph.materialize(second);
+
+    // absent, and indistinguishable from never written — which is exactly what a withdrawal means
+    CHECK(raw.try_get(p) == nullptr);
+
+    auto const* const kept = raw.try_get(q);
+    REQUIRE(kept != nullptr);
+    CHECK(kept->single().as_i64() == 2);
+
+    // the entity survives because a sibling property does
+    CHECK(raw.try_get(entity_id::of("e1")) != nullptr);
+}
+
+TEST("vdoc - abstaining every property of an entity removes the entity too")
+{
+    auto graph = op_graph();
+
+    auto const p = path_of("e1", "T", "x");
+    auto const first = graph.add(op_builder().set_raw(p, value::of(1)).build(graph));
+    op_id const head[] = {first};
+
+    auto const second = graph.add(op_builder().set_parents(head).abstain(p).build(graph));
+    auto const raw = graph.materialize(second);
+
+    // an empty component or entity entry is a shape a materialization never produces, so the whole chain is pruned
+    CHECK(raw.try_get(entity_id::of("e1")) == nullptr);
+    CHECK(raw.property_count() == 0);
+}
+
+TEST("vdoc - a concurrent write beats a concurrent abstain, and the value survives")
+{
+    // Storage resolves this rather than reporting it, and the direction follows the $alive rule: the non-vanishing side
+    // wins, because losing a value is not recoverable and a re-attempted withdrawal is.
+    // See ../docs/decisions.md.
+    auto graph = op_graph();
+    auto const p = path_of("e1", "T", "x");
+
+    auto const root = graph.add(op_builder().set_raw(p, value::of(1)).build(graph));
+    op_id const from_root[] = {root};
+
+    auto const writer = graph.add(op_builder().set_parents(from_root).set_raw(p, value::of(2)).build(graph));
+    auto const withdrawer = graph.add(op_builder().set_parents(from_root).abstain(p).build(graph));
+
+    op_id const both[] = {writer, withdrawer};
+    auto const raw = graph.materialize(both);
+
+    auto const* const survivor = raw.try_get(p);
+    REQUIRE(survivor != nullptr);
+
+    // one surviving writer, not a multi-value: the abstention superseded the root and then contributed nothing
+    CHECK(!survivor->is_multi_valued());
+    CHECK(survivor->single().as_i64() == 2);
+}
+
 TEST("vdoc - a multi-valued property always differs, even when the writers agree")
 {
     auto graph = op_graph();

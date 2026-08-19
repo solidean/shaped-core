@@ -116,6 +116,9 @@ Removing data would break immutability, synchronization and history — the thre
 
 Contested `$alive` keeps the thing alive, because resurrecting is recoverable and vanishing is not.
 
+An **abstention** does not weaken this: it removes a *write*, never a *thing*.
+The op that abstained is still in the history, still hashed, and still says what it did — what stops being there is one property's value, which is the same kind of statement as overwriting it.
+
 **Reopen when:** nothing.
 
 ### Ops and blobs stay in separate tables
@@ -635,6 +638,165 @@ So spending complexity on relaying ops nobody can decode buys a compatibility ax
 **Reopen when:** a tag 2 is actually proposed.
 At that point the question is whether tag-1-only builds must relay tag-2 ops, and the byte-first op has kept that door open.
 
+### An abstention is an assignment kind, carried by a per-record byte in `sorted_v1`
+
+**Decided in milestone 8.**
+
+An op could only ever *write*.
+Deletion via `$alive` removes a whole component or entity, so there was no way to un-write one property — and reverting an override to whatever is underneath is exactly that.
+`assignment_kind::abstain` is it: an assignment that supersedes its ancestors as a write does, and then contributes nothing.
+
+**It is a property of the assignment, not of the value**, which is what decided where it goes.
+A `value_kind::absent` would have widened a format constant validated by a hard upper-bound tag check in three separate switches.
+And `value.hh` is consumed by `versioned-document-file` for assets and the workspace, so every value consumer in two libraries could then receive a value that is not a value.
+A third blob in `op_payload` was worse still: it changes the hash preimage, and `op_payload`'s two-blob shape is what the file layer stores.
+
+So every assignment record now opens with a kind byte, and an abstention carries no value at all.
+Not a `null` — two spellings of one thing is the canonicality problem again.
+
+**It went into `sorted_v1` rather than a new tag 2, and that was deliberate.**
+A second encoding was drafted first: written only when something abstained, so abstain-free ops kept their bytes and their ids and stayed readable by an older build.
+That is the right shape *once something depends on it*, and nothing does: vdoc has no users outside its own tests.
+So all the compatibility apparatus bought was two decode paths, a canonicality rule the decoder had to enforce, and an extra decode error.
+Changing `sorted_v1` costs one round of op ids and nothing else, and it leaves one code path where there would have been two forever.
+
+Every op id therefore moved.
+A golden test over fixed inputs pins the new ones, because an op id *is* the content address.
+If the encoding or the preimage drifts again, every stored op silently stops matching its own id, and no other test would notice.
+
+**Reopen when:** a `.vdoc` exists that someone would be upset to lose.
+From that point a format change needs the tag, and the drafted two-encoding scheme above is how to do it.
+
+### An abstention never reaches the raw document
+
+**Decided in milestone 8.**
+
+Inside the sweep an abstaining writer is an ordinary survivor carrying a flag; `build_document` drops it, and a path whose every survivor abstained is simply absent.
+So `property_value`, `raw_property` and the snapshot format are all untouched, and `versioned-document-file` needed no change at all.
+
+**The consequence to state plainly: a concurrent write beats a concurrent abstention, and nothing reports it.**
+That is storage resolving a conflict, and it sits against [equal concurrent writes are still structurally multi-valued](#equal-concurrent-writes-are-still-structurally-multi-valued).
+That entry is the rule that storage records what happened and never collapses anything.
+
+It is taken anyway, on two arguments.
+The direction is the one `$alive` already established: the non-vanishing side wins deterministically, because losing a value is not recoverable and a re-attempted withdrawal is.
+And the permanence is asymmetric — op bytes are forever, while `raw_document`'s shape and the snapshot encoding are recomputable and already versioned.
+So this is the half that can be revisited later at no cost to anything stored.
+
+The alternative, designed and deliberately not built: a parallel `cc::vector<op_id> abstaining_writers` beside `raw_property::writers`.
+It keeps "every entry in `writers` is a real value" intact, leaves each per-writer record byte-identical, and makes the conflict diagnosable.
+Its cost is a `snapshot-v2` in `versioned-document-file`, plus the few sites that read writer lists directly.
+That is pre-planned there: the codec is versioned in its own name, and a snapshot that will not decode is a load issue rather than a failure.
+
+Worth noting the motivating case cannot hit it: a per-frame override layer is a linear rebase, so it has no concurrency at all.
+
+**Reopen when:** a UI has to explain why a reset-to-default did not take.
+That is the diagnostic this cannot produce, and the parallel channel above is the answer.
+
+### Layering composes per property path, and a higher layer replaces rather than merges
+
+**Decided in milestone 8.**
+
+A `layer_stack` composes several independent histories into one document, and does it on `raw_document`s rather than on typed ones.
+
+**Property granularity is the requirement, not a refinement.**
+A typed `document` holds component structs in dense columns, so the only thing a higher layer could do to a component is replace it whole.
+Then a base that animates a transform, with an override on `position` alone, would have `rotation` frozen at the edit.
+That is exactly the rebasing the feature exists for, broken.
+So the composition has to happen below the typed layer, and once it does, materializing one ordinary `document` on top costs nothing extra and keeps every downstream guarantee intact.
+
+**Replace, never merge**, per path: the winning layer's entire writer list stands.
+That makes layering the totally ordered conflict-free composition, in contrast to a DAG merge.
+It also means a conflict is always layer-local: a contested path inside the winning layer reaches `parse_policy` exactly as it would unlayered.
+
+The composition unit is the **entity**, because `impl::select_entity` takes one `raw_entity`.
+Composing at that granularity is what lets a layered parse reuse the ordinary selection and construction phases; `impl::parse_from` exists so that reuse is literal rather than a second copy.
+
+Composed entities are held **all at once** rather than one at a time, which is a lifetime requirement.
+Selection records `raw_component const*` into what it was handed and construction reads them afterwards, so a single reused buffer would dangle every entity but the last.
+
+**Reopen when:** arbitrary layer reordering is wanted.
+Nothing here forecloses it — it would mark the stack fully dirty exactly as muting does — but no case has asked for it.
+
+### A layer stack pulls every delta rather than being handed one
+
+**Decided in milestone 8**, and it replaced a design that had been agreed the other way round.
+
+The stack holds each graph layer's head, and `set_head` is the only way to move one.
+A `direct_layer` bumps its own version from inside its mutators.
+So `apply` derives every layer's delta itself.
+
+The alternative, drafted first, was a `layered_change` carrying per-layer op movements.
+`apply` would validate those against the version the composed document was built at, reporting a mismatch rather than asserting it, since `CC_ASSERT` is compiled out in `release-*`.
+
+Pull is better on the same axis that motivated the validation: **a stale or forgotten change set is not expressible**, rather than caught.
+It also deletes the annotation types, the per-layer version comparison, and a fallback reason.
+What it costs is that the stack consumes a direct layer's accumulated dirty set, so such a layer belongs to exactly one stack — recorded in its header.
+
+The one thing push offered that pull would have lost is a producer handing in a dirty set it already knows, skipping the byte compares.
+`direct_layer::mark_dirty` covers that without reopening the hole.
+
+What remains is `apply_fallback_reason`, because *how* a layer moved is not always derivable.
+A merge on a graph layer's chain, a chain past the bound, or a structural change each recompose in full and say so.
+
+**Reopen when:** a second stack has to observe one direct layer.
+That needs the layer to retain changes per consumer, which is the point at which push becomes the simpler shape again.
+
+### A directly written layer is attributed to a synthetic writer id, and versioned by a counter
+
+**Decided in milestone 8.**
+
+`synthetic_writer_id(name)` is `blake3("vdoc::layer/v1" ‖ name)` — domain-separated from `"vdoc::op/v1"` on the same argument that separator itself rests on, so it cannot collide with a real op id.
+It is a function of the name alone, so writer sorts and the ids inside diagnostics reproduce across runs and machines.
+It is never the all-zero id, which already means "absent parent" and "nothing chosen".
+
+One id per layer rather than per path: hashing the path too would make the ids unbounded and would make the byte-equal-writers agreement check meaningless.
+It essentially never reaches `resolve_multi_value` anyway.
+Replace-not-merge means a direct layer's writer and a graph layer's never appear in one candidate list, and a direct layer is single-writer per path by construction.
+
+**The risk is leakage, not collision.**
+A composed document contains writer ids no op has, so installing one into a `snapshot_cache` would put a fabricated op id into a file.
+That is the same class as the existing filtered-result warning, and `snapshot_cache::install` now names it.
+
+A direct layer's **version is a plain counter**, bumped by its mutators.
+A graph layer's version is an op id, which is a real content address; a counter is not, and is good for nothing but telling the stack that something moved.
+It is bumped inside the mutators rather than by the caller because "forgot to say it changed" is precisely the silent staleness the pull model exists to make unreachable.
+
+**Reopen when:** two layers need distinct provenance under one name, or a layer's contents need a content address.
+The second would mean hashing the layer, which is O(n) per frame and is what the counter exists to avoid.
+
+### Provenance is per path, and a composed component may come from several layers
+
+**Decided in milestone 8.**
+
+`layer_stack::provenance_of` takes a `property_path` and nothing coarser.
+
+Per component is not merely inconvenient, it is **not well-defined**.
+Replacement is per path, so one typed component is routinely assembled from two layers, which is the case the whole feature is built around.
+And the typed `document` holds no raw property data at all, so provenance is unrepresentable there rather than just absent.
+
+It materializes the entity per layer on demand instead of keeping every layer's document resident, because the incremental path deliberately materializes only the dirty subset.
+So it is a UI query and not something to run in a loop, which its header says.
+
+**Reopen when:** a UI wants provenance for a whole document at once.
+That wants a different shape — one pass producing a path-to-layer map — rather than this called in a loop.
+
+### `$schema_version` must agree among the layers that supply a component
+
+**Decided in milestone 8.**
+
+Every layer contributing a real property to a component and also stamping a `$schema_version` must agree with the stamp that won, or the component is dropped with a `layered_schema_version_conflict`.
+A layer that does not stamp has **no opinion**, rather than "version 0".
+
+**This is the default hazard rather than an edge case**, which is why it is enforced rather than documented.
+`op_builder::set` always stamps, so every layer written through the typed API carries a version, while the composed stamp is whichever layer won that one path.
+The failure is silent in one direction — v1-shaped data read at v2 — and total in the other, since a too-new or contested version skips the whole component.
+
+The stricter rule was rejected: requiring a layer that overrides any property to also carry the component's version would forbid overriding `transform/position` alone, which is the feature.
+
+**Reopen when:** an application legitimately wants layers at different versions of one component.
+That needs a migration at the composition boundary, which is a much larger thing than this check.
+
 ---
 
 ## Interpretation
@@ -763,6 +925,63 @@ Predictable was preferred, and the asymmetry is documented in [interpretation](c
 
 **Reopen when:** a UI shows a stale `unsupported_component_type` and users notice.
 The fix is then a periodic full re-parse, not a per-apply scan.
+
+### A re-interpretation is driven by a dirty path set, and coarsening one is conservative
+
+**Decided in milestone 8.**
+
+`change_set` is a sorted `property_path` vector plus a `change_granularity` of property, component or entity, plus an `everything` state.
+It is what an incremental re-interpretation consumes, and `(graph, from, to)` became one way to *produce* one rather than the only way to ask for one.
+
+The reason is that a single-parent op chain is not the only thing that knows a delta.
+A directly written source knows its own, and a composition knows the union of its parts' — none of which can be phrased as a pair of ops.
+Generalizing the input was cheaper than growing a second apply beside the first.
+
+**The invariant is that `covers` over-reports at worst and never under-reports.**
+That is what makes granularity a speed dial rather than a correctness risk: every consumer is correct at every granularity, and only the amount of recomputation varies.
+So a producer that cannot be precise is free to be coarse, and is never forced to be wrong.
+`coarsen_to` asserts on a request to *refine*, because inventing the finer information would turn a conservative set into a lying one, and no consumer could detect that.
+
+Coarsening is one forward pass because `property_path::compare_bytes` is entity-major, so everything that collapses together is already adjacent.
+That ordering was chosen for the op hash, and this falls out of it for free.
+
+Below the granularity an entry's fields are default ids that **must not be read**.
+An id has no invalid state — a default-constructed one equals `of("")`, a legal id that sorts first — so the granularity and never the data is what says how much of a path means anything.
+Note this is the *opposite* convention to `parse_report::drop_for_entities`, where an empty entity id means "matches nothing" so that a document-scoped diagnostic survives.
+Identical bytes, opposite readings, and the two must not borrow each other's wording.
+
+**Reopen when:** a consumer wants a granularity between property and component, or wants to subtract one set from another.
+Subtraction is the one operation deliberately absent: layering needs "minus what a higher layer shadows", and that is a query against the layer stack rather than a set operation.
+
+### A change summary keeps its enumeration rather than gaining an `everything` flag
+
+**Decided in milestone 8**, when `change_set` gained exactly that flag and the symmetry looked obvious.
+
+It is not symmetric, because the two face opposite directions.
+On an *input* set, `everything` is the safe over-approximation — the honest thing to say when no delta is available.
+On an *output* summary it is a **loss**: the slow path already enumerates every entity and component explicitly, and that list is strictly more useful to an invalidator than a flag would be.
+
+A flag would also be a second representation of the same fact, which every consumer would have to remember to check before reading the vectors.
+Forgetting it is silent under-invalidation, which is the failure mode this library spends the most effort making unreachable.
+
+**Reopen when:** the slow path's O(document) summary enumeration shows up in a profile.
+The fix is then a flag *plus* an audit of every consumer, not a flag alone.
+
+### A fallback names its reason
+
+**Decided in milestone 8.**
+
+`incremental_apply_stats::fallback_reason` says why an apply re-parsed: `forced`, `no_single_parent_chain`, or `chain_too_long`.
+
+Before this, only `took_fast_path == false` was observable, which conflates three situations wanting three different responses.
+`chain_too_long` is a statement about `max_chain_ops` and is fixed by raising it.
+`no_single_parent_chain` is a statement about the history and is not fixed by anything.
+`forced` is a test pinning the slow path, and should never be read as either.
+
+It costs one enum on a struct a caller already passes, and it is what makes a fallback that should not be happening findable instead of merely slow.
+
+**Reopen when:** nothing.
+This is an observability field, and the cost of another enumerator is one line.
 
 ---
 

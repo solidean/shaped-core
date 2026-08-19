@@ -26,6 +26,7 @@
 #include <nexus/guide.hh>
 #include <nexus/test.hh>
 #include <versioned-document/incremental_parse.hh>
+#include <versioned-document/layer_stack.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/op_builder.hh>
 #include <versioned-document/op_graph.hh>
@@ -392,6 +393,172 @@ struct measurement
 
     return out;
 }
+/// The per-frame cost of a three-layer stack, which is the shape layering exists for.
+///
+/// A computed base is rewritten wholesale every frame, a user override layer sits on top, and a forced layer above that.
+/// The claim under test is that a frame costs O(dirty entities x layers) rather than O(document) — so `apply` is
+/// measured beside the `rebuild` it avoids, and the gap is what must not close.
+struct layered_samples
+{
+    stage_samples produce; ///< the base layer rewriting everything, diffed down to what actually moved
+    stage_samples apply;   ///< layer_stack::apply
+    stage_samples rebuild; ///< recomposing from nothing instead, for the comparison
+
+    [[nodiscard]] stage_samples frame() const
+    {
+        auto out = stage_samples();
+        for (isize i = 0; i < produce.seconds.size(); ++i)
+            out.add(produce.seconds[i] + apply.seconds[i]);
+        return out;
+    }
+};
+
+/// One wall's paths and the values that do not change, hoisted out of the frame loop.
+///
+/// **Interning an id and formatting a string are not what this measures.**
+/// A real producer holds its property ids as constants and its entity ids alongside whatever it is producing from, so
+/// leaving `entity_id::of(cc::format(...))` in the loop would attribute the intern table's cost to the layer — and at
+/// 8,000 entities that dwarfed everything else.
+struct produced_wall
+{
+    cc::vector<vdoc::property_path> paths;
+    cc::vector<vdoc::value> values;
+};
+
+[[nodiscard]] cc::vector<produced_wall> plan_walls(isize entities)
+{
+    auto const transform = vdoc::component_type_id::of("transform");
+    vdoc::property_id const properties[] = {
+        vdoc::property_id::of("$schema_version"),
+        vdoc::property_id::of("x"),
+        vdoc::property_id::of("y"),
+        vdoc::property_id::of("z"),
+        vdoc::property_id::of("angle"),
+        vdoc::property_id::of("label"),
+        vdoc::property_id::of("layer"),
+    };
+
+    auto out = cc::vector<produced_wall>();
+    out.reserve(entities);
+
+    for (isize i = 0; i < entities; ++i)
+    {
+        auto wall = produced_wall();
+        auto const entity = wall_entity(i);
+
+        for (auto const& p : properties)
+            wall.paths.push_back({.entity = entity, .component = transform, .property = p});
+
+        wall.values.push_back(vdoc::value::of(i64(1)));
+        wall.values.push_back(vdoc::value::of(f64(i)));
+        wall.values.push_back(vdoc::value::of(f64(i) * 2));
+        wall.values.push_back(vdoc::value::of(f64(i) * 3));
+        wall.values.push_back(vdoc::value::of(f64(i) * 0.25));
+        wall.values.push_back(vdoc::value::of(cc::format("wall {}", i)));
+        wall.values.push_back(vdoc::value::of(i64(i % 8)));
+
+        out.push_back(cc::move(wall));
+    }
+
+    return out;
+}
+
+/// Writes one wall's properties into a direct layer, version stamp included.
+///
+/// The stamp belongs to the layer that supplies the component, which here is the base — an override layer deliberately
+/// does not stamp, so the composed version stays the base's.
+void produce_wall(vdoc::direct_layer& layer, produced_wall const& wall, cc::optional<vdoc::value> const& moved_x)
+{
+    for (isize p = 0; p < wall.paths.size(); ++p)
+        layer.set(wall.paths[p], p == 1 && moved_x.has_value() ? moved_x.value() : wall.values[p]);
+}
+
+[[nodiscard]] layered_samples measure_layered(isize entities, isize samples, bool record)
+{
+    auto out = layered_samples();
+
+    auto registry = vdoc::component_registry();
+    registry.register_component<vdoc_bench::wall>();
+    auto const policy = vdoc::default_parse_policy::create_with_registry(registry);
+
+    auto base = vdoc::direct_layer("base");
+    auto forced = vdoc::direct_layer("forced");
+    auto user = vdoc::op_graph();
+
+    auto const plan = plan_walls(entities);
+
+    // the base's first full production is setup rather than a measured frame
+    for (auto const& wall : plan)
+        produce_wall(base, wall, {});
+
+    // a handful of user overrides, which is what a real session has: a few pinned properties, not thousands
+    auto staged = vdoc::op_builder();
+    for (isize i = 0; i < 8 && i < entities; ++i)
+        staged.set_raw({.entity = wall_entity(i),
+                        .component = vdoc::component_type_id::of("transform"),
+                        .property = vdoc::property_id::of("y")},
+                       vdoc::value::of(-1.0));
+    auto const user_head = user.add(staged.build(user));
+
+    auto stack = vdoc::layer_stack();
+    (void)stack.push_direct_layer("base", base);
+    (void)stack.push_graph_layer("user", user, user_head);
+    (void)stack.push_direct_layer("forced", forced);
+
+    auto report = vdoc::parse_report();
+    auto changes = vdoc::change_summary();
+    stack.rebuild(policy, report, changes);
+    REQUIRE(stack.composed().entity_count() == entities);
+
+    for (isize frame = 0; frame < samples; ++frame)
+    {
+        // The producer rewrites EVERYTHING and only a few entities actually move, which is the case the diff exists for.
+        auto const moved_x = vdoc::value::of(f64(frame));
+
+        auto const t_produce = clock_type::now();
+        base.begin_rebuild();
+        for (isize i = 0; i < plan.size(); ++i)
+            produce_wall(base, plan[i], i < 4 ? cc::optional<vdoc::value>(moved_x) : cc::optional<vdoc::value>());
+        base.finish_rebuild();
+        out.produce.add(seconds_since(t_produce));
+
+        auto stats = vdoc::layered_apply_stats();
+        auto const t_apply = clock_type::now();
+        stack.apply(policy, report, changes, {}, &stats);
+        out.apply.add(seconds_since(t_apply));
+
+        CHECK(stats.took_fast_path);
+
+        // The same state composed from nothing, on a throwaway stack, so the two are comparable per frame.
+        auto fresh = vdoc::layer_stack();
+        (void)fresh.push_direct_layer("base", base);
+        (void)fresh.push_graph_layer("user", user, user_head);
+        (void)fresh.push_direct_layer("forced", forced);
+
+        auto fresh_report = vdoc::parse_report();
+        auto const t_rebuild = clock_type::now();
+        fresh.rebuild(policy, fresh_report, changes);
+        out.rebuild.add(seconds_since(t_rebuild));
+    }
+
+    auto const frame_total = out.frame();
+
+    std::printf("entities=%6lld samples=%4lld  three layers: computed base, user overrides, forced\n",
+                (long long)entities, (long long)samples);
+    print_stage("produce", out.produce);
+    print_stage("apply", out.apply);
+    print_stage("FRAME", frame_total);
+    print_stage("rebuild", out.rebuild);
+
+    if (record)
+    {
+        nx::guide::report_time_for("layered-frame-p95", frame_total.p95());
+        nx::guide::report_time_for("layered-apply-p95", out.apply.p95());
+        nx::guide::report_time_for("layered-rebuild-p95", out.rebuild.p95());
+    }
+
+    return out;
+}
 } // namespace
 
 // The representative size, recorded: an editing session's worth of history, one op at a time.
@@ -410,4 +577,21 @@ TEST("bench-vdoc-edit-latency (full sweep)", nx::config::manual)
     (void)measure(500, 100, /*record =*/false);
     (void)measure(2000, 50, /*record =*/false);
     (void)measure(8000, 20, /*record =*/false);
+}
+
+// The layered per-frame shape, recorded: the three-layer stack layering exists for.
+GUIDE_BENCHMARK("bench-vdoc-layered-frame (three layers, per frame)")
+{
+    (void)measure_layered(2000, 30, /*record =*/true);
+}
+
+// The sweep that says whether composing is O(dirty) or O(document).
+//
+// `apply` must stay roughly flat across these sizes while `rebuild` grows with them.
+// If the two converge, the composition has started walking the whole document, and nothing else would notice.
+TEST("bench-vdoc-layered-frame (full sweep)", nx::config::manual)
+{
+    (void)measure_layered(500, 40, /*record =*/false);
+    (void)measure_layered(2000, 30, /*record =*/false);
+    (void)measure_layered(8000, 15, /*record =*/false);
 }

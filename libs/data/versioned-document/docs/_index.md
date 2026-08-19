@@ -38,6 +38,8 @@ Read [the model](concepts/the-model.md) first if you are reading only one.
 - [interpretation](concepts/interpretation.md) — the typed layer: policy in, report out, and why parsing never refuses.
   Reserved names, deletion as an ordinary write, schema evolution, and the five validation layers.
 - [the typed document](concepts/the-typed-document.md) — why `document` has no mutation API, and the layout that follows from being frozen.
+- [layering](concepts/layering.md) — composing several independent histories into one document, where a higher layer replaces a lower one per property path.
+  Why property granularity is the requirement rather than a refinement, and why the composition has to happen below the typed layer.
 - [assets and blobs](concepts/assets-and-blobs.md) — bulk content beside the document rather than in it, blob sharing, declared dependencies, and the one deliberate hole in immutability.
 - [snapshots](concepts/snapshots.md) — how materialization stays independent of history length, why a snapshot stores surviving only, and why its validity is decided at use rather than at creation.
 - [pruning and recovery](concepts/pruning-and-recovery.md) — discarding history, and taking it back from a peer nobody trusts.

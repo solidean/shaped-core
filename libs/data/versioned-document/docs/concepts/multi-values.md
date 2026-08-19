@@ -42,3 +42,17 @@ The default is deterministic and biased toward the local user:
 - otherwise the smallest op id wins, and a *multi-valued conflict* diagnostic reports it.
 
 Both branches are total and reproducible: the same inputs always produce the same document, on every machine.
+
+## An abstention against a concurrent write is the one case storage decides
+
+Everything above is storage recording what happened and interpretation choosing.
+[Abstain](ops-and-content-addressing.md#an-assignment-either-writes-or-abstains) is the exception, and it is worth knowing about rather than discovering.
+
+When one branch writes a path and a concurrent branch withdraws it, **the write wins, and nothing reports it.**
+The abstention is dropped as the raw document is assembled, so no writer list ever mentions it and no policy is consulted.
+
+The direction is the one `$alive` already takes: the non-vanishing side wins deterministically, because losing a value is not recoverable and a re-attempted withdrawal is.
+What is genuinely given up is the diagnostic — a user whose reset-to-default silently did not take has nothing to read.
+
+[decisions.md](../decisions.md#an-abstention-never-reaches-the-raw-document) carries the argument, the alternative that would make it diagnosable, and what would reopen it.
+Note the case cannot arise on a linear history at all, which is where withdrawals are actually used.

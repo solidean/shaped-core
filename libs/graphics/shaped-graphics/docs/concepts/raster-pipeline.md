@@ -69,8 +69,7 @@ A graphics PSO with a vertex-input layout requires it, and it is inert for compu
 
 ## Deferred
 
-PSO **caching** (`ctx.cached.acquire_raster_pipeline` + `pipeline_cache` description hashing + `async_raster_pipeline` — the compute/RT parity piece), **indirect draws**,
-**dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and the **vulkan** implementation.
+**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and the **vulkan** implementation.
 Geometry and tessellation stages are **in** (dx12). See [TODO](../TODO.md).
 
 ## See also

@@ -6,6 +6,7 @@ It is the CPU fan-out "task system" that `cc::threaded_actor` defers to.
 `E` is the failure-channel type, defaulting to `async_error` — a move-only wrapper over `cc::any_error`; any type works (an enum, a small struct, …).
 
 Headers: [`async.hh`](../../src/clean-core/thread/async.hh) (public, templated) and [`async_node.hh`](../../src/clean-core/thread/async_node.hh) (untemplated core + scheduler seam).
+[`async_coroutine.hh`](../../src/clean-core/thread/async_coroutine.hh) is the opt-in `co_await` layer over them — see [co_await / co_return](#co_await--co_return).
 **Incubator-stage** API — expect it to grow and change.
 
 ## Model
@@ -18,7 +19,7 @@ So a node is a value/error machine from the outside, whatever runs inside it —
 ```cpp
 auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; });
 auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);   // b depends on a; f gets a plain int
-int v = cc::async_blocking_get_singlethreaded(b);   // drives the graph on this thread -> 42
+int v = cc::async_blocking_get(b);   // drives the graph on the ambient scheduler -> 42
 ```
 
 The handle:
@@ -180,8 +181,19 @@ The handler is C++ EH only, which is what keeps a hardware fault from being swal
 
 ## Driving (the scheduler seam)
 
-**You never block on an async — a scheduler makes progress on it**, and blocking is a convenience that scheduler offers.
+**You never block on an async — a scheduler makes progress on it**, and blocking is a convenience over that.
 The graph is **decoupled from any executor**: a worker binds a scheduler to its thread with `async_worker_scope`, and nodes reach it via `async_scheduler::current()`.
+
+**Touching the async system requires an ambient scheduler**, and it is an error to do so without one.
+The ambient scheduler is the one bound to this thread, or else the process-wide default:
+
+```cpp
+cc::async_thread_pool pool;
+cc::scoped_default_async_scheduler const ambient(pool);   // an application does this once, early
+```
+
+An application installs one at startup, and a nexus run installs one per phase — a test or example opts out with `nx::no_scheduler`, and then owns the decision itself.
+`cc::ambient_async_scheduler()` is the lookup, and it asserts rather than falling back, so "nobody installed one" is reported where it happens instead of surfacing as a graph that never runs.
 
 There are two schedulers, and they present the same surface:
 
@@ -191,20 +203,19 @@ There are two schedulers, and they present the same surface:
 | `async_thread_pool` | worker threads **plus the calling thread** | yes | real concurrent work |
 
 ```cpp
-cc::singlethreaded_scheduler sched;
-int v = sched.blocking_get(root);        // drives + blocks THIS thread
-cc::async_thread_pool pool;              // defaults to hardware concurrency - 1 (the caller is the other thread)
-int v = pool.blocking_get(root);         // the calling thread PARTICIPATES, then blocks
+cc::singlethreaded_scheduler sched;       // installed as ambient: every graph runs inline, in order
+cc::async_thread_pool pool;               // defaults to hardware concurrency - 1 (the driving thread is the other)
+int v = cc::async_blocking_get(root);     // drives on whichever of them is ambient
 ```
 
-`async_thread_pool::blocking_get` does not hand the graph over and park.
+Driving on a pool does not hand the graph over and park.
 The calling thread borrows a pool slot and runs the graph itself, stealing like any worker, and parks only once nothing is left for it.
 A graph that never forks therefore costs tens of nanoseconds rather than a cross-thread round trip, and a large one still spreads across the pool — the caller's deque is stealable like any other.
 That is why the default worker count is one *fewer* than the hardware concurrency, and why a 1-worker pool still publishes work: its caller is a second participant.
 
 `singlethreaded_scheduler` is single-threaded **by construction, not by circumstance**.
 It has no peers, so it never publishes work and a graph's nodes cannot run concurrently however many cores sit idle.
-That is what makes the whole system testable without threads.
+That is what makes the whole system testable without threads: install one as the ambient scheduler (`nx::singlethreaded` in a test) and every graph runs inline on the driving thread, in order.
 
 `async_no_worker_scope` is the other direction: for its lifetime the calling thread has **no** scheduler bound.
 That is an ordinary state — a foreign thread has never had one — and the scope only makes it reachable from inside a worker.
@@ -214,17 +225,25 @@ Left bound, a node that code schedules lands in the *host's* queue and is run la
 Nexus unbinds around every test body for exactly that reason ([parallel-execution](../../../nexus/docs/parallel-execution.md)).
 A node created inside the scope still routes to the installed default pool, exactly as it would on a thread that never had a scheduler.
 
-For a self-contained graph, the free functions build a throwaway scheduler for you.
-The verbose names are deliberate — this is a test/debug convenience, not how real work gets scheduled:
+### Blocking on a graph
+
+The free functions drive `root` on the **ambient** scheduler and return once it is ready — value or error, never still pending:
 
 ```cpp
-int v = cc::async_blocking_get_singlethreaded(root);                       // asserts on error/cancel/no-progress
-cc::optional<cc::result<int, cc::async_error>> r = cc::try_async_blocking_get_singlethreaded(root); // fallible
+int v = cc::async_blocking_get(root);                                   // asserts on error/cancel
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get(root);  // fallible
 ```
 
-The `try_` form returns an **optional** result.
-`nullopt` means the scheduler pumped everything reachable from here and `root` is still not ready — see [Multi-scheduler correctness](#multi-scheduler-correctness).
-`blocking_get` asserts on that outcome, and on an error, so keep it for graphs you know complete inline.
+There is no "not yet" outcome to handle: whatever the ambient scheduler cannot finish itself, these wait for.
+A node awaiting a push that never comes therefore hangs rather than reporting no-progress, which is the honest failure —
+`cc::try_async_blocking_get_for(root, timeout_ms)` is the way out for a caller that cannot afford it, and the one place `cc::optional` survives.
+
+**This is a bridge between synchronous and asynchronous code, and nothing more.**
+Reaching for it often is the signal to step back: make the surrounding code async, write an `ASYNC_TEST`, hand the async to a caller that can await it.
+Calling it from inside a frame is legal and participates rather than idling, but every blocked thread is one that cannot help — overused, that is how a graph starves or deadlocks.
+
+`cc::async_blocking_get_on(scheduler, root)` names a scheduler instead of taking the ambient one, for code that owns one and means *that* one: a benchmark measuring a pool, a test standing one up.
+Its `try_` form keeps the optional, because a named scheduler genuinely can run dry with the graph unfinished — see [Multi-scheduler correctness](#multi-scheduler-correctness).
 
 `run_one` / `run_until` / `drain` are the underlying pump, and the pump is what you need when a graph parks on a manual node.
 Nothing progresses while you are not inside it, so call it again after the external push.
@@ -324,6 +343,109 @@ auto ri = cc::make_async_from_value_emplace<Immovable>(7);        // build T in 
 // also make_async_from_error_emplace<T, E>(args...)
 ```
 
+## `co_await` / `co_return`
+
+A coroutine **is** a compute frame.
+The frame contract — re-entrant, polled repeatedly, never moved, resolving through the context — is one-for-one what a coroutine gives you, so the layer in
+[`async_coroutine.hh`](../../src/clean-core/thread/async_coroutine.hh) adds **no node state at all**.
+
+| frame contract | coroutine |
+|---|---|
+| polled again once dependencies are ready | `h.resume()` |
+| state persists, frame never moved | the coroutine frame is stable heap storage |
+| `require(dep)` then `wait_for_dependencies()` | `await_suspend` requires, then suspends |
+| `resolve_to_value` | `co_return` |
+| exception containment | `unhandled_exception()` |
+
+Including that header is what makes a function returning `shared_async<T, E>` a coroutine — `async.hh` alone does not, and `<coroutine>` never reaches it.
+A graph that does not await pays nothing: no field on the node, no branch in `poll()`.
+
+```cpp
+cc::shared_async<int> load(cc::string path)      // COLD: calling load() runs nothing
+{
+    auto const& bytes = co_await read(path);     // a failed read short-circuits
+    co_return parse(bytes);
+}
+```
+
+### Lazy by default, like every other spelling here
+
+The two coroutine return types map one-for-one onto the two factories, and the plain one is the lazy one:
+
+| return type | means | mirrors |
+|---|---|---|
+| `cc::shared_async<T, E>` | **cold** until something requires or schedules it | `make_async_lazy` |
+| `cc::async_scheduled<T, E>` | scheduled at its initial suspend; converts to `shared_async<T, E>` | `make_async_scheduled` |
+
+That is the same rule the rest of the system follows — *"there is deliberately no plain `map` that hides which of the two you get"* — and a coroutine must not be the exception.
+An eager default would also make the meaning of a call site depend on **ambient** state, since scheduling is a no-op with nothing bound to route to.
+The same line would then start work in production and nothing in a test, with neither reading written down anywhere.
+
+Eager scheduling has to live in the **return type** rather than in something the caller opts into afterwards.
+It happens at the initial suspend, which is over before the caller ever sees the handle.
+It cannot move into `get_return_object` either: the coroutine is not suspended there yet, so a peer could resume a frame still inside its own ramp.
+
+`cc::async_start(h)` is the explicit "and go" for a handle you already hold.
+It is idempotent, and a no-op where nothing could be reached — no worker scope bound and no default pool — which leaves the node cold rather than asserting.
+
+**`co_await` never starts work.**
+`require()` is a wakeup edge, and one await parks on one dependency, so **awaiting two cold asyncs in sequence runs them in sequence**.
+That is the cost of the lazy default, and `cc::async_all` is the answer: it requires every dependency before parking, so the poll loop can publish the rest for peers to steal.
+It hands back nothing — read each value with a plain `co_await`, which no longer suspends once the node is ready.
+
+```cpp
+co_await cc::async_all(a, b, c);            // one park, on all three
+auto const sum = co_await a + co_await b;   // neither suspends
+
+auto const x = cc::async_start(load(p));    // the other way: start them, then await
+auto const y = cc::async_start(load(q));
+auto const both = co_await x + co_await y;
+```
+
+### Failure short-circuits without unwinding
+
+A failed dependency means the coroutine is **never resumed**.
+The frame destroys it while suspended — which runs the destructors of every in-scope local — and resolves the node with the propagated error.
+The rest of the body is skipped, and so is any `catch` in it.
+That matches the `make_async_*` sugar's short-circuit, and it avoids both an unwind and the message re-materialization a throwing `await_resume` would cost the default `async_error`.
+
+Three writers share **one** failure slot on the promise — a dependency short-circuit, an escaped exception, and `cc::async_fail` — and the frame is the only reader.
+`co_await cc::async_settled(a)` waits without short-circuiting, and leaves you to read `a->try_value()` / `a->try_error()`.
+`cc::async_as_result(a)` is the same wait handed back as a `cc::result`, at the cost of a copy.
+
+`co_await cc::async_fail(e)` is the uniform failure spelling.
+`co_return cc::error(...)` also works, but only for a non-`unit` `T`.
+`return_void` and `return_value` cannot coexist, so a `cc::unit` coroutine keeps the bare `co_return;` and fails through `async_fail`.
+
+### What it costs
+
+One heap allocation for the coroutine frame, on top of the node.
+It cannot be elided, since the handle escapes into the node, and it goes through the same slab the node does (`promise_type::operator new`).
+
+The node's stored frame is that one handle: **8 B, always inline**, so a coroutine never spills into the boxed `cc::unique_function`.
+The useful comparison is therefore *a lambda frame that spills* — above the 24 B budget a closure boxes anyway, so at that size a coroutine costs the same.
+Below it, the small lambda frame remains the zero-allocation path, deliberately.
+
+### `async_yield`
+
+`co_await cc::async_yield()` maps onto `async_step_status::yield`: the node goes running → scheduled and is re-enqueued.
+It is deliberately a narrow tool, and it is **not** cooperative multitasking.
+A worker pops its own deque bottom LIFO, so an otherwise idle one pops the yielding node straight back — a re-poll plus a queue round trip.
+What it does buy: the node becomes **stealable** by a peer while it sits there, and work pushed after it runs first.
+It is not how you wait for something external — that is a manual node, pushed by whatever completes it, rather than a yield loop burning a worker.
+
+### The sharp edges
+
+* **Coroutine parameters are captured by their declared type**, so a reference parameter dangles across the first suspend.
+  Take them **by value**.
+* **`T` must be movable** — `co_return` moves the result through the promise.
+  An immovable `T` stays on the raw-frame emplace API.
+* **A coroutine can resume on a different thread than it suspended on.**
+  Nothing may be held across a `co_await` that is bound to a thread.
+* **Dropping a started coroutine's handle does not cancel it**: the schedule queue holds the node, and the system is cooperative throughout.
+  Dropping a *cold* one, by contrast, simply destroys it — nothing ever ran.
+* `co_await a` yields a `U const&` **into the node's payload**, so reading it copies nothing — but binding `auto const&` to the result of awaiting a *temporary* dangles once the full-expression ends.
+
 ## Concurrent execution: `async_thread_pool`
 
 `cc::async_thread_pool` ([`clean-core/thread/async_thread_pool.hh`](../../src/clean-core/thread/async_thread_pool.hh))
@@ -336,14 +458,15 @@ It is deliberately not lock-free: only genuinely foreign submits reach it — a 
 
 ```cpp
 cc::async_thread_pool pool(cc::num_hardware_threads());
-cc::install_default_async_pool(pool);            // compute nodes now route here when off-worker
+cc::scoped_default_async_scheduler const ambient(pool);  // every async now belongs to this pool
 auto root = build_graph();
-int v = pool.blocking_get(root);                 // submit to the pool, block THIS (foreign) thread
+int v = cc::async_blocking_get(root);                    // participate in the pool, block THIS thread
 ```
 
-`pool.blocking_get` / `try_blocking_get` drive `root` on the calling thread, which borrows a pool slot and participates (see above), and block only once there is nothing left for it to run.
-With every external slot already claimed they fall back to submitting the root and blocking on a one-shot completion hook.
-Call them only from a **foreign** thread; from inside a worker of the same pool it asserts, since it would park a pool thread on its own work.
+`participate_until_ready` is what a drive on a pool does: the calling thread borrows a pool slot and runs the graph itself, stealing like any worker.
+It parks only once there is nothing left for it to run.
+With every external slot already claimed it falls back to submitting the root and blocking on a one-shot completion hook.
+It is legal from inside a worker, where it becomes a nested drive — the price being that unrelated work then runs on that thread in the middle of a frame.
 
 The node machinery is thread-safe under this — see [Multi-scheduler correctness](#multi-scheduler-correctness) for exactly what is and is not guaranteed.
 
@@ -538,5 +661,8 @@ Down a chain past the inline depth cap that becomes a re-poll storm — measured
 * **Shared errors** and **heterogeneous-`E` propagation** — the failure channel is typed (`async<T, E>`), but the sugar assumes a single `E` across a graph.
   The default `async_error` also still re-materializes its message on propagation rather than sharing an error payload.
   Cross-`E` bridging and cancellation propagation through a graph are follow-ups.
-* **`co_await` integration** layered on top of the raw frame API, and plain (non-async) arguments in the variadic dependency form.
+* **Plain (non-async) arguments** in the variadic dependency form.
+* **Immovable `T` through `co_return`** — the coroutine layer moves its result through the promise, so an immovable result stays on the raw-frame emplace API.
+* **`async<void>`** — you spell `async<cc::unit>` today.
+  That is one corner of a wider question about `void` in the vocabulary types, tracked in [TODO](../TODO.md).
 * **Deferred teardown** as a built-in — handing a handle to a reclaim thread already works at the user level.

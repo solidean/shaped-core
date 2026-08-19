@@ -26,6 +26,7 @@ from .lib.pipeline.diagjobs import BuildMark
 from .lib.pipeline.diagjobs import harvest as harvest_build_jobs
 from .lib.pipeline.diagjobs import mark as mark_build
 from .lib.pipeline.eligibility import select_eligible_binaries
+from .lib.pipeline.examples import drop_testless_examples
 from .lib.pipeline.test import test
 from .lib.project.compdb import find_entry, load_entries, split_command, strip_pch_flags, suggest_files
 from .lib.project.flags import extract_flags
@@ -38,18 +39,24 @@ from .lib.project.targets import (
     select_test_binaries,
     write_query,
 )
+from .lib.quality.changes import (
+    ChangeScope,
+    ChangeScopeError,
+    changed_files,
+    changed_line_ranges,
+    format_changed_line_spec,
+    resolve_range,
+)
 from .lib.quality.checks import Check, list_checks, run_checks
 from .lib.quality.crossrefs import CrossRefResult, check_crossrefs
 from .lib.quality.format import (
     FormatResult,
     FormatSetupError,
-    changed_line_ranges,
     clang_format_version,
     discover_files,
     discover_lint_files,
     expand_lint_paths,
     find_clang_format,
-    format_changed_line_spec,
     format_sources,
     required_major,
     run_format,
@@ -92,6 +99,12 @@ __all__ = [
     "Check",
     "list_checks",
     "run_checks",
+    "ChangeScope",
+    "ChangeScopeError",
+    "changed_files",
+    "changed_line_ranges",
+    "format_changed_line_spec",
+    "resolve_range",
     "configure",
     "ensure_configured",
     "coverage_run",
@@ -113,13 +126,11 @@ __all__ = [
     "doctor",
     "FormatResult",
     "FormatSetupError",
-    "changed_line_ranges",
     "clang_format_version",
     "discover_files",
     "discover_lint_files",
     "expand_lint_paths",
     "find_clang_format",
-    "format_changed_line_spec",
     "format_sources",
     "required_major",
     "run_format",

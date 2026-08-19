@@ -1,11 +1,11 @@
 #include "components.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <versioned-document/document.hh>
 
-#include <algorithm>
 
 using namespace cc::primitive_defines;
 
@@ -65,7 +65,7 @@ struct document_builder
     for (auto const& n : names)
         out.push_back(entity_id::of(n));
 
-    std::sort(out.begin(), out.end(), entity_id::by_bytes{});
+    cc::sort(out, entity_id::by_bytes{});
     return out;
 }
 

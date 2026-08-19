@@ -1,3 +1,4 @@
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -101,18 +102,20 @@ INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample 
     REQUIRE(buf != nullptr);
 
     // Pipelines + layouts, built straight from the reflected bindings.
-    auto fill_group_layout = ctx.uncached.create_binding_group_layout(fill.bindings);
+    auto fill_group_layout = ctx.cached.acquire_binding_group_layout(fill.bindings);
     REQUIRE(fill_group_layout != nullptr);
-    auto fill_pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {fill_group_layout}});
+    auto fill_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {fill_group_layout}});
     REQUIRE(fill_pipeline_layout != nullptr);
-    auto fill_pipe = ctx.uncached.create_compute_pipeline({.shader = fill, .layout = fill_pipeline_layout});
+    auto fill_pipe
+        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = fill, .layout = fill_pipeline_layout}));
     REQUIRE(fill_pipe != nullptr);
 
-    auto sample_group_layout = ctx.uncached.create_binding_group_layout(sample.bindings);
+    auto sample_group_layout = ctx.cached.acquire_binding_group_layout(sample.bindings);
     REQUIRE(sample_group_layout != nullptr);
-    auto sample_pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {sample_group_layout}});
+    auto sample_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {sample_group_layout}});
     REQUIRE(sample_pipeline_layout != nullptr);
-    auto sample_pipe = ctx.uncached.create_compute_pipeline({.shader = sample, .layout = sample_pipeline_layout});
+    auto sample_pipe = cc::async_blocking_get(
+        ctx.cached.acquire_compute_pipeline({.shader = sample, .layout = sample_pipeline_layout}));
     REQUIRE(sample_pipe != nullptr);
 
     // Groups: pass 1 binds the texture as a UAV; pass 2 binds it as an SRV + a dynamic point/clamp sampler.

@@ -91,6 +91,10 @@ CREATE TABLE ops (
 Loading re-hashes what it read; nothing on the load path re-serializes.
 This is what stops a formatter change from ever looking like tampering.
 
+**The `assignments` blob is opaque to this format.**
+Its leading tag names an encoding vdoc owns, and the only thing that ever reads inside it is `vdoc::try_decode_op`.
+So a new assignment encoding is not a change to the `.vdoc` format: the column stores whatever bytes it is handed, and this file's version does not move with vdoc's tag set.
+
 Both may be `NULL`, which is a **skeleton op**: a pruned parent, kept for its position in the DAG.
 A skeleton is unverifiable by construction and must be reported as such, never as a hash mismatch.
 

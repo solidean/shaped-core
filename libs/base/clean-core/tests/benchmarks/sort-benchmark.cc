@@ -262,7 +262,7 @@ TEST("bench-sort - sort_async vs cc::sort", nx::config::manual)
                                                   [&](cc::vector<i32>& v)
                                                   {
                                                       auto const sorted = cc::sort_async(v);
-                                                      (void)pool.blocking_get(sorted);
+                                                      pool.participate_until_ready(*sorted);
                                                   });
 
                 row(workers, serial, parallel);
@@ -286,7 +286,7 @@ TEST("bench-sort - sort_async vs cc::sort", nx::config::manual)
                             {
                                 auto const sorted = cc::sort_async_ex(0, isize(v.size()), cc::as_index_swap_range(v),
                                                                       cc::default_less{}, cutoff);
-                                (void)pool.blocking_get(sorted);
+                                pool.participate_until_ready(*sorted);
                             });
 
             row(static_cast<long long>(cutoff), serial, parallel);

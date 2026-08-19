@@ -44,7 +44,7 @@ TEST("bcache acquire returns the computed value with no storage at all")
     };
 
     auto const a = cache->acquire(key, compute);
-    CHECK(blob_text(cc::async_blocking_get_singlethreaded(a)) == "computed anyway");
+    CHECK(blob_text(cc::async_blocking_get(a)) == "computed anyway");
     CHECK(calls == 1);
 
     // Singleflight is pure in-process machinery, so it works with no storage behind it — a second concurrent caller still shares one compute.
@@ -52,8 +52,8 @@ TEST("bcache acquire returns the computed value with no storage at all")
     auto const c = cache->acquire(key, compute);
     CHECK(b.get() == c.get());
     CHECK(cache->get_stats().singleflight_joins == 1);
-    CHECK(blob_text(cc::async_blocking_get_singlethreaded(b)) == "computed anyway");
-    CHECK(blob_text(cc::async_blocking_get_singlethreaded(c)) == "computed anyway");
+    CHECK(blob_text(cc::async_blocking_get(b)) == "computed anyway");
+    CHECK(blob_text(cc::async_blocking_get(c)) == "computed anyway");
 
     // Every acquire recomputes, because nothing is ever stored — degraded, not wrong.
     CHECK(calls == 2);

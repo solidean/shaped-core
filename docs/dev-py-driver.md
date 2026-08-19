@@ -104,7 +104,7 @@ The line the whole design defends: **`lib/` knows mechanism, `dev.py` owns polic
 It does not know which preset is this project's platform default, or that the pre-commit test gate also runs a sanitizer preset.
 That knowledge is policy, and it lives in `dev.py`'s preset tables.
 `dev.py` bundles those tables into a `Policy` and wraps it in a [Context](../tools/dev/cmd/context.py).
-The `Context` also carries the repo root and the cross-command glue: preset and target resolution, the `*-test` convention, the error-exit helper.
+The `Context` also carries the repo root and the cross-command glue: preset and target resolution, the `*-test` and `*-example` conventions, the error-exit helper.
 Every command receives the `Context`, so commands never import `dev.py` and `dev.py` never imports a command's internals.
 The dependency only flows one way.
 
@@ -114,7 +114,7 @@ The dependency only flows one way.
 Use the facade (`dev.X`) for mechanism and the `ctx` for policy and glue.
 [cmd/run.py](../tools/dev/cmd/run.py) is the smallest complete example: resolve a preset, build a target, run its artifact.
 
-A command that forwards trailing arguments to a child process must also be listed in `dev.py`'s `parse_known_args` allowance; `test` and `run` are the two.
+A command that forwards trailing arguments to a child process must also be listed in `dev.py`'s `parse_known_args` allowance; `test`, `run` and `example` are the three.
 Everywhere else an unrecognized argument stays a hard error, so a typo fails loudly instead of being silently passed along.
 
 **Add a pre-commit check.** Checks are a registry in [cmd/check.py](../tools/dev/cmd/check.py): a list of `dev.Check(name, description, supports_fix, run, requires_green=…)`.

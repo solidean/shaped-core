@@ -27,10 +27,11 @@ Findings we want to keep, but that are not a guide to anything.
 
 ## Guides
 
-[guides/_index.md](guides/_index.md) lists all eleven; the ones most often wanted:
+[guides/_index.md](guides/_index.md) lists all thirteen; the ones most often wanted:
 
 - [guides/building-and-testing.md](guides/building-and-testing.md) — drive `dev.py`, and diagnose with the `repo_tools` tools.
 - [guides/ci.md](guides/ci.md) — the GitHub Actions workflows and what each uploads.
+- [guides/examples.md](guides/examples.md) — the `examples/` corpus and `dev.py example`: how a library shows what it feels like to use.
 - [guides/prose.md](guides/prose.md) — `dev.py lint`, the prose rules in practice, and reworking a documentation surface.
 - [guides/compile-times.md](guides/compile-times.md) — `dev.py compile-time`: which headers and TUs the compiler spends its time on.
 - [guides/precompiled-headers.md](guides/precompiled-headers.md) — the per-target PCH tiers, how to pick one, and the no-PCH gate.
@@ -49,8 +50,8 @@ Findings we want to keep, but that are not a guide to anything.
   [cheat-sheet](../libs/base/nexus/cheat-sheet.md) for the API at a glance, deeper notes in its [docs hub](../libs/base/nexus/docs/_index.md).
 - [typed-geometry](../libs/base/typed-geometry/readme.md) — the `tg` math & geometry library.
   [cheat-sheet](../libs/base/typed-geometry/cheat-sheet.md) and [docs hub](../libs/base/typed-geometry/docs/_index.md).
-- [babel-serializer](../libs/io/babel-serializer/readme.md) — the `babel` format readers and writers.
-  [cheat-sheet](../libs/io/babel-serializer/cheat-sheet.md) and [docs hub](../libs/io/babel-serializer/docs/_index.md).
+- [babel-serializer](../libs/data/babel-serializer/readme.md) — the `babel` format readers and writers.
+  [cheat-sheet](../libs/data/babel-serializer/cheat-sheet.md) and [docs hub](../libs/data/babel-serializer/docs/_index.md).
 - **data family** — versioned-document
   ([readme](../libs/data/versioned-document/readme.md) ·
   [cheat-sheet](../libs/data/versioned-document/cheat-sheet.md) ·

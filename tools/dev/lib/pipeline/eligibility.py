@@ -25,7 +25,7 @@ from ..core.models import Preset, Target
 _WASM_LAUNCH_SUFFIXES = {".js", ".mjs", ".wasm"}
 
 # How a non-normal bucket is re-entered on the CLI, for the "wrong bucket" hint.
-_BUCKET_FLAG = {"manual": "--manual", "guide_benchmark": "--guide-benchmarks"}
+_BUCKET_FLAG = {"manual": "--manual", "guide_benchmark": "--guide-benchmarks", "example": "--examples"}
 
 
 @dataclass

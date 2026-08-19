@@ -65,7 +65,7 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     CHECK(p1.get() == p2.get());
 
     // Drive the async build inline (no pool installed) and confirm it resolved to a real pipeline.
-    sg::compute_pipeline_handle pipeline = cc::async_blocking_get_singlethreaded(p1);
+    sg::compute_pipeline_handle pipeline = cc::async_blocking_get(p1);
     REQUIRE(pipeline != nullptr);
     CHECK(pipeline->workgroup_size().x == 64);
 
@@ -145,6 +145,10 @@ TEST("sg pipeline_cache - a different shader yields a different pipeline node")
     auto other = ctx.cached.acquire_compute_pipeline(desc2);
 
     CHECK(base.get() != other.get());
+
+    // Identity is the claim, but both are real PSO builds on the ambient scheduler — finished here rather than left running past the test.
+    (void)cc::try_async_blocking_get(base);
+    (void)cc::try_async_blocking_get(other);
 }
 
 TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipeline-layout key")

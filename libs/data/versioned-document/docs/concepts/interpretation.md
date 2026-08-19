@@ -90,6 +90,33 @@ An exact ancestor test on a DAG is what this design declines to pay for.
 Anything else — a merge on the chain, a chain too long, a `to` that does not reach `from` — re-materializes and re-parses.
 Correctness never depends on the gate; only speed does.
 
+### The dirty set is the input, and it is allowed to over-report
+
+An apply does not consume a pair of ops; it consumes a **`change_set`** — the property paths that have to be re-interpreted — and the op chain is one way to produce one.
+
+That matters because a chain is not the only thing that knows a delta.
+A source written directly knows its own, and a composition of several sources knows the union of theirs, and neither can be phrased as "from this op to that one".
+
+A change set carries a **granularity**: property, component or entity.
+Coarser is a superset, and the contract is one-directional:
+
+> `covers` may answer true where nothing changed, and never false where something did.
+
+So coarsening is a pure speed dial.
+Every consumer is correct at every granularity, and only the amount of recomputation varies — which means a producer that cannot be precise is free to be coarse and is never forced to be wrong.
+Refining is what no one may do, and `coarsen_to` asserts rather than allowing it.
+
+An apply coarsens to entity granularity immediately, because that is what re-interpretation works at.
+Selection and construction run one entity at a time, so knowing which property under it changed buys nothing.
+
+### A fallback says why
+
+`incremental_apply_stats::fallback_reason` distinguishes the three ways the fast path declines.
+The caller forced it, the history had no single-parent chain, or the chain was longer than `max_chain_ops`.
+
+Only the last is fixed by raising the bound, and only the middle one is a statement about the workload.
+Conflating them is how a fallback that should not be happening stays merely slow instead of becoming findable.
+
 ### What an incremental apply owes the report
 
 A parse appends.

@@ -6,7 +6,7 @@
 
 """clang-tidy gate runner for shaped-core.
 
-Where the clang-tidy logic actually lives: `dev.py lint clang-tidy` is thin wiring that shells out to this script, and `dev.py check` runs it dirty-only.
+Where the clang-tidy logic actually lives: `dev.py lint clang-tidy` is thin wiring that shells out to this script, and `dev.py check` runs it over the next commit's files.
 It is also usable standalone: `uv run tools/lint/clang-tidy.py --build-dir build/<preset>`.
 
 The gates are the strict whitelist in tools/lint/clang-tidy-gates.yml — our own schema, `gates` each carrying a `why` — which this script translates into clang-tidy's `-*,<gates>` config.
@@ -25,7 +25,7 @@ Files are linted in parallel, one clang-tidy invocation per `.cc` across a threa
 
 Output is bounded: diagnostics print verbatim while under `--limit` lines, and past it they collapse into a grouped-by-check digest so every failing check stays visible even among thousands of hits.
 
-tools/dev machinery is reused — git dirty-file discovery, the compilation-database reader, LLVM-tool location — by putting the repo root on sys.path.
+tools/dev machinery is reused — change-set discovery, the compilation-database reader, LLVM-tool location — by putting the repo root on sys.path.
 """
 
 from __future__ import annotations
@@ -212,7 +212,7 @@ def _nopch_database(build_dir: Path, scratch: Path) -> Path:
     return scratch
 
 
-def _sources_in_scope(build_dir: Path, *, dirty_only: bool, explicit: list[str]) -> list[Path]:
+def _sources_in_scope(build_dir: Path, *, scope, explicit: list[str]) -> list[Path]:
     """The `.cc` files to lint: either an explicit list or discovery, intersected with the compile DB.
 
     A file with no compile_commands.json entry — generated, or excluded by the active backend — cannot be linted, so it is dropped rather than erroring.
@@ -220,7 +220,7 @@ def _sources_in_scope(build_dir: Path, *, dirty_only: bool, explicit: list[str])
     if explicit:
         files = [Path(f).resolve() for f in explicit]
     else:
-        files = [f for f in dev.discover_files(ROOT, dirty_only=dirty_only) if f.suffix == ".cc"]
+        files = [f for f in dev.discover_files(ROOT, scope=scope) if f.suffix == ".cc"]
 
     try:
         entries = dev.load_entries(build_dir)
@@ -281,8 +281,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the clang-tidy gates over shaped-core C++ sources.")
     parser.add_argument("--build-dir", metavar="DIR", default=None,
                         help="Directory holding compile_commands.json (default: the platform preset's build dir)")
-    parser.add_argument("--dirty-only", action="store_true",
-                        help="Only lint git-dirty/untracked .cc sources (the next commit's files)")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--dirty-only", action="store_true",
+                       help="Only lint git-dirty/untracked .cc sources (the next commit's files)")
+    scope.add_argument("--commit", metavar="REV", default=None,
+                       help="Only lint the .cc sources a commit or `A..B` range touched; "
+                            "a single commit means its first-parent diff")
     parser.add_argument("--fix", action="store_true",
                         help="Let clang-tidy apply its fixes in place")
     parser.add_argument("--include-incubator", action="store_true",
@@ -313,7 +317,15 @@ def main() -> None:
               file=sys.stderr)
         sys.exit(2)
 
-    files = _sources_in_scope(build_dir, dirty_only=args.dirty_only, explicit=args.files)
+    if args.commit is not None:
+        scope = dev.ChangeScope(args.commit)
+    else:
+        scope = dev.ChangeScope() if args.dirty_only else None
+    try:
+        files = _sources_in_scope(build_dir, scope=scope, explicit=args.files)
+    except dev.ChangeScopeError as e:
+        print(dev.console.red(f"ERROR: {e}"), file=sys.stderr)
+        sys.exit(2)
     if not files:
         print(dev.console.green("clang-tidy: nothing to lint (no .cc sources in scope)"), file=sys.stderr)
         sys.exit(0)

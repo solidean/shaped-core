@@ -492,7 +492,7 @@ compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backe
 ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
 ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (.layout is a pipeline_layout; blocking build; throws sg::pipeline_creation_exception; + try_ twin)
-ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin). No ctx.cached yet.
+ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin)
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
@@ -589,7 +589,9 @@ cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — tra
 ctx.cached.acquire_binding_group_layout(span<binding const>, static_samplers={}) // -> binding_group_layout_handle  SYNC; (bindings, static_samplers) keyed => one shared handle
 ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_layout_handle  SYNC; keyed on the ordered group-layout identities => one shared handle
 ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_compute_pipeline  async PSO build; identical (shader, pipeline layout) => one node
-                                                               //   drive: cc::async_blocking_get_singlethreaded(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
+                                                               //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
+ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_raster_pipeline  async PSO build; keyed on all shaders + layout + vertex input + every fixed-function state
+                                                               //   NOT keyed on .cached_pipeline — that blob only accelerates a build
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
 // keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: ordered group-layout
@@ -600,7 +602,6 @@ ctx.cached.cache()                                             // -> pipeline_ca
 pipeline_cache pc;                                            // standalone use (acquire_* take a context&)
 pc.acquire_binding_group_layout(ctx, bindings);  pc.acquire_pipeline_layout(ctx, {.groups={gl}});  pc.acquire_compute_pipeline(ctx, desc);
 pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provider(p);  pc.apply_bookkeeping();
-// TODO: graphics pipeline caching once that pipeline type lands in sg.
 ```
 
 ## render routines — reusable GPU-work units  (see docs/render-routines.md)

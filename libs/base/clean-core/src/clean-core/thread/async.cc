@@ -4,6 +4,9 @@
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/impl/async_tls.hh>
 
+#include <chrono> // the poll interval a driver waiting on an external push sleeps for
+#include <thread>
+
 using namespace cc::primitive_defines;
 
 // Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump, and the node state machine / poll loop.
@@ -146,6 +149,108 @@ void cc::singlethreaded_scheduler::run_until(cc::function_ref<bool()> done)
     while (!done() && run_one())
     {
     }
+}
+
+bool cc::singlethreaded_scheduler::try_run_one()
+{
+    async_worker_scope const scope(*this); // nests harmlessly if this scheduler is already bound here
+    return run_one();
+}
+
+void cc::singlethreaded_scheduler::participate_until_ready(async_node_base& root)
+{
+    async_worker_scope const scope(*this);
+
+    root.schedule();
+    run_until([&] { return root.is_ready(); });
+
+    // Pump anything still queued out of the `scheduled` state before we stop driving.
+    // run_until stops the moment `root` is ready, which can strand a node that MIGRATED into our queue mid-drive.
+    // schedule() / schedule_on() are idempotent on `scheduled`, so no other scheduler could reclaim it and a wait on it would hang.
+    // Draining with our worker scope still bound settles each such node — completed, or re-parked as `blocked` and re-woken onto whichever scheduler finishes its dependency.
+    drain();
+}
+
+// ============================================================================
+// the ambient scheduler
+// ============================================================================
+
+void cc::install_default_async_scheduler(async_scheduler& scheduler)
+{
+    CC_ASSERT(async_scheduler::default_or_null() == nullptr,
+              "a default async scheduler is already installed; overriding a live default is almost never correct "
+              "(uninstall it first, or use scoped_default_async_scheduler)");
+    async_scheduler::set_default(&scheduler);
+}
+
+void cc::uninstall_default_async_scheduler(async_scheduler& scheduler)
+{
+    CC_ASSERT(async_scheduler::default_or_null() == &scheduler, "uninstall_default_async_scheduler: this scheduler is "
+                                                                "not the currently installed default");
+    CC_UNUSED(scheduler);
+    async_scheduler::set_default(nullptr);
+}
+
+namespace
+{
+/// How long a driver that cannot progress sleeps before asking again.
+///
+/// Only an async awaiting an EXTERNAL push ever gets here — everything a scheduler owns is driven, not polled.
+/// So this trades latency on a path that is already crossing a thread boundary for a driver that costs nothing while it waits.
+constexpr int async_external_poll_ms = 1;
+
+void async_sleep_a_moment()
+{
+    std::this_thread::sleep_for(std::chrono::milliseconds(async_external_poll_ms));
+}
+} // namespace
+
+void cc::impl::async_drive_until_ready(async_node_base& root)
+{
+    auto& scheduler = cc::ambient_async_scheduler();
+
+    while (!root.is_ready())
+    {
+        scheduler.participate_until_ready(root);
+        if (root.is_ready())
+            return;
+
+        // The scheduler ran out of work it could do here, so what is left is somebody else's push.
+        async_sleep_a_moment();
+    }
+}
+
+bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms)
+{
+    // Deliberately NOT participate_until_ready: a pool parks in a slot until the root is ready, which is exactly the wait this overload exists to bound.
+    // Stepping instead keeps the deadline honest, and a bound scheduler still runs its own work while we hold the thread.
+    auto& scheduler = cc::ambient_async_scheduler();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+
+    while (!root.is_ready())
+    {
+        if (scheduler.try_run_one())
+            continue;
+
+        if (std::chrono::steady_clock::now() >= deadline)
+            return root.is_ready();
+
+        async_sleep_a_moment();
+    }
+
+    return true;
+}
+
+cc::async_scheduler& cc::ambient_async_scheduler()
+{
+    if (auto* const bound = async_scheduler::current_or_null())
+        return *bound;
+
+    auto* const installed = async_scheduler::default_or_null();
+    CC_ASSERT(installed != nullptr, "no ambient async scheduler: install one at startup with "
+                                    "cc::install_default_async_scheduler (an app), or let nexus install the run's "
+                                    "own (a test declaring nx::no_scheduler has opted out of it)");
+    return *installed;
 }
 
 // ============================================================================

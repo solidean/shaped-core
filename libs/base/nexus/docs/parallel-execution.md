@@ -40,15 +40,33 @@ Nexus will not quietly finish it for you.
 Set per test, orthogonal to buckets and to exclusion.
 Tests sharing a mode form one graph and run as one **phase**; phases run one after another, because schedulers do not nest.
 
-| Config item | What the test gets |
+| Config item | Where the body runs |
 |---|---|
 | *(default)* | the run's scheduler, capped by `--jobs` |
 | `own_pool(n)` | a private pool of `n` workers, shared with every other test asking for that same count |
-| `no_scheduler` | no scheduler bound at all; bodies driven directly on the calling thread, in schedule order |
+| `main_thread` | directly on the thread `nx::run` was entered on, in schedule order |
+
+## The ambient scheduler
+
+A separate axis from the one above: **where the body runs** is one question, **which scheduler the body's own async work belongs to** is another.
+
+Every async needs an ambient scheduler and it is an error to touch one without it, so a run installs one for each phase (`cc::install_default_async_scheduler`).
+A body running as a node on the phase's pool inherits it as a bound worker scope; a directly driven body gets it as the process-wide default.
+
+| Config item | The ambient scheduler |
+|---|---|
+| *(default)* | a pool — the phase's own where the bodies run on it, otherwise one stood up for the phase |
+| `singlethreaded` | a `cc::singlethreaded_scheduler` bound to the body's thread, so every graph runs inline and in order |
+| `no_scheduler` | none installed and none bound |
+
+`singlethreaded` is for a test whose subject is the ORDER things run in, which a pool is free to change.
 
 `no_scheduler` is what a test needs when it stands up its own `cc` scheduler, or nests an `nx::execute_tests` run of its own.
+Touching an async under it asserts, which is the point: the test has taken that decision over.
 `execute_tests` asserts when a scheduler is already bound rather than nesting one, and names the fix.
 `nx::invoke_tests` is unaffected — a dispatched child runs inside its driver's body and creates no scheduler.
+
+Both drive the body directly, so neither composes with a mode that runs it as a node, and asking for both is an assert.
 
 ## Main-thread affinity
 
@@ -63,12 +81,11 @@ TEST("sr - window system creates and shuts down", main_thread) { … }
 A test that wants its body on main and also drives async work of its own can say both.
 
 `nx::run` records the thread it was entered on, and `execute_tests` asserts that is the thread it was called on before honouring the flag.
-A nested run satisfies that for free: nesting already requires `no_scheduler`, and the no-scheduler group runs bodies on the outer run's calling thread.
+A nested run satisfies that for free: nesting already requires `no_scheduler`, and a directly driven body runs on the outer run's calling thread.
 The case that legitimately trips the assert is a run driven from a thread somebody spawned.
 
-The flag is honoured today by driving the body in the no-scheduler group, which already runs bodies directly on the calling thread.
-That is the implementation and not the contract: `main_thread` promises a thread, `no_scheduler` promises an absent scheduler, and they are asked for separately.
-So main-thread tests share that one phase and run in schedule order among its other members, and cannot yet overlap the shared phase — a quality-of-implementation gap, not a property of the API.
+The flag is honoured by driving the body directly, in schedule order with everything else asking for the same ambient scheduler.
+So main-thread tests cannot yet overlap the shared phase — a quality-of-implementation gap, not a property of the API.
 
 Two combinations are asserts rather than quiet demotions:
 
@@ -117,39 +134,42 @@ That is load-bearing rather than tidiness: an exclusivity edge feeds one test no
 
 ## `ASYNC_TEST`
 
+An `ASYNC_TEST` is a test whose body may `co_await`.
+
 ```cpp
 #include <nexus/async-test.hh>   // a separate header: TEST pays nothing for the async templates
 
 ASYNC_TEST("cache - resolves a miss")
 {
-    auto entry = cache.acquire_async("shader.hlsl");
-    return cc::make_async_lazy<cc::unit>(
-        [entry](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-        {
-            if (!actx.require(entry))
-                return actx.wait_for_dependencies();
-            CHECK(entry->has_value());
-            return actx.resolve_to_value(cc::unit{});
-        });
+    auto const entry = co_await cache.acquire_async("shader.hlsl");
+    CHECK(entry.is_compiled());
 }
 ```
 
-The body runs to its `return` exactly like a `TEST` body: same thread, no scheduler bound, its own graphs its own business.
-What it *returns* is different — nexus schedules that root and makes the test wait on it, so a park inside the graph parks the test instead of blocking a worker.
+The body *is* the graph: nexus schedules it and makes the test wait on it, so a park inside parks the test instead of blocking a worker.
+
+C++ needs at least one `co_` keyword to make a body a coroutine.
+A body that awaits nothing therefore ends in a bare `co_return;`, or stays a plain body that **returns** the graph to await — the pre-coroutine spelling, still supported:
+
+```cpp
+ASYNC_TEST("...") { return cc::make_async_lazy<cc::unit>(/* ... */); }
+```
 
 **Attribution across the suspension rests on one mechanism.**
 Scheduling a **cold** node stamps the scheduling thread's ambient context onto it as a resume token.
-The wrapper installs this test's link and schedules the returned root under it, so `poll()` re-installs that link on whichever worker picks the root up.
-The cold nodes the root drives inline inherit it in turn, because a node without a token of its own inherits its driver's.
+Nexus installs this test's link and schedules the body's root under it, so `poll()` re-installs that link on whichever worker picks it up.
+The cold nodes that root drives inline inherit it in turn, because a node without a token of its own inherits its driver's.
 
-That is why **the returned root must be cold**: a root that was already scheduled or already resolved cannot take the stamp, and the graph's checks would be billed to whatever happened to be driving.
+That is why **the root must be cold**: one already scheduled or already resolved cannot take the stamp, and its checks would be billed to whatever happened to be driving.
 An already-scheduled root is an assert, not a silent misattribution.
+A coroutine body is cold by construction — [`cc::async`'s coroutines are lazy](../../clean-core/docs/systems/async.md#co_await--co_return) — so the rule binds only the returning form.
 
 Two limits, both deliberate:
 
 * **`SECTION` is not available in an async body**, and asserts.
   The section tree is replay state — the body re-runs once per section path — and an async body runs once.
 * **A graph resolving to an error fails the test, naming the error**, and is never propagated onward.
+  An awaited dependency that fails is exactly that: it short-circuits the rest of the body, then fails the test.
 
 `no_scheduler` and `ASYNC_TEST` are mutually exclusive: nothing would drive the graph.
 

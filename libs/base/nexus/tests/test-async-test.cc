@@ -9,42 +9,51 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-// ASYNC_TEST: a body that hands its graph back instead of running to completion.
+// ASYNC_TEST: a test whose body may co_await.
 //
 // The contract worth pinning is attribution across the suspension.
-// The wrapper node installs the test's ambient link and schedules the returned root under it, so a check reported deep
-// inside the graph — on any worker, at any depth — is still billed to this test.
+// The body IS the graph — nexus installs the test's ambient link and schedules it — so a check reported deep inside,
+// on any worker, at any depth, is still billed to this test.
 
-ASYNC_TEST("async test - a check inside the returned graph is billed to this test")
+ASYNC_TEST("async test - a coroutine body awaits and its checks are billed to this test")
+{
+    auto const x = cc::make_async_lazy([] { return 7; });
+    CHECK(co_await x == 7);
+    CHECK(1 + 1 == 2);
+}
+
+namespace
+{
+// A coroutine of its own, so the CHECK below is reported from a node nexus never saw, one level down.
+cc::shared_async<int> checking_seven()
+{
+    CHECK(true);
+    co_return 7;
+}
+} // namespace
+
+ASYNC_TEST("async test - a check below an awaited dependency is billed to this test too")
+{
+    CHECK(co_await checking_seven() == 7);
+}
+
+ASYNC_TEST("async test - async_all fans out from a test body")
+{
+    auto const a = cc::make_async_lazy([] { return 2; });
+    auto const b = cc::make_async_lazy([] { return 5; });
+
+    co_await cc::async_all(a, b);
+    CHECK(co_await a + co_await b == 7);
+}
+
+// The pre-coroutine spelling, still supported: a body with no co_ keyword must RETURN the graph to await.
+// It has to be cold, which a coroutine body is by construction and a returned graph is not.
+ASYNC_TEST("async test - a body may still return a graph instead of awaiting")
 {
     return cc::make_async_lazy<cc::unit>(
         [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
         {
             CHECK(1 + 1 == 2);
-            return actx.resolve_to_value(cc::unit{});
-        });
-}
-
-ASYNC_TEST("async test - a check below a parked dependency is billed to this test too")
-{
-    // Two levels: the outer frame parks on a dependency it builds on the fly, and both report checks.
-    auto inner = cc::make_async_lazy<int>(
-        [](cc::async_context<int>& actx) -> cc::async_step_status
-        {
-            CHECK(true); // reported from a node nexus never saw
-            return actx.resolve_to_value(7);
-        });
-
-    return cc::make_async_lazy<cc::unit>(
-        [inner, waited = false](cc::async_context<cc::unit>& actx) mutable -> cc::async_step_status
-        {
-            if (!waited)
-            {
-                waited = true;
-                if (!actx.require(inner))
-                    return actx.wait_for_dependencies();
-            }
-            CHECK(*inner->value_ptr() == 7);
             return actx.resolve_to_value(cc::unit{});
         });
 }
