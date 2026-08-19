@@ -9,6 +9,7 @@ add_library(shaped-rendering
     src/shaped-rendering/shaped-rendering.cc
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
+    src/shaped-rendering/keyed_pipeline_cache.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
     src/shaped-rendering/imgui_style.cc

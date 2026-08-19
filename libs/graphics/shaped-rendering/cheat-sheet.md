@@ -193,9 +193,9 @@ sr::keyed_pipeline_cache<sg::pixel_format> pipelines;   // Pipeline defaults to 
 
 // In init_declare, after building the layout: (re)bind the build callback + CLEAR the cache.
 pipelines.init(ctx, [layout, vs, ps](sg::context& c, sg::pixel_format format)
-                    { return c.uncached.try_create_raster_pipeline({.layout = layout, .vertex_shader = vs,
-                                                                     .fragment_shader = ps,
-                                                                     .color_targets = {{.format = format}}}); });
+                    { return sr::build_cached_raster_pipeline(c, {.layout = layout, .vertex_shader = vs,
+                                                                  .fragment_shader = ps,
+                                                                  .color_targets = {{.format = format}}}); });
 
 auto pipe = pipelines.try_acquire(format);    // -> cc::result<handle>; the form for inside a rendering scope
 if (!pipe.has_error() && pipe.value())
@@ -206,6 +206,9 @@ pipelines.acquire_async(format);  // -> cc::shared_async<handle>; the fallible f
 pipelines.prepare(format);        // warm the cache for `format` ahead of the draw
 ```
 
+- **`sr::build_cached_raster_pipeline(ctx, desc)`** is the build callback's one-liner: it acquires through `ctx.cached` and blocks on the build.
+  So the PSO is shared with every other routine asking for the same description.
+  Blocking is safe here — it happens inside the keyed cache's own async frame, where a `blocking_get` participates in the graph rather than idling.
 - **`init` clears the cache** — call it on every (re)load: a rebuilt layout invalidates every pipeline cached
   against the old one, and re-`init` both drops them and rebinds the fresh callback.
 - **`handle` is `std::shared_ptr<Pipeline const>`** — for the default it IS `sg::raster_pipeline_handle`.

@@ -5,13 +5,12 @@
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// Backend-agnostic cache for group layouts, pipeline layouts, and compute + raytracing pipelines.
+/// Backend-agnostic cache for group layouts, pipeline layouts, and compute + raster + raytracing pipelines.
 /// Keyed by a cc::hash128 over the logical creation arguments, so it is independent of any backend handle identity.
 /// A second acquire with the same arguments returns the already-created handle / async node instead of rebuilding.
 ///
 /// Layouts are cheap and cached synchronously.
 /// Pipelines are built asynchronously as a cc::async routed to the installed default pool, since PSO creation is multi-ms.
-/// Raster pipelines are not cached yet.
 ///
 /// A context owns one of these, reached via ctx.cached; the acquire_* methods take the owning context so the cache stays a plain member.
 ///
@@ -32,6 +31,9 @@ public:
 
     /// Adds a tier to the compute-pipeline cache.
     void add_compute_pipeline_provider(std::shared_ptr<cc::key_value_provider<cc::hash128, async_compute_pipeline>> provider);
+
+    /// Adds a tier to the raster-pipeline cache.
+    void add_raster_pipeline_provider(std::shared_ptr<cc::key_value_provider<cc::hash128, async_raster_pipeline>> provider);
 
     /// Adds a tier to the raytracing-pipeline cache.
     void add_raytracing_pipeline_provider(
@@ -60,6 +62,12 @@ public:
     /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc);
 
+    /// The async raster_pipeline for `desc`, built via ctx.uncached on a miss.
+    /// The key combines every shader's content with the pipeline_layout handle's identity, the vertex-input layout and all fixed-function state.
+    /// `desc.cached_pipeline` is NOT part of the key — it is a best-effort driver blob, so seeding a build with one must still hit the same entry.
+    /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    [[nodiscard]] async_raster_pipeline acquire_raster_pipeline(context& ctx, raster_pipeline_description const& desc);
+
     /// The async raytracing_pipeline for `desc`, built via ctx.uncached on a miss.
     /// The key combines every shader's content with the pipeline_layout handle's identity and the pipeline limits.
     /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
@@ -76,11 +84,12 @@ private:
                                                                cc::span<named_sampler const> static_samplers) const;
     [[nodiscard]] cc::hash128 compute_pipeline_layout_key(pipeline_layout_description const& desc) const;
     [[nodiscard]] cc::hash128 compute_compute_pipeline_key(compute_pipeline_description const& desc) const;
+    [[nodiscard]] cc::hash128 compute_raster_pipeline_key(raster_pipeline_description const& desc) const;
     [[nodiscard]] cc::hash128 compute_raytracing_pipeline_key(raytracing_pipeline_description const& desc) const;
 
     cc::key_value_cache<cc::hash128, binding_group_layout_handle> _binding_group_layout_cache;
     cc::key_value_cache<cc::hash128, pipeline_layout_handle> _pipeline_layout_cache;
     cc::key_value_cache<cc::hash128, async_compute_pipeline> _compute_cache;
+    cc::key_value_cache<cc::hash128, async_raster_pipeline> _raster_cache;
     cc::key_value_cache<cc::hash128, async_raytracing_pipeline> _raytracing_cache;
-    // TODO: a raster_pipeline cache tier.
 };

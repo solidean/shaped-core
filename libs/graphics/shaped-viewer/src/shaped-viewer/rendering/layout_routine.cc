@@ -118,14 +118,15 @@ void layout_routine::init_declare(sg::context& ctx)
             if (key.blended)
                 target.blend = over_blend;
 
-            return c.uncached.try_create_raster_pipeline({
+            auto const desc = sg::raster_pipeline_description{
                 .layout = layout,
                 .vertex_shader = vertex_shader,
                 .fragment_shader = fragment_shader,
                 .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
                 .rasterization = {.cull = sg::cull_mode::none},
                 .color_targets = {target},
-            });
+            };
+            return sr::build_cached_raster_pipeline(c, desc);
         });
 }
 

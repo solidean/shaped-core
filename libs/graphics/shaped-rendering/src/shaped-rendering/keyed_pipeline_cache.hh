@@ -101,3 +101,15 @@ private:
     // Mutable: acquiring is logically a read — the get-or-create is an internal detail behind the mutex.
     mutable cc::mutex<map_t> _cache;
 };
+
+namespace sr
+{
+/// A `keyed_pipeline_cache<Key>` build callback in one line: acquire `desc` through ctx.cached and block on the build.
+///
+/// The two caches stack on purpose — the keyed cache maps the routine's key to a pipeline and owns reload invalidation, while identity and the build itself belong to ctx.cached.
+/// So two routines drawing the same shaders into the same target format share one PSO.
+/// Blocking here happens inside the keyed cache's own async frame, where a blocking_get participates in the graph rather than idling.
+[[nodiscard]] cc::result<sg::raster_pipeline_handle> build_cached_raster_pipeline(
+    sg::context& ctx,
+    sg::raster_pipeline_description const& desc);
+} // namespace sr

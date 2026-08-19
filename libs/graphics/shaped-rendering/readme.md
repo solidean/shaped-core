@@ -93,6 +93,9 @@ The key is almost always the render-target pixel format: a routine draws the sam
 It replaces the hand-rolled "small vector of `{format, pipeline}` plus a linear-search find-or-create" that routines otherwise grow (`sr::blit_routine` is the first user).
 
 The build callback — given the context and the key — does the actual creation, so the cache stays agnostic to what a pipeline needs.
+For a raster pipeline that callback is `sr::build_cached_raster_pipeline`, which routes the build through `ctx.cached`.
+The keyed cache owns the key -> pipeline mapping and reload invalidation, while pipeline identity and the build itself belong to sg's own cache.
+So two routines drawing the same shaders into the same format share one PSO.
 The caller captures its layout and shaders into the callback at `init` time.
 `init` clears the cache, which is exactly what a hot-reload wants: a rebuilt layout invalidates every pipeline cached against the old one.
 The sync path is a `try_acquire` (→ `cc::result`) / `acquire` (→ throws) pair, mirroring sg's `try_create_*` / `create_*`.

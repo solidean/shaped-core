@@ -184,18 +184,19 @@ void imgui_routine::init_declare(sg::context& ctx)
         [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
             sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
         {
-            return c.uncached.try_create_raster_pipeline(
-                {.layout = layout,
-                 .vertex_shader = vertex_shader,
-                 .fragment_shader = fragment_shader,
-                 .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
-                 .topology = sg::primitive_topology::triangle_list,
-                 .rasterization = {.cull = sg::cull_mode::none},
-                 .color_targets
-                 = {{.format = format,
-                     .blend = sg::blend_state{
-                         .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
-                         .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}});
+            auto const desc = sg::raster_pipeline_description{
+                .layout = layout,
+                .vertex_shader = vertex_shader,
+                .fragment_shader = fragment_shader,
+                .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
+                .topology = sg::primitive_topology::triangle_list,
+                .rasterization = {.cull = sg::cull_mode::none},
+                .color_targets
+                = {{.format = format,
+                    .blend = sg::blend_state{
+                        .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
+                        .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}};
+            return build_cached_raster_pipeline(c, desc);
         });
 }
 

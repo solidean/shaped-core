@@ -1,5 +1,6 @@
 #include <clean-core/container/vector.hh>
-#include <clean-core/fwd.hh> // offsetof
+#include <clean-core/fwd.hh>          // offsetof
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -151,7 +152,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a trian
     sg::compiled_shader gs = compile("main_gs", sg::shader_stage::geometry);
     sg::compiled_shader ps = compile("main_ps", sg::shader_stage::fragment);
 
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout({});
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout({});
     REQUIRE(pipeline_layout != nullptr);
 
     sg::raster_pipeline_description desc;
@@ -163,7 +164,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a trian
     desc.topology = sg::primitive_topology::point_list;
     desc.rasterization.cull = sg::cull_mode::none;
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = ctx.uncached.create_raster_pipeline(desc);
+    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
     REQUIRE(pipeline != nullptr);
 
     constexpr int W = 16;
@@ -243,7 +244,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch t
     sg::compiled_shader ds = compile("main_ds", sg::shader_stage::tessellation_evaluation);
     sg::compiled_shader ps = compile("main_ps", sg::shader_stage::fragment);
 
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout({});
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout({});
     REQUIRE(pipeline_layout != nullptr);
 
     sg::raster_pipeline_description desc;
@@ -257,7 +258,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch t
     desc.patch_control_points = 3;
     desc.rasterization.cull = sg::cull_mode::none;
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = ctx.uncached.create_raster_pipeline(desc);
+    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
     REQUIRE(pipeline != nullptr);
 
     constexpr int W = 16;

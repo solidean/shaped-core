@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -323,9 +324,9 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
     auto blit_vs = compile(blit_hlsl, "main_vs", sg::shader_stage::vertex, ssc::dxc::shader_model::sm_6_8);
     auto blit_ps = compile(blit_hlsl, "main_ps", sg::shader_stage::fragment, ssc::dxc::shader_model::sm_6_8);
 
-    auto blit_group_layout = ctx.uncached.create_binding_group_layout(blit_ps.bindings);
+    auto blit_group_layout = ctx.cached.acquire_binding_group_layout(blit_ps.bindings);
     REQUIRE(blit_group_layout != nullptr);
-    auto blit_pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {blit_group_layout}});
+    auto blit_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {blit_group_layout}});
     REQUIRE(blit_pipeline_layout != nullptr);
 
     auto blit_desc = sg::raster_pipeline_description{
@@ -336,7 +337,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
         .rasterization = {.cull = sg::cull_mode::none},
         .color_targets = {{.format = sc->format()}},
     };
-    auto blit_pipeline = ctx.uncached.create_raster_pipeline(blit_desc);
+    auto blit_pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(blit_desc));
     REQUIRE(blit_pipeline != nullptr);
 
     auto const blit_sampler = sg::sampler{.min_filter = sg::sampler_filter::linear,

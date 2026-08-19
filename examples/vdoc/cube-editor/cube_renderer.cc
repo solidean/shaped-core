@@ -166,8 +166,8 @@ cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::sh
                         [layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
                             sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
                         {
-                            return c.uncached.try_create_raster_pipeline(
-                                {.layout = layout,
+                            auto const desc = sg::raster_pipeline_description{
+                                 .layout = layout,
                                  .vertex_shader = vertex_shader,
                                  .fragment_shader = fragment_shader,
                                  .vertex_input = sg::vertex_input_layout::create<cube_vertex, cube_instance>(),
@@ -176,7 +176,8 @@ cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::sh
                                  // shows whichever face happened to be recorded last.
                                  .depth_stencil = {.depth_test = true, .depth_write = true},
                                  .color_targets = {{.format = format}},
-                                 .depth_stencil_format = sg::pixel_format::depth32_float});
+                                 .depth_stencil_format = sg::pixel_format::depth32_float};
+                            return sr::build_cached_raster_pipeline(c, desc);
                         });
     return out;
 }

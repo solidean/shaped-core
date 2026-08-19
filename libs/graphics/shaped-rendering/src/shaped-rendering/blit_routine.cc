@@ -37,14 +37,15 @@ void blit_routine::init_declare(sg::context& ctx)
                     [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
                         sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
                     {
-                        return c.uncached.try_create_raster_pipeline({
+                        auto const desc = sg::raster_pipeline_description{
                             .layout = layout,
                             .vertex_shader = vertex_shader,
                             .fragment_shader = fragment_shader,
                             .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
                             .rasterization = {.cull = sg::cull_mode::none},
                             .color_targets = {{.format = format}},
-                        });
+                        };
+                        return build_cached_raster_pipeline(c, desc);
                     });
 }
 
