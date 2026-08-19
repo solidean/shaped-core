@@ -6,6 +6,7 @@ Back to [guides](_index.md).
 
 ```bash
 uv run dev.py lint shaped --dirty-only   # the loop: your changed lines only
+uv run dev.py lint shaped --commit <rev> # the same, for a commit or range you already made
 uv run dev.py lint shaped --fix          # apply what is mechanically safe
 uv run dev.py lint clang-tidy            # the C++ gates (see building-and-testing.md)
 
@@ -35,6 +36,10 @@ Its rules encode conventions the guidelines only summarize, and seeing them fire
 
 A prose finding sits on exactly one line, and that line either changed or it did not, so a dirty-only run can be scoped to changed lines exactly rather than approximately.
 The [readme](../../tools/shaped-linter/readme.md#--changed-lines-and-why-dirty-only-is-line-exact-for-prose) has the mechanism.
+
+`--commit <rev>` takes the same line ranges from a commit instead of the working tree, which is how you re-check prose you have already committed.
+Its one caveat is that the ranges are numbered against that commit while the linter reads the file from disk, so a tree that has moved on filters against stale lines — the run warns when that happens.
+See [Re-checking a commit or a range](building-and-testing.md#re-checking-a-commit-or-a-range).
 
 The consequence is the one to carry: **editing one section of a long document puts only those lines in the gate.**
 That is what makes a drive-by prose fix a terminating job rather than an unbounded sweep of the file.

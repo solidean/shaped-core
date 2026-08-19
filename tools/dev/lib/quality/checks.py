@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..core import console, profile
+from .changes import ChangeScope
 
 
 @dataclass
@@ -39,7 +40,7 @@ def run_checks(
     selected: list[Check],
     *,
     fix: bool,
-    all_scope: bool,
+    scope: ChangeScope | None,
     mirror: bool,
     verbose: bool,
     no_test: bool,
@@ -48,13 +49,14 @@ def run_checks(
 
     Static checks run first, and a `requires_green` check runs only if none of them failed and `no_test` is False.
     There is no point building and testing a tree that already fails a cheap lint.
+    `scope` is handed to every check identically; a check that is always repo-wide ignores it.
     """
     failed: list[str] = []
 
     def run_one(c: Check) -> None:
         print(console.dim(f"\n--- running {c.name} ---"), file=sys.stderr)
         with profile.span(c.name, type="check-gate"):
-            ok = c.run(fix=fix, all_scope=all_scope, mirror=mirror, verbose=verbose)
+            ok = c.run(fix=fix, scope=scope, mirror=mirror, verbose=verbose)
         if not ok:
             failed.append(c.name)
 

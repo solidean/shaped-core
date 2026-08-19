@@ -245,10 +245,12 @@ The scope is a whitelist — `libs/`, `tools/instruction-tracer/` and `tools/sha
 uv run dev.py format                         # format every libs/ source in place
 uv run dev.py format --dirty-only            # only git-dirty/untracked files — the pre-commit move
 uv run dev.py format --dirty-only --check-only   # verify without rewriting (exit 1 if any differ)
+uv run dev.py format --commit <rev>          # only the sources that commit or range touched
 ```
 
 `--check-only` rewrites nothing; it lists the non-conforming files and exits non-zero, so it works as a CI or pre-commit gate.
 `--dirty-only` restricts the set to what is part of your next commit — modified, staged, or untracked — and the two pair up before committing.
+`--commit` asks the same question of an already-committed change set instead — see [Re-checking a commit or a range](#re-checking-a-commit-or-a-range).
 
 clang-format output is not stable across major versions, so the command pins to the major version declared by `.clang-format`'s `Requires: clang-format >= N` header.
 It **errors** if the installed clang-format's major differs; `--allow-different-version` downgrades that to a warning and proceeds anyway.
@@ -266,6 +268,7 @@ uv run dev.py check            # run every check -> one verdict
 uv run dev.py check --fix      # apply fixable checks (clang-format -i), then report
 uv run dev.py check --no-test  # static checks only — skip the build+test tail (docs-only re-check)
 uv run dev.py check --all      # widen lint, shaped-lint and format from dirty-only to the whole tree
+uv run dev.py check --commit <rev>   # check a commit or range instead of the working tree
 uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
 ```
@@ -274,9 +277,9 @@ Registered checks, **in the order they run**:
 
 | Check        | What it does                                                                   | `--fix`? |
 |--------------|--------------------------------------------------------------------------------|----------|
-| `lint`       | clang-tidy whitelist gates on `.cc` sources. Dirty-only by default; `--all` for the whole tree.  | yes (applies clang-tidy fixes) |
-| `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Dirty-only by default; `--all` for the whole tree. | yes (applies its suggested fixes) |
-| `format`     | clang-format our C++ sources. Dirty-only by default; `--all` for the whole tree. | yes (rewrites in place) |
+| `lint`       | clang-tidy whitelist gates on `.cc` sources. Dirty-only by default; `--commit` or `--all` to rescope.  | yes (applies clang-tidy fixes) |
+| `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Dirty-only by default; `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
+| `format`     | clang-format our C++ sources. Dirty-only by default; `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
 
@@ -290,7 +293,7 @@ Naming checks explicitly does not change it: `check format lint` runs `lint` fir
 The gates are a strict, must-be-zero whitelist in [tools/lint/clang-tidy-gates.yml](../../tools/lint/clang-tidy-gates.yml).
 That whitelist is deliberately distinct from the root `.clang-tidy` clangd reads, which stays the broader IDE incubator; a check graduates into the gate once the tree is clean under it.
 Only `.cc` translation units are linted — a bare header has no compile-database entry, so its diagnostics surface through the `.cc` that includes it.
-Dirty-only by default so gates adopt incrementally; `--all` widens to the whole tree, and `--fix` lets clang-tidy rewrite.
+Dirty-only by default so gates adopt incrementally; `--all` widens to the whole tree, `--commit` retargets it at a commit, and `--fix` lets clang-tidy rewrite.
 `shaped-lint` is the same shape over shaped-linter's own rules, which cover `.cc` / `.hh` / `.md` / `.py` — code *and* prose.
 `dev.py lint` is the front door for both, plus `prose-apply` and `prose-stats`; the prose half is [prose.md](prose.md)'s.
 
@@ -317,6 +320,31 @@ On failure it prints the `test_diag` selector, same as `dev.py test`.
 Windows has no sanitizer leg — see [Sanitizers](#sanitizers) for why.
 
 New gates plug into the check registry in [cmd/check.py](../../tools/dev/cmd/check.py) without changing the command surface.
+
+### Re-checking a commit or a range
+
+Dirty-only is exactly right *before* a commit and useless *after* one.
+Once the work is committed the working tree is clean, so a re-check finds nothing to check and reports green without having looked at anything.
+`--commit` is the answer: it takes the changed files, and the changed lines, from a commit instead of from the working tree.
+
+```bash
+uv run dev.py check --commit c24d3581        # everything that merge brought in
+uv run dev.py check --commit main..HEAD      # a branch's worth of work
+uv run dev.py lint shaped --commit HEAD      # one gate, same scope
+```
+
+**A single commit means its first-parent diff**, so pointing it at a merge gives you everything the merge brought in rather than only the conflict resolutions.
+That is the case it was built for: a merge lands on `main` and you want the gates re-run over the whole merged-in change set.
+A range is handed to git as given, so `A..B` and `A...B` both behave as they do everywhere else.
+
+Two things to know before trusting a result:
+
+- **A bad revision is a hard error, not an empty run.** A typo'd hash would otherwise scope every gate to zero files and report green, which is the one failure a re-check must never produce.
+- **Line ranges come from the commit, but the linters read files from disk.**
+  If the tree has moved on since, prose findings are filtered against stale line numbers, and the run warns, naming the drifted files.
+
+`--all` and `--commit` are mutually exclusive, as are `--dirty-only` and `--commit` on `format` and `lint`; each names a different change set and only one can win.
+`crossrefs` ignores the scope entirely and stays repo-wide, because a moved file breaks links in other, untouched files.
 
 ## clangd / IDE code intelligence
 
@@ -487,6 +515,12 @@ These are the parts that fail quietly: a lane that double-books two overlapping 
 
 ```bash
 uv run tools/dev/profile-self-test.py
+```
+
+The change-set discovery behind `--dirty-only` and `--commit` has one for the same reason — a scope that resolves to nothing reports green without having looked at a line.
+
+```bash
+uv run tools/dev/changes-self-test.py
 ```
 
 ## Tests (nexus)

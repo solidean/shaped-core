@@ -145,7 +145,7 @@ TEST("lint config - a nearer config re-opens what the root denied, narrowly")
     CHECK(cfg.classify_include("libs/base/clean-core/src/clean-core/vector.hh", "<atomic>").verdict
           == include_verdict::denied);
     // Another library is not reached by clean-core's entry at all.
-    CHECK(cfg.classify_include("libs/io/babel-serializer/src/x.hh", "<atomic>").verdict == include_verdict::denied);
+    CHECK(cfg.classify_include("libs/data/babel-serializer/src/x.hh", "<atomic>").verdict == include_verdict::denied);
 }
 
 TEST("lint config - an entry only reaches files below its own config")

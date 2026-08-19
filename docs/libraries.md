@@ -67,29 +67,24 @@ The planned scope:
 
 [structure.md](../libs/base/typed-geometry/docs/structure.md) carries both what exists today — the scalar seam, the linalg core, the first geometry primitives — and the full roadmap.
 
-## io
+## data
 
-Getting data in and out, in various formats.
+Understanding data: the formats it arrives in, and the structures that outlive a session — documents, their history, and the files they live in.
 Layered on `base`, below the graphics stack.
 
 ### babel-serializer — namespace `babel` — depends on clean-core, typed-geometry
 
-[readme](../libs/io/babel-serializer/readme.md) ·
-[cheat-sheet](../libs/io/babel-serializer/cheat-sheet.md) ·
-[docs](../libs/io/babel-serializer/docs/_index.md)
+[readme](../libs/data/babel-serializer/readme.md) ·
+[cheat-sheet](../libs/data/babel-serializer/cheat-sheet.md) ·
+[docs](../libs/data/babel-serializer/docs/_index.md)
 
 Serialization and deserialization of various formats, often thin wrappers over existing libraries and often our own take on a parse.
 Two layers, kept distinct: each format parses into an **unopinionated native structure**, and **opinionated aggregators** — "load an image", "load a mesh" — sit on top of those.
 Reading is optimized for the read-once case and takes a `cc::read_stream`, with one deviation for a format that must hand back zero-copy views of its input.
-[coding-guidelines.md](../libs/io/babel-serializer/docs/coding-guidelines.md) owns all of that.
+[coding-guidelines.md](../libs/data/babel-serializer/docs/coding-guidelines.md) owns all of that.
 Today: a base64 codec, JSON and markdown readers plus a SQLite engine wrapper (`data/`), and Wavefront OBJ and glTF 2.0/GLB readers (`geometry/`).
 Plus PNG/JPEG read+write, with the `babel::image` aggregator on top (`image/`).
-The roadmap lives in [structure.md](../libs/io/babel-serializer/docs/structure.md).
-
-## data
-
-Structured data that outlives a session: documents, their history, and the files they live in.
-Layered on `base`, and on `io` where persistence needs a storage engine.
+The roadmap lives in [structure.md](../libs/data/babel-serializer/docs/structure.md).
 
 ### versioned-document — namespace `vdoc` — depends on clean-core
 
