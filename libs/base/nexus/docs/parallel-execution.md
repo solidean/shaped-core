@@ -117,39 +117,42 @@ That is load-bearing rather than tidiness: an exclusivity edge feeds one test no
 
 ## `ASYNC_TEST`
 
+An `ASYNC_TEST` is a test whose body may `co_await`.
+
 ```cpp
 #include <nexus/async-test.hh>   // a separate header: TEST pays nothing for the async templates
 
 ASYNC_TEST("cache - resolves a miss")
 {
-    auto entry = cache.acquire_async("shader.hlsl");
-    return cc::make_async_lazy<cc::unit>(
-        [entry](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-        {
-            if (!actx.require(entry))
-                return actx.wait_for_dependencies();
-            CHECK(entry->has_value());
-            return actx.resolve_to_value(cc::unit{});
-        });
+    auto const entry = co_await cache.acquire_async("shader.hlsl");
+    CHECK(entry.is_compiled());
 }
 ```
 
-The body runs to its `return` exactly like a `TEST` body: same thread, no scheduler bound, its own graphs its own business.
-What it *returns* is different — nexus schedules that root and makes the test wait on it, so a park inside the graph parks the test instead of blocking a worker.
+The body *is* the graph: nexus schedules it and makes the test wait on it, so a park inside parks the test instead of blocking a worker.
+
+C++ needs at least one `co_` keyword to make a body a coroutine.
+A body that awaits nothing therefore ends in a bare `co_return;`, or stays a plain body that **returns** the graph to await — the pre-coroutine spelling, still supported:
+
+```cpp
+ASYNC_TEST("...") { return cc::make_async_lazy<cc::unit>(/* ... */); }
+```
 
 **Attribution across the suspension rests on one mechanism.**
 Scheduling a **cold** node stamps the scheduling thread's ambient context onto it as a resume token.
-The wrapper installs this test's link and schedules the returned root under it, so `poll()` re-installs that link on whichever worker picks the root up.
-The cold nodes the root drives inline inherit it in turn, because a node without a token of its own inherits its driver's.
+Nexus installs this test's link and schedules the body's root under it, so `poll()` re-installs that link on whichever worker picks it up.
+The cold nodes that root drives inline inherit it in turn, because a node without a token of its own inherits its driver's.
 
-That is why **the returned root must be cold**: a root that was already scheduled or already resolved cannot take the stamp, and the graph's checks would be billed to whatever happened to be driving.
+That is why **the root must be cold**: one already scheduled or already resolved cannot take the stamp, and its checks would be billed to whatever happened to be driving.
 An already-scheduled root is an assert, not a silent misattribution.
+A coroutine body is cold by construction — [`cc::async`'s coroutines are lazy](../../clean-core/docs/systems/async.md#co_await--co_return) — so the rule binds only the returning form.
 
 Two limits, both deliberate:
 
 * **`SECTION` is not available in an async body**, and asserts.
   The section tree is replay state — the body re-runs once per section path — and an async body runs once.
 * **A graph resolving to an error fails the test, naming the error**, and is never propagated onward.
+  An awaited dependency that fails is exactly that: it short-circuits the rest of the body, then fails the test.
 
 `no_scheduler` and `ASYNC_TEST` are mutually exclusive: nothing would drive the graph.
 

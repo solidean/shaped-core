@@ -6,6 +6,7 @@ It is the CPU fan-out "task system" that `cc::threaded_actor` defers to.
 `E` is the failure-channel type, defaulting to `async_error` — a move-only wrapper over `cc::any_error`; any type works (an enum, a small struct, …).
 
 Headers: [`async.hh`](../../src/clean-core/thread/async.hh) (public, templated) and [`async_node.hh`](../../src/clean-core/thread/async_node.hh) (untemplated core + scheduler seam).
+[`async_coroutine.hh`](../../src/clean-core/thread/async_coroutine.hh) is the opt-in `co_await` layer over them — see [co_await / co_return](#co_await--co_return).
 **Incubator-stage** API — expect it to grow and change.
 
 ## Model
@@ -324,6 +325,109 @@ auto ri = cc::make_async_from_value_emplace<Immovable>(7);        // build T in 
 // also make_async_from_error_emplace<T, E>(args...)
 ```
 
+## `co_await` / `co_return`
+
+A coroutine **is** a compute frame.
+The frame contract — re-entrant, polled repeatedly, never moved, resolving through the context — is one-for-one what a coroutine gives you, so the layer in
+[`async_coroutine.hh`](../../src/clean-core/thread/async_coroutine.hh) adds **no node state at all**.
+
+| frame contract | coroutine |
+|---|---|
+| polled again once dependencies are ready | `h.resume()` |
+| state persists, frame never moved | the coroutine frame is stable heap storage |
+| `require(dep)` then `wait_for_dependencies()` | `await_suspend` requires, then suspends |
+| `resolve_to_value` | `co_return` |
+| exception containment | `unhandled_exception()` |
+
+Including that header is what makes a function returning `shared_async<T, E>` a coroutine — `async.hh` alone does not, and `<coroutine>` never reaches it.
+A graph that does not await pays nothing: no field on the node, no branch in `poll()`.
+
+```cpp
+cc::shared_async<int> load(cc::string path)      // COLD: calling load() runs nothing
+{
+    auto const& bytes = co_await read(path);     // a failed read short-circuits
+    co_return parse(bytes);
+}
+```
+
+### Lazy by default, like every other spelling here
+
+The two coroutine return types map one-for-one onto the two factories, and the plain one is the lazy one:
+
+| return type | means | mirrors |
+|---|---|---|
+| `cc::shared_async<T, E>` | **cold** until something requires or schedules it | `make_async_lazy` |
+| `cc::async_scheduled<T, E>` | scheduled at its initial suspend; converts to `shared_async<T, E>` | `make_async_scheduled` |
+
+That is the same rule the rest of the system follows — *"there is deliberately no plain `map` that hides which of the two you get"* — and a coroutine must not be the exception.
+An eager default would also make the meaning of a call site depend on **ambient** state, since scheduling is a no-op with nothing bound to route to.
+The same line would then start work in production and nothing in a test, with neither reading written down anywhere.
+
+Eager scheduling has to live in the **return type** rather than in something the caller opts into afterwards.
+It happens at the initial suspend, which is over before the caller ever sees the handle.
+It cannot move into `get_return_object` either: the coroutine is not suspended there yet, so a peer could resume a frame still inside its own ramp.
+
+`cc::async_start(h)` is the explicit "and go" for a handle you already hold.
+It is idempotent, and a no-op where nothing could be reached — no worker scope bound and no default pool — which leaves the node cold rather than asserting.
+
+**`co_await` never starts work.**
+`require()` is a wakeup edge, and one await parks on one dependency, so **awaiting two cold asyncs in sequence runs them in sequence**.
+That is the cost of the lazy default, and `cc::async_all` is the answer: it requires every dependency before parking, so the poll loop can publish the rest for peers to steal.
+It hands back nothing — read each value with a plain `co_await`, which no longer suspends once the node is ready.
+
+```cpp
+co_await cc::async_all(a, b, c);            // one park, on all three
+auto const sum = co_await a + co_await b;   // neither suspends
+
+auto const x = cc::async_start(load(p));    // the other way: start them, then await
+auto const y = cc::async_start(load(q));
+auto const both = co_await x + co_await y;
+```
+
+### Failure short-circuits without unwinding
+
+A failed dependency means the coroutine is **never resumed**.
+The frame destroys it while suspended — which runs the destructors of every in-scope local — and resolves the node with the propagated error.
+The rest of the body is skipped, and so is any `catch` in it.
+That matches the `make_async_*` sugar's short-circuit, and it avoids both an unwind and the message re-materialization a throwing `await_resume` would cost the default `async_error`.
+
+Three writers share **one** failure slot on the promise — a dependency short-circuit, an escaped exception, and `cc::async_fail` — and the frame is the only reader.
+`co_await cc::async_settled(a)` waits without short-circuiting, and leaves you to read `a->try_value()` / `a->try_error()`.
+`cc::async_as_result(a)` is the same wait handed back as a `cc::result`, at the cost of a copy.
+
+`co_await cc::async_fail(e)` is the uniform failure spelling.
+`co_return cc::error(...)` also works, but only for a non-`unit` `T`.
+`return_void` and `return_value` cannot coexist, so a `cc::unit` coroutine keeps the bare `co_return;` and fails through `async_fail`.
+
+### What it costs
+
+One heap allocation for the coroutine frame, on top of the node.
+It cannot be elided, since the handle escapes into the node, and it goes through the same slab the node does (`promise_type::operator new`).
+
+The node's stored frame is that one handle: **8 B, always inline**, so a coroutine never spills into the boxed `cc::unique_function`.
+The useful comparison is therefore *a lambda frame that spills* — above the 24 B budget a closure boxes anyway, so at that size a coroutine costs the same.
+Below it, the small lambda frame remains the zero-allocation path, deliberately.
+
+### `async_yield`
+
+`co_await cc::async_yield()` maps onto `async_step_status::yield`: the node goes running → scheduled and is re-enqueued.
+It is deliberately a narrow tool, and it is **not** cooperative multitasking.
+A worker pops its own deque bottom LIFO, so an otherwise idle one pops the yielding node straight back — a re-poll plus a queue round trip.
+What it does buy: the node becomes **stealable** by a peer while it sits there, and work pushed after it runs first.
+It is not how you wait for something external — that is a manual node, pushed by whatever completes it, rather than a yield loop burning a worker.
+
+### The sharp edges
+
+* **Coroutine parameters are captured by their declared type**, so a reference parameter dangles across the first suspend.
+  Take them **by value**.
+* **`T` must be movable** — `co_return` moves the result through the promise.
+  An immovable `T` stays on the raw-frame emplace API.
+* **A coroutine can resume on a different thread than it suspended on.**
+  Nothing may be held across a `co_await` that is bound to a thread.
+* **Dropping a started coroutine's handle does not cancel it**: the schedule queue holds the node, and the system is cooperative throughout.
+  Dropping a *cold* one, by contrast, simply destroys it — nothing ever ran.
+* `co_await a` yields a `U const&` **into the node's payload**, so reading it copies nothing — but binding `auto const&` to the result of awaiting a *temporary* dangles once the full-expression ends.
+
 ## Concurrent execution: `async_thread_pool`
 
 `cc::async_thread_pool` ([`clean-core/thread/async_thread_pool.hh`](../../src/clean-core/thread/async_thread_pool.hh))
@@ -538,5 +642,8 @@ Down a chain past the inline depth cap that becomes a re-poll storm — measured
 * **Shared errors** and **heterogeneous-`E` propagation** — the failure channel is typed (`async<T, E>`), but the sugar assumes a single `E` across a graph.
   The default `async_error` also still re-materializes its message on propagation rather than sharing an error payload.
   Cross-`E` bridging and cancellation propagation through a graph are follow-ups.
-* **`co_await` integration** layered on top of the raw frame API, and plain (non-async) arguments in the variadic dependency form.
+* **Plain (non-async) arguments** in the variadic dependency form.
+* **Immovable `T` through `co_return`** — the coroutine layer moves its result through the promise, so an immovable result stays on the raw-frame emplace API.
+* **`async<void>`** — you spell `async<cc::unit>` today.
+  That is one corner of a wider question about `void` in the vocabulary types, tracked in [TODO](../TODO.md).
 * **Deferred teardown** as a built-in — handing a handle to a reclaim thread already works at the user level.

@@ -14,6 +14,7 @@ Blessing has three tiers, because "we will not reimplement this", "call it direc
 | `<typeindex>`        | yes       | `std::type_index` — the hashable/orderable handle over `std::type_info`. |
 | `<concepts>`         | yes       | The standard concepts are spellings of compiler-known relations; same argument as `<type_traits>`. |
 | `<initializer_list>` | yes       | Required by the language for braced-init-list constructors.             |
+| `<coroutine>`        | yes       | Required by the language for `co_await` / `co_return`: `coroutine_handle` is what a suspended frame IS, and `coroutine_traits` is the only customization point that names a coroutine's promise. Scoped to [`thread/async_coroutine.hh`](../src/clean-core/thread/async_coroutine.hh), which keeps it out of `async.hh`. |
 | `<utility>`          | yes       | Structured bindings need `std::tuple_size` / `std::tuple_element` specializations, and only this header declares them. |
 | `<compare>`          | yes       | Required by the language for `operator<=>`: the comparison categories are what it returns, and `= default` needs them too. Name `std::strong_ordering` (or `weak_`/`partial_`) in the return type; everything else about ordering stays in `cc::`. |
 | `<chrono>`           | for now   | Wall/monotonic clocks are OS facilities, and the unit-safe `duration`/`time_point` algebra is exactly what we would rewrite. Use `steady_clock` for elapsed time, never `system_clock` (it can jump). A `cc::` time vocabulary is still expected — this is tier 3. |
