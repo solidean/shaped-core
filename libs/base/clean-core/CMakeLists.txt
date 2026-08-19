@@ -400,6 +400,7 @@ if(SC_BUILD_TESTS)
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc
+        tests/thread/async-coroutine-test.cc
         tests/thread/async-pool-test.cc
         tests/thread/atomic-test.cc
         tests/thread/chase_lev_deque-test.cc

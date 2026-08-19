@@ -270,6 +270,14 @@ template <class E>
 
 namespace impl
 {
+/// Whether scheduling a node from here would reach a scheduler at all.
+/// async_node_base::schedule() asserts with neither a bound worker scope nor an installed default pool, so every "start it now" path tests this first.
+/// A node left cold is not a lost computation — it runs when something requires it, or when a driver schedules it.
+[[nodiscard]] inline bool async_can_schedule_here()
+{
+    return cc::async_scheduler::current_or_null() != nullptr || cc::async_scheduler::default_or_null() != nullptr;
+}
+
 /// Tag selecting async's manual/promise constructor, born external_pending in a single store.
 /// Passed by make_async_manual through make_shared; not part of the public surface.
 struct async_manual_tag
@@ -707,14 +715,14 @@ template <class T, class E = async_error, class F, class... Args>
     return node;
 }
 
-/// Like make_async_lazy, but eager: it schedules the node immediately if a worker scope is active on this thread.
-/// Otherwise it stays cold and is scheduled when first required or driven.
+/// Like make_async_lazy, but eager: it schedules the node immediately, on the worker scope active here or else the installed default pool.
+/// With neither, it stays cold and is scheduled when first required or driven.
 /// Same forms as make_async_lazy.
 template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
 [[nodiscard]] auto make_async_scheduled(F&& f, Deps&&... deps)
 {
     auto node = impl::async_make_node<T, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
-    if (async_scheduler::current_or_null() != nullptr)
+    if (impl::async_can_schedule_here())
         node->schedule();
     return node;
 }

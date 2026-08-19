@@ -38,10 +38,11 @@ TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-wo
 // Exclusion is an ORDERING edge, not a lock: holders run in schedule order, which is reproducible by design.
 
 #include <nexus/async-test.hh>           // separate header: TEST pays nothing for the async templates
-ASYNC_TEST("cache - resolves a miss")    // body returns cc::shared_async<cc::unit>; nexus awaits it
-{                                        //   the returned root must be COLD — that stamp is what attributes its checks
-    return cc::make_async_lazy<cc::unit>(/* ... CHECK inside the graph lands on THIS test ... */);
-}                                        //   no SECTION inside an async body; a graph error fails the test by name
+ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexus awaits the body
+{                                        //   a CHECK at any depth below it still lands on THIS test
+    auto const e = co_await cache.acquire_async("shader.hlsl");   // a FAILED await short-circuits + fails the test
+    CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
+}                                        // no co_ keyword? then `return` a COLD cc::shared_async<cc::unit> instead
 
 // Buckets: every test is in one bucket — normal (default), manual, guide_benchmark, or example. A sweep selects
 // one bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
