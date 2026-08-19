@@ -79,10 +79,46 @@ uv run dev.py deps list --json       # for scripting
 ```
 
 The network is the default path, because a pin with no notion of what is current answers half the question.
-It is about a dozen requests, well inside the unauthenticated GitHub rate limit; `GITHUB_TOKEN` is honored when set, and a rate-limit error says so rather than reading as "no update".
-Results cache to `.tmp/deps/updates.json` for 24 hours, keyed by pin — bumping a pin invalidates that entry by itself.
+Results cache to `.tmp/deps/updates.json` for 24 hours, each entry keyed by its pin and carrying its own timestamp.
+Bumping a pin invalidates that entry by itself, and a failed lookup is never cached — one rate-limited run must not answer "unknown" for the rest of the day.
 
-The second block reports the fetched dependencies as **current**, **stale** or **not fetched**.
+**A token is used when one is available.**
+`GITHUB_TOKEN` first, otherwise whatever `gh auth token` hands back.
+Unauthenticated is 60 requests an hour, which two `--refresh` runs will exhaust, and the failure looks like every dependency having become unresolvable rather than like a rate limit.
+The error says which it is, but not hitting it at all is better.
+
+### The security banner
+
+`list` also reads the release notes of every version we are behind, and prints a loud banner when one of them looks like a security fix.
+
+```
+==============================================================================
+============== SECURITY: 1 release note(s) across 1 dependency ===============
+==============================================================================
+
+  Dear ImGui  pinned v1.92.8-docking
+    v1.92.9  [use-after-free] Vulkan: fixed use after-free when using multi-viewports with dynamic rendering. (#9390, #9468)
+      https://github.com/ocornut/imgui/releases/tag/v1.92.9
+```
+
+That is the point of reading notes at all.
+"seven releases behind" is a shrug; "seven releases behind, one of which fixes a use-after-free" is a decision.
+
+Where the notes come from depends on the track, and none of it costs an extra round trip worth worrying about.
+A release-tracked or tag-tracked upstream has its GitHub release bodies scanned.
+A `default-branch` one has no releases, so the commit messages between our pin and the head are scanned instead — the compare call already returns them.
+SQLite's `changes.html` is one section per release, which gives version, date and notes together.
+
+The keyword list is `_SECURITY_PATTERNS` in [tools/deps/deps.py](../../tools/deps/deps.py), and it is deliberately narrower than it could be.
+A bare "overflow" fires on every arithmetic fix, and a banner that cries wolf is one nobody reads.
+The matched line is always printed with a link, so a false positive costs one glance rather than a wrong call.
+
+It does not fail the command.
+Whether to bump is a judgement about our exposure — the Vulkan multi-viewport path above is one we do not use — and the tool's job is to make sure that judgement is made rather than skipped.
+
+### Fetch state
+
+The last block reports the fetched dependencies as **current**, **stale** or **not fetched**.
 A `.install/` that does not match its manifest is otherwise invisible, and it is what makes a build mysteriously use the wrong version.
 
 **`deps list` is deliberately not a `check` gate.** Network in the pre-commit gate buys only flakiness.

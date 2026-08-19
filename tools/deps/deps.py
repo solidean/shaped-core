@@ -16,6 +16,7 @@ Two commands over one source of truth, the `extern/<dep>/dependency.yml` manifes
 - `licenses` — regenerate `docs/licenses/` from those manifests, so the directory is a complete shipping bundle including our own license.
 
 `list` reaches the network by default, since a pinned version with no notion of what is current answers half the question.
+It also reads the release notes of every version we are behind, and prints a loud banner when any of them looks like a security fix.
 `--offline` restricts it to the manifests and the installed pins.
 Results are cached under `.tmp/deps/updates.json` for a day, because the answer changes on upstream's release cadence rather than ours.
 
@@ -33,11 +34,12 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,10 +77,67 @@ class Latest:
     behind: int | None = None
     unit: str = ""
     error: str = ""
+    # Security-looking notes among the releases we are behind, as plain dicts so the cache round-trips them.
+    advisories: list[dict] = field(default_factory=list)
 
     @property
     def known(self) -> bool:
         return bool(self.version) or self.behind is not None
+
+
+# What in a release note or commit message makes a version bump worth doing now rather than eventually.
+# Tuned for the phrasing upstreams actually use, and deliberately narrower than "overflow" alone, which fires on
+# every arithmetic fix and would train the reader to skip the banner.
+# The matched line is always shown, so a false positive costs one glance rather than a wrong decision.
+_SECURITY_PATTERNS = [
+    ("CVE", r"CVE-\d{4}-\d{4,7}"),
+    ("security", r"\bsecurit(?:y|ies)\b"),
+    ("vulnerability", r"\bvulnerab(?:le|ility|ilities)\b"),
+    ("exploit", r"\bexploit(?:able|ed)?\b"),
+    ("buffer overflow", r"\b(?:buffer|heap|stack|integer)[ -]overflow\b"),
+    ("out-of-bounds", r"\bout[ -]of[ -]bounds\b|\bOOB\b"),
+    ("use-after-free", r"\buse[ -]after[ -]free\b"),
+    ("double free", r"\bdouble[ -]free\b"),
+    ("memory corruption", r"\bmemory corruption\b"),
+    ("denial of service", r"\bdenial[ -]of[ -]service\b"),
+]
+
+_SECURITY_REGEXES = [(label, re.compile(pattern, re.IGNORECASE)) for label, pattern in _SECURITY_PATTERNS]
+
+# Enough of the matching line to judge it without opening the link; a release note bullet is rarely longer.
+_SNIPPET_CHARS = 160
+
+
+def scan_security(text: str) -> tuple[str, str] | None:
+    """The first security-looking phrase in a release note or commit message, with the line it sits on.
+
+    Returns the matched label and a trimmed snippet, or None.
+    """
+    for line in (text or "").splitlines():
+        stripped = line.strip().lstrip("*-# ").strip()
+        if not stripped:
+            continue
+        for label, regex in _SECURITY_REGEXES:
+            if regex.search(stripped):
+                snippet = stripped if len(stripped) <= _SNIPPET_CHARS else stripped[: _SNIPPET_CHARS - 1] + "…"
+                return label, snippet
+    return None
+
+
+def github_token() -> str | None:
+    """A token for the GitHub API, if one can be had without asking.
+
+    Unauthenticated is 60 requests an hour, which a couple of `--refresh` runs exhaust — and the failure is
+    silent-looking, every row reading "unknown". `gh` is already a dependency of the PR and CI workflows here,
+    so borrowing its token costs the caller nothing and is what keeps that from being the normal experience.
+    """
+    if os.environ.get("GITHUB_TOKEN"):
+        return os.environ["GITHUB_TOKEN"]
+    try:
+        done = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() or None if done.returncode == 0 else None
 
 
 def _github_repo(up: "deps_manifest.Upstream") -> tuple[str, str] | None:
@@ -130,12 +189,51 @@ def resolve(up: "deps_manifest.Upstream", token: str | None) -> Latest:
     return Latest(error=f"no resolver for track {up.track!r}")
 
 
+def _releases(repo: tuple[str, str], token) -> list[dict]:
+    """Published releases, newest first.
+
+    Drafts and prereleases are dropped, so this matches what /releases/latest would have picked while also
+    handing back the notes for every release we are behind.
+    """
+    data = _get_json(f"{GITHUB_API}/repos/{repo[0]}/{repo[1]}/releases?per_page=100", token) or []
+    return [r for r in data if not r.get("draft") and not r.get("prerelease")]
+
+
+def _advisories_from_releases(releases: list[dict], stop_at: str | None) -> list[dict]:
+    """Scan the releases newer than `stop_at` — the tag we are on — for security-looking notes."""
+    found = []
+    for release in releases:
+        tag = release.get("tag_name", "")
+        if stop_at is not None and tag == stop_at:
+            break
+        hit = scan_security(f"{release.get('name', '')}\n{release.get('body', '')}")
+        if hit:
+            found.append(
+                {"version": tag, "keyword": hit[0], "snippet": hit[1], "url": release.get("html_url", "")}
+            )
+    return found
+
+
 def _resolve_github_release(up, token) -> Latest:
     repo = _github_repo(up)
     if repo is None:
         return Latest(error=f"not a github repo: {up.repo!r}")
-    data = _get_json(f"{GITHUB_API}/repos/{repo[0]}/{repo[1]}/releases/latest", token)
-    return Latest(version=data.get("tag_name", ""), date=_day(data.get("published_at", "")))
+
+    releases = _releases(repo, token)
+    if not releases:
+        return Latest(error="no published releases")
+
+    newest = releases[0]
+    tags = [r.get("tag_name", "") for r in releases]
+    behind = tags.index(up.tag) if up.tag in tags else None
+
+    return Latest(
+        version=newest.get("tag_name", ""),
+        date=_day(newest.get("published_at", "")),
+        behind=behind,
+        unit="releases",
+        advisories=_advisories_from_releases(releases, up.tag),
+    )
 
 
 # The tags endpoint returns no dates and no useful order — its sequence is neither chronological nor
@@ -169,6 +267,10 @@ def _resolve_github_tags(up, token) -> Latest:
         names += [t["name"] for t in batch]
         if len(batch) < 100:
             break
+        # Our own tag being in view means everything newer is too, since what follows sorts below it.
+        # Usually one page, against the three a full walk of a long-lived repo's tags would cost.
+        if up.tag and up.tag in names:
+            break
 
     versions = sorted({n for n in names if pattern.match(n)}, key=_version_key, reverse=True)
     if not versions:
@@ -178,11 +280,33 @@ def _resolve_github_tags(up, token) -> Latest:
     behind = versions.index(up.tag) if up.tag in versions else None
 
     date = ""
+    advisories: list[dict] = []
     if newest != up.tag:
-        commit = _get_json(f"{GITHUB_API}/repos/{repo[0]}/{repo[1]}/commits/{newest}", token)
-        date = _day(commit.get("commit", {}).get("committer", {}).get("date", ""))
+        # A tag-tracked upstream usually publishes releases against those tags too, so one call covers both the
+        # date and the notes for every version we are behind.
+        #
+        # Matched on the numeric version rather than the tag text, because the two need not agree.
+        # We pin Dear ImGui's `v1.92.8-docking` while its releases are tagged `v1.92.8`, and a suffixed respin
+        # like `v1.92.9b` is still a release we are behind; both map onto the same key.
+        releases = _releases(repo, token)
+        newer = {_version_key(v) for v in versions[:behind]} if behind else set()
+        advisories = _advisories_from_releases(
+            [r for r in releases if _version_key(r.get("tag_name", "")) in newer], None
+        )
 
-    return Latest(version=newest, date=date, behind=behind, unit="releases")
+        # Matched on the exact tag, not the version key, so the date belongs to the tag the column names.
+        # Dear ImGui is why: its `v1.92.9b` respin shares a version key with `v1.92.9`, and dating the
+        # docking tag from the respin would put a date next to a version that was not released on it.
+        for release in releases:
+            if release.get("tag_name", "") == newest:
+                date = _day(release.get("published_at", ""))
+                break
+        else:
+            # Tagged without a release of its own, so the date costs its own call.
+            commit = _get_json(f"{GITHUB_API}/repos/{repo[0]}/{repo[1]}/commits/{newest}", token)
+            date = _day(commit.get("commit", {}).get("committer", {}).get("date", ""))
+
+    return Latest(version=newest, date=date, behind=behind, unit="releases", advisories=advisories)
 
 
 def _resolve_github_compare(up, token) -> Latest:
@@ -194,36 +318,100 @@ def _resolve_github_compare(up, token) -> Latest:
     ahead = data.get("ahead_by")
     commits = data.get("commits") or []
     head = commits[-1] if commits else data.get("base_commit", {})
+
+    # These upstreams publish no release notes, but the compare response already carries every commit message
+    # between our pin and the head — the same information, at no extra request.
+    advisories = []
+    for entry in commits:
+        hit = scan_security(entry.get("commit", {}).get("message", ""))
+        if hit:
+            advisories.append(
+                {
+                    "version": (entry.get("sha", "") or "")[:12],
+                    "keyword": hit[0],
+                    "snippet": hit[1],
+                    "url": entry.get("html_url", ""),
+                }
+            )
+
     return Latest(
         version=(head.get("sha", "") or "")[:12],
         date=_day(head.get("commit", {}).get("committer", {}).get("date", "")),
         pinned_date=_day(data.get("base_commit", {}).get("commit", {}).get("committer", {}).get("date", "")),
         behind=ahead,
         unit="commits",
+        advisories=advisories,
     )
 
 
-def _resolve_sqlite(up) -> Latest:
-    """sqlite.org has no API, but download.html carries a machine-readable PRODUCT block.
+def _dotted_version(packed: str) -> tuple[int, ...]:
+    """SQLite's download version is packed as X*1000000 + Y*10000 + Z*100 — 3530300 is 3.53.3."""
+    n = int(packed)
+    return (n // 1000000, (n // 10000) % 100, (n // 100) % 100)
 
-    Each line is `PRODUCT,version,relpath,size,sha3` — we want the amalgamation's version.
+
+def _strip_html(fragment: str) -> str:
+    """The text of a changes.html section, one release note per line.
+
+    The line split is what lets the security scan report the bullet it matched, rather than the whole section.
     """
-    page = _get_text("https://sqlite.org/download.html")
-    for line in page.splitlines():
-        if not line.startswith("PRODUCT,"):
-            continue
-        parts = line.split(",")
-        if len(parts) >= 3 and "sqlite-amalgamation-" in parts[2]:
-            packed = re.search(r"sqlite-amalgamation-(\d+)\.zip", parts[2])
-            if packed:
-                return Latest(version=packed.group(1))
-    return Latest(error="no amalgamation in the PRODUCT block")
+    text = re.sub(r"<li>|<p>|<br\s*/?>", "\n", fragment, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&[a-z]+;", " ", text)
+    lines = (re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
+
+
+def _resolve_sqlite(up) -> Latest:
+    """sqlite.org has no API, but changes.html is one `<h3>DATE (VERSION)</h3>` per release, newest first.
+
+    That is version, date and release notes in a single request, which download.html's PRODUCT block cannot give.
+    """
+    page = _get_text("https://sqlite.org/changes.html")
+    sections = list(re.finditer(r"<h3>(\d{4}-\d{2}-\d{2}) \(([\d.]+)\)</h3>", page))
+    if not sections:
+        return Latest(error="no release sections in changes.html")
+
+    ours = _dotted_version(up.version)
+    newest = sections[0]
+
+    advisories = []
+    behind = 0
+    for index, section in enumerate(sections):
+        version = tuple(int(p) for p in section.group(2).split("."))
+        if version <= ours:
+            break
+        behind += 1
+        end = sections[index + 1].start() if index + 1 < len(sections) else len(page)
+        hit = scan_security(_strip_html(page[section.end():end]))
+        if hit:
+            advisories.append(
+                {
+                    "version": section.group(2),
+                    "keyword": hit[0],
+                    "snippet": hit[1],
+                    "url": f"https://sqlite.org/changes.html#version_{section.group(2).replace('.', '_')}",
+                }
+            )
+
+    return Latest(
+        version=newest.group(2),
+        date=newest.group(1),
+        behind=behind,
+        unit="releases",
+        advisories=advisories,
+    )
 
 
 # --- update cache -------------------------------------------------------------------------------
 
 
 def load_cache(refresh: bool) -> dict:
+    """The still-fresh cached lookups, keyed by dependency and upstream name.
+
+    Each entry carries its own `fetched_at`, so a run that re-fetches one upstream does not extend the
+    lifetime of the others it merely copied forward.
+    """
     if refresh or not CACHE_FILE.is_file():
         return {}
     try:
@@ -232,9 +420,10 @@ def load_cache(refresh: bool) -> dict:
         return {}
     if data.get("schema") != CACHE_SCHEMA:
         return {}
-    if time.time() - data.get("generated_at", 0) > CACHE_TTL_SECONDS:
-        return {}
-    return data.get("upstreams", {})
+
+    now = time.time()
+    entries = data.get("upstreams", {})
+    return {k: v for k, v in entries.items() if now - v.get("fetched_at", 0) <= CACHE_TTL_SECONDS}
 
 
 def save_cache(entries: dict) -> None:
@@ -243,7 +432,18 @@ def save_cache(entries: dict) -> None:
     CACHE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+# Cache bookkeeping, not part of what upstream told us.
+_CACHE_ONLY_KEYS = ("pin_hash", "fetched_at")
+
+
 # --- list -----------------------------------------------------------------------------------------
+
+
+def _display_version(up: "deps_manifest.Upstream") -> str:
+    """SQLite's `version` is the download site's packed form, which nobody reads as a version."""
+    if up.track == "sqlite" and up.version.isdigit():
+        return ".".join(str(part) for part in _dotted_version(up.version))
+    return up.version
 
 
 def install_state(up: "deps_manifest.Upstream") -> str:
@@ -271,12 +471,12 @@ def status_of(up: "deps_manifest.Upstream", latest: Latest) -> str:
             return "up to date"
         unit = latest.unit if latest.behind != 1 else latest.unit.rstrip("s")
         return f"{latest.behind} {unit} behind"
-    ours = up.tag or up.version
+    ours = up.tag or _display_version(up)
     return "up to date" if latest.version == ours else f"{latest.version} available"
 
 
 def pinned_label(up: "deps_manifest.Upstream") -> str:
-    version = up.tag or up.version
+    version = up.tag or _display_version(up)
     short = up.pin_hash[:12]
     return f"{version} · {short}" if version else short
 
@@ -286,7 +486,7 @@ def run_list(*, offline: bool, refresh: bool, as_json: bool) -> int:
 
     cache = {} if offline else load_cache(refresh)
     resolved: dict[str, Latest] = {}
-    token = os.environ.get("GITHUB_TOKEN") or None
+    token = github_token()
 
     if not offline:
         fresh: dict[str, dict] = {}
@@ -294,13 +494,16 @@ def run_list(*, offline: bool, refresh: bool, as_json: bool) -> int:
             key = f"{up.directory.name}/{up.name}"
             hit = cache.get(key)
             if hit is not None and hit.get("pin_hash") == up.pin_hash:
-                resolved[key] = Latest(**{k: v for k, v in hit.items() if k != "pin_hash"})
+                resolved[key] = Latest(**{k: v for k, v in hit.items() if k not in _CACHE_ONLY_KEYS})
                 fresh[key] = hit
                 continue
             print(f"  resolving {up.name} ...", file=sys.stderr)
             latest = resolve(up, token)
             resolved[key] = latest
-            fresh[key] = {**latest.__dict__, "pin_hash": up.pin_hash}
+            # A failed lookup is never cached: one rate-limited or offline run would otherwise answer
+            # "unknown" for the next 24 hours, which reads exactly like a dependency nobody can resolve.
+            if not latest.error:
+                fresh[key] = {**latest.__dict__, "pin_hash": up.pin_hash, "fetched_at": time.time()}
         save_cache(fresh)
 
     rows = []
@@ -311,7 +514,7 @@ def run_list(*, offline: bool, refresh: bool, as_json: bool) -> int:
             {
                 "name": up.name,
                 "directory": up.directory.name,
-                "pinned": up.tag or up.version,
+                "pinned": up.tag or _display_version(up),
                 "pin_hash": up.pin_hash,
                 "digest_algo": up.digest_algo,
                 "source": up.source,
@@ -324,6 +527,7 @@ def run_list(*, offline: bool, refresh: bool, as_json: bool) -> int:
                 "behind": latest.behind,
                 "status": "not checked" if offline else status_of(up, latest),
                 "error": latest.error,
+                "advisories": latest.advisories,
             }
         )
 
@@ -359,6 +563,8 @@ def _print_table(rows: list[dict], *, offline: bool) -> None:
         if r["error"]:
             print(f"  {'':<{name_w}}  {console.red(r['error'])}")
 
+    _print_security_banner(rows)
+
     fetched = [r for r in rows if r["install"] in ("current", "stale", "not fetched")]
     if fetched:
         print("\n  fetched on demand:")
@@ -369,6 +575,40 @@ def _print_table(rows: list[dict], *, offline: bool) -> None:
 
     if offline:
         print(f"\n  {console.dim('offline — upstream not checked')}")
+
+
+def _print_security_banner(rows: list[dict]) -> None:
+    """Call out the releases we are behind whose notes read as security fixes.
+
+    Deliberately loud and deliberately below the table: a bump we are sitting on for convenience is a different
+    decision once one of the versions in between says "buffer overflow", and that has to be impossible to skim past.
+    Every entry shows the line that matched, so a false positive costs one glance rather than a wrong call.
+    """
+    flagged = [(r, a) for r in rows for a in r["advisories"]]
+    if not flagged:
+        return
+
+    deps = {r["name"] for r, _ in flagged}
+    title = f" SECURITY: {len(flagged)} release note(s) across {len(deps)} dependenc{'y' if len(deps) == 1 else 'ies'} "
+    rule = "=" * max(len(title), 78)
+
+    print()
+    print(console.red(console.bold(rule)))
+    print(console.red(console.bold(title.center(len(rule), "="))))
+    print(console.red(console.bold(rule)))
+    print()
+
+    for name in sorted(deps):
+        entries = [a for r, a in flagged if r["name"] == name]
+        row = next(r for r, _ in flagged if r["name"] == name)
+        print(f"  {console.bold(name)}  {console.dim(f'pinned {row['pinned'] or row['pin_hash'][:12]}')}")
+        for a in entries:
+            print(f"    {console.yellow(a['version'])}  [{console.red(a['keyword'])}] {a['snippet']}")
+            if a["url"]:
+                print(f"      {console.dim(a['url'])}")
+        print()
+
+    print(f"  {console.dim('Read the notes before deciding to stay put. See docs/guides/dependencies.md for the bump workflow.')}")
 
 
 def _latest_cell(row: dict) -> str:
@@ -470,7 +710,7 @@ def render_index(upstreams: list) -> str:
     ]
 
     for up in upstreams:
-        version = up.tag or up.version or up.pin_hash[:12]
+        version = up.tag or _display_version(up) or up.pin_hash[:12]
         links = ", ".join(f"[{b.filename}]({b.filename})" for b in collect([up])[0])
         lines.append(f"| [{up.name}]({up.homepage}) | {version} | `{up.license}` | {up.used_by} | {links} |")
 
