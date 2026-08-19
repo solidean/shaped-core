@@ -2,7 +2,6 @@
 
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 
@@ -15,17 +14,6 @@
 namespace
 {
 using namespace cube_editor;
-
-/// The process-wide default async pool the store needs.
-///
-/// A `.vdoc` store completes async nodes on its own actor thread, and a completion off a worker has to route
-/// somewhere — without an installed default it asserts. The application installs one at startup (cube_app does);
-/// these tests install one lazily and share it, because a default may only be installed once per process.
-void ensure_default_async_pool()
-{
-    static cc::async_thread_pool pool;
-    static cc::scoped_default_async_pool const installed(pool);
-}
 
 /// Opens a document on a private file, with everything a store needs already standing.
 [[nodiscard]] cc::optional<document> open_scratch_document();
@@ -42,11 +30,7 @@ void ensure_default_async_pool()
     return path;
 }
 
-cc::optional<document> open_scratch_document()
-{
-    ensure_default_async_pool();
-    return document::open(scratch_path());
-}
+cc::optional<document> open_scratch_document() { return document::open(scratch_path()); }
 
 [[nodiscard]] placement at(float x) { return {.center = tg::pos3f(x, 0, 0), .half_extent = 0.8f}; }
 } // namespace
@@ -127,6 +111,40 @@ TEST("cube-editor - editing a past revision branches off it", nx::config::exclus
     CHECK(doc.value().timeline().size() == isize(tip) + 1);
     CHECK(doc.value().revision() == tip);
     CHECK(doc.value().revision_label(tip) == "move to 9");
+}
+
+TEST("cube-editor - an imgui layout round-trips per example and writes no history", nx::config::exclusive("vdoc-file-store"))
+{
+    if (!vdoc::file::store::is_file_storage_available())
+        SKIP("no SQLite backend was compiled in");
+
+    auto const path = scratch_path();
+
+    {
+        auto doc = document::open(path);
+        REQUIRE(doc.has_value());
+
+        auto const revisions_before = doc.value().timeline().size();
+        doc.value().store_ui_settings("editor", "[Window][cube editor]\nPos=20,20\n");
+        doc.value().store_ui_settings("viewer", "[Window][cube viewer]\nPos=400,300\n");
+
+        // The whole reason the layout lives in the workspace: it is not an edit.
+        CHECK(doc.value().timeline().size() == revisions_before);
+    } // close() flushes the workspace
+
+    auto reopened = document::open(path);
+    REQUIRE(reopened.has_value());
+
+    auto const editor = reopened.value().load_ui_settings("editor");
+    auto const viewer = reopened.value().load_ui_settings("viewer");
+    REQUIRE(editor.has_value());
+    REQUIRE(viewer.has_value());
+
+    // Both examples open the same file, so what matters is that neither name read the other's layout back.
+    CHECK(editor.value() == "[Window][cube editor]\nPos=20,20\n");
+    CHECK(viewer.value() == "[Window][cube viewer]\nPos=400,300\n");
+
+    CHECK(!reopened.value().load_ui_settings("never-written").has_value());
 }
 
 TEST("cube-editor - deleting an entity is reversible by moving back", nx::config::exclusive("vdoc-file-store"))

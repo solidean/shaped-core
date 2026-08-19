@@ -19,7 +19,7 @@ So a node is a value/error machine from the outside, whatever runs inside it —
 ```cpp
 auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; });
 auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);   // b depends on a; f gets a plain int
-int v = cc::async_blocking_get_singlethreaded(b);   // drives the graph on this thread -> 42
+int v = cc::async_blocking_get(b);   // drives the graph on the ambient scheduler -> 42
 ```
 
 The handle:
@@ -181,8 +181,19 @@ The handler is C++ EH only, which is what keeps a hardware fault from being swal
 
 ## Driving (the scheduler seam)
 
-**You never block on an async — a scheduler makes progress on it**, and blocking is a convenience that scheduler offers.
+**You never block on an async — a scheduler makes progress on it**, and blocking is a convenience over that.
 The graph is **decoupled from any executor**: a worker binds a scheduler to its thread with `async_worker_scope`, and nodes reach it via `async_scheduler::current()`.
+
+**Touching the async system requires an ambient scheduler**, and it is an error to do so without one.
+The ambient scheduler is the one bound to this thread, or else the process-wide default:
+
+```cpp
+cc::async_thread_pool pool;
+cc::scoped_default_async_scheduler const ambient(pool);   // an application does this once, early
+```
+
+An application installs one at startup, and a nexus run installs one per phase — a test or example opts out with `nx::no_scheduler`, and then owns the decision itself.
+`cc::ambient_async_scheduler()` is the lookup, and it asserts rather than falling back, so "nobody installed one" is reported where it happens instead of surfacing as a graph that never runs.
 
 There are two schedulers, and they present the same surface:
 
@@ -192,20 +203,19 @@ There are two schedulers, and they present the same surface:
 | `async_thread_pool` | worker threads **plus the calling thread** | yes | real concurrent work |
 
 ```cpp
-cc::singlethreaded_scheduler sched;
-int v = sched.blocking_get(root);        // drives + blocks THIS thread
-cc::async_thread_pool pool;              // defaults to hardware concurrency - 1 (the caller is the other thread)
-int v = pool.blocking_get(root);         // the calling thread PARTICIPATES, then blocks
+cc::singlethreaded_scheduler sched;       // installed as ambient: every graph runs inline, in order
+cc::async_thread_pool pool;               // defaults to hardware concurrency - 1 (the driving thread is the other)
+int v = cc::async_blocking_get(root);     // drives on whichever of them is ambient
 ```
 
-`async_thread_pool::blocking_get` does not hand the graph over and park.
+Driving on a pool does not hand the graph over and park.
 The calling thread borrows a pool slot and runs the graph itself, stealing like any worker, and parks only once nothing is left for it.
 A graph that never forks therefore costs tens of nanoseconds rather than a cross-thread round trip, and a large one still spreads across the pool — the caller's deque is stealable like any other.
 That is why the default worker count is one *fewer* than the hardware concurrency, and why a 1-worker pool still publishes work: its caller is a second participant.
 
 `singlethreaded_scheduler` is single-threaded **by construction, not by circumstance**.
 It has no peers, so it never publishes work and a graph's nodes cannot run concurrently however many cores sit idle.
-That is what makes the whole system testable without threads.
+That is what makes the whole system testable without threads: install one as the ambient scheduler (`nx::singlethreaded` in a test) and every graph runs inline on the driving thread, in order.
 
 `async_no_worker_scope` is the other direction: for its lifetime the calling thread has **no** scheduler bound.
 That is an ordinary state — a foreign thread has never had one — and the scope only makes it reachable from inside a worker.
@@ -215,17 +225,25 @@ Left bound, a node that code schedules lands in the *host's* queue and is run la
 Nexus unbinds around every test body for exactly that reason ([parallel-execution](../../../nexus/docs/parallel-execution.md)).
 A node created inside the scope still routes to the installed default pool, exactly as it would on a thread that never had a scheduler.
 
-For a self-contained graph, the free functions build a throwaway scheduler for you.
-The verbose names are deliberate — this is a test/debug convenience, not how real work gets scheduled:
+### Blocking on a graph
+
+The free functions drive `root` on the **ambient** scheduler and return once it is ready — value or error, never still pending:
 
 ```cpp
-int v = cc::async_blocking_get_singlethreaded(root);                       // asserts on error/cancel/no-progress
-cc::optional<cc::result<int, cc::async_error>> r = cc::try_async_blocking_get_singlethreaded(root); // fallible
+int v = cc::async_blocking_get(root);                                   // asserts on error/cancel
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get(root);  // fallible
 ```
 
-The `try_` form returns an **optional** result.
-`nullopt` means the scheduler pumped everything reachable from here and `root` is still not ready — see [Multi-scheduler correctness](#multi-scheduler-correctness).
-`blocking_get` asserts on that outcome, and on an error, so keep it for graphs you know complete inline.
+There is no "not yet" outcome to handle: whatever the ambient scheduler cannot finish itself, these wait for.
+A node awaiting a push that never comes therefore hangs rather than reporting no-progress, which is the honest failure —
+`cc::try_async_blocking_get_for(root, timeout_ms)` is the way out for a caller that cannot afford it, and the one place `cc::optional` survives.
+
+**This is a bridge between synchronous and asynchronous code, and nothing more.**
+Reaching for it often is the signal to step back: make the surrounding code async, write an `ASYNC_TEST`, hand the async to a caller that can await it.
+Calling it from inside a frame is legal and participates rather than idling, but every blocked thread is one that cannot help — overused, that is how a graph starves or deadlocks.
+
+`cc::async_blocking_get_on(scheduler, root)` names a scheduler instead of taking the ambient one, for code that owns one and means *that* one: a benchmark measuring a pool, a test standing one up.
+Its `try_` form keeps the optional, because a named scheduler genuinely can run dry with the graph unfinished — see [Multi-scheduler correctness](#multi-scheduler-correctness).
 
 `run_one` / `run_until` / `drain` are the underlying pump, and the pump is what you need when a graph parks on a manual node.
 Nothing progresses while you are not inside it, so call it again after the external push.
@@ -440,14 +458,15 @@ It is deliberately not lock-free: only genuinely foreign submits reach it — a 
 
 ```cpp
 cc::async_thread_pool pool(cc::num_hardware_threads());
-cc::install_default_async_pool(pool);            // compute nodes now route here when off-worker
+cc::scoped_default_async_scheduler const ambient(pool);  // every async now belongs to this pool
 auto root = build_graph();
-int v = pool.blocking_get(root);                 // submit to the pool, block THIS (foreign) thread
+int v = cc::async_blocking_get(root);                    // participate in the pool, block THIS thread
 ```
 
-`pool.blocking_get` / `try_blocking_get` drive `root` on the calling thread, which borrows a pool slot and participates (see above), and block only once there is nothing left for it to run.
-With every external slot already claimed they fall back to submitting the root and blocking on a one-shot completion hook.
-Call them only from a **foreign** thread; from inside a worker of the same pool it asserts, since it would park a pool thread on its own work.
+`participate_until_ready` is what a drive on a pool does: the calling thread borrows a pool slot and runs the graph itself, stealing like any worker.
+It parks only once there is nothing left for it to run.
+With every external slot already claimed it falls back to submitting the root and blocking on a one-shot completion hook.
+It is legal from inside a worker, where it becomes a nested drive — the price being that unrelated work then runs on that thread in the middle of a frame.
 
 The node machinery is thread-safe under this — see [Multi-scheduler correctness](#multi-scheduler-correctness) for exactly what is and is not guaranteed.
 

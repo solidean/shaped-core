@@ -62,9 +62,10 @@ cache.set_blob_cache(&c)         // persistent 2nd tier: encoded compiled shader
                            //   the compile PARKS on the store: with no pool and no worker scope, the tier is skipped
 cache.apply_bookkeeping()        // in-memory eviction on all tiers
 compiler.version()               // -> cc::string_view "major.minor"; empty if DXC would not report one
-// drive: cc::async_blocking_get_singlethreaded(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
+// drive: cc::async_blocking_get(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
+
 // a compile failure surfaces as an async error (sh->has_error()); DXC diagnostics carried through.
-// runs on the installed default async pool (cc::install_default_async_pool); inline if none installed.
+// runs on the ambient scheduler (cc::install_default_async_scheduler), which blocking on it drives.
 // each worker uses its own thread-local compiler (compiler is one-per-thread). Cache preprocessed source.
 ```
 

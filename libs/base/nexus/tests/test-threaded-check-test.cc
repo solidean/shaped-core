@@ -35,7 +35,7 @@ TEST("threaded check - a check inside a pool-driven node counts towards its test
                                     CHECK(1 + 1 == 2); // on a worker: no test context on that thread, only the node's
                                     return ctx.success(7);
                                 });
-                            CHECK(pool.blocking_get(n) == 7);
+                            CHECK(cc::async_blocking_get_on(pool, n) == 7);
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);
@@ -60,7 +60,7 @@ TEST("threaded check - a failing check inside a pool-driven node fails its test"
                                     CHECK(1 == 2);
                                     return ctx.success(0);
                                 });
-                            (void)pool.blocking_get(n);
+                            (void)cc::async_blocking_get_on(pool, n);
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);
@@ -86,7 +86,7 @@ TEST("threaded check - a REQUIRE inside a node fails the test and resolves the n
                                     past_require = true;
                                     return ctx.success(0);
                                 });
-                            node_errored = pool.try_blocking_get(n).has_error();
+                            node_errored = cc::try_async_blocking_get_on(pool, n).value().has_error();
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);
@@ -114,7 +114,7 @@ TEST("threaded check - a section cannot be opened off the test's own thread", no
                                     }
                                     return ctx.success(1);
                                 });
-                            CHECK(pool.blocking_get(n) == 1);
+                            CHECK(cc::async_blocking_get_on(pool, n) == 1);
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);
@@ -138,7 +138,7 @@ TEST("threaded check - a guide metric from a node lands on its test", no_schedul
                                     nx::guide::report_raw("from-a-worker", 1.0, "1");
                                     return ctx.success(1);
                                 });
-                            CHECK(pool.blocking_get(n) == 1);
+                            CHECK(cc::async_blocking_get_on(pool, n) == 1);
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);

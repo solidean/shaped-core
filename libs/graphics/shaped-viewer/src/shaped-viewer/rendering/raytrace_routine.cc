@@ -12,9 +12,9 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
     auto ch = sv::shaders::shading.closest_hit.ClosestHit->acquire(ctx);
 
     // No async pool is guaranteed here, so drive the compiles inline.
-    (void)cc::try_async_blocking_get_singlethreaded(rg);
-    (void)cc::try_async_blocking_get_singlethreaded(ms);
-    (void)cc::try_async_blocking_get_singlethreaded(ch);
+    (void)cc::try_async_blocking_get(rg);
+    (void)cc::try_async_blocking_get(ms);
+    (void)cc::try_async_blocking_get(ch);
 
     auto const* const compiled_rg = rg->try_value();
     auto const* const compiled_ms = ms->try_value();

@@ -27,10 +27,14 @@
 ///     finish takes their place.
 ///   - **Deletion removes nothing.** It writes `$alive = false`; scrub back and the cube returns.
 ///   - **The camera is not an edit.** It lives in the file's workspace, which creates no op and never dirties.
+///     The imgui panel layout lives there too, which is why running this leaves no imgui.ini behind.
 
 namespace
 {
 using namespace cube_editor;
+
+/// What this example's imgui layout is filed under in the workspace, distinct from the viewer's.
+constexpr cc::string_view ui_name = "editor";
 
 /// The nearest cube under the cursor, or nothing.
 [[nodiscard]] vdoc::entity_id pick(vdoc::document const& doc, orbit_camera const& cam, tg::angle_f fov, tg::pos2f cursor, tg::vec2i viewport)
@@ -145,6 +149,11 @@ EXAMPLE("vdoc/cube-editor")
     if (app == nullptr)
         return; // create() already said what was missing
 
+    // The panel layout lives in the workspace too, so no imgui.ini is written anywhere.
+    // It must be restored before the first frame, and under a name of its own — the viewer example opens this same file.
+    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value())
+        app->imgui().load_settings(ini.value());
+
     auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
     auto selected = vdoc::entity_id();
     auto orbiting = false;
@@ -200,8 +209,14 @@ EXAMPLE("vdoc/cube-editor")
         ImGui::End();
 
         app->end_frame(doc.value().current(), camera, selected);
+
+        // Empty on nearly every frame: imgui only asks for a save a few seconds after something moved.
+        if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value())
+            doc.value().store_ui_settings(ui_name, ini.value());
     }
 
+    // The last few seconds of layout are still only in imgui, so the exit save is unconditional — and must precede `app` going away.
+    doc.value().store_ui_settings(ui_name, app->imgui().settings());
     doc.value().store_camera(camera);
     doc.value().save();
     cc::println("{} revisions in the document; reopen to find it exactly as you left it", doc.value().timeline().size());

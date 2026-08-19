@@ -40,15 +40,33 @@ Nexus will not quietly finish it for you.
 Set per test, orthogonal to buckets and to exclusion.
 Tests sharing a mode form one graph and run as one **phase**; phases run one after another, because schedulers do not nest.
 
-| Config item | What the test gets |
+| Config item | Where the body runs |
 |---|---|
 | *(default)* | the run's scheduler, capped by `--jobs` |
 | `own_pool(n)` | a private pool of `n` workers, shared with every other test asking for that same count |
-| `no_scheduler` | no scheduler bound at all; bodies driven directly on the calling thread, in schedule order |
+| `main_thread` | directly on the thread `nx::run` was entered on, in schedule order |
+
+## The ambient scheduler
+
+A separate axis from the one above: **where the body runs** is one question, **which scheduler the body's own async work belongs to** is another.
+
+Every async needs an ambient scheduler and it is an error to touch one without it, so a run installs one for each phase (`cc::install_default_async_scheduler`).
+A body running as a node on the phase's pool inherits it as a bound worker scope; a directly driven body gets it as the process-wide default.
+
+| Config item | The ambient scheduler |
+|---|---|
+| *(default)* | a pool — the phase's own where the bodies run on it, otherwise one stood up for the phase |
+| `singlethreaded` | a `cc::singlethreaded_scheduler` bound to the body's thread, so every graph runs inline and in order |
+| `no_scheduler` | none installed and none bound |
+
+`singlethreaded` is for a test whose subject is the ORDER things run in, which a pool is free to change.
 
 `no_scheduler` is what a test needs when it stands up its own `cc` scheduler, or nests an `nx::execute_tests` run of its own.
+Touching an async under it asserts, which is the point: the test has taken that decision over.
 `execute_tests` asserts when a scheduler is already bound rather than nesting one, and names the fix.
 `nx::invoke_tests` is unaffected — a dispatched child runs inside its driver's body and creates no scheduler.
+
+Both drive the body directly, so neither composes with a mode that runs it as a node, and asking for both is an assert.
 
 ## Main-thread affinity
 
@@ -63,12 +81,11 @@ TEST("sr - window system creates and shuts down", main_thread) { … }
 A test that wants its body on main and also drives async work of its own can say both.
 
 `nx::run` records the thread it was entered on, and `execute_tests` asserts that is the thread it was called on before honouring the flag.
-A nested run satisfies that for free: nesting already requires `no_scheduler`, and the no-scheduler group runs bodies on the outer run's calling thread.
+A nested run satisfies that for free: nesting already requires `no_scheduler`, and a directly driven body runs on the outer run's calling thread.
 The case that legitimately trips the assert is a run driven from a thread somebody spawned.
 
-The flag is honoured today by driving the body in the no-scheduler group, which already runs bodies directly on the calling thread.
-That is the implementation and not the contract: `main_thread` promises a thread, `no_scheduler` promises an absent scheduler, and they are asked for separately.
-So main-thread tests share that one phase and run in schedule order among its other members, and cannot yet overlap the shared phase — a quality-of-implementation gap, not a property of the API.
+The flag is honoured by driving the body directly, in schedule order with everything else asking for the same ambient scheduler.
+So main-thread tests cannot yet overlap the shared phase — a quality-of-implementation gap, not a property of the API.
 
 Two combinations are asserts rather than quiet demotions:
 

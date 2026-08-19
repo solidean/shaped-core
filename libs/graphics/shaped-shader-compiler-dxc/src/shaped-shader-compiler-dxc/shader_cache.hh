@@ -15,8 +15,8 @@
 /// The key is a cc::hash128 over the full compile identity — source, entry point, stage, model, options — and the value is a shared async compiled shader.
 /// A second compile() for the same key returns the SAME async node, whether the first is still in flight or already finished, so a shader is never compiled twice.
 ///
-/// Compilation runs on the installed default async pool (cc::install_default_async_pool).
-/// With none installed, cc::async_blocking_get_singlethreaded drives it inline on the calling thread.
+/// Compilation runs on the installed default async pool (cc::install_default_async_scheduler).
+/// With none installed, cc::async_blocking_get drives it inline on the calling thread.
 /// Each worker uses its own thread-local ssc::dxc::compiler, since the compiler is one-per-thread / not thread-safe.
 
 class ssc::dxc::shader_cache
@@ -37,7 +37,7 @@ public:
     void set_blob_cache(bcache::blob_cache* cache);
 
     /// The async compiled shader for (desc, options), reusing a cached node if present.
-    /// Drive it with cc::async_blocking_get_singlethreaded(sh), or poll sh->try_value() (which yields sg::compiled_shader_handle).
+    /// Drive it with cc::async_blocking_get(sh), or poll sh->try_value() (which yields sg::compiled_shader_handle).
     /// On a compile failure the node carries the DXC diagnostics as an async error.
     ///
     /// `desc.source` must already be preprocessed (compile() rejects #includes) — resolve includes via

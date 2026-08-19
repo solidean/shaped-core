@@ -41,7 +41,7 @@ INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired
     // Pass the context, get back what *it* accepts — the negotiation this whole seam exists for.
     auto const shader = sg::test::shaders::double_values.compute.main->acquire(*ctx);
     REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get_singlethreaded(shader); // no async pool here, so drive it
+    (void)cc::try_async_blocking_get(shader); // no async pool here, so drive it
 
     if (ctx->accepts_shader_format(sg::shader_format::dxil))
     {

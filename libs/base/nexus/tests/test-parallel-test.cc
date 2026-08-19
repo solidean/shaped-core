@@ -248,10 +248,11 @@ TEST("parallel - a main_thread test runs on the process main thread", no_schedul
     CHECK(pinned_thread == cc::thread_id::main);
 }
 
-TEST("parallel - main_thread and no_scheduler share one phase, in schedule order", no_scheduler)
+TEST("parallel - main_thread and no_scheduler are separate phases, each in schedule order", no_scheduler)
 {
-    // Two separate promises — a thread, and an absent scheduler — that today land in the same group.
-    // Pinning the order is what makes replacing that implementation a visible change rather than a silent one.
+    // Both drive their bodies on the calling thread, but they ask for different AMBIENT schedulers — a pool against nothing at all —
+    // and a phase installs one for its whole run, so the two cannot be interleaved.
+    // Phase order is first appearance, so every main_thread body runs before the first no_scheduler one.
     cc::vector<cc::string> order;
 
     nx::test_registry reg;
@@ -278,8 +279,8 @@ TEST("parallel - main_thread and no_scheduler share one phase, in schedule order
     REQUIRE(order.size() == 6);
     for (auto i = 0; i < 3; ++i)
     {
-        CHECK(order[i * 2] == cc::format("m{}", i));
-        CHECK(order[i * 2 + 1] == cc::format("n{}", i));
+        CHECK(order[i] == cc::format("m{}", i));
+        CHECK(order[3 + i] == cc::format("n{}", i));
     }
 }
 

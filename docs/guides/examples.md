@@ -72,8 +72,9 @@ What follows from the bucket:
 * **A sweep never selects it.** Not `dev.py test`, not `--manual`, not a bulk "run disabled too" request.
   Only `--examples` or its exact name.
 * **No CHECK is required.** A `CHECK` that fails still fails, so assert where asserting is part of the demonstration — but an example with none is a passing example.
-* **`no_scheduler` is baked in**, so the body runs directly on the thread `nx::run` was entered on: the process main thread.
-  A trailing config item overrides it, and an example whose subject asserts on the main thread says so with `EXAMPLE("x", main_thread)`.
+* **`main_thread` is baked in**, so the body runs on the thread `nx::run` was entered on, one example at a time — which is what a window or a device context needs.
+* **The run installs an ambient async scheduler**, so an example may use `cc::async` without standing up a pool of its own.
+  `EXAMPLE("x", no_scheduler)` is how an example that wants to install its own opts out of that.
 
 **The name is a slash path**, and it is load-bearing.
 It is the CLI argument, the gallery entry and — once preview rendering lands — the screenshot slug, so it is written as its own identifier rather than as a sentence.

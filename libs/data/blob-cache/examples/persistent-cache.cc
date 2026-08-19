@@ -49,10 +49,6 @@ EXAMPLE("blob-cache/persistent-cache")
 
     // The cache is an optimization and nothing else, so opening it cannot fail in a way a caller must handle.
     // A storage problem shows up as a miss, never as an error.
-    // The cache's actor thread completes async nodes, and a completed node's continuation needs somewhere to run.
-    // Installing a default pool is that somewhere — without one, the first completion off a worker thread asserts.
-    auto pool = cc::async_thread_pool();
-    auto const default_pool = cc::scoped_default_async_pool(pool);
 
     auto computed = false;
 
@@ -62,18 +58,18 @@ EXAMPLE("blob-cache/persistent-cache")
 
     // acquire is lookup, singleflight and store in one call: the callback runs only on a real miss,
     // and concurrent callers for the same key join one pipeline instead of each computing their own.
-    auto const value = pool.blocking_get(cache->acquire(key,
-                                                        [&]
-                                                        {
-                                                            computed = true;
-                                                            return expensive_derivation("teapot");
-                                                        }));
+    auto const value = cc::async_blocking_get(cache->acquire(key,
+                                                             [&]
+                                                             {
+                                                                 computed = true;
+                                                                 return expensive_derivation("teapot");
+                                                             }));
 
     cc::println("value: {}", blob_text(value));
     cc::println("this run {}", computed ? "computed it" : "read it from the cache");
 
     // Asking again in the same process never reaches storage at all.
-    auto const again = pool.blocking_get(cache->acquire(key, [&] { return expensive_derivation("teapot"); }));
+    auto const again = cc::async_blocking_get(cache->acquire(key, [&] { return expensive_derivation("teapot"); }));
     cc::println("second acquire returns the same bytes: {}", blob_text(again) == blob_text(value));
 
     auto const stats = cache->get_stats();

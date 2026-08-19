@@ -42,14 +42,12 @@ What is left is the interaction on top of it, in dependency order:
   The cheap check is a readback test: converge a static view, translate the camera along its own right axis by
   exactly one pixel's worth at the focal distance, and assert the image shifts by one texel.
   Until that exists, `pathtraced-window-manual-test` is the only real confirmation.
-- **The GPU tests may be passing vacuously.** `pathtrace_routine::init_declare` drives its shader compiles inline with
-  `try_async_blocking_get_singlethreaded`, which does not complete when called from a nexus pool worker — so the
-  routine ends up with no pipeline and `execute` silently no-ops.
-  `pathtraced-view-test` proves it: `is_ready` holds when the test runs alone and fails in the concurrent sweep, which
-  is why that one is now pinned to the main thread.
-  Every other tracing test asserts only CPU-side facts, so none of them would notice tracing nothing at all.
-  The real fix is a pool-aware wait in `init_declare` — the hazard being that it blocks under the routine's own init
-  lock, which is presumably why the singlethreaded variant was chosen in the first place.
+- **The GPU tests may still be passing vacuously.** `pathtrace_routine::init_declare` used to drive its shader compiles
+  with a throwaway single-threaded scheduler, which could not complete a node the ambient pool already owned — so the
+  routine ended up with no pipeline and `execute` silently no-opped.
+  `cc::try_async_blocking_get` waits on the scheduler that owns the node, which removes that failure mode.
+  What remains is the coverage gap it exposed: every tracing test but `pathtraced-view-test` asserts only CPU-side
+  facts, so none of them would notice tracing nothing at all.
   Until then, a tracing test that means anything needs `nx::config::main_thread` *and* an `is_ready` assertion.
 - **The disocclusion thresholds are guesses**: 1% of view depth on position, 0.9 on the normal dot.
   They want tuning against real content, and probably want to be per-view rather than constants in the raygen.

@@ -7,6 +7,12 @@
 
 #if SR_HAS_WINDOW
 
+namespace
+{
+/// What this example's imgui layout is filed under in the workspace, distinct from the editor's.
+constexpr cc::string_view ui_name = "viewer";
+} // namespace
+
 /// The whole stack on one screen, with nothing on top of it.
 ///
 /// A `.vdoc` file holds the scene, its cubes are drawn through sg, and the camera lives in the file's WORKSPACE —
@@ -27,6 +33,11 @@ EXAMPLE("vdoc/cube-viewer")
     auto app = cube_editor::app::create("vdoc cube viewer — drag to orbit, scroll to zoom, close to end");
     if (app == nullptr)
         return; // create() already said what was missing
+
+    // The panel layout the last session left behind, restored before the first frame.
+    // Under this example's own name: the editor opens the same file, and its layout is not this one's.
+    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value())
+        app->imgui().load_settings(ini.value());
 
     // The camera the last session left behind, or a default for a first run.
     auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
@@ -63,9 +74,14 @@ EXAMPLE("vdoc/cube-viewer")
         ImGui::End();
 
         app->end_frame(doc.value().current(), camera, vdoc::entity_id());
+
+        // Empty on nearly every frame: imgui only asks for a save a few seconds after something moved.
+        if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value())
+            doc.value().store_ui_settings(ui_name, ini.value());
     }
 
     // Written on every exit, and flushed by the store's close(). No op, no ref move, no dirty document.
+    doc.value().store_ui_settings(ui_name, app->imgui().settings());
     doc.value().store_camera(camera);
     cc::println("camera stored in the workspace — reopen to land exactly here");
 }

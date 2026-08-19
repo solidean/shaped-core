@@ -86,9 +86,9 @@ asset->generation()                 // -> u64; moves when a reload replaced the 
 asset->last_error()                 // -> optional<string>; why the last reload was rejected
 asset->virtual_path() / stage() / entry_point()
 asset->dependencies()               // -> vector<string>; source + resolved includes (what is watched)
-// GOTCHA: acquire returns a COLD cc::async node. Install cc::install_default_async_pool and its workers
-//   run it, or drive it with cc::try_async_blocking_get_singlethreaded(sh). Lazy + per format: nothing
-//   compiles until asked, and each format is compiled separately from the same source.
+// GOTCHA: acquire returns a COLD cc::async node. The ambient scheduler's workers run it, or block on it with
+//   cc::try_async_blocking_get(sh). Lazy + per format: nothing compiles until asked, and each format is
+//   compiled separately from the same source.
 ```
 
 ## the compiler seam

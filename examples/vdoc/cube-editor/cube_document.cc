@@ -3,7 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
-#include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/async.hh>
 #include <versioned-document/incremental_parse.hh>
 #include <versioned-document/op_builder.hh>
 #include <versioned-document/value_builder.hh>
@@ -15,6 +15,15 @@ namespace
 constexpr cc::string_view main_ref = "main";
 constexpr cc::string_view camera_key = "viewport/camera";
 constexpr i32 camera_version = 1;
+
+/// The imgui layout is one string per example, and imgui itself skips ini entries it does not know —
+/// so this version only moves if the value stops being that bare string.
+constexpr i32 ui_settings_version = 1;
+
+[[nodiscard]] cc::string ui_settings_key(cc::string_view name)
+{
+    return cc::format("ui/imgui/{}", name);
+}
 
 /// The op's label, which is what the timeline shows.
 /// Metadata is free-form and informational — and still hashed into the op id, so it is part of what is versioned.
@@ -68,8 +77,7 @@ cc::optional<document> document::open(cc::string_view path)
     out._file = cc::move(opened.store);
 
     // A hard load failure rides `loaded`'s error channel; a soft one lands in report() and the file still opened.
-    auto pool = cc::async_thread_pool();
-    if (auto result = pool.try_blocking_get(opened.loaded); result.has_error())
+    if (auto const result = cc::try_async_blocking_get(opened.loaded); result.has_error())
     {
         cc::eprintln("could not load {}: {}", path, result.error().underlying().to_string());
         return cc::nullopt;
@@ -97,7 +105,7 @@ cc::optional<document> document::open(cc::string_view path)
         // Waited on, unlike every later save: a publish is fire-and-forget, so a first run closed or killed before it
         // lands would leave a ref pointing at an op whose bytes never arrived — and the next run would then load an
         // empty document and seed a second time.
-        (void)pool.try_blocking_get(out._file->publish({.refs = {{cc::string(main_ref), out._head}}}));
+        (void)cc::try_async_blocking_get(out._file->publish({.refs = {{cc::string(main_ref), out._head}}}));
     }
 
     return out;
@@ -403,6 +411,20 @@ cc::optional<orbit_camera> document::load_camera() const
     cam.yaw = tg::angle_f::make_from_degree(number("yaw_deg", 35.0f));
     cam.pitch = tg::angle_f::make_from_degree(number("pitch_deg", 28.0f));
     return cam;
+}
+
+void document::store_ui_settings(cc::string_view name, cc::string_view ini)
+{
+    _file->set_workspace(ui_settings_key(name), {.version = ui_settings_version, .value = vdoc::value::of(ini)});
+}
+
+cc::optional<cc::string> document::load_ui_settings(cc::string_view name) const
+{
+    auto const stored = _file->try_get_workspace(ui_settings_key(name), ui_settings_version);
+    if (!stored.has_value() || stored.value().kind() != vdoc::value_kind::string)
+        return cc::nullopt;
+
+    return cc::string(stored.value().as_string());
 }
 
 vdoc::component_registry const& registry()

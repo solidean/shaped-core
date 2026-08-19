@@ -51,7 +51,7 @@ public:
 
     /// The pipeline for `key`, get-or-scheduled: one build per key, and a warmed build is reused.
     /// A build failure surfaces as an async error.
-    /// Drive with cc::(try_)async_blocking_get_singlethreaded, or poll.
+    /// Drive with cc::(try_)async_blocking_get, or poll.
     [[nodiscard]] async_handle acquire_async(Key const& key) const
     {
         return _cache.lock(
@@ -83,10 +83,7 @@ public:
     [[nodiscard]] cc::result<handle> try_acquire(Key const& key) const
     {
         auto node = acquire_async(key);
-        auto driven = cc::try_async_blocking_get_singlethreaded(node);
-        // A scheduled node with no unpushed manual dependency always drives to completion here.
-        CC_ASSERT(driven.has_value(), "pipeline build could not be driven to completion");
-        auto& result = driven.value();
+        auto result = cc::try_async_blocking_get(node);
         if (result.has_error())
             return cc::error(cc::move(result.error().underlying()));
         return cc::move(result.value());
