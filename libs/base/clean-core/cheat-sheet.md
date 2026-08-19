@@ -200,6 +200,7 @@ e.value();  e.key();                               // valid once occupied;  e.ge
 e.emplace_with_key(kargs, vargs...);               // rare: build K from explicit args instead of the probe key
 // entry is invalidated by ANY structural mutation of the map (incl. another entry's emplace) — don't mutate in between.
 // heterogeneous lookup needs the probe type to hash-equal & compare-equal to K (e.g. string_view vs string).
+// on a string-keyed map a literal probes directly: m["axis"], m.get("axis"), m.erase("axis") — no view to name.
 // keys must hash well-mixed: buckets mask low bits. default_hash finalizes; a custom Hash MUST avalanche.
 // move: O(1) (nodes stay put).  copy: deep, only if K and V are copyable (else move-only).
 // customize: cc::map<K,V,Hash,KeyEqual> — Hash{}(k)->u64 (transparent), KeyEqual{}(a,b)->bool (transparent).
@@ -560,6 +561,8 @@ cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold ov
 //   the protocol, the tier order and the reasoning: docs/customization-points.md
 // built-in: string/string_view (bytes, equal across both); vector/array/span/fixed_array/pair/optional (structural);
 //           unique_* containers structural; unique_ptr by pointer identity
+// a char array hashes as the string it holds (needs string_view.hh), which is what makes m["literal"] work
+//   a raw char const* still hashes by ADDRESS — convert it to a string_view before using it as a key
 
 #include <clean-core/common/hash128.hh>
 cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)

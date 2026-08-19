@@ -161,6 +161,30 @@ TEST("map - heterogeneous string_view lookup")
     CHECK(e.value() == 2);
 }
 
+TEST("map - string literals probe a string-keyed map directly")
+{
+    cc::map<cc::string, int> m;
+    m["alpha"] = 1;
+    m["beta"] += 2;
+
+    CHECK(m.size() == 2);
+    CHECK(m.contains("alpha"));
+    CHECK(!m.contains("gamma"));
+    CHECK(m.get("beta") == 2);
+    CHECK(m.get_or("gamma", -1) == -1);
+    CHECK(*m.get_ptr("alpha") == 1);
+
+    // the literal and the view it would produce must land on the same entry
+    CHECK(m.get_ptr("alpha") == m.get_ptr(cc::string_view("alpha")));
+
+    auto e = m.entry("beta");
+    CHECK(e.exists());
+    CHECK(e.value() == 2);
+
+    CHECK(m.erase("alpha"));
+    CHECK(!m.erase("alpha"));
+}
+
 TEST("map - reference stability across growth")
 {
     cc::map<int, int> m;

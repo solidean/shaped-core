@@ -26,6 +26,8 @@ That is convenient and easy to do by accident, so a `cc::string` parameter where
 
 `size()` counts bytes.
 Embedded `'\0'` bytes are allowed and counted, and indexing is by byte.
+A char array — a literal or a buffer alike — decays to a pointer and is read up to its first `'\0'`, never to the array bound.
+Constructing a view over embedded `'\0'` bytes therefore takes the explicit `string_view(ptr, size)`.
 
 Neither type does Unicode: no codepoint iteration, no grapheme clusters, no normalization, no case folding beyond ASCII.
 `cc::utf8_to_utf16` in `string/conversion.hh` is the one transcoding operation clean-core has.
@@ -99,6 +101,8 @@ That includes the reversed forms, so `"lemon" < s` works as well as `s < "nectar
 Hashing is structural over the bytes, via `cc::make_hash_of_bytes` (XXH3-64).
 `cc::string` delegates to `cc::string_view`, so **equal content hashes equally** regardless of inline-vs-heap storage or which of the two types holds it.
 That is what makes a `string_view` usable for heterogeneous lookup in a `cc::map` keyed by `cc::string`, with no temporary allocation.
+A char array hashes the same way, over the string it holds, so a bare literal probes such a map directly — `m["axis"]` needs no view to be named first.
+A raw `char const*` does not: it hashes by address like any other pointer, so wrap it in a `string_view` before using it as a key.
 [benchmarks/string-hash-benchmark](benchmarks/string-hash-benchmark.md) is why XXH3 is the default.
 
 ## Character predicates
