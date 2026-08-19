@@ -3,6 +3,7 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
@@ -165,6 +166,24 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
     return best;
 }
 
+/// What vulkan says about the physical device that was picked.
+///
+/// `driverVersion` is vendor-encoded and vulkan defines no portable decomposition, so it is recorded as the raw
+/// number — which is enough for the only thing sg::adapter_info promises about it, equality.
+sg::adapter_info describe_adapter(VkPhysicalDevice device)
+{
+    VkPhysicalDeviceProperties props = {};
+    vkGetPhysicalDeviceProperties(device, &props);
+
+    auto info = sg::adapter_info();
+    info.name = cc::string(props.deviceName); // a NUL-terminated char array, not length-prefixed
+    info.vendor_id = u32(props.vendorID);
+    info.device_id = u32(props.deviceID);
+    info.driver_version = cc::format("{}", props.driverVersion);
+    info.is_software = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+    return info;
+}
+
 void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger)
 {
     if (messenger == VK_NULL_HANDLE)
@@ -324,7 +343,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         return vulkan_error(r, "vkCreateSemaphore (submission timeline) failed");
     }
 
-    return context_handle(std::make_shared<vulkan_context>(instance, best_device, device, queue, best_family,
-                                                           epoch_timeline, submission_timeline, messenger));
+    auto ctx = std::make_shared<vulkan_context>(instance, best_device, device, queue, best_family, epoch_timeline,
+                                                submission_timeline, messenger);
+    ctx->set_adapter_info(describe_adapter(best_device));
+    return context_handle(cc::move(ctx));
 }
 } // namespace sg

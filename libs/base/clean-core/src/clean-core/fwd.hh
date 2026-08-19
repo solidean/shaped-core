@@ -302,6 +302,11 @@ struct async_worker_scope;
 struct async_no_worker_scope;
 struct singlethreaded_scheduler;
 struct async_thread_pool;
+struct thread_pump_registration; // one registered cooperative pump (thread/thread_pump.hh)
+namespace impl
+{
+struct thread_pump_entry;
+}
 struct scoped_default_async_scheduler;
 struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)
 struct async_ambient_scope;

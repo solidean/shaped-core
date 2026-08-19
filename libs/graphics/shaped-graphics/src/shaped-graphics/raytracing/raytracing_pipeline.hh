@@ -64,6 +64,19 @@ public:
     /// Empty if the backend does not support it.
     [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;
 
+    /// Whether creation actually consumed the `cached_pipeline` blob it was handed.
+    ///
+    /// False when none was supplied, and false when one was supplied and the backend rejected it.
+    /// A rejection is the exact signal that a persisted blob has gone stale — a driver update, a different adapter —
+    /// so a cache replaces its entry on it rather than trying to predict staleness through the key.
+    ///
+    /// Always false on a backend whose state objects carry no blob at all, dx12 among them, which is the same answer
+    /// a caller needs: there is nothing worth persisting here.
+    [[nodiscard]] bool used_cached_pipeline() const { return _used_cached_pipeline; }
+
 protected:
     raytracing_pipeline() = default;
+
+    /// Set by the backend during creation; see used_cached_pipeline().
+    bool _used_cached_pipeline = false;
 };

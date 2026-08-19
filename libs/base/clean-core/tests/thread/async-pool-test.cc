@@ -416,4 +416,70 @@ TEST("async - a throwing frame on a worker does not take the process down", nx::
     REQUIRE(r.value().has_error());
     CHECK(r.value().error().underlying().to_string().contains("worker boom"));
 }
+
+TEST("async - a work item stolen by a parked participant runs under its own context, not the stealer's",
+     nx::config::no_scheduler,
+     exclusive("cc-default-async-pool"))
+{
+    // A blocking get parks INSIDE an ambient scope and steals while parked, so whatever it picks up would inherit that
+    // scope if a dequeued item were treated like an inline-driven dependency.
+    // It must not be: a node reaching a queue always carries its own token, so a null one there means "no context".
+    // Inheriting instead cross-attributes unrelated work to whichever logical task happened to be blocked.
+    //
+    // The pool's one worker is pinned inside `hog` for the whole test, so the parked participant is the only thread
+    // left that can run `victim` — the steal is forced rather than raced.
+    cc::async_thread_pool pool(1);
+    cc::scoped_default_async_scheduler as_default(
+        pool); // the pusher thread has nothing bound, and resolving `gate` routes a continuation
+
+    cc::atomic<bool> hog_running = {false};
+    cc::atomic<bool> release_hog = {false};
+    auto hog = cc::make_async_lazy<i64>(
+        [&]() -> i64
+        {
+            hog_running.store(true, cc::memory_order_release);
+            while (!release_hog.load(cc::memory_order_acquire))
+                std::this_thread::yield();
+            return 0;
+        });
+    hog->schedule_on(pool);
+    while (!hog_running.load(cc::memory_order_acquire))
+        std::this_thread::yield();
+
+    int scope_value = 7;
+    cc::atomic<int> observed = {-1}; // what `victim` saw: -1 not run, 0 no context, 7 the stealer's
+
+    auto gate = cc::make_async_manual<i64>();
+    auto root = cc::make_async_lazy([](i64 v) { return v; }, gate);
+
+    auto victim = cc::make_async_lazy<i64>(
+        [&]() -> i64
+        {
+            auto* const v = cc::async_ambient_lookup(pool_tag());
+            observed.store(v == nullptr ? 0 : *static_cast<int*>(v), cc::memory_order_release);
+            return 1;
+        });
+
+    // Nothing is bound on this thread, so `victim` reaches the queue with a null token — the case that inherits.
+    // Releasing the root only once `victim` has run is what makes the order the test claims the order it gets.
+    std::thread pusher(
+        [&]
+        {
+            victim->schedule_on(pool);
+            while (observed.load(cc::memory_order_acquire) < 0)
+                std::this_thread::yield();
+            gate->push_value(1);
+        });
+
+    {
+        cc::async_ambient_scope const s(pool_tag(), &scope_value);
+        CHECK(cc::async_blocking_get_on(pool, root) == 1);
+    }
+    pusher.join();
+
+    CHECK(observed.load(cc::memory_order_acquire) == 0);
+
+    release_hog.store(true, cc::memory_order_release);
+    (void)cc::async_blocking_get_on(pool, hog); // settle it before the pool goes away
+}
 #endif

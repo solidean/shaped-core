@@ -57,7 +57,18 @@ cache->collect_garbage();                       // -> shared_async<gc_result>; a
 cache->flush();                                 // -> shared_async<cc::unit>; write buffered access times out
 cache->get_stats();                             // -> cache_stats; cheap, never touches the database
 
-cache->pump();                                  // -> bool; runs storage work where there is no actor thread
+#include <blob-cache/default_cache.hh>          // the process-wide cache every subsystem shares
+bcache::default_cache();                        // -> blob_cache&; opened on first use, never at static-init time
+bcache::default_cache_path();                   // -> cc::string; <user cache dir>/shaped-core/blob-cache.db
+bcache::set_default_cache(&c);                  // nullptr restores the lazily-opened one; caller keeps ownership
+bcache::disable_default_cache();                // every get misses, every put is dropped, acquire still singleflights
+bcache::scoped_default_cache guard(&c);         // RAII install/restore
+// SC_BLOB_CACHE=off   -> the default opens with no storage at all   (bcache::cache_mode_env_var)
+// SC_BLOB_CACHE=temp  -> a private file under the OS temp dir, fresh per process
+// read once, when the default is first opened; anything else (incl. unset) is the normal user cache
+
+// no pump() of its own: a store with no actor thread registers with cc::register_thread_pump, so whoever blocks
+//   runs its storage work (cc::thread_pump_all sweeps them all)
 cache->close();                                 // flush, drain, join; idempotent, and the destructor calls it
 cache->is_closed();                             // -> bool; a closed cache misses and drops rather than queueing
 ```
@@ -76,7 +87,7 @@ bcache::cache_config{
     .verify_on_read = false,              // re-BLAKE3 every hit; a full crypto pass per read, so off by default
     .wall_clock = fn, .steady_clock = fn, // default to clean-core's; must be callable from any thread
     .on_storage_error = fn,               // one line per failure, so degradation is never silent
-    .unthreaded = false};                 // drive via pump() instead of an actor thread
+    .unthreaded = false};                 // no actor thread: registers a pump, so whoever blocks runs the storage work
 
 bcache::cache_limits{
     .max_total_bytes = i64(50) << 30,     // decoded OBJECT bytes — not pages, indexes, freelist or WAL
@@ -133,6 +144,15 @@ Only what the signatures above cannot tell you.
   An extra column is a newer build's and is kept.
 - **`cache_config::path`'s directory must already exist.** clean-core has no directory creation; a missing one is
   not an error, it just opens degraded.
-- **Without threads, whoever would have blocked must `pump()`.** A caller that never pumps sees only misses and
-  dropped puts — degraded, never deadlocked.
-  `pump()` is a no-op returning false in a threaded build, so calling it unconditionally is correct everywhere.
+  `default_cache()` is the exception, and only because it creates its own directory through bcache's own platform shim.
+- **One big cache beats several small ones**, which is why `default_cache()` exists and why a library reaches for it
+  rather than asking its caller for one.
+  A shared budget lets a cold shader compile evict a stale texture mip; per-subsystem caches can only ever evict their own.
+- **Tests share the real cache on purpose**, and are faster for it: most only want the cached thing to exist, not to
+  be built cold.
+  A test that is *about* caching opens its own store instead of installing one as the default, and `SC_BLOB_CACHE`
+  is the whole-run lever for asking whether a stale entry is behind a result.
+- **Without threads, whoever blocks runs the storage work**, through clean-core's pump registry rather than by naming
+  this cache.
+  So blocking is enough and there is no threadless code path to write; `cc::thread_pump_all()` is the same sweep for a
+  frame loop that wants one explicitly.

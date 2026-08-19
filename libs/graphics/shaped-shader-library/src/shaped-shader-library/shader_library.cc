@@ -2,6 +2,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
@@ -57,9 +58,10 @@ void slib::shader_library::start_hot_reload(reload_config config)
     bool const threaded = CC_HAS_THREADS && !config.unthreaded;
 
     _watcher_stopping = std::make_shared<cc::atomic<bool>>(false);
+    _watcher_poll_now = std::make_shared<cc::atomic<bool>>(false);
     _wake = std::make_shared<impl::reload_wake>();
     _watcher = cc::make_threaded_actor<impl::reload_watcher>(*this, config.interval_ms, threaded, config.force_polling,
-                                                             _watcher_stopping, _wake);
+                                                             _watcher_stopping, _watcher_poll_now, _wake);
 
     // Arm before start: the constructor's scan had no actor to wake, and nothing runs until start(), so there is no gap to race.
     _wake->arm(_watcher.get());
@@ -68,8 +70,14 @@ void slib::shader_library::start_hot_reload(reload_config config)
 
 void slib::shader_library::poll_hot_reload()
 {
-    if (_watcher != nullptr)
-        (void)_watcher->process_messages_if_unthreaded(); // no-op when the watcher has its own thread
+    // Deliberately NOT cc::thread_pump_all(): the watcher IS registered there, but a sweep runs on every blocking wait
+    // in the process and may only rescan on the watcher's own interval.
+    // This is the caller asking outright, on its own cadence, so it says so and then drives the watcher.
+    if (_watcher == nullptr)
+        return;
+
+    _watcher_poll_now->store(true);
+    (void)_watcher->process_messages_if_unthreaded(); // a no-op while the watcher has its own thread
 }
 
 void slib::shader_library::add_compiler(std::unique_ptr<shader_compiler> compiler)

@@ -2,6 +2,7 @@
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_sampler
+#include <shaped-graphics/binding/impl/layout_hash.hh>
 #include <shaped-graphics/binding/sampler.hh>
 
 namespace sg::backend::dx12
@@ -28,7 +29,8 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
     cc::span<sg::binding const> bindings,
     cc::span<sg::named_sampler const> static_samplers)
 {
-    auto layout = std::make_shared<dx12_binding_group_layout>();
+    auto layout
+        = std::make_shared<dx12_binding_group_layout>(sg::impl::binding_group_layout_hash(bindings, static_samplers));
 
     // A sampler binding is *static* (baked into the root signature by the pipeline layout) iff its name
     // appears in static_samplers; otherwise it is a *dynamic* sampler-table entry supplied per binding_group.

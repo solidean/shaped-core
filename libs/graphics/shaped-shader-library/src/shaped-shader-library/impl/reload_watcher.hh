@@ -68,6 +68,7 @@ public:
                    bool threaded,
                    bool force_polling,
                    std::shared_ptr<cc::atomic<bool>> stopping,
+                   std::shared_ptr<cc::atomic<bool>> poll_now,
                    std::shared_ptr<reload_wake> wake);
 
 protected:
@@ -97,15 +98,29 @@ private:
     /// Falls back to polling if any of them cannot be watched.
     void resubscribe();
 
+    /// Whether enough of `_interval_ms` has passed to rescan, advancing the deadline when it has.
+    /// Unthreaded only: the threaded arm sleeps the interval out instead.
+    [[nodiscard]] bool poll_interval_elapsed();
+
     shader_library* _library;
     double _interval_ms;
     bool _threaded;
+
+    /// When the unthreaded polling arm may scan again; 0 means "never scanned".
+    /// A pump registration is swept on every blocking wait anywhere, so the interval has to live HERE rather than in a
+    /// caller's cadence — otherwise a shader-directory scan rides along with every wait in the process.
+    double _next_poll_secs = 0;
 
     /// Whether we rescan on a timer rather than on notification.
     /// Starts at reload_config::force_polling and latches on for good the moment a directory we depend on turns out to be unwatchable.
     /// Polling sees every change anyway, so there is nothing to be gained by climbing back out.
     /// Actor thread only.
     bool _polling;
+
+    /// Set by poll_hot_reload() to mean "rescan NOW, never mind the interval".
+    /// Shared for the same reason `_stopping` is, and it is what separates a caller asking from a pump sweep passing
+    /// through: a sweep reaches this on every blocking wait in the process, so only the interval may let it scan.
+    std::shared_ptr<cc::atomic<bool>> _poll_now;
 
     /// Set by the library before shutdown so a sleeping poll loop gives up promptly.
     /// Shared because the actor owns this impl and hands it back only once it has stopped.

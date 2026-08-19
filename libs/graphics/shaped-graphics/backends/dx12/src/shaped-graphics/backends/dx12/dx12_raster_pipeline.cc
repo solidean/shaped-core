@@ -197,9 +197,13 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     }
 
     HRESULT hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&pipeline->pipeline_state));
+    pipeline->_used_cached_pipeline = SUCCEEDED(hr) && !cached.empty();
 
     // A stale/mismatched blob fails with E_INVALIDARG; the cached PSO is a best-effort accelerator, so
     // degrade to a fresh build rather than hard-failing.
+    //
+    // Taking this path is also the ONLY exact answer to "did the driver accept our blob" — d3d12 never silently
+    // ignores one — which is what used_cached_pipeline() reports.
     if (FAILED(hr) && !cached.empty())
     {
         pso.CachedPSO = {};

@@ -78,6 +78,8 @@ ctx.backend()                                      // sg::backend_kind (coarse t
 ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
+ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
+                                                   // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
@@ -486,6 +488,9 @@ sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (
 sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle, max_binding_groups> groups; cc::vector<bound_sampler> static_samplers }  — groups ordered; index = bind slot
 sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout; pinned_data<byte const> cached_pipeline={} }
 compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backend's serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported / accelerator only, NOT in the cache key)
+pipeline.used_cached_pipeline()          // -> bool — did creation actually CONSUME desc.cached_pipeline? false = none given, or the backend rejected it
+                                         // A rejection is the exact "this persisted blob is stale" signal (driver update, other adapter) — refresh the entry on it, never on a byte compare
+layout->structural_hash()                // -> cc::hash128 on binding_group_layout / pipeline_layout — content identity, NOT the handle address; stable across processes, so it can key a persistent cache
 // layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
 ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
@@ -591,9 +596,23 @@ ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_ra
                                                                //   NOT keyed on .cached_pipeline — that blob only accelerates a build
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
-// keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: ordered group-layout
-//   identities; compute pipeline: shader bytecode+entry+signature + pipeline-layout handle identity).
-// For full dedup, acquire the group layouts THROUGH the cache, then the pipeline layout, then the pipeline.
+// keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: its groups'
+//   structural hashes + static samplers + inline constants; compute pipeline: shader bytecode+entry+signature + the
+//   pipeline layout's structural hash).
+// COMPUTE + RAYTRACING take the layout STRUCTURALLY, never the handle address -> identical layouts built independently
+//   dedup, and the key still names the same thing in the next process, which is what the persistent tier needs.
+//   Acquiring the layout through the cache is convenience for those two, not a precondition for dedup.
+// RASTER takes the layout's ADDRESS, so acquire it through the cache or two identical layouts miss each other.
+//   In-memory only today; it would have to go structural before raster PSOs could be persisted.
+ctx.cached.cache().set_blob_cache(&c)   // persistent 2nd tier: serialized PSO blobs surviving across RUNS (bcache::blob_cache*)
+                                        // defaults to bcache::default_cache(); nullptr = off. Keyed on adapter + driver too
+                                        // The build PARKS on the store: with no ambient scheduler and no worker scope, the tier
+                                        //   is skipped and the pipeline is built plainly
+                                        // Drive with cc::async_blocking_get — it resumes on an ambient-scheduler worker, and
+                                        //   without threads it sweeps cc::thread_pump_all() rather than sleeping
+cc::thread_pump_all()                   // -> bool; one cycle of every semantic thread with no OS thread of its own
+                                        // sg has NO pump of its own: an unthreaded actor registers itself, so blocking is enough
+                                        // one atomic load WITH threads, so call it unconditionally
 // Threading: the async build calls the backend from a pool worker — safe where the backend allows concurrent
 // pipeline creation (dx12 device creates are free-threaded). On single_threaded, install NO pool and drive inline.
 pipeline_cache pc;                                            // standalone use (acquire_* take a context&)

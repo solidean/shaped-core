@@ -1033,6 +1033,20 @@ namespace cc
 {
 static_assert(sizeof(async_node_base) == 16, "async_node_base must be a 16 B header (payload() offset relies on it)");
 
+/// Poll a node a scheduler just took off its queue, as its own attribution root.
+///
+/// EVERY dequeue site must go through this rather than calling poll() directly, and only a dequeue site may.
+/// An inline dependency drive, and the caller's own root in participate_until_ready, are on the calling frame's
+/// stack on purpose and keep inheriting from it.
+namespace impl
+{
+inline void async_poll_work_item(async_node_base& node)
+{
+    async_ambient_root_scope const root;
+    node.poll();
+}
+} // namespace impl
+
 // ============================================================================
 // async_node_traits — intrusive refcount ops (defined now that async_node_base is complete)
 // ============================================================================

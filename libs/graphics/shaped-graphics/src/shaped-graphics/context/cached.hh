@@ -20,7 +20,7 @@ public:
                                                                            = {});
 
     /// The cached pipeline_layout for these ordered group layouts, created on a miss.
-    /// Acquire the group layouts through this scope too for full dedup — the key is their handle identity.
+    /// The key is the group layouts' structural identity, so two separately created but identical ones still dedup.
     /// Throws sg::pipeline_creation_exception on a creation failure, or sg::device_lost_exception if the device was lost.
     [[nodiscard]] pipeline_layout_handle acquire_pipeline_layout(pipeline_layout_description const& desc);
 

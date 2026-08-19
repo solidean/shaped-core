@@ -22,6 +22,8 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
+    src/shaped-graphics/binding/impl/layout_hash.cc
+    src/shaped-graphics/binding/impl/shader_codec.cc
     src/shaped-graphics/compute/compute_pipeline.cc
     src/shaped-graphics/raster/raster_pipeline.cc
     src/shaped-graphics/raytracing/raytracing_pipeline.cc
@@ -103,6 +105,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/binding.hh
     src/shaped-graphics/binding/binding_group_layout.hh
     src/shaped-graphics/binding/pipeline_layout.hh
+    src/shaped-graphics/context/adapter_info.hh
     src/shaped-graphics/binding/compiled_shader.hh
     src/shaped-graphics/compute/compute_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_pipeline.hh
@@ -124,7 +127,9 @@ target_include_directories(shaped-graphics
 
 # clean-core provides the vocabulary types + assertions; typed-geometry the math types sg's
 # resource/viewport/geometry APIs will speak in.
-target_link_libraries(shaped-graphics PUBLIC clean-core typed-geometry)
+# blob-cache is PUBLIC because pipeline_cache's persistence seam names bcache::blob_cache in a public header.
+# It links babel/SQLite privately, so the cost here is one forward-declared type, not the storage engine.
+target_link_libraries(shaped-graphics PUBLIC clean-core typed-geometry blob-cache)
 
 sc_declare_pch_tier(SG EXTENDS TG HEADERS <shaped-graphics/all.hh>)
 
@@ -171,6 +176,8 @@ if(SC_BUILD_TESTS)
         tests/texture/texture-view-test.cc
         tests/transfer/bytes_future-test.cc
         tests/binding/binding-test.cc
+        tests/binding/layout_hash-test.cc
+        tests/binding/shader_codec-test.cc
         tests/pipeline/raster_pipeline-test.cc
         tests/sampler/sampler-test.cc
         tests/barrier/access_state-test.cc

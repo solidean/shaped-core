@@ -87,6 +87,11 @@ cc::result<compiler> compiler::create()
     return compiler(cc::move(i));
 }
 
+cc::string_view compiler::version() const
+{
+    return _state->version;
+}
+
 cc::result<preprocessed_source> compiler::preprocess(shader_description const& desc,
                                                      include_resolver resolve_include,
                                                      compile_options const& options)

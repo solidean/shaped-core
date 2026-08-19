@@ -106,4 +106,17 @@ inline dx12_context_handle make_warp_context()
     auto ctx = make_test_context();
     return ctx.has_value() ? ctx.value() : nullptr;
 }
+
+/// A context on the REAL adapter rather than WARP, for the behaviour only a vendor driver can show.
+/// nullptr where the host has no D3D12 hardware adapter, which a caller turns into a SKIP.
+///
+/// Reach for this over make_warp_context only where the driver itself is the subject — serialized PSO blobs are the
+/// case that matters, since WARP's are the runtime's and say nothing about what a driver does with one.
+inline dx12_context_handle make_hardware_context(dx12_config config = {})
+{
+    config.use_warp = false;
+    config.enable_debug_layer = true;
+    auto ctx = as_test_context(sg::create_dx12_context(config));
+    return ctx.has_value() ? ctx.value() : nullptr;
+}
 } // namespace sg::backend::dx12

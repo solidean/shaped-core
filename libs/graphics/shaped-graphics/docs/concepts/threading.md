@@ -42,22 +42,28 @@ See [barriers](barriers.md) for the slot model and the revert-to-canonical contr
 
 Where `CC_HAS_THREADS == 0` — WebAssembly, or any build configured `-DSC_THREADS=OFF` — nothing about the API changes.
 The transfer systems still hand their copies to a [`cc::threaded_actor`](../../../../base/clean-core/src/clean-core/thread/threaded_actor.hh).
-The actor simply runs on whoever pumps it instead of on a thread of its own.
+The actor simply runs on whoever sweeps it instead of on a thread of its own.
 
-That shifts one obligation onto sg: **every blocking wait must drain the actors before it blocks.**
-`sg::context::pump_transfers()` — a backend seam; dx12 drives its upload/download copy actors — runs one cycle and reports whether more work may remain.
-It does nothing and returns false where the actors have their own threads, so the drain collapses to a single test and the code path stays the same either way.
+**sg owns no pumping of its own.**
+An unthreaded actor registers itself with clean-core's [pump registry](../../../../base/clean-core/src/clean-core/thread/thread_pump.hh).
+Every blocking wait — `cc::async_blocking_get`, a frame loop, one of the waits below — sweeps that registry rather than draining the actors it happens to know about.
+`cc::thread_pump_all()` is the whole entry point, and it costs one atomic load where every actor has a thread of its own.
 
-The rule is: **a wait that only an actor can satisfy has to pump it first.** Those waits are
+sg used to carry `sg::context::pump()` and a per-backend `on_pump()` for this, and the reason they are gone is that they could only ever drain what *this context* could name.
+A wait below sg, or beside it, saw none of them: the deadlock that produced the registry was `cc::async_blocking_get` sleeping on a store it had no way to reach.
+
+The waits that need the sweep are
 
 - `wait_for(future)` and `wait_for_ticks` / `wait_for_seconds` — the readback actor delivers the bytes.
 - `wait_for_epoch`, and so also `wait_for_next_inflight_epoch` and `advance_epoch`'s throttle — *not* just a GPU wait.
-  A submitted list can be parked on the async-upload completion fence, which the copy actor signals, so without the drain the GPU never reaches the epoch fence.
+  A submitted list can be parked on the async-upload completion fence, which the copy actor signals, so without the sweep the GPU never reaches the epoch fence.
 - the inline-download ring's back-pressure and its drain-to-idle — only the actor frees ring space and decrements the outstanding count.
 
 The last two are the traps: they look like waits on the GPU or on an atomic, not on an actor.
-Adding an actor, or a wait that an actor unblocks, means extending `pump_transfers` or draining at the new wait.
-Otherwise it deadlocks with no threads and passes every threaded test.
+What the registry leaves as an obligation sits on the ACTORS rather than on the waits.
+**A handler must not block on progress another registration has to make**, because unthreaded it holds the only thread there is.
+The inline-download actor is the live example.
+It sweeps until its submission completes and only then falls through to the fence wait, because that submission can be queued behind an upload the copy actor has not run yet.
 
 ## Backends today
 

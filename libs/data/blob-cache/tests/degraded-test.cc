@@ -1,5 +1,6 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -11,7 +12,9 @@ using namespace bcache::test;
 // A broken cache is slow.
 // That is all it is.
 
-TEST("bcache create_disabled answers every read as a miss and drops every write")
+// exclusive() because it asserts on cc::thread_pump_all()'s own return value, which is process-wide: any sibling test
+// holding a registered store would answer for it.
+TEST("bcache create_disabled answers every read as a miss and drops every write", exclusive())
 {
     auto cache = blob_cache::create_disabled();
     auto const key = key_of("disabled", "entry");
@@ -28,10 +31,10 @@ TEST("bcache create_disabled answers every read as a miss and drops every write"
     CHECK(!got->try_value()->has_value());
 
     // Nothing to pump, and pumping anyway is safe — which is what lets a caller pump unconditionally.
-    CHECK(!cache->pump());
+    CHECK(!cc::thread_pump_all());
 }
 
-TEST("bcache acquire returns the computed value with no storage at all")
+TEST("bcache acquire returns the computed value with no storage at all", singlethreaded)
 {
     auto cache = blob_cache::create_disabled();
     auto const key = key_of("disabled", "computed");
@@ -48,6 +51,8 @@ TEST("bcache acquire returns the computed value with no storage at all")
     CHECK(calls == 1);
 
     // Singleflight is pure in-process machinery, so it works with no storage behind it — a second concurrent caller still shares one compute.
+    // nx::singlethreaded is what makes "concurrent" true here: on a pool, a worker is free to finish `b` before `c` is
+    // ever issued, and then there is no flight left to join.
     auto const b = cache->acquire(key, compute);
     auto const c = cache->acquire(key, compute);
     CHECK(b.get() == c.get());
@@ -73,7 +78,7 @@ TEST("bcache opens degraded when its directory does not exist")
 
     auto cache = blob_cache::create(cc::move(config));
     while (!cache->opened()->is_ready())
-        cache->pump();
+        (void)cc::thread_pump_all();
 
     CHECK(cache->opened()->has_error()); // the one place the reason is available, for a log line
     CHECK(!cache->get_stats().is_backed_by_storage);
@@ -82,12 +87,12 @@ TEST("bcache opens degraded when its directory does not exist")
     auto const key = key_of("degraded", "entry");
     auto const put = cache->put(key, make_blob("dropped"));
     while (!put->is_ready())
-        cache->pump();
+        (void)cc::thread_pump_all();
     CHECK(put->try_value()->status == put_status::unavailable);
 
     auto const got = cache->get(key);
     while (!got->is_ready())
-        cache->pump();
+        (void)cc::thread_pump_all();
     CHECK(!got->try_value()->has_value());
 }
 

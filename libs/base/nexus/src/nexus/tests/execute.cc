@@ -15,6 +15,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/check.hh>
@@ -1696,5 +1697,13 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     }
 
     drain_orphan_checks(result);
+
+    // A registered pump outliving the run means a semantic thread was never torn down.
+    // Nothing fails yet — the run's own result is already computed — but it is silent otherwise, and the next run
+    // inherits a pump into freed memory.
+    if (auto const leaked = cc::registered_thread_pump_count(); leaked > 0)
+        cc::print("[nexus] warning: {} thread pump(s) still registered after the run - a semantic thread outlived it\n",
+                  leaked);
+
     return result;
 }

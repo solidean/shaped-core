@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/hash128.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/binding/binding.hh>
@@ -55,6 +56,16 @@ class sg::pipeline_layout
 public:
     virtual ~pipeline_layout();
 
+    /// Content identity: a hash over the group layouts' own identities, the static samplers and the inline constants.
+    /// Stable across processes, which is what lets it key a cache that outlives one.
+    ///
+    /// Not virtual on purpose: identity is decided at the sg level, from sg-level inputs, so two backends cannot
+    /// disagree about which layouts are the same one.
+    [[nodiscard]] cc::hash128 structural_hash() const { return _structural_hash; }
+
 protected:
-    pipeline_layout() = default;
+    /// `structural_hash` must come from sg::impl::pipeline_layout_hash over the creation arguments.
+    explicit pipeline_layout(cc::hash128 structural_hash) : _structural_hash(structural_hash) {}
+
+    cc::hash128 _structural_hash;
 };
