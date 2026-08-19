@@ -62,7 +62,10 @@ bcache::default_cache();                        // -> blob_cache&; opened on fir
 bcache::default_cache_path();                   // -> cc::string; <user cache dir>/shaped-core/blob-cache.db
 bcache::set_default_cache(&c);                  // nullptr restores the lazily-opened one; caller keeps ownership
 bcache::disable_default_cache();                // every get misses, every put is dropped, acquire still singleflights
-bcache::scoped_default_cache guard(&c);         // RAII install/restore — what a TEST BINARY must use, see gotchas
+bcache::scoped_default_cache guard(&c);         // RAII install/restore
+// SC_BLOB_CACHE=off   -> the default opens with no storage at all   (bcache::cache_mode_env_var)
+// SC_BLOB_CACHE=temp  -> a private file under the OS temp dir, fresh per process
+// read once, when the default is first opened; anything else (incl. unset) is the normal user cache
 
 cache->pump();                                  // -> bool; runs storage work where there is no actor thread
 cache->close();                                 // flush, drain, join; idempotent, and the destructor calls it
@@ -144,9 +147,10 @@ Only what the signatures above cannot tell you.
 - **One big cache beats several small ones**, which is why `default_cache()` exists and why a library reaches for it
   rather than asking its caller for one.
   A shared budget lets a cold shader compile evict a stale texture mip; per-subsystem caches can only ever evict their own.
-- **A test binary MUST install a `scoped_default_cache`.** Without one, any code path reaching `default_cache()`
-  writes into the developer's real cache directory, where its entries outlive the run and its keys collide with a
-  neighbouring binary's.
+- **Tests share the real cache on purpose**, and are faster for it: most only want the cached thing to exist, not to
+  be built cold.
+  A test that is *about* caching opens its own store instead of installing one as the default, and `SC_BLOB_CACHE`
+  is the whole-run lever for asking whether a stale entry is behind a result.
 - **Without threads, whoever would have blocked must `pump()`.** A caller that never pumps sees only misses and
   dropped puts — degraded, never deadlocked.
   `pump()` is a no-op returning false in a threaded build, so calling it unconditionally is correct everywhere.

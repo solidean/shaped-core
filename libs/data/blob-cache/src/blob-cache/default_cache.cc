@@ -1,6 +1,8 @@
 #include <blob-cache/blob_cache.hh>
 #include <blob-cache/default_cache.hh>
 #include <blob-cache/impl/cache_paths.hh>
+#include <clean-core/platform/environment.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
 
@@ -23,6 +25,13 @@ blob_cache& lazy_default()
     // access times and joins the actor — runs at exit rather than never.
     static auto const instance = []
     {
+        auto const mode = cc::environment_variable(cache_mode_env_var);
+        if (mode.has_value() && mode.value() == "off")
+            return blob_cache::create_disabled();
+
+        if (mode.has_value() && mode.value() == "temp")
+            return blob_cache::create({.path = cc::temp_file_path("shaped-core-cache", ".db")});
+
         // A missing directory is not an error to blob_cache: it opens degraded and misses forever.
         // Which is exactly why this has to happen here, where the default path is chosen.
         (void)impl::create_directories(default_cache_directory());

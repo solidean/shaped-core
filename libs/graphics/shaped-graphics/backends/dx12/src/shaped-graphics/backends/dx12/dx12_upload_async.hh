@@ -78,7 +78,7 @@ public:
     void shutdown();
 
     /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
-    /// A no-op returning false wherever the actor has its own thread — see sg::context::pump_transfers.
+    /// A no-op returning false wherever the actor has its own thread — see sg::context::pump.
     bool pump_unthreaded() { return _actor != nullptr && _actor->process_messages_if_unthreaded(); }
 
     // Set in initialize, then touched only by the copy actor, which reads them lock-free.

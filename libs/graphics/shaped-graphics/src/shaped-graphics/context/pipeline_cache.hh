@@ -1,8 +1,10 @@
 #pragma once
 
+#include <blob-cache/keys.hh> // bcache::cache_key, returned by value below
 #include <clean-core/common/hash128.hh>
 #include <clean-core/container/key_value_cache.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// Backend-agnostic cache for group layouts, pipeline layouts, and compute + raytracing pipelines.
@@ -40,6 +42,14 @@ public:
     /// Convenience: give every cache a default in-memory tier (up to max_entries each).
     void add_default_in_memory_providers(isize max_entries = 4096);
 
+    /// The persistent tier a pipeline build consults: serialized PSO blobs surviving across runs.
+    /// Defaults to bcache::default_cache(), opened the first time a pipeline misses in memory; nullptr turns it off.
+    ///
+    /// The build parks on the store, so it needs somewhere to resume: with no pool installed and no worker scope
+    /// active, the tier is skipped and the pipeline is built the plain way.
+    /// Without threads, drive it with ctx.pump() — the store advances only when pumped.
+    void set_blob_cache(bcache::blob_cache* cache);
+
     // acquire (get-or-create)
 public:
     /// The cached binding_group_layout for these bindings + static samplers, created via ctx.uncached on a miss.
@@ -71,12 +81,29 @@ public:
     /// Runs bookkeeping (e.g. in-memory eviction) on all caches.
     void apply_bookkeeping();
 
+    /// Advances the persistent tier where it has no thread of its own; true if there may be more work.
+    /// Reached through ctx.pump(); never opens a store that was not already in use.
+    bool pump();
+
 private:
     [[nodiscard]] cc::hash128 compute_binding_group_layout_key(cc::span<binding const> bindings,
                                                                cc::span<named_sampler const> static_samplers) const;
     [[nodiscard]] cc::hash128 compute_pipeline_layout_key(pipeline_layout_description const& desc) const;
     [[nodiscard]] cc::hash128 compute_compute_pipeline_key(compute_pipeline_description const& desc) const;
     [[nodiscard]] cc::hash128 compute_raytracing_pipeline_key(raytracing_pipeline_description const& desc) const;
+
+    /// The persistent-cache key for a pipeline whose in-memory key is `pipeline_key`.
+    ///
+    /// Folds in the adapter and driver on top, because a serialized PSO blob is only valid for the pair that wrote it.
+    /// Under-keying is cheap by construction — a rejected blob costs one failed create and nothing else — so this
+    /// deliberately does not try to capture the whole driver state.
+    [[nodiscard]] bcache::cache_key persistent_key(context& ctx, cc::hash128 pipeline_key, cc::string_view kind) const;
+
+    /// The persistent tier, resolved on first use: nullopt means "not chosen yet", a null pointer means OFF.
+    /// Lazy so that merely creating a context never opens a cache file.
+    [[nodiscard]] bcache::blob_cache* resolve_blob_cache();
+
+    cc::optional<bcache::blob_cache*> _blob_cache;
 
     cc::key_value_cache<cc::hash128, binding_group_layout_handle> _binding_group_layout_cache;
     cc::key_value_cache<cc::hash128, pipeline_layout_handle> _pipeline_layout_cache;

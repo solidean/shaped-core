@@ -2,6 +2,7 @@
 
 #include <blob-cache/fwd.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 
 /// The process-wide cache every subsystem shares.
 ///
@@ -11,8 +12,18 @@
 
 namespace bcache
 {
+/// Overrides where default_cache() opens, for a run that must not touch the real one.
+///
+///   off    every get misses and every put is dropped — the shape to reach for when diagnosing whether a stale entry is behind a result
+///   temp   a private file under the OS temp directory, fresh per process
+///
+/// Anything else, including unset, is the normal user cache.
+/// Read once, when the default is first opened.
+inline constexpr auto cache_mode_env_var = cc::string_view("SC_BLOB_CACHE");
+
 /// Where default_cache() opens, when nothing was installed over it: `<user cache dir>/shaped-core/blob-cache.db`.
 /// %LOCALAPPDATA% on Windows, $XDG_CACHE_HOME or ~/.cache on Linux, ~/Library/Caches on Apple platforms.
+/// What cache_mode_env_var selects instead is not reported here.
 [[nodiscard]] cc::string default_cache_path();
 
 /// The cache to use when the caller was given none.

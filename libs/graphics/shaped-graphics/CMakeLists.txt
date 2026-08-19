@@ -126,7 +126,9 @@ target_include_directories(shaped-graphics
 
 # clean-core provides the vocabulary types + assertions; typed-geometry the math types sg's
 # resource/viewport/geometry APIs will speak in.
-target_link_libraries(shaped-graphics PUBLIC clean-core typed-geometry)
+# blob-cache is PUBLIC because pipeline_cache's persistence seam names bcache::blob_cache in a public header.
+# It links babel/SQLite privately, so the cost here is one forward-declared type, not the storage engine.
+target_link_libraries(shaped-graphics PUBLIC clean-core typed-geometry blob-cache)
 
 sc_declare_pch_tier(SG EXTENDS TG HEADERS <shaped-graphics/all.hh>)
 

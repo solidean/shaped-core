@@ -84,6 +84,14 @@ pipeline_cache& context::pipeline_cache_ref()
     return *_pipeline_cache;
 }
 
+bool context::pump()
+{
+    // Both, never short-circuited: they are independent, and either may still have work when the other says it does not.
+    bool const backend = this->on_pump();
+    bool const caches = _pipeline_cache != nullptr && _pipeline_cache->pump();
+    return backend || caches;
+}
+
 cc::optional<u64> context::wait_for_ticks(gpu_timestamp const& timestamp)
 {
     if (timestamp._heap_future == nullptr)

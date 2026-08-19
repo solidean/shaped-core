@@ -45,8 +45,10 @@ The transfer systems still hand their copies to a [`cc::threaded_actor`](../../.
 The actor simply runs on whoever pumps it instead of on a thread of its own.
 
 That shifts one obligation onto sg: **every blocking wait must drain the actors before it blocks.**
-`sg::context::pump_transfers()` — a backend seam; dx12 drives its upload/download copy actors — runs one cycle and reports whether more work may remain.
-It does nothing and returns false where the actors have their own threads, so the drain collapses to a single test and the code path stays the same either way.
+`sg::context::pump()` runs one cycle of everything that has no thread of its own and reports whether more may remain.
+It is the single public entry point, and a backend contributes its own actors through the protected `on_pump()` — dx12 drives its upload/download copy actors there.
+The backend-independent parts, today the persistent pipeline cache, are pumped alongside them.
+It does nothing and returns false where all of that drives itself, so the drain collapses to a single test and the code path stays the same either way.
 
 The rule is: **a wait that only an actor can satisfy has to pump it first.** Those waits are
 
@@ -56,7 +58,7 @@ The rule is: **a wait that only an actor can satisfy has to pump it first.** Tho
 - the inline-download ring's back-pressure and its drain-to-idle — only the actor frees ring space and decrements the outstanding count.
 
 The last two are the traps: they look like waits on the GPU or on an atomic, not on an actor.
-Adding an actor, or a wait that an actor unblocks, means extending `pump_transfers` or draining at the new wait.
+Adding an actor, or a wait that an actor unblocks, means extending `on_pump` or draining at the new wait.
 Otherwise it deadlocks with no threads and passes every threaded test.
 
 ## Backends today

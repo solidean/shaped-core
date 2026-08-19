@@ -329,10 +329,10 @@ public:
     void set_inline_upload_budget(isize bytes) override { _upload_inline.set_budget(bytes); }
     void set_inline_download_budget(isize bytes) override { _download_inline.set_budget(bytes); }
 
-    /// Drives all three copy actors one cycle each.
-    /// Only does anything when they have no thread of their own — see sg::context::pump_transfers.
+    /// Drives all three copy actors one cycle each — this backend's half of sg::context::pump.
+    /// Only does anything when they have no thread of their own.
     /// Every actor is pumped, with no short-circuit: they are independent, and an upload's copy-queue fence can be what a download waits behind.
-    bool pump_transfers() override
+    bool on_pump() override
     {
         bool more = _upload_async.pump_unthreaded();
         more |= _download_async.pump_unthreaded();
@@ -340,13 +340,13 @@ public:
         return more;
     }
 
-    /// Drains every copy actor until none reports more work.
+    /// Drains everything pumpable until nothing reports more work.
     /// Costs one false test wherever the actors have their own threads.
     /// Without them it is a precondition of any GPU wait: a submitted list can be parked on the async-upload completion fence, which only the copy actor signals.
     /// The GPU would never reach the epoch fence, leaving the wait blocked on work only this thread can produce.
     void drain_transfers()
     {
-        while (pump_transfers())
+        while (this->pump())
         {
         }
     }

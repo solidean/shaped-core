@@ -1,7 +1,11 @@
+#include <blob-cache/blob_cache.hh>
+#include <blob-cache/default_cache.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh> // including it is what makes build_compute_pipeline a coroutine
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // named_sampler
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -15,6 +19,152 @@
 
 namespace sg
 {
+namespace
+{
+/// Bumped when what goes into a persistent pipeline entry changes shape.
+/// The adapter and driver live in the key itself; this is only ever about OUR encoding.
+constexpr auto k_pipeline_blob_version = bcache::version(1);
+
+/// The namespace fragment naming a backend, so two backends' blobs can never answer each other's lookups.
+/// backend_kind is explicitly not a closed set, so an unnamed one shares the "unknown" partition rather than silently
+/// colliding with dx12's.
+cc::string_view name_of(backend_kind backend)
+{
+    switch (backend)
+    {
+    case backend_kind::dx12:
+        return "dx12";
+    case backend_kind::vulkan:
+        return "vulkan";
+    default:
+        return "unknown";
+    }
+}
+
+/// Builds a compute pipeline, letting a persistent PSO blob accelerate it.
+///
+/// `acquire` rather than get-then-put, so the whole lookup-build-store pipeline singleflights and identical blobs
+/// deduplicate by content — without loading anything at startup.
+///
+/// The wrinkle it has to solve: the singleflight's `compute` produces the BLOB, while the caller wants the PIPELINE.
+/// A slot only the winner fills resolves that, and doubles as the hit/miss signal acquire does not otherwise expose.
+///
+/// Parameters are by value: a coroutine captures them by declared type, so a reference would dangle across the first suspend.
+cc::shared_async<compute_pipeline_handle> build_compute_pipeline(context* ctx,
+                                                                 compiled_shader shader,
+                                                                 pipeline_layout_handle layout,
+                                                                 bcache::blob_cache* store,
+                                                                 bcache::cache_key key)
+{
+    auto const create = [&](bcache::blob blob)
+    {
+        return ctx->uncached.try_create_compute_pipeline(
+            {.shader = shader, .layout = layout, .cached_pipeline = cc::move(blob)});
+    };
+
+    if (store == nullptr)
+    {
+        auto plain = create({});
+        if (plain.has_error())
+            co_await cc::async_fail(cc::move(plain.error()));
+        co_return cc::move(plain.value());
+    }
+
+    // Filled only by the singleflight winner, so "is it filled" IS "this was a miss".
+    auto const produced = std::make_shared<cc::optional<compute_pipeline_handle>>();
+
+    auto compute = [ctx, shader, layout, produced]() -> cc::shared_async<bcache::blob>
+    {
+        return cc::make_async_lazy<bcache::blob>(
+            [ctx, shader, layout, produced](cc::async_context<bcache::blob>& actx) -> cc::async_step_status
+            {
+                auto built = ctx->uncached.try_create_compute_pipeline({.shader = shader, .layout = layout});
+                if (built.has_error())
+                    return actx.error(cc::move(built.error()));
+
+                *produced = built.value();
+                // Empty where the backend serializes nothing (dx12 state objects); the entry is then a tiny placeholder
+                // and every later run takes the plain build path, which is the same work it would have done anyway.
+                return actx.success(built.value()->cached_pipeline_data());
+            });
+    };
+
+    // A plain await: the only failure acquire surfaces is the compute's own, and that one must reach the caller.
+    // Every cache failure is already a miss by then.
+    auto const cached = co_await store->acquire(key, cc::move(compute));
+
+    if (produced->has_value())
+        co_return cc::move(produced->value()); // we built it, so there is nothing to rebuild from the blob
+
+    auto seeded = create(cached);
+    if (seeded.has_error())
+        co_await cc::async_fail(cc::move(seeded.error()));
+
+    auto pipeline = cc::move(seeded.value());
+
+    // The driver refused the blob, so the entry is stale for this adapter and driver — replace it rather than pay the
+    // rejection on every future run.
+    // Entries are immutable, so a replacement is invalidate-then-put; both are enqueued on one actor, so they stay ordered.
+    //
+    // Never decided by comparing bytes: a real driver re-serializes an accepted blob to different bytes, so a byte test
+    // would rewrite every entry on every run.
+    if (!cached.empty() && !pipeline->used_cached_pipeline())
+    {
+        auto fresh = pipeline->cached_pipeline_data();
+        if (!fresh.empty())
+        {
+            (void)store->invalidate(key);
+            (void)store->put(key, cc::move(fresh));
+        }
+    }
+
+    co_return pipeline;
+}
+} // namespace
+
+void pipeline_cache::set_blob_cache(bcache::blob_cache* cache)
+{
+    _blob_cache = cache;
+}
+
+bcache::blob_cache* pipeline_cache::resolve_blob_cache()
+{
+    // A build parks on the store, so it needs somewhere to resume.
+    // With nowhere to route, the tier is skipped rather than parking on a node whose completion could not wake it —
+    // a cache may never change what a caller gets, only how fast.
+    if (cc::async_scheduler::current_or_null() == nullptr && cc::async_scheduler::default_or_null() == nullptr)
+        return nullptr;
+
+    // Resolved lazily so that merely creating a context never opens a cache file.
+    if (!_blob_cache.has_value())
+        _blob_cache = &bcache::default_cache();
+    return _blob_cache.value();
+}
+
+bool pipeline_cache::pump()
+{
+    // Only what is already in use: resolving here would open the default store just because somebody pumped.
+    if (!_blob_cache.has_value() || _blob_cache.value() == nullptr)
+        return false;
+    return _blob_cache.value()->pump();
+}
+
+bcache::cache_key pipeline_cache::persistent_key(context& ctx, cc::hash128 pipeline_key, cc::string_view kind) const
+{
+    auto const& adapter = ctx.adapter();
+
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(pipeline_key);
+    b.add_pod(adapter.vendor_id);
+    b.add_pod(adapter.device_id);
+    b.add_string(adapter.driver_version);
+    b.add_bool(adapter.is_software);
+
+    return {.space = bcache::cache_namespace(cc::format("sg.{}.{}", kind, name_of(ctx.backend()))),
+            .key = bcache::logical_key::create_from_hash(cc::hash256::create(b.written_bytes())),
+            .version = k_pipeline_blob_version};
+}
+
 void pipeline_cache::add_binding_group_layout_provider(
     std::shared_ptr<cc::key_value_provider<cc::hash128, binding_group_layout_handle>> provider)
 {
@@ -143,18 +293,14 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
     return _compute_cache.acquire(key,
                                   [&]() -> async_compute_pipeline
                                   {
-                                      // The build frame runs later, possibly on a worker.
-                                      // So own the shader copy + layout handle rather than the description's reference.
-                                      return cc::make_async_scheduled<compute_pipeline_handle>(
-                                          [ctx_ptr = &ctx, shader = compiled_shader(desc.shader), layout = desc.layout](
-                                              cc::async_context<compute_pipeline_handle>& actx) -> cc::async_step_status
-                                          {
-                                              compute_pipeline_description const d = {.shader = shader, .layout = layout};
-                                              auto res = ctx_ptr->uncached.try_create_compute_pipeline(d);
-                                              if (res.has_error())
-                                                  return actx.error(cc::move(res.error()));
-                                              return actx.success(cc::move(res.value()));
-                                          });
+                                      // The build runs later, possibly on a worker, so it owns the shader copy and layout handle rather than
+                                      // the description's reference.
+                                      auto node = build_compute_pipeline(&ctx, compiled_shader(desc.shader),
+                                                                         desc.layout, this->resolve_blob_cache(),
+                                                                         this->persistent_key(ctx, key, "pso"));
+
+                                      // A coroutine is cold; this tier has always handed back a scheduled node.
+                                      return cc::async_start(cc::move(node));
                                   });
 }
 

@@ -46,6 +46,40 @@ Structural rather than pointer identity is what makes these keys mean anything o
 Two independently created but identical group layouts collapse to one key, so acquiring through the cache is a convenience rather than a precondition for dedup.
 A key computed in one run also still names the same thing in the next — the property a persistent tier needs, and one an address could never have given it.
 
+## The persistent tier
+
+A pipeline that misses in memory consults [blob-cache](../../../../data/blob-cache/docs/design.md) for a serialized PSO blob before building, and stores the one it produced on the way out.
+So the in-memory tier holds live handles for this run, and bcache holds bytes for every run after it.
+
+It is deliberately **not** a `cc::key_value_provider` tier, and it could not be one: a provider's `try_get` is synchronous and runs under the cache's lock, while bcache is async.
+Blocking there would stall every concurrent acquire.
+The store is consulted inside the miss build instead, through `bcache::acquire`, so the whole lookup-build-store pipeline singleflights and identical blobs deduplicate by content.
+
+The key is the in-memory key plus the **adapter and driver**, because a blob is only valid for the pair that wrote it.
+Under-keying is cheap by construction: a blob the driver refuses costs one failed create and nothing else, since the backend retries without it.
+
+**Staleness is observed, never predicted.**
+`used_cached_pipeline()` reports whether creation actually consumed the blob, and a refusal is what triggers replacing the entry.
+The tempting alternative is comparing the blob the pipeline hands back against the one that was stored, and it is wrong.
+A real driver re-serializes an accepted blob to different bytes, so that test would rewrite every entry on every run.
+It would also look perfectly healthy on WARP, which reproduces the bytes exactly.
+
+**It needs somewhere to schedule.**
+A build parks on the store, so it has to be able to resume somewhere.
+With no default pool installed and no worker scope active there is nowhere, and the tier is skipped rather than parked — the pipeline is built the plain way.
+
+**Without threads, pump it.**
+`ctx.pump()` advances everything the context needs driven that has no thread of its own, the store included, and is a no-op returning false where the platform has threads.
+Two drivers are in play there and both are needed: pumping resolves what the build is parked on, and draining the scheduler is what resumes the build itself.
+So a threadless caller polls and pumps rather than blocking, exactly as it already does for transfers.
+A caller with threads drives the build with its pool's own `blocking_get`, not `cc::async_blocking_get_singlethreaded`.
+The build resumes on a pool worker, so the pool that owns that worker has to be the driver.
+
+`ctx.cached.cache().set_blob_cache(...)` overrides the store per context; it defaults to `bcache::default_cache()`, and `nullptr` turns persistence off.
+Tests share the developer's real cache like anything else, and are faster for it — most of them only want a pipeline, not a cold build of one.
+A test that is *about* caching opens its own store and passes it here.
+`SC_BLOB_CACHE` turns the default off or redirects it to temp for a whole run, which is the lever for asking whether a stale entry is behind a result.
+
 ## Async: the build runs off the frame path
 
 `acquire_compute_pipeline` and `shader_cache::compile` return an async handle rather than a finished object, because driver PSO lowering and DXC compilation are multi-millisecond work.
