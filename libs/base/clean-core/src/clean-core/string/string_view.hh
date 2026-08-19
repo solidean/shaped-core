@@ -53,26 +53,14 @@ public:
     /// Creates a string_view from a null-terminated C string, whose length is found by scanning for '\0'.
     /// The view excludes the terminator.
     /// Precondition: cstr must not be null.
+    ///
+    /// A char array — a literal, or a buffer — decays to a pointer and arrives here, so the length is the string's and never the array's.
+    /// `char buf[100] = "hello"` therefore views 5 chars, and an UNTERMINATED buffer is the one thing this cannot read: give it a size, string_view(buf, n).
     constexpr string_view(char const* cstr)
     {
         CC_ASSERT(cstr != nullptr, "string_view cannot be constructed from nullptr");
         _data = cstr;
         _size = compute_length(cstr);
-    }
-
-    /// Creates a string_view from a string literal, deducing the size N from the array type.
-    /// The view excludes the null terminator, so size() == N - 1.
-    ///
-    /// CAUTION: this assumes a '\0' sits at position N-1.
-    /// For a local char buffer that may be unterminated, or that holds a shorter string than the buffer,
-    /// use the explicit string_view(ptr, size) constructor instead:
-    ///   char buf[100] = "hello";        // 5 chars + '\0', the rest uninitialized
-    ///   auto sv1 = string_view(buf);    // WRONG: a view of size 99
-    ///   auto sv2 = string_view(buf, 5); // CORRECT
-    template <isize N>
-    constexpr string_view(char const (&arr)[N]) : _data(arr), _size(N - 1)
-    {
-        static_assert(N > 0, "string literal must have at least a null terminator");
     }
 
     /// Creates a string_view from any container whose .data() converts to char const* and which has .size().
@@ -546,6 +534,19 @@ namespace cc
 template <>
 inline constexpr bool enable_borrowed_range<string_view> = true;
 } // namespace cc
+
+namespace cc::custom
+{
+/// A char array hashes as the string it holds — exactly the bytes string_view(arr) views, so the length is the string's and not the array bound.
+/// Without this a bare literal has no hash at all, because `m["axis"]` deduces the probe as char[N] and never as string_view.
+/// Equality already reads a char array through the same conversion, so the hash has to agree or heterogeneous lookup would silently miss.
+/// An unterminated buffer is the one case that must not go through here: view it explicitly as string_view(buf, size).
+template <isize N>
+struct hash_trait<char[N]>
+{
+    [[nodiscard]] static u64 hash(char const (&arr)[N]) { return cc::make_hash(cc::string_view(arr)); }
+};
+} // namespace cc::custom
 
 // ============================================================================
 // Implementation of prefix/suffix matching operations
