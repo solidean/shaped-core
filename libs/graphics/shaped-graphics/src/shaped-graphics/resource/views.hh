@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>     // CC_ASSERT (access checks on the raw -> typed recovery)
+#include <clean-core/common/hash.hh>       // cc::make_hash (the arms' view-identity hidden friends)
 #include <clean-core/common/utility.hh>    // cc::move
 #include <clean-core/container/variant.hh> // cc::variant (raw_view is a sum over the per-resource payloads)
 #include <clean-core/error/optional.hh>    // cc::optional (try_as_* recovery)
@@ -137,6 +138,14 @@ struct sg::raw_buffer_view
     isize element_count = 0;                   ///< [structured] number of elements
     isize stride_in_bytes = 0;                 ///< [structured] element stride (= sizeof(T))
 
+    /// View-IDENTITY hash (the cc::make_hash protocol's hidden friend): the buffer by address, plus every
+    /// field that reaches the descriptor — never the buffer's contents.
+    [[nodiscard]] friend u64 hash(raw_buffer_view const& v)
+    {
+        return cc::make_hash(v.buffer.get(), v.access, v.shape, v.offset_in_bytes, v.size_in_bytes, v.element_count,
+                             v.stride_in_bytes);
+    }
+
     // Re-type this erased arm as a strongly-typed leaf of element `T`, which you supply — no element tag is stored, so `T` is your claim about the bytes.
     // Adds the layout check `buffer_view<T>` does, since it delegates there.
     // Member function templates, so the struct stays an aggregate and brace / designated init is unaffected.
@@ -160,6 +169,8 @@ struct sg::raw_buffer_view
 /// Only valid as an element of an array binding; a scalar binding must bind a resource.
 struct sg::vacant_view
 {
+    /// All vacancies are one value; the enclosing raw_view's hash separates the arm.
+    [[nodiscard]] friend u64 hash(vacant_view const&) { return 0; }
 };
 
 /// A texture view's erased payload: the sampled (SRV) or storage (UAV) descriptor a backend builds over a subresource range.
@@ -173,6 +184,14 @@ struct sg::raw_texture_view
     subresource_range range;                       ///< the mip × array-slice × aspect sub-range the view exposes
     cc::start_end depth_slice_range
         = {.start = 0, .end = 0}; ///< [3D storage view] depth (W/Z) slice window; empty otherwise
+
+    /// View-IDENTITY hash (the cc::make_hash protocol's hidden friend): the texture by address, plus every
+    /// field that reaches the descriptor — never the texture's texels.
+    [[nodiscard]] friend u64 hash(raw_texture_view const& v)
+    {
+        return cc::make_hash(v.texture.get(), v.access, v.view_dimension, v.format, v.range, v.depth_slice_range.start,
+                             v.depth_slice_range.end);
+    }
 
     // Re-type this erased arm as a strongly-typed leaf of shape `Traits`, which you supply.
     // Adds a check that the runtime `view_dimension` matches `Traits::dimension`.
@@ -193,6 +212,9 @@ struct sg::raw_texture_view
 struct sg::raw_tlas_view
 {
     tlas_handle tlas; ///< the viewed top-level acceleration structure
+
+    /// View-IDENTITY hash: the TLAS by address (a null TLAS hashes as null).
+    [[nodiscard]] friend u64 hash(raw_tlas_view const& v) { return cc::make_hash(v.tlas.get()); }
 };
 
 namespace sg

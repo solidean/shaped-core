@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/hash.hh>    // cc::make_hash (subresource_range's hidden friend)
 #include <clean-core/common/utility.hh> // cc::start_end
 #include <shaped-graphics/fwd.hh>
 
@@ -72,5 +73,12 @@ struct sg::subresource_range
     {
         return mip_range.start >= mip_range.end || array_range.start >= array_range.end
             || aspect_range.start >= aspect_range.end;
+    }
+
+    /// Structural hash over the three ranges' bounds (the cc::make_hash protocol's hidden friend).
+    [[nodiscard]] friend u64 hash(subresource_range const& r)
+    {
+        return cc::make_hash(r.mip_range.start, r.mip_range.end, r.array_range.start, r.array_range.end,
+                             r.aspect_range.start, r.aspect_range.end);
     }
 };
