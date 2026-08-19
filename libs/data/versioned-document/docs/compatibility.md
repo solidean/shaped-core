@@ -120,6 +120,9 @@ An op whose assignment blob uses an encoding this build predates cannot be read,
 The reasoning is [decisions.md](decisions.md#an-unknown-assignment-encoding-tag-is-a-decode-error).
 The byte-first op keeps the door open to relaying it, and the decision records what would reopen the question.
 
+`sorted_v1` is the only tag, and it carries a per-assignment [kind](concepts/ops-and-content-addressing.md#an-assignment-either-writes-or-abstains) byte.
+Adding that byte changed every op id, which cost nothing because nothing outside the tests had written a `.vdoc` yet — the sort of break the current phase exists to allow.
+
 **Compatibility is about structure, not meaning.**
 Two applications that both write `Transform` but disagree about handedness are perfectly compatible at every level this document describes, and will still produce a scene neither one wanted.
 Agreeing on the components you share is a design conversation, and nothing here substitutes for it.

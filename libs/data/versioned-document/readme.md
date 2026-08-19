@@ -21,7 +21,8 @@ What a `transform` or a `material` is belongs to the application; `vdoc` owns th
 
 Headers are included by their full path from `src/`, e.g. `#include <versioned-document/op_graph.hh>`.
 
-The library is complete: values, ids, ops, the DAG, snapshots and pruning, the typed layer, and recovery from an untrusted peer.
+The library is complete: values, ids, ops, the DAG, snapshots and pruning, the typed layer, recovery from an untrusted peer, and **layering**.
+Layering composes several independent histories into one document, a higher layer replacing a lower one per property path — see [the concept](./docs/concepts/layering.md).
 Persistence is [versioned-document-file](../versioned-document-file/readme.md), one library up.
 The [concept docs](./docs/_index.md#concepts) are the design, one file per concept.
 

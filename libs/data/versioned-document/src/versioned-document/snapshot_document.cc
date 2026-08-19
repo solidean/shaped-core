@@ -24,6 +24,16 @@ namespace
     return total;
 }
 
+/// The index of the entry keyed by `id`, or -1 where there is none.
+template <class EntryT, class IdT>
+[[nodiscard]] isize index_of(cc::vector<EntryT> const& entries, IdT EntryT::* key, IdT id)
+{
+    auto const at = cc::first_at_least_in_sorted(
+        entries, id, [key](EntryT const& e, IdT const& k) { return (e.*key).compare_bytes(k) < 0; });
+
+    return at < entries.size() && entries[at].*key == id ? at : isize(-1);
+}
+
 /// The entry keyed by `id`, inserted in sorted position where absent.
 /// Every level of a raw_document is a vector of `{id, value}` sorted by the id's canonical bytes, so one helper covers
 /// all three.
@@ -84,6 +94,7 @@ vdoc::snapshot_document vdoc::snapshot_document::create_owning_copy(raw_document
                 }
 
                 component.value.properties.push_back(cc::move(property));
+                ++result._property_count;
             }
 
             entity.value.components.push_back(cc::move(component));
@@ -106,6 +117,7 @@ vdoc::snapshot_document vdoc::snapshot_document::create_from_owned_arena(cc::vec
     result._owned_bytes = arena.size();
     result._chunks.push_back(cc::move(arena));
     result._document = cc::move(doc);
+    result._property_count = result._document.property_count();
     return result;
 }
 
@@ -136,6 +148,9 @@ void vdoc::snapshot_document::set_single_writer(property_path const& path, op_id
     auto& component = entry_for(entity.value.components, &raw_entity::entry::component, path.component);
     auto& property = entry_for(component.value.properties, &raw_component::entry::property, path.property);
 
+    if (property.value.writers.empty())
+        ++_property_count;
+
     // The bytes the old writers pointed at are still in a chunk and can never be reclaimed in place, so they are
     // counted instead: a caller rebuilds once they outweigh the live ones.
     for (auto const& w : property.value.writers)
@@ -143,4 +158,65 @@ void vdoc::snapshot_document::set_single_writer(property_path const& path, op_id
 
     property.value.writers.clear();
     property.value.writers.push_back({.writer = writer, .value = impl_append(bytes)});
+}
+
+bool vdoc::snapshot_document::set_single_writer_if_changed(property_path const& path,
+                                                           op_id const& writer,
+                                                           cc::span<byte const> bytes,
+                                                           bool* out_inserted)
+{
+    auto& entity = entry_for(_document.entities, &raw_document::entry::entity, path.entity);
+    auto& component = entry_for(entity.value.components, &raw_entity::entry::component, path.component);
+    auto& property = entry_for(component.value.properties, &raw_component::entry::property, path.property);
+
+    auto& writers = property.value.writers;
+    auto const inserted = writers.empty();
+    if (out_inserted != nullptr)
+        *out_inserted = inserted;
+
+    if (inserted)
+        ++_property_count;
+    else if (writers.size() == 1 && writers[0].value == value_view::from_validated_bytes(bytes))
+        return false;
+
+    for (auto const& w : writers)
+        _dead_bytes += w.value.bytes().size();
+
+    writers.clear();
+    writers.push_back({.writer = writer, .value = impl_append(bytes)});
+    return true;
+}
+
+void vdoc::snapshot_document::clear_writers(property_path const& path)
+{
+    auto const entity_at = index_of(_document.entities, &raw_document::entry::entity, path.entity);
+    if (entity_at < 0)
+        return;
+
+    auto& entity = _document.entities[entity_at];
+    auto const component_at = index_of(entity.value.components, &raw_entity::entry::component, path.component);
+    if (component_at < 0)
+        return;
+
+    auto& component = entity.value.components[component_at];
+    auto const property_at = index_of(component.value.properties, &raw_component::entry::property, path.property);
+    if (property_at < 0)
+        return;
+
+    // Same accounting as an overwrite: the bytes stay in their chunk and are counted so a caller knows when to rebuild.
+    for (auto const& w : component.value.properties[property_at].value.writers)
+        _dead_bytes += w.value.bytes().size();
+
+    --_property_count;
+    component.value.properties.remove_at(property_at);
+
+    // Then prune upwards, because an empty component or entity entry is a shape a fresh materialization never produces
+    // and a parse would misread — see the header.
+    if (!component.value.properties.empty())
+        return;
+
+    entity.value.components.remove_at(component_at);
+
+    if (entity.value.components.empty())
+        _document.entities.remove_at(entity_at);
 }

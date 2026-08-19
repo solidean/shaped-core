@@ -49,6 +49,11 @@ public:
     /// A filtered result is a projection rather than surviving(id), and installing one silently truncates every later
     /// sweep that terminates here — the one way this cache can be poisoned.
     ///
+    /// **A composed document is a projection too, and a worse one.** What a
+    /// [layer_stack](layer_stack.hh) composes is several histories at once, and a
+    /// [direct layer](direct_layer.hh)'s values are attributed to a synthetic writer id that names no op at all — so
+    /// installing one would put a fabricated op id into a file.
+    ///
     /// `pinned` is what a persisted, load-bearing snapshot is: never evicted, and never counted against the budget.
     void install(op_id const& id, snapshot_document doc, bool pinned = false);
 

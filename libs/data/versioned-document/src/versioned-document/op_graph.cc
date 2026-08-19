@@ -60,6 +60,21 @@ template <class F>
     return read;
 }
 
+/// A surviving writer as the sweep sees one, which unlike a raw document's may be a withdrawal rather than a value.
+///
+/// **This is the only place an abstention exists.**
+/// It supersedes its ancestors exactly as a write does and then contributes nothing, so `build_document` drops it and a
+/// `raw_document` never carries one — which is what keeps abstain out of the snapshot format and out of every consumer
+/// that reads a writer list.
+struct sweep_writer
+{
+    op_id writer;
+    vdoc::value_view value;
+
+    /// When set, `value` is meaningless: this writer withdrew rather than wrote.
+    bool abstains = false;
+};
+
 /// What one path knows at one point in the sweep.
 ///
 /// `surviving` is the maximal writers so far; `superseded` is every writer a descendant has overwritten.
@@ -67,7 +82,7 @@ template <class F>
 /// ancestor-closed, so a dominating pair always lands wholly inside one branch and can be recorded there.
 struct path_state
 {
-    cc::small_vector<property_value, 1> surviving;
+    cc::small_vector<sweep_writer, 1> surviving;
     cc::small_vector<op_id, 1> superseded;
 
     /// Membership flags for the side lists below, so appending to one is O(1) and needs no set.
@@ -114,7 +129,7 @@ void note_dirty(sweep_state& state, i32 path)
     state.dirty.push_back(path);
 }
 
-[[nodiscard]] bool contains_writer(cc::span<property_value const> writers, op_id const& id)
+[[nodiscard]] bool contains_writer(cc::span<sweep_writer const> writers, op_id const& id)
 {
     for (auto const& w : writers)
         if (w.writer == id)
@@ -157,7 +172,7 @@ void merge_into(sweep_state& dst, sweep_state const& src)
         if (d.superseded.empty())
             continue;
 
-        auto kept = cc::small_vector<property_value, 1>();
+        auto kept = cc::small_vector<sweep_writer, 1>();
         for (auto const& w : d.surviving)
             if (!contains_id(d.superseded, w.writer))
                 kept.push_back(w);
@@ -166,8 +181,10 @@ void merge_into(sweep_state& dst, sweep_state const& src)
     }
 }
 
-/// Applies one write: everything currently surviving is now superseded, and this writer stands alone.
-void apply_write(sweep_state& state, i32 path, op_id const& writer, vdoc::value_view value)
+/// Applies one assignment: everything currently surviving is now superseded, and this writer stands alone.
+///
+/// An abstention takes exactly this path — superseding is the whole of what it does, and `value` is then meaningless.
+void apply_write(sweep_state& state, i32 path, op_id const& writer, vdoc::value_view value, bool abstains)
 {
     auto& slot = state.slots[path];
 
@@ -176,7 +193,7 @@ void apply_write(sweep_state& state, i32 path, op_id const& writer, vdoc::value_
             slot.superseded.push_back(w.writer);
 
     slot.surviving.clear();
-    slot.surviving.push_back(property_value{.writer = writer, .value = value});
+    slot.surviving.push_back(sweep_writer{.writer = writer, .value = value, .abstains = abstains});
 
     note_occupied(state, path);
     if (!slot.superseded.empty())
@@ -225,9 +242,16 @@ void apply_write(sweep_state& state, i32 path, op_id const& writer, vdoc::value_
         if (state.slots[i].surviving.empty())
             continue;
 
+        // An abstaining writer is dropped here, which is the whole of how abstain stays out of the raw document.
+        // A path whose every survivor abstained therefore ends up absent — indistinguishable from never written, which
+        // is exactly what a withdrawal means.
         auto writers = cc::vector<property_value>();
         for (auto const& w : state.slots[i].surviving)
-            writers.push_back(w);
+            if (!w.abstains)
+                writers.push_back(property_value{.writer = w.writer, .value = w.value});
+
+        if (writers.empty())
+            continue;
 
         cc::sort(writers,
                  [](property_value const& a, property_value const& b) { return a.writer.compare_bytes(b.writer) < 0; });
@@ -706,15 +730,18 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
             // surviving(T) already contains T's writes, so applying them again would move T into superseded while it
             // is also in surviving, and the next merge would drop it — T's own writes would silently vanish.
             auto const& snapshot = options.cache->find(reachable[ix])->document();
-            auto const entities_read
-                = for_each_wanted_property(snapshot, filtered, wanted_sorted,
-                                           [&](property_path const& path, raw_property const& property)
-                                           {
-                                               auto const at = path_index[path];
-                                               for (auto const& w : property.writers)
-                                                   state.slots[at].surviving.push_back(w);
-                                               note_occupied(state, at);
-                                           });
+            auto const entities_read = for_each_wanted_property(
+                snapshot, filtered, wanted_sorted,
+                [&](property_path const& path, raw_property const& property)
+                {
+                    auto const at = path_index[path];
+
+                    // A snapshot is a raw document, so nothing in it abstains.
+                    for (auto const& w : property.writers)
+                        state.slots[at].surviving.push_back(sweep_writer{.writer = w.writer, .value = w.value});
+
+                    note_occupied(state, at);
+                });
 
             if (options.stats != nullptr)
             {
@@ -729,7 +756,7 @@ vdoc::raw_document vdoc::impl::materialize(op_graph const& graph,
                 if (filtered && !wanted.contains(a.path.entity))
                     continue;
 
-                apply_write(state, path_index[a.path], o->id, a.value);
+                apply_write(state, path_index[a.path], o->id, a.value, a.is_abstain());
             }
         }
 

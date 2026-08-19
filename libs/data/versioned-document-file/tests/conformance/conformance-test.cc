@@ -51,6 +51,53 @@ INVOCABLE_TEST("vdoc::file - a published document round-trips through close and 
     CHECK(materialize_to_text(reopened->ops(), *head) == expected);
 }
 
+INVOCABLE_TEST("vdoc::file - an op whose assignments abstain round-trips unchanged", (store_impl const& impl))
+{
+    // The assignment blob is opaque to this library — stored and handed back verbatim, with the only decode delegated
+    // to vdoc::try_decode_op.
+    // So an assignment kind this format knows nothing about has to survive a write, a close and a reopen, including
+    // the verification the load path performs on every op.
+    auto const medium = impl.make_medium();
+
+    auto history = sample_history();
+    auto const wall = vdoc::entity_id::of("wall-17");
+    auto const transform = vdoc::component_type_id::of("transform");
+
+    auto first = vdoc::op_builder();
+    first.set_raw(wall, transform, vdoc::property_id::of("x"), vdoc::value::of(1.0));
+    first.set_raw(wall, transform, vdoc::property_id::of("y"), vdoc::value::of(2.0));
+    history.ops.push_back(history.graph.add(first.build(history.graph)));
+
+    auto second = vdoc::op_builder();
+    second.set_parents(cc::span<vdoc::op_id const>(history.ops).last_n(1));
+    second.abstain(wall, transform, vdoc::property_id::of("x"));
+    history.ops.push_back(history.graph.add(second.build(history.graph)));
+
+    auto const expected = materialize_to_text(history.graph, history.head());
+
+    {
+        auto const s = open_or_fail(*medium);
+        publish_sample(*s, history);
+        s->close();
+    }
+
+    auto const reopened = open_or_fail(*medium);
+    CHECK(reopened->report().is_empty());
+    CHECK(reopened->ops().size() == history.ops.size());
+
+    auto const* head = reopened->refs().get_ptr(cc::string("main"));
+    REQUIRE(head != nullptr);
+    CHECK(materialize_to_text(reopened->ops(), *head) == expected);
+
+    // and the withdrawal really took effect, so this is not two empty documents agreeing
+    auto const* const reloaded = reopened->ops().find(*head);
+    REQUIRE(reloaded != nullptr);
+    CHECK(vdoc::verify_op(*reloaded) == vdoc::op_verification::verified);
+    CHECK(reopened->ops().materialize(*head).try_get(
+              vdoc::property_path{.entity = wall, .component = transform, .property = vdoc::property_id::of("x")})
+          == nullptr);
+}
+
 INVOCABLE_TEST("vdoc::file - an op no ref can reach is not written", (store_impl const& impl))
 {
     auto const medium = impl.make_medium();

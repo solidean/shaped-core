@@ -5,7 +5,6 @@
 #include <versioned-document/op.hh>
 #include <versioned-document/value_builder.hh>
 
-
 using namespace cc::primitive_defines;
 
 using vdoc::assignment;
@@ -65,6 +64,22 @@ struct op_parts
     return out;
 }
 
+/// Builds the two blobs from assignments given verbatim, so a test can stage an abstain.
+/// The caller owns the values the views point at.
+[[nodiscard]] op_parts parts_of_assignments(cc::span<assignment const> unsorted)
+{
+    auto out = op_parts();
+
+    auto const metadata = empty_metadata();
+    out.metadata_bytes = cc::vector<byte>::create_copy_of(metadata.bytes());
+
+    auto entries = cc::vector<assignment>::create_copy_of(unsorted);
+    cc::sort(entries, [](assignment const& a, assignment const& b) { return a.path.compare_bytes(b.path) < 0; });
+
+    out.assignment_bytes = vdoc::encode_assignments(entries);
+    return out;
+}
+
 /// Decodes what parts_of built, stamping the id the content actually has.
 [[nodiscard]] cc::result<op, op_decode_error> decode(cc::span<op_id const> parents, op_parts const& p)
 {
@@ -89,7 +104,117 @@ struct op_parts
         bytes[i] = byte(b);
     return op_id::from_bytes(bytes);
 }
+
+/// The id's leading 8 bytes as lowercase hex.
+///
+/// A prefix rather than the whole digest, because a golden expectation is read by a human and 64 bits already makes an
+/// accidental match impossible.
+[[nodiscard]] cc::string id_prefix(op_id const& id)
+{
+    static constexpr char digits[] = "0123456789abcdef";
+
+    byte bytes[op_id::byte_size] = {};
+    id.to_bytes(bytes);
+
+    auto out = cc::string();
+    for (isize i = 0; i < 8; ++i)
+    {
+        out += digits[u8(bytes[i]) >> 4];
+        out += digits[u8(bytes[i]) & 0xF];
+    }
+    return out;
+}
 } // namespace
+
+TEST("vdoc - the op ids of a fixed set of ops are pinned")
+{
+    // A golden test over fixed inputs, because an op id IS the content address: if the assignment encoding or the hash
+    // preimage ever moves, every stored op silently stops matching its own id, and no other test would notice.
+    // A changed digest here means one of the two moved, and the change had better be deliberate.
+    op_id const one_parent[] = {id_of_byte(0x11)};
+
+    {
+        cc::vector<property_path> const paths = {path_of("e1", "Transform", "position")};
+        cc::vector<i64> const values = {42};
+        auto const p = parts_of(paths, values);
+
+        CHECK(id_prefix(vdoc::compute_op_id({}, p.metadata_bytes, p.assignment_bytes)) == "8c1613ed14f18b95");
+    }
+
+    {
+        cc::vector<property_path> const paths = {path_of("e1", "Transform", "position"), path_of("e2", "Mesh", "asset")};
+        cc::vector<i64> const values = {1, 2};
+        auto const p = parts_of(paths, values);
+
+        CHECK(id_prefix(vdoc::compute_op_id(one_parent, p.metadata_bytes, p.assignment_bytes)) == "407402f8b6aedbdc");
+    }
+
+    {
+        // an op that assigns nothing at all still has a stable id
+        auto const p = parts_of({}, {});
+
+        CHECK(id_prefix(vdoc::compute_op_id(one_parent, p.metadata_bytes, p.assignment_bytes)) == "5398cd801baf07c3");
+    }
+}
+
+TEST("vdoc - an op round-trips a mix of writes and abstentions")
+{
+    auto const ten = value::of_i64(10);
+
+    assignment const entries[] = {
+        {.path = path_of("e1", "Transform", "position"), .value = ten},
+        {.path = path_of("e1", "Transform", "rotation"), .kind = vdoc::assignment_kind::abstain},
+        {.path = path_of("e2", "Mesh", "asset"), .value = ten},
+    };
+
+    auto const p = parts_of_assignments(entries);
+
+    auto const decoded = decode({}, p);
+    REQUIRE(decoded.has_value());
+    CHECK(vdoc::verify_op(decoded.value()) == op_verification::verified);
+
+    auto const list = decoded.value().try_decode_assignments();
+    REQUIRE(list.has_value());
+    REQUIRE(list.value().size() == 3);
+
+    // sorted by path, so the abstain is the middle one
+    CHECK(!list.value()[0].is_abstain());
+    CHECK(list.value()[0].path == path_of("e1", "Transform", "position"));
+    CHECK(list.value()[1].is_abstain());
+    CHECK(list.value()[1].path == path_of("e1", "Transform", "rotation"));
+    CHECK(!list.value()[2].is_abstain());
+    CHECK(list.value()[2].value.as_i64() == 10);
+
+    // the lazy cursor and the eager list must agree about where every entry ends, which is what a missing kind byte
+    // would break
+    auto walked = isize(0);
+    for (auto const a : decoded.value().assignments())
+    {
+        CHECK(a.path == list.value()[walked].path);
+        CHECK(a.is_abstain() == list.value()[walked].is_abstain());
+        ++walked;
+    }
+    CHECK(walked == 3);
+}
+
+TEST("vdoc - decoding rejects an assignment kind this build does not know")
+{
+    auto const ten = value::of_i64(10);
+    assignment const entries[]
+        = {{.path = path_of("e1", "Transform", "position"), .value = ten},
+           {.path = path_of("e1", "Transform", "rotation"), .kind = vdoc::assignment_kind::abstain}};
+
+    auto p = parts_of_assignments(entries);
+
+    // the first entry's kind byte sits right after the tag and the count
+    p.assignment_bytes[1 + 4] = byte(7);
+
+    auto const id = vdoc::compute_op_id({}, p.metadata_bytes, p.assignment_bytes);
+    auto const decoded = vdoc::try_decode_op(id, {}, p.metadata_bytes, p.assignment_bytes);
+
+    REQUIRE(decoded.has_error());
+    CHECK(decoded.error() == op_decode_error::unknown_assignment_kind);
+}
 
 TEST("vdoc - identical content gives one op id, whatever order the caller supplied")
 {
