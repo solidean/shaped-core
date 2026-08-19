@@ -6,6 +6,7 @@
 upstreams:
   - name: SQLite
     homepage: https://sqlite.org
+    install: fetched
     source: url
     track: sqlite
     version: "3530300"

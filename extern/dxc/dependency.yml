@@ -6,6 +6,7 @@
 upstreams:
   - name: DXC
     homepage: https://github.com/microsoft/DirectXShaderCompiler
+    install: fetched
     source: github-release
     repo: https://github.com/microsoft/DirectXShaderCompiler
     track: github-releases

@@ -75,7 +75,8 @@ def run(args, ctx): ...       # do the work, using the facade + ctx
 ```
 
 A command owns its full CLI surface, so its flags live next to its logic and copying or adapting a command means touching one file.
-  Commands with subcommands — `coverage`, `pgo`, `info`, `diagnose`, `lint`, `assembly`, `profiling` — build their nested subparsers inside their own `add_parser` and branch inside their own `run`.
+  Commands with subcommands — `coverage`, `pgo`, `info`, `diagnose`, `lint`, `assembly`, `profiling`, `deps` — build their nested subparsers inside their own `add_parser`,
+  and branch inside their own `run`.
 Shared argparse fragments — `--preset`, the build-dir overrides, `--emsdk-path`, the profiling flags — live in [cmd/args.py](../tools/dev/cmd/args.py) so they are defined once.
 The profiling fragment is the one that also has a global twin in `dev.py`, and its `SUPPRESS` defaults are what keep the two from overwriting each other.
 
@@ -116,6 +117,13 @@ Use the facade (`dev.X`) for mechanism and the `ctx` for policy and glue.
 
 A command that forwards trailing arguments to a child process must also be listed in `dev.py`'s `parse_known_args` allowance; `test`, `run` and `example` are the three.
 Everywhere else an unrecognized argument stays a hard error, so a typo fails loudly instead of being silently passed along.
+
+**A command whose logic needs a third-party package keeps that package out of `dev.py`.**
+`dev.py` declares `dependencies = []` and is worth keeping that way, since it is the entry point every other path goes through.
+So the logic lives in a standalone script with its own PEP 723 block, and the `cmd/` module is thin wiring that shells out to it through `dev.run_step`.
+[cmd/lint.py](../tools/dev/cmd/lint.py) over [tools/lint/clang-tidy.py](../tools/lint/clang-tidy.py) is the original.
+[cmd/deps.py](../tools/dev/cmd/deps.py) over [tools/deps/deps.py](../tools/deps/deps.py) follows it.
+Both scripts stay runnable on their own, which is what keeps the seam honest rather than a private calling convention.
 
 **Add a pre-commit check.** Checks are a registry in [cmd/check.py](../tools/dev/cmd/check.py): a list of `dev.Check(name, description, supports_fix, run, requires_green=…)`.
 Add one, and the generic runner in `lib/quality/checks.py` sequences the static checks first and the slow `requires_green` tail — the test suite — only if they pass.

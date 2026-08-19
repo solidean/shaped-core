@@ -26,6 +26,9 @@ MANIFEST_NAME = "dependency.yml"
 SOURCES = {"git", "github-release", "url"}
 TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
+# `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
+# `bundled` arrives inside another upstream in the same directory — Zycore, which the Zydis amalgamation folds in — so it has no install state of its own.
+INSTALLS = {"vendored", "fetched", "bundled"}
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,7 @@ class Upstream:
     directory: Path
     source: str
     track: str
+    install: str
     pin_hash: str
     digest_algo: str
     license: str
@@ -45,6 +49,9 @@ class Upstream:
     version: str = ""
     year: str = ""
     asset: str = ""
+    # For `track: tags`, a regex selecting which tags are versions at all — upstreams tag far more than releases.
+    # Empty means the default "looks like a version number" pattern.
+    tag_pattern: str = ""
     license_files: list[str] = field(default_factory=list)
     # Verbatim license text, for an upstream that ships no file of its own — sqlite's amalgamation is the only one.
     license_text: str = ""
@@ -64,6 +71,26 @@ class Upstream:
         if self.source == "url":
             return f"https://sqlite.org/{self.year}/{self.asset}"
         raise ValueError(f"{self.name}: source {self.source!r} has no archive URL")
+
+    @property
+    def is_fetched(self) -> bool:
+        return self.install == "fetched"
+
+    @property
+    def install_dir(self) -> Path:
+        """Where a fetched dependency hydrates; meaningless for a vendored one."""
+        return self.directory / ".install"
+
+    @property
+    def pin_file(self) -> Path:
+        """The file whose content must equal `pin_hash` for a fetched install to be current."""
+        return self.install_dir / "pin.txt"
+
+    def installed_pin(self) -> str | None:
+        """What the install on disk is actually at, or None when nothing is installed."""
+        if not self.is_fetched or not self.pin_file.is_file():
+            return None
+        return self.pin_file.read_text(encoding="utf-8").strip()
 
     @property
     def slug(self) -> str:
@@ -131,6 +158,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         directory=directory,
         source=need("source"),
         track=need("track"),
+        install=entry.get("install", "vendored"),
         pin_hash=need("pin_hash"),
         digest_algo=need("digest_algo"),
         license=need("license"),
@@ -140,6 +168,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         version=str(entry.get("version", "")),
         year=str(entry.get("year", "")),
         asset=entry.get("asset", ""),
+        tag_pattern=entry.get("tag_pattern", ""),
         license_files=list(entry.get("license_files", [])),
         license_text=entry.get("license_text", ""),
         used_by=entry.get("used_by", ""),
@@ -150,6 +179,8 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         raise ValueError(f"{path}: {up.name}: `source` must be one of {sorted(SOURCES)}, got {up.source!r}")
     if up.track not in TRACKS:
         raise ValueError(f"{path}: {up.name}: `track` must be one of {sorted(TRACKS)}, got {up.track!r}")
+    if up.install not in INSTALLS:
+        raise ValueError(f"{path}: {up.name}: `install` must be one of {sorted(INSTALLS)}, got {up.install!r}")
     if up.digest_algo not in DIGEST_ALGOS:
         raise ValueError(f"{path}: {up.name}: `digest_algo` must be one of {sorted(DIGEST_ALGOS)}, got {up.digest_algo!r}")
     if not up.license_files and not up.license_text:

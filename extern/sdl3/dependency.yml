@@ -6,6 +6,7 @@
 upstreams:
   - name: SDL3
     homepage: https://github.com/libsdl-org/SDL
+    install: fetched
     source: github-release
     repo: https://github.com/libsdl-org/SDL
     track: github-releases

@@ -6,6 +6,7 @@
 upstreams:
   - name: Zydis
     homepage: https://github.com/zyantific/zydis
+    install: fetched
     source: github-release
     repo: https://github.com/zyantific/zydis
     track: github-releases
@@ -22,6 +23,7 @@ upstreams:
 
   - name: Zycore
     homepage: https://github.com/zyantific/zycore-c
+    install: bundled
     source: git
     repo: https://github.com/zyantific/zycore-c
     track: none
