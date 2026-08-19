@@ -97,6 +97,7 @@ What is left is the interaction on top of it, in dependency order:
   It rides in `frame_constants_gpu` / `pt_frame_constants_gpu` only because the trace binds one mesh per view.
   That is the same reason `Vertices` / `Indices` / `Materials` are single global bindings.
   Fold it into the per-instance mesh descriptor table the "one mesh per view" seam wants anyway, indexed by `InstanceID()` and carrying each mesh's vertex/index range or bindless handles.
+  The bindless side now exists — `sv::bindless_manager` owns the group and mints the slots — so what remains is the per-instance table itself and wiring the trace through it.
   Moving the flag alone would not help: a per-instance flag over a still-global vertex buffer is no more correct.
   The DXR-native alternative is per-geometry data in the hit-group shader record via a local root signature, which specializes the `[branch]` in `mesh.hlsli` away.
   It needs local-root-signature support in sg's shader table first.

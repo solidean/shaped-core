@@ -206,7 +206,7 @@ Set `look_requires_button = false` once the caller has captured the cursor (`sr:
 ## Resources by id — the managers
 
 ```cpp
-sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials } with per-manager budgets
+sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials; bindless_config bindless }
 sv::mesh_manager::create(ctx, cfg)     // cfg = manager_config { resource_budget budget }; ctx must outlive it
 
 // What you hand a manager: an owning cc::pinned_data payload + the cc::hash128 that identifies it.
@@ -235,6 +235,25 @@ It mints ids, tracks each record's byte size and last-used epoch, and evicts on 
 It never evicts this frame's working set; `begin_frame` in its header states that rule exactly.
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
 A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
+
+## The bindless group — sv::bindless_manager
+
+```cpp
+sv::bindless_manager::create(ctx, cfg)  // named ctor; cfg = bindless_config { u32 buffer_count, texture_{1d,2d,3d,cube}_count } (each >= 2)
+manager.acquire(raw_buffer_view)        // -> bindless_buffer_slot      readonly only; same view -> same slot, O(1), no reupload
+manager.acquire(readonly_texture_view<sg::tv_1d / tv_2d / tv_3d / tv_cube>)  // -> the category's slot newtype
+manager.layout()                        // -> binding_group_layout_handle — one slot of the consumer's pipeline layout (lazy)
+manager.lock_group()                    // -> binding_group_handle; recreates ONLY if a mirror changed, else the SAME handle; locks (no acquires)
+manager.unlock_group(group)             // must get the served group back (pointer identity), in the SAME epoch — both asserted
+sv::bindless_buffer_slot / bindless_texture_{1d,2d,3d,cube}_slot  // enum class : u32; ::invalid; u32(slot) is what a shader consumes
+sv::bindless_buffers_binding / bindless_textures_{1d,2d,3d,cube}_binding  // the binding names, also for declare_array_*_access
+```
+
+One readonly `sg::binding_group` of five bounded arrays, one register space per category (`space1..space5`, index 0).
+Slots are valid ONLY for the epoch they were acquired in — re-acquire the working set every epoch; a full table LRU-reclaims, never a slot touched this epoch.
+Staleness is per-category dirty flags on the CPU mirrors (`impl::slot_table`): an unchanged epoch serves the previous group untouched.
+Access declaration is the CONSUMER's job — declare the elements a dispatch reads via `cmd.*.declare_array_*_access` with the binding names above.
+Writable views are never bindless; they stay ordinary bindings in another group.
 
 ## Rendering — the view_renderer + routines
 

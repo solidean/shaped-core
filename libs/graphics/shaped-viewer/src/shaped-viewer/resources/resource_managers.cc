@@ -214,6 +214,6 @@ material_set_id material_manager::acquire(cc::span<mesh_attribute const> attribu
 scene_resources scene_resources::create(sg::context& ctx, scene_resources_config const& cfg)
 {
     return scene_resources(mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
-                           texture_manager::create(ctx));
+                           texture_manager::create(ctx), bindless_manager::create(ctx, cfg.bindless));
 }
 } // namespace sv

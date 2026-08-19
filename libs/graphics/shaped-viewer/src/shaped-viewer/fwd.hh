@@ -85,6 +85,14 @@ enum class buffer_id : u32;
 class mesh_manager;
 class material_manager;
 class texture_manager;
+// the bindless descriptor group (see resources/bindless_manager.hh); its slot ids are defined at the bottom
+struct bindless_config;
+class bindless_manager;
+enum class bindless_buffer_slot : u32;
+enum class bindless_texture_1d_slot : u32;
+enum class bindless_texture_2d_slot : u32;
+enum class bindless_texture_3d_slot : u32;
+enum class bindless_texture_cube_slot : u32;
 // The class-key must match the definition: the Microsoft ABI mangles struct and class differently, so a
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
 class scene_resources;
@@ -117,6 +125,7 @@ struct plan_resources;
 namespace impl
 {
 struct layout_pipeline_key;
+class slot_table; // one bindless category's fixed-capacity CPU mirror (resources/impl/slot_table.hh)
 } // namespace impl
 
 // rendering
@@ -222,6 +231,37 @@ enum class sv::texture_id : sv::u32
 };
 
 enum class sv::buffer_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Bindless binding slots, one newtype per category — the index a shader uses into that category's binding
+/// array, minted by `sv::bindless_manager::acquire`.
+///
+/// Category-typed so a buffer slot cannot be passed where a texture slot is expected; the shader-facing
+/// number is an explicit `u32(slot)` at the packing site.
+/// A slot is only valid for the epoch it was acquired in — see resources/bindless_manager.hh.
+enum class sv::bindless_buffer_slot : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::bindless_texture_1d_slot : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::bindless_texture_2d_slot : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::bindless_texture_3d_slot : sv::u32
+{
+    invalid = u32(-1)
+};
+
+enum class sv::bindless_texture_cube_slot : sv::u32
 {
     invalid = u32(-1)
 };

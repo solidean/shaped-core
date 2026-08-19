@@ -6,6 +6,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/resources/bindless_manager.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
@@ -133,6 +134,7 @@ struct sv::scene_resources_config
 {
     manager_config meshes = {};
     manager_config materials = {};
+    bindless_config bindless = {};
 };
 
 /// The bundle of resource managers a `viewer_definition` resolves its ids against.
@@ -144,10 +146,11 @@ struct sv::scene_resources_config
 class sv::scene_resources
 {
 public:
-    /// Creates all three managers on `ctx`, each budgeted by its slice of `cfg`.
+    /// Creates every manager on `ctx`, each budgeted / sized by its slice of `cfg`.
     [[nodiscard]] static scene_resources create(sg::context& ctx, scene_resources_config const& cfg = {});
 
     /// Advance every budgeted manager to epoch `e`, running its idle + budget eviction first.
+    /// The bindless manager needs no frame hook — it reads the context's epoch itself.
     void begin_frame(sg::epoch e)
     {
         meshes.begin_frame(e);
@@ -157,10 +160,14 @@ public:
     mesh_manager meshes;
     material_manager materials;
     texture_manager textures;
+    bindless_manager bindless;
 
 private:
-    scene_resources(mesh_manager meshes, material_manager materials, texture_manager textures)
-      : meshes(cc::move(meshes)), materials(cc::move(materials)), textures(cc::move(textures))
+    scene_resources(mesh_manager meshes, material_manager materials, texture_manager textures, bindless_manager bindless)
+      : meshes(cc::move(meshes)),
+        materials(cc::move(materials)),
+        textures(cc::move(textures)),
+        bindless(cc::move(bindless))
     {
     }
 };
