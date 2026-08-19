@@ -1,6 +1,8 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/common/utility.hh> // cc::memcmp
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -90,11 +92,124 @@ TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatche
     auto const blob = first->cached_pipeline_data();
     CHECK(!blob.empty()); // WARP supports GetCachedBlob
 
+    // Nothing was fed in, so nothing was consumed.
+    CHECK(!first->used_cached_pipeline());
+
     // Seed a second pipeline with that blob and confirm it dispatches identically.
     auto seeded
         = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout, .cached_pipeline = blob});
     REQUIRE(seeded != nullptr);
+    CHECK(seeded->used_cached_pipeline()); // the driver accepted its own blob
     check_doubles(ctx, *seeded, group_layout, 256);
+}
+
+/// Feeding a blob back in must keep working after a round trip, whatever the backend did to the bytes.
+/// That is the invariant a persistent cache actually rests on: it stores what a pipeline handed it, and a stored blob
+/// that would never be accepted again is an entry that can only ever miss.
+///
+/// It is deliberately NOT a byte comparison.
+/// A real dx12 driver re-serializes an accepted blob to DIFFERENT bytes of the same length — measured, not assumed —
+/// while WARP reproduces them exactly, so bytes are a backend detail and acceptance is the contract.
+void check_blob_round_trips(sg::context& ctx,
+                            sg::compiled_shader const& shader,
+                            sg::pipeline_layout_handle const& pipeline_layout)
+{
+    auto first = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    REQUIRE(first != nullptr);
+    auto const blob = first->cached_pipeline_data();
+    REQUIRE(!blob.empty());
+
+    auto seeded
+        = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout, .cached_pipeline = blob});
+    REQUIRE(seeded != nullptr);
+    CHECK(seeded->used_cached_pipeline()).context("a backend rejected a blob it had just produced itself");
+
+    // The second generation must be as good as the first, or refreshing a cache entry would poison it.
+    auto const again = seeded->cached_pipeline_data();
+    REQUIRE(!again.empty());
+    auto third
+        = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout, .cached_pipeline = again});
+    REQUIRE(third != nullptr);
+    CHECK(third->used_cached_pipeline()).context("a re-serialized blob was no longer accepted");
+}
+
+TEST("sg cached PSO - a blob survives a round trip through a seeded pipeline")
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
+
+    sg::compiled_shader const shader = make_double_shader();
+    auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
+    REQUIRE(group_layout != nullptr);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
+    REQUIRE(pipeline_layout != nullptr);
+
+    check_blob_round_trips(ctx, shader, pipeline_layout);
+}
+
+TEST("sg cached PSO - a real driver accepts its own blob and rejects a foreign one")
+{
+    auto handle = dx12::make_hardware_context();
+    if (handle == nullptr)
+        SKIP("no dx12 hardware adapter");
+    sg::context& ctx = *handle;
+
+    sg::compiled_shader const shader = make_double_shader();
+    auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
+    REQUIRE(group_layout != nullptr);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
+    REQUIRE(pipeline_layout != nullptr);
+
+    auto first = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    REQUIRE(first != nullptr);
+    CHECK(!first->used_cached_pipeline());
+
+    auto const blob = first->cached_pipeline_data();
+    if (blob.empty())
+        SKIP("this driver reports no cached PSO blob"); // legal, and it makes the rest meaningless
+
+    // The whole persistent-cache design rests on these two answers coming from a vendor driver rather than from WARP.
+    auto seeded
+        = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout, .cached_pipeline = blob});
+    REQUIRE(seeded != nullptr);
+    CHECK(seeded->used_cached_pipeline());
+    check_doubles(ctx, *seeded, group_layout, 256);
+
+    // A REAL driver re-serializes to different bytes of the same length, where WARP reproduces them exactly.
+    // Measured here, and the reason no cache logic may compare blob bytes to decide anything: doing so would rewrite
+    // every entry on every run.
+    // used_cached_pipeline() is the signal instead, and what survives a round trip is acceptance, not the bytes.
+    check_blob_round_trips(ctx, shader, pipeline_layout);
+
+    {
+        // A blob from nowhere must be rejected, not silently accepted — that rejection is the staleness signal.
+        dx12::scoped_expected_validation_messages const expect_complaint;
+
+        byte const garbage[64] = {};
+        auto rejected = ctx.uncached.try_create_compute_pipeline(
+            {.shader = shader,
+             .layout = pipeline_layout,
+             .cached_pipeline = cc::make_pinned_data(cc::span<byte const>(garbage))});
+        REQUIRE(rejected.has_value());
+        CHECK(!rejected.value()->used_cached_pipeline());
+        check_doubles(ctx, *rejected.value(), group_layout, 256);
+    }
+}
+
+TEST("sg reports which adapter it is running on")
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
+
+    auto const& adapter = ctx.adapter();
+
+    // WARP is Microsoft's software rasterizer, and identifying it as one is the whole point of the flag: a blob it
+    // produced is worth less across machines than a real driver's.
+    CHECK(!adapter.name.empty());
+    CHECK(adapter.is_software);
+    CHECK(adapter.vendor_id != 0);
 }
 
 TEST("sg cached PSO - a garbage blob degrades to a fresh build")
@@ -119,6 +234,9 @@ TEST("sg cached PSO - a garbage blob degrades to a fresh build")
          .layout = pipeline_layout,
          .cached_pipeline = cc::make_pinned_data(cc::span<byte const>(garbage))});
     REQUIRE(res.has_value());
+
+    // A rejected blob is exactly what a persistent cache needs to hear: its entry has gone stale.
+    CHECK(!res.value()->used_cached_pipeline());
     check_doubles(ctx, *res.value(), group_layout, 256);
 }
 

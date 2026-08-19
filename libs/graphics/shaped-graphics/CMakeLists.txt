@@ -22,6 +22,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
+    src/shaped-graphics/binding/impl/layout_hash.cc
     src/shaped-graphics/compute/compute_pipeline.cc
     src/shaped-graphics/raster/raster_pipeline.cc
     src/shaped-graphics/raytracing/raytracing_pipeline.cc
@@ -103,6 +104,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/binding.hh
     src/shaped-graphics/binding/binding_group_layout.hh
     src/shaped-graphics/binding/pipeline_layout.hh
+    src/shaped-graphics/context/adapter_info.hh
     src/shaped-graphics/binding/compiled_shader.hh
     src/shaped-graphics/compute/compute_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_pipeline.hh
@@ -171,6 +173,7 @@ if(SC_BUILD_TESTS)
         tests/texture/texture-view-test.cc
         tests/transfer/bytes_future-test.cc
         tests/binding/binding-test.cc
+        tests/binding/layout_hash-test.cc
         tests/pipeline/raster_pipeline-test.cc
         tests/sampler/sampler-test.cc
         tests/barrier/access_state-test.cc

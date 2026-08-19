@@ -51,17 +51,17 @@ public:
                                                                            = {});
 
     /// The cached pipeline_layout for these ordered group layouts, created via ctx.uncached on a miss.
-    /// The key is the group layouts' handle identity, so acquire the group layouts THROUGH the cache for full dedup.
+    /// The key is the group layouts' structural identity, so two separately created but identical group layouts still dedup.
     /// Throws sg::pipeline_creation_exception on failure, or sg::device_lost_exception if the device was lost.
     [[nodiscard]] pipeline_layout_handle acquire_pipeline_layout(context& ctx, pipeline_layout_description const& desc);
 
     /// The async compute_pipeline for `desc`, built via ctx.uncached on a miss.
-    /// The key combines the shader's content with the pipeline_layout handle's identity, so acquire the pipeline layout THROUGH the cache for full dedup.
+    /// The key combines the shader's content with the pipeline_layout's structural identity.
     /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc);
 
     /// The async raytracing_pipeline for `desc`, built via ctx.uncached on a miss.
-    /// The key combines every shader's content with the pipeline_layout handle's identity and the pipeline limits.
+    /// The key combines every shader's content with the pipeline_layout's structural identity and the pipeline limits.
     /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_raytracing_pipeline acquire_raytracing_pipeline(context& ctx,
                                                                         raytracing_pipeline_description const& desc);

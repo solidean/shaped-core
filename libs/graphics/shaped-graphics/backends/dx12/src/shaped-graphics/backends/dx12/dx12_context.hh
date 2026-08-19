@@ -365,6 +365,9 @@ public:
 
     void shutdown() override;
 
+    // create_dx12_context fills this in once it has picked an adapter, like every other member here.
+    using sg::context::set_adapter_info;
+
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;

@@ -35,11 +35,16 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
 
 - **binding group layout** = the reflected `binding`s **plus the static samplers**.
   Static samplers are baked into the root signature, so a different static sampler is a different group layout and must be part of the key.
-- **pipeline layout** = the **ordered group-layout handle identities**.
-  Pointer identity is enough because group layouts are shared and persistent — so acquire the group layouts *through the cache* first, for full dedup.
-- **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with the **pipeline-layout handle identity**, which transitively covers its group layouts.
-  Same reason, same advice: acquire the pipeline layout through the cache first, so structurally identical layouts collapse to one handle and the pipelines built on them dedup too.
+- **pipeline layout** = its groups' own **structural hashes**, plus its register-bound static samplers and its inline constants.
+  All three change the root signature.
+  A layout carries that hash from creation — `layout->structural_hash()` — computed once by the backend through the same `sg::impl` functions this cache keys with, so the two can never disagree.
+- **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with the **pipeline layout's structural hash**, which transitively covers its group layouts.
+
 - **compiled shader** = source + entry point + stage + model + every compile option.
+
+Structural rather than pointer identity is what makes these keys mean anything outside the process that made them.
+Two independently created but identical group layouts collapse to one key, so acquiring through the cache is a convenience rather than a precondition for dedup.
+A key computed in one run also still names the same thing in the next — the property a persistent tier needs, and one an address could never have given it.
 
 ## Async: the build runs off the frame path
 

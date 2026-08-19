@@ -8,6 +8,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/context/adapter_info.hh>
 #include <shaped-graphics/context/cached.hh>
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/context/persistent.hh>
@@ -41,6 +42,10 @@ public:
 
     /// The threading guarantees this backend provides (see libs/graphics/shaped-graphics/docs/concepts/threading.md).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
+
+    /// Which GPU this context is running on, fixed at creation.
+    /// Fields a backend cannot report are left at their defaults, so a caller reads "unknown" and never a wrong answer.
+    [[nodiscard]] adapter_info const& adapter() const { return _adapter; }
 
     /// Whether the GPU device has been lost — driver reset, TDR, removed adapter.
     /// Sticky once set: the context is unusable and must be torn down and recreated.
@@ -181,6 +186,10 @@ public:
 protected:
     /// `accepted_shader_formats` must be non-empty, most-preferred first.
     context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats);
+
+    /// Records which adapter the backend picked.
+    /// Called once during creation, before the context is handed out; the adapter cannot change afterwards.
+    void set_adapter_info(adapter_info info) { _adapter = cc::move(info); }
 
     /// Pumps transfers until `future` is ready or no transfer work is left.
     /// Collapses to a single false test where the platform has threads; without them it is what makes a blocking wait terminate.
@@ -327,6 +336,9 @@ protected:
 
     // Fixed at construction; inline for the realistic one-or-two-format backends, but not capped.
     cc::small_vector<shader_format, 2> _accepted_shader_formats;
+
+    // Filled by the backend during creation, from whatever the API tells it about the adapter it picked.
+    adapter_info _adapter;
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;

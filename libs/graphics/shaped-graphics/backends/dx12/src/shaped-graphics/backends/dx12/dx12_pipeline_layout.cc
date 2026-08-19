@@ -3,6 +3,7 @@
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/binding.hh> // sg::is_sampler
+#include <shaped-graphics/binding/impl/layout_hash.hh>
 
 namespace sg::backend::dx12
 {
@@ -14,7 +15,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     if (int(groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
-    auto pl = std::make_shared<dx12_pipeline_layout>();
+    auto pl = std::make_shared<dx12_pipeline_layout>(
+        sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants));
 
     // One descriptor-table root parameter per group table, appended in group order (resource table then
     // sampler table). The group layouts' range arrays back pDescriptorRanges and must outlive serialization

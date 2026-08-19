@@ -5,6 +5,7 @@
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // named_sampler
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/binding/impl/layout_hash.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh> // pipeline_layout_description::groups
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
@@ -14,27 +15,6 @@
 
 namespace sg
 {
-namespace
-{
-// Hash a sampler field by field.
-// Not add_pod over the whole struct: padding bytes would make the hash nondeterministic for logically-equal samplers.
-void add_sampler(cc::byte_stream_builder& b, sampler const& s)
-{
-    b.add_pod(s.min_filter);
-    b.add_pod(s.mag_filter);
-    b.add_pod(s.mip_filter);
-    b.add_pod(s.address_u);
-    b.add_pod(s.address_v);
-    b.add_pod(s.address_w);
-    b.add_pod(s.mip_lod_bias);
-    b.add_pod(s.max_anisotropy);
-    b.add_pod(s.min_lod);
-    b.add_pod(s.max_lod);
-    b.add_optional(s.compare);
-    b.add_pod(s.border_color);
-}
-} // namespace
-
 void pipeline_cache::add_binding_group_layout_provider(
     std::shared_ptr<cc::key_value_provider<cc::hash128, binding_group_layout_handle>> provider)
 {
@@ -75,58 +55,17 @@ void pipeline_cache::apply_bookkeeping()
     _raytracing_cache.apply_bookkeeping();
 }
 
+// The two layout keys ARE the layouts' structural identity — the same functions a backend stamps into the layout it
+// creates, so this tier and any persistent one can never disagree about which layouts are the same.
 cc::hash128 pipeline_cache::compute_binding_group_layout_key(cc::span<binding const> bindings,
                                                              cc::span<named_sampler const> static_samplers) const
 {
-    auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_pod(u64(bindings.size()));
-    for (auto const& bnd : bindings)
-    {
-        b.add_string(bnd.name);
-        b.add_pod(bnd.set);
-        b.add_pod(bnd.index);
-        b.add_pod(bnd.count);
-        b.add_pod(bnd.type);
-        b.add_optional(bnd.block_size);
-    }
-    b.add_pod(u64(static_samplers.size()));
-    for (auto const& ns : static_samplers)
-    {
-        b.add_string(ns.name);
-        add_sampler(b, ns.sampler);
-    }
-    return cc::hash128::create(b.written_bytes(), 0);
+    return impl::binding_group_layout_hash(bindings, static_samplers);
 }
 
 cc::hash128 pipeline_cache::compute_pipeline_layout_key(pipeline_layout_description const& desc) const
 {
-    auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_pod(u64(desc.groups.size()));
-    for (auto const& g : desc.groups)
-        // group-layout identity — pointer is stable because cached group layouts are shared/persistent
-        b.add_pod(reinterpret_cast<u64>(g.get()));
-    // pipeline-level static samplers change the root signature, so they are part of the identity
-    b.add_pod(u64(desc.static_samplers.size()));
-    for (auto const& bs : desc.static_samplers)
-    {
-        b.add_pod(bs.binding.set);
-        b.add_pod(bs.binding.index);
-        b.add_pod(bs.binding.count);
-        b.add_pod(bs.binding.type);
-        add_sampler(b, bs.sampler);
-    }
-    // inline constants add a 32-bit-constants root parameter, so they are part of the identity too
-    b.add_pod(desc.inline_constants.has_value());
-    if (desc.inline_constants.has_value())
-    {
-        auto const& ic = desc.inline_constants.value();
-        b.add_pod(ic.set);
-        b.add_pod(ic.index);
-        b.add_pod(ic.count);
-        b.add_pod(ic.type);
-        b.add_optional(ic.block_size);
-    }
-    return cc::hash128::create(b.written_bytes(), 0);
+    return impl::pipeline_layout_hash(desc);
 }
 
 cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_description const& desc) const
@@ -136,17 +75,16 @@ cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_descri
     b.add(desc.shader.bytecode.span());
     b.add_string(desc.shader.entry_point);
     b.add_string(desc.shader.compiler.signature);
-    // pipeline-layout identity — the pointer is stable because cached layouts are shared and persistent.
-    // It transitively covers its group layouts.
-    b.add_pod(reinterpret_cast<u64>(desc.layout.get()));
+    // Pipeline-layout identity, which transitively covers its group layouts.
+    b.add_pod(desc.layout != nullptr ? desc.layout->structural_hash() : cc::hash128{});
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
 cc::hash128 pipeline_cache::compute_raytracing_pipeline_key(raytracing_pipeline_description const& desc) const
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
-    // pipeline-layout identity — pointer is stable because cached layouts are shared/persistent
-    b.add_pod(reinterpret_cast<u64>(desc.layout.get()));
+    // Pipeline-layout identity, which transitively covers its group layouts.
+    b.add_pod(desc.layout != nullptr ? desc.layout->structural_hash() : cc::hash128{});
 
     auto add_shader = [&b](compiled_shader const& s)
     {
