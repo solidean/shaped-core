@@ -124,7 +124,7 @@ INVOCABLE_TEST("sg dx12 - a missing dynamic sampler is rejected at group creatio
     sg::binding const bindings[] = {
         {.name = "Dyn", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
-    auto layout = c.uncached.create_binding_group_layout(bindings);
+    auto layout = c.cached.acquire_binding_group_layout(bindings);
     REQUIRE(layout != nullptr);
 
     // No samplers provided → the dynamic "Dyn" binding is unfilled.
