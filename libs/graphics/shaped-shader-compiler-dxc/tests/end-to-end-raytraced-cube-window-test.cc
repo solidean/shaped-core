@@ -301,16 +301,16 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
         = compile(closest_hit_hlsl, "ClosestHit", sg::shader_stage::closest_hit, ssc::dxc::shader_model::sm_6_3);
 
     // The global root signature comes from the raygen's reflected bindings (scene t0, Output u0, Camera b0).
-    auto rt_group_layout = ctx.uncached.create_binding_group_layout(raygen.bindings);
+    auto rt_group_layout = ctx.cached.acquire_binding_group_layout(raygen.bindings);
     REQUIRE(rt_group_layout != nullptr);
-    auto rt_pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {rt_group_layout}});
+    auto rt_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {rt_group_layout}});
     REQUIRE(rt_pipeline_layout != nullptr);
 
     auto rpd = sg::raytracing_pipeline_description{.layout = rt_pipeline_layout, .max_payload_size = sizeof(float) * 4};
     auto const raygen_h = rpd.add_raygen_shader(cc::move(raygen));
     auto const miss_h = rpd.add_miss_shader(cc::move(miss));
     auto const hit_h = rpd.add_hit_shader({.closest_hit = cc::move(closest_hit)});
-    auto rt_pipeline = ctx.uncached.create_raytracing_pipeline(rpd);
+    auto rt_pipeline = cc::async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
     REQUIRE(rt_pipeline != nullptr);
 
     auto stbd = sg::raytracing_shader_table_description{.pipeline = rt_pipeline};
