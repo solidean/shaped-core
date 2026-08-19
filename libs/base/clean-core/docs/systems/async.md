@@ -618,6 +618,16 @@ The yield site is the easy one to forget: an inline-driven node was never schedu
 A node without one falls through and inherits its driver's context — which is what makes the eager depth-first drive pay one install for a 512-node chain rather than 512.
 Node creation costs nothing at all: no TLS read, no store, so born-ready, manual and lazy-then-inline-driven nodes never touch the word.
 
+Inheritance is for the INLINE drive alone, and a **dequeued work item is polled at a fresh attribution root** instead.
+That is `cc::impl::async_poll_work_item`, which every dequeue site goes through and only a dequeue site may.
+The three write sites above are what earn that: a node reaching a queue always carries its own token.
+So a null one there means "no context" rather than "inherit whoever dequeued me".
+
+That distinction is invisible on a worker, whose ambient is null anyway, and load-bearing for `participate_until_ready`.
+A participant parks INSIDE the logical task it is blocked on and steals while parked.
+Without the root, every unrelated item it picks up is billed to that task — which a consumer keying off the chain reads as real nesting.
+nexus is the one that shows it: its invocation-cycle guard walks the chain, so a stolen test node chained under a blocked test reports a cycle that does not exist.
+
 **Lifetime is safe, not merely checked.**
 Links are refcounted and hold their parent strongly, so retaining a head retains the whole chain and a lookup can never reach a freed link.
 The arm holds one reference, released in `~async_unresolved` — one site covering resolve-value, resolve-error and cold/parked teardown, so the count is exactly-once by construction.

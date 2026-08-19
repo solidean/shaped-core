@@ -141,7 +141,7 @@ bool cc::singlethreaded_scheduler::run_one()
 
     auto node = cc::move(_queue.back()); // keep it alive across the poll, then release our queue ref
     _queue.remove_back();
-    node->poll();
+    impl::async_poll_work_item(*node);
     return true;
 }
 

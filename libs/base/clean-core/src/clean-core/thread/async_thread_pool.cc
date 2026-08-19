@@ -259,7 +259,7 @@ void cc::async_thread_pool::worker_main(worker& w)
     {
         if (auto n = try_get_work(w))
         {
-            n->poll();
+            impl::async_poll_work_item(*n);
             continue;
         }
 
@@ -271,7 +271,7 @@ void cc::async_thread_pool::worker_main(worker& w)
             cc::spin_pause();
             if (auto n = try_get_work(w))
             {
-                n->poll();
+                impl::async_poll_work_item(*n);
                 found = true;
                 break;
             }
@@ -294,7 +294,7 @@ void cc::async_thread_pool::worker_main(worker& w)
         if (auto n = try_get_work(w, /*authoritative*/ true))
         {
             _sleepers.fetch_sub(1, cc::memory_order_relaxed);
-            n->poll();
+            impl::async_poll_work_item(*n);
             continue;
         }
 
@@ -369,7 +369,7 @@ bool cc::async_thread_pool::try_run_one()
     if (n == nullptr)
         return false;
 
-    n->poll();
+    impl::async_poll_work_item(*n);
     return true;
 }
 
@@ -486,7 +486,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         {
             if (auto n = try_get_work(*slot))
             {
-                n->poll();
+                impl::async_poll_work_item(*n);
                 continue;
             }
 
@@ -498,7 +498,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                 cc::spin_pause();
                 if (auto n = try_get_work(*slot))
                 {
-                    n->poll();
+                    impl::async_poll_work_item(*n);
                     found = true;
                     break;
                 }
@@ -525,7 +525,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             if (auto n = try_get_work(*slot, /*authoritative*/ true))
             {
                 _sleepers.fetch_sub(1, cc::memory_order_relaxed);
-                n->poll();
+                impl::async_poll_work_item(*n);
                 continue;
             }
 
@@ -621,7 +621,7 @@ bool cc::async_thread_pool::try_run_one()
 
     async_node_ptr n = cc::move(_queue.back());
     _queue.pop_back();
-    n->poll();
+    impl::async_poll_work_item(*n);
     return true;
 }
 
@@ -639,7 +639,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     {
         async_node_ptr n = cc::move(_queue.back());
         _queue.pop_back();
-        n->poll();
+        impl::async_poll_work_item(*n);
     }
 }
 
