@@ -4,6 +4,7 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 
 namespace bcache::test
@@ -96,9 +97,11 @@ void cache_fixture::drive_until(cc::function_ref<bool()> done)
             return;
 
         // The actors first: they are what resolve the promises the graph is parked on.
-        _cache->pump();
+        // This test's own stores by name, never cc::thread_pump_all(): a global sweep also runs the stores of every
+        // sibling test running beside this one, at moments they did not choose.
+        (void)_cache->pump();
         for (auto* other : _also_driven)
-            other->pump();
+            (void)other->pump();
         _driver->scheduler.drain();
     }
 
@@ -109,9 +112,9 @@ void cache_fixture::idle(int cycles)
 {
     for (auto i = 0; i < cycles; ++i)
     {
-        _cache->pump();
+        (void)_cache->pump();
         for (auto* other : _also_driven)
-            other->pump();
+            (void)other->pump();
         _driver->scheduler.drain();
     }
 }

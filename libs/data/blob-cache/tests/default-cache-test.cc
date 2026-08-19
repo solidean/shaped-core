@@ -5,6 +5,7 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;

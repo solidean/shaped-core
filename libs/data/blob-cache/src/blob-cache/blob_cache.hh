@@ -131,7 +131,7 @@ struct bcache::cache_config
     /// The cache degrades to a miss either way; this exists so the failure is not silent.
     cc::unique_function<void(cc::string_view)> on_storage_error;
 
-    /// Drive storage on the calling thread through pump() instead of on an actor thread.
+    /// Run storage on whoever blocks, through the cc::register_thread_pump registry, instead of on an actor thread.
     /// A build with CC_HAS_THREADS == 0 behaves this way whatever this says.
     bool unthreaded = false;
 };
@@ -284,8 +284,13 @@ public:
 
     // driving and shutdown
 public:
-    /// Runs storage work on the calling thread where there is no actor thread; true if there may be more.
-    /// A no-op returning false in a threaded build, so pumping unconditionally is correct everywhere.
+    /// Runs THIS store's storage work on the calling thread, where it has no actor thread; true if there may be more.
+    ///
+    /// Production code never needs it: an unthreaded store registers a pump, so blocking already drives it and
+    /// cc::thread_pump_all() drives every store at once.
+    /// This exists for a test that is ABOUT one store's ordering, which a global sweep would disturb — it also runs
+    /// every OTHER unthreaded store a sibling test owns, at moments that test did not choose.
+    /// A no-op returning false in a threaded build.
     bool pump();
 
     /// Flushes buffered access times, drains accepted writes, rejects new ones, and joins the actor.

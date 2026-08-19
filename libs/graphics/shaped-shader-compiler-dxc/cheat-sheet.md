@@ -59,7 +59,8 @@ cache.compile(desc, opts={})     // -> sg::async_compiled_shader  (same key => S
                            //   (the version only matters to the persistent tier — without it a DXC upgrade serves old DXIL)
 cache.set_blob_cache(&c)         // persistent 2nd tier: encoded compiled shaders surviving across RUNS (bcache::blob_cache*)
                            //   defaults to bcache::default_cache(); nullptr = off. Encoded via sg::impl::encode_compiled_shader
-                           //   the compile PARKS on the store: with no pool and no worker scope, the tier is skipped
+                           //   the compile PARKS on the store: with no ambient scheduler and no worker scope, the tier is skipped
+                           //   without threads the store is swept by whoever blocks (cc::thread_pump_all), not pumped by name
 cache.apply_bookkeeping()        // in-memory eviction on all tiers
 compiler.version()               // -> cc::string_view "major.minor"; empty if DXC would not report one
 // drive: cc::async_blocking_get(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).

@@ -111,16 +111,13 @@ namespace
 {
 /// Builds the double-shader pipeline through ctx.cached, with `store` as the persistent tier, and drives it.
 ///
-/// The two shapes an application has, both exercised because both presets run this file.
-/// With threads, the store answers on its own thread and the build resumes on a pool worker, so the pool that owns
-/// that worker is what drives it — not async_blocking_get_singlethreaded.
-/// Without threads, nothing advances the store unless somebody pumps it, so poll ctx.pump() instead of blocking.
+/// One shape for both presets, which is the point: the build parks on the store either way, and blocking is what
+/// resolves it either way.
+/// With threads the store answers on its own thread; without them it answers on this one, because a store with no
+/// thread registers a pump and cc::async_blocking_get sweeps the registry rather than sleeping.
 ///
 /// No REQUIRE in here: it returns a value, so a failed REQUIRE would have nothing to return.
-sg::compute_pipeline_handle build_via_store(sg::context& ctx,
-                                            sg::compiled_shader const& shader,
-                                            bcache::blob_cache& store,
-                                            cc::async_thread_pool& pool)
+sg::compute_pipeline_handle build_via_store(sg::context& ctx, sg::compiled_shader const& shader, bcache::blob_cache& store)
 {
     ctx.cached.cache().set_blob_cache(&store);
 
@@ -128,27 +125,7 @@ sg::compute_pipeline_handle build_via_store(sg::context& ctx,
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     auto const desc = sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout};
 
-    if constexpr (CC_HAS_THREADS)
-        return pool.blocking_get(ctx.cached.acquire_compute_pipeline(desc));
-
-    // The scope has to be bound BEFORE the acquire: it decides where the build schedules, and draining a scheduler the
-    // build never went to would spin until the loop gives up.
-    auto scheduler = cc::singlethreaded_scheduler();
-    auto const scope = cc::async_worker_scope(scheduler);
-
-    auto node = ctx.cached.acquire_compute_pipeline(desc);
-
-    // Two drivers, both needed: ctx.pump() advances the store, which resolves what the build is parked on, and
-    // draining the scheduler is what then resumes the build.
-    // Bounded, so a pipeline that can never complete fails the test instead of hanging it.
-    for (auto i = 0; i < 100000 && !node->is_ready(); ++i)
-    {
-        (void)ctx.pump();
-        scheduler.drain();
-    }
-
-    auto const* const value = node->try_value();
-    return value != nullptr ? *value : nullptr;
+    return cc::async_blocking_get(ctx.cached.acquire_compute_pipeline(desc));
 }
 
 /// Feeding a blob back in must keep working after a round trip, whatever the backend did to the bytes.
@@ -258,11 +235,6 @@ TEST("sg cached PSO - a persisted blob accelerates a later context")
 
     sg::compiled_shader const shader = make_double_shader();
 
-    // The store answers from its own thread, so the parked build needs somewhere to resume.
-    // Without a pool the persistent tier declines to engage at all, and this test would silently prove nothing.
-    auto pool = cc::async_thread_pool();
-    auto const default_pool = cc::scoped_default_async_pool(pool);
-
     // A store of this test's own, because this test is ABOUT the store: it has to start empty and stay unshared.
     // Every other test is free to hit the real default cache and be faster for it.
     auto const path = cc::temp_file_path("sg-pso-cache-test", ".db");
@@ -272,14 +244,14 @@ TEST("sg cached PSO - a persisted blob accelerates a later context")
     // Each context has its own in-memory tier, so the second one genuinely misses in memory and has to reach the store.
     auto first = dx12::make_hardware_context();
     REQUIRE(first != nullptr);
-    auto const cold = build_via_store(*first, shader, *store, pool);
+    auto const cold = build_via_store(*first, shader, *store);
     REQUIRE(cold != nullptr);
     CHECK(!cold->used_cached_pipeline()); // nothing to accelerate with yet
     first = nullptr;
 
     auto second = dx12::make_hardware_context();
     REQUIRE(second != nullptr);
-    auto const warm = build_via_store(*second, shader, *store, pool);
+    auto const warm = build_via_store(*second, shader, *store);
     REQUIRE(warm != nullptr);
     CHECK(warm->used_cached_pipeline()).context("the persisted PSO blob did not reach the second context");
 

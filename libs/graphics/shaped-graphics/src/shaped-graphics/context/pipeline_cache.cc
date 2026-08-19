@@ -141,14 +141,6 @@ bcache::blob_cache* pipeline_cache::resolve_blob_cache()
     return _blob_cache.value();
 }
 
-bool pipeline_cache::pump()
-{
-    // Only what is already in use: resolving here would open the default store just because somebody pumped.
-    if (!_blob_cache.has_value() || _blob_cache.value() == nullptr)
-        return false;
-    return _blob_cache.value()->pump();
-}
-
 bcache::cache_key pipeline_cache::persistent_key(context& ctx, cc::hash128 pipeline_key, cc::string_view kind) const
 {
     auto const& adapter = ctx.adapter();

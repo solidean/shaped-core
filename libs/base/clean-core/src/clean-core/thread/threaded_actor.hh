@@ -9,6 +9,7 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/thread_pump.hh>
 
 // COST NOTE: the STL headers below reach MSVC's <xutility>, which pulls <immintrin.h>.
 // That is the whole AVX-512 intrinsic surface — ~43 extra files, and most of this header's parse time.
@@ -140,7 +141,8 @@ private:
     // members
 private:
     std::thread _thread;
-    std::condition_variable _inbox_cond_var; // one wake point shared by all message types
+    cc::thread_pump_registration _pump_registration; // held only while unthreaded: this actor as a semantic thread
+    std::condition_variable _inbox_cond_var;         // one wake point shared by all message types
     cc::atomic<bool> _is_started = false;
     cc::atomic<bool> _is_shutting_down = false;
     cc::atomic<bool> _is_shut_down = false;

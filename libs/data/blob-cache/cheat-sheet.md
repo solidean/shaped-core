@@ -67,7 +67,8 @@ bcache::scoped_default_cache guard(&c);         // RAII install/restore
 // SC_BLOB_CACHE=temp  -> a private file under the OS temp dir, fresh per process
 // read once, when the default is first opened; anything else (incl. unset) is the normal user cache
 
-cache->pump();                                  // -> bool; runs storage work where there is no actor thread
+// no pump() of its own: a store with no actor thread registers with cc::register_thread_pump, so whoever blocks
+//   runs its storage work (cc::thread_pump_all sweeps them all)
 cache->close();                                 // flush, drain, join; idempotent, and the destructor calls it
 cache->is_closed();                             // -> bool; a closed cache misses and drops rather than queueing
 ```
@@ -151,6 +152,7 @@ Only what the signatures above cannot tell you.
   be built cold.
   A test that is *about* caching opens its own store instead of installing one as the default, and `SC_BLOB_CACHE`
   is the whole-run lever for asking whether a stale entry is behind a result.
-- **Without threads, whoever would have blocked must `pump()`.** A caller that never pumps sees only misses and
-  dropped puts — degraded, never deadlocked.
-  `pump()` is a no-op returning false in a threaded build, so calling it unconditionally is correct everywhere.
+- **Without threads, whoever blocks runs the storage work**, through clean-core's pump registry rather than by naming
+  this cache.
+  So blocking is enough and there is no threadless code path to write; `cc::thread_pump_all()` is the same sweep for a
+  frame loop that wants one explicitly.

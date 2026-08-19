@@ -230,9 +230,9 @@ A declaration that disappeared would make a caller's code depend on how the buil
 There is no `#if` anywhere in this library.
 Both dimensions — threads and storage — are runtime facts.
 
-Without threads, or with `cache_config::unthreaded`, there is no actor thread and `pump()` runs storage work on the calling thread.
-It returns false in a threaded build, so pumping unconditionally is correct everywhere.
-A caller that never pumps sees only misses and dropped puts: degraded, never deadlocked, which is the property that makes the rule safe rather than a trap.
+Without threads, or with `cache_config::unthreaded`, there is no actor thread, and the actor registers itself with clean-core's pump registry instead.
+Storage work then runs on whoever blocks — `cc::async_blocking_get` sweeps the registry rather than sleeping — so no caller has to know this cache exists to make it progress.
+That is what lets the same code drive a threaded and an unthreaded store: the difference is which thread runs the handler, never which calls the caller makes.
 
 ## What is deliberately not here
 

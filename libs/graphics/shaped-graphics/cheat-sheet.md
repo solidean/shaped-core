@@ -601,13 +601,13 @@ ctx.cached.cache()                                             // -> pipeline_ca
 //   thing in the next process. Acquiring through the cache is convenience now, not a precondition for dedup.
 ctx.cached.cache().set_blob_cache(&c)   // persistent 2nd tier: serialized PSO blobs surviving across RUNS (bcache::blob_cache*)
                                         // defaults to bcache::default_cache(); nullptr = off. Keyed on adapter + driver too
-                                        // The build PARKS on the store: with no pool installed and no worker scope, the tier is
-                                        //   skipped and the pipeline is built plainly. Drive with pool.blocking_get, NOT
-                                        //   async_blocking_get_singlethreaded — it resumes on a pool worker
-ctx.pump()                              // -> bool; one cycle of everything with no thread of its own (backend actors via the
-                                        //   protected on_pump(), plus the blob cache)
-                                        // no-op returning false WITH threads, so call it unconditionally. Without threads: poll +
-                                        //   pump instead of blocking, and drain your scheduler too — pump resolves, drain resumes
+                                        // The build PARKS on the store: with no ambient scheduler and no worker scope, the tier
+                                        //   is skipped and the pipeline is built plainly
+                                        // Drive with cc::async_blocking_get — it resumes on an ambient-scheduler worker, and
+                                        //   without threads it sweeps cc::thread_pump_all() rather than sleeping
+cc::thread_pump_all()                   // -> bool; one cycle of every semantic thread with no OS thread of its own
+                                        // sg has NO pump of its own: an unthreaded actor registers itself, so blocking is enough
+                                        // one atomic load WITH threads, so call it unconditionally
 // Threading: the async build calls the backend from a pool worker — safe where the backend allows concurrent
 // pipeline creation (dx12 device creates are free-threaded). On single_threaded, install NO pool and drive inline.
 pipeline_cache pc;                                            // standalone use (acquire_* take a context&)

@@ -75,14 +75,11 @@ It would also look perfectly healthy on WARP, which reproduces the bytes exactly
 
 **It needs somewhere to schedule.**
 A build parks on the store, so it has to be able to resume somewhere.
-With no default pool installed and no worker scope active there is nowhere, and the tier is skipped rather than parked — the pipeline is built the plain way.
+With no ambient scheduler installed and no worker scope active there is nowhere, and the tier is skipped rather than parked — the pipeline is built the plain way.
 
-**Without threads, pump it.**
-`ctx.pump()` advances everything the context needs driven that has no thread of its own, the store included, and is a no-op returning false where the platform has threads.
-Two drivers are in play there and both are needed: pumping resolves what the build is parked on, and draining the scheduler is what resumes the build itself.
-So a threadless caller polls and pumps rather than blocking, exactly as it already does for transfers.
-A caller with threads drives the build with its pool's own `blocking_get`, not `cc::async_blocking_get_singlethreaded`.
-The build resumes on a pool worker, so the pool that owns that worker has to be the driver.
+**Without threads, blocking still works.**
+A store with no thread of its own registers a pump with clean-core, and `cc::async_blocking_get` sweeps that registry instead of sleeping.
+So the same blocking call drives the store and then resumes the build, and there is no threadless code path to write: one `cc::async_blocking_get` is correct in both builds.
 
 `ctx.cached.cache().set_blob_cache(...)` overrides the store per context; it defaults to `bcache::default_cache()`, and `nullptr` turns persistence off.
 Tests share the developer's real cache like anything else, and are faster for it — most of them only want a pipeline, not a cold build of one.

@@ -744,11 +744,25 @@ auto a = cc::make_and_start_threaded_actor<uploader>(args...); // -> cc::unique_
 a->enqueue_message(upload_job{...});      // -> bool (false if shutting down); a->shutdown() drains + joins
 auto impl = a->take_impl<uploader>();     // std::unique_ptr — only after shutdown; ~handle joins too
 
-// Unthreaded mode: no background thread; you drive the loop (only option on single-threaded wasm).
+// Unthreaded mode: no background thread (the only option on single-threaded wasm).
 auto b = cc::make_threaded_actor<uploader>(args...);
-b->start(cc::threaded_actor_mode::unthreaded);
+b->start(cc::threaded_actor_mode::unthreaded);  // registers a pump for its lifetime -> whoever BLOCKS runs it
 b->process_messages_if_unthreaded();      // one cycle -> bool "more to do"; no-op when a thread runs
 b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe to call every frame
+// the two above are the primitive; you rarely call them - cc::thread_pump_all() is what drives every actor at once
+```
+
+## Cooperative pumping (thread/thread_pump.hh)
+
+```cpp
+// A semantic thread with no OS thread registers a pump; every blocking wait sweeps the registry instead of sleeping.
+// cc::threaded_actor does this for you when started unthreaded; a hand-rolled thread does it where it would spawn.
+auto reg = cc::register_thread_pump([&] { return step_once(); }); // -> RAII; true == "made progress / more to do"
+cc::thread_pump_all();                    // -> bool; one cycle of every registration. One atomic load when empty
+cc::thread_pump_all_for(4.0);             // loop until idle or 4ms; true == stopped on the budget
+cc::registered_thread_pump_count();       // -> isize; a leak check at the end of a run
+// GOTCHA: a pump must NOT block on another registration - it holds the only thread, so that one never runs.
+//   Sweep from inside a pump instead (this one is skipped, the others run). Blocking on a GPU fence / OS handle is fine.
 ```
 
 ## Async / dataflow (incubator — see docs/systems/async.md)

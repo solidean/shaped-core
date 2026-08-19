@@ -1,5 +1,6 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -73,7 +74,7 @@ TEST("bcache opens degraded when its directory does not exist")
 
     auto cache = blob_cache::create(cc::move(config));
     while (!cache->opened()->is_ready())
-        cache->pump();
+        (void)cache->pump();
 
     CHECK(cache->opened()->has_error()); // the one place the reason is available, for a log line
     CHECK(!cache->get_stats().is_backed_by_storage);
@@ -82,12 +83,12 @@ TEST("bcache opens degraded when its directory does not exist")
     auto const key = key_of("degraded", "entry");
     auto const put = cache->put(key, make_blob("dropped"));
     while (!put->is_ready())
-        cache->pump();
+        (void)cache->pump();
     CHECK(put->try_value()->status == put_status::unavailable);
 
     auto const got = cache->get(key);
     while (!got->is_ready())
-        cache->pump();
+        (void)cache->pump();
     CHECK(!got->try_value()->has_value());
 }
 

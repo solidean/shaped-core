@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
@@ -104,13 +105,14 @@ TEST("ssc::dxc shader_cache - a compile persists across cache instances")
     auto const path = cc::temp_file_path("ssc-dxc-cache-test", ".db");
     auto store = bcache::blob_cache::create({.path = path, .unthreaded = true});
 
-    // Two drivers, both needed: the pump resolves what the compile is parked on, the drain resumes the compile.
-    // Bounded, so a compile that can never finish fails the test instead of hanging it.
+    // Two drivers, both needed: the sweep resolves what the compile is parked on, the drain resumes the compile.
+    // Driven by hand rather than through cc::async_blocking_get because the point here is the store's message ORDER,
+    // and bounded, so a compile that can never finish fails the test instead of hanging it.
     auto const settle = [&](auto const& node)
     {
         for (auto i = 0; i < 100000 && !node->is_ready(); ++i)
         {
-            (void)store->pump();
+            (void)cc::thread_pump_all();
             scheduler.drain();
         }
         CHECK(node->is_ready());

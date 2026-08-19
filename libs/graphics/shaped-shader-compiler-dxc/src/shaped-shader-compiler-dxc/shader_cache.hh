@@ -31,9 +31,9 @@ public:
     /// The persistent tier a compile consults: encoded compiled shaders surviving across runs.
     /// Defaults to bcache::default_cache(), opened the first time a compile misses in memory; nullptr turns it off.
     ///
-    /// The compile parks on the store, so it needs somewhere to resume: with no pool installed and no worker scope
+    /// The compile parks on the store, so it needs somewhere to resume: with no ambient scheduler and no worker scope
     /// active, the tier is skipped and the shader is compiled the plain way.
-    /// Without threads the store advances only when pumped, which sg::context::pump() does for the default one.
+    /// Without threads the store runs on whoever blocks, through clean-core's pump registry, so no caller drives it by name.
     void set_blob_cache(bcache::blob_cache* cache);
 
     /// The async compiled shader for (desc, options), reusing a cached node if present.

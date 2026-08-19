@@ -45,9 +45,9 @@ public:
     /// The persistent tier a pipeline build consults: serialized PSO blobs surviving across runs.
     /// Defaults to bcache::default_cache(), opened the first time a pipeline misses in memory; nullptr turns it off.
     ///
-    /// The build parks on the store, so it needs somewhere to resume: with no pool installed and no worker scope
+    /// The build parks on the store, so it needs somewhere to resume: with no ambient scheduler and no worker scope
     /// active, the tier is skipped and the pipeline is built the plain way.
-    /// Without threads, drive it with ctx.pump() — the store advances only when pumped.
+    /// Without threads the store runs on whoever blocks, through clean-core's pump registry, so no caller has to drive it by name.
     void set_blob_cache(bcache::blob_cache* cache);
 
     // acquire (get-or-create)
@@ -81,10 +81,6 @@ public:
 public:
     /// Runs bookkeeping (e.g. in-memory eviction) on all caches.
     void apply_bookkeeping();
-
-    /// Advances the persistent tier where it has no thread of its own; true if there may be more work.
-    /// Reached through ctx.pump(); never opens a store that was not already in use.
-    bool pump();
 
 private:
     [[nodiscard]] cc::hash128 compute_binding_group_layout_key(cc::span<binding const> bindings,

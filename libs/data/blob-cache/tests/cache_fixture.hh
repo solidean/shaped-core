@@ -99,7 +99,7 @@ private:
 
     struct driver;
 
-    /// Borrowed, never owned: the test holds the second cache, and this only says who else needs pumping.
+    /// Borrowed, never owned: the test holds the second cache, and this only says who else this fixture drives.
     cc::vector<blob_cache*> _also_driven;
 
     cc::string _path;

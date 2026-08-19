@@ -7,6 +7,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/context/adapter_info.hh>
 #include <shaped-graphics/context/cached.hh>
@@ -141,14 +142,6 @@ public:
     /// Does not advance; safe to call from any thread.
     virtual void wait_for_next_inflight_epoch() = 0;
 
-    /// Runs one cycle of everything this context needs driven that has no thread of its own, returning true if there may be more.
-    /// The backend's own actors, plus the backend-independent parts — today the persistent pipeline cache.
-    ///
-    /// Where the platform has threads all of it drives itself, so this returns false without doing anything, and calling it unconditionally is always correct.
-    /// It is load-bearing only under CC_HAS_THREADS == 0, where a cc::threaded_actor runs on its caller and nothing advances unless someone pumps it.
-    /// Every blocking wait must therefore drain this first — including GPU waits, since an async upload's copy-queue fence is signalled by an actor.
-    bool pump();
-
     /// Blocks until a download future is delivered, then returns its bytes.
     /// nullopt if the future is invalid, unsubmitted, or cancelled.
     /// The only completion guarantee for a download — advance_epoch* drain GPU work but not the readback actor.
@@ -191,24 +184,20 @@ protected:
     /// Called once during creation, before the context is handed out; the adapter cannot change afterwards.
     void set_adapter_info(adapter_info info) { _adapter = cc::move(info); }
 
-    /// The backend's half of pump(): one cycle of whatever actors it owns, true if there may be more.
-    /// Backends with no actors leave this alone; pump() is the public entry point either way.
-    virtual bool on_pump() { return false; }
-
-    /// Pumps until `future` is ready or nothing is left to pump.
-    /// Collapses to a single false test where the platform has threads; without them it is what makes a blocking wait terminate.
+    /// Drives cooperative work until `future` is ready or nothing anywhere reports more.
+    /// Collapses to a single false test where every semantic thread has an OS thread of its own; without them it is what makes a blocking wait terminate.
     /// Leaving the future unready is fine — the wait below it reports the cancelled / not-yet-submitted cases rather than blocking.
     template <class FutureT>
     void drive_transfers_until_ready(FutureT const& future)
     {
-        while (!future.is_ready() && this->pump())
+        while (!future.is_ready() && cc::thread_pump_all())
         {
         }
     }
 
     // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
     // The try_* virtuals below are the fallible core a backend implements; the public façades add the throwing flavor (see docs/error-handling.md).
-    // A backend also implements the public pure virtuals above — submit / drop, the epoch surface, is_submission_complete — and usually overrides shutdown and on_pump.
+    // A backend also implements the public pure virtuals above — submit / drop, the epoch surface, is_submission_complete — and usually overrides shutdown.
     friend class context_persistent_scope;
     friend class context_transient_scope;
     friend class context_upload_scope;

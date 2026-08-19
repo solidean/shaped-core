@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
@@ -329,24 +330,13 @@ public:
     void set_inline_upload_budget(isize bytes) override { _upload_inline.set_budget(bytes); }
     void set_inline_download_budget(isize bytes) override { _download_inline.set_budget(bytes); }
 
-    /// Drives all three copy actors one cycle each — this backend's half of sg::context::pump.
-    /// Only does anything when they have no thread of their own.
-    /// Every actor is pumped, with no short-circuit: they are independent, and an upload's copy-queue fence can be what a download waits behind.
-    bool on_pump() override
-    {
-        bool more = _upload_async.pump_unthreaded();
-        more |= _download_async.pump_unthreaded();
-        more |= _download_inline.pump_unthreaded();
-        return more;
-    }
-
-    /// Drains everything pumpable until nothing reports more work.
-    /// Costs one false test wherever the actors have their own threads.
+    /// Drains every semantic thread until nothing reports more work.
+    /// Costs one atomic load wherever they all have OS threads of their own.
     /// Without them it is a precondition of any GPU wait: a submitted list can be parked on the async-upload completion fence, which only the copy actor signals.
     /// The GPU would never reach the epoch fence, leaving the wait blocked on work only this thread can produce.
     void drain_transfers()
     {
-        while (this->pump())
+        while (cc::thread_pump_all())
         {
         }
     }
