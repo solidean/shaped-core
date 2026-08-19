@@ -35,8 +35,7 @@ TEST("sv bindless_manager - unchanged mirrors serve the same group, changes recr
     auto const buf = ctx.persistent.create_raw_buffer(256, sg::buffer_usage::readonly_buffer);
     auto const tex = make_texture(ctx);
 
-    auto const buf_slot
-        = manager.acquire(sg::as_buffer_view(sg::buffer<byte>::from_raw(buf).as_readonly_buffer().to_raw()));
+    auto const buf_slot = manager.acquire(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
     auto const tex_slot = manager.acquire(tex.as_readonly_view());
     CHECK(buf_slot != sv::bindless_buffer_slot::invalid);
     CHECK(tex_slot != sv::bindless_texture_2d_slot::invalid);
