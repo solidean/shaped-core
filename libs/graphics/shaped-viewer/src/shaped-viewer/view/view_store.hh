@@ -34,10 +34,17 @@ public:
     [[nodiscard]] impl::view_state& get_or_create(view_id id);
 
     /// The record for `id`, or null if absent; a hit is marked used this frame.
-    [[nodiscard]] impl::view_state* find(view_id id);
+    [[nodiscard]] impl::view_state* get_ptr(view_id id);
 
-    /// The record for `id` without marking it used — for hit-tests and queries, which must not keep a view alive.
-    [[nodiscard]] impl::view_state const* peek(view_id id) const;
+    /// The record for `id`, which must exist; marked used this frame.
+    [[nodiscard]] impl::view_state& get(view_id id);
+
+    /// The record for `id` without marking it used, or null if absent — for hit-tests and queries, which must not keep
+    /// a view alive.
+    [[nodiscard]] impl::view_state const* peek_ptr(view_id id) const;
+
+    /// The record for `id` without marking it used; `id` must exist.
+    [[nodiscard]] impl::view_state const& peek(view_id id) const;
 
     /// What this view's textures cost against the store's budget.
     /// `id` must exist.

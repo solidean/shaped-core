@@ -29,7 +29,7 @@ public:
     mesh_ref(frame* f, view_index view, u32 layer, u32 item) : _frame(f), _view(view), _layer(layer), _item(item) {}
 
     /// Where this placement puts the mesh, overriding the `sv::mesh`'s own transform.
-    mesh_ref& transform(tg::affine_transform3f const& t);
+    void transform(tg::affine_transform3f const& t);
 
 private:
     [[nodiscard]] scene_item& target() const;
@@ -47,7 +47,7 @@ public:
     light_ref(frame* f, view_index view, u32 layer, u32 light) : _frame(f), _view(view), _layer(layer), _light(light) {}
 
     /// Replaces the whole light.
-    light_ref& light(area_light const& l);
+    void light(area_light const& l);
 
 private:
     [[nodiscard]] area_light& target() const;
@@ -77,10 +77,10 @@ public:
     light_ref add_light(area_light const& light);
 
     /// The environment a missed ray sees.
-    scene_ref& background(sv::background const& bg);
+    void background(sv::background const& bg);
 
     /// Sample counts and bounce limits for this layer's trace.
-    scene_ref& settings(render_settings const& s);
+    void settings(render_settings const& s);
 
 private:
     [[nodiscard]] layer& target() const;
@@ -120,18 +120,18 @@ public:
 
     /// The camera this view is drawn from, this frame.
     /// Setting it every frame means the caller owns it: the built-in controller leaves this view alone.
-    view_ref& camera(sv::camera const& cam);
+    void camera(sv::camera const& cam);
 
     /// The camera this view starts at, applied only the first time this id is seen.
     /// After that whatever the user orbited it to wins.
-    view_ref& initial_camera(sv::camera const& cam);
-    view_ref& initial_orbit(orbit_state const& o);
+    void initial_camera(sv::camera const& cam);
+    void initial_orbit(orbit_state const& o);
 
     /// Pins this view to a fixed pixel resolution instead of taking the rect it lands in.
-    view_ref& resolution(tg::vec2i r);
+    void resolution(tg::vec2i r);
 
     /// How often this view re-renders, as a fraction of the loop's rate: 1 every frame, 0.5 every second frame.
-    view_ref& refresh_rate(float rate);
+    void refresh_rate(float rate);
 
     /// Offers this view for dragging: Ctrl + left-drag lifts it out of the layout and floats it over the window.
     ///
@@ -139,7 +139,7 @@ public:
     /// Once lifted, the view is placed by a fraction of the window rather than by the layout: its siblings tile as if
     /// it were absent, and it draws in front.
     /// Re-assert it every frame; dropping the call leaves the view where it was but stops it being draggable.
-    view_ref& movable(bool v = true);
+    void movable(bool v = true);
 
     /// What this view is called where a human reads it, which defaults to `display_name_of(id)` — the id up to its
     /// `##`.
@@ -147,14 +147,14 @@ public:
     /// It is persistent, like the camera: set once and it survives every later frame that does not set it again.
     /// Setting an empty name restores the default rather than leaving the view nameless.
     /// Nothing draws it yet — sv has no text renderer — so this is what a title bar will read, not what one does.
-    view_ref& display_name(cc::string_view name);
+    void display_name(cc::string_view name);
 
     template <class Arg0, class... Args>
-    view_ref& display_name(cc::format_string<std::type_identity_t<Arg0>, std::type_identity_t<Args>...> fmt,
-                           Arg0&& arg0,
-                           Args&&... args)
+    void display_name(cc::format_string<std::type_identity_t<Arg0>, std::type_identity_t<Args>...> fmt,
+                      Arg0&& arg0,
+                      Args&&... args)
     {
-        return display_name(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
+        display_name(cc::format(fmt, cc::forward<Arg0>(arg0), cc::forward<Args>(args)...));
     }
 
     [[nodiscard]] cc::string_view display_name() const;
@@ -192,13 +192,13 @@ public:
     }
 
     /// Combines this leaf's views into one image.
-    leaf_ref& post_process(sv::post_process const& p);
+    void post_process(sv::post_process const& p);
 
-    leaf_ref& fit(fit_mode m);
-    leaf_ref& sampler(sampler_mode m);
+    void fit(fit_mode m);
+    void sampler(sampler_mode m);
 
     /// Whether the key-bound zoom may magnify this leaf.
-    leaf_ref& allow_zoom(bool v = true);
+    void allow_zoom(bool v = true);
 
 private:
     [[nodiscard]] layout_leaf& target() const;
@@ -248,7 +248,7 @@ public:
     [[nodiscard]] layout_ref relative(relative_placement placement, box_style style = {});
 
     /// This container's margin, border, padding and the spacing between its children.
-    layout_ref& style(box_style const& s);
+    void style(box_style const& s);
 
     [[nodiscard]] layout_node_id node() const { return _node; }
 
@@ -284,26 +284,10 @@ struct sv::view_api
         return self().default_view().layout_auto_grid(style, params);
     }
 
-    Derived& camera(sv::camera const& cam)
-    {
-        self().default_view().camera(cam);
-        return self();
-    }
-    Derived& initial_camera(sv::camera const& cam)
-    {
-        self().default_view().initial_camera(cam);
-        return self();
-    }
-    Derived& initial_orbit(orbit_state const& o)
-    {
-        self().default_view().initial_orbit(o);
-        return self();
-    }
-    Derived& refresh_rate(float rate)
-    {
-        self().default_view().refresh_rate(rate);
-        return self();
-    }
+    void camera(sv::camera const& cam) { self().default_view().camera(cam); }
+    void initial_camera(sv::camera const& cam) { self().default_view().initial_camera(cam); }
+    void initial_orbit(orbit_state const& o) { self().default_view().initial_orbit(o); }
+    void refresh_rate(float rate) { self().default_view().refresh_rate(rate); }
 
 private:
     [[nodiscard]] Derived& self() { return static_cast<Derived&>(*this); }

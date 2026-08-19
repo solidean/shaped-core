@@ -348,21 +348,22 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
 //
 // This is what lets viewers run in succession — or side by side — on one device, and it is why a provider needs no
 // caching of its own.
-// It deliberately leaves `sv::acquire_context` unset again on the way out; the context it caused to be cached is the
+// It deliberately clears the provider again on the way out; the context it caused to be cached is the
 // same WARP one the rest of this file uses.
 TEST("sv - the rendering context is created once and shared")
 {
     auto builds = 0;
-    sv::acquire_context = [&builds]
-    {
-        ++builds;
-        return sg::create_dx12_context({.use_warp = true});
-    };
+    sv::set_acquire_context(
+        [&builds]
+        {
+            ++builds;
+            return sg::create_dx12_context({.use_warp = true});
+        });
 
     auto const first = sv::acquire_viewer_context();
     if (first.has_error())
     {
-        sv::acquire_context = {};
+        sv::set_acquire_context({});
         SKIP("no Direct3D 12 device (hardware or WARP)");
     }
 
@@ -373,8 +374,8 @@ TEST("sv - the rendering context is created once and shared")
     CHECK(builds == 1);
     CHECK(first.value().get() == second.value().get());
 
-    // Restoring the hook does not un-cache the context — which is the documented behavior, not an oversight.
-    sv::acquire_context = {};
+    // Clearing the hook does not un-cache the context — which is the documented behavior, not an oversight.
+    sv::set_acquire_context({});
     auto const third = sv::acquire_viewer_context();
     REQUIRE(!third.has_error());
     CHECK(builds == 1);

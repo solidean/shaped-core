@@ -44,7 +44,6 @@ target_sources(shaped-viewer
     FILES
     src/shaped-viewer/fwd.hh
     src/shaped-viewer/all.hh
-    src/shaped-viewer/gpu_types.hh
     src/shaped-viewer/frame.hh
     src/shaped-viewer/refs.hh
     src/shaped-viewer/interactive.hh
@@ -57,7 +56,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/mesh.hh
     src/shaped-viewer/scene/mesh_attribute.hh
     src/shaped-viewer/scene/mesh_flags.hh
-    src/shaped-viewer/scene/mesh_parameter.hh
     src/shaped-viewer/scene/mesh_texture.hh
     src/shaped-viewer/scene/scene_item.hh
     src/shaped-viewer/view/view_id.hh

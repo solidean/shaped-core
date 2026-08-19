@@ -266,7 +266,7 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
     // the history half stayed the texture nothing had ever written, every pixel failed the disocclusion test against
     // garbage geometry, and the whole image rejected its history on every frame.
     // The counter above kept climbing throughout, which is exactly why it could not catch this.
-    auto const* const rec = store.peek(traced_id);
+    auto const* const rec = store.peek_ptr(traced_id);
     REQUIRE(rec != nullptr);
 
     for (auto const tid : {sv::temporal_id::accumulation(0), sv::temporal_id::gbuffer(0)})

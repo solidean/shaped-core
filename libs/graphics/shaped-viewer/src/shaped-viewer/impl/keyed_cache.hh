@@ -96,7 +96,7 @@ public:
 
     /// The record for `key`, or null if absent.
     /// Marks a hit used this tick.
-    [[nodiscard]] Record* find(Key key)
+    [[nodiscard]] Record* get_ptr(Key key)
     {
         auto* const e = _entries.get_ptr(key);
         if (e == nullptr)
@@ -105,11 +105,29 @@ public:
         return &e->record;
     }
 
-    /// The record for `key` without touching it — for hit-tests and asserts, which must not keep a view alive.
-    [[nodiscard]] Record const* peek(Key key) const
+    /// The record for `key`, which must exist.
+    /// Marks it used this tick.
+    [[nodiscard]] Record& get(Key key)
+    {
+        auto* const r = get_ptr(key);
+        CC_ASSERT(r != nullptr, "keyed_cache::get: unknown key");
+        return *r;
+    }
+
+    /// The record for `key` without touching it, or null if absent — for hit-tests and asserts, which must not keep a
+    /// view alive.
+    [[nodiscard]] Record const* peek_ptr(Key key) const
     {
         auto const* const e = _entries.get_ptr(key);
         return e == nullptr ? nullptr : &e->record;
+    }
+
+    /// The record for `key` without touching it; `key` must exist.
+    [[nodiscard]] Record const& peek(Key key) const
+    {
+        auto const* const r = peek_ptr(key);
+        CC_ASSERT(r != nullptr, "keyed_cache::peek: unknown key");
+        return *r;
     }
 
     /// Mark `key` used this tick without creating it; returns whether it was there.

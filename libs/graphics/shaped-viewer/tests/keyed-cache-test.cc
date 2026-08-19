@@ -105,7 +105,7 @@ TEST("sv - keyed_cache demotion releases the payload but keeps the entry")
     CHECK(c.contains(a));
     CHECK(c.count() == 1);
     CHECK(c.payload_bytes() == 0);
-    CHECK(c.peek(a)->value == 0); // the hook cleared what it released
+    CHECK(c.peek_ptr(a)->value == 0); // the hook cleared what it released
 
     // Nothing to release a second time, whether it idles further or is finally evicted.
     c.begin_frame(5, log);
@@ -136,8 +136,8 @@ TEST("sv - keyed_cache demotion leaves what the hook did not clear")
     c.begin_frame(4, log); // past the payload threshold
     REQUIRE(log.keys.size() == 1);
 
-    CHECK(c.peek(a)->value == 0);     // the payload went
-    CHECK(c.peek(a)->identity == 99); // the identity stayed
+    CHECK(c.peek_ptr(a)->value == 0);     // the payload went
+    CHECK(c.peek_ptr(a)->identity == 99); // the identity stayed
 }
 
 TEST("sv - keyed_cache never reclaims this tick's working set")
@@ -202,8 +202,31 @@ TEST("sv - keyed_cache peek does not keep a view alive")
     for (auto tick = u64(2); tick <= 4; ++tick)
     {
         c.begin_frame(tick);
-        (void)c.peek(a); // a hit-test must not count as use
+        (void)c.peek_ptr(a); // a hit-test must not count as use
     }
+    CHECK(!c.contains(a));
+}
+
+TEST("sv - keyed_cache get and peek are the checked forms of get_ptr and peek_ptr")
+{
+    auto c = cache{};
+    c.set_limits({.max_idle_frames_entry = 3});
+
+    auto const a = id_of("main");
+    c.begin_frame(1);
+    c.get_or_create(a).value = 11;
+
+    CHECK(&c.get(a) == c.get_ptr(a));
+    CHECK(&c.peek(a) == c.peek_ptr(a));
+    CHECK(c.get(a).value == 11);
+
+    // peek reads without counting as use, exactly as peek_ptr does, so a checked read cannot keep a record alive.
+    for (auto tick = u64(2); tick <= 5; ++tick)
+    {
+        c.begin_frame(tick);
+        CHECK(c.peek(a).value == 11);
+    }
+    c.begin_frame(6);
     CHECK(!c.contains(a));
 }
 

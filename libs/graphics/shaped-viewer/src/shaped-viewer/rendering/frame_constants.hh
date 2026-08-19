@@ -1,7 +1,7 @@
 #pragma once
 
+#include <shaped-rendering/gpu_types.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <typed-geometry/linalg/vec.hh>
 
@@ -17,7 +17,7 @@ struct sv::frame_constants_gpu
     /// false => the bound mesh is a non-indexed triangle list, so the closest-hit reads its vertices directly instead of through `Indices`.
     /// Set it from `mesh_record::is_indexed`.
     /// The trace binds one mesh per view, which is why per-mesh state can ride here at all.
-    gpu_boolean mesh_is_indexed = false;
+    sr::gpu_boolean mesh_is_indexed = false;
     f32 _padding0[3] = {};
 
     // Pad the whole block to 256 bytes.
