@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pyyaml>=6"]
 # ///
 """Download the pinned DirectX Shader Compiler release binaries into extern/dxc/.install.
 
@@ -12,12 +12,15 @@ dxcompiler DLL + import lib + headers (plus the dxil.dll signer, so emitted DXIL
 signed) into a gitignored extern/dxc/.install/. The download is small and fast, so
 dev.py runs it on demand per configure (see tools/dev/lib/pipeline/prereqs.py).
 
-Pinning: PIN_TAG is the human-readable release; PIN_HASH (the asset's SHA-256) is the
-authority — the download is rejected unless it matches. Bump PIN_TAG/ASSET/PIN_HASH
-together after vetting a new release.
+Pinning lives in dependency.yml next to this script: `tag` is the human-readable release, and `pin_hash` (the asset's SHA-256) is the authority,
+so the download is rejected unless it matches.
+Bump tag, version, asset and pin_hash together after vetting a new release.
 
-Re-running is idempotent: a re-run whose .install/pin.txt already matches PIN_HASH is a
-no-op. Pass --force to re-download anyway.
+Upstream names the license member inconsistently across releases, so it is found by pattern rather than by a fixed path.
+Its destination is dependency.yml's `license_files` entry, which is what `dev.py deps licenses` collects.
+
+Re-running is idempotent: a re-run whose .install/pin.txt already matches pin_hash is a no-op.
+Pass --force to re-download anyway.
 """
 
 import argparse
@@ -30,17 +33,14 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-# Pinned upstream release. https://github.com/microsoft/DirectXShaderCompiler/releases
-REPO_URL = "https://github.com/microsoft/DirectXShaderCompiler"
-PIN_TAG = "v1.9.2602.24"
-ASSET = "dxc_2026_05_27.zip"
-PIN_HASH = "cf658aacf070d3045e31b8f1f8a696c2945f37c1095019481ef7c513368db3b4"
-URL = f"{REPO_URL}/releases/download/{PIN_TAG}/{ASSET}"
-
 # This script lives in extern/dxc/ and installs alongside itself.
 DEST = Path(__file__).resolve().parent
 INSTALL = DEST / ".install"
 PIN_FILE = INSTALL / "pin.txt"
+
+# The pin lives in dependency.yml next to this script, so it is written once.
+sys.path.insert(0, str(DEST.parent))
+import deps_manifest  # noqa: E402
 
 # platform.machine() -> the release's per-arch subdirectory.
 ARCH_MAP = {
@@ -62,8 +62,14 @@ def host_arch() -> str:
     return arch
 
 
-def already_installed() -> bool:
-    return PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == PIN_HASH
+def already_installed(pin_hash: str) -> bool:
+    return PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == pin_hash
+
+
+def license_member(archive: zipfile.ZipFile) -> str | None:
+    """The release's license member, whose exact name has moved between releases (LICENSE.txt, LICENSE-MIT, ...)."""
+    names = [n for n in archive.namelist() if Path(n).name.upper().startswith("LICENSE")]
+    return min(names, key=len) if names else None
 
 
 def main() -> int:
@@ -71,23 +77,25 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="re-download even if the install is current")
     args = ap.parse_args()
 
-    if not args.force and already_installed():
-        print(f"dxc {PIN_TAG} already installed at {INSTALL.as_posix()} — nothing to do")
+    up = deps_manifest.one(DEST)
+
+    if not args.force and already_installed(up.pin_hash):
+        print(f"dxc {up.tag} already installed at {INSTALL.as_posix()} — nothing to do")
         return 0
 
     if sys.platform != "win32":
         sys.exit("download-dxc.py currently supports Windows only (uses the Windows release + d3d12shader.h reflection)")
 
     arch = host_arch()
-    print(f"downloading DXC {PIN_TAG} ({ASSET}, {arch}) ...", flush=True)
-    request = urllib.request.Request(URL, headers={"User-Agent": "shaped-core-dxc-fetch"})
+    print(f"downloading {up.name} {up.tag} ({up.asset}, {arch}) ...", flush=True)
+    request = urllib.request.Request(up.url, headers={"User-Agent": "shaped-core-dxc-fetch"})
     with urllib.request.urlopen(request) as response:  # noqa: S310 (pinned github release URL)
         data = response.read()
 
     got = hashlib.sha256(data).hexdigest()
-    if got != PIN_HASH:
-        sys.exit(f"sha256 mismatch for {ASSET}: got {got}, expected {PIN_HASH}.\n"
-                 "Update PIN_TAG/ASSET/PIN_HASH together after vetting the new release.")
+    if got != up.pin_hash:
+        sys.exit(f"sha256 mismatch for {up.asset}: got {got}, expected {up.pin_hash}.\n"
+                 "Update tag/version/asset/pin_hash together in dependency.yml, after vetting the new release.")
 
     archive = zipfile.ZipFile(io.BytesIO(data))
 
@@ -110,9 +118,19 @@ def main() -> int:
     extract("inc/dxcapi.h", INSTALL / "include" / "dxc" / "dxcapi.h")
     extract("inc/d3d12shader.h", INSTALL / "include" / "dxc" / "d3d12shader.h")
 
-    PIN_FILE.write_text(PIN_HASH + "\n", encoding="utf-8")
+    # The license, so `dev.py deps licenses` has something to collect for a binary-only dependency.
+    # A release that ships none is not worth failing a build over, so warn and carry on.
+    member = license_member(archive)
+    if member is None:
+        print(f"warning: {up.asset} ships no LICENSE member — docs/licenses/ will keep its committed copy", file=sys.stderr)
+    else:
+        license_dest = INSTALL.parent / up.license_files[0]
+        license_dest.parent.mkdir(parents=True, exist_ok=True)
+        extract(member, license_dest)
 
-    print(f"\ninstalled DXC {PIN_TAG} ({arch}) -> {INSTALL.as_posix()}")
+    PIN_FILE.write_text(up.pin_hash + "\n", encoding="utf-8")
+
+    print(f"\ninstalled {up.name} {up.tag} ({arch}) -> {INSTALL.as_posix()}")
     print("  bin/dxcompiler.dll, bin/dxil.dll, lib/dxcompiler.lib, include/dxc/")
     return 0
 

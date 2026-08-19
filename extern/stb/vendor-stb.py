@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pyyaml>=6"]
 # ///
 """Vendor stb (stb_image + stb_image_write) in-tree at a pinned commit.
 
@@ -12,7 +12,7 @@ This script regenerates the vendored copy from a pinned upstream commit: it fetc
 Two differences from vendor-xxhash.py, both from how stb ships:
 
 - stb publishes NO release tags — its canonical repo is a rolling `master`.
-  So the pin is a commit hash only (no PIN_TAG), fetched by SHA rather than by tag; PIN_HASH is the sole authority.
+  So the pin is a commit hash only (no tag), fetched by SHA rather than by tag; pin_hash is the sole authority.
 - src/stb.c is OURS, not upstream.
   Upstream keeps the implementation behind STB_*_IMPLEMENTATION macros inside the headers; our src/stb.c defines those macros and `#include`s them.
   So it is authored here, never copied or wiped — WIPE covers only the vendored payload (include/ + LICENSE).
@@ -30,14 +30,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Pinned upstream. stb has no tags, so PIN_HASH is the only pin — the fetch is rejected unless HEAD resolves to exactly this commit.
-# Bump it only after vetting the new commit (stb is a rolling master; there is no version tag to track).
-REPO_URL = "https://github.com/nothings/stb"
-PIN_HASH = "31c1ad37456438565541f4919958214b6e762fb4"
-
 # This script lives in extern/stb/ and vendors alongside itself.
 DEST = Path(__file__).resolve().parent
 CLONE = DEST / ".clone"
+
+# The pin lives in dependency.yml next to this script, so it is written once.
+# stb has no tags, so pin_hash is the only pin — the fetch is rejected unless HEAD resolves to exactly that commit.
+sys.path.insert(0, str(DEST.parent))
+import deps_manifest  # noqa: E402
 
 # Upstream-relative source -> vendored destination (relative to DEST).
 # stb keeps its sources flat at the repo root; we remap the two headers into include/ and copy the license.
@@ -75,6 +75,8 @@ def run(*args: str, cwd: Path | None = None) -> str:
 
 
 def main() -> int:
+    up = deps_manifest.one(DEST)
+
     # Clean slate: a stale clone or partial previous run must not leak in.
     if CLONE.exists():
         _force_rmtree(CLONE)
@@ -82,17 +84,17 @@ def main() -> int:
 
     # Fetch exactly the pinned commit by SHA (stb has no tags), then verify HEAD.
     # GitHub serves any reachable commit SHA to `git fetch`, so a shallow fetch of the single pinned commit is enough — no full history, no branch checkout.
-    print(f"fetching {REPO_URL} @ {PIN_HASH} ...")
+    print(f"fetching {up.repo} @ {up.pin_hash} ...")
     run("git", "init", "--quiet", str(CLONE))
-    run("git", "-C", str(CLONE), "remote", "add", "origin", REPO_URL)
-    run("git", "-C", str(CLONE), "fetch", "--depth", "1", "--quiet", "origin", PIN_HASH)
+    run("git", "-C", str(CLONE), "remote", "add", "origin", up.repo)
+    run("git", "-C", str(CLONE), "fetch", "--depth", "1", "--quiet", "origin", up.pin_hash)
     run("git", "-C", str(CLONE), "checkout", "--quiet", "FETCH_HEAD")
     head = run("git", "-C", str(CLONE), "rev-parse", "HEAD")
-    if head != PIN_HASH:
+    if head != up.pin_hash:
         _force_rmtree(CLONE)
         sys.exit(
-            f"pin mismatch: fetch resolved to {head}, expected {PIN_HASH}.\n"
-            "Update PIN_HASH after vetting the new commit."
+            f"pin mismatch: fetch resolved to {head}, expected {up.pin_hash}.\n"
+            "Update pin_hash in dependency.yml after vetting the new commit."
         )
 
     # Wipe the previously vendored payload so dropped-upstream files do not linger.
@@ -117,7 +119,7 @@ def main() -> int:
         if p.is_file() and ".clone" not in p.parts
     )
 
-    print(f"\nvendored stb ({PIN_HASH[:12]}): {len(vendored)} files")
+    print(f"\nvendored {up.name} ({up.pin_hash[:12]}): {len(vendored)} files")
     print(f"into {DEST.as_posix()}")
 
     return 0

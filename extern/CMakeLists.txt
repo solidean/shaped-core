@@ -1,5 +1,6 @@
 # Vendored third-party dependencies.
-# Each lives in-tree under extern/<lib>/ at a pinned commit (see the per-lib vendor-*.py).
+# Each lives in-tree under extern/<lib>/ at a pinned commit, declared in that directory's dependency.yml.
+# `uv run dev.py deps list` shows every pin and whether upstream has moved on; the per-lib vendor-*.py / fetch-*.py reads its pin from the same manifest.
 # Each SC_USE_VENDORED_<LIB> defaults ON and builds the in-tree copy;
 # turning one OFF means the embedding project must already provide a target of that name.
 #

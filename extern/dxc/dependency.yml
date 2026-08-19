@@ -1,0 +1,26 @@
+# Pin and license for the upstream fetched here.
+# download-dxc.py reads its pin from this file; the arch map and the release's member layout stay in the script.
+# tools/dev/lib/pipeline/prereqs.py scans this file for the `pin_hash:` line to decide whether .install/ is current,
+# without paying to start Python — keep that key on a line of its own.
+
+upstreams:
+  - name: DXC
+    homepage: https://github.com/microsoft/DirectXShaderCompiler
+    source: github-release
+    repo: https://github.com/microsoft/DirectXShaderCompiler
+    track: github-releases
+    version: 1.9.2602.24
+    tag: v1.9.2602.24
+    asset: dxc_2026_05_27.zip
+    digest_algo: sha256
+    pin_hash: cf658aacf070d3045e31b8f1f8a696c2945f37c1095019481ef7c513368db3b4
+    license: LicenseRef-Microsoft-DXC-Binary
+    license_files: [.install/LICENSE.txt]
+    used_by: shaped-shader-compiler-dxc — HLSL to sg::compiled_shader
+    notes: |
+      The one dependency that is not permissively licensed, and the only one we take as a binary rather than as source.
+      DirectXShaderCompiler's *source* is NCSA, but the prebuilt release we download ships Microsoft Software License Terms — a proprietary EULA, which is why the SPDX field is a LicenseRef rather than NCSA.
+      It permits redistributing the "distributable code" (dxcompiler.dll, dxil.dll) with an application, which is exactly how we use it.
+      It is on the license allowlist as a named exception rather than by category; re-read the terms on any version bump.
+      Building DXC from source instead would be an LLVM-scale build, which is why we take the binary.
+      The release zip names its license member inconsistently across versions, so download-dxc.py finds it by pattern and normalizes it to .install/LICENSE.txt.

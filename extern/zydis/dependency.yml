@@ -1,0 +1,35 @@
+# Pins and licenses for the two upstreams installed here — Zydis and the Zycore it vendors.
+# fetch-zydis.py reads both pins from this file; the copy map and the amalgamate step stay in the script.
+# tools/dev/lib/pipeline/prereqs.py scans this file for the first `pin_hash:` line to decide whether .install/ is current,
+# without paying to start Python — keep Zydis first, and that key on a line of its own.
+
+upstreams:
+  - name: Zydis
+    homepage: https://github.com/zyantific/zydis
+    source: github-release
+    repo: https://github.com/zyantific/zydis
+    track: github-releases
+    version: 4.1.1
+    tag: v4.1.1
+    digest_algo: git-commit
+    pin_hash: a2278f1d254e492f6a6b39f6cb5d1f5d515659dc
+    license: MIT
+    license_files: [.install/LICENSE]
+    used_by: instruction-tracer — decoding what optimized code actually executed
+    notes: |
+      The hybrid of the two shapes: pinned to a release tag, but cloned rather than downloaded, because we run upstream's assets/amalgamate.py to generate the single-TU distribution.
+      So `digest_algo` is git-commit even though `source` is a GitHub release.
+
+  - name: Zycore
+    homepage: https://github.com/zyantific/zycore-c
+    source: git
+    repo: https://github.com/zyantific/zycore-c
+    track: none
+    digest_algo: git-commit
+    pin_hash: 0b2432ced0884fd152b471d97ecf0258ff4d859f
+    license: MIT
+    license_files: [.install/LICENSE.zycore]
+    used_by: instruction-tracer — folded into the amalgamated Zydis
+    notes: |
+      A submodule of Zydis, so the pinned Zydis commit already fixes it — `track: none` because upstream freshness is Zydis's to decide, not ours.
+      We assert this hash too, so a rewritten submodule pointer cannot slip in unnoticed.

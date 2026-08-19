@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pyyaml>=6"]
 # ///
 """Vendor mimalloc in-tree at a pinned commit.
 
@@ -30,16 +30,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Pinned upstream. The tag is for humans; PIN_HASH is the authority — the clone is
-# rejected unless the tag resolves to exactly this commit. Bump PIN_TAG and PIN_HASH
-# together, only after vetting the new commit.
-REPO_URL = "https://github.com/microsoft/mimalloc"
-PIN_TAG = "v3.3.2"
-PIN_HASH = "30b2d9d89099bee08e9f67a1ffb3e12e7ba45227"
-
 # This script lives in extern/mimalloc/ and vendors alongside itself.
 DEST = Path(__file__).resolve().parent
 CLONE = DEST / ".clone"
+
+# The pin lives in dependency.yml next to this script, so it is written once.
+sys.path.insert(0, str(DEST.parent))
+import deps_manifest  # noqa: E402
 
 # What we keep from the upstream tree. Everything else (test/, cmake/, bin/, doc/,
 # ide/, .github/, packaging, ...) is intentionally dropped — we build static.c with
@@ -76,20 +73,22 @@ def run(*args: str, cwd: Path | None = None) -> str:
 
 
 def main() -> int:
+    up = deps_manifest.one(DEST)
+
     # Clean slate: a stale clone or partial previous run must not leak in.
     if CLONE.exists():
         _force_rmtree(CLONE)
     CLONE.parent.mkdir(parents=True, exist_ok=True)
 
     # Shallow-clone just the pinned tag, then verify it is the pinned commit.
-    print(f"cloning {REPO_URL} @ {PIN_TAG} ...")
-    run("git", "clone", "--depth", "1", "--branch", PIN_TAG, REPO_URL, str(CLONE))
+    print(f"cloning {up.repo} @ {up.tag} ...")
+    run("git", "clone", "--depth", "1", "--branch", up.tag, up.repo, str(CLONE))
     head = run("git", "-C", str(CLONE), "rev-parse", "HEAD")
-    if head != PIN_HASH:
+    if head != up.pin_hash:
         _force_rmtree(CLONE)
         sys.exit(
-            f"pin mismatch: tag {PIN_TAG} resolved to {head}, expected {PIN_HASH}.\n"
-            "Update PIN_TAG/PIN_HASH together after vetting the new commit."
+            f"pin mismatch: tag {up.tag} resolved to {head}, expected {up.pin_hash}.\n"
+            "Update tag and pin_hash together in dependency.yml, after vetting the new commit."
         )
 
     # Wipe the previously vendored payload so dropped-upstream files do not linger.
@@ -114,7 +113,7 @@ def main() -> int:
         if p.is_file() and ".clone" not in p.parts
     )
 
-    print(f"\nvendored mimalloc {PIN_TAG} ({PIN_HASH[:12]}): {len(vendored)} files")
+    print(f"\nvendored {up.name} {up.tag} ({up.pin_hash[:12]}): {len(vendored)} files")
     print(f"into {DEST.as_posix()}")
     print(
         "\nremember: our CMakeLists.txt compiles only src/static.c, but the whole\n"

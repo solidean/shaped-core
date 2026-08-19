@@ -23,20 +23,24 @@ from ..core import profile
 _NON_NATIVE = ("wasm", "emscripten", "web", "android", "ios")
 
 
-def _pinned_hash(script: Path) -> str | None:
-    """Read PIN_HASH from a fetch script (the authority its install is matched against)."""
-    if not script.is_file():
+def _pinned_hash(manifest: Path) -> str | None:
+    """Read the first `pin_hash` from a dependency.yml (the authority its install is matched against).
+
+    Scanned by line rather than parsed, so this stays stdlib-only — dev.py declares no dependencies, and this runs on the fast path of every configure.
+    The first entry is the one whose pin `.install/pin.txt` carries, which is why zydis declares Zydis before the Zycore it vendors.
+    """
+    if not manifest.is_file():
         return None
-    for line in script.read_text(encoding="utf-8").splitlines():
+    for line in manifest.read_text(encoding="utf-8").splitlines():
         s = line.strip()
-        if s.startswith("PIN_HASH"):
-            return s.split("=", 1)[1].strip().strip('"').strip("'")
+        if s.startswith("pin_hash:"):
+            return s.split(":", 1)[1].strip().strip('"').strip("'")
     return None
 
 
-def _is_current(script: Path, pin: Path) -> bool:
-    """True when the install's pin.txt already matches the script's PIN_HASH."""
-    expected = _pinned_hash(script)
+def _is_current(manifest: Path, pin: Path) -> bool:
+    """True when the install's pin.txt already matches the manifest's pin_hash."""
+    expected = _pinned_hash(manifest)
     return bool(expected) and pin.is_file() and pin.read_text(encoding="utf-8").strip() == expected
 
 
@@ -68,13 +72,16 @@ def _ensure(
     if not script.is_file():
         return
 
+    manifest = root / "extern" / directory / "dependency.yml"
     pin = root / "extern" / directory / ".install" / "pin.txt"
-    if _is_current(script, pin):
+    if _is_current(manifest, pin):
         return  # already installed at the pinned release — fast path
 
     print(f"{name}: {doing} (set {skip_env}=1 to skip) ...", file=sys.stderr)
+    # Through `uv run`, not sys.executable: the script reads its pin from dependency.yml, so it needs the pyyaml its PEP 723 block declares.
+    # Only a real fetch pays that resolution — the fast path above never gets here.
     with profile.span(name, type="prereq", extra={"script": script_name}):
-        result = subprocess.run([sys.executable, str(script)], cwd=root)
+        result = subprocess.run(["uv", "run", str(script)], cwd=root)
     if result.returncode != 0:
         print(
             f"{name}: {script_name} failed — {dependent} will be skipped. "

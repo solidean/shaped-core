@@ -1,0 +1,16 @@
+# Pin and license for the upstream vendored here.
+# vendor-mimalloc.py reads its pin from this file; the copy lists and cruft filter stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: mimalloc
+    homepage: https://github.com/microsoft/mimalloc
+    source: git
+    repo: https://github.com/microsoft/mimalloc
+    track: tags
+    tag: v3.3.2
+    digest_algo: git-commit
+    pin_hash: 30b2d9d89099bee08e9f67a1ffb3e12e7ba45227
+    license: MIT
+    license_files: [LICENSE]
+    used_by: clean-core — the default general memory resource
