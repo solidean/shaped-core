@@ -1,0 +1,16 @@
+# Pin and license for the upstream vendored here.
+# vendor-xxhash.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: xxHash
+    homepage: https://github.com/Cyan4973/xxHash
+    source: git
+    repo: https://github.com/Cyan4973/xxHash
+    track: tags
+    tag: v0.8.3
+    digest_algo: git-commit
+    pin_hash: e626a72bc2321cd320e953a0ccf1584cad60f363
+    license: BSD-2-Clause
+    license_files: [LICENSE]
+    used_by: clean-core — cc::hash128 (the XXH3 128-bit hash)

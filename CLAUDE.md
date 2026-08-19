@@ -141,6 +141,7 @@ uv run dev.py format             # clang-format our C++ sources in place
 uv run dev.py lint clang-tidy    # run the clang-tidy whitelist gates
 uv run dev.py lint shaped        # run shaped-linter's own rules
 uv run dev.py check --fix        # run pre-commit checks, auto-fixing what's safe
+uv run dev.py deps list          # external dependency pins, and what upstream offers now
 uv run dev.py doctor             # sanity-check the toolchain
 ```
 
@@ -352,6 +353,8 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | The prose / lint workflow        | [docs/guides/prose.md](docs/guides/prose.md)                     |
 | Rework a topic's comments/docs   | the `reworking-prose` skill, applied via `uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]` |
 | Measure a doc surface's prose    | `uv run dev.py lint prose-stats <path>...` (lines + words, per file and total) |
+| See external dependency pins     | `uv run dev.py deps list` (`--offline` for no network; [dependencies](docs/guides/dependencies.md)) |
+| Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |

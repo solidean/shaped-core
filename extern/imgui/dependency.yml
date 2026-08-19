@@ -1,0 +1,46 @@
+# Pins and licenses for the three upstreams vendored here as one bundle.
+# vendor-imgui.py reads the pins from this file; the copy maps, rewrites and wipe list stay in the script.
+# Bump `tag` (where set) and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: Dear ImGui
+    homepage: https://github.com/ocornut/imgui
+    source: git
+    repo: https://github.com/ocornut/imgui
+    track: tags
+    tag: v1.92.8-docking
+    tag_pattern: ^v\d+(\.\d+)*-docking$
+    digest_algo: git-commit
+    pin_hash: b61e56346a92cfcaf1f43a545ca37b0b32239654
+    license: MIT
+    license_files: [LICENSE-imgui.txt]
+    used_by: shaped-rendering — sr::imgui_context and sr::imgui_routine
+    notes: |
+      Pinned to the docking branch's tag, not the mainline one.
+
+  - name: ImPlot
+    homepage: https://github.com/epezent/implot
+    source: git
+    repo: https://github.com/epezent/implot
+    track: default-branch
+    digest_algo: git-commit
+    pin_hash: d65a2bef53d32502407de3a4be80f191e2f412d7
+    license: MIT
+    license_files: [LICENSE-implot.txt]
+    used_by: shaped-rendering — plotting inside the imgui bundle
+    notes: |
+      The latest release (v0.16) predates ImGui 1.92's draw/texture API, and only master tracks it.
+      So the pin is a commit on the default branch rather than a tag.
+
+  - name: ImGuizmo
+    homepage: https://github.com/cedricguillemet/ImGuizmo
+    source: git
+    repo: https://github.com/cedricguillemet/ImGuizmo
+    track: default-branch
+    digest_algo: git-commit
+    pin_hash: dc25afb98bc3ebe00dfc9a23ba7235fead2ccb1d
+    license: MIT
+    license_files: [LICENSE-ImGuizmo.txt]
+    used_by: shaped-rendering — manipulation gizmos inside the imgui bundle
+    notes: |
+      Cuts no release tags at all, so the pin is a commit on the default branch.

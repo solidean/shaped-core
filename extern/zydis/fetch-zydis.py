@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pyyaml>=6"]
 # ///
 """Fetch the pinned Zydis into extern/zydis/.install as an amalgamated single-TU source.
 
@@ -36,29 +36,32 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Pinned upstream. https://github.com/zyantific/zydis/releases
-REPO_URL = "https://github.com/zyantific/zydis"
-PIN_TAG = "v4.1.1"
-PIN_HASH = "a2278f1d254e492f6a6b39f6cb5d1f5d515659dc"
-
-# Zycore is a submodule of Zydis; the pinned Zydis commit already fixes it, but we assert it
-# too so a rewritten submodule pointer cannot slip in unnoticed.
-ZYCORE_PIN_HASH = "0b2432ced0884fd152b471d97ecf0258ff4d859f"
-
 # This script lives in extern/zydis/ and installs alongside itself.
 DEST = Path(__file__).resolve().parent
 CLONE = DEST / ".clone"
 INSTALL = DEST / ".install"
 PIN_FILE = INSTALL / "pin.txt"
 
+# Both pins live in dependency.yml next to this script, so no pin is written twice.
+# Zycore is a submodule of Zydis, so the pinned Zydis commit already fixes it — we assert it too, so a rewritten submodule pointer cannot slip in unnoticed.
+sys.path.insert(0, str(DEST.parent))
+import deps_manifest  # noqa: E402
+
 # Generated-by-amalgamate.py (relative to CLONE) -> installed destination (relative to INSTALL).
 # Zydis.c only `#include <Zydis.h>`, resolved via the include/ dir — mirroring the xxHash layout.
+# The two licenses are copied to whatever dependency.yml names, which is what `dev.py deps licenses` then collects.
 COPY_MAP = {
     "amalgamated-dist/Zydis.h": "include/Zydis.h",
     "amalgamated-dist/Zydis.c": "src/Zydis.c",
-    "LICENSE": "LICENSE",
-    "dependencies/zycore/LICENSE": "LICENSE.zycore",
 }
+
+
+def _install_relative(license_file: str) -> str:
+    """A `license_files` path is relative to extern/zydis/; the copy loop works relative to .install/."""
+    prefix = INSTALL.name + "/"
+    if not license_file.startswith(prefix):
+        sys.exit(f"dependency.yml: {license_file!r} must live under {prefix}")
+    return license_file[len(prefix):]
 
 
 def _force_rmtree(path: Path) -> None:
@@ -80,8 +83,8 @@ def run(*args: str, cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
-def already_installed() -> bool:
-    return PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == PIN_HASH
+def already_installed(pin_hash: str) -> bool:
+    return PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == pin_hash
 
 
 def main() -> int:
@@ -89,27 +92,30 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="regenerate even if the install is current")
     args = ap.parse_args()
 
-    if not args.force and already_installed():
-        print(f"zydis {PIN_TAG} already installed at {INSTALL.as_posix()} — nothing to do")
+    zydis = deps_manifest.by_name(DEST, "Zydis")
+    zycore = deps_manifest.by_name(DEST, "Zycore")
+
+    if not args.force and already_installed(zydis.pin_hash):
+        print(f"zydis {zydis.tag} already installed at {INSTALL.as_posix()} — nothing to do")
         return 0
 
     # Clean slate: a stale clone or partial previous run must not leak in.
     if CLONE.exists():
         _force_rmtree(CLONE)
 
-    print(f"cloning {REPO_URL} @ {PIN_TAG} ...", flush=True)
-    run("git", "clone", "--depth", "1", "--branch", PIN_TAG, "--recurse-submodules",
-        "--shallow-submodules", REPO_URL, str(CLONE))
+    print(f"cloning {zydis.repo} @ {zydis.tag} ...", flush=True)
+    run("git", "clone", "--depth", "1", "--branch", zydis.tag, "--recurse-submodules",
+        "--shallow-submodules", zydis.repo, str(CLONE))
 
     # Verify both pins before running any upstream code from the clone.
     head = run("git", "-C", str(CLONE), "rev-parse", "HEAD")
     zycore_head = run("git", "-C", str(CLONE / "dependencies" / "zycore"), "rev-parse", "HEAD")
-    for name, got, expected in (("zydis", head, PIN_HASH), ("zycore", zycore_head, ZYCORE_PIN_HASH)):
+    for name, got, expected in (("zydis", head, zydis.pin_hash), ("zycore", zycore_head, zycore.pin_hash)):
         if got != expected:
             _force_rmtree(CLONE)
             sys.exit(
                 f"pin mismatch: {name} resolved to {got}, expected {expected}.\n"
-                "Update the PIN_* hashes together after vetting the new commits."
+                "Update both pin_hash values together in dependency.yml, after vetting the new commits."
             )
 
     # Fold Zydis + Zycore into amalgamated-dist/{Zydis.h,Zydis.c}.
@@ -124,16 +130,20 @@ def main() -> int:
     if INSTALL.exists():
         _force_rmtree(INSTALL)
 
-    for src, dst in COPY_MAP.items():
+    copies = dict(COPY_MAP)
+    copies["LICENSE"] = _install_relative(zydis.license_files[0])
+    copies["dependencies/zycore/LICENSE"] = _install_relative(zycore.license_files[0])
+
+    for src, dst in copies.items():
         dest_path = INSTALL / dst
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(CLONE / src, dest_path)
 
     _force_rmtree(CLONE)
-    PIN_FILE.write_text(PIN_HASH + "\n", encoding="utf-8")
+    PIN_FILE.write_text(zydis.pin_hash + "\n", encoding="utf-8")
 
     total = sum(p.stat().st_size for p in INSTALL.rglob("*") if p.is_file())
-    print(f"\ninstalled Zydis {PIN_TAG} ({PIN_HASH[:12]}) -> {INSTALL.as_posix()} ({total / 1e6:.1f} MB)")
+    print(f"\ninstalled {zydis.name} {zydis.tag} ({zydis.pin_hash[:12]}) -> {INSTALL.as_posix()} ({total / 1e6:.1f} MB)")
     print("  include/Zydis.h, src/Zydis.c, LICENSE, LICENSE.zycore")
     return 0
 
