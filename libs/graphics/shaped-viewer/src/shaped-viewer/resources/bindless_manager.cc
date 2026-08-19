@@ -27,27 +27,13 @@ template <class Traits>
                          v.range.aspect_range.end);
 }
 
-// A vacant texture element of the category's dimension: null handle, but dimension + format still shape the
-// null descriptor the backend builds for it.
-[[nodiscard]] sg::raw_texture_view vacant_texture(sg::texture_view_dimension dim)
-{
-    return {.access = sg::view_class::readonly,
-            .texture = nullptr,
-            .view_dimension = dim,
-            .format = sg::pixel_format::rgba8_unorm};
-}
-
-[[nodiscard]] sg::raw_buffer_view vacant_buffer()
-{
-    return {.access = sg::view_class::readonly, .shape = sg::view_shape::raw, .buffer = nullptr};
-}
-
-// The full element list of one category: each occupied slot's view, a vacant view everywhere else.
-[[nodiscard]] sg::named_view mirror_to_named_view(char const* name, sv::impl::slot_table const& table, sg::raw_view vacant)
+// The full element list of one category: each occupied slot's view, the vacant marker everywhere else —
+// the backend synthesizes vacant elements' null descriptors from the binding.
+[[nodiscard]] sg::named_view mirror_to_named_view(char const* name, sv::impl::slot_table const& table)
 {
     auto nv = sg::named_view{.name = name, .views = {}};
     for (auto const& e : table.entries())
-        nv.views.push_back(e.occupied ? e.view : vacant);
+        nv.views.push_back(e.occupied ? e.view : sg::raw_view(sg::vacant_view{}));
     return nv;
 }
 } // namespace
@@ -117,20 +103,27 @@ void sv::bindless_manager::_ensure_layout()
 
     // One register space per category (index 0 each), so shaders address a category with no register-offset
     // math: `ByteAddressBuffer BindlessBuffers[N] : register(t0, space1);` and so on.
-    auto const tex_binding = [](char const* name, u32 set, u32 count)
+    // A hand-written texture binding carries its dimension — what shapes vacant elements' null descriptors.
+    auto const tex_binding = [](char const* name, u32 set, u32 count, sg::texture_view_dimension dim)
     {
-        return sg::binding{.name = name, .set = set, .index = 0, .count = count, .type = sg::binding_type::readonly_texture};
+        return sg::binding{.name = name,
+                           .set = set,
+                           .index = 0,
+                           .count = count,
+                           .type = sg::binding_type::readonly_texture,
+                           .texture_dimension = dim};
     };
+    using vd = sg::texture_view_dimension;
     sg::binding const bindings[] = {
         {.name = bindless_buffers_binding,
          .set = 1,
          .index = 0,
          .count = _cfg.buffer_count,
          .type = sg::binding_type::readonly_raw_buffer},
-        tex_binding(bindless_textures_1d_binding, 2, _cfg.texture_1d_count),
-        tex_binding(bindless_textures_2d_binding, 3, _cfg.texture_2d_count),
-        tex_binding(bindless_textures_3d_binding, 4, _cfg.texture_3d_count),
-        tex_binding(bindless_textures_cube_binding, 5, _cfg.texture_cube_count),
+        tex_binding(bindless_textures_1d_binding, 2, _cfg.texture_1d_count, vd::tex_1d),
+        tex_binding(bindless_textures_2d_binding, 3, _cfg.texture_2d_count, vd::tex_2d),
+        tex_binding(bindless_textures_3d_binding, 4, _cfg.texture_3d_count, vd::tex_3d),
+        tex_binding(bindless_textures_cube_binding, 5, _cfg.texture_cube_count, vd::cube),
     };
     _layout = _ctx.cached.acquire_binding_group_layout(bindings);
 }
@@ -143,13 +136,12 @@ sg::binding_group_handle sv::bindless_manager::lock_group()
     auto const dirty = _buffers.dirty() || _tex_1d.dirty() || _tex_2d.dirty() || _tex_3d.dirty() || _tex_cube.dirty();
     if (dirty || _group == nullptr)
     {
-        using vd = sg::texture_view_dimension;
         cc::vector<sg::named_view> views;
-        views.push_back(mirror_to_named_view(bindless_buffers_binding, _buffers, vacant_buffer()));
-        views.push_back(mirror_to_named_view(bindless_textures_1d_binding, _tex_1d, vacant_texture(vd::tex_1d)));
-        views.push_back(mirror_to_named_view(bindless_textures_2d_binding, _tex_2d, vacant_texture(vd::tex_2d)));
-        views.push_back(mirror_to_named_view(bindless_textures_3d_binding, _tex_3d, vacant_texture(vd::tex_3d)));
-        views.push_back(mirror_to_named_view(bindless_textures_cube_binding, _tex_cube, vacant_texture(vd::cube)));
+        views.push_back(mirror_to_named_view(bindless_buffers_binding, _buffers));
+        views.push_back(mirror_to_named_view(bindless_textures_1d_binding, _tex_1d));
+        views.push_back(mirror_to_named_view(bindless_textures_2d_binding, _tex_2d));
+        views.push_back(mirror_to_named_view(bindless_textures_3d_binding, _tex_3d));
+        views.push_back(mirror_to_named_view(bindless_textures_cube_binding, _tex_cube));
 
         // Overwrite, not patch: sg groups are immutable, and the old group's descriptor range is freed by
         // an epoch finalizer once its last-using epoch retires.

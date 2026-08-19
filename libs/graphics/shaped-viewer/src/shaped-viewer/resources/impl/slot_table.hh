@@ -15,8 +15,9 @@
 /// the mirror, which is what lets an unchanged frame skip the group reupload entirely.
 /// A slot handed out is only valid for the epoch it was acquired in — the table never reclaims a slot
 /// acquired in the current epoch, so within one epoch every handed-out slot stays live.
-/// When the table is full, the least-recently-acquired slot is reclaimed; if every slot was acquired in the
-/// current epoch, the working set exceeds the capacity and acquire asserts.
+/// When the table is full, EVERY slot not acquired in the current epoch is reclaimed at once — the mint
+/// dirties the mirror and forces a group recreation anyway, so there is nothing to save by evicting less.
+/// If every slot was acquired in the current epoch, the working set exceeds the capacity and acquire asserts.
 ///
 /// The occupied entry holds the view (and thereby the resource's handle) alive while its key is mapped, so a
 /// key's raw pointer cannot be reused by a new resource while the entry lives.
@@ -36,8 +37,8 @@ public:
 
     /// The slot for `key`, minting one on a miss.
     /// A hit re-stamps the slot's epoch and leaves the mirror untouched (not dirty).
-    /// A miss takes a free slot, else reclaims the least-recently-acquired one — never a slot acquired in
-    /// epoch `e` — and marks the table dirty.
+    /// A miss takes a free slot; a full table first reclaims every slot not acquired in epoch `e` (the mint
+    /// forces a group recreation anyway) and asserts that freed at least one.
     /// `key` must identify `view`: two calls with the same key must describe the same view.
     [[nodiscard]] u32 acquire(u64 key, sg::raw_view view, sg::epoch e)
     {
@@ -47,16 +48,11 @@ public:
             return *slot;
         }
 
-        auto slot = u32(0);
-        if (!_free.empty())
-        {
-            slot = _free.back();
-            _free.pop_back();
-        }
-        else
-        {
-            slot = _reclaim_lru(e);
-        }
+        if (_free.empty())
+            _reclaim_stale(e);
+
+        auto const slot = _free.back();
+        _free.pop_back();
 
         _entries[slot] = {.view = cc::move(view), .key = key, .last_acquired = e, .occupied = true};
         _by_key[key] = slot;
@@ -86,22 +82,20 @@ public:
     [[nodiscard]] isize occupied_count() const { return _entries.size() - _free.size(); }
 
 private:
-    /// The occupied slot with the oldest `last_acquired`; a slot acquired in `e` is never a victim.
-    /// Erases the victim's key before overwriting, so a stale key can never resolve to the new occupant.
-    [[nodiscard]] u32 _reclaim_lru(sg::epoch e)
+    /// Frees every occupied slot not acquired in epoch `e`; slots acquired in `e` are never victims.
+    /// Each freed slot's key is erased with it, so a stale key can never resolve to a later occupant.
+    void _reclaim_stale(sg::epoch e)
     {
-        auto victim = isize(-1);
         for (isize i = 0; i < _entries.size(); ++i)
         {
-            if (_entries[i].last_acquired == e)
+            if (!_entries[i].occupied || _entries[i].last_acquired == e)
                 continue;
-            if (victim < 0 || u64(_entries[i].last_acquired) < u64(_entries[victim].last_acquired))
-                victim = i;
+            _by_key.erase(_entries[i].key);
+            _entries[i] = {};
+            _free.push_back(u32(i));
         }
-        CC_ASSERT(victim >= 0, "bindless slot table is full: every slot was acquired this epoch (the working set "
-                               "exceeds the configured capacity)");
-        _by_key.erase(_entries[victim].key);
-        return u32(victim);
+        CC_ASSERT(!_free.empty(), "bindless slot table is full: every slot was acquired this epoch (the working set "
+                                  "exceeds the configured capacity)");
     }
 
     cc::vector<entry> _entries;

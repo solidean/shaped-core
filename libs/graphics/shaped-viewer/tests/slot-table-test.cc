@@ -44,23 +44,29 @@ TEST("sv slot_table - a re-acquired key keeps its slot and stays clean")
     CHECK(table.occupied_count() == 3);
 }
 
-TEST("sv slot_table - a full table reclaims the least-recently-acquired slot")
+TEST("sv slot_table - a full table clears every stale slot at once")
 {
-    auto table = sv::impl::slot_table(2);
-    auto const s0 = table.acquire(1, some_view(), ep(0));
-    auto const s1 = table.acquire(2, some_view(), ep(0));
-
-    // Epoch 1 touches only key 2, so key 1's slot is the LRU victim for the new key in epoch 2.
-    CHECK(table.acquire(2, some_view(), ep(1)) == s1);
+    auto table = sv::impl::slot_table(3);
+    (void)table.acquire(1, some_view(), ep(0));
+    (void)table.acquire(2, some_view(), ep(0));
+    auto const s2 = table.acquire(3, some_view(), ep(1));
     table.clear_dirty();
-    auto const s3 = table.acquire(3, some_view(), ep(2));
-    CHECK(s3 == s0);
-    CHECK(table.dirty());
 
-    // The reclaimed key is gone: re-acquiring it mints again (evicting key 2, the older of the two now).
-    auto const s1_again = table.acquire(1, some_view(), ep(3));
-    CHECK(s1_again == s1);
-    CHECK(table.occupied_count() == 2);
+    // The epoch-1 mint finds the table full: keys 1 and 2 (last acquired in epoch 0) are BOTH reclaimed —
+    // the mint recreates the group anyway — while key 3, acquired this epoch, survives in place.
+    auto const s3 = table.acquire(4, some_view(), ep(1));
+    CHECK(table.dirty());
+    CHECK(s3 != s2);
+    CHECK(table.acquire(3, some_view(), ep(1)) == s2);
+
+    // Both stale keys are gone, so key 1 mints afresh into the second freed slot.
+    auto const s1_again = table.acquire(1, some_view(), ep(1));
+    CHECK(s1_again != s2);
+    CHECK(s1_again != s3);
+    CHECK(table.occupied_count() == 3);
+
+    // Key 2 would need a fourth slot, and every slot is now current-epoch: the working set exceeds capacity.
+    CHECK_ASSERTS(table.acquire(2, some_view(), ep(1)));
 }
 
 TEST("sv slot_table - a slot acquired this epoch is never reclaimed")

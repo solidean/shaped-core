@@ -250,7 +250,7 @@ sv::bindless_buffers_binding / bindless_textures_{1d,2d,3d,cube}_binding  // the
 ```
 
 One readonly `sg::binding_group` of five bounded arrays, one register space per category (`space1..space5`, index 0).
-Slots are valid ONLY for the epoch they were acquired in — re-acquire the working set every epoch; a full table LRU-reclaims, never a slot touched this epoch.
+Slots are valid ONLY for the epoch they were acquired in — re-acquire the working set every epoch; a full table clears EVERY slot not acquired this epoch (the mint recreates the group anyway).
 Staleness is per-category dirty flags on the CPU mirrors (`impl::slot_table`): an unchanged epoch serves the previous group untouched.
 Access declaration is the CONSUMER's job — declare the elements a dispatch reads via `cmd.*.declare_array_*_access` with the binding names above.
 Writable views are never bindless; they stay ordinary bindings in another group.
