@@ -7,6 +7,8 @@ add_library(blob-cache
     src/blob-cache/fwd.cc
     src/blob-cache/keys.cc
     src/blob-cache/blob_cache.cc
+    src/blob-cache/default_cache.cc
+    src/blob-cache/impl/cache_paths.cc
     src/blob-cache/impl/singleflight.cc
     src/blob-cache/impl/cache_schema.cc
     src/blob-cache/impl/cache_io.cc
@@ -25,6 +27,7 @@ target_sources(blob-cache
     src/blob-cache/fwd.hh
     src/blob-cache/keys.hh
     src/blob-cache/blob_cache.hh
+    src/blob-cache/default_cache.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -54,6 +57,7 @@ if(SC_BUILD_TESTS)
     add_executable(blob-cache-test
         tests/main.cc
         tests/cache_fixture.cc
+        tests/default-cache-test.cc
         tests/put-get-test.cc
         tests/first-writer-test.cc
         tests/singleflight-test.cc

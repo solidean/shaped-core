@@ -18,6 +18,12 @@ rules:
       - tests/**
 
   - kind: allow-include
+    value: <sys/stat.h>
+    reason: mkdir/stat for the default cache's directory. clean-core's platform/file_path.hh is explicit that it is not a filesystem layer and offers no directory creation, so the one primitive a zero-config default needs lives here instead.
+    files:
+      - src/blob-cache/impl/cache_paths.cc
+
+  - kind: allow-include
     value: <type_traits>
     reason: the acquire() convenience overload constrains on std::is_invocable_r_v to stay disjoint from the async one.
     files:

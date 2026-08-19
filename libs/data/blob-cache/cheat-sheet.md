@@ -57,6 +57,13 @@ cache->collect_garbage();                       // -> shared_async<gc_result>; a
 cache->flush();                                 // -> shared_async<cc::unit>; write buffered access times out
 cache->get_stats();                             // -> cache_stats; cheap, never touches the database
 
+#include <blob-cache/default_cache.hh>          // the process-wide cache every subsystem shares
+bcache::default_cache();                        // -> blob_cache&; opened on first use, never at static-init time
+bcache::default_cache_path();                   // -> cc::string; <user cache dir>/shaped-core/blob-cache.db
+bcache::set_default_cache(&c);                  // nullptr restores the lazily-opened one; caller keeps ownership
+bcache::disable_default_cache();                // every get misses, every put is dropped, acquire still singleflights
+bcache::scoped_default_cache guard(&c);         // RAII install/restore — what a TEST BINARY must use, see gotchas
+
 cache->pump();                                  // -> bool; runs storage work where there is no actor thread
 cache->close();                                 // flush, drain, join; idempotent, and the destructor calls it
 cache->is_closed();                             // -> bool; a closed cache misses and drops rather than queueing
@@ -133,6 +140,13 @@ Only what the signatures above cannot tell you.
   An extra column is a newer build's and is kept.
 - **`cache_config::path`'s directory must already exist.** clean-core has no directory creation; a missing one is
   not an error, it just opens degraded.
+  `default_cache()` is the exception, and only because it creates its own directory through bcache's own platform shim.
+- **One big cache beats several small ones**, which is why `default_cache()` exists and why a library reaches for it
+  rather than asking its caller for one.
+  A shared budget lets a cold shader compile evict a stale texture mip; per-subsystem caches can only ever evict their own.
+- **A test binary MUST install a `scoped_default_cache`.** Without one, any code path reaching `default_cache()`
+  writes into the developer's real cache directory, where its entries outlive the run and its keys collide with a
+  neighbouring binary's.
 - **Without threads, whoever would have blocked must `pump()`.** A caller that never pumps sees only misses and
   dropped puts — degraded, never deadlocked.
   `pump()` is a no-op returning false in a threaded build, so calling it unconditionally is correct everywhere.
