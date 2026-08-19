@@ -318,17 +318,18 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
 
 void render_imgui(imgui_context& imgui, sg::context& ctx, sg::swapchain& main, tg::vec4f clear_color)
 {
+    // The viewport windows are moved, drawn and presented before the main window's present — see render_viewports for why that order matters.
+    // They go first rather than between the main list's recording and its submit:
+    // a viewport list submitted while the main list is still open makes the two concurrent, and the font atlas both sample is then reverted to its canonical layout at every viewport submit.
+    imgui.update_viewports();
+    imgui_routine::render_viewports(ctx);
+
     auto rt = main.acquire_backbuffer();
     auto cmd = ctx.create_command_list();
     {
         auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(clear_color)}});
         imgui_routine::execute(pass, ImGui::GetDrawData());
     }
-
-    // The viewport windows are moved and drawn after the main window's content is recorded but before it is presented — see render_viewports for why that order matters.
-    imgui.update_viewports();
-    imgui_routine::render_viewports(ctx);
-
     ctx.submit_command_list_and_present(main, cc::move(cmd));
 }
 } // namespace sr
