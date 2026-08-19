@@ -56,6 +56,10 @@ public:
     [[nodiscard]] cc::result<sg::compiled_shader> compile(shader_description const& desc,
                                                           compile_options const& options = {});
 
+    /// The DXC version behind this instance, as "major.minor"; empty where DXC would not report one.
+    /// Belongs in any cache key that outlives the process, or a DXC upgrade keeps serving the old compiler's DXIL.
+    [[nodiscard]] cc::string_view version() const;
+
 private:
     struct state;
     explicit compiler(std::unique_ptr<state> s);

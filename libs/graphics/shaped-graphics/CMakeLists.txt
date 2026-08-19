@@ -23,6 +23,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
     src/shaped-graphics/binding/impl/layout_hash.cc
+    src/shaped-graphics/binding/impl/shader_codec.cc
     src/shaped-graphics/compute/compute_pipeline.cc
     src/shaped-graphics/raster/raster_pipeline.cc
     src/shaped-graphics/raytracing/raytracing_pipeline.cc
@@ -176,6 +177,7 @@ if(SC_BUILD_TESTS)
         tests/transfer/bytes_future-test.cc
         tests/binding/binding-test.cc
         tests/binding/layout_hash-test.cc
+        tests/binding/shader_codec-test.cc
         tests/pipeline/raster_pipeline-test.cc
         tests/sampler/sampler-test.cc
         tests/barrier/access_state-test.cc

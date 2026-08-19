@@ -40,7 +40,8 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
   A layout carries that hash from creation — `layout->structural_hash()` — computed once by the backend through the same `sg::impl` functions this cache keys with, so the two can never disagree.
 - **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with the **pipeline layout's structural hash**, which transitively covers its group layouts.
 
-- **compiled shader** = source + entry point + stage + model + every compile option.
+- **compiled shader** = source + entry point + stage + model + every compile option + **the DXC version**.
+  The version matters only to a key that outlives the process, and there it is load-bearing: without it a DXC upgrade keeps serving the previous compiler's DXIL forever.
 
 Structural rather than pointer identity is what makes these keys mean anything outside the process that made them.
 Two independently created but identical group layouts collapse to one key, so acquiring through the cache is a convenience rather than a precondition for dedup.
@@ -49,7 +50,15 @@ A key computed in one run also still names the same thing in the next — the pr
 ## The persistent tier
 
 A pipeline that misses in memory consults [blob-cache](../../../../data/blob-cache/docs/design.md) for a serialized PSO blob before building, and stores the one it produced on the way out.
+The DXC shader cache does the same with encoded `compiled_shader`s.
 So the in-memory tier holds live handles for this run, and bcache holds bytes for every run after it.
+
+The two differ in one way that shapes the code.
+For a shader the cacheable product and the expensive product are the same bytes, so it is a plain `acquire`: decode what comes back, compile and encode on a miss.
+For a pipeline they are not: the store holds a blob while the caller wants a live handle.
+So the singleflight's winner stashes what it built in a slot, which then doubles as the hit/miss signal `acquire` does not otherwise expose.
+Shaders go through [`sg::impl::encode_compiled_shader`](../../src/shaped-graphics/binding/impl/shader_codec.hh), a codec with its own version prefix.
+It refuses anything doubtful, because a cache may miss but must never lie.
 
 It is deliberately **not** a `cc::key_value_provider` tier, and it could not be one: a provider's `try_get` is synchronous and runs under the cache's lock, while bcache is async.
 Blocking there would stall every concurrent acquire.
