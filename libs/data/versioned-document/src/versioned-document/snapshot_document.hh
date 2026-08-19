@@ -44,6 +44,34 @@ public:
     /// assignments applied to its parent's snapshot, which is what `advance_snapshot` does and checks.
     void set_single_writer(property_path const& path, op_id const& writer, cc::span<byte const> bytes);
 
+    /// `set_single_writer`, but a no-op reporting false when the stored bytes already equal `bytes`.
+    ///
+    /// **One walk rather than a lookup plus a write**, which is what a producer rewriting its whole layer every frame
+    /// pays per property.
+    /// A multi-valued path always counts as changed, for the same reason it always does in an op's diff.
+    ///
+    /// `out_inserted` reports whether the path was not there before.
+    /// A caller doing mark-and-sweep needs that to know whether the path SET changed, which is a different question from
+    /// whether any value did — and answering it here is what lets the sweep be skipped entirely.
+    bool set_single_writer_if_changed(property_path const& path,
+                                      op_id const& writer,
+                                      cc::span<byte const> bytes,
+                                      bool* out_inserted = nullptr);
+
+    /// How many property paths carry a writer.
+    /// Maintained rather than counted, because a mark-and-sweep asks it once per rebuild.
+    [[nodiscard]] isize property_count() const { return _property_count; }
+
+    /// Removes every writer of `path`, and then the component and entity it leaves empty.
+    ///
+    /// **Pruning the empty parents is the load-bearing half.** A component entry with zero properties is not what a
+    /// fresh materialization would ever produce, and a parse would *select* it — schema found, `$alive` absent so alive,
+    /// version 0 — and construct an all-defaults component out of nothing.
+    ///
+    /// Same soundness caveat as `set_single_writer`: this is a document edit, and the one place it is a sound one is a
+    /// single-parent child's abstention applied to its parent's snapshot.
+    void clear_writers(property_path const& path);
+
     /// The value bytes this snapshot owns, which is what a cache budget counts.
     [[nodiscard]] isize owned_byte_size() const { return _owned_bytes; }
 
@@ -65,6 +93,9 @@ private:
 
     isize _owned_bytes = 0;
     isize _dead_bytes = 0;
+
+    /// Maintained by every mutator, so `property_count` is O(1) rather than a walk.
+    isize _property_count = 0;
 
     raw_document _document;
 };

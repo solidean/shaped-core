@@ -263,9 +263,12 @@ struct pending_column
 };
 } // namespace
 
-vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, parse_report& report)
+vdoc::document vdoc::impl::parse_from(cc::span<entity_id const> sorted_entities,
+                                      cc::function_ref<raw_entity const*(entity_id)> lookup,
+                                      parse_policy const& policy,
+                                      parse_report& report)
 {
-    // Selection walks the raw document once, in its own sorted order, and decides everything structural:
+    // Selection walks the entities once, in ascending id order, and decides everything structural:
     // which entities exist, which components survive `$alive`, and which schema versions this build understands.
     //
     // **Every structural diagnostic is filed there, and construction files none.**
@@ -275,13 +278,17 @@ vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, 
     auto columns = cc::vector<pending_column>();
     auto unsupported = cc::vector<component_type_id>();
 
-    for (auto const& e : raw.entities)
+    for (auto const& entity : sorted_entities)
     {
-        auto const selection = impl::select_entity(e.entity, e.value, policy, report, unsupported);
+        auto const* const raw_entity_at = lookup(entity);
+        if (raw_entity_at == nullptr)
+            continue;
+
+        auto const selection = impl::select_entity(entity, *raw_entity_at, policy, report, unsupported);
         if (!selection.instantiate)
             continue;
 
-        surviving_entities.push_back(e.entity);
+        surviving_entities.push_back(entity);
 
         for (auto const& sc : selection.components)
         {
@@ -300,7 +307,7 @@ vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, 
             }
 
             // Entities are walked in ascending id order, so each column's candidates come out sorted for free.
-            columns[found].candidates.push_back({.entity = e.entity, .raw = sc.raw, .version = sc.version});
+            columns[found].candidates.push_back({.entity = entity, .raw = sc.raw, .version = sc.version});
         }
     }
 
@@ -328,4 +335,16 @@ vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, 
     }
 
     return builder.finish();
+}
+
+vdoc::document vdoc::parse(raw_document const& raw, parse_policy const& policy, parse_report& report)
+{
+    // A raw document's entity vector is already the ascending order parse_from wants, and its own entries are the
+    // lookup — so this is the identity case of the general parse rather than a second implementation of it.
+    auto entities = cc::vector<entity_id>();
+    entities.reserve(raw.entities.size());
+    for (auto const& e : raw.entities)
+        entities.push_back(e.entity);
+
+    return impl::parse_from(entities, [&](entity_id e) { return raw.try_get(e); }, policy, report);
 }

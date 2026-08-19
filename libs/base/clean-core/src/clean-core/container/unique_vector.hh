@@ -7,11 +7,8 @@
 // - sequence entry points
 // - retyping APIs
 // - equality, order, hashing
-// - insert/emplace at arbitrary positions
-// - push_back_range
 // - contains/contains_where/find/find_where/count/count_where
 // - sort
-// - assign (replace parts of content)
 
 
 /// Dynamically allocated vector of T elements with move-only semantics.
@@ -66,10 +63,19 @@ public:
 
     // appending operations
 public:
-    using base::emplace_back;        // construct element at back (with allocation if needed)
-    using base::emplace_back_stable; // construct element at back (requires capacity)
-    using base::push_back;           // add element at back (with allocation if needed)
-    using base::push_back_stable;    // add element at back (requires capacity)
+    using base::emplace_back;           // construct element at back (with allocation if needed)
+    using base::emplace_back_stable;    // construct element at back (requires capacity)
+    using base::push_back;              // add element at back (with allocation if needed)
+    using base::push_back_range;        // append a range at back (sized range -> one reservation)
+    using base::push_back_range_stable; // append a range at back (requires capacity)
+    using base::push_back_stable;       // add element at back (requires capacity)
+
+    // insertion at a position
+public:
+    using base::emplace_at;      // construct element at index (idx == size() appends)
+    using base::insert_at;       // insert element at index (idx == size() appends)
+    using base::insert_range_at; // insert a sized range at index -> span of inserted elements
+    using base::replace_range;   // swap the run {.offset, .size} out for a sized range, moving the tail once
 
     // single element removal
 public:
@@ -83,8 +89,8 @@ public:
 
     // range removal
 public:
-    using base::remove_at_range;           // remove range [start, start+count) (preserves order)
-    using base::remove_at_range_unordered; // remove range [start, start+count) (O(count), does not preserve order)
+    using base::remove_at_range;           // remove the run {.offset, .size} (preserves order)
+    using base::remove_at_range_unordered; // remove the run {.offset, .size} (O(size), does not preserve order)
     using base::remove_from_to;            // remove range [start, end) (preserves order)
     using base::remove_from_to_unordered;  // remove range [start, end) (O(end-start), does not preserve order)
 
@@ -131,10 +137,6 @@ public:
 public:
     using base::clear; // destroy all elements, size becomes 0
     using base::fill;  // fill all elements with value
-
-    // TODO: insert(Iterator pos, T const& value) - insert element at position
-    // TODO: insert(Iterator pos, T&& value) - insert element at position
-    // TODO: insert(Iterator pos, isize count, T const& value) - insert multiple copies
 
     // ctors / allocation management
 public:

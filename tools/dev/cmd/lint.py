@@ -26,8 +26,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     ct = lint_sub.add_parser("clang-tidy", help="Run the clang-tidy whitelist gates (must be zero to commit)")
     a.preset(ct)
     a.profile(ct)
-    ct.add_argument("--dirty-only", action="store_true",
-                    help="Only lint git-dirty/untracked .cc sources (the next commit's files)")
+    a.change_scope(ct, default_all=True)
     ct.add_argument("--fix", action="store_true", help="Let clang-tidy apply its fixes in place")
     ct.add_argument("--limit", type=int, default=None, metavar="N",
                     help="Max diagnostic lines before switching to a grouped-by-check digest")
@@ -35,8 +34,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     sl = lint_sub.add_parser("shaped", help="Run shaped-linter — our own rules over code and prose (tools/shaped-linter)")
     a.preset(sl)
     a.profile(sl)
-    sl.add_argument("--dirty-only", action="store_true",
-                    help="Only lint the next commit's files, and for prose rules only its changed lines")
+    a.change_scope(sl, default_all=True)
     sl.add_argument("--fix", action="store_true", help="Let shaped-linter apply its suggested fixes in place")
 
     pa = lint_sub.add_parser("prose-apply", help="Apply a prose plan — many comment/doc rewrites in one pass")
@@ -64,7 +62,7 @@ def run_clang_tidy(
     ctx: Context,
     *,
     preset_specs: list[str] | None,
-    dirty_only: bool,
+    scope: dev.ChangeScope | None,
     fix: bool,
     limit: int | None = None,
     mirror: bool = False,
@@ -80,8 +78,8 @@ def run_clang_tidy(
 
     runner = ctx.root / "tools" / "lint" / "clang-tidy.py"
     argv = ["uv", "run", str(runner), "--build-dir", str(preset.build_dir)]
-    if dirty_only:
-        argv.append("--dirty-only")
+    if scope is not None:
+        argv += ["--commit", scope.revision] if scope.revision else ["--dirty-only"]
     if fix:
         argv.append("--fix")
     if limit is not None:
@@ -99,7 +97,7 @@ def run_shaped_linter(
     ctx: Context,
     *,
     preset_specs: list[str] | None,
-    dirty_only: bool,
+    scope: dev.ChangeScope | None,
     fix: bool,
     mirror: bool = False,
     verbose: bool = False,
@@ -125,16 +123,16 @@ def run_shaped_linter(
         return False
 
     # A wider scope than clang-format's, prose included, so .md and .py are in — tools/dev/lib/quality/format.py owns it.
-    files = dev.discover_lint_files(ctx.root, dirty_only=dirty_only)
+    files = dev.discover_lint_files(ctx.root, scope=scope)
     if not files:
         print(dev.console.green("shaped-linter: nothing to lint (no sources in scope)"), file=sys.stderr)
         return True
 
-    # Dirty-only is line-exact for prose, and docs/guides/prose.md says why that matters.
+    # A scoped run is line-exact for prose, and docs/guides/prose.md says why that matters.
     # A spec file rather than argv, since the run already batches to stay under the command-line limit.
     changed_lines_spec: Path | None = None
-    if dirty_only:
-        spec = dev.format_changed_line_spec(dev.changed_line_ranges(ctx.root))
+    if scope is not None:
+        spec = dev.format_changed_line_spec(dev.changed_line_ranges(ctx.root, scope))
         if spec:
             changed_lines_spec = preset.build_dir / "shaped-linter-changed-lines.txt"
             changed_lines_spec.parent.mkdir(parents=True, exist_ok=True)
@@ -283,7 +281,7 @@ def run_bless_includes(
         print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
         return False
 
-    files = dev.discover_lint_files(ctx.root, dirty_only=False)
+    files = dev.discover_lint_files(ctx.root, scope=None)
 
     # One invocation, unlike `lint shaped`: a config's block is written from everything below it at once,
     # and a batched run would rewrite each block from one batch's share of the files.
@@ -304,17 +302,28 @@ def run_bless_includes(
     return result.ok
 
 
+def _scope(args: argparse.Namespace, ctx: Context) -> dev.ChangeScope | None:
+    """The requested scope, with a bad revision reported before anything is built."""
+    scope = a.scope_from_args(args)
+    if scope is not None and not scope.is_working_tree:
+        try:
+            dev.resolve_range(ctx.root, scope.revision)
+        except dev.ChangeScopeError as e:
+            ctx.die(str(e))
+    return scope
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     match args.lint_cmd:
         case "clang-tidy":
             ok = run_clang_tidy(
-                ctx, preset_specs=args.preset, dirty_only=args.dirty_only, fix=args.fix, limit=args.limit,
+                ctx, preset_specs=args.preset, scope=_scope(args, ctx), fix=args.fix, limit=args.limit,
                 mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)
         case "shaped":
             ok = run_shaped_linter(
-                ctx, preset_specs=args.preset, dirty_only=args.dirty_only, fix=args.fix,
+                ctx, preset_specs=args.preset, scope=_scope(args, ctx), fix=args.fix,
                 mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)

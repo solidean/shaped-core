@@ -25,8 +25,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("names", nargs="*", help="Specific check(s) to run (default: all)")
     p.add_argument("--fix", action="store_true",
                    help="Let fixable checks apply unambiguous fixes (e.g. clang-format -i)")
-    p.add_argument("--all", action="store_true",
-                   help="Widen lint, shaped-lint and format from dirty-only to the whole tree")
+    a.change_scope(p, default_all=False)
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")
@@ -36,13 +35,13 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 def _build_checks(ctx: Context) -> list[dev.Check]:
     """The pre-commit registry: project policy for which gates exist."""
 
-    def check_format(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+    def check_format(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # --fix rewrites in place; without it clang-format only reports.
         try:
             result = dev.run_format(
                 ctx.root,
                 check=not fix,
-                dirty_only=not all_scope,
+                scope=scope,
                 allow_different_version=False,
                 mirror=mirror,
                 verbose=verbose,
@@ -51,25 +50,25 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             ctx.die(str(e))
         return dev.report.summarize_format(result, ctx.root)
 
-    def check_lint(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+    def check_lint(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         from .lint import run_clang_tidy
         return run_clang_tidy(
-            ctx, preset_specs=None, dirty_only=not all_scope, fix=fix, mirror=mirror, verbose=verbose,
+            ctx, preset_specs=None, scope=scope, fix=fix, mirror=mirror, verbose=verbose,
         )
 
-    def check_shaped_lint(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+    def check_shaped_lint(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         from .lint import run_shaped_linter
         return run_shaped_linter(
-            ctx, preset_specs=None, dirty_only=not all_scope, fix=fix, mirror=mirror, verbose=verbose,
+            ctx, preset_specs=None, scope=scope, fix=fix, mirror=mirror, verbose=verbose,
         )
 
-    def check_crossrefs(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
-        # Not fixable and never dirty-only, so fix and all_scope are both ignored.
+    def check_crossrefs(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # A moved file breaks links in other, untouched files, so this is always repo-wide: fix and scope are both ignored.
         return dev.report.summarize_crossrefs(dev.check_crossrefs(ctx.root), ctx.root)
 
-    def check_tests(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+    def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
-        # Not fixable, so fix and all_scope are ignored.
+        # Not fixable, so fix and scope are ignored.
         system = platform.system()
         specs = [ctx.default_preset_name()]
         for sibling in (
@@ -101,13 +100,13 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
     # ORDER IS LOAD-BEARING: every fixing gate runs before `format`, so what they rewrite is formatted in the same pass.
     # docs/guides/building-and-testing.md has the argument.
     return [
-        dev.Check("lint", "clang-tidy gates on the next commit's C++ (dirty-only; --all for the whole tree)",
+        dev.Check("lint", "clang-tidy gates on the next commit's C++ (dirty-only; --commit or --all to rescope)",
                   True, check_lint),
         dev.Check("shaped-lint", "shaped-linter's own rules on the next commit's code and prose "
-                                 "(dirty-only; --all for the whole tree)",
+                                 "(dirty-only; --commit or --all to rescope)",
                   True, check_shaped_lint),
         dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
-                            "(dirty-only; --all for the whole tree)",
+                            "(dirty-only; --commit or --all to rescope)",
                   True, check_format),
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("test",
@@ -135,8 +134,17 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     else:
         selected = list(checks)
 
+    # --all is the whole tree, --commit is that diff, and the default is the working tree.
+    scope = a.scope_from_args(args)
+    if scope is not None and not scope.is_working_tree:
+        # Fail on a bad revision here, rather than once a gate is already running.
+        try:
+            dev.resolve_range(ctx.root, scope.revision)
+        except dev.ChangeScopeError as e:
+            ctx.die(str(e))
+
     ok = dev.run_checks(
-        selected, fix=args.fix, all_scope=args.all,
+        selected, fix=args.fix, scope=scope,
         mirror=args.mirror_output, verbose=args.verbose, no_test=args.no_test,
     )
     sys.exit(0 if ok else 1)

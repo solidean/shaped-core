@@ -14,6 +14,14 @@ Add entries as we discover them, and remove them as they land.
   `sr::key_modifiers` is the last one still carrying its own operators plus a free `has_all`.
   All of sg's have migrated — `buffer_usages`, `texture_usages`, `access_flags`, `pipeline_stage_flags`, `color_write_mask`, `accel_build_flags`.
 
+- **Revisit the regular-void stance across the vocabulary types.**
+  Today `void` is rejected and you spell `cc::unit` by hand: `result<void, E>` is a static_assert pointing at it, `optional<void>` has the same shape, and `async<void>` was never wired up at all.
+  Generic code that forms `xyz<T>` where `T` can reasonably be `void` hits this everywhere, so a per-type alias fixes one corner and leaves the rest.
+  The direction is to support `xyz<void>` as an affordance meaning `xyz<unit>` — same type, no conversions — decided once for `result`, `optional` and `async` together rather than type by type.
+  Two consequences the async side already ran into, and that the decision has to answer.
+  A `shared_async<void>` dependency should contribute an ordering edge and NO argument to the `make_async_*` sugar.
+  And it becomes indistinguishable from one deliberately carrying a `unit`.
+
 ## container
 
 - **`bitset` printing and allocation interop.**

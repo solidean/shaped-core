@@ -1,9 +1,10 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 
@@ -25,11 +26,9 @@ TEST("bcache singleflights across threads", exclusive())
     constexpr auto thread_count = 8;
     constexpr auto rounds = 16;
 
-    auto pool = cc::async_thread_pool();
-    if (pool.worker_count() == 0)
-        SKIP("no threads in this build: the pool runs nothing of its own, so the scenario does not exist");
-
-    auto const install = cc::scoped_default_async_pool(pool);
+#if !CC_HAS_THREADS
+    SKIP("no threads in this build: nothing runs concurrently, so the scenario does not exist");
+#endif
 
     auto const path = cc::format("{}/bcache-threaded.db", cc::temp_directory_path());
     cc::remove_file(path);
@@ -40,7 +39,7 @@ TEST("bcache singleflights across threads", exclusive())
 
     {
         auto cache = blob_cache::create({.path = path});
-        (void)pool.blocking_get(cache->opened());
+        (void)cc::async_blocking_get(cache->opened());
 
         auto const expected = [](int k) { return cc::format("value-for-key-{}", k); };
 
@@ -58,7 +57,7 @@ TEST("bcache singleflights across threads", exclusive())
 
             for (auto i = isize(0); i < pending.size(); ++i)
             {
-                auto const value = pool.blocking_get(pending[i]);
+                auto const value = cc::async_blocking_get(pending[i]);
                 // The value must be the one belonging to ITS key: a table that mixed two operations up would show here as one key quietly answering with another's bytes.
                 CHECK(blob_text(value) == expected(int(i % key_count)));
             }
@@ -84,11 +83,9 @@ TEST("bcache serves concurrent readers from a real actor thread", exclusive())
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
-    auto pool = cc::async_thread_pool();
-    if (pool.worker_count() == 0)
-        SKIP("no threads in this build: the pool runs nothing of its own, so the scenario does not exist");
-
-    auto const install = cc::scoped_default_async_pool(pool);
+#if !CC_HAS_THREADS
+    SKIP("no threads in this build: nothing runs concurrently, so the scenario does not exist");
+#endif
 
     auto const path = cc::format("{}/bcache-threaded-reads.db", cc::temp_directory_path());
     cc::remove_file(path);
@@ -97,10 +94,10 @@ TEST("bcache serves concurrent readers from a real actor thread", exclusive())
 
     {
         auto cache = blob_cache::create({.path = path});
-        (void)pool.blocking_get(cache->opened());
+        (void)cc::async_blocking_get(cache->opened());
 
         auto const key = key_of("threaded", "read-me");
-        auto const stored = pool.blocking_get(cache->put(key, make_blob_of_size(64 * 1024, 9)));
+        auto const stored = cc::async_blocking_get(cache->put(key, make_blob_of_size(64 * 1024, 9)));
         CHECK(stored.status == put_status::stored);
 
         auto reads = cc::vector<cc::shared_async<cc::optional<cache_hit>>>();
@@ -109,13 +106,13 @@ TEST("bcache serves concurrent readers from a real actor thread", exclusive())
 
         for (auto const& r : reads)
         {
-            auto const hit = pool.blocking_get(r);
+            auto const hit = cc::async_blocking_get(r);
             REQUIRE(hit.has_value());
             CHECK(hit.value().data.size() == 64 * 1024);
         }
 
         // Every hit noted an access, and the actor batched them rather than writing 64 rows.
-        (void)pool.blocking_get(cache->flush());
+        (void)cc::async_blocking_get(cache->flush());
         CHECK(cache->get_stats().hits == 64);
         CHECK(cache->get_stats().access_rows_written <= 1);
     }

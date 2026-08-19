@@ -198,6 +198,107 @@ constexpr void compact_move_objects_backward(T* dest_start, T* src_start, T* src
     }
 }
 
+/// Spreads objects apart by moving [gap_start, live_end) up by `gap_size` slots within the same allocation, to open a hole for an insertion.
+/// The growing counterpart of compact_move_objects_backward, and the only function here that writes across the live/uninitialized boundary in one pass:
+/// the tail objects landing at or above `live_end` are move-CONSTRUCTED into raw storage, the ones landing below it are move-ASSIGNED over live objects.
+/// Reverse iteration is what makes this safe, and it is only safe because the destination never falls below the source.
+///
+/// PRECONDITIONS:
+///   - gap_size > 0
+///   - gap_start <= live_end, and live_end is the END of the caller's live object range
+///   - [live_end, live_end + gap_size) is uninitialized storage in the same allocation
+///   - the objects in [gap_start, live_end) are alive, and will be moved from
+///
+/// POSTCONDITION: [gap_start, gap_start + gap_size) is RAW storage, and the tail is alive at [gap_start + gap_size, live_end + gap_size).
+/// The moved-from husks the shift leaves behind inside the hole are destroyed here, deliberately.
+/// That costs at most gap_size trivial destructor calls and buys every caller the right to placement-new into the whole hole without testing which slots are still live.
+///
+/// The caller owns the hole once this returns.
+/// It must construct into every slot, and until it has, it must not describe its live range as covering the hole:
+///
+///   spread_move_objects_forward(obj_start + idx, obj_end, 1);
+///   obj_end = obj_start + idx; // the tail is parked above the hole, alive but unowned
+///   new (cc::placement_new, obj_start + idx) T(...);
+///   obj_end = obj_start + old_size + 1;
+template <class T>
+constexpr void spread_move_objects_forward(T* gap_start, T* live_end, isize gap_size)
+{
+    static_assert(sizeof(T) > 0, "T must be a complete type (did you forget to include a header?)");
+    static_assert(std::is_move_constructible_v<T>, "T must be move constructible");
+    static_assert(std::is_move_assignable_v<T>, "T must be move assignable");
+
+    CC_ASSERT(gap_start <= live_end, "spread_move_objects_forward requires gap_start <= live_end");
+    CC_ASSERT(gap_size > 0, "spread_move_objects_forward requires a positive gap");
+
+    auto const tail_count = live_end - gap_start;
+
+    if constexpr (std::is_trivially_copyable_v<T>)
+    {
+        // memmove handles the overlap, and a trivially copyable T is trivially destructible, so the husks need no cleanup
+        if (tail_count > 0)
+            std::memmove(gap_start + gap_size, gap_start, size_t(tail_count) * sizeof(T));
+    }
+    else
+    {
+        // The topmost min(gap_size, tail_count) objects land at or above live_end, in raw storage, so they are constructed rather than assigned
+        auto const create_count = gap_size < tail_count ? gap_size : tail_count;
+
+        auto p_dest = live_end + gap_size; // one past the last destination, and walks down from there
+        move_create_objects_to_reverse(p_dest, live_end - create_count, live_end);
+
+        // Everything below that lands on a live object; still top-down, so a destination is only written after its own source was read
+        auto p_src = live_end - create_count;
+        while (p_src != gap_start)
+        {
+            --p_src;
+            --p_dest;
+            *p_dest = cc::move(*p_src);
+        }
+
+        destroy_objects_in_reverse(gap_start, gap_start + create_count);
+    }
+}
+
+/// Turns the `old_count` live objects at `window` into a RAW window of `new_count` slots, relocating the `tail_count` objects behind them exactly once.
+/// The whole in-place half of an insert, a replace and an erase-and-fill, shared by every contiguous container: they differ in how they record their size, not in how the elements move.
+/// Growing delegates to spread_move_objects_forward, shrinking to compact_move_objects_backward, and an equal-sized replacement moves nothing at all.
+///
+/// PRECONDITIONS:
+///   - old_count >= 0, new_count >= 0 and tail_count >= 0
+///   - the objects in [window, window + old_count + tail_count) are alive
+///   - when new_count > old_count, [window + old_count + tail_count, window + new_count + tail_count) is uninitialized storage in the same allocation
+///
+/// POSTCONDITION: [window, window + new_count) is RAW and the tail is alive at [window + new_count, window + new_count + tail_count).
+/// Nothing else in the affected region is alive — both the replaced objects and any husk the shift produced have been destroyed.
+/// As with spread_move_objects_forward the caller owns the hole and must fill it before describing its live range as covering it.
+template <class T>
+constexpr void resize_object_window(T* window, isize old_count, isize new_count, isize tail_count)
+{
+    static_assert(sizeof(T) > 0, "T must be a complete type (did you forget to include a header?)");
+
+    CC_ASSERT(old_count >= 0 && new_count >= 0 && tail_count >= 0, "resize_object_window requires non-negative counts");
+
+    auto const delta = new_count - old_count;
+    auto* const live_end = window + old_count + tail_count;
+
+    if (delta > 0)
+    {
+        spread_move_objects_forward(window + old_count, live_end, delta);
+        // the hole already covers [window + old_count, window + new_count), so only the replaced run is still alive
+        destroy_objects_in_reverse(window, window + old_count);
+    }
+    else
+    {
+        if (delta < 0)
+            compact_move_objects_backward(window + new_count, window + old_count, live_end);
+
+        // the compaction leaves -delta moved-from husks at the very top, and none at all when delta == 0
+        destroy_objects_in_reverse(live_end + delta, live_end);
+        // the head of the replaced run was never assigned over, so it is still holding its original objects
+        destroy_objects_in_reverse(window, window + new_count);
+    }
+}
+
 /// Copy-assigns the objects of [src_start, src_end) over the live objects at the cursor.
 /// A throw leaves the assigned-over elements in a partially modified state, not an invalid one.
 template <class T>

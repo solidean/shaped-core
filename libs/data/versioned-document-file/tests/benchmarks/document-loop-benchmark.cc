@@ -20,6 +20,7 @@
 
 #include "../conformance/store_fixture.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/guide.hh>
 #include <nexus/test.hh>
@@ -28,7 +29,6 @@
 #include <versioned-document/snapshot_cache.hh>
 #include <versioned-document/snapshot_document.hh>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdio>
 
@@ -47,7 +47,8 @@ using clock_type = std::chrono::steady_clock;
 
 [[nodiscard]] double median_of(cc::vector<double> values)
 {
-    std::sort(values.begin(), values.end());
+    // Only the middle element has to end up where a full sort would put it, which sort_at does in O(n).
+    cc::sort_at(values, values.size() / 2);
     return values[values.size() / 2];
 }
 

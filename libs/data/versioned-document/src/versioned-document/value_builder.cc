@@ -1,11 +1,10 @@
 #include "value_builder.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/endian.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
-
-#include <algorithm> // std::sort — no cc:: algorithm library yet
 
 using namespace cc::primitive_defines;
 
@@ -47,8 +46,10 @@ cc::result<vdoc::value, vdoc::value_build_error> vdoc::value_builder::try_build(
 
     if (_kind == value_kind::object)
     {
-        std::sort(order.begin(), order.end(),
-                  [this](isize a, isize b) { return impl::compare_key_bytes(_entries[a].key, _entries[b].key) < 0; });
+        // sort_indices breaks ties on the index, so equal keys keep caller order and the duplicate check below
+        // sees them adjacent either way.
+        cc::sort_indices(order, _entries,
+                         [](entry const& a, entry const& b) { return impl::compare_key_bytes(a.key, b.key) < 0; });
 
         for (isize i = 1; i < count; ++i)
             if (impl::compare_key_bytes(_entries[order[i - 1]].key, _entries[order[i]].key) == 0)

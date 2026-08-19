@@ -270,6 +270,14 @@ template <class E>
 
 namespace impl
 {
+/// Whether scheduling a node from here would reach a scheduler at all.
+/// async_node_base::schedule() asserts with neither a bound worker scope nor an installed default pool, so every "start it now" path tests this first.
+/// A node left cold is not a lost computation — it runs when something requires it, or when a driver schedules it.
+[[nodiscard]] inline bool async_can_schedule_here()
+{
+    return cc::async_scheduler::current_or_null() != nullptr || cc::async_scheduler::default_or_null() != nullptr;
+}
+
 /// Tag selecting async's manual/promise constructor, born external_pending in a single store.
 /// Passed by make_async_manual through make_shared; not part of the public surface.
 struct async_manual_tag
@@ -707,14 +715,14 @@ template <class T, class E = async_error, class F, class... Args>
     return node;
 }
 
-/// Like make_async_lazy, but eager: it schedules the node immediately if a worker scope is active on this thread.
-/// Otherwise it stays cold and is scheduled when first required or driven.
+/// Like make_async_lazy, but eager: it schedules the node immediately, on the worker scope active here or else the installed default pool.
+/// With neither, it stays cold and is scheduled when first required or driven.
 /// Same forms as make_async_lazy.
 template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
 [[nodiscard]] auto make_async_scheduled(F&& f, Deps&&... deps)
 {
     auto node = impl::async_make_node<T, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
-    if (async_scheduler::current_or_null() != nullptr)
+    if (impl::async_can_schedule_here())
         node->schedule();
     return node;
 }
@@ -799,31 +807,62 @@ template <class T, class E = async_error>
 // driving — a scheduler makes progress; blocking is its convenience
 // ============================================================================
 
-// You never block on an async — a scheduler drives it, and these block the CALLING thread while that happens.
-// Mirrors async_thread_pool::blocking_get / try_blocking_get, with one deliberate difference.
-// This scheduler never blocks, so "pumped out, still not ready" is a real outcome and try_ returns an optional.
-// The pool waits on a completion latch instead, so it has no such outcome and returns the result directly.
+// You never block on an async — the ambient scheduler drives it, and these block the CALLING thread while that happens.
+//
+// **This is a bridge between the synchronous and the asynchronous world, and nothing more.**
+// If you find yourself reaching for it often, step back: make the surrounding code async, write an ASYNC_TEST,
+// return the async to a caller that can await it.
+// A blocking_get inside a frame is legal — it participates rather than idling — but every blocked thread is one that
+// cannot help, so overusing it is how a graph starves or deadlocks.
 
-template <class T, class E>
-cc::optional<cc::result<T, E>> singlethreaded_scheduler::try_blocking_get(shared_async<T, E> const& root)
+namespace impl
+{
+/// Drives `root` on the ambient scheduler until it is ready.
+/// The scheduler returning early means it cannot progress — an unpushed manual node — so this waits and asks again.
+void async_drive_until_ready(async_node_base& root);
+
+/// async_drive_until_ready, giving up after `timeout_ms`. True if `root` is ready.
+[[nodiscard]] bool async_drive_until_ready_for(async_node_base& root, i64 timeout_ms);
+} // namespace impl
+
+/// Drive `root` to completion on the ambient scheduler and return its outcome.
+/// Ready on return, always: value or error, never still pending.
+///
+/// Requires an ambient scheduler (cc::install_default_async_scheduler, or a nexus run's).
+/// Never returns while the graph is unfinished, so a node awaiting a push that never comes hangs here — that is the
+/// honest failure, and try_async_blocking_get_for is the way out for a caller that cannot afford it.
+template <class T, class E = async_error>
+[[nodiscard]] cc::result<T, E> try_async_blocking_get(shared_async<T, E> const& root)
 {
     CC_ASSERT(root != nullptr, "cannot drive a null async");
+    impl::async_drive_until_ready(*root);
 
-    async_worker_scope scope(*this); // nests harmlessly if this scheduler is already bound here
+    if (root->has_error())
+        return cc::result<T, E>(cc::error(root->propagate_error()));
+    return cc::result<T, E>(*root->value_ptr()); // copy out
+}
 
-    root->schedule();
-    run_until([&] { return root->is_ready(); });
+/// try_async_blocking_get, returning the value as a copy and asserting on error or cancellation.
+/// For zero-copy access use root->try_value() after driving.
+template <class T, class E = async_error>
+[[nodiscard]] T async_blocking_get(shared_async<T, E> const& root)
+{
+    auto r = try_async_blocking_get<T, E>(root);
+    CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");
+    return cc::move(r).value();
+}
 
-    // Pump anything still queued out of the `scheduled` state before we stop driving.
-    // run_until stops the moment `root` is ready, which can strand a node that MIGRATED into our queue mid-drive.
-    // schedule() / schedule_on() are idempotent on `scheduled`, so no other scheduler could reclaim it and a blocking_get on it would hang.
-    // Draining with our worker scope still bound settles each such node — completed, or re-parked as `blocked` and re-woken onto whichever scheduler finishes its dependency.
-    // See "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md for why running that work here, rather than on its origin scheduler, is accepted.
-    drain();
-
-    // A drained queue does not mean the graph completed, only that WE could not advance `root`.
-    // It may be parked on a manual node awaiting an external push, or have migrated onto another scheduler that is still driving it.
-    // Neither is ours to assert on: report it, and let the caller push, retry, or wait.
+/// try_async_blocking_get, driven on `scheduler` rather than on the ambient one.
+///
+/// For code that owns a scheduler and means THAT one: a benchmark measuring a pool, a test standing one up.
+/// Nullopt is "that scheduler could not finish it here" — the graph is parked on an external push, or another
+/// scheduler already owns it — and the caller decides whether to push, wait, or try elsewhere.
+template <class T, class E = async_error>
+[[nodiscard]] cc::optional<cc::result<T, E>> try_async_blocking_get_on(async_scheduler& scheduler,
+                                                                       shared_async<T, E> const& root)
+{
+    CC_ASSERT(root != nullptr, "cannot drive a null async");
+    scheduler.participate_until_ready(*root);
     if (!root->is_ready())
         return cc::nullopt;
 
@@ -832,35 +871,31 @@ cc::optional<cc::result<T, E>> singlethreaded_scheduler::try_blocking_get(shared
     return cc::result<T, E>(*root->value_ptr()); // copy out
 }
 
-template <class T, class E>
-T singlethreaded_scheduler::blocking_get(shared_async<T, E> const& root)
+/// try_async_blocking_get_on, returning the value as a copy and asserting on error, cancellation, or no progress.
+template <class T, class E = async_error>
+[[nodiscard]] T async_blocking_get_on(async_scheduler& scheduler, shared_async<T, E> const& root)
 {
-    auto r = try_blocking_get(root);
-    CC_ASSERT(r.has_value(), "async graph could not complete on this scheduler (parked on an external push that "
-                             "never came, or being driven by another scheduler — use try_blocking_get)");
+    auto r = try_async_blocking_get_on<T, E>(scheduler, root);
+    CC_ASSERT(r.has_value(), "that scheduler could not complete the graph (parked on an external push, or owned by "
+                             "another scheduler)");
     CC_ASSERT(r.value().has_value(), "async completed with an error or was cancelled");
     return cc::move(r).value().value();
 }
 
-/// Drive `root` to completion on a throwaway singlethreaded_scheduler and return its outcome, or nullopt if it could not complete here.
-/// A graph parked on a manual node that is never pushed is the usual nullopt — a throwaway scheduler cannot be pumped around the external push, so keep your own singlethreaded_scheduler for that.
-/// BLOCKS the calling thread, and the whole graph runs HERE: no dependency executes concurrently, however many cores are idle.
-/// Never call it from inside a frame; park on a dependency instead.
+/// try_async_blocking_get with a deadline: the outcome, or nullopt if `root` was still not ready after `timeout_ms`.
 ///
-/// The verbose name is deliberate — this is a top-level / test convenience, and real work belongs on a scheduler you own.
+/// The one place "still pending" survives, for a caller that must not hang on a graph waiting for an external push.
+/// It helps where it can — a scheduler bound here still runs work — but it never claims a slot to park in, so a
+/// pool-driven graph simply continues on its own workers while this polls.
 template <class T, class E = async_error>
-[[nodiscard]] cc::optional<cc::result<T, E>> try_async_blocking_get_singlethreaded(shared_async<T, E> const& root)
+[[nodiscard]] cc::optional<cc::result<T, E>> try_async_blocking_get_for(shared_async<T, E> const& root, i64 timeout_ms)
 {
-    singlethreaded_scheduler scheduler;
-    return scheduler.try_blocking_get(root);
-}
+    CC_ASSERT(root != nullptr, "cannot drive a null async");
+    if (!impl::async_drive_until_ready_for(*root, timeout_ms))
+        return cc::nullopt;
 
-/// try_async_blocking_get_singlethreaded, but returns the value as a copy, and asserts on error or cancellation.
-/// For zero-copy access use root->try_value() after driving.
-template <class T, class E = async_error>
-[[nodiscard]] T async_blocking_get_singlethreaded(shared_async<T, E> const& root)
-{
-    singlethreaded_scheduler scheduler;
-    return scheduler.blocking_get(root);
+    if (root->has_error())
+        return cc::result<T, E>(cc::error(root->propagate_error()));
+    return cc::result<T, E>(*root->value_ptr()); // copy out
 }
 } // namespace cc

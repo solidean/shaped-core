@@ -12,7 +12,8 @@
 
 ## Project layout
 
-Libraries live under `libs/<category>/<lib>`: `src/<lib>/` (colocated `.hh`/`.cc`), `tests/` (a `<lib>-test` binary), and an optional `docs/`.
+Libraries live under `libs/<category>/<lib>`: `src/<lib>/` (colocated `.hh`/`.cc`), `tests/` (a `<lib>-test` binary), an optional `examples/` (`<lib>-<name>-example` binaries) and an optional `docs/`.
+Cross-library examples — the ones belonging to no single library — live in `examples/<category>/<example>/` at the repo root.
 
 One-liner per library:
 
@@ -26,16 +27,16 @@ One-liner per library:
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
-* **`libs/io/babel-serializer`** — serialization / deserialization of various formats.
+* **`libs/data/babel-serializer`** — serialization / deserialization of various formats.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
   The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
   So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`).
   Plus Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`).
   Also PNG/JPEG codecs in `babel::png` / `babel::jpg`, with the `babel::image` aggregator on top (`image/`).
-  Its [docs/coding-guidelines.md](libs/io/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
+  Its [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
   Namespace `babel`. Depends on clean-core + typed-geometry.
-  Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
+  Early stage — see its [docs/structure.md](libs/data/babel-serializer/docs/structure.md) roadmap.
 * **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
   Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
   Ships **zero components** — the component set belongs entirely to the application.
@@ -44,6 +45,10 @@ One-liner per library:
   [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices and what would reopen each.
   **The edit path is incremental and realtime** — `build(graph, cache)`, `advance_snapshot`, `vdoc::apply` — so a one-entity edit is ~10 µs whatever the document's size.
   [concepts/workloads.md](libs/data/versioned-document/docs/concepts/workloads.md) names the editing shapes that buys, and the one (a fanned drag) it does not.
+  **`vdoc::layer_stack` composes several independent histories into one document**, a higher layer replacing a lower one per property path.
+  A per-frame computed base, user overrides on top, forced values above those.
+  [concepts/layering.md](libs/data/versioned-document/docs/concepts/layering.md) is the design.
+  Property granularity is the requirement rather than a refinement, which is why it composes below the typed layer.
 * **`libs/data/versioned-document-file`** — the `.vdoc` save format.
   One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
   Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
@@ -98,6 +103,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   `.clang-tidy` is still being calibrated — treat its warnings as advisory, not gospel.
 * **Building or testing requires the `building-and-testing` skill.** Activate it before the first `dev.py` build/test in a session, and don't drive `dev.py` from memory.
 * **Test binaries are named `*-test`.** Never run one directly — go through `uv run dev.py test`.
+* **Example binaries are named `*-example`.** Run one example with `uv run dev.py example <match>`, never the binary directly.
+  Examples build everywhere and are executed by nobody automatically — see [docs/guides/examples.md](docs/guides/examples.md).
 * **Feature branches are mandatory** (see Git workflow) — don't commit to `main`.
 * **No force-push to `main`.**
 * **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
@@ -129,6 +136,7 @@ Run it from the repo root, **without piping output** — the output is terse by 
 uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
 uv run dev.py test               # build + run the full suite
 uv run dev.py build [-t <target>]
+uv run dev.py example <match>    # build + run exactly one example (no arg lists them)
 uv run dev.py format             # clang-format our C++ sources in place
 uv run dev.py lint clang-tidy    # run the clang-tidy whitelist gates
 uv run dev.py lint shaped        # run shaped-linter's own rules
@@ -165,8 +173,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
   [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
   The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
-* `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` gate the `*-test` binaries and `tools/`.
-  Both default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
+* `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` / `SC_BUILD_EXAMPLES` gate the `*-test` binaries, `tools/` and the `*-example` binaries.
+  All default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.
   **No API is gated on it** — threaded types keep their full surface and fall back to running on the calling thread, so never `#if` a declaration away.
   OFF is a whole-build switch, never per-target, and `check` runs a `singlethreaded-*` preset so both modes stay exercised.
@@ -324,6 +332,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
+| Run one example                  | `uv run dev.py example <match>` (no arg lists them all; [examples](docs/guides/examples.md)) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
 | Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
@@ -344,6 +353,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Rework a topic's comments/docs   | the `reworking-prose` skill, applied via `uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]` |
 | Measure a doc surface's prose    | `uv run dev.py lint prose-stats <path>...` (lines + words, per file and total) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
+| Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |

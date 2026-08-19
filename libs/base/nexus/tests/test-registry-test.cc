@@ -585,6 +585,16 @@ TEST("test schedule config - a bucket flag selects a bucket and pins the sweep t
         CHECK(!cfg.allow_cross_bucket_naming);
     }
 
+    // --examples selects the example bucket.
+    {
+        char a0[] = "prog";
+        char a1[] = "--examples";
+        char* argv[] = {a0, a1};
+        auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
+        CHECK(cfg.selected_bucket == nx::config::test_bucket::example);
+        CHECK(!cfg.allow_cross_bucket_naming);
+    }
+
     // No bucket flag: the sweep is the normal bucket, but a filter naming a test exactly may cross buckets
     // (decided per-test in is_eligible, not here). run_disabled_tests is never auto-set — an exact name is
     // what enables a disabled test, so a substring filter can't resurrect an unrelated one.
@@ -676,5 +686,74 @@ TEST("test schedule config - a substring filter never reaches another bucket", n
         CHECK(counter_guide == 1);
         CHECK(counter_manual == 0);
         CHECK(exec.count_total_tests() == 1);
+    }
+}
+
+TEST("test registry - example bucket is swept only when selected", no_scheduler)
+{
+    nx::test_registry reg;
+
+    int counter_normal = 0;
+    int counter_example = 0;
+
+    reg.add_declaration("T_normal", {},
+                        [&]
+                        {
+                            ++counter_normal;
+                            SUCCEED();
+                        });
+    reg.add_declaration("clean-core/vector", nx::config::cfg{.bucket = nx::config::test_bucket::example},
+                        [&]
+                        {
+                            ++counter_example; /* no checks: an example demonstrates, it need not assert */
+                        });
+
+    // Default sweep: an example never runs, so `dev.py test` can never open a window by accident.
+    {
+        auto exec = nx::execute_tests(nx::test_schedule::create({}, reg), {});
+        CHECK(counter_normal == 1);
+        CHECK(counter_example == 0);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // Nor under a bulk "run disabled too" request, which is orthogonal to the bucket.
+    counter_normal = counter_example = 0;
+    {
+        auto exec = nx::execute_tests(nx::test_schedule::create({.run_disabled_tests = true}, reg), {});
+        CHECK(counter_example == 0);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // --examples selects the bucket, and an example with no CHECK at all still passes.
+    counter_normal = counter_example = 0;
+    {
+        char a0[] = "prog";
+        char a1[] = "--examples";
+        char* argv[] = {a0, a1};
+        auto exec
+            = nx::execute_tests(nx::test_schedule::create(nx::test_schedule_config::create_from_args(2, argv), reg), {});
+        CHECK(counter_normal == 0);
+        CHECK(counter_example == 1);
+        CHECK(exec.count_total_tests() == 1);
+        CHECK(exec.count_failed_tests() == 0);
+    }
+
+    // An exact name reaches it without the flag — this is what `dev.py example` sends, and what makes a
+    // one-example run addressable at all.
+    counter_normal = counter_example = 0;
+    {
+        auto exec = nx::execute_tests(
+            nx::test_schedule::create({.filters = {"clean-core/vector"}, .allow_cross_bucket_naming = true}, reg), {});
+        CHECK(counter_example == 1);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // ...but a substring never does, so a sweep-shaped filter cannot pull one in.
+    counter_normal = counter_example = 0;
+    {
+        auto exec = nx::execute_tests(
+            nx::test_schedule::create({.filters = {"clean-core"}, .allow_cross_bucket_naming = true}, reg), {});
+        CHECK(counter_example == 0);
+        CHECK(exec.count_total_tests() == 0);
     }
 }

@@ -1,5 +1,6 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -106,13 +107,14 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
             has_accel = true;
     CHECK(has_accel);
 
-    auto group_layout = ctx.uncached.create_binding_group_layout(shader.bindings);
+    auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
     REQUIRE(group_layout != nullptr);
     sg::pipeline_layout_description pld;
     pld.groups = {group_layout};
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout(pld);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    auto pipeline
+        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
     REQUIRE(pipeline != nullptr);
 
     auto out_buf = ctx.persistent.create_raw_buffer(isize(2 * sizeof(u32)),

@@ -258,6 +258,18 @@ public:
     /// Idempotent, since the graph is keyed by content hash.
     vdoc::op_id add_op(vdoc::op op) { return _ops.add(cc::move(op)); }
 
+    /// Forgets an op nothing descends from, which a session does to the frames of a finished drag.
+    ///
+    /// The counterpart to add_op, and the only reason the graph is not otherwise reachable for mutation: a continuous
+    /// edit chains an op per frame and collapses them into one on release, and without this the discarded chain would
+    /// accumulate in memory for the length of the session.
+    /// See [workloads](../../../versioned-document/docs/concepts/workloads.md#continuous-editing-goes-wide).
+    ///
+    /// Storage is not touched, and it does not need to be: publishing derives its ops from the refs, so a frame no ref ever reached was never written.
+    /// Dropping one that WAS published would leave the file's copy in place, which is why this asserts the same thing op_graph::drop_leaf does — nothing may descend from it.
+    /// False where the graph does not have the op.
+    bool drop_leaf_op(vdoc::op_id const& id) { return _ops.drop_leaf(id); }
+
     // publishing
 public:
     /// Publishes ref moves plus the assets and blobs that go with them; the ops follow from the refs by reachability.

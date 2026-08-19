@@ -1347,6 +1347,38 @@ void nx::impl::run_test_body(nx::test_execution& execution,
     }
 }
 
+namespace
+{
+/// Swaps the process-wide ambient scheduler for one phase, restoring the run's own afterwards.
+/// A null `next` is the phase that wants none at all.
+struct scoped_ambient_override
+{
+    explicit scoped_ambient_override(cc::async_scheduler* next) : _previous(cc::async_scheduler::default_or_null())
+    {
+        if (_previous != nullptr)
+            cc::uninstall_default_async_scheduler(*_previous);
+        if (next != nullptr)
+            cc::install_default_async_scheduler(*next);
+        _installed = next;
+    }
+
+    ~scoped_ambient_override()
+    {
+        if (_installed != nullptr)
+            cc::uninstall_default_async_scheduler(*_installed);
+        if (_previous != nullptr)
+            cc::install_default_async_scheduler(*_previous);
+    }
+
+    scoped_ambient_override(scoped_ambient_override const&) = delete;
+    scoped_ambient_override& operator=(scoped_ambient_override const&) = delete;
+
+private:
+    cc::async_scheduler* _previous = nullptr;
+    cc::async_scheduler* _installed = nullptr;
+};
+} // namespace
+
 nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, test_schedule_config const& config)
 {
     test_schedule_execution result;
@@ -1396,6 +1428,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     struct run_phase
     {
         nx::config::scheduler_mode mode = nx::config::scheduler_mode::shared;
+        nx::config::ambient_mode ambient = nx::config::ambient_mode::multi_threaded;
         int threads = 0;
         cc::vector<isize> indices;
     };
@@ -1429,30 +1462,71 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                  && !instance.declaration->is_async())
             mode = nx::config::scheduler_mode::none;
 
+        // The ambient scheduler is the phase's too: it is installed process-wide for the phase, so tests wanting different ones cannot share it.
+        // Only a directly driven body may ask for anything but a pool — a body running as a node on one already has it bound.
+        auto const ambient = instance.declaration->test_config.ambient;
+        CC_ASSERT(mode == nx::config::scheduler_mode::none || ambient == nx::config::ambient_mode::multi_threaded,
+                  "nx::no_scheduler and nx::singlethreaded drive the body directly, so they cannot be combined with a "
+                  "scheduler mode that runs it as a node");
+
         auto const threads = instance.declaration->test_config.scheduler_threads;
         auto* phase = static_cast<run_phase*>(nullptr);
         for (auto& p : phases)
-            if (p.mode == mode && p.threads == threads)
+            if (p.mode == mode && p.ambient == ambient && p.threads == threads)
             {
                 phase = &p;
                 break;
             }
         if (phase == nullptr)
         {
-            phases.push_back(run_phase{.mode = mode, .threads = threads, .indices = {}});
+            phases.push_back(run_phase{.mode = mode, .ambient = ambient, .threads = threads, .indices = {}});
             phase = &phases.back();
         }
         phase->indices.push_back(i);
     }
 
+    // ONE ambient scheduler for the whole run, and deliberately not one per phase.
+    // Work a test left running outlives its phase — an actor thread completing a node is the usual shape — and a completion with nothing installed has nowhere to route.
+    // It is never the scheduler driving the tests either, so a body that blocks on its own graph can never end up running another test's.
+    cc::async_thread_pool run_ambient(config.jobs > 0 ? cc::max(config.jobs - 1, 1)
+                                                      : cc::async_thread_pool::default_worker_count());
+    cc::scoped_default_async_scheduler const run_ambient_installed(run_ambient);
+
     for (auto const& phase : phases)
     {
-        // No scheduler means no graph: with nothing to schedule a node would only wrap a call, and this is the one mode
-        // that must leave the calling thread unbound, so a test nesting its own run finds nothing above it.
+        // Bodies driven directly: no graph, since with nothing to schedule a node would only wrap a call.
         if (phase.mode == nx::config::scheduler_mode::none)
         {
-            for (auto const i : phase.indices)
-                run_scheduled_instance(result.executions[i], config);
+            auto const run_bodies = [&]
+            {
+                for (auto const i : phase.indices)
+                    run_scheduled_instance(result.executions[i], config);
+            };
+
+            switch (phase.ambient)
+            {
+            case nx::config::ambient_mode::multi_threaded:
+                run_bodies(); // the run's own, which is what every other phase gets too
+                break;
+
+            case nx::config::ambient_mode::none:
+            {
+                // The one mode that leaves the thread unbound and installs nothing, so a test nesting its own run finds nothing above it.
+                scoped_ambient_override const overridden(nullptr);
+                run_bodies();
+                break;
+            }
+
+            case nx::config::ambient_mode::single_threaded:
+            {
+                // Bound as well as installed: binding is what makes every graph run inline on this thread, in order, which is what the mode is for.
+                cc::singlethreaded_scheduler scheduler;
+                cc::async_worker_scope const scope(scheduler);
+                scoped_ambient_override const overridden(&scheduler);
+                run_bodies();
+                break;
+            }
+            }
             continue;
         }
 
@@ -1583,13 +1657,13 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             // Serial: drive one node at a time, so the run order IS the schedule order.
             // Not a fan-out join with an st scheduler — a join picks whichever pending dependency it likes, and a chain of edges
             // would drive the whole schedule depth-first past the inline depth cap.
-            cc::singlethreaded_scheduler scheduler;
+            //
+            // The driver is bound but never ambient: its queue holds THE REMAINING TEST NODES, and a body that
+            // blocked on it would run other tests, bodies and all, nested inside itself.
+            cc::singlethreaded_scheduler driver;
+            cc::async_worker_scope const scope(driver);
             for (auto const& node : test_nodes)
-            {
-                auto const completed = scheduler.try_blocking_get(node).has_value();
-                CC_ASSERT(completed, "a test node is self-contained, so driving it here must complete it");
-                CC_UNUSED(completed);
-            }
+                (void)cc::async_blocking_get_on(driver, node);
             continue;
         }
 
@@ -1606,11 +1680,12 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                 return actx.resolve_to_value(cc::unit{});
             });
 
-        // One fewer worker than the job count: the thread blocking here participates as one.
+        // One fewer worker than the job count: the thread driving here participates as one.
+        // It is the phase's ambient scheduler too, so a body's own async work belongs to the pool already running it —
+        // the run's own stays installed around the phase, for work that outlives it.
         cc::async_thread_pool pool(jobs - 1);
-        auto const outcome = pool.try_blocking_get(join);
-        CC_ASSERT(outcome.has_value(), "the test graph is self-contained, so driving it here must complete it");
-        CC_UNUSED(outcome);
+        scoped_ambient_override const overridden(&pool);
+        (void)cc::async_blocking_get_on(pool, join);
     }
 
     // Flush the buffered per-test traces in schedule order, so --verbose reads the same however the tests ran.

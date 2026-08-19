@@ -21,6 +21,11 @@ async_compute_pipeline context_cached_scope::acquire_compute_pipeline(compute_pi
     return _ctx.pipeline_cache_ref().acquire_compute_pipeline(_ctx, desc);
 }
 
+async_raster_pipeline context_cached_scope::acquire_raster_pipeline(raster_pipeline_description const& desc)
+{
+    return _ctx.pipeline_cache_ref().acquire_raster_pipeline(_ctx, desc);
+}
+
 async_raytracing_pipeline context_cached_scope::acquire_raytracing_pipeline(raytracing_pipeline_description const& desc)
 {
     return _ctx.pipeline_cache_ref().acquire_raytracing_pipeline(_ctx, desc);

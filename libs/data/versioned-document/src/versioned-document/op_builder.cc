@@ -19,7 +19,7 @@ vdoc::op_builder& vdoc::op_builder::set_metadata(value metadata)
     return *this;
 }
 
-vdoc::op_builder& vdoc::op_builder::set_raw(property_path const& path, value v)
+void vdoc::op_builder::impl_assert_unstaged(property_path const& path)
 {
     // Free in release, where CC_ASSERT is stripped — but a debug editor staging a bulk edit pays it, and a linear
     // scan per write is quadratic in the size of the op.
@@ -43,7 +43,11 @@ vdoc::op_builder& vdoc::op_builder::set_raw(property_path const& path, value v)
             CC_ASSERT(_staged_paths.insert(path), "the same property path was staged twice in one op");
         }
     }
+}
 
+vdoc::op_builder& vdoc::op_builder::set_raw(property_path const& path, value v)
+{
+    impl_assert_unstaged(path);
     _writes.push_back(pending_write{.path = path, .v = cc::move(v)});
     return *this;
 }
@@ -51,6 +55,19 @@ vdoc::op_builder& vdoc::op_builder::set_raw(property_path const& path, value v)
 vdoc::op_builder& vdoc::op_builder::set_raw(entity_id entity, component_type_id component, property_id property, value v)
 {
     return set_raw(property_path{.entity = entity, .component = component, .property = property}, cc::move(v));
+}
+
+vdoc::op_builder& vdoc::op_builder::abstain(property_path const& path)
+{
+    // Staging a write and a withdrawal of one path in one op is the same caller bug as staging two writes.
+    impl_assert_unstaged(path);
+    _writes.push_back(pending_write{.path = path, .kind = assignment_kind::abstain});
+    return *this;
+}
+
+vdoc::op_builder& vdoc::op_builder::abstain(entity_id entity, component_type_id component, property_id property)
+{
+    return abstain(property_path{.entity = entity, .component = component, .property = property});
 }
 
 vdoc::op_builder& vdoc::op_builder::set_alive(entity_id entity, component_type_id component, bool alive)
@@ -98,6 +115,17 @@ vdoc::op vdoc::op_builder::impl_build(op_graph const& graph, snapshot_cache* cac
     for (auto const& w : _writes)
     {
         auto const* const existing = current.try_get(w.path);
+
+        if (w.kind == assignment_kind::abstain)
+        {
+            // The mirror of the write case: withdrawing a contribution to a path nothing writes says nothing at all.
+            // That is what lets an override layer re-stage the same withdrawal every frame for free.
+            if (existing == nullptr)
+                continue;
+
+            entries.push_back(assignment{.path = w.path, .kind = assignment_kind::abstain});
+            continue;
+        }
 
         // A multi-valued path always differs: it is two independent writes rather than a value, and this op is what
         // resolves it back to one.

@@ -31,21 +31,42 @@ TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RN
 TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
 TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all; a synchronous one is
                                          //     routed into the no-scheduler group, so it costs no barrier and no node
-TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — nothing bound; REQUIRED to nest nx::execute_tests
+TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — NO ambient scheduler at all: none bound, none
+                                         //     installed. For a test standing up its own, and REQUIRED to nest
+                                         //     nx::execute_tests. Touching an async without one asserts.
+TEST("order matters", singlethreaded) { }//   singlethreaded  — ambient cc::singlethreaded_scheduler: every graph
+                                         //     runs inline on the body's thread, in order
 TEST("opens a window", main_thread) { }  //   main_thread     — body runs on the process MAIN thread (SDL wants that);
                                          //     a flag, not a mode, so it composes; own_pool / ASYNC_TEST assert
 TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-worker pool, shared per count
 // Exclusion is an ORDERING edge, not a lock: holders run in schedule order, which is reproducible by design.
 
 #include <nexus/async-test.hh>           // separate header: TEST pays nothing for the async templates
-ASYNC_TEST("cache - resolves a miss")    // body returns cc::shared_async<cc::unit>; nexus awaits it
-{                                        //   the returned root must be COLD — that stamp is what attributes its checks
-    return cc::make_async_lazy<cc::unit>(/* ... CHECK inside the graph lands on THIS test ... */);
-}                                        //   no SECTION inside an async body; a graph error fails the test by name
+ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexus awaits the body
+{                                        //   a CHECK at any depth below it still lands on THIS test
+    auto const e = co_await cache.acquire_async("shader.hlsl");   // a FAILED await short-circuits + fails the test
+    CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
+}                                        // no co_ keyword? then `return` a COLD cc::shared_async<cc::unit> instead
 
-// Buckets: every test is in one bucket — normal (default), manual, or guide_benchmark. A sweep selects one
-// bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
+// Buckets: every test is in one bucket — normal (default), manual, guide_benchmark, or example. A sweep selects
+// one bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
+```
+
+## Examples (`EXAMPLE`)
+
+A runnable demonstration of an API **in practice**, in the `example` bucket, run one at a time by `dev.py example`.
+Every build compiles them and no sweep runs one; [docs/guides/examples.md](../../../docs/guides/examples.md) is the concept and the CMake side.
+
+```cpp
+EXAMPLE("clean-core/vector")             // swept only via `--examples`, or run by its exact name
+{                                        //   no CHECK required — a failing one still fails
+    auto v = cc::vector<int>::create_filled(5, 1);
+    cc::println("{} elements", v.size());
+}
+// The name is a slash path: it is the CLI argument and the gallery entry, so it is an identifier, not a sentence.
+// `main_thread` is baked in, so the body runs on the thread nx::run was entered on, one example at a time.
+// The run still installs an ambient async scheduler; EXAMPLE("x", no_scheduler) is how one installs its own.
 ```
 
 ## Guide benchmarks (PGO metrics)
@@ -204,7 +225,7 @@ uv run dev.py test                       # build + run the whole suite
 // Catch2-compatible CLI (for IDEs/tooling, not daily use): --list-tests, --reporter xml,
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
-// --perf-json <file> (write recorded-metric sidecar).
+// --examples (sweep example bucket), --perf-json <file> (write recorded-metric sidecar).
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
 //   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.

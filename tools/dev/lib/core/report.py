@@ -240,8 +240,8 @@ def summarize_format(result, root: Path) -> bool:
     Offenders (check mode) go to stdout (pipeable); the verdict to stderr.
     """
     if result.nothing:
-        scope = "dirty libs/ sources" if result.dirty_only else "libs/ sources"
-        print(console.dim(f"No {scope} to format."), file=sys.stderr)
+        what = result.scope.phrase("libs/ sources") if result.scope else "libs/ sources"
+        print(console.dim(f"No {what} to format."), file=sys.stderr)
         return True
 
     if result.check:
@@ -251,7 +251,7 @@ def summarize_format(result, root: Path) -> bool:
         for f in result.offenders:
             print(rel(f, root))
         sys.stdout.flush()
-        hint = " --dirty-only" if result.dirty_only else ""
+        hint = result.scope.rerun_flag() if result.scope else ""
         print(
             console.red(
                 f"\n{len(result.offenders)} of {result.files} file(s) need formatting "

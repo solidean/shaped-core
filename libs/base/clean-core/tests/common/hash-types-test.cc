@@ -27,6 +27,20 @@ TEST("hash types - string and string_view hash equally (heterogeneous)")
     CHECK(cc::make_hash(s) != cc::make_hash(other));
 }
 
+TEST("hash types - a char array hashes as the string it holds")
+{
+    cc::string const s = "hello world";
+    CHECK(cc::make_hash("hello world") == cc::make_hash(s));
+    CHECK(cc::make_hash("hello world") == cc::make_hash(cc::string_view("hello world")));
+
+    // the length is the string's, not the array bound — same as what string_view makes of the array
+    char const padded[16] = "hello world";
+    CHECK(cc::string_view(padded).size() == 11);
+    CHECK(cc::make_hash(padded) == cc::make_hash(s));
+
+    CHECK(cc::make_hash("") == cc::make_hash(cc::string_view()));
+}
+
 TEST("hash types - vector is structural and order-dependent")
 {
     cc::vector<int> const a = {1, 2, 3};

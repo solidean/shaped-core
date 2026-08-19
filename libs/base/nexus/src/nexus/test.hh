@@ -72,6 +72,20 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 // Extra config items compose as with TEST, e.g. GUIDE_BENCHMARK("name", seed(42)).
 #define GUIDE_BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, guide_benchmark __VA_OPT__(, ) __VA_ARGS__)
 
+// An example: a runnable demonstration of an API in practice, in the example bucket.
+// Swept only via --examples, or named exactly, and never in a normal run; `dev.py example <match>` runs exactly one.
+// Its body needs no CHECK — an example shows how a library FEELS to use, which is precisely what a test's testability bias filters out.
+// A failing CHECK still fails, so an example may assert where asserting is part of the demonstration.
+//
+// The name is a slash path, because it doubles as the gallery entry and the screenshot slug:
+//
+//   EXAMPLE("blob-cache/put-and-get")
+//
+// `main_thread` is baked in: bodies run on the thread nx::run was entered on, one at a time, which is what a window or a device context usually needs.
+// The run still installs an ambient async scheduler, so an example may use asyncs without standing up a pool of its own —
+// `no_scheduler` is the trailing config item for the example that wants to install one itself.
+#define EXAMPLE(name, ...) NX_IMPL_TEST(name, __COUNTER__, example, main_thread __VA_OPT__(, ) __VA_ARGS__)
+
 // An invocable test: an inert test body taking arguments, run only when a driver calls nx::invoke_tests with a matching (decayed) argument signature.
 // That is the parametrized / data-driven / generator pattern, and libs/base/nexus/docs/invocable-tests.md has the full mechanism.
 // `params` is a parenthesized function parameter list, and the body follows with no trailing ';'.

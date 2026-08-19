@@ -228,6 +228,10 @@ imgui_context imgui_context::create(imgui_context_description const& desc)
 
     io.BackendPlatformName = "shaped-rendering (sr::window)";
 
+    // imgui's own default is "imgui.ini" relative to the current working directory, which drops a file wherever the app was started from.
+    // Null is what makes a caller's persistence explicit — through load_settings / take_dirty_settings, into whatever store it already has.
+    io.IniFilename = nullptr;
+
     // We set the cursor shape from ImGui::GetMouseCursor each frame — see begin_frame(window&, float).
     io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
 
@@ -240,6 +244,15 @@ imgui_context imgui_context::create(imgui_context_description const& desc)
     // begin_frame(window&) is the first point one is in reach.
     auto result = imgui_context(ctx);
     result._viewports_requested = desc.enable_viewports;
+
+    // Set through the member rather than from `desc`, whose string the caller may drop the moment create() returns —
+    // imgui keeps the pointer and reads it on every save.
+    if (!desc.ini_file.empty())
+    {
+        result._ini_file = cc::make_unique<cc::string>(cc::string::create_copy_c_str_materialized(desc.ini_file));
+        io.IniFilename = result._ini_file->c_str_if_terminated();
+    }
+
     return result;
 }
 
@@ -519,6 +532,7 @@ void imgui_context::begin_frame(frame_info const& info)
     io.DisplayFramebufferScale = ImVec2(info.framebuffer_scale[0], info.framebuffer_scale[1]);
     io.DeltaTime = info.delta_time;
 
+    _frame_started = true; // NewFrame is the point past which load_settings can no longer reach every window
     ImGui::NewFrame();
 }
 
@@ -528,5 +542,40 @@ void imgui_context::end_frame()
     ImGui::Render(); // builds the draw data ImGui::GetDrawData() returns
 
     _viewport_update_pending = (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0;
+}
+
+void imgui_context::load_settings(cc::string_view ini)
+{
+    CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
+    CC_ASSERT(!_frame_started, "load_settings must run before the first frame — imgui applies a window's settings when "
+                               "it first creates that window");
+    CC_ASSERT(_ini_file == nullptr, "load_settings needs an empty ini_file — imgui already loads the file it was "
+                                    "given");
+
+    // The sized overload, so a view that is not null-terminated is fine.
+    ImGui::LoadIniSettingsFromMemory(ini.data(), size_t(ini.size()));
+}
+
+cc::optional<cc::string> imgui_context::take_dirty_settings()
+{
+    CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
+
+    auto& io = ImGui::GetIO();
+    if (!io.WantSaveIniSettings)
+        return cc::nullopt;
+
+    // Clearing it is the caller's job by imgui's contract, and this call is that caller.
+    io.WantSaveIniSettings = false;
+    return this->settings();
+}
+
+cc::string imgui_context::settings() const
+{
+    CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
+
+    // imgui owns the buffer and reuses it, so the copy is what makes the result outlive the next imgui call.
+    auto size = size_t(0);
+    auto const* const ini = ImGui::SaveIniSettingsToMemory(&size);
+    return cc::string::create_copy_of(cc::string_view(ini, isize(size)));
 }
 } // namespace sr

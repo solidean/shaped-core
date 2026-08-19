@@ -54,9 +54,22 @@ public:
         return *this;
     }
 
+    /// Stages a withdrawal of this history's contribution to a path, leaving whatever is below to show through.
+    ///
+    /// **This is the only way to un-write a property.** Deletion via `$alive` removes a whole component or entity;
+    /// this removes one write, and it is what reverts an override to a lower layer or a stored value to absent.
+    ///
+    /// Its diff is the mirror of `set_raw`'s: abstaining over a path nothing writes emits nothing, so re-staging the
+    /// same withdrawal every frame costs nothing and yields the same op id.
+    op_builder& abstain(property_path const& path);
+    op_builder& abstain(entity_id entity, component_type_id component, property_id property);
+
     /// Deletion, which is an ordinary assignment and never a removal.
     ///
     /// Something is dead only if `$alive` is unambiguously false, so writing true here is how an undelete is spelled.
+    ///
+    /// Distinct from `abstain(entity, component, reserved::alive())`, which withdraws this history's opinion about
+    /// aliveness rather than asserting one — the difference between "I no longer say it is dead" and "I say it is alive".
     op_builder& set_alive(entity_id entity, component_type_id component, bool alive);
 
     /// Entity-level deletion: `$alive` on the `$entity` component type, which drops the whole entity.
@@ -79,18 +92,20 @@ public:
 
     /// Materializes the touched entities as seen from this op's parents, and emits only what actually differs.
     ///
-    /// The diff has four cases, and the last is the one worth knowing:
+    /// The diff has four cases per staged path, and `abstain` is the mirror of a write in each:
     ///
-    /// | current state of the path      | emit?                  |
-    /// |--------------------------------|------------------------|
-    /// | absent                         | yes                    |
-    /// | one writer, bytes equal        | no                     |
-    /// | one writer, bytes differ       | yes                    |
-    /// | two or more writers            | yes, whatever the bytes|
+    /// | current state of the path      | `set_raw` emits?       | `abstain` emits? |
+    /// |--------------------------------|------------------------|------------------|
+    /// | absent                         | yes                    | no               |
+    /// | one writer, bytes equal        | no                     | yes              |
+    /// | one writer, bytes differ       | yes                    | yes              |
+    /// | two or more writers            | yes, whatever the bytes| yes              |
     ///
     /// A multi-valued property is two independent writes rather than a value, so nothing about it equals the desired
     /// one — and emitting is the only way a conflict is ever resolved through the normal edit path.
     /// See [decisions.md](../../docs/decisions.md#a-multi-valued-property-always-differs).
+    ///
+    /// The top-right cell is what makes a per-frame override layer cheap: withdrawing what nobody wrote says nothing.
     ///
     /// The result is not added to the graph; that is the caller's `graph.add(...)`.
     [[nodiscard]] op build(op_graph const& graph) const;
@@ -109,10 +124,16 @@ public:
 private:
     [[nodiscard]] op impl_build(op_graph const& graph, snapshot_cache* cache) const;
 
+    /// Asserts this path has not already been staged, maintaining the lazy index the check switches to.
+    void impl_assert_unstaged(property_path const& path);
+
     struct pending_write
     {
         property_path path;
         value v;
+
+        /// `v` is unused and meaningless on an abstain.
+        assignment_kind kind = assignment_kind::set;
     };
 
     cc::vector<op_id> _parents;

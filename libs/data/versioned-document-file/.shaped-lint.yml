@@ -31,9 +31,3 @@ rules:
     reason: the loop benchmark times one-shot stages rather than repeatable throughput, so it needs a clock rather than clean-core's adaptive timer.
     files:
       - tests/benchmarks/**
-
-  - kind: allow-include
-    value: <algorithm>
-    reason: taking a median of a handful of timings, which is the simplest robust noise filter and not worth a container of our own.
-    files:
-      - tests/benchmarks/**

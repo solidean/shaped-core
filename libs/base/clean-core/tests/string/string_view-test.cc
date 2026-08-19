@@ -72,6 +72,14 @@ TEST("string_view - construction")
         CHECK(sv.empty());
     }
 
+    SECTION("char buffer construction reads to the terminator, not to the array bound")
+    {
+        char buf[100] = "hello";
+        auto const sv = cc::string_view{buf};
+        CHECK(sv.size() == 5);
+        CHECK(sv == "hello");
+    }
+
     SECTION("container construction - cc::string")
     {
         auto const str = cc::string{"hello world"};

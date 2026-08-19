@@ -66,8 +66,15 @@ auto v = cc::vector<int>::create_defaulted(n);   // also: create_filled(n, val),
 v.push_back(x);  v.emplace_back(args...);        // append (reallocates if needed)
 v.push_back_stable(x);                           // append, asserts spare capacity (no realloc)
 v.push_back_range(rng);                          // append a whole range (sized -> single reservation); push_back_range_stable(rng) needs capacity
+v.insert_at(i, x);  v.emplace_at(i, args...);    // insert at index -> T&; i == size() appends; arg may reference v
+v.insert_range_at(i, rng);                       // insert a SIZED range at index -> cc::span<T> of what landed
+v.replace_range({.offset = i, .size = n}, rng);  // [head][n at i][tail] -> [head][rng][tail]; n and rng.size() are
+                                                 // independent, tail moves ONCE -> span the rng now occupies
+                                                 // insert_range_at / replace_range: rng must NOT alias v (asserts)
 v.pop_back();                                    // -> T (moved out);  remove_back() discards
 v.remove_at(i);  v.remove_at_unordered(i);       // erase by index (ordered / O(1) swap-with-last)
+v.remove_at_range({.offset = i, .size = n});     // erase a run; also remove_at_range_unordered
+v.remove_from_to(start, end);                    // the [start, end) spelling; also remove_from_to_unordered
 v.remove_all_where(pred);  v.remove_all_value(x);// -> isize removed;  also remove_first/last_*
 v.retain_all_where(pred);                        // keep only matching
 v.resize_to_defaulted(n);                        // also resize_to_filled/_uninitialized/_constructed,
@@ -108,12 +115,14 @@ cc::variant<int, immovable>::create_emplaced<1>(7);// prvalue, so immovable alte
 #include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, N-min inline (SVO)
 cc::small_vector<int, 4> sv;                       // 48 B here; N is a MINIMUM inline cap; over-aligned T OK
 sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop_back/clear/resize/reserve
+sv.push_back_range(rng);                           // also insert_at/emplace_at/insert_range_at/replace_range
 sv.is_inline();                                    // true while still on the inline buffer (no heap held)
 sv.inline_capacity();                              // actual inline cap >= N (auto-grows to fill footprint; 9 here)
 
 #include <clean-core/container/fixed_vector.hh>  // cc::fixed_vector<T, N> — inline, N is a HARD capacity cap
 cc::fixed_vector<int, 4> fv;                       // never allocates; pushing past N ASSERTS (no heap spill)
 fv.push_back(1); fv.emplace_back(2);               // mirrors vector, minus reserve*/shrink_to_fit/extract_allocation
+fv.push_back_range(rng);                           // also insert_at/emplace_at/insert_range_at/replace_range
 fv.full();  fv.capacity();                         // -> bool;  -> N (static constexpr)
 
 #include <clean-core/container/ringbuffer.hh>     // cc::ringbuffer<T> — O(1) push/pop at BOTH ends, grows
@@ -191,6 +200,7 @@ e.value();  e.key();                               // valid once occupied;  e.ge
 e.emplace_with_key(kargs, vargs...);               // rare: build K from explicit args instead of the probe key
 // entry is invalidated by ANY structural mutation of the map (incl. another entry's emplace) — don't mutate in between.
 // heterogeneous lookup needs the probe type to hash-equal & compare-equal to K (e.g. string_view vs string).
+// on a string-keyed map a literal probes directly: m["axis"], m.get("axis"), m.erase("axis") — no view to name.
 // keys must hash well-mixed: buckets mask low bits. default_hash finalizes; a custom Hash MUST avalanche.
 // move: O(1) (nodes stay put).  copy: deep, only if K and V are copyable (else move-only).
 // customize: cc::map<K,V,Hash,KeyEqual> — Hash{}(k)->u64 (transparent), KeyEqual{}(a,b)->bool (transparent).
@@ -290,7 +300,8 @@ str.subview(off / {.offset,.size} / {.start,.end});   // -> string_view (dies on
 str.substring(off / {.offset,.size} / {.start,.end}); // -> owning cc::string copy
 str.replace_all(from, to);                        // -> isize count; char/char or sv/sv (empty from = no-op)
 str.replace_first(from, to);  str.replace_last(from, to);   // -> bool; char/char or sv/sv
-str.replace({.offset,.size} / {.start,.end}, with);         // replace a range with a string_view
+str.replace({.offset,.size} / {.start,.end}, with);         // replace a range with a string_view; in place unless `with` aliases str
+str.insert_at(i, c);  str.insert_range_at(i, sv);           // insert at byte index; i == size() appends; sv must NOT alias str
 str.is_small();                                   // -> bool (currently in SSO mode)
 str.as_span();  str.as_mutable_span();            // -> span<char const> / span<char> (content only, no terminator)
 str.as_bytes();  str.as_mutable_bytes();          // -> span<byte const> / span<byte>
@@ -550,6 +561,8 @@ cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold ov
 //   the protocol, the tier order and the reasoning: docs/customization-points.md
 // built-in: string/string_view (bytes, equal across both); vector/array/span/fixed_array/pair/optional (structural);
 //           unique_* containers structural; unique_ptr by pointer identity
+// a char array hashes as the string it holds (needs string_view.hh), which is what makes m["literal"] work
+//   a raw char const* still hashes by ADDRESS — convert it to a string_view before using it as a key
 
 #include <clean-core/common/hash128.hh>
 cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)
@@ -748,7 +761,7 @@ cc::shared_async<T, E = async_error> = cc::shared_ptr<cc::async<T, E>, impl::asy
 // cc::async_context<T, E>& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
 // values before f runs; errors short-circuit. T deduced (context-free) or explicit; E defaults to async_error.
 auto a = cc::make_async_lazy([]{ return 40; });                             // cold; no context, no deps
-auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager (scheduled if worker scope active)
+auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager: worker scope, else default pool
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
@@ -758,11 +771,12 @@ auto p = cc::make_async_lazy_emplace<int, cc::async_error, PinnedFrame>(7); // b
 auto rv = cc::make_async_from_value(42);   auto re = cc::make_async_from_error<int>(async_error::make_cancelled());
 auto rvE = cc::make_async_from_value_emplace<Immovable>(7);  // T explicit; also *_from_error_emplace<T, E>(...)
 
-// you never block on an async: a SCHEDULER drives it. These build a throwaway singlethreaded_scheduler and
-// BLOCK the calling thread — top-level/tests only, never in a frame. Verbose name = deliberately discouraged:
-int v = cc::async_blocking_get_singlethreaded(a);                    // -> T (asserts on error/cancel/no-progress)
-cc::optional<cc::result<int, cc::async_error>> r = cc::try_async_blocking_get_singlethreaded(a); // nullopt if it
-                    // couldn't complete here (parked on an unpushed manual node, or migrated to another scheduler)
+// you never block on an async: a SCHEDULER drives it. These drive on the AMBIENT one and BLOCK the calling
+// thread — a bridge from sync code, not a way to write it. Ready on return: value or error, never pending.
+int v = cc::async_blocking_get(a);                                   // -> T (asserts on error/cancel)
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a);  // fallible; no "not yet" to handle
+cc::try_async_blocking_get_for(a, 50);                               // -> cc::optional<result>, the only "not yet"
+int v2 = cc::async_blocking_get_on(pool, a);                         // drive on THIS scheduler, not the ambient one
 cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
 int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value
@@ -804,11 +818,11 @@ sched.drain();  sched.empty();      // pump till empty / is anything queued (a q
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
 cc::async_thread_pool pool;                              // >=1 workers; default = hardware concurrency - 1 (below)
-cc::install_default_async_pool(pool);                    // compute nodes route here when off-worker
-int v = pool.blocking_get(root);                         // caller PARTICIPATES (runs the graph, steals), then blocks
-// ^ hence the -1 default: the calling thread is a worker for the duration. A graph that never forks stays on it
+cc::scoped_default_async_scheduler const ambient(pool);  // THE ambient scheduler: every async belongs to it
+int v = cc::async_blocking_get(root);                    // caller PARTICIPATES (runs the graph, steals), then blocks
+// ^ hence the -1 default: the driving thread is a worker for the duration. A graph that never forks stays on it
 //   entirely — tens of ns, no cross-thread round trip (docs/systems/async.md "Driving").
-//   Never call blocking_get from inside a worker of that pool.
+//   An app installs one at startup; a nexus run installs one per phase (nx::no_scheduler opts out).
 // route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
 cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
 // WITHOUT THREADS (CC_HAS_THREADS == 0) the pool still exists with the same API — no #if at the call site.
@@ -829,8 +843,26 @@ cc::async_is_polling();          // inside a poll? i.e. would a throw from here 
 // never by a thread merely WAKING it, so a shared dep completing under B cannot contaminate A's continuation.
 // Links are refcounted, so work may outlive the scope that named it (prewarming is legal, not a leak); cc does
 // not assert on that — read outstanding() and decide for yourself. A RESOLVED node carries no context at all.
-// Not here yet: co_await, plain (non-async) dep args, structured/owned children, error-type conversion across
-// a heterogeneous-E dependency graph (the make_async_* sugar assumes a single E; raw frames can bridge by hand).
+// co_await / co_return (#include <clean-core/thread/async_coroutine.hh> — INCLUDING it is what enables coroutines)
+// A coroutine IS a compute frame: the node stores one coroutine_handle (8 B, always inline). T must be MOVABLE.
+// Take coroutine parameters BY VALUE — they are captured by declared type, so a reference dangles across a suspend.
+cc::shared_async<int> load(cc::string p) { auto const& b = co_await read(p); co_return parse(b); } // COLD (= lazy)
+cc::async_scheduled<int> spawn(cc::string p) { co_return 1; }  // eager at initial suspend; converts to shared_async
+auto a = cc::async_start(load(p));    // "and go": idempotent; no-op if nothing could route (stays cold, drives later)
+int const& v = co_await a;            // -> U const& into the node; a FAILED dep short-circuits (locals destroyed,
+                                      // rest of the body skipped, error propagates) — no unwind, no catch runs
+co_await cc::async_all(a, b, c);      // require ALL, park once; then `co_await a` no longer suspends. Also a span
+                                      // overload. THE fan-out spelling: awaiting two COLD asyncs in sequence runs
+                                      // them in sequence, since one await parks on one dependency
+co_await cc::async_settled(a);        // wait WITHOUT short-circuiting, then read a->try_value()/try_error() (no copy)
+cc::result<int> r = co_await cc::async_as_result(a);   // same, as a value (copies; needs a copyable U)
+co_await cc::async_yield();           // -> async_step_status::yield; makes the node stealable and lets newer local
+                                      // work go first. NOT a fairness knob (LIFO deque pops it back), NOT a way to
+                                      // wait on something external — that is a manual node
+co_await cc::async_fail("boom");      // never resumes; the uniform failure spelling
+co_return cc::error("boom");          // non-unit T only (return_void and return_value cannot coexist)
+// Not here yet: plain (non-async) dep args, structured/owned children, immovable T through co_return, error-type
+// conversion across a heterogeneous-E graph (the make_async_* sugar assumes a single E; raw frames bridge by hand).
 ```
 
 ## Strings — encoding conversion
@@ -865,6 +897,12 @@ cc::temp_file_path(prefix, suffix = "");            // "<temp>/<prefix>-<pid>-<c
 cc::remove_file(path);                              // true == gone, which includes never having been there
                                                     // NOT a filesystem layer: no mkdir, no iteration, no metadata,
                                                     // no path arithmetic. Reading and writing are the file streams'.
+
+#include <clean-core/platform/environment.hh>     // read-only process environment
+cc::environment_variable("HOME");                   // cc::optional<cc::string>; EMPTY value reads as absent
+cc::is_environment_flag_set("SC_REQUEST_BACKGROUND");  // bool; set and not "0"/"false"/"no"/"off" (case-insensitive)
+                                                    // No setter: it is process-global and racy against every other
+                                                    // thread — pass the variable when spawning the child instead.
 
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
@@ -997,8 +1035,9 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **A sort comparator MUST be a strict weak ordering.**
   The partition scans are deliberately unbounded, so one that is not walks off the range — `CC_ASSERT` catches it in debug and relwithdebinfo, and release has nothing to catch it with.
   `<=` where `<` was meant, and floats that can be NaN, are the two usual causes.
-- **No sort here is stable**, and there is no `cc::stable_sort` — stability needs a buffer, which the swap-only design forbids.
-  `cc::sort_indices` over `0..n-1` is the stable spelling: it breaks ties on the index.
+- **No sort here is stable by default** — the plain `cc::sort` / `sort_by` leave equal elements in an unspecified order.
+  `cc::sort_stable` / `cc::sort_stable_by` are the stable spellings, and they permute an index array rather than buffering elements, so the swap-only design survives.
+  `cc::sort_indices` over `0..n-1` is stable for the same reason: it breaks ties on the index.
 - **`cc::sort_by` evaluates its key on every comparison**, i.e. O(n log n) times.
   `cc::sort_by_cached_key` evaluates it exactly n times into a temporary buffer, and is worth it as soon as the key costs more than a member read.
 - **`cc::vector` is not an `index_swap_range`** — deliberately, so nothing models the seam by accident.

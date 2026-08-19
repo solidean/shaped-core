@@ -88,8 +88,8 @@ cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(tru
 cc::async_thread_pool::~async_thread_pool()
 {
     CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_default_async_pool / "
-              "scoped_default_async_pool)");
+              "uninstall this pool as the default before destroying it (uninstall_default_async_scheduler / "
+              "scoped_default_async_scheduler)");
 
     _stop.store(true, cc::memory_order_release);
     {
@@ -376,6 +376,22 @@ void cc::async_thread_pool::drain_slot_to_injection(worker& w)
         wake_one();
 }
 
+bool cc::async_thread_pool::try_run_one()
+{
+    // Only from a slot of our own: a step runs on the calling thread's deque, and a foreign thread has none until it participates.
+    worker* const w = current_worker();
+    if (w == nullptr || w->pool != this)
+        return false;
+
+    async_worker_scope const scope(*this);
+    auto n = try_get_work(*w);
+    if (n == nullptr)
+        return false;
+
+    n->poll();
+    return true;
+}
+
 void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 {
     worker* const slot = try_claim_external_slot();
@@ -387,8 +403,29 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         return;
     }
 
-    worker* const previous = current_worker();
-    set_current_worker(slot);
+    // RAII rather than a restore at the bottom: a poll below can throw — an assert handler that reports a check does —
+    // and a thread left pointing at a slot of a pool it is no worker of pushes onto the wrong deque from then on.
+    // The slot would stay claimed forever too, so the pool would lose an external seat per escape.
+    struct slot_scope
+    {
+        async_thread_pool& pool;
+        worker* const claimed;
+        worker* const previous;
+
+        slot_scope(async_thread_pool& p, worker* s) : pool(p), claimed(s), previous(current_worker())
+        {
+            set_current_worker(s);
+        }
+        ~slot_scope()
+        {
+            set_current_worker(previous);
+            claimed->claimed.store(false, cc::memory_order_release);
+        }
+        slot_scope(slot_scope const&) = delete;
+        slot_scope& operator=(slot_scope const&) = delete;
+    };
+
+    slot_scope const held(*this, slot);
     {
         async_worker_scope const scope(*this); // binds THIS pool, so the root's children route to our own deque
 
@@ -430,8 +467,6 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 
         drain_slot_to_injection(*slot);
     }
-    set_current_worker(previous);
-    slot->claimed.store(false, cc::memory_order_release);
 }
 
 #else // CC_HAS_THREADS == 0
@@ -463,8 +498,8 @@ cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(fal
 cc::async_thread_pool::~async_thread_pool()
 {
     CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_default_async_pool / "
-              "scoped_default_async_pool)");
+              "uninstall this pool as the default before destroying it (uninstall_default_async_scheduler / "
+              "scoped_default_async_scheduler)");
 
     // No drain by hand, unlike the threaded destructor: _queue holds real handles, so abandoned work releases its own counts when the vector dies.
     // Same contract though — outstanding graphs are dropped, not run.
@@ -472,7 +507,7 @@ cc::async_thread_pool::~async_thread_pool()
 
 int cc::async_thread_pool::default_worker_count()
 {
-    return 0; // no threads to give: the blocking_get caller is the only worker there is
+    return 0; // no threads to give: whoever drives a graph is the only worker there is
 }
 
 void cc::async_thread_pool::enqueue(async_node_ptr node)
@@ -491,6 +526,18 @@ void cc::async_thread_pool::submit(async_node_ptr node)
     _queue.push_back(cc::move(node));
 }
 
+bool cc::async_thread_pool::try_run_one()
+{
+    async_worker_scope const scope(*this); // bind the pool, so what the node schedules routes back to _queue
+    if (_queue.empty())
+        return false;
+
+    async_node_ptr n = cc::move(_queue.back());
+    _queue.pop_back();
+    n->poll();
+    return true;
+}
+
 void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 {
     async_worker_scope const scope(*this); // bind the pool, so nodes the frames touch route back to _queue
@@ -500,7 +547,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     root.poll();
 
     // Then pump whatever it queued.
-    // Anything reachable runs, so falling out with the root not ready means the graph is parked on something no thread here will ever deliver -- blocking_get's assert names that.
+    // Anything reachable runs, so falling out with the root not ready means the graph is parked on something no thread here will ever deliver.
     while (!root.is_ready() && !_queue.empty())
     {
         async_node_ptr n = cc::move(_queue.back());
@@ -510,18 +557,3 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 }
 
 #endif // CC_HAS_THREADS
-
-void cc::install_default_async_pool(async_thread_pool& pool)
-{
-    CC_ASSERT(async_scheduler::default_or_null() == nullptr,
-              "a default async pool is already installed; overriding a live default is almost never correct "
-              "(uninstall it first, or use scoped_default_async_pool)");
-    async_scheduler::set_default(&pool);
-}
-
-void cc::uninstall_default_async_pool(async_thread_pool& pool)
-{
-    CC_ASSERT(async_scheduler::default_or_null() == static_cast<async_scheduler*>(&pool),
-              "uninstall_default_async_pool: this pool is not the currently installed default");
-    async_scheduler::set_default(nullptr);
-}

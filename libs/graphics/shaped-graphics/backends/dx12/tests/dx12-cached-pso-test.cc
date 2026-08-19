@@ -144,4 +144,7 @@ TEST("sg cached PSO - the blob is not part of the built-in cache key")
     auto b = ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout, .cached_pipeline = blob});
     REQUIRE(a != nullptr);
     CHECK(a.get() == b.get());
+
+    // One node, and a real PSO build on the ambient scheduler — finished here rather than left running past the test.
+    (void)cc::try_async_blocking_get(a);
 }

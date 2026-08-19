@@ -22,6 +22,7 @@ Drive it through `dev.py`, which builds it and resolves its path — never const
 ```bash
 uv run dev.py lint shaped              # lint the first-party sources: libs/ tools/ docs/ .claude/skills/, plus CLAUDE.md / README.md / dev.py
 uv run dev.py lint shaped --dirty-only # just the next commit's changed .cc/.hh/.py/.md
+uv run dev.py lint shaped --commit <rev> # the same for a commit or `A..B` range already made (a single commit means its first-parent diff)
 uv run dev.py lint shaped --fix        # apply the suggested fixes in place (then `dev.py format`)
 
 uv run dev.py build -t shaped-linter   # build the tool

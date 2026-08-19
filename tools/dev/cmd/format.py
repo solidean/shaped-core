@@ -18,8 +18,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.profile(p)
     p.add_argument("--check-only", action="store_true",
                    help="Report non-conforming files and exit non-zero; do not rewrite")
-    p.add_argument("--dirty-only", action="store_true",
-                   help="Only format git-dirty/untracked sources (good pre-commit check)")
+    a.change_scope(p, default_all=True)
     p.add_argument("--allow-different-version", action="store_true",
                    help="Downgrade a clang-format version mismatch from error to warning")
     return p
@@ -30,11 +29,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         result = dev.run_format(
             ctx.root,
             check=args.check_only,
-            dirty_only=args.dirty_only,
+            scope=a.scope_from_args(args),
             allow_different_version=args.allow_different_version,
             mirror=args.mirror_output,
             verbose=args.verbose,
         )
-    except dev.FormatSetupError as e:
+    except (dev.FormatSetupError, dev.ChangeScopeError) as e:
         ctx.die(str(e))
     sys.exit(0 if dev.report.summarize_format(result, ctx.root) else 1)

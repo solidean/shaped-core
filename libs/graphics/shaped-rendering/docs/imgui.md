@@ -114,6 +114,44 @@ The `ImGuiStyle&` overload writes into a style you own instead, for a caller tha
 The colors are sRGB-encoded, which is what the routine draws unconverted — so this pairs with the same non-srgb target the rest of the renderer requires.
 Drawn into an `_srgb` target it comes out washed out, the inverse of the double-encoding the routine asserts against.
 
+## Layout persistence
+
+imgui keeps window positions, sizes, docking and viewport geometry in an ini text it would write to `imgui.ini` — **relative to the current working directory**.
+That drops a file into whatever directory the process happened to start in, and two programs started in one directory overwrite each other's layout.
+
+So `sr::imgui_context::create()` nulls `io.IniFilename`: sr writes no file, and persistence is something a caller asks for.
+There are two ways to ask.
+
+Name a path, and imgui does it all — loads before the first frame, rewrites a few seconds after a change:
+
+```cpp
+auto imgui = sr::imgui_context::create({.ini_file = "my-app.ini"}); // an absolute path is the safe form
+```
+
+Or take the text and put it where the application's other state already lives:
+
+```cpp
+auto imgui = sr::imgui_context::create();
+imgui.load_settings(store.read());            // before the first frame — imgui applies a window's settings as it creates it
+
+while (running)
+{
+    // ... the frame, ending in imgui.end_frame()
+
+    // Empty on nearly every frame: imgui asks for a save at most every IniSavingRate (5 s) after a change.
+    if (auto const ini = imgui.take_dirty_settings(); ini.has_value())
+        store.write(ini.value());
+}
+
+store.write(imgui.settings());                // once at shutdown: with no ini_file, nothing saves on destruction
+```
+
+The two are exclusive — with a path set, imgui saves the file itself and never asks the caller, and `load_settings` asserts.
+
+The worked example is [examples/vdoc/cube-editor/](../../../../examples/vdoc/cube-editor/), which puts the text in its document's `.vdoc` **workspace**:
+disposable per-user state that creates no op, moves no ref and never makes the document look unsaved.
+The layout then travels with the file, and two examples sharing one file keep their own by keying on a name.
+
 ## The 1.92 texture protocol
 
 This is the part that is not optional and not obvious.
@@ -186,12 +224,14 @@ auto imgui = sr::imgui_context::create({.enable_viewports = true});
 ```
 
 If you use `render_imgui`, it does all of this for you and you can skip the rest of this section.
-Driving the viewports by hand (the compositing path) is two calls in the frame loop, after the main window's draw is recorded but **before** its present:
+Driving the viewports by hand (the compositing path) is two calls in the frame loop, **before** the main window's present:
 
 ```cpp
 imgui.update_viewports();                   // opens / moves / closes the OS windows
 sr::imgui_routine::render_viewports(*ctx);  // draws and presents each, own swapchain per viewport
 
+auto cmd = ctx->create_command_list();                      // record the main window after, not before
+// ... your scene + imgui_routine::execute(pass, ImGui::GetDrawData()) ...
 ctx->submit_command_list_and_present(*sc, cc::move(cmd));   // main window last
 ```
 
@@ -199,6 +239,10 @@ The order is not cosmetic.
 Moving an OS window and presenting its new content are separate events, and in between the window displays content drawn for where it used to be.
 Put a vsync-blocking main present in that gap and it becomes a full frame: everything inside a window being dragged — dock markers most visibly — lags the window by however far it moved.
 This is the ordering imgui's own examples use, and the order `render_imgui` runs them in.
+
+Only the *present* order is load-bearing, which is why the main list is recorded afterwards rather than before.
+`render_viewports` submits a command list per viewport, and one submitted while the main list is still open makes the two concurrent —
+the font atlas both sample is then reverted to its canonical layout at every viewport submit, which sg reports as a hidden cost of concurrent recording.
 
 **Both changes are load-bearing, and neither is optional once the flag is on.**
 

@@ -1,3 +1,4 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
 #include <versioned-document-file/impl/payload_codec.hh>
 #include <versioned-document-file/impl/snapshot_codec.hh>
@@ -5,7 +6,6 @@
 #include <versioned-document-file/store.hh>
 #include <versioned-document/value_builder.hh>
 
-#include <algorithm>
 
 namespace vdoc::file
 {
@@ -575,14 +575,14 @@ cc::shared_async<snapshot_write_result> store::prune(vdoc::op_id const& head)
         job.skeletonized.push_back(cc::move(hash));
     }
 
-    std::sort(job.skeletonized.begin(), job.skeletonized.end(),
-              [](cc::vector<byte> const& a, cc::vector<byte> const& b)
-              {
-                  for (isize i = 0; i < a.size() && i < b.size(); ++i)
-                      if (a[i] != b[i])
-                          return a[i] < b[i];
-                  return a.size() < b.size();
-              });
+    cc::sort(job.skeletonized,
+             [](cc::vector<byte> const& a, cc::vector<byte> const& b)
+             {
+                 for (isize i = 0; i < a.size() && i < b.size(); ++i)
+                     if (a[i] != b[i])
+                         return a[i] < b[i];
+                 return a.size() < b.size();
+             });
 
     // The in-memory graph follows the file, so a prune needs no reopen to take effect.
     for (auto const& id : behind)
@@ -660,14 +660,14 @@ cc::shared_async<recovery_result> store::recover(cc::span<vdoc::received_op cons
         job.ops.push_back(to_row(o));
     }
 
-    std::sort(job.ops.begin(), job.ops.end(),
-              [](op_row const& a, op_row const& b)
-              {
-                  for (isize i = 0; i < a.hash.size() && i < b.hash.size(); ++i)
-                      if (a.hash[i] != b.hash[i])
-                          return a.hash[i] < b.hash[i];
-                  return a.hash.size() < b.hash.size();
-              });
+    cc::sort(job.ops,
+             [](op_row const& a, op_row const& b)
+             {
+                 for (isize i = 0; i < a.hash.size() && i < b.hash.size(); ++i)
+                     if (a.hash[i] != b.hash[i])
+                         return a.hash[i] < b.hash[i];
+                 return a.hash.size() < b.hash.size();
+             });
 
     auto const applied = vdoc::apply_verified_batch(_ops, cc::move(verified.value()));
     job.ops_added = applied.ops_added;
