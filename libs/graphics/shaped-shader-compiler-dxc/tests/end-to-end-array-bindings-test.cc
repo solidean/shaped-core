@@ -29,20 +29,6 @@ void main()
 }
 )";
 
-// A vacant texture element: a null handle that still carries the dimension + format the null descriptor needs.
-[[nodiscard]] sg::raw_texture_view vacant_texture_2d()
-{
-    return {.access = sg::view_class::readonly,
-            .texture = nullptr,
-            .view_dimension = sg::texture_view_dimension::tex_2d,
-            .format = sg::pixel_format::rgba8_unorm};
-}
-
-// A vacant raw-buffer element: a null handle with the readonly raw shape.
-[[nodiscard]] sg::raw_buffer_view vacant_raw_buffer()
-{
-    return {.access = sg::view_class::readonly, .shape = sg::view_shape::raw, .buffer = nullptr};
-}
 } // namespace
 
 INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access, readback",
@@ -85,6 +71,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access,
     CHECK(set2[0].name == "Texs");
     CHECK(set2[0].count == 4);
     CHECK(set2[0].type == sg::binding_type::readonly_texture);
+    // The declared dimension rides the binding — what the backend builds vacant elements' null SRVs from.
+    CHECK(set2[0].texture_dimension == sg::texture_view_dimension::tex_2d);
 
     auto group_layout0 = ctx.uncached.create_binding_group_layout(set0);
     auto group_layout1 = ctx.uncached.create_binding_group_layout(set1);
@@ -127,22 +115,22 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access,
     up->upload.bytes_to_texture(tex, texels);
     ctx.submit_command_list(cc::move(up));
 
-    // Groups: Out at slot 0; the arrays at slots 1 and 2, vacant elements as null-handle views.
+    // Groups: Out at slot 0; the arrays at slots 1 and 2, vacant elements as the vacant marker.
     sg::named_view const g0_view = {.name = "Out", .views = {sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()}};
     auto g0 = ctx.persistent.create_binding_group(group_layout0, cc::span<sg::named_view const>(&g0_view, 1));
     REQUIRE(g0 != nullptr);
 
     auto bufs_nv = sg::named_view{.name = "Bufs", .views = {}};
     bufs_nv.views.push_back(sg::buffer<byte>::from_raw(b0_buf).as_readonly_buffer());
-    bufs_nv.views.push_back(vacant_raw_buffer());
-    bufs_nv.views.push_back(vacant_raw_buffer());
+    bufs_nv.views.push_back(sg::vacant_view{});
+    bufs_nv.views.push_back(sg::vacant_view{});
     bufs_nv.views.push_back(sg::buffer<byte>::from_raw(b3_buf).as_readonly_buffer());
     auto g1 = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&bufs_nv, 1));
     REQUIRE(g1 != nullptr);
 
     auto texs_nv = sg::named_view{.name = "Texs", .views = {}};
     for (isize i = 0; i < 4; ++i)
-        texs_nv.views.push_back(vacant_texture_2d());
+        texs_nv.views.push_back(sg::vacant_view{});
     texs_nv.views[1] = sg::texture_2d::from_raw(tex).as_readonly_view();
     auto g2 = ctx.persistent.create_binding_group(group_layout2, cc::span<sg::named_view const>(&texs_nv, 1));
     REQUIRE(g2 != nullptr);
@@ -225,8 +213,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::con
     auto texs_nv = sg::named_view{.name = "Texs", .views = {}};
     for (isize i = 0; i < 4; ++i)
     {
-        bufs_nv.views.push_back(vacant_raw_buffer());
-        texs_nv.views.push_back(vacant_texture_2d());
+        bufs_nv.views.push_back(sg::vacant_view{});
+        texs_nv.views.push_back(sg::vacant_view{});
     }
     auto g1 = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&bufs_nv, 1));
     auto g2 = ctx.persistent.create_binding_group(group_layout2, cc::span<sg::named_view const>(&texs_nv, 1));

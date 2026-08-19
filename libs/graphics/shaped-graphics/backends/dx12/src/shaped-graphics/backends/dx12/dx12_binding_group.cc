@@ -99,15 +99,17 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
             return cc::error(cc::format("binding_group: no view binding named '{}' in the layout", nv.name));
 
         auto const& s = layout->view_slots[slot_index];
-        bool const is_array = s.binding.count > 1;
+        bool const is_array = s.binding.is_array();
         if (isize(nv.views.size()) != isize(s.binding.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
-                                        "exactly one per element; a vacant element is a null-handle view)",
+                                        "exactly one per element; a vacant element is sg::vacant_view)",
                                         nv.name, s.binding.count, nv.views.size()));
         CC_ASSERT(view_filled[slot_index] == char(0), "binding_group: a binding was provided more than once");
         view_filled[slot_index] = char(1);
 
-        auto array_binding = dx12_array_binding{.name = nv.name, .is_texture = false, .elements = {}};
+        auto array_binding = dx12_array_binding{.name = nv.name,
+                                                .is_texture = sg::shape_of(s.binding.type) == sg::view_shape::texture,
+                                                .elements = {}};
 
         for (isize element = 0; element < nv.views.size(); ++element)
         {
@@ -117,7 +119,18 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
                     cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));
 
             auto const dst = ctx._descriptor_heap.cpu_at(view_base + s.table_offset + int(element));
-            if (auto const* av = sg::try_as_tlas_view(view))
+            if (sg::is_vacant(view))
+            {
+                if (!is_array)
+                    return cc::error(cc::format("binding_group: '{}' — a vacant element is only valid in an array "
+                                                "binding; a scalar binding must bind a resource",
+                                                nv.name));
+
+                // The null descriptor is synthesized from the binding alone — a vacant element carries nothing.
+                create_null_view(ctx._device.Get(), s.binding, dst);
+                array_binding.elements.push_back({});
+            }
+            else if (auto const* av = sg::try_as_tlas_view(view))
             {
                 if (is_array)
                     return cc::error(cc::format("binding_group: '{}' — acceleration-structure arrays are not "
@@ -144,21 +157,17 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
             }
             else if (auto const* tv = sg::try_as_texture_view(view))
             {
-                if (tv->texture == nullptr && !is_array)
-                    return cc::error(cc::format("binding_group: '{}' — a null texture view is only valid as a vacant "
-                                                "array element",
+                // A view always binds a resource — an empty element is sg::vacant_view, never a null handle.
+                if (tv->texture == nullptr)
+                    return cc::error(cc::format("binding_group: '{}' — a texture view must bind a texture (a vacant "
+                                                "array element is sg::vacant_view)",
                                                 nv.name));
 
                 create_texture_view(ctx._device.Get(), *tv, dst);
-                auto dx = dx12_texture_handle();
-                if (tv->texture != nullptr)
-                {
-                    dx = std::dynamic_pointer_cast<dx12_texture const>(tv->texture);
-                    CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
-                }
+                auto dx = std::dynamic_pointer_cast<dx12_texture const>(tv->texture);
+                CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
                 if (is_array)
                 {
-                    array_binding.is_texture = true;
                     array_binding.elements.push_back({.buffer = {}, .texture = cc::move(dx), .range = tv->range});
                 }
                 else
@@ -171,22 +180,19 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
             else
             {
                 auto const& bv = sg::as_buffer_view(view);
-                if (bv.buffer == nullptr && !is_array && bv.access != sg::view_class::readonly
-                    && bv.access != sg::view_class::readwrite)
-                    return cc::error(cc::format("binding_group: '{}' — a null buffer view is not valid here", nv.name));
+                if (bv.buffer == nullptr)
+                    return cc::error(cc::format("binding_group: '{}' — a buffer view must bind a buffer (a vacant "
+                                                "array element is sg::vacant_view)",
+                                                nv.name));
 
                 create_buffer_view(ctx._device.Get(), bv, dst);
-                auto dx = dx12_buffer_handle();
-                if (bv.buffer != nullptr)
-                {
-                    dx = std::dynamic_pointer_cast<dx12_buffer const>(bv.buffer);
-                    CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
-                }
+                auto dx = std::dynamic_pointer_cast<dx12_buffer const>(bv.buffer);
+                CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
                 if (is_array)
                 {
                     array_binding.elements.push_back({.buffer = cc::move(dx), .texture = {}, .range = {}});
                 }
-                else if (dx != nullptr)
+                else
                 {
                     group->referenced.push_back(cc::move(dx));
                     group->hazard_views.push_back(

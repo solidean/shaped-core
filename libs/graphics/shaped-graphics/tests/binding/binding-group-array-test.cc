@@ -13,7 +13,7 @@
 using namespace cc::primitive_defines;
 
 // Array bindings (binding.count > 1): a named_view supplies exactly `count` views, one per element, and a
-// vacant element is a null-handle view that still names its arm (dimension + format for a texture).
+// vacant element is the sg::vacant_view marker — its null descriptor is synthesized from the binding.
 // Each test is an INVOCABLE_TEST run against every available backend (see tests/context/context-test.cc).
 // The dispatch side — declare_array_*_access and its accounting — needs a shader and lives in the DXC-gated
 // end-to-end suite (shaped-shader-compiler-dxc's tests).
@@ -32,25 +32,17 @@ namespace
     return sg::texture_2d::from_raw(ctx->persistent.create_raw_texture(desc));
 }
 
-// A vacant texture element: a null handle that still carries the dimension + format the null descriptor needs.
-[[nodiscard]] sg::raw_texture_view vacant_texture_2d()
-{
-    return {.access = sg::view_class::readonly,
-            .texture = nullptr,
-            .view_dimension = sg::texture_view_dimension::tex_2d,
-            .format = sg::pixel_format::rgba8_unorm};
-}
-
-// A vacant raw-buffer element: a null handle with the readonly raw shape.
-[[nodiscard]] sg::raw_buffer_view vacant_raw_buffer()
-{
-    return {.access = sg::view_class::readonly, .shape = sg::view_shape::raw, .buffer = nullptr};
-}
-
 // One texture array binding of `count` elements.
+// A hand-written texture binding must set texture_dimension — the backend synthesizes vacant elements'
+// null descriptors from the binding alone.
 [[nodiscard]] sg::binding texture_array_binding(u32 count)
 {
-    return {.name = "Textures", .set = 0, .index = 0, .count = count, .type = sg::binding_type::readonly_texture};
+    return {.name = "Textures",
+            .set = 0,
+            .index = 0,
+            .count = count,
+            .type = sg::binding_type::readonly_texture,
+            .texture_dimension = sg::texture_view_dimension::tex_2d};
 }
 } // namespace
 
@@ -68,7 +60,7 @@ INVOCABLE_TEST("sg - array binding accepts a partially vacant element list", (sg
     auto const t7 = make_texture(ctx);
     auto nv = sg::named_view{.name = "Textures", .views = {}};
     for (isize i = 0; i < 8; ++i)
-        nv.views.push_back(vacant_texture_2d());
+        nv.views.push_back(sg::vacant_view{});
     nv.views[0] = t0.as_readonly_view();
     nv.views[3] = t3.as_readonly_view();
     nv.views[7] = t7.as_readonly_view();
@@ -87,7 +79,7 @@ INVOCABLE_TEST("sg - array binding accepts an all-vacant element list", (sg::con
 
     auto nv = sg::named_view{.name = "Textures", .views = {}};
     for (isize i = 0; i < 4; ++i)
-        nv.views.push_back(vacant_texture_2d());
+        nv.views.push_back(sg::vacant_view{});
 
     auto group = ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
     CHECK(group != nullptr);
@@ -107,8 +99,8 @@ INVOCABLE_TEST("sg - buffer array binding accepts bound and vacant elements", (s
 
     auto nv = sg::named_view{.name = "Buffers", .views = {}};
     nv.views.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
-    nv.views.push_back(vacant_raw_buffer());
-    nv.views.push_back(vacant_raw_buffer());
+    nv.views.push_back(sg::vacant_view{});
+    nv.views.push_back(sg::vacant_view{});
     nv.views.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
 
     auto group = ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
@@ -126,7 +118,7 @@ INVOCABLE_TEST("sg - array binding rejects a wrong-size element list", (sg::cont
     // 3 views for a count-4 binding: an array takes exactly one view per element.
     auto nv = sg::named_view{.name = "Textures", .views = {}};
     for (isize i = 0; i < 3; ++i)
-        nv.views.push_back(vacant_texture_2d());
+        nv.views.push_back(sg::vacant_view{});
 
     auto group = ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
     CHECK(group.has_error());
@@ -157,16 +149,19 @@ INVOCABLE_TEST("sg - array binding rejects a mismatched element", (sg::context_h
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
 
+    auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readonly_buffer);
+    REQUIRE(buf != nullptr);
+
     // Element 1 is a buffer view in a texture array: wrong arm, rejected per element.
     auto nv = sg::named_view{.name = "Textures", .views = {}};
-    nv.views.push_back(vacant_texture_2d());
-    nv.views.push_back(vacant_raw_buffer());
+    nv.views.push_back(sg::vacant_view{});
+    nv.views.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
 
     auto group = ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
     CHECK(group.has_error());
 }
 
-INVOCABLE_TEST("sg - scalar binding rejects a null-handle view", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg - scalar binding rejects a vacant element", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -174,9 +169,9 @@ INVOCABLE_TEST("sg - scalar binding rejects a null-handle view", (sg::context_ha
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
 
-    // A null-handle view is only valid as a vacant ARRAY element; a scalar binding must bind a resource.
+    // A vacancy is only valid as an ARRAY element; a scalar binding must bind a resource.
     auto nv = sg::named_view{.name = "Textures", .views = {}};
-    nv.views.push_back(vacant_texture_2d());
+    nv.views.push_back(sg::vacant_view{});
 
     auto group = ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
     CHECK(group.has_error());

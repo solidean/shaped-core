@@ -369,9 +369,9 @@ void dx12_command_list::declare_array_accesses()
         {
             CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of "
                                                                           "range");
-            auto const& buffer = ab->elements[e.index].buffer;
-            CC_ASSERT(buffer != nullptr, "declared array element is vacant (a null-handle view)");
-            track_buffer_access(buffer, e.stages, e.access);
+            auto const& element = ab->elements[e.index];
+            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (a null-handle view)");
+            track_buffer_access(element.buffer, e.stages, e.access);
         }
     }
 
@@ -384,7 +384,7 @@ void dx12_command_list::declare_array_accesses()
             CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of "
                                                                           "range");
             auto const& element = ab->elements[e.index];
-            CC_ASSERT(element.texture != nullptr, "declared array element is vacant (a null-handle view)");
+            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (a null-handle view)");
             track_texture_access(element.texture, element.range, e.stages, e.access, e.layout);
         }
     }

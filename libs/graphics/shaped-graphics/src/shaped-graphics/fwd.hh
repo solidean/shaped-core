@@ -151,6 +151,7 @@ enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see resource/views.hh)
 struct raw_buffer_view;                 // erased buffer-view payload — one arm of raw_view (see resource/views.hh)
 struct raw_texture_view;                // erased texture-view payload — one arm of raw_view
+struct vacant_view;                     // a vacant array element (no view at all) — one arm of raw_view
 struct raw_tlas_view;                   // erased acceleration-structure-view payload — one arm of raw_view
 struct tlas_view;                       // the typed acceleration-structure view (see resource/views.hh)
 template <class T>

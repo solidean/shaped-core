@@ -113,6 +113,7 @@ cc::hash128 pipeline_cache::compute_binding_group_layout_key(cc::span<binding co
         b.add_pod(bnd.count);
         b.add_pod(bnd.type);
         b.add_optional(bnd.block_size);
+        b.add_optional(bnd.texture_dimension);
     }
     b.add_pod(u64(static_samplers.size()));
     for (auto const& ns : static_samplers)

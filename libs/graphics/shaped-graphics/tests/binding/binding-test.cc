@@ -170,13 +170,22 @@ TEST("sg bindings - named_view pairs a name with bound views")
     CHECK(sg::shape_of(nv.views[0]) == sg::view_shape::structured);
     CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.views[0]));
 
-    // An array binding carries one view per element; a vacant element is a null-handle view that still
-    // names its arm — here a null texture view keeping dimension + format for the backend's null descriptor.
-    auto const vacant = sg::raw_texture_view{.access = sg::view_class::readonly,
-                                             .texture = nullptr,
-                                             .view_dimension = sg::texture_view_dimension::tex_2d,
-                                             .format = sg::pixel_format::rgba8_unorm};
-    sg::named_view const array = {.name = "Textures", .views = {vacant, vacant, vacant}};
+    // An array binding carries one view per element; a vacant element is the sg::vacant_view marker,
+    // which satisfies every view kind — the backend synthesizes its null descriptor from the binding.
+    sg::named_view const array = {.name = "Textures", .views = {sg::vacant_view{}, sg::vacant_view{}, sg::vacant_view{}}};
     CHECK(array.views.size() == 3);
+    CHECK(sg::is_vacant(array.views[1]));
     CHECK(sg::accepts(sg::binding_type::readonly_texture, array.views[1]));
+    CHECK(sg::accepts(sg::binding_type::readonly_raw_buffer, array.views[1]));
+    CHECK(!sg::accepts(sg::binding_type::sampler, array.views[1]));
+
+    // is_array and the reflected texture dimension are what a backend reads off an array binding.
+    auto const b = sg::binding{.name = "Textures",
+                               .count = 4,
+                               .type = sg::binding_type::readonly_texture,
+                               .texture_dimension = sg::texture_view_dimension::cube};
+    CHECK(b.is_array());
+    auto const scalar = sg::binding{.name = "One", .count = 1};
+    CHECK(!scalar.is_array());
+    CHECK(b.texture_dimension == sg::texture_view_dimension::cube);
 }

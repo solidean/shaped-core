@@ -154,6 +154,14 @@ struct sg::raw_buffer_view
     [[nodiscard]] auto try_as_uniform() const; // -> cc::optional<uniform_buffer_view<T>>
 };
 
+/// A vacant array element: no view at all, marked explicitly.
+/// The backend synthesizes a null descriptor for it from the *binding* alone — access and shape from
+/// `binding_type`, a texture's dimension from `binding.texture_dimension` — so it carries nothing.
+/// Only valid as an element of an array binding; a scalar binding must bind a resource.
+struct sg::vacant_view
+{
+};
+
 /// A texture view's erased payload: the sampled (SRV) or storage (UAV) descriptor a backend builds over a subresource range.
 /// Dimension and format are a reinterpretation the view chose, not the texture's shape.
 struct sg::raw_texture_view
@@ -190,9 +198,16 @@ struct sg::raw_tlas_view
 namespace sg
 {
 
-/// The erased form every typed view converts into — a sum over the per-resource payloads.
+/// The erased form every typed view converts into — a sum over the per-resource payloads, plus the vacant marker.
 /// A backend `visit`s it, or reaches for one of the `try_as_*_view` arm accessors below, to build the native descriptor; `named_view` carries one.
-using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
+using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view>;
+
+/// Whether the erased view is the vacant marker — an array element deliberately left empty.
+/// Gate on this before access_of / shape_of, which have no answer for a vacant element.
+[[nodiscard]] inline bool is_vacant(raw_view const& v)
+{
+    return v.try_as<vacant_view>() != nullptr;
+}
 
 /// The buffer arm, or null when the erased view holds a different one.
 [[nodiscard]] inline raw_buffer_view const* try_as_buffer_view(raw_view const& v)
@@ -227,19 +242,31 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
 }
 
 /// The access class the erased view carries — the active arm's (a tlas is always acceleration_structure).
+/// A vacant element has none — it takes whatever the binding says — so gate on is_vacant() first.
 [[nodiscard]] inline view_class access_of(raw_view const& v)
 {
     return v.visit([](raw_buffer_view const& b) { return b.access; },  //
                    [](raw_texture_view const& t) { return t.access; }, //
-                   [](raw_tlas_view const&) { return view_class::acceleration_structure; });
+                   [](raw_tlas_view const&) { return view_class::acceleration_structure; },
+                   [](vacant_view const&)
+                   {
+                       CC_UNREACHABLE("a vacant element has no access class — gate on is_vacant() first");
+                       return view_class::uniform;
+                   });
 }
 
 /// The layout the erased view carries: the buffer arm's `shape`, `texture` for a texture arm, `acceleration_structure` for a tlas arm.
+/// A vacant element has none — it takes whatever the binding says — so gate on is_vacant() first.
 [[nodiscard]] inline view_shape shape_of(raw_view const& v)
 {
     return v.visit([](raw_buffer_view const& b) { return b.shape; },            //
                    [](raw_texture_view const&) { return view_shape::texture; }, //
-                   [](raw_tlas_view const&) { return view_shape::acceleration_structure; });
+                   [](raw_tlas_view const&) { return view_shape::acceleration_structure; },
+                   [](vacant_view const&)
+                   {
+                       CC_UNREACHABLE("a vacant element has no shape — gate on is_vacant() first");
+                       return view_shape::uniform_block;
+                   });
 }
 
 } // namespace sg

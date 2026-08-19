@@ -36,6 +36,10 @@ struct sg::backend::dx12::dx12_array_element
     dx12_buffer_handle buffer;
     dx12_texture_handle texture;
     sg::subresource_range range;
+
+    /// Whether this element was bound as a null view — a null descriptor with no resource behind it.
+    /// Declaring access on a vacant element is an error (there is nothing to track).
+    [[nodiscard]] bool is_vacant() const { return buffer == nullptr && texture == nullptr; }
 };
 
 /// An array binding's per-element resources, keyed by the binding's reflection name.

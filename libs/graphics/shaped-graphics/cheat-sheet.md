@@ -383,10 +383,12 @@ sg::texture_view<VT>         // access-erased middle: any access of a texture vi
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
 sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)
-sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view> — erased sum every typed view converts into
+sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view> — erased sum every typed view converts into
+sg::vacant_view              // {} — a vacant ARRAY element (no view); the backend synthesizes its null descriptor from the binding
+sg::is_vacant(rv)            // bool — gate on it before access_of / shape_of (a vacancy has neither)
 v.to_raw()  /  (implicit)    // -> raw_view; sg::access_of(rv) / sg::shape_of(rv) read the active arm's access/shape
 sg::try_as_buffer_view(rv)   // -> raw_buffer_view const*, null on a different arm (+ _texture_ / _tlas_; as_*_view asserts instead)
-// backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view) to build the native descriptor
+// backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view | vacant_view) to build the native descriptor
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
 // INVERSE (erased -> typed leaf): as_* asserts (access, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
 mid.as_readonly() / as_readwrite() / as_uniform()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
@@ -452,8 +454,9 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 #include <shaped-graphics/binding/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
-sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
-                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count > 1 = bounded array; count 0 = unbounded (unsupported)
+sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size;
+                            //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
+                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count > 1 = bounded array (.is_array()); count 0 = unbounded (unsupported)
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
@@ -481,7 +484,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
 sg::named_view              // { cc::string name; cc::vector<raw_view> views }  — input to create_binding_group (a typed view converts)
                             //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element
-                            //   vacant array element = null-handle view that still names its arm (dimension + format for a texture) -> null descriptor
+                            //   vacant array element = sg::vacant_view{} -> null descriptor synthesized from the BINDING (type + texture_dimension)
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `set`)

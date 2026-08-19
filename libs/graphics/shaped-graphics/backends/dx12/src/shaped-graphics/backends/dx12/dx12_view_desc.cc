@@ -4,6 +4,7 @@
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
+#include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
@@ -12,11 +13,8 @@ namespace
 {
 // The underlying ID3D12Resource of a view's buffer (null for an empty buffer). Raw-word views address
 // in units of 4 bytes; structured views in units of the element stride.
-// A null buffer handle is a vacant array element — its resource is null and the desc below becomes a null descriptor.
 [[nodiscard]] ID3D12Resource* resource_of(sg::raw_buffer_view const& view)
 {
-    if (view.buffer == nullptr)
-        return nullptr;
     auto const* buf = dynamic_cast<dx12_buffer const*>(view.buffer.get());
     CC_ASSERT(buf != nullptr, "bound resource is not a dx12 buffer");
     return buf->_resource.Get();
@@ -291,20 +289,9 @@ namespace
 
 void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst)
 {
-    // A null texture handle is a vacant array element: the view's dimension + format still shape the desc,
-    // and a null resource makes it a null descriptor (reads return zero, writes are dropped).
-    ID3D12Resource* resource = nullptr;
-    if (view.texture != nullptr)
-    {
-        auto const* tex = dynamic_cast<dx12_texture const*>(view.texture.get());
-        CC_ASSERT(tex != nullptr, "bound resource is not a dx12 texture");
-        resource = tex->_resource.Get();
-    }
-    else
-    {
-        CC_ASSERT(view.format != sg::pixel_format::undefined, "a vacant texture element must still name a format (a "
-                                                              "null descriptor needs one)");
-    }
+    auto const* tex = dynamic_cast<dx12_texture const*>(view.texture.get());
+    CC_ASSERT(tex != nullptr, "bound resource is not a dx12 texture");
+    ID3D12Resource* const resource = tex->_resource.Get();
     DXGI_FORMAT const format = to_dxgi_format(view.format);
 
     switch (view.access)
@@ -406,6 +393,77 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
         CC_UNREACHABLE("acceleration-structure views are created via create_accel_view, not create_buffer_view");
     }
     CC_UNREACHABLE("unhandled view access class");
+}
+
+void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CPU_DESCRIPTOR_HANDLE dst)
+{
+    // A null descriptor's reads return zero and writes are dropped whatever its format, so a fixed one serves
+    // every vacant element; only the SRV/UAV dimension has to match the shader's declaration.
+    switch (binding.type)
+    {
+    case sg::binding_type::readonly_raw_buffer:
+    case sg::binding_type::readonly_structured_buffer:
+    case sg::binding_type::readwrite_raw_buffer:
+    case sg::binding_type::readwrite_structured_buffer:
+    {
+        bool const is_raw = sg::shape_of(binding.type) == sg::view_shape::raw;
+        auto const view = sg::raw_buffer_view{.access = sg::access_of(binding.type),
+                                              .shape = sg::shape_of(binding.type),
+                                              .buffer = nullptr,
+                                              .stride_in_bytes = is_raw ? 0 : 4};
+        if (view.access == sg::view_class::readonly)
+        {
+            D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
+            desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+            desc.Format = is_raw ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+            desc.Buffer.StructureByteStride = UINT(view.stride_in_bytes);
+            if (is_raw)
+                desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+            device->CreateShaderResourceView(nullptr, &desc, dst);
+        }
+        else
+        {
+            D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
+            desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            desc.Format = is_raw ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+            desc.Buffer.StructureByteStride = UINT(view.stride_in_bytes);
+            if (is_raw)
+                desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+            device->CreateUnorderedAccessView(nullptr, nullptr, &desc, dst);
+        }
+        return;
+    }
+    case sg::binding_type::readonly_texture:
+    case sg::binding_type::readwrite_texture:
+    {
+        CC_ASSERT(binding.texture_dimension.has_value(), "a vacant texture element needs the binding's "
+                                                         "texture_dimension (reflection fills it; hand-written "
+                                                         "bindings must set it)");
+        // Reuse the dimension mapping through a synthetic null-handle view; the default subresource range
+        // (one mip, one slice) is inert on a null descriptor.
+        auto const view = sg::raw_texture_view{.access = sg::access_of(binding.type),
+                                               .texture = nullptr,
+                                               .view_dimension = binding.texture_dimension.value(),
+                                               .format = sg::pixel_format::rgba8_unorm};
+        if (view.access == sg::view_class::readonly)
+        {
+            D3D12_SHADER_RESOURCE_VIEW_DESC const desc = texture_srv_desc(view, DXGI_FORMAT_R8G8B8A8_UNORM);
+            device->CreateShaderResourceView(nullptr, &desc, dst);
+        }
+        else
+        {
+            D3D12_UNORDERED_ACCESS_VIEW_DESC const desc = texture_uav_desc(view, DXGI_FORMAT_R8G8B8A8_UNORM);
+            device->CreateUnorderedAccessView(nullptr, nullptr, &desc, dst);
+        }
+        return;
+    }
+    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::sampler:
+    case sg::binding_type::acceleration_structure:
+        break;
+    }
+    CC_UNREACHABLE("this binding kind never takes a vacant element");
 }
 
 void create_accel_view(ID3D12Device* device, dx12_tlas const* tlas, D3D12_CPU_DESCRIPTOR_HANDLE dst)

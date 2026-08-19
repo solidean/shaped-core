@@ -23,6 +23,13 @@ void create_accel_view(ID3D12Device* device, dx12_tlas const* tlas, D3D12_CPU_DE
 /// depth-as-SRV is unsupported.
 void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst);
 
+/// Creates the null descriptor a vacant array element of `binding` binds — synthesized from the binding
+/// alone: access + shape from its type, a texture's SRV/UAV dimension from `binding.texture_dimension`
+/// (required for texture kinds, asserted), and a fixed format (a null descriptor's reads return zero
+/// regardless).
+/// Sampler / uniform-buffer / acceleration-structure bindings never take a vacant element.
+void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CPU_DESCRIPTOR_HANDLE dst);
+
 /// Creates the native D3D12 render-target view (RTV) for the color target `view` into the CPU
 /// descriptor slot `dst` (a non-shader-visible RTV heap). Unlike shader-facing views these take the typed
 /// render-target / depth-stencil view directly (they don't erase to raw_view). The texture must be a dx12_texture.

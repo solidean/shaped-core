@@ -33,9 +33,11 @@ An array binding is a `binding` with `count > 1`: `count` consecutive descriptor
 Three rules distinguish an array binding from a scalar one:
 
 - **A `named_view` supplies exactly `count` views, one per element.**
-  A vacant element is a **null-handle view** that still names its arm — a `raw_texture_view` with a null texture keeps its `view_dimension` + `format`, a null-buffer view its shape.
-  The backend builds a matching **null descriptor** from it, and reads of one return zero.
-  All-vacant is legal — a table can start empty.
+  A vacant element is the **`sg::vacant_view` marker** — no view at all.
+  The backend synthesizes its **null descriptor** from the *binding* alone: access and shape from `binding_type`, a texture's dimension from `binding.texture_dimension`.
+  Reflection fills `texture_dimension`; hand-written bindings must set it.
+  Reads of a null descriptor return zero.
+  All-vacant is legal — a table can start empty — and a null-handle view is an error everywhere: a view always binds a resource.
 - **Access is never inferred.**
   Which elements a shader indexes, and how, cannot be read from the binding, so array bindings skip the automatic hazard tracking scalar bindings get.
   The dispatching caller declares the touched elements via `cmd.compute.declare_array_buffer_access` / `declare_array_texture_access`, applied to the next dispatch only.
