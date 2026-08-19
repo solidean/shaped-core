@@ -224,12 +224,14 @@ auto imgui = sr::imgui_context::create({.enable_viewports = true});
 ```
 
 If you use `render_imgui`, it does all of this for you and you can skip the rest of this section.
-Driving the viewports by hand (the compositing path) is two calls in the frame loop, after the main window's draw is recorded but **before** its present:
+Driving the viewports by hand (the compositing path) is two calls in the frame loop, **before** the main window's present:
 
 ```cpp
 imgui.update_viewports();                   // opens / moves / closes the OS windows
 sr::imgui_routine::render_viewports(*ctx);  // draws and presents each, own swapchain per viewport
 
+auto cmd = ctx->create_command_list();                      // record the main window after, not before
+// ... your scene + imgui_routine::execute(pass, ImGui::GetDrawData()) ...
 ctx->submit_command_list_and_present(*sc, cc::move(cmd));   // main window last
 ```
 
@@ -237,6 +239,10 @@ The order is not cosmetic.
 Moving an OS window and presenting its new content are separate events, and in between the window displays content drawn for where it used to be.
 Put a vsync-blocking main present in that gap and it becomes a full frame: everything inside a window being dragged — dock markers most visibly — lags the window by however far it moved.
 This is the ordering imgui's own examples use, and the order `render_imgui` runs them in.
+
+Only the *present* order is load-bearing, which is why the main list is recorded afterwards rather than before.
+`render_viewports` submits a command list per viewport, and one submitted while the main list is still open makes the two concurrent —
+the font atlas both sample is then reverted to its canonical layout at every viewport submit, which sg reports as a hidden cost of concurrent recording.
 
 **Both changes are load-bearing, and neither is optional once the flag is on.**
 

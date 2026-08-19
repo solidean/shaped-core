@@ -19,7 +19,7 @@ ssc::dxc::shader_cache  ── get-or-create over the DXC compiler (a separate l
 - [`ctx.cached`](../../src/shaped-graphics/context/cached.hh) is the **front door**.
   Every context owns a [`pipeline_cache`](../../src/shaped-graphics/context/pipeline_cache.hh), with default in-memory tiers installed, reached here.
   `acquire_binding_group_layout` and `acquire_pipeline_layout` return shared handles.
-  `acquire_compute_pipeline` and `acquire_raytracing_pipeline` return an **async** handle whose build runs off-thread.
+  `acquire_compute_pipeline`, `acquire_raster_pipeline` and `acquire_raytracing_pipeline` return an **async** handle whose build runs off-thread.
 - The DXC [`shader_cache`](../../../shaped-shader-compiler-dxc/src/shaped-shader-compiler-dxc/shader_cache.hh) lives in the compiler library, not in sg — sg has no compiler.
   It caches `compile()` the same way: the same request yields the same async compiled shader, never recompiled.
 
@@ -39,13 +39,19 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
   All three change the root signature.
   A layout carries that hash from creation — `layout->structural_hash()` — computed once by the backend through the same `sg::impl` functions this cache keys with, so the two can never disagree.
 - **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with the **pipeline layout's structural hash**, which transitively covers its group layouts.
+- **raytracing pipeline** = the same, over every shader it names, plus the pipeline limits.
+- **raster pipeline** = every shader plus the vertex input and each baked fixed-function state, over the layout's **address** rather than its structural hash.
+  That one is the odd one out, and deliberately in-memory-only.
+  An address dedups nothing across two identically built layouts, and means nothing at all in the next process.
+  So raster PSOs would have to go structural before they could be persisted.
 
 - **compiled shader** = source + entry point + stage + model + every compile option + **the DXC version**.
   The version matters only to a key that outlives the process, and there it is load-bearing: without it a DXC upgrade keeps serving the previous compiler's DXIL forever.
 
-Structural rather than pointer identity is what makes these keys mean anything outside the process that made them.
-Two independently created but identical group layouts collapse to one key, so acquiring through the cache is a convenience rather than a precondition for dedup.
-A key computed in one run also still names the same thing in the next — the property a persistent tier needs, and one an address could never have given it.
+Structural rather than pointer identity is what makes a key mean anything outside the process that made it.
+Two independently created but identical group layouts collapse to one, so for the tiers keyed that way acquiring through the cache is a convenience rather than a precondition for dedup.
+A key computed in one run also still names the same thing in the next — the property the persistent tier needs, and one an address could never have given it.
+Which is exactly why the raster tier's address-keyed layout bounds what that tier can become.
 
 ## The persistent tier
 
@@ -92,7 +98,7 @@ A test that is *about* caching opens its own store and passes it here.
 Both build on [`cc::async`](../../../../base/clean-core/docs/systems/async.md): the returned node is **scheduled onto the ambient scheduler** (`cc::install_default_async_scheduler`).
 Blocking on it drives it there, so the same handle works whether that scheduler is a pool or a single-threaded one.
 
-The result types are the `sg::async_*` typedefs (`async_compiled_shader`, `async_compute_pipeline`, `async_raytracing_pipeline`).
+The result types are the `sg::async_*` typedefs (`async_compiled_shader`, `async_compute_pipeline`, `async_raster_pipeline`, `async_raytracing_pipeline`).
 `cc::async<T>` cannot hold a `const T` — its internal `cc::optional<T>` forbids it — so const arrives at the **read** side.
 `try_value()` yields the const `*_handle`, and `cc::async_blocking_get` yields the handle by value.
 A build failure surfaces as an **async error** on the node (`has_error()`) carrying the DXC / PSO diagnostics; it is not thrown.
@@ -121,6 +127,7 @@ bindings + static samplers ─▶ ctx.cached.acquire_binding_group_layout ─▶
                               ctx.cached.acquire_pipeline_layout({groups}) ─▶ pipeline_layout_handle ─┤
                                                                                                   ▼
                               ctx.cached.acquire_compute_pipeline({shader, layout}) ─▶ async_compute_pipeline
+                              ctx.cached.acquire_raster_pipeline({shaders, layout, state}) ─▶ async_raster_pipeline
                                                                                                   │
                                                                                  (blocking_get)   ▼
                                                                                  compute_pipeline_handle ─▶ cmd.compute.bind_pipeline
@@ -131,7 +138,6 @@ An in-flight async is shared too, so a second `acquire` for a still-compiling pi
 
 ## Deferred
 
-**Raster-pipeline caching.** The type exists (see [raster pipeline](raster-pipeline.md)) but `ctx.cached` has no `acquire_raster_pipeline` yet, unlike compute and raytracing.
 **A content hash on `compiled_shader`**, so a pipeline key need not re-hash the bytecode.
 **Disk-backed provider tiers**, and richer eviction than clear-on-overflow.
 

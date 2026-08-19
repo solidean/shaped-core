@@ -1,5 +1,6 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -40,7 +41,7 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
         REQUIRE(tex != nullptr);
         sg::binding const b
             = {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
-        auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
+        auto layout = c.cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
@@ -55,7 +56,7 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
         REQUIRE(tex != nullptr);
         sg::binding const b
             = {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
-        auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
+        auto layout = c.cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
@@ -96,12 +97,12 @@ INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transiti
     auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
     REQUIRE(tex != nullptr);
 
-    auto group_layout = c.uncached.create_binding_group_layout(shader.bindings);
+    auto group_layout = c.cached.acquire_binding_group_layout(shader.bindings);
     REQUIRE(group_layout != nullptr);
-    auto pipeline_layout = c.uncached.create_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    auto pipeline_layout = c.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = c.uncached.create_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
+    auto pipeline = cc::async_blocking_get(c.cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
     REQUIRE(pipeline != nullptr);
 
     auto const typed = sg::texture_2d::from_raw(tex);

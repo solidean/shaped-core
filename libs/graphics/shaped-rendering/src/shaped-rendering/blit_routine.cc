@@ -21,8 +21,12 @@ void blit_routine::init_declare(sg::context& ctx)
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
         _group_layout = nullptr;
-        _pipelines.init(ctx, [](sg::context&, sg::pixel_format) -> cc::result<sg::raster_pipeline_handle>
-                        { return cc::error(cc::any_error("blit shaders did not compile")); });
+        _pipelines.init(ctx,
+                        [](sg::context&, sg::pixel_format) -> sg::async_raster_pipeline
+                        {
+                            return cc::make_async_from_error<sg::raster_pipeline_handle>(
+                                cc::async_error::make_error(cc::any_error("blit shaders did not compile")));
+                        });
         return;
     }
 
@@ -35,16 +39,17 @@ void blit_routine::init_declare(sg::context& ctx)
     // Init clears every pipeline built against the previous ones.
     _pipelines.init(ctx,
                     [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
-                        sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
+                        sg::context& c, sg::pixel_format format) -> sg::async_raster_pipeline
                     {
-                        return c.uncached.try_create_raster_pipeline({
+                        auto const desc = sg::raster_pipeline_description{
                             .layout = layout,
                             .vertex_shader = vertex_shader,
                             .fragment_shader = fragment_shader,
                             .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
                             .rasterization = {.cull = sg::cull_mode::none},
                             .color_targets = {{.format = format}},
-                        });
+                        };
+                        return c.cached.acquire_raster_pipeline(desc);
                     });
 }
 

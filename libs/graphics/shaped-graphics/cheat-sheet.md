@@ -495,7 +495,7 @@ layout->structural_hash()                // -> cc::hash128 on binding_group_layo
 ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
 ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (.layout is a pipeline_layout; blocking build; throws sg::pipeline_creation_exception; + try_ twin)
-ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin). No ctx.cached yet.
+ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin)
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
@@ -592,13 +592,18 @@ ctx.cached.acquire_binding_group_layout(span<binding const>, static_samplers={})
 ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_layout_handle  SYNC; keyed on the ordered group-layout identities => one shared handle
 ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_compute_pipeline  async PSO build; identical (shader, pipeline layout) => one node
                                                                //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
+ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_raster_pipeline  async PSO build; keyed on all shaders + layout + vertex input + every fixed-function state
+                                                               //   NOT keyed on .cached_pipeline — that blob only accelerates a build
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
 // keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: its groups'
 //   structural hashes + static samplers + inline constants; compute pipeline: shader bytecode+entry+signature + the
 //   pipeline layout's structural hash).
-// STRUCTURAL, never the handle address -> identical layouts built independently dedup, and a key still names the same
-//   thing in the next process. Acquiring through the cache is convenience now, not a precondition for dedup.
+// COMPUTE + RAYTRACING take the layout STRUCTURALLY, never the handle address -> identical layouts built independently
+//   dedup, and the key still names the same thing in the next process, which is what the persistent tier needs.
+//   Acquiring the layout through the cache is convenience for those two, not a precondition for dedup.
+// RASTER takes the layout's ADDRESS, so acquire it through the cache or two identical layouts miss each other.
+//   In-memory only today; it would have to go structural before raster PSOs could be persisted.
 ctx.cached.cache().set_blob_cache(&c)   // persistent 2nd tier: serialized PSO blobs surviving across RUNS (bcache::blob_cache*)
                                         // defaults to bcache::default_cache(); nullptr = off. Keyed on adapter + driver too
                                         // The build PARKS on the store: with no ambient scheduler and no worker scope, the tier
@@ -613,7 +618,6 @@ cc::thread_pump_all()                   // -> bool; one cycle of every semantic 
 pipeline_cache pc;                                            // standalone use (acquire_* take a context&)
 pc.acquire_binding_group_layout(ctx, bindings);  pc.acquire_pipeline_layout(ctx, {.groups={gl}});  pc.acquire_compute_pipeline(ctx, desc);
 pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provider(p);  pc.apply_bookkeeping();
-// TODO: graphics pipeline caching once that pipeline type lands in sg.
 ```
 
 ## render routines — reusable GPU-work units  (see docs/render-routines.md)

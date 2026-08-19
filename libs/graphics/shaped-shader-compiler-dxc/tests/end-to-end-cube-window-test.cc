@@ -1,5 +1,6 @@
 #include <clean-core/container/vector.hh>
-#include <clean-core/fwd.hh> // offsetof
+#include <clean-core/fwd.hh>          // offsetof
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -220,7 +221,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         .type = sg::binding_type::uniform_buffer,
         .block_size = isize(sizeof(tg::mat4f)),
     };
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout(pld);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
 
     sg::raster_pipeline_description desc;
@@ -234,7 +235,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
     desc.depth_stencil.depth_write = true;
     desc.depth_stencil_format = sg::pixel_format::depth32_float;
     desc.color_targets.push_back({.format = sc->format()});
-    auto pipeline = ctx.uncached.create_raster_pipeline(desc);
+    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
     REQUIRE(pipeline != nullptr);
 
     // Upload the cube's vertices once, in their own list so the buffer decays to COMMON before draws read it.

@@ -330,6 +330,7 @@ using swapchain_handle = std::shared_ptr<swapchain>; // mutable: a swapchain is 
 // (a shareable projection back to a *_handle is a deferred follow-up).
 using async_compiled_shader = cc::shared_async<compiled_shader>;          // try_value() -> compiled_shader const*
 using async_compute_pipeline = cc::shared_async<compute_pipeline_handle>; // blocking_get -> compute_pipeline_handle
+using async_raster_pipeline = cc::shared_async<raster_pipeline_handle>;   // blocking_get -> raster_pipeline_handle
 using async_raytracing_pipeline
     = cc::shared_async<raytracing_pipeline_handle>; // blocking_get -> raytracing_pipeline_handle
 } // namespace sg
