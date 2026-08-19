@@ -397,18 +397,18 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
 
         // Rebuild the TLAS for this frame's transform (refit isn't implemented), then trace.
         sg::tlas_handle const tlas = cmd->raytracing.build_tlas({make_cube_instance(blas, rot)});
-        auto rt_group = ctx.transient.create_binding_group(rt_group_layout,
-                                                           {{.name = "scene", .view = tlas->as_view()},
-                                                            {.name = "Output", .view = image.as_readwrite_view()},
-                                                            {.name = "Camera", .view = cam_buf.as_uniform_buffer()}});
+        auto rt_group = ctx.transient.create_binding_group(
+            rt_group_layout, {{.name = "scene", .views = {tlas->as_view()}},
+                              {.name = "Output", .views = {image.as_readwrite_view()}},
+                              {.name = "Camera", .views = {cam_buf.as_uniform_buffer()}}});
         cmd->raytracing.bind_pipeline(*rt_pipeline);
         cmd->raytracing.bind_group(0, *rt_group);
         cmd->raytracing.dispatch_rays(*rt_table, raygen_idx, size[0], size[1]);
 
         // Blit the ray-traced image onto the back buffer.
-        auto blit_group
-            = ctx.transient.create_binding_group(blit_group_layout, {{.name = "Src", .view = image.as_readonly_view()}},
-                                                 {{.name = "Samp", .sampler = blit_sampler}});
+        auto blit_group = ctx.transient.create_binding_group(blit_group_layout,
+                                                             {{.name = "Src", .views = {image.as_readonly_view()}}},
+                                                             {{.name = "Samp", .sampler = blit_sampler}});
         {
             auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0, 0, 0, 1))}});
             cmd->raster.bind_pipeline(*blit_pipeline);

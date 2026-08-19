@@ -75,6 +75,7 @@ if(SC_BUILD_TESTS)
             tests/dx12-entry.cc
             tests/end-to-end-sampler-test.cc
             tests/end-to-end-multigroup-test.cc
+            tests/end-to-end-array-bindings-test.cc
             tests/end-to-end-inline-constants-test.cc
             tests/end-to-end-inline-raytracing-test.cc
             tests/end-to-end-raytracing-test.cc

@@ -453,7 +453,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
 sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
-                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count 0 = unbounded
+                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count > 1 = bounded array; count 0 = unbounded (unsupported)
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
@@ -479,7 +479,9 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 ```cpp
 #include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
 sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
-sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
+sg::named_view              // { cc::string name; cc::vector<raw_view> views }  — input to create_binding_group (a typed view converts)
+                            //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element
+                            //   vacant array element = null-handle view that still names its arm (dimension + format for a texture) -> null descriptor
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `set`)
@@ -499,9 +501,10 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(set, group)       // void — bind a binding_group at slot `set` (indexes the pipeline layout's groups)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
-cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding
+cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
-                                                         // (scalar bindings are inferred; arrays can't be — declare them)
+                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
+                                                         // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;

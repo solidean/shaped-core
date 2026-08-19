@@ -61,13 +61,13 @@ void pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
     auto const group = ctx.transient.create_binding_group(
-        self._group_layout, {{.name = "scene", .view = tlas->as_view()},
-                             {.name = "Output", .view = d.output.as_readwrite_view()},
-                             {.name = "frame", .view = d.frame.as_uniform_buffer()},
-                             {.name = "background", .view = d.background.as_uniform_buffer()},
-                             {.name = "Materials", .view = d.materials.as_readonly_buffer()},
-                             {.name = "Vertices", .view = d.vertices.as_readonly_buffer()},
-                             {.name = "Indices", .view = d.indices.as_readonly_buffer()}});
+        self._group_layout, {{.name = "scene", .views = {tlas->as_view()}},
+                             {.name = "Output", .views = {d.output.as_readwrite_view()}},
+                             {.name = "frame", .views = {d.frame.as_uniform_buffer()}},
+                             {.name = "background", .views = {d.background.as_uniform_buffer()}},
+                             {.name = "Materials", .views = {d.materials.as_readonly_buffer()}},
+                             {.name = "Vertices", .views = {d.vertices.as_readonly_buffer()}},
+                             {.name = "Indices", .views = {d.indices.as_readonly_buffer()}}});
 
     cmd.raytracing.bind_pipeline(*self._pipeline);
     cmd.raytracing.bind_group(0, *group);

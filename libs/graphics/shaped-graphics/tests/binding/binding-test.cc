@@ -158,14 +158,25 @@ TEST("sg bindings - split_off_sampler_bindings partitions in order")
     CHECK(bindings.size() == 2);
 }
 
-TEST("sg bindings - named_view pairs a name with a bound view")
+TEST("sg bindings - named_view pairs a name with bound views")
 {
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
 
-    // A typed view converts implicitly to the named_view's raw_view.
-    sg::named_view const nv = {.name = "Output", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
+    // A typed view converts implicitly to a raw_view element; a scalar binding carries exactly one.
+    sg::named_view const nv = {.name = "Output", .views = {sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()}};
     CHECK(nv.name == "Output");
-    CHECK(sg::access_of(nv.view) == sg::view_class::readwrite);
-    CHECK(sg::shape_of(nv.view) == sg::view_shape::structured);
-    CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.view));
+    CHECK(nv.views.size() == 1);
+    CHECK(sg::access_of(nv.views[0]) == sg::view_class::readwrite);
+    CHECK(sg::shape_of(nv.views[0]) == sg::view_shape::structured);
+    CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.views[0]));
+
+    // An array binding carries one view per element; a vacant element is a null-handle view that still
+    // names its arm — here a null texture view keeping dimension + format for the backend's null descriptor.
+    auto const vacant = sg::raw_texture_view{.access = sg::view_class::readonly,
+                                             .texture = nullptr,
+                                             .view_dimension = sg::texture_view_dimension::tex_2d,
+                                             .format = sg::pixel_format::rgba8_unorm};
+    sg::named_view const array = {.name = "Textures", .views = {vacant, vacant, vacant}};
+    CHECK(array.views.size() == 3);
+    CHECK(sg::accepts(sg::binding_type::readonly_texture, array.views[1]));
 }

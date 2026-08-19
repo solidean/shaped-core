@@ -200,6 +200,7 @@ if(SC_BUILD_TESTS)
             tests/transfer/download-async-test.cc
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc
+            tests/binding/binding-group-array-test.cc
             tests/barrier/barrier-test.cc
             tests/error-handling/error-handling-test.cc
             tests/raytracing/raytracing-test.cc

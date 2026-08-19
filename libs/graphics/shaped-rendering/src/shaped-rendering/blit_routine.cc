@@ -64,7 +64,7 @@ void blit_routine::execute(sg::rendering_scope& scope, sg::texture_2d const& src
         return; // shaders did not compile, or this format's pipeline failed to build
 
     auto const group = ctx.transient.create_binding_group(
-        self._group_layout, {{.name = "source_texture", .view = src.as_readonly_view()}},
+        self._group_layout, {{.name = "source_texture", .views = {src.as_readonly_view()}}},
         {{.name = "linear_sampler",
           .sampler = {.min_filter = sg::sampler_filter::linear,
                       .mag_filter = sg::sampler_filter::linear,

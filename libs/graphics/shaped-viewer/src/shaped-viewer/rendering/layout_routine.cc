@@ -170,8 +170,8 @@ void layout_routine::execute(sg::rendering_scope& scope,
                 continue;
             group = ctx.transient.create_binding_group(
                 self._group_layout,
-                {{.name = "source_0", .view = textures.targets[0].as_readonly_view()},
-                 {.name = "source_1", .view = textures.targets[0].as_readonly_view()}},
+                {{.name = "source_0", .views = {textures.targets[0].as_readonly_view()}},
+                 {.name = "source_1", .views = {textures.targets[0].as_readonly_view()}}},
                 {{.name = "source_sampler", .sampler = {}}});
         }
         else
@@ -194,8 +194,8 @@ void layout_routine::execute(sg::rendering_scope& scope,
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
             group
                 = ctx.transient.create_binding_group(self._group_layout,
-                                                     {{.name = "source_0", .view = primary->as_readonly_view()},
-                                                      {.name = "source_1", .view = secondary->as_readonly_view()}},
+                                                     {{.name = "source_0", .views = {primary->as_readonly_view()}},
+                                                      {.name = "source_1", .views = {secondary->as_readonly_view()}}},
                                                      {{.name = "source_sampler",
                                                        .sampler = {.min_filter = filter,
                                                                    .mag_filter = filter,

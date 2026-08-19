@@ -216,7 +216,7 @@ INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", 
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
     REQUIRE(buf != nullptr);
 
-    sg::named_view const nv = {.name = "Data", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
+    sg::named_view const nv = {.name = "Data", .views = {sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()}};
     auto group = ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
     REQUIRE(group != nullptr);
     CHECK(group != nullptr);
@@ -241,7 +241,7 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
 
     // A view bound to a name the layout does not declare is rejected, not silently ignored.
     // The fallible core surfaces it as an error; the throwing façade (create_binding_group) would raise sg::binding_group_exception instead (see tests/error-handling).
-    sg::named_view const wrong = {.name = "Nope", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
+    sg::named_view const wrong = {.name = "Nope", .views = {sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()}};
     auto group = ctx->transient.try_create_binding_group(layout, cc::span<sg::named_view const>(&wrong, 1));
     CHECK(group.has_error());
 }

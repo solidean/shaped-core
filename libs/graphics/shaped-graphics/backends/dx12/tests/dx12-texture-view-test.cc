@@ -44,7 +44,7 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
-        sg::named_view const nv = {.name = "Tex", .view = typed.as_readwrite_view()};
+        sg::named_view const nv = {.name = "Tex", .views = {typed.as_readwrite_view()}};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr); // create_texture_view UAV succeeded + the debug layer accepted it
     }
@@ -59,7 +59,7 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
-        sg::named_view const nv = {.name = "Tex", .view = typed.as_readonly_view()};
+        sg::named_view const nv = {.name = "Tex", .views = {typed.as_readonly_view()}};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr);
     }
@@ -106,8 +106,8 @@ INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transiti
 
     auto const typed = sg::texture_2d::from_raw(tex);
     sg::named_view const views[] = {
-        {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()},
-        {.name = "Tex", .view = typed.as_readwrite_view()},
+        {.name = "Output", .views = {sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()}},
+        {.name = "Tex", .views = {typed.as_readwrite_view()}},
     };
     auto group = c.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
     REQUIRE(group != nullptr);

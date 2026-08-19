@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 
@@ -49,6 +50,14 @@ public:
     /// Each dimension must be >= 1, and their product <= 2^30.
     /// Requires a bound pipeline, and `table` must have been built for it.
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
+
+    /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch_rays only** — the compute scope's contract, at the raytracing stage.
+    /// Every bound array binding must be declared before each dispatch; an empty `elements` span declares "unused".
+    void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
+
+    /// Declares per-element access for a *texture* array / bindless binding.
+    /// Like the buffer form it applies to the next dispatch_rays only, but each element also names the layout it must be in.
+    void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raytracing_scope(command_list_raytracing_scope const&) = delete;

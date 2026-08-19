@@ -120,8 +120,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
     REQUIRE(out_buf != nullptr);
 
     sg::named_view const views[] = {
-        {.name = "scene", .view = tlas->as_view()},
-        {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()},
+        {.name = "scene", .views = {tlas->as_view()}},
+        {.name = "Out", .views = {sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()}},
     };
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
     REQUIRE(group != nullptr);

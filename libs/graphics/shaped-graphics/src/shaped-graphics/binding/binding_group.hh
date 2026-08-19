@@ -1,16 +1,20 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
-/// A binding name paired with the view bound to it — the input to create_binding_group.
-/// A typed view converts implicitly to its `raw_view`, so call sites read `{"Output", buf->as_readwrite_buffer<u32>()}`.
+/// A binding name paired with the views bound to it — the input to create_binding_group.
+/// A scalar binding (count == 1) takes exactly one view; an array binding (count > 1) takes exactly `count`, one per element.
+/// A vacant array element is a null-handle view: it must still carry the binding's arm (a `raw_texture_view` with a null
+/// texture keeps its dimension + format, so the backend builds a matching null descriptor; a null-buffer view likewise).
+/// A typed view converts implicitly to its `raw_view`, so call sites read `{"Output", {buf->as_readwrite_buffer<u32>()}}`.
 struct sg::named_view
 {
     cc::string name;
-    raw_view view;
+    cc::vector<raw_view> views;
 };
 
 /// A binding name paired with a sampler state.

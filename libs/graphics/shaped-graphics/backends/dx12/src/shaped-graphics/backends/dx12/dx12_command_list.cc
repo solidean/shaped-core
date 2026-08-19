@@ -230,6 +230,9 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
                                  sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
+    // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
+    declare_array_accesses();
+
     // Emit every hazard the bound resources declared, batched, right before the dispatch consumes them.
     flush_barriers();
     _list->Dispatch(UINT(x), UINT(y), UINT(z));
@@ -301,6 +304,9 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
                                  sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
+    // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
+    declare_array_accesses();
+
     // The shader table buffer is read by the fixed-function ray dispatch.
     track_buffer_access(dt->buffer, sg::pipeline_stage_flag::raytracing, sg::access_flag::shader_read);
 
@@ -322,21 +328,95 @@ void dx12_command_list::compute_declare_array_buffer_access(cc::string_view bind
 {
     CC_ASSERT(!binding_name.empty(), "declare_array_buffer_access requires a binding name");
     // Arrays / bindless are not auto-tracked: which elements a shader indexes, and how, cannot be inferred, so the caller declares it here.
-    // Applying it needs a binding-name → bound-resources reflection map and an array binding path, neither of which exists yet.
-    // TODO: once array bindings land, declare each element's access on its buffer for the next dispatch.
-    (void)elements;
+    // Held until the next dispatch resolves it against the bound groups.
+    auto declare = dx12_array_buffer_declare{.name = cc::string(binding_name), .elements = {}};
+    declare.elements.push_back_range(elements);
+    _pending_array_buffer_declares.push_back(cc::move(declare));
 }
 
 void dx12_command_list::compute_declare_array_texture_access(cc::string_view binding_name,
                                                              cc::span<sg::array_texture_access const> elements)
 {
     CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
-    // Applying the per-element layout + subresource declaration needs a binding-name → bound-resources
-    // reflection map and an array binding path, neither of which exists yet.
-    // Unlike the buffer form above this rejects a non-empty declaration rather than dropping it, since
-    // silently ignoring a required layout would leave the texture in the wrong one.
-    CC_ASSERT(elements.empty(), "texture array access declaration is not implemented yet (needs the array binding "
-                                "path)");
+    auto declare = dx12_array_texture_declare{.name = cc::string(binding_name), .elements = {}};
+    declare.elements.push_back_range(elements);
+    _pending_array_texture_declares.push_back(cc::move(declare));
+}
+
+void dx12_command_list::declare_array_accesses()
+{
+    // The bound groups' array bindings, resolved by name — also the accounting set: every array binding must be
+    // covered by a declaration, since which elements a shader indexes cannot be inferred and silently skipping
+    // one would leave its resources untracked (wrong layouts, missed hazards).
+    auto const find_array_binding = [&](cc::string_view name, bool want_texture) -> dx12_array_binding const*
+    {
+        for (auto const* bound_group : _bound_groups)
+        {
+            if (bound_group == nullptr)
+                continue;
+            for (auto const& ab : bound_group->array_bindings)
+                if (ab.name == name && ab.is_texture == want_texture)
+                    return &ab;
+        }
+        return nullptr;
+    };
+
+    for (auto const& declare : _pending_array_buffer_declares)
+    {
+        auto const* ab = find_array_binding(declare.name, false);
+        CC_ASSERT(ab != nullptr, "declare_array_buffer_access names no buffer array binding of a bound group");
+        for (auto const& e : declare.elements)
+        {
+            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of "
+                                                                          "range");
+            auto const& buffer = ab->elements[e.index].buffer;
+            CC_ASSERT(buffer != nullptr, "declared array element is vacant (a null-handle view)");
+            track_buffer_access(buffer, e.stages, e.access);
+        }
+    }
+
+    for (auto const& declare : _pending_array_texture_declares)
+    {
+        auto const* ab = find_array_binding(declare.name, true);
+        CC_ASSERT(ab != nullptr, "declare_array_texture_access names no texture array binding of a bound group");
+        for (auto const& e : declare.elements)
+        {
+            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of "
+                                                                          "range");
+            auto const& element = ab->elements[e.index];
+            CC_ASSERT(element.texture != nullptr, "declared array element is vacant (a null-handle view)");
+            track_texture_access(element.texture, element.range, e.stages, e.access, e.layout);
+        }
+    }
+
+#if CC_ASSERT_ENABLED
+    // The reverse direction of the accounting: an undeclared array binding is a hard error, not "no access" —
+    // an empty-span declaration is the way to say a dispatch touches no elements of an array.
+    for (auto const* bound_group : _bound_groups)
+    {
+        if (bound_group == nullptr)
+            continue;
+        for (auto const& ab : bound_group->array_bindings)
+        {
+            bool declared = false;
+            if (ab.is_texture)
+            {
+                for (auto const& declare : _pending_array_texture_declares)
+                    declared |= declare.name == ab.name;
+            }
+            else
+            {
+                for (auto const& declare : _pending_array_buffer_declares)
+                    declared |= declare.name == ab.name;
+            }
+            CC_ASSERT(declared, "a bound array binding has no declare_array_*_access for this dispatch (declare an "
+                                "empty span if it is unused)");
+        }
+    }
+#endif
+
+    _pending_array_buffer_declares.clear();
+    _pending_array_texture_declares.clear();
 }
 
 void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,

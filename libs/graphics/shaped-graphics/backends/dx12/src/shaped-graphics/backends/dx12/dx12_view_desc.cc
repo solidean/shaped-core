@@ -12,8 +12,11 @@ namespace
 {
 // The underlying ID3D12Resource of a view's buffer (null for an empty buffer). Raw-word views address
 // in units of 4 bytes; structured views in units of the element stride.
+// A null buffer handle is a vacant array element — its resource is null and the desc below becomes a null descriptor.
 [[nodiscard]] ID3D12Resource* resource_of(sg::raw_buffer_view const& view)
 {
+    if (view.buffer == nullptr)
+        return nullptr;
     auto const* buf = dynamic_cast<dx12_buffer const*>(view.buffer.get());
     CC_ASSERT(buf != nullptr, "bound resource is not a dx12 buffer");
     return buf->_resource.Get();
@@ -288,9 +291,20 @@ namespace
 
 void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst)
 {
-    auto const* tex = dynamic_cast<dx12_texture const*>(view.texture.get());
-    CC_ASSERT(tex != nullptr, "bound resource is not a dx12 texture");
-    ID3D12Resource* const resource = tex->_resource.Get();
+    // A null texture handle is a vacant array element: the view's dimension + format still shape the desc,
+    // and a null resource makes it a null descriptor (reads return zero, writes are dropped).
+    ID3D12Resource* resource = nullptr;
+    if (view.texture != nullptr)
+    {
+        auto const* tex = dynamic_cast<dx12_texture const*>(view.texture.get());
+        CC_ASSERT(tex != nullptr, "bound resource is not a dx12 texture");
+        resource = tex->_resource.Get();
+    }
+    else
+    {
+        CC_ASSERT(view.format != sg::pixel_format::undefined, "a vacant texture element must still name a format (a "
+                                                              "null descriptor needs one)");
+    }
     DXGI_FORMAT const format = to_dxgi_format(view.format);
 
     switch (view.access)

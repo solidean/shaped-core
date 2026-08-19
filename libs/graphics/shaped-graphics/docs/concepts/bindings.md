@@ -25,6 +25,28 @@ For buffer and texture kinds they line up exactly: `access_of(binding_type)` and
 `accepts(binding_type, raw_view)` is the check.
 That equivalence is what lets a binding validate a bound view with no backend involved, and it is why `binding_type`'s view kinds mirror the view `(access, shape)` combinations one-to-one.
 
+## Array bindings
+
+An array binding is a `binding` with `count > 1`: `count` consecutive descriptors under one name — `Texture2D Texs[4]` in HLSL, and the building block of a bindless table.
+`count == 0` (unbounded) remains unsupported; a bindless table declares a bounded count and treats it as capacity.
+
+Three rules distinguish an array binding from a scalar one:
+
+- **A `named_view` supplies exactly `count` views, one per element.**
+  A vacant element is a **null-handle view** that still names its arm — a `raw_texture_view` with a null texture keeps its `view_dimension` + `format`, a null-buffer view its shape.
+  The backend builds a matching **null descriptor** from it, and reads of one return zero.
+  All-vacant is legal — a table can start empty.
+- **Access is never inferred.**
+  Which elements a shader indexes, and how, cannot be read from the binding, so array bindings skip the automatic hazard tracking scalar bindings get.
+  The dispatching caller declares the touched elements via `cmd.compute.declare_array_buffer_access` / `declare_array_texture_access`, applied to the next dispatch only.
+  The raytracing scope has the same pair.
+- **Every bound array binding must be declared before each dispatch** — the backend asserts it.
+  A missing declaration is a bug, never "no access"; an empty element span is the way to say "unused this dispatch".
+
+Element resources are still kept alive by the group, exactly like scalar bindings.
+Arrays of samplers, uniform buffers or acceleration structures are not supported.
+Raster draws do not support array bindings yet.
+
 ## Samplers: not views
 
 A `sampler` binding (`is_sampler(binding_type)`) has no view: a sampler carries no memory and no `(access, shape)`, so `accepts` rejects any view for it.
