@@ -282,17 +282,8 @@ public:
     /// Counters since create(). Cheap, and never touches the database.
     [[nodiscard]] cache_stats get_stats() const;
 
-    // driving and shutdown
+    // shutdown
 public:
-    /// Runs THIS store's storage work on the calling thread, where it has no actor thread; true if there may be more.
-    ///
-    /// Production code never needs it: an unthreaded store registers a pump, so blocking already drives it and
-    /// cc::thread_pump_all() drives every store at once.
-    /// This exists for a test that is ABOUT one store's ordering, which a global sweep would disturb — it also runs
-    /// every OTHER unthreaded store a sibling test owns, at moments that test did not choose.
-    /// A no-op returning false in a threaded build.
-    bool pump();
-
     /// Flushes buffered access times, drains accepted writes, rejects new ones, and joins the actor.
     /// Idempotent, and the destructor calls it.
     ///

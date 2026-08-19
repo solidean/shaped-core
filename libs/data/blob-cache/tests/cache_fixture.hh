@@ -85,8 +85,10 @@ public:
     /// Pumps the actor and the scheduler until `done`, or fails the test.
     void drive_until(cc::function_ref<bool()> done);
 
-    /// Pumps a bounded number of times without requiring anything to finish — for "nothing further happened" checks.
-    void idle(int cycles = 4);
+    /// Drives until nothing moves, without requiring anything to finish — for "nothing further happened" checks.
+    /// Quiescence rather than a cycle count: a sibling test sweeping the same registry can hold this store's pump, and
+    /// a skipped cycle is not one this store got.
+    void idle();
 
 private:
     template <class T>
@@ -98,9 +100,6 @@ private:
     }
 
     struct driver;
-
-    /// Borrowed, never owned: the test holds the second cache, and this only says who else this fixture drives.
-    cc::vector<blob_cache*> _also_driven;
 
     cc::string _path;
     std::shared_ptr<fake_clock> _clock;

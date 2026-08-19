@@ -111,6 +111,10 @@ public:
     /// Returns true if it stopped on the budget with work still pending.
     bool process_messages_if_unthreaded_for_ms(double max_ms);
 
+    /// Whether this actor runs on its caller rather than on a thread of its own.
+    /// Set once by start(); the answer decides whether driving it by hand means anything.
+    [[nodiscard]] bool is_unthreaded() const { return _is_unthreaded; }
+
     /// True once shutdown has begun: new messages are rejected and the thread is winding down.
     [[nodiscard]] bool is_shutting_down() const;
     /// True once shutdown has finished and the thread has joined.

@@ -42,7 +42,8 @@ TEST("bcache creates a missing directory tree, and says so again on the second c
     CHECK(!impl::create_directories(""));
 }
 
-TEST("bcache opens a database inside a directory tree it had to create")
+// exclusive() because this one is about the PROCESS-WIDE default, which every other test shares.
+TEST("bcache opens a database inside a directory tree it had to create", exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -56,7 +57,7 @@ TEST("bcache opens a database inside a directory tree it had to create")
 
     auto opened = cache->opened();
     for (auto i = 0; i < 1000 && !opened->is_ready(); ++i)
-        (void)cache->pump();
+        (void)cc::thread_pump_all();
 
     REQUIRE(opened->is_ready());
     CHECK(cache->get_stats().is_backed_by_storage);

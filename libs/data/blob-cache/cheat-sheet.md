@@ -87,7 +87,7 @@ bcache::cache_config{
     .verify_on_read = false,              // re-BLAKE3 every hit; a full crypto pass per read, so off by default
     .wall_clock = fn, .steady_clock = fn, // default to clean-core's; must be callable from any thread
     .on_storage_error = fn,               // one line per failure, so degradation is never silent
-    .unthreaded = false};                 // drive via pump() instead of an actor thread
+    .unthreaded = false};                 // no actor thread: registers a pump, so whoever blocks runs the storage work
 
 bcache::cache_limits{
     .max_total_bytes = i64(50) << 30,     // decoded OBJECT bytes — not pages, indexes, freelist or WAL

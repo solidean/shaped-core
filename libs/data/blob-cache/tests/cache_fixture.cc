@@ -1,5 +1,6 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
@@ -80,43 +81,44 @@ cc::unique_ptr<blob_cache> cache_fixture::open_second()
     config.wall_clock = [clock = _clock] { return clock->now(); };
     config.steady_clock = [clock = _clock] { return clock->now(); };
 
-    auto second = blob_cache::create(cc::move(config));
-    _also_driven.push_back(second.get());
-    return second;
+    return blob_cache::create(cc::move(config));
 }
 
 void cache_fixture::drive_until(cc::function_ref<bool()> done)
 {
+    // Bounded by TIME, not by cycles: a sibling test sweeping the same registry holds this store's pump while it runs
+    // it, and our sweep skips a pump already running.
+    // Counting those skips as attempts would give up while somebody else was making the very progress we wait for.
     // Generous, because one acquire is several actor round trips and a GC pass is many.
-    // Small enough that a pipeline which can never finish fails in well under a second rather than hanging the suite.
-    constexpr auto max_cycles = 100000;
+    auto const deadline = cc::current_time_steady_secs() + 5.0;
 
-    for (auto i = 0; i < max_cycles; ++i)
+    while (cc::current_time_steady_secs() < deadline)
     {
         if (done())
             return;
 
         // The actors first: they are what resolve the promises the graph is parked on.
-        // This test's own stores by name, never cc::thread_pump_all(): a global sweep also runs the stores of every
-        // sibling test running beside this one, at moments they did not choose.
-        (void)_cache->pump();
-        for (auto* other : _also_driven)
-            (void)other->pump();
+        // Through the registry, never store by store: driving one by name would test a local pump and leave the real
+        // mechanism — an unthreaded store registering itself — broken and unnoticed.
+        (void)cc::thread_pump_all();
         _driver->scheduler.drain();
     }
 
-    CHECK(false); // "settle" never settled — a step is missing, not merely slow
+    CHECK(done()); // "settle" never settled — a step is missing, not merely slow
 }
 
-void cache_fixture::idle(int cycles)
+void cache_fixture::idle()
 {
-    for (auto i = 0; i < cycles; ++i)
-    {
-        (void)_cache->pump();
-        for (auto* other : _also_driven)
-            (void)other->pump();
+    // Until nothing moves, rather than a fixed number of cycles, for the same reason drive_until is bounded by time:
+    // a sibling test sweeping the same registry holds this store's pump while it runs it, and a cycle that skipped a
+    // busy pump is not a cycle this store got.
+    // Quiescence is also the stronger claim — "everything that could happen has" rather than "four tries' worth".
+    auto const deadline = cc::current_time_steady_secs() + 5.0;
+
+    while (cc::thread_pump_all() && cc::current_time_steady_secs() < deadline)
         _driver->scheduler.drain();
-    }
+
+    _driver->scheduler.drain(); // the last sweep's completions still have to be resumed
 }
 
 blob make_blob(cc::string_view text)

@@ -59,6 +59,10 @@ namespace cc
 /// One that always returns true turns every blocking wait into a busy loop, because a driver treats "no progress
 /// anywhere" as its cue to sleep.
 ///
+/// It must also be CHEAP when it has nothing due.
+/// A sweep runs on every blocking wait in the process, which is orders of magnitude more often than any one caller's
+/// cadence, so work a real thread would have slept between belongs behind the same interval here.
+///
 /// It runs on whichever thread is blocking, not on one of its own, and it is never re-entered: a sweep that finds it
 /// already running skips it, exactly as a busy thread takes no new work.
 ///

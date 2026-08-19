@@ -278,13 +278,6 @@ cc::shared_async<gc_result> blob_cache::collect_garbage()
     return promise;
 }
 
-bool blob_cache::pump()
-{
-    if (!_core->has_actor())
-        return false;
-    return _core->actor->process_messages_if_unthreaded();
-}
-
 cc::shared_async<cc::unit> blob_cache::flush()
 {
     if (!_core->has_actor() || _core->is_closed.load())

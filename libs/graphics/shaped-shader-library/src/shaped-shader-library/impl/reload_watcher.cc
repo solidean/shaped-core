@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/container/set.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/impl/reload_watcher.hh>
@@ -84,11 +85,13 @@ slib::impl::reload_watcher::reload_watcher(shader_library& library,
                                            bool threaded,
                                            bool force_polling,
                                            std::shared_ptr<cc::atomic<bool>> stopping,
+                                           std::shared_ptr<cc::atomic<bool>> poll_now,
                                            std::shared_ptr<reload_wake> wake)
   : _library(&library),
     _interval_ms(interval_ms),
     _threaded(threaded),
     _polling(force_polling),
+    _poll_now(cc::move(poll_now)),
     _stopping(cc::move(stopping)),
     _wake(cc::move(wake))
 {
@@ -105,13 +108,28 @@ void slib::impl::reload_watcher::on_message(check_now)
     scan();
 }
 
+bool slib::impl::reload_watcher::poll_interval_elapsed()
+{
+    auto const now = cc::current_time_steady_secs();
+    if (now < _next_poll_secs)
+        return false;
+
+    _next_poll_secs = now + _interval_ms / 1000.0;
+    return true;
+}
+
 bool slib::impl::reload_watcher::on_process()
 {
     if (!_threaded)
     {
-        // Unthreaded: this runs on whoever called poll_hot_reload(), so it must not sleep.
-        // While a watch is live the mailbox is the whole trigger; polling, the caller's own cadence is the interval.
-        if (_polling)
+        // Unthreaded: this runs on whoever swept the pump registry, so it must neither sleep nor scan per call.
+        // While a watch is live the mailbox is the whole trigger, which is why nothing here scans unless polling.
+        //
+        // Polling, this arm owns the interval the threaded one sleeps out.
+        // A sweep reaches it on every blocking wait in the process, and re-stat'ing every dependency on each of those
+        // would be ruinous — so a sweep scans on the interval, and only poll_hot_reload() asking outright scans now.
+        auto const asked = _poll_now->exchange(false);
+        if (_polling && (asked || poll_interval_elapsed()))
             scan();
         return false;
     }
