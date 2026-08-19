@@ -43,7 +43,7 @@ Two rules cover almost every choice.
 It exists as the escape hatch for the cases the cache key cannot express.
 
 Layouts and pipelines are schemas rather than lifetime-scoped GPU memory, which is why they sit on their own pair of scopes instead of on `persistent` / `transient`.
-Raster pipelines and shader tables are `uncached`-only for now — `ctx.cached` has no `acquire_raster_pipeline`.
+Shader tables are `uncached`-only: one is tied to a single pipeline, so there is nothing to dedup across callers.
 
 Beside the scopes, `ctx.routines` is the per-context render-routine registry — see [render-routines](../render-routines.md).
 

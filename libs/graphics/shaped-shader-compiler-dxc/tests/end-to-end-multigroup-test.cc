@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -56,14 +57,15 @@ INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 grou
     REQUIRE(set0.size() == 2);
     REQUIRE(set1.size() == 1);
 
-    auto group_layout0 = ctx.uncached.create_binding_group_layout(set0);
+    auto group_layout0 = ctx.cached.acquire_binding_group_layout(set0);
     REQUIRE(group_layout0 != nullptr);
-    auto group_layout1 = ctx.uncached.create_binding_group_layout(set1);
+    auto group_layout1 = ctx.cached.acquire_binding_group_layout(set1);
     REQUIRE(group_layout1 != nullptr);
 
-    auto pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {group_layout0, group_layout1}});
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout0, group_layout1}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    auto pipeline
+        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
     REQUIRE(pipeline != nullptr);
 
     // Buffers: A[i]=i, and two slot-1 inputs B1[i]=1, B2[i]=100. Out is read back after each dispatch.

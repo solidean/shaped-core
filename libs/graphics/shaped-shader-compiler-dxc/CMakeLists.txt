@@ -80,6 +80,7 @@ if(SC_BUILD_TESTS)
             tests/end-to-end-raytracing-test.cc
             tests/end-to-end-raster-test.cc
             tests/end-to-end-raster-stages-test.cc
+            tests/end-to-end-raster-cache-test.cc
             tests/end-to-end-cube-window-test.cc
             tests/end-to-end-raytraced-cube-window-test.cc
         )
