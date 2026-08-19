@@ -16,6 +16,15 @@ constexpr cc::string_view main_ref = "main";
 constexpr cc::string_view camera_key = "viewport/camera";
 constexpr i32 camera_version = 1;
 
+/// The imgui layout is one string per example, and imgui itself skips ini entries it does not know —
+/// so this version only moves if the value stops being that bare string.
+constexpr i32 ui_settings_version = 1;
+
+[[nodiscard]] cc::string ui_settings_key(cc::string_view name)
+{
+    return cc::format("ui/imgui/{}", name);
+}
+
 /// The op's label, which is what the timeline shows.
 /// Metadata is free-form and informational — and still hashed into the op id, so it is part of what is versioned.
 [[nodiscard]] vdoc::value label_metadata(cc::string_view label)
@@ -403,6 +412,20 @@ cc::optional<orbit_camera> document::load_camera() const
     cam.yaw = tg::angle_f::make_from_degree(number("yaw_deg", 35.0f));
     cam.pitch = tg::angle_f::make_from_degree(number("pitch_deg", 28.0f));
     return cam;
+}
+
+void document::store_ui_settings(cc::string_view name, cc::string_view ini)
+{
+    _file->set_workspace(ui_settings_key(name), {.version = ui_settings_version, .value = vdoc::value::of(ini)});
+}
+
+cc::optional<cc::string> document::load_ui_settings(cc::string_view name) const
+{
+    auto const stored = _file->try_get_workspace(ui_settings_key(name), ui_settings_version);
+    if (!stored.has_value() || stored.value().kind() != vdoc::value_kind::string)
+        return cc::nullopt;
+
+    return cc::string(stored.value().as_string());
 }
 
 vdoc::component_registry const& registry()

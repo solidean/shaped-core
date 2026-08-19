@@ -129,6 +129,41 @@ TEST("cube-editor - editing a past revision branches off it", nx::config::exclus
     CHECK(doc.value().revision_label(tip) == "move to 9");
 }
 
+TEST("cube-editor - an imgui layout round-trips per example and writes no history", nx::config::exclusive("vdoc-file-store"))
+{
+    if (!vdoc::file::store::is_file_storage_available())
+        SKIP("no SQLite backend was compiled in");
+
+    ensure_default_async_pool();
+    auto const path = scratch_path();
+
+    {
+        auto doc = document::open(path);
+        REQUIRE(doc.has_value());
+
+        auto const revisions_before = doc.value().timeline().size();
+        doc.value().store_ui_settings("editor", "[Window][cube editor]\nPos=20,20\n");
+        doc.value().store_ui_settings("viewer", "[Window][cube viewer]\nPos=400,300\n");
+
+        // The whole reason the layout lives in the workspace: it is not an edit.
+        CHECK(doc.value().timeline().size() == revisions_before);
+    } // close() flushes the workspace
+
+    auto reopened = document::open(path);
+    REQUIRE(reopened.has_value());
+
+    auto const editor = reopened.value().load_ui_settings("editor");
+    auto const viewer = reopened.value().load_ui_settings("viewer");
+    REQUIRE(editor.has_value());
+    REQUIRE(viewer.has_value());
+
+    // Both examples open the same file, so what matters is that neither name read the other's layout back.
+    CHECK(editor.value() == "[Window][cube editor]\nPos=20,20\n");
+    CHECK(viewer.value() == "[Window][cube viewer]\nPos=400,300\n");
+
+    CHECK(!reopened.value().load_ui_settings("never-written").has_value());
+}
+
 TEST("cube-editor - deleting an entity is reversible by moving back", nx::config::exclusive("vdoc-file-store"))
 {
     if (!vdoc::file::store::is_file_storage_available())

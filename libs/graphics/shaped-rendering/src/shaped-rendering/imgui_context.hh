@@ -1,5 +1,8 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
+#include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/string/string.hh>
 #include <imgui/imgui_fwd.hh>
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -23,6 +26,15 @@ struct sr::imgui_context_description
     /// On by default, so an app gets the brand look without a call.
     /// Turn it off to keep imgui's stock dark theme, or to apply your own style after create().
     bool apply_default_style = true;
+
+    /// Where imgui persists window layout, docking and viewport geometry.
+    ///
+    /// Empty — the default — means sr writes no file at all, and imgui_context's settings seam is what persists a layout.
+    /// imgui's own default would be `imgui.ini` **relative to the current working directory**, which drops a file into whatever directory the app happened to start in.
+    ///
+    /// A path here hands persistence back to imgui: it loads the file before the first frame and rewrites it a few seconds after a change.
+    /// The settings seam then reports nothing, because imgui only asks a caller to save while it is not saving itself.
+    cc::string ini_file = "";
 };
 
 /// Owns the Dear ImGui context and brackets a frame — the platform half of an imgui backend, as far as it goes without a windowing system.
@@ -119,6 +131,36 @@ public:
     /// The window_system must outlive this context: closing a viewport destroys an sr::window, which unregisters itself from the system it came from.
     void update_viewports();
 
+    // settings
+    //
+    // Window layout, docking and viewport geometry, in imgui's own ini text — the state imgui would otherwise keep in a file.
+    // With imgui_context_description::ini_file empty, which is the default, persisting it is the caller's:
+    //
+    //     imgui.load_settings(store.read());          // before the first frame
+    //     ...
+    //     if (auto ini = imgui.take_dirty_settings(); ini.has_value())
+    //         store.write(ini.value());               // in the frame loop, after end_frame
+    //     ...
+    //     store.write(imgui.settings());              // once at shutdown
+public:
+    /// Restores a layout previously read from settings() or take_dirty_settings().
+    ///
+    /// Must run before the first frame: imgui applies a window's settings when it first creates that window.
+    /// Requires an empty ini_file — with a path set, imgui loads the file itself and a second load would merge over it.
+    void load_settings(cc::string_view ini);
+
+    /// The layout, but only when imgui flagged a change since the last call — empty otherwise.
+    /// Taking it clears the flag, so a caller stores exactly what it gets.
+    ///
+    /// imgui raises that flag at most every IniSavingRate (5 s by default) after a change, so polling this every frame costs nothing.
+    /// It never fires while ini_file names a path.
+    [[nodiscard]] cc::optional<cc::string> take_dirty_settings();
+
+    /// The layout, whether or not anything changed.
+    ///
+    /// For the save at shutdown: with no ini_file, destroying the context writes nothing by itself, so the last change before exit is only in memory.
+    [[nodiscard]] cc::string settings() const;
+
     // queries
 public:
     [[nodiscard]] bool is_valid() const { return _ctx != nullptr; }
@@ -146,4 +188,13 @@ private:
     /// Set by end_frame while viewports are on, cleared by update_viewports.
     /// begin_frame asserts on it, so a caller who never wires update_viewports gets told rather than losing all mouse hit-testing silently.
     bool _viewport_update_pending = false;
+
+    /// The ini path, when the description named one, and null when it did not.
+    ///
+    /// Held by pointer rather than by value because imgui stores the `char const*` it is given:
+    /// the string object must keep its address while this context is moved, and only the pointer to it may move.
+    cc::unique_ptr<cc::string> _ini_file;
+
+    /// Whether a frame has begun, which is what lets load_settings assert on being too late.
+    bool _frame_started = false;
 };

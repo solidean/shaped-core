@@ -113,6 +113,7 @@ if(SC_BUILD_TESTS)
         tests/window-manual-test.cc
         tests/imgui-registry-test.cc
         tests/imgui-input-test.cc
+        tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
     )
 
