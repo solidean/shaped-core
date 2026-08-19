@@ -25,7 +25,7 @@ namespace
 {
 struct test_buffer final : sg::raw_buffer
 {
-    test_buffer(isize size_in_bytes, sg::buffer_usage usage) : sg::raw_buffer(size_in_bytes, usage) {}
+    test_buffer(isize size_in_bytes, sg::buffer_usages usage) : sg::raw_buffer(size_in_bytes, usage) {}
 };
 
 struct particle
@@ -33,7 +33,7 @@ struct particle
     u32 a, b, c, d;
 };
 
-std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usage usage)
+std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usages usage)
 {
     return std::make_shared<test_buffer>(size, usage);
 }

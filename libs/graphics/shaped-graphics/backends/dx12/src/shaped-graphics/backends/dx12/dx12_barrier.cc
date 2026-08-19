@@ -6,23 +6,23 @@ namespace sg::backend::dx12
 D3D12_BARRIER_SYNC d3d12_sync_from(sg::pipeline_stage_flags stages)
 {
     D3D12_BARRIER_SYNC out = D3D12_BARRIER_SYNC_NONE;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::draw_indirect))
+    if (stages.has(sg::pipeline_stage_flag::draw_indirect))
         out |= D3D12_BARRIER_SYNC_EXECUTE_INDIRECT;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::vertex))
+    if (stages.has(sg::pipeline_stage_flag::vertex))
         out |= D3D12_BARRIER_SYNC_VERTEX_SHADING;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::fragment))
+    if (stages.has(sg::pipeline_stage_flag::fragment))
         out |= D3D12_BARRIER_SYNC_PIXEL_SHADING;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::compute))
+    if (stages.has(sg::pipeline_stage_flag::compute))
         out |= D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::copy))
+    if (stages.has(sg::pipeline_stage_flag::copy))
         out |= D3D12_BARRIER_SYNC_COPY;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::render_target))
+    if (stages.has(sg::pipeline_stage_flag::render_target))
         out |= D3D12_BARRIER_SYNC_RENDER_TARGET;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::depth_stencil_target))
+    if (stages.has(sg::pipeline_stage_flag::depth_stencil_target))
         out |= D3D12_BARRIER_SYNC_DEPTH_STENCIL;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::raytracing))
+    if (stages.has(sg::pipeline_stage_flag::raytracing))
         out |= D3D12_BARRIER_SYNC_RAYTRACING;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::accel_build))
+    if (stages.has(sg::pipeline_stage_flag::accel_build))
         out |= D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE;
     return out;
 }
@@ -30,31 +30,31 @@ D3D12_BARRIER_SYNC d3d12_sync_from(sg::pipeline_stage_flags stages)
 D3D12_BARRIER_ACCESS d3d12_access_from(sg::access_flags access)
 {
     D3D12_BARRIER_ACCESS out = D3D12_BARRIER_ACCESS_COMMON; // 0
-    if (sg::has_all(access, sg::access_flags::uniform_read))
+    if (access.has(sg::access_flag::uniform_read))
         out |= D3D12_BARRIER_ACCESS_CONSTANT_BUFFER;
-    if (sg::has_all(access, sg::access_flags::index_read))
+    if (access.has(sg::access_flag::index_read))
         out |= D3D12_BARRIER_ACCESS_INDEX_BUFFER;
-    if (sg::has_all(access, sg::access_flags::vertex_read))
+    if (access.has(sg::access_flag::vertex_read))
         out |= D3D12_BARRIER_ACCESS_VERTEX_BUFFER;
-    if (sg::has_all(access, sg::access_flags::shader_read))
+    if (access.has(sg::access_flag::shader_read))
         out |= D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-    if (sg::has_all(access, sg::access_flags::shader_write))
+    if (access.has(sg::access_flag::shader_write))
         out |= D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-    if (sg::has_all(access, sg::access_flags::copy_read))
+    if (access.has(sg::access_flag::copy_read))
         out |= D3D12_BARRIER_ACCESS_COPY_SOURCE;
-    if (sg::has_all(access, sg::access_flags::copy_write))
+    if (access.has(sg::access_flag::copy_write))
         out |= D3D12_BARRIER_ACCESS_COPY_DEST;
-    if (sg::has_all(access, sg::access_flags::indirect_read))
+    if (access.has(sg::access_flag::indirect_read))
         out |= D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT;
-    if (sg::has_all(access, sg::access_flags::color_write))
+    if (access.has(sg::access_flag::color_write))
         out |= D3D12_BARRIER_ACCESS_RENDER_TARGET;
-    if (sg::has_all(access, sg::access_flags::depth_read))
+    if (access.has(sg::access_flag::depth_read))
         out |= D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ;
-    if (sg::has_all(access, sg::access_flags::depth_write))
+    if (access.has(sg::access_flag::depth_write))
         out |= D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
-    if (sg::has_all(access, sg::access_flags::accel_read))
+    if (access.has(sg::access_flag::accel_read))
         out |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_READ;
-    if (sg::has_all(access, sg::access_flags::accel_write))
+    if (access.has(sg::access_flag::accel_write))
         out |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_WRITE;
     return out;
 }
@@ -75,14 +75,14 @@ namespace
 /// SYNC_DRAW is the one bit legal with both.
 [[nodiscard]] D3D12_BARRIER_SYNC sync_for_access(D3D12_BARRIER_SYNC sync, sg::access_flags access)
 {
-    if (sync == D3D12_BARRIER_SYNC_NONE || !sg::has_all(access, sg::access_flags::index_read))
+    if (sync == D3D12_BARRIER_SYNC_NONE || !access.has(sg::access_flag::index_read))
         return sync;
     if ((sync & D3D12_BARRIER_SYNC_VERTEX_SHADING) == 0)
         return sync | D3D12_BARRIER_SYNC_INDEX_INPUT;
 
     auto const vertex_stage_access
-        = sg::access_flags::vertex_read | sg::access_flags::uniform_read | sg::access_flags::shader_read;
-    auto const also_shades = u32(access & vertex_stage_access) != 0;
+        = sg::access_flag::vertex_read | sg::access_flag::uniform_read | sg::access_flag::shader_read;
+    auto const also_shades = access.has_any(vertex_stage_access);
 
     sync &= ~D3D12_BARRIER_SYNC_VERTEX_SHADING;
     return sync | (also_shades ? D3D12_BARRIER_SYNC_DRAW : D3D12_BARRIER_SYNC_INDEX_INPUT);

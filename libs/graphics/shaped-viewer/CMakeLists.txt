@@ -3,7 +3,7 @@ project(shaped-viewer LANGUAGES CXX)
 
 # shaped-viewer (sv::) is the professional, RTX-enabled visualization renderer with a dev-friendly API,
 # built on shaped-rendering. This is the first vertical slice: a per-frame viewer_definition of views, each
-# path-traced into a target texture and blitted into a window by the view_renderer routine.
+# path-traced into its own texture by the view_renderer routine and placed into a window by viewer_renderer.
 #
 # The library API is present on every platform (the vocabulary, managers, routines and renderer all compile
 # cross-platform); actual rendering needs a ray-tracing-capable backend, which today means dx12 + DXR on
@@ -11,12 +11,28 @@ project(shaped-viewer LANGUAGES CXX)
 # draws nothing — the same graceful path a broken shader edit takes.
 add_library(shaped-viewer
     src/shaped-viewer/shaped-viewer.cc
-    src/shaped-viewer/camera.cc
-    src/shaped-viewer/light.cc
+    src/shaped-viewer/context.cc
+    src/shaped-viewer/scene/light.cc
+    src/shaped-viewer/scene/background.cc
+    src/shaped-viewer/scene/pbr_material.cc
+    src/shaped-viewer/view/camera.cc
+    src/shaped-viewer/view/camera_controller.cc
+    src/shaped-viewer/view/view_data.cc
+    src/shaped-viewer/view/view_store.cc
+    src/shaped-viewer/layout/box_style.cc
+    src/shaped-viewer/layout/solvers.cc
+    src/shaped-viewer/layout/layout_tree.cc
+    src/shaped-viewer/frame.cc
+    src/shaped-viewer/refs.cc
+    src/shaped-viewer/interactive.cc
+    src/shaped-viewer/viewer.cc
     src/shaped-viewer/resources/resource_managers.cc
     src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
+    src/shaped-viewer/rendering/render_plan.cc
+    src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/view_renderer.cc
+    src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
 )
 
@@ -28,31 +44,46 @@ target_sources(shaped-viewer
     FILES
     src/shaped-viewer/fwd.hh
     src/shaped-viewer/all.hh
-    src/shaped-viewer/view_id.hh
     src/shaped-viewer/gpu_types.hh
-    src/shaped-viewer/camera.hh
-    src/shaped-viewer/pbr_material.hh
-    src/shaped-viewer/light.hh
-    src/shaped-viewer/background.hh
-    src/shaped-viewer/render_settings.hh
-    src/shaped-viewer/triangle_geometry.hh
-    src/shaped-viewer/mesh.hh
-    src/shaped-viewer/mesh_attribute.hh
-    src/shaped-viewer/mesh_flags.hh
-    src/shaped-viewer/mesh_parameter.hh
-    src/shaped-viewer/mesh_texture.hh
-    src/shaped-viewer/scene_item.hh
-    src/shaped-viewer/view.hh
-    src/shaped-viewer/viewer_definition.hh
+    src/shaped-viewer/frame.hh
+    src/shaped-viewer/refs.hh
+    src/shaped-viewer/interactive.hh
+    src/shaped-viewer/viewer.hh
+    src/shaped-viewer/context.hh
+    src/shaped-viewer/scene/pbr_material.hh
+    src/shaped-viewer/scene/light.hh
+    src/shaped-viewer/scene/background.hh
+    src/shaped-viewer/scene/triangle_geometry.hh
+    src/shaped-viewer/scene/mesh.hh
+    src/shaped-viewer/scene/mesh_attribute.hh
+    src/shaped-viewer/scene/mesh_flags.hh
+    src/shaped-viewer/scene/mesh_parameter.hh
+    src/shaped-viewer/scene/mesh_texture.hh
+    src/shaped-viewer/scene/scene_item.hh
+    src/shaped-viewer/view/view_id.hh
+    src/shaped-viewer/view/camera.hh
+    src/shaped-viewer/view/camera_controller.hh
+    src/shaped-viewer/view/render_settings.hh
+    src/shaped-viewer/view/post_process.hh
+    src/shaped-viewer/view/layer.hh
+    src/shaped-viewer/view/view_data.hh
+    src/shaped-viewer/view/viewer_definition.hh
+    src/shaped-viewer/layout/box_style.hh
+    src/shaped-viewer/layout/solvers.hh
+    src/shaped-viewer/layout/layout_tree.hh
     src/shaped-viewer/resources/resource_data.hh
     src/shaped-viewer/impl/content_hash.hh
-    src/shaped-viewer/resources/resource_ids.hh
+    src/shaped-viewer/impl/keyed_cache.hh
+    src/shaped-viewer/impl/view_state.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
     src/shaped-viewer/rendering/frame_constants.hh
     src/shaped-viewer/rendering/raytrace_routine.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
+    src/shaped-viewer/rendering/render_plan.hh
+    src/shaped-viewer/rendering/layout_routine.hh
     src/shaped-viewer/rendering/view_renderer.hh
+    src/shaped-viewer/rendering/viewer_renderer.hh
     src/shaped-viewer/rendering/shaders.hh
 )
 
@@ -65,6 +96,16 @@ target_include_directories(shaped-viewer
 )
 
 target_link_libraries(shaped-viewer PUBLIC shaped-rendering)
+
+# sv brings its own context up when a caller sets no sv::acquire_context, so it needs one backend to fall back on.
+# PRIVATE: the fallback is an implementation detail, and a consumer that wants a different backend overrides the hook
+# rather than inheriting this one. Which backend the default reaches for is a per-target choice that will grow.
+if(WIN32 AND TARGET shaped-graphics-dx12)
+    target_link_libraries(shaped-viewer PRIVATE shaped-graphics-dx12)
+    target_compile_definitions(shaped-viewer PRIVATE SV_HAS_DEFAULT_BACKEND=1)
+else()
+    target_compile_definitions(shaped-viewer PRIVATE SV_HAS_DEFAULT_BACKEND=0)
+endif()
 
 sc_target_pch(shaped-viewer SG)
 
@@ -88,6 +129,10 @@ sc_add_shader_package(
         raygen.hlsl:raygen:RayGen
         shading.hlsl:miss:Miss
         shading.hlsl:closest_hit:ClosestHit
+        layout.hlsl:vertex:main_vs
+        layout.hlsl:fragment:border_ps
+        layout.hlsl:fragment:view_ps
+        layout.hlsl:fragment:wipe_ps
         pathtrace.hlsl:raygen:PathTraceRayGen
         pt_hit.hlsl:miss:PtMiss
         pt_hit.hlsl:miss:PtShadowMiss
@@ -103,6 +148,10 @@ if(SC_BUILD_TESTS)
         tests/smoke-test.cc
         tests/vocabulary-test.cc
         tests/lru-pool-test.cc
+        tests/keyed-cache-test.cc
+        tests/camera-controller-test.cc
+        tests/layout-test.cc
+        tests/render-plan-test.cc
     )
 
     target_link_libraries(shaped-viewer-test
@@ -120,8 +169,13 @@ if(SC_BUILD_TESTS)
             tests/raytraced-view-test.cc
             tests/pathtraced-view-test.cc
             tests/view-renderer-test.cc
+            tests/view-accumulation-test.cc
+            tests/viewer-renderer-test.cc
+            tests/layout-routine-test.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
+            tests/immediate-viewer-window-manual-test.cc
+            tests/interactive-showcase-manual-test.cc
         )
         target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
 

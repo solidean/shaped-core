@@ -13,18 +13,18 @@ namespace
 {
 [[nodiscard]] D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS to_dxr_build_flags(sg::accel_build_flags f)
 {
-    CC_ASSERT(!(sg::has_flag(f, sg::accel_build_flags::fast_trace) && sg::has_flag(f, sg::accel_build_flags::fast_build)),
+    CC_ASSERT(!f.has_all(sg::accel_build_flag::fast_trace | sg::accel_build_flag::fast_build),
               "fast_trace and fast_build are mutually exclusive");
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS out = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-    if (sg::has_flag(f, sg::accel_build_flags::fast_trace))
+    if (f.has(sg::accel_build_flag::fast_trace))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-    if (sg::has_flag(f, sg::accel_build_flags::fast_build))
+    if (f.has(sg::accel_build_flag::fast_build))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
-    if (sg::has_flag(f, sg::accel_build_flags::allow_update))
+    if (f.has(sg::accel_build_flag::allow_update))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
-    if (sg::has_flag(f, sg::accel_build_flags::allow_compaction))
+    if (f.has(sg::accel_build_flag::allow_compaction))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
-    if (sg::has_flag(f, sg::accel_build_flags::minimize_memory))
+    if (f.has(sg::accel_build_flag::minimize_memory))
         out |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
     return out;
 }
@@ -36,7 +36,7 @@ namespace
     auto const b = std::dynamic_pointer_cast<dx12_buffer const>(buffer);
     CC_ASSERT(b != nullptr, "build input buffer is not a dx12 buffer");
     CC_ASSERT(!b->is_expired(), "build input buffer is a transient buffer used past its epoch (expired)");
-    CC_ASSERT(sg::has_flag(b->usage(), sg::buffer_usage::accel_structure_build_input),
+    CC_ASSERT(b->usage().has(sg::buffer_usage::accel_structure_build_input),
               "acceleration-structure build input buffer must have buffer_usage::accel_structure_build_input");
     (void)what;
     return b;
@@ -91,10 +91,10 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
     // Scratch is a plain UAV (shader_write / UNORDERED_ACCESS), and the geometry inputs are ordinary buffer reads (shader_read / SHADER_RESOURCE).
     // The AS access bits are illegal on non-AS buffers.
     // The tracker turns a prior upload of the inputs (copy_write) into the copy->read barrier.
-    track_buffer_access(result, sg::pipeline_stage_flags::accel_build, sg::access_flags::accel_write);
-    track_buffer_access(scratch, sg::pipeline_stage_flags::accel_build, sg::access_flags::shader_write);
+    track_buffer_access(result, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);
+    track_buffer_access(scratch, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
     for (auto const& in : input_buffers)
-        track_buffer_access(in, sg::pipeline_stage_flags::accel_build, sg::access_flags::shader_read);
+        track_buffer_access(in, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
     flush_barriers();
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
@@ -254,7 +254,7 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     auto const instance_buf = std::dynamic_pointer_cast<dx12_buffer const>(instance_raw);
     CC_ASSERT(instance_buf != nullptr, "instance buffer is not a dx12 buffer");
 
-    track_buffer_access(instance_buf, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write);
+    track_buffer_access(instance_buf, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     flush_barriers();
     _ctx._upload_inline.upload_buffer(*this, *instance_buf,
                                       cc::as_bytes(cc::span<D3D12_RAYTRACING_INSTANCE_DESC const>(instance_descs)), 0);
@@ -281,11 +281,11 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     // The top-level build writes the result (accel_write) and uses scratch as a UAV (shader_write).
     // The instance descs are an ordinary buffer read (shader_read) — they are not an acceleration structure.
     // Each referenced BLAS is read *as* an acceleration structure (accel_read).
-    track_buffer_access(result, sg::pipeline_stage_flags::accel_build, sg::access_flags::accel_write);
-    track_buffer_access(scratch, sg::pipeline_stage_flags::accel_build, sg::access_flags::shader_write);
-    track_buffer_access(instance_buf, sg::pipeline_stage_flags::accel_build, sg::access_flags::shader_read);
+    track_buffer_access(result, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);
+    track_buffer_access(scratch, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
+    track_buffer_access(instance_buf, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
     for (auto const& s : referenced_storage)
-        track_buffer_access(s, sg::pipeline_stage_flags::accel_build, sg::access_flags::accel_read);
+        track_buffer_access(s, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_read);
     flush_barriers();
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};

@@ -1,9 +1,9 @@
 #include "component.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
 #include <versioned-document/op_builder.hh>
 
-#include <algorithm>
 
 using namespace cc::primitive_defines;
 
@@ -79,8 +79,8 @@ void vdoc::component_registry::add(component_schema schema)
 
     // Registration is rare and lookup is not, so the vector pays for staying sorted here.
     _schemas.push_back(cc::move(schema));
-    std::sort(_schemas.begin(), _schemas.end(),
-              [](component_schema const& a, component_schema const& b) { return a.type.compare_bytes(b.type) < 0; });
+    cc::sort(_schemas,
+             [](component_schema const& a, component_schema const& b) { return a.type.compare_bytes(b.type) < 0; });
 }
 
 void vdoc::component_registry::merge(component_registry const& other)

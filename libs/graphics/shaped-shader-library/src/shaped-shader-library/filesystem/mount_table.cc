@@ -62,10 +62,8 @@ void slib::mount_table::mount(cc::string_view virtual_dir, filesystem_handle fs)
                 }
             }
 
-            s.mounts.emplace_back();
-            for (isize i = s.mounts.size() - 1; i > at; --i)
-                s.mounts[i] = cc::move(s.mounts[i - 1]);
-            s.mounts[at] = entry{.prefix = cc::move(normalized.value()), .fs = cc::move(fs), .salt = s.next_salt++};
+            s.mounts.insert_at(
+                at, entry{.prefix = cc::move(normalized.value()), .fs = cc::move(fs), .salt = s.next_salt++});
         });
 }
 

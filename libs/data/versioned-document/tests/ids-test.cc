@@ -1,8 +1,8 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <versioned-document/ids.hh>
 
-#include <algorithm>
 #include <type_traits>
 
 using namespace cc::primitive_defines;
@@ -78,8 +78,8 @@ TEST("vdoc - id ordering does not depend on intern order")
         backward.push_back(entity_id::of(names[names.size() - 1 - i]));
     }
 
-    std::sort(forward.begin(), forward.end(), entity_id::by_bytes{});
-    std::sort(backward.begin(), backward.end(), entity_id::by_bytes{});
+    cc::sort(forward, entity_id::by_bytes{});
+    cc::sort(backward, entity_id::by_bytes{});
 
     for (isize i = 0; i < forward.size(); ++i)
         CHECK(forward[i] == backward[i]);

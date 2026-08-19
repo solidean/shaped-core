@@ -375,9 +375,9 @@ void imgui_context::process_events(window_system const& wsys)
         //
         // Only *consecutive* ones, and only within the same window:
         // that never moves a position across the button or wheel event that follows it, which is the ordering the trickle exists to preserve.
-        if (events[i].try_as_mouse_move() != nullptr        //
-            && i + 1 < events.size()                        //
-            && events[i + 1].try_as_mouse_move() != nullptr //
+        if (events[i].is_mouse_move()        //
+            && i + 1 < events.size()         //
+            && events[i + 1].is_mouse_move() //
             && events[i].window == events[i + 1].window)
             continue;
 

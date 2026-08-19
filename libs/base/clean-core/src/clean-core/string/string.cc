@@ -114,10 +114,32 @@ void cc::string::replace(offset_size const r, string_view const with)
     CC_ASSERT(r.size >= 0, "replace size must be non-negative");
     CC_ASSERT(r.offset >= 0 && r.offset + r.size <= size(), "replace range out of bounds");
 
-    // Both self and `with` may reference this string's buffer.
+    auto const old_size = size();
+
+    // Test for aliasing FIRST, before anything can move: an overlapping `with` is what forces the rebuild,
+    // and it is what makes s.replace(r, s.subview(...)) legal.
+    if (with.empty() || with.data() + with.size() <= data() || with.data() >= data() + old_size)
+    {
+        auto const delta = with.size() - r.size;
+
+        if (delta > 0)
+            resize_to_uninitialized(old_size + delta); // may materialize to the heap or reallocate
+
+        auto* const d = data(); // re-read, since the resize above may have reallocated
+        cc::memmove(d + r.offset + with.size(), d + r.offset + r.size, size_t(old_size - r.offset - r.size));
+        if (!with.empty())
+            cc::memcpy(d + r.offset, with.data(), size_t(with.size()));
+
+        if (delta < 0)
+            resize_to_uninitialized(old_size + delta);
+
+        return;
+    }
+
+    // `with` points into our own buffer.
     // The rebuilt result is a separate allocation and only moves into *this at the end, so aliasing is safe.
     string_view const self(*this);
-    auto result = create_with_capacity(size() - r.size + with.size(), resource());
+    auto result = create_with_capacity(old_size - r.size + with.size(), resource());
     result.append(self.subview({.start = isize(0), .end = r.offset}));
     result.append(with);
     result.append(self.subview(r.offset + r.size));

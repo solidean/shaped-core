@@ -16,7 +16,7 @@ namespace sg::backend::dx12
 /// The D3D12_RESOURCE_DESC for a buffer of this shape.
 /// Shared by committed + placed creation and by a memory_heap's requirement query, which must all agree on the exact desc.
 /// `size_in_bytes` must be > 0.
-[[nodiscard]] D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usage usage);
+[[nodiscard]] D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages usage);
 
 } // namespace sg::backend::dx12
 
@@ -29,7 +29,7 @@ public:
     dx12_buffer(dx12_context& ctx,
                 sg::epoch created_in,
                 isize size_in_bytes,
-                sg::buffer_usage usage,
+                sg::buffer_usages usage,
                 ComPtr<ID3D12Resource> resource,
                 sg::memory_heap_handle heap = nullptr)
       : sg::raw_buffer(size_in_bytes, usage),

@@ -13,7 +13,7 @@ namespace
 {
 namespace dx12 = sg::backend::dx12;
 
-sg::texture_description target_desc(sg::texture_usage usage, sg::pixel_format format, int w, int h)
+sg::texture_description target_desc(sg::texture_usages usage, sg::pixel_format format, int w, int h)
 {
     sg::texture_description d;
     d.format = format;

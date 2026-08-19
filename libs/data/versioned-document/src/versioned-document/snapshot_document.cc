@@ -24,29 +24,6 @@ namespace
     return total;
 }
 
-/// Inserts `value` at `at`, shifting the tail up by one.
-///
-/// clean-core's vector has no insert-at-position yet — container/vector.hh tracks it as a TODO — so this is the local
-/// stand-in, and the place to delete once it grows one.
-template <class T>
-void insert_at(cc::vector<T>& values, isize at, T value)
-{
-    values.push_back(cc::move(value));
-    for (auto i = values.size() - 1; i > at; --i)
-        cc::swap(values[i], values[i - 1]);
-}
-
-/// Removes the entry at `at`, shifting the tail down by one.
-/// The sibling of `insert_at`, and it goes when clean-core's vector grows the pair.
-template <class T>
-void remove_at(cc::vector<T>& values, isize at)
-{
-    for (auto i = at; i + 1 < values.size(); ++i)
-        cc::swap(values[i], values[i + 1]);
-
-    values.remove_back();
-}
-
 /// The index of the entry keyed by `id`, or -1 where there is none.
 template <class EntryT, class IdT>
 [[nodiscard]] isize index_of(cc::vector<EntryT> const& entries, IdT EntryT::* key, IdT id)
@@ -69,9 +46,9 @@ template <class EntryT, class IdT>
     if (at < entries.size() && entries[at].*key == id)
         return entries[at];
 
-    insert_at(entries, at, EntryT{});
-    entries[at].*key = id;
-    return entries[at];
+    auto& entry = entries.emplace_at(at);
+    entry.*key = id;
+    return entry;
 }
 } // namespace
 
@@ -231,15 +208,15 @@ void vdoc::snapshot_document::clear_writers(property_path const& path)
         _dead_bytes += w.value.bytes().size();
 
     --_property_count;
-    remove_at(component.value.properties, property_at);
+    component.value.properties.remove_at(property_at);
 
     // Then prune upwards, because an empty component or entity entry is a shape a fresh materialization never produces
     // and a parse would misread — see the header.
     if (!component.value.properties.empty())
         return;
 
-    remove_at(entity.value.components, component_at);
+    entity.value.components.remove_at(component_at);
 
     if (entity.value.components.empty())
-        remove_at(_document.entities, entity_at);
+        _document.entities.remove_at(entity_at);
 }

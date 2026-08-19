@@ -18,7 +18,7 @@ struct sg::color_target_state
 {
     pixel_format format = pixel_format::undefined;
     cc::optional<blend_state> blend = {}; ///< unset => the source overwrites the target (no blend)
-    color_write_mask write_mask = color_write_mask::all;
+    color_write_mask write_mask = color_write_mask_all;
 };
 
 /// Everything needed to build a raster_pipeline: the shaders, the pipeline_layout they are compiled against, the vertex-input layout, and the fixed-function state.

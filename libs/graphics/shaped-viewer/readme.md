@@ -7,8 +7,36 @@ Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → 
 
 sv will grow into Shaped Code's visualization renderer — the top of the graphics stack, serving SOLIDEAN, internal tools, and customer visualization needs.
 
-The library has a **first vertical slice**: a per-frame `viewer_definition` of views, each path-traced into a target texture.
-The `view_renderer` routine blits them into a window; raytracing-first, dx12 + DXR today.
+A **view is the definition of one texture**, and one of a view's layers may be a whole layout tree — so views nest, at any depth.
+A frame is authored through fluent handles, flattened into a `render_plan`, and replayed by `viewer_renderer`.
+Raytracing-first, dx12 + DXR today.
+
+```cpp
+for (auto f : sv::interactive("my viewer"))
+{
+    auto rows = f.window().view().layout_rows({.spacing = 6});
+    rows.add_view("left").add_scene().add_mesh(mesh);   // content-addressed: an unchanged mesh uploads nothing
+    rows.add_view("right").add_scene().add_mesh(mesh);
+}
+```
+
+No context is threaded through — one is acquired through `sv::acquire_context`, or from a built-in default.
+
+An application whose own loop must stay in charge writes the same loop out, with `begin_frame` / `end_frame` around the identical authoring calls.
+Both author the same `sv::frame`; only what ends it differs — the range yields an `sv::frame_scope` that presents when the loop body ends, `begin_frame` hands out the frame itself:
+
+```cpp
+auto viewer = sv::viewer::create("my viewer");
+while (viewer.is_running())
+{
+    auto& f = viewer.begin_frame();
+    if (!f) // the window cannot draw right now (minimized)
+        continue;
+    f.add_scene().add_mesh(mesh);
+    viewer.end_frame();
+}
+```
+
 See [docs/structure.md](docs/structure.md) for the roadmap and [cheat-sheet.md](cheat-sheet.md) for the API.
 
 ## Building & testing

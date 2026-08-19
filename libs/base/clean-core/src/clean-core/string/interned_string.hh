@@ -81,7 +81,7 @@ public:
     /// Anything saved, sent or shown to a person wants compare_bytes.
     [[nodiscard]] std::strong_ordering compare_identity(interned_string rhs) const { return _entry <=> rhs._entry; }
 
-    /// Sort predicate over the canonical bytes: std::sort(v.begin(), v.end(), cc::interned_string::by_bytes{}).
+    /// Sort predicate over the canonical bytes: cc::sort(v, cc::interned_string::by_bytes{}).
     struct by_bytes
     {
         [[nodiscard]] bool operator()(interned_string lhs, interned_string rhs) const

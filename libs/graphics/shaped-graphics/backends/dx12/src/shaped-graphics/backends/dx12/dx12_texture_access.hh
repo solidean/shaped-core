@@ -264,26 +264,26 @@ private:
         for (auto const& cbox : _canonical.boxes())
         {
             sg::texture_layout const canonical_layout = cbox.state.prev_layout;
-            s.partition.for_each_box_in(
-                cbox.range,
-                [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
-                {
-                    if (state.prev_layout == canonical_layout)
-                        return; // already in the canonical layout
-                    state.declare(sg::pipeline_stage_flags::none, sg::access_flags::none, canonical_layout);
-                    auto const b = state.flush();
-                    if (b.needed)
-                    {
-                        out.push_back({box_range, b});
-                        if (!warned)
-                        {
-                            cc::eprintln("[sg] reverting a texture to its canonical layout at submit "
-                                         "because other command lists are still open (a hidden "
-                                         "cost of concurrent recording)");
-                            warned = true;
-                        }
-                    }
-                });
+            s.partition.for_each_box_in(cbox.range,
+                                        [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
+                                        {
+                                            if (state.prev_layout == canonical_layout)
+                                                return; // already in the canonical layout
+                                            state.declare({}, {}, canonical_layout);
+                                            auto const b = state.flush();
+                                            if (b.needed)
+                                            {
+                                                out.push_back({box_range, b});
+                                                if (!warned)
+                                                {
+                                                    cc::eprintln("[sg] reverting a texture to its canonical layout at "
+                                                                 "submit "
+                                                                 "because other command lists are still open (a hidden "
+                                                                 "cost of concurrent recording)");
+                                                    warned = true;
+                                                }
+                                            }
+                                        });
         }
         return out;
     }

@@ -7,8 +7,8 @@
 #include <clean-core/container/span.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/content_hash.hh>
-#include <shaped-viewer/pbr_material.hh>
-#include <shaped-viewer/triangle_geometry.hh>
+#include <shaped-viewer/scene/pbr_material.hh>
+#include <shaped-viewer/scene/triangle_geometry.hh>
 #include <typed-geometry/linalg/pos.hh>
 
 // What a caller hands a resource manager: the payload plus the content hash that identifies it.

@@ -265,7 +265,7 @@ protected:
     /// Allocates a GPU-resident buffer; size must be >= 0, and 0 is a valid empty buffer.
     /// `alloc` selects the backing memory (see allocation_info).
     [[nodiscard]] virtual cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
-                                                                              buffer_usage usage,
+                                                                              buffer_usages usage,
                                                                               allocation_info const& alloc) = 0;
 
     /// Allocates a GPU-resident texture from a description; `alloc` selects the backing memory (see allocation_info).

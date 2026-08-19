@@ -26,5 +26,5 @@ public:
 
 protected:
     [[nodiscard]] sg::memory_requirements query_buffer_requirements(isize size_in_bytes,
-                                                                    sg::buffer_usage usage) const override;
+                                                                    sg::buffer_usages usage) const override;
 };

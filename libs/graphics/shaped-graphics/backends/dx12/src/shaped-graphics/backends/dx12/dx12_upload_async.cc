@@ -348,8 +348,8 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
     if (data.empty())
         return;
     CC_ASSERT(dst->_resource, "async upload target buffer has no storage");
-    CC_ASSERT(sg::has_flag(dst->usage(), sg::buffer_usage::copy_dst), "async upload target buffer must have "
-                                                                      "buffer_usage::copy_dst");
+    CC_ASSERT(dst->usage().has(sg::buffer_usage::copy_dst), "async upload target buffer must have "
+                                                            "buffer_usage::copy_dst");
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
     // Reserve this upload's completion value and stamp the destination *before* enqueuing, so any command list reading the buffer after this call already sees a value to wait on.
@@ -385,8 +385,8 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     CC_ASSERT(dst != nullptr, "texture is not a dx12 texture");
     CC_ASSERT(!dst->is_expired(), "async upload target is a transient texture used past its epoch (expired)");
     CC_ASSERT(dst->_resource, "async upload target texture has no storage");
-    CC_ASSERT(sg::has_flag(dst->usage(), sg::texture_usage::copy_dst), "async upload target texture must have "
-                                                                       "texture_usage::copy_dst");
+    CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "async upload target texture must have "
+                                                             "texture_usage::copy_dst");
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.

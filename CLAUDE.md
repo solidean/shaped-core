@@ -12,7 +12,8 @@
 
 ## Project layout
 
-Libraries live under `libs/<category>/<lib>`: `src/<lib>/` (colocated `.hh`/`.cc`), `tests/` (a `<lib>-test` binary), and an optional `docs/`.
+Libraries live under `libs/<category>/<lib>`: `src/<lib>/` (colocated `.hh`/`.cc`), `tests/` (a `<lib>-test` binary), an optional `examples/` (`<lib>-<name>-example` binaries) and an optional `docs/`.
+Cross-library examples — the ones belonging to no single library — live in `examples/<category>/<example>/` at the repo root.
 
 One-liner per library:
 
@@ -102,6 +103,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   `.clang-tidy` is still being calibrated — treat its warnings as advisory, not gospel.
 * **Building or testing requires the `building-and-testing` skill.** Activate it before the first `dev.py` build/test in a session, and don't drive `dev.py` from memory.
 * **Test binaries are named `*-test`.** Never run one directly — go through `uv run dev.py test`.
+* **Example binaries are named `*-example`.** Run one example with `uv run dev.py example <match>`, never the binary directly.
+  Examples build everywhere and are executed by nobody automatically — see [docs/guides/examples.md](docs/guides/examples.md).
 * **Feature branches are mandatory** (see Git workflow) — don't commit to `main`.
 * **No force-push to `main`.**
 * **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
@@ -133,6 +136,7 @@ Run it from the repo root, **without piping output** — the output is terse by 
 uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
 uv run dev.py test               # build + run the full suite
 uv run dev.py build [-t <target>]
+uv run dev.py example <match>    # build + run exactly one example (no arg lists them)
 uv run dev.py format             # clang-format our C++ sources in place
 uv run dev.py lint clang-tidy    # run the clang-tidy whitelist gates
 uv run dev.py lint shaped        # run shaped-linter's own rules
@@ -169,8 +173,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
   [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
   The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
-* `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` gate the `*-test` binaries and `tools/`.
-  Both default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
+* `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` / `SC_BUILD_EXAMPLES` gate the `*-test` binaries, `tools/` and the `*-example` binaries.
+  All default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.
   **No API is gated on it** — threaded types keep their full surface and fall back to running on the calling thread, so never `#if` a declaration away.
   OFF is a whole-build switch, never per-target, and `check` runs a `singlethreaded-*` preset so both modes stay exercised.
@@ -328,6 +332,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
+| Run one example                  | `uv run dev.py example <match>` (no arg lists them all; [examples](docs/guides/examples.md)) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
 | Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |

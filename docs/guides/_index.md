@@ -5,6 +5,7 @@ Task-oriented how-tos for working in shaped-core.
 
 - [building-and-testing.md](building-and-testing.md) — drive `dev.py` (build / test / doctor /
   presets) and diagnose failures with the `repo_tools` `build_diag` / `test_diag` tools.
+- [examples.md](examples.md) — the `examples/` corpus and `dev.py example`: what an example is for next to a test, how `EXAMPLE` and the CMake helpers work, and what binds one.
 - [prose.md](prose.md) — `dev.py lint`'s prose half: when to run it, why dirty-only is line-exact,
   and when a pile of findings is a rework rather than a run of local edits.
 - [disassembly.md](disassembly.md) — `dev.py assembly`: `search` / `show` are a local godbolt over the built object files, for reading the optimizer's actual codegen.

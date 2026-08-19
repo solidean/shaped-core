@@ -47,7 +47,7 @@ void context_transient_scope::apply_pending_budget_at_epoch_boundary()
         });
 }
 
-raw_buffer_handle context_transient_scope::create_raw_buffer(isize size_in_bytes, buffer_usage usage)
+raw_buffer_handle context_transient_scope::create_raw_buffer(isize size_in_bytes, buffer_usages usage)
 {
     auto r = try_create_raw_buffer(size_in_bytes, usage);
     if (r.has_value())
@@ -57,7 +57,7 @@ raw_buffer_handle context_transient_scope::create_raw_buffer(isize size_in_bytes
     throw allocation_exception("transient buffer allocation failed", size_in_bytes, r.error());
 }
 
-cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isize size_in_bytes, buffer_usage usage)
+cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isize size_in_bytes, buffer_usages usage)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
 

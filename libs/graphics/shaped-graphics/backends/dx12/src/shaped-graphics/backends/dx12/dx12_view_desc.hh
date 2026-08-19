@@ -14,7 +14,8 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
 
 /// Creates the native D3D12 acceleration-structure SRV for `tlas` into `dst`.
 /// Unique among views: the resource argument to CreateShaderResourceView is null, and the descriptor is addressed purely by the TLAS's storage GPU virtual address.
-void create_accel_view(ID3D12Device* device, dx12_tlas const& tlas, D3D12_CPU_DESCRIPTOR_HANDLE dst);
+/// A null `tlas` writes the null acceleration structure — a valid descriptor that every TraceRay misses.
+void create_accel_view(ID3D12Device* device, dx12_tlas const* tlas, D3D12_CPU_DESCRIPTOR_HANDLE dst);
 
 /// Creates the native D3D12 texture view — SRV for readonly, UAV for readwrite — for `view` into the CPU descriptor slot `dst`.
 /// The view's texture must be a dx12_texture.

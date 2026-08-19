@@ -14,7 +14,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - `declare_array_buffer_access` / `declare_array_texture_access` **full wiring** — the API and its validation are in, but neither is applied.
     Applying either needs an array binding path plus a binding-name→resource reflection map.
     The texture form additionally asserts on a non-empty declaration today;
-  - migrating `access_flags` / `pipeline_stage_flags` to `cc::flags`, which has landed in clean-core;
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
@@ -52,8 +51,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   See [blessed-stdlib-headers.md](../../../base/clean-core/docs/blessed-stdlib-headers.md).
   The migration is mechanical, since with threads `cc::atomic` **is** `std::atomic`.
   It becomes load-bearing when WebGPU-on-wasm lands: that build has no threads, and every one of those atomics would keep its interlock for a concurrency that cannot happen.
-- **`cc::flags`:** `buffer_usage`, `texture_usage` and `accel_build_flags` use a hand-rolled `enum class` plus bitwise operators.
-  `cc::flags` has landed in clean-core, so these can migrate; retiring `sg::has_flag` with them touches ~50 call sites, most inside `CC_ASSERT`.
 - **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
   - **reflection-driven validation** of a view's `T` and access class against the shader;

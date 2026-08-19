@@ -1,6 +1,8 @@
 #include <SDL3/SDL.h>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/macros.hh>  // CC_OS_WINDOWS
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/platform/win32_sanitized.hh>
 #include <shaped-rendering/impl/input_translation.hh>
 #include <shaped-rendering/impl/window_internals.hh>
 #include <shaped-rendering/window.hh>
@@ -370,8 +372,24 @@ cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_syste
         }
     }
 
+    // Show without activating, so a launcher-driven run does not take the screen away from whatever the user is doing.
+    // Hints rather than a window flag: SDL_WINDOW_NOT_FOCUSABLE would make the window permanently unfocusable, while
+    // these only govern the moment it appears — so a background window is fully usable as soon as it IS clicked.
+    // Process-global and outliving SDL_Quit, hence reset in the normal case for the same reason the driver hint is.
+    if (desc.background)
+    {
+        (void)SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+        (void)SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, "0");
+    }
+    else
+    {
+        (void)SDL_ResetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN);
+        (void)SDL_ResetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED);
+    }
+
     auto system = cc::make_unique<window_system>();
     system->_is_headless = desc.headless;
+    system->_is_background = desc.background;
     system->_owning_thread_id = SDL_GetCurrentThreadID();
     system->_modifiers = impl::modifiers_from_sdl(SDL_GetModState()); // seeded once; key events maintain it after
     ++s_live_system_count;
@@ -465,9 +483,33 @@ void window_system::unregister_window(window* w)
     _events.remove_all_where([w](input_event const& e) { return e.window == w; });
 }
 
+void window::send_to_back()
+{
+    _system->assert_owning_thread();
+
+    // Win32 directly: SDL has SDL_RaiseWindow and no counterpart to lower a window.
+    // Unchecked because a window manager declining is an ordinary outcome, not an error worth propagating.
+#if defined(CC_OS_WINDOWS)
+    auto* const hwnd = static_cast<HWND>(this->native_window_handle());
+    if (hwnd != nullptr)
+        (void)SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+#endif
+}
+
 void window_system::poll_events()
 {
     assert_owning_thread();
+
+    // Keep a background run out of the way for as long as it is not being used.
+    //
+    // Once per poll rather than once at creation, because plenty of things raise a window after it exists — creating
+    // a DXGI swapchain against it is the one that made this necessary.
+    // It stops the moment the window is focused, so clicking a background window brings it forward and leaves it
+    // there, which is what someone who just clicked it wants.
+    if (_is_background)
+        for (auto* const w : _windows)
+            if (!w->is_focused())
+                w->send_to_back();
 
     // Last frame's events die here, which is the lifetime events() documents.
     _events.clear();

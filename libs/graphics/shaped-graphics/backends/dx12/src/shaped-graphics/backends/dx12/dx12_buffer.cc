@@ -6,7 +6,7 @@
 
 namespace sg::backend::dx12
 {
-D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usage usage)
+D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages usage)
 {
     CC_ASSERT(size_in_bytes > 0, "buffer resource desc requires a positive size");
 
@@ -22,8 +22,8 @@ D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usage u
     // Only a UAV (read-write storage) needs a creation flag; SRV / CBV / VBV / IBV / copy / indirect are all allowed by default on a D3D12 buffer.
     // Acceleration-structure *storage* is a UAV-flavored buffer too, since D3D12 requires ALLOW_UNORDERED_ACCESS for it.
     // It must also be *created* in the RAYTRACING_ACCELERATION_STRUCTURE state — see accel_structure_initial_state and the dx12_context create path.
-    bool const needs_uav = sg::has_flag(usage, sg::buffer_usage::readwrite_buffer)
-                        || sg::has_flag(usage, sg::buffer_usage::accel_structure_storage);
+    bool const needs_uav
+        = usage.has(sg::buffer_usage::readwrite_buffer) || usage.has(sg::buffer_usage::accel_structure_storage);
     desc.Flags = needs_uav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
     return desc;
 }
@@ -142,7 +142,7 @@ dx12_buffer::~dx12_buffer()
 } // no-op if expire() already released the storage
 
 cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_bytes,
-                                                                sg::buffer_usage usage,
+                                                                sg::buffer_usages usage,
                                                                 sg::allocation_info const& alloc)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
@@ -163,7 +163,7 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_by
         // Exception: acceleration-structure storage MUST be created in the RAYTRACING_ACCELERATION_STRUCTURE
         // state and stays there for its whole life (D3D12 forbids transitioning an AS resource); the build's
         // accel_write/accel_read barriers are same-state UAV-style ordering, not layout transitions.
-        D3D12_RESOURCE_STATES const initial_state = sg::has_flag(usage, sg::buffer_usage::accel_structure_storage)
+        D3D12_RESOURCE_STATES const initial_state = usage.has(sg::buffer_usage::accel_structure_storage)
                                                       ? D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE
                                                       : D3D12_RESOURCE_STATE_COMMON;
         if (alloc.is_placed())

@@ -39,7 +39,7 @@ struct sg::texture_description
     int sample_count = 1;                ///< > 1 = multisampled
     bool is_cube = false;
 
-    texture_usage usage = texture_usage::none;
+    texture_usages usage = {};
 
     /// Whether the shape contract holds: a concrete format, extents >= 1, mip and sample counts >= 1, and a valid dimension / array / cube / MSAA combination.
     /// The non-asserting counterpart of assert_valid().
@@ -71,7 +71,7 @@ public:
     [[nodiscard]] int depth() const { return _desc.depth; }
     [[nodiscard]] int mip_levels() const { return _desc.mip_levels; }
     [[nodiscard]] int sample_count() const { return _desc.sample_count; }
-    [[nodiscard]] texture_usage usage() const { return _desc.usage; }
+    [[nodiscard]] texture_usages usage() const { return _desc.usage; }
 
     // Derived shape queries (see texture_description for the encoding).
 

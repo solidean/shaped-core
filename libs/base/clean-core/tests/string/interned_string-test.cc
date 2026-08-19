@@ -1,3 +1,4 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
@@ -7,8 +8,7 @@
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
-#include <algorithm> // std::sort — no cc:: algorithm library yet
-#include <compare>   // std::is_lt and friends, for asserting about a strong_ordering
+#include <compare> // std::is_lt and friends, for asserting about a strong_ordering
 
 #if CC_HAS_THREADS
 #include <clean-core/thread/atomic.hh>
@@ -112,8 +112,8 @@ TEST("interned_string - ordering follows the bytes, not the intern order")
         from_backward.push_back(backward.intern(strings[strings.size() - 1 - i]));
     }
 
-    std::sort(from_forward.begin(), from_forward.end(), cc::interned_string::by_bytes{});
-    std::sort(from_backward.begin(), from_backward.end(), cc::interned_string::by_bytes{});
+    cc::sort(from_forward, cc::interned_string::by_bytes{});
+    cc::sort(from_backward, cc::interned_string::by_bytes{});
 
     for (isize i = 0; i < from_forward.size(); ++i)
         CHECK(from_forward[i].as_string_view() == from_backward[i].as_string_view());

@@ -1,3 +1,5 @@
+#include <clean-core/algorithm/search.hh>
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/endian.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/map.hh>
@@ -5,7 +7,6 @@
 #include <versioned-document/op.hh>
 #include <versioned-document/value.hh>
 
-#include <algorithm>
 
 /// The layout is a header of four intern tables, then the document as indices into them.
 ///
@@ -65,21 +66,17 @@ template <class IdT>
     for (auto const& id : ids)
         names.push_back(id.as_string_view());
 
-    std::sort(names.begin(), names.end(), [](cc::string_view a, cc::string_view b) { return compare_names(a, b) < 0; });
+    // compare_names returns 0 exactly on byte equality, so the dedup this performs is the same one a
+    // back()-comparing pass would do.
+    cc::sort_and_dedup(names, [](cc::string_view a, cc::string_view b) { return compare_names(a, b) < 0; });
 
-    auto unique = cc::vector<cc::string_view>();
-    for (auto const& n : names)
-        if (unique.empty() || unique.back() != n)
-            unique.push_back(n);
-
-    return unique;
+    return names;
 }
 
 [[nodiscard]] u32 index_of_name(cc::vector<cc::string_view> const& table, cc::string_view name)
 {
-    auto const it = std::lower_bound(table.begin(), table.end(), name,
-                                     [](cc::string_view a, cc::string_view b) { return compare_names(a, b) < 0; });
-    return u32(it - table.begin());
+    return u32(cc::first_at_least_in_sorted(
+        table, name, [](cc::string_view a, cc::string_view b) { return compare_names(a, b) < 0; }));
 }
 
 /// Reads the header's fixed-width fields, refusing anything that runs off the end.
@@ -165,21 +162,16 @@ cc::vector<byte> encode_snapshot(vdoc::raw_document const& doc)
         }
     }
 
-    std::sort(writers.begin(), writers.end(), vdoc::op_id::by_bytes{});
-    auto unique_writers = cc::vector<vdoc::op_id>();
-    for (auto const& w : writers)
-        if (unique_writers.empty() || !(unique_writers.back() == w))
-            unique_writers.push_back(w);
+    // by_bytes orders fixed-width hashes, so it compares equal exactly when the ids are equal.
+    cc::sort_and_dedup(writers, vdoc::op_id::by_bytes{});
+    auto const& unique_writers = writers;
 
     auto const entity_names = intern_names(entity_ids);
     auto const component_names = intern_names(component_ids);
     auto const property_names = intern_names(property_ids);
 
     auto const writer_index = [&](vdoc::op_id const& id)
-    {
-        auto const it = std::lower_bound(unique_writers.begin(), unique_writers.end(), id, vdoc::op_id::by_bytes{});
-        return u32(it - unique_writers.begin());
-    };
+    { return u32(cc::first_at_least_in_sorted(unique_writers, id, vdoc::op_id::by_bytes{})); };
 
     auto out = cc::vector<byte>();
 

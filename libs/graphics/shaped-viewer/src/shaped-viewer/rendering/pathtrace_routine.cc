@@ -1,3 +1,4 @@
+#include <clean-core/common/asserts.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
@@ -56,6 +57,14 @@ void pathtrace_routine::init_declare(sg::context& ctx)
     _table = ctx.uncached.create_raytracing_shader_table(stbd);
 }
 
+bool pathtrace_routine::is_ready(sg::command_list& cmd)
+{
+    // Exclusive, not the const acquire: these are exactly what init_declare writes, and the const path is unlocked
+    // (see sg::render_routine's threading note), so reading them there can observe an instance mid-initialization.
+    auto self = acquire_exclusive(cmd);
+    return self->_pipeline != nullptr && self->_table != nullptr;
+}
+
 void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
 {
     auto const& self = acquire(cmd);
@@ -64,12 +73,26 @@ void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
     if (self._pipeline == nullptr || self._table == nullptr)
         return; // shaders did not compile; leave the target untouched
 
+    // The raygen writes both unconditionally, so a missing one faults inside the binding group rather than here.
+    CC_ASSERT(d.output.raw() != nullptr, "pathtrace_routine: no output target bound");
+    CC_ASSERT(d.gbuffer.raw() != nullptr, "pathtrace_routine: no gbuffer bound");
+    CC_ASSERT(d.gbuffer.width() == d.output.width() && d.gbuffer.height() == d.output.height(),
+              "pathtrace_routine: the gbuffer must match the output's extent — the raygen writes both at its own "
+              "pixel");
+    CC_ASSERT(d.history_color.raw() != nullptr && d.history_gbuffer.raw() != nullptr,
+              "pathtrace_routine: both history textures must be bound, even with has_history false");
+    CC_ASSERT(d.history_color.raw() != d.output.raw() && d.history_gbuffer.raw() != d.gbuffer.raw(),
+              "pathtrace_routine: history must not alias what this dispatch writes — reprojection reads another pixel");
+
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
     auto const group = ctx.transient.create_binding_group(
         self._group_layout, {{.name = "scene", .view = tlas->as_view()},
                              {.name = "Output", .view = d.output.as_readwrite_view()},
+                             {.name = "GBuffer", .view = d.gbuffer.as_readwrite_view()},
+                             {.name = "HistoryColor", .view = d.history_color.as_readonly_view()},
+                             {.name = "HistoryGBuffer", .view = d.history_gbuffer.as_readonly_view()},
                              {.name = "FrameConstants", .view = d.frame.as_uniform_buffer()},
                              {.name = "background", .view = d.background.as_uniform_buffer()},
                              {.name = "Materials", .view = d.materials.as_readonly_buffer()},
