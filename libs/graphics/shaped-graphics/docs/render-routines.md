@@ -33,7 +33,7 @@ public:
     static void execute(sg::command_list& cmd, sg::buffer<sg::u32> const& out)
     {
         auto const& self = acquire(cmd);                 // lazily creates + initializes; returns the routine
-        auto const pipeline = cc::async_blocking_get_singlethreaded(self._pipeline);
+        auto const pipeline = cc::async_blocking_get(self._pipeline);
         auto const group = cmd.context().transient.create_binding_group(
             self._group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
         cmd.compute.bind_pipeline(*pipeline);
@@ -45,7 +45,7 @@ protected:
     void init_declare(sg::context& ctx) override
     {
         auto const shader = my::shaders::pattern_fill.compute.main->acquire(ctx);
-        (void)cc::try_async_blocking_get_singlethreaded(shader);      // drive it (or install an async pool)
+        (void)cc::try_async_blocking_get(shader);      // drive it (or install an async pool)
         auto const* const compiled = shader->try_value();
         _group_layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
         auto const layout = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}});
@@ -88,7 +88,7 @@ ctx.routines.clear();           // drop all (VRAM pressure / context switch)
 ```
 
 `prewarm` is the opt-in fan-out for startup:
-prewarming a set of routines kicks off all their async pipeline compiles at once, so they build in parallel on the installed async pool (`cc::install_default_async_pool`).
+prewarming a set of routines kicks off all their async pipeline compiles at once, so they build in parallel on the installed async pool (`cc::install_default_async_scheduler`).
 There is no dependency graph — a routine that composes others just calls them; lazy registration covers correctness, and you prewarm the leaves you care about.
 `clear()` runs automatically on context shutdown.
 

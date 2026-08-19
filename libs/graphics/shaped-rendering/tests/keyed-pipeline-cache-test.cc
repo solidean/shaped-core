@@ -121,7 +121,6 @@ TEST("sr - keyed pipeline cache surfaces a build failure")
 
     // The async form carries it on the error channel.
     auto node = cache.acquire_async(sg::pixel_format::rgba8_unorm);
-    auto const driven = cc::try_async_blocking_get_singlethreaded(node);
-    REQUIRE(driven.has_value());
-    CHECK(driven.value().has_error());
+    auto const driven = cc::try_async_blocking_get(node);
+    CHECK(driven.has_error());
 }

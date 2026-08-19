@@ -13,7 +13,7 @@
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image (same philosophy as the
 // raytraced-view test). Reaching the end without an assert/exception means every GPU stage succeeded.
 // On the main thread, because `pathtrace_routine::init_declare` drives its shader compiles inline through
-// `try_async_blocking_get_singlethreaded` — which does not complete from inside a pool worker, leaving the routine
+// `try_async_blocking_get` — which does not complete from inside a pool worker, leaving the routine
 // with no pipeline and `execute` silently doing nothing.
 // Same reason shaped-rendering pins its dispatch test (commit 9c9c6ef7).
 TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)

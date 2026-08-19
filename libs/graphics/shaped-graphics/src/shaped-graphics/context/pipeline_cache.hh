@@ -16,7 +16,7 @@
 /// A context owns one of these, reached via ctx.cached; the acquire_* methods take the owning context so the cache stays a plain member.
 ///
 /// Threading: the async pipeline build calls a backend create from a pool worker, which is only safe where the backend permits concurrent pipeline creation (dx12 device creates are free-threaded).
-/// With a single_threaded thread_model, install no pool and drive the node inline on the main thread via cc::async_blocking_get_singlethreaded.
+/// With a single_threaded thread_model, install no pool and drive the node inline on the main thread via cc::async_blocking_get.
 
 class sg::pipeline_cache
 {
@@ -57,12 +57,12 @@ public:
 
     /// The async compute_pipeline for `desc`, built via ctx.uncached on a miss.
     /// The key combines the shader's content with the pipeline_layout handle's identity, so acquire the pipeline layout THROUGH the cache for full dedup.
-    /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc);
 
     /// The async raytracing_pipeline for `desc`, built via ctx.uncached on a miss.
     /// The key combines every shader's content with the pipeline_layout handle's identity and the pipeline limits.
-    /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_raytracing_pipeline acquire_raytracing_pipeline(context& ctx,
                                                                         raytracing_pipeline_description const& desc);
 

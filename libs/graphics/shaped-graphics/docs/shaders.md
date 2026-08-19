@@ -77,9 +77,9 @@ something the context takes.
 If nothing connects them (say a vulkan context with only an HLSL→DXIL compiler registered), you get an
 async error saying so — rather than bytecode the context cannot use.
 
-`acquire` returns an `sg::async_compiled_shader`, which is a `cc::async` node: install a default async
-pool (`cc::install_default_async_pool`) and its workers run the compile, or drive it yourself with
-`cc::try_async_blocking_get_singlethreaded`. Compilation is lazy and per format — nothing compiles
+`acquire` returns an `sg::async_compiled_shader`, which is a `cc::async` node: the ambient scheduler's
+workers run the compile (`cc::install_default_async_scheduler`), or block on it with
+`cc::try_async_blocking_get`. Compilation is lazy and per format — nothing compiles
 until something asks.
 
 ## Wiring it up

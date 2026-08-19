@@ -60,10 +60,10 @@ void layout_routine::init_declare(sg::context& ctx)
     auto view_ps = sv::shaders::layout.fragment.view_ps->acquire(ctx);
     auto wipe_ps = sv::shaders::layout.fragment.wipe_ps->acquire(ctx);
 
-    (void)cc::try_async_blocking_get_singlethreaded(vs);
-    (void)cc::try_async_blocking_get_singlethreaded(border_ps);
-    (void)cc::try_async_blocking_get_singlethreaded(view_ps);
-    (void)cc::try_async_blocking_get_singlethreaded(wipe_ps);
+    (void)cc::try_async_blocking_get(vs);
+    (void)cc::try_async_blocking_get(border_ps);
+    (void)cc::try_async_blocking_get(view_ps);
+    (void)cc::try_async_blocking_get(wipe_ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_border = border_ps->try_value();

@@ -97,6 +97,11 @@ public:
     void store_camera(orbit_camera const& cam);
     [[nodiscard]] cc::optional<orbit_camera> load_camera() const;
 
+    /// One example's imgui layout, under `ui/imgui/<name>`.
+    /// Both examples open the same file, so the name is what keeps the editor's panels out of the viewer's.
+    void store_ui_settings(cc::string_view name, cc::string_view ini);
+    [[nodiscard]] cc::optional<cc::string> load_ui_settings(cc::string_view name) const;
+
     /// The op DAG behind all of it. For the tests beside this example, which assert on what a drag left in it.
     [[nodiscard]] vdoc::op_graph const& ops() const { return _file->ops(); }
 

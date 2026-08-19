@@ -44,17 +44,17 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
 ## Async: the build runs off the frame path
 
 `acquire_compute_pipeline` and `shader_cache::compile` return an async handle rather than a finished object, because driver PSO lowering and DXC compilation are multi-millisecond work.
-Both build on [`cc::async`](../../../../base/clean-core/docs/systems/async.md): the returned node is **scheduled onto the installed default async pool** (`cc::install_default_async_pool`).
-With no pool installed it is driven inline the first time you block on it, so the same handle works whether or not a thread pool exists.
+Both build on [`cc::async`](../../../../base/clean-core/docs/systems/async.md): the returned node is **scheduled onto the ambient scheduler** (`cc::install_default_async_scheduler`).
+Blocking on it drives it there, so the same handle works whether that scheduler is a pool or a single-threaded one.
 
 The result types are the `sg::async_*` typedefs (`async_compiled_shader`, `async_compute_pipeline`, `async_raytracing_pipeline`).
 `cc::async<T>` cannot hold a `const T` — its internal `cc::optional<T>` forbids it — so const arrives at the **read** side.
-`try_value()` yields the const `*_handle`, and `cc::async_blocking_get_singlethreaded` yields the handle by value.
+`try_value()` yields the const `*_handle`, and `cc::async_blocking_get` yields the handle by value.
 A build failure surfaces as an **async error** on the node (`has_error()`) carrying the DXC / PSO diagnostics; it is not thrown.
 
 > **Threading caveat.** The async pipeline build calls a *backend* create from a pool worker.
 > That is only safe where the backend permits concurrent pipeline creation — dx12 device creates are free-threaded.
-> On a `single_threaded` [thread_model](threading.md), install no pool and let `cc::async_blocking_get_singlethreaded` drive the build inline on the main thread.
+> On a `single_threaded` [thread_model](threading.md), make the ambient scheduler a `cc::singlethreaded_scheduler`, and the build runs inline on whichever thread blocks on it.
 
 Binding-layout acquisition stays **synchronous**: layout creation is cheap (a root signature), so paying for an async node would be pure overhead.
 

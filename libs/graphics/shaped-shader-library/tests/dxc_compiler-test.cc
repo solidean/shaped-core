@@ -24,7 +24,7 @@ namespace
 sg::compiled_shader const& await(sg::async_compiled_shader const& shader)
 {
     REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get_singlethreaded(shader);
+    (void)cc::try_async_blocking_get(shader);
 
     if (shader->has_error())
         FAIL(shader->try_error()->underlying().to_string());
@@ -107,7 +107,7 @@ TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-
     // A shader that does not build must not throw or abort — it is an error a caller handles.
     auto const shader = broken->acquire(sg::shader_format::dxil);
     REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get_singlethreaded(shader);
+    (void)cc::try_async_blocking_get(shader);
     CHECK(shader->has_error());
 }
 

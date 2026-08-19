@@ -11,8 +11,8 @@ void blit_routine::init_declare(sg::context& ctx)
     auto vs = sr::shaders::blit.vertex.main_vs->acquire(ctx);
     auto ps = sr::shaders::blit.fragment.main_ps->acquire(ctx);
 
-    (void)cc::try_async_blocking_get_singlethreaded(vs);
-    (void)cc::try_async_blocking_get_singlethreaded(ps);
+    (void)cc::try_async_blocking_get(vs);
+    (void)cc::try_async_blocking_get(ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
