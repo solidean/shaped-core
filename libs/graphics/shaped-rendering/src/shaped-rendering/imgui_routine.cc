@@ -147,8 +147,12 @@ void imgui_routine::init_declare(sg::context& ctx)
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
         _group_layout = nullptr;
-        _pipelines.init(ctx, [](sg::context&, sg::pixel_format) -> cc::result<sg::raster_pipeline_handle>
-                        { return cc::error(cc::any_error("imgui shaders did not compile")); });
+        _pipelines.init(ctx,
+                        [](sg::context&, sg::pixel_format) -> sg::async_raster_pipeline
+                        {
+                            return cc::make_async_from_error<sg::raster_pipeline_handle>(
+                                cc::async_error::make_error(cc::any_error("imgui shaders did not compile")));
+                        });
         return;
     }
 
@@ -182,7 +186,7 @@ void imgui_routine::init_declare(sg::context& ctx)
     _pipelines.init(
         ctx,
         [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
-            sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
+            sg::context& c, sg::pixel_format format) -> sg::async_raster_pipeline
         {
             auto const desc = sg::raster_pipeline_description{
                 .layout = layout,
@@ -196,7 +200,7 @@ void imgui_routine::init_declare(sg::context& ctx)
                     .blend = sg::blend_state{
                         .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
                         .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}};
-            return build_cached_raster_pipeline(c, desc);
+            return c.cached.acquire_raster_pipeline(desc);
         });
 }
 

@@ -26,9 +26,9 @@
 /// Error model: the sync path is a `try_acquire` (-> cc::result) / `acquire` (-> throws) pair.
 /// The async path needs no separate `try_`, since a cc::shared_async already carries its outcome — `acquire_async` is the fallible form.
 ///
-/// Threading: a build may run on a pool worker and may be invoked concurrently for distinct keys, so the callback must only read immutable captures.
-/// Backend PSO creation is free-threaded where this matters, e.g. dx12.
-/// Only the key -> pipeline map is behind a mutex.
+/// Threading: the callback runs under this cache's mutex, on whichever thread acquired, and only starts the build.
+/// Whatever it returns does the work later, so the callback must only read immutable captures.
+/// Only the key -> node map is behind that mutex.
 /// The context and callback are plain members set by `init`, so `init` must not race in-flight builds — call it at (re)load points, which are serialized with rendering.
 /// With no pool installed, builds are driven inline on the calling thread.
 template <class Key, class Pipeline = sg::raster_pipeline>
@@ -37,11 +37,15 @@ class sr::keyed_pipeline_cache
 public:
     using handle = std::shared_ptr<Pipeline const>;
     using async_handle = cc::shared_async<handle>;
-    using build_fn = cc::unique_function<cc::result<handle>(sg::context&, Key const&)>;
+    using build_fn = cc::unique_function<async_handle(sg::context&, Key const&)>;
 
     /// Store the context + build callback and CLEAR the cache.
     /// Call from a routine's init_declare on every (re)load: a rebuilt pipeline layout invalidates every pipeline cached against the old one.
     /// Re-`init` both drops them and rebinds the fresh callback.
+    ///
+    /// The callback returns the async, it does not wait for one.
+    /// A build that is already a node (ctx.cached.acquire_raster_pipeline) is handed straight over; one that is not is
+    /// cc::make_async_from_value / cc::make_async_from_error away.
     void init(sg::context& ctx, build_fn build)
     {
         _ctx = &ctx;
@@ -60,16 +64,10 @@ public:
                 if (auto* const hit = m.get_ptr(key))
                     return *hit;
 
-                // The frame runs later, possibly on a worker: deep-copy the key.
-                // Reach the context + callback through the stable members (they outlive every build; see the threading note).
-                auto node = cc::make_async_scheduled<handle>(
-                    [ctx = _ctx, build = &_build, key](cc::async_context<handle>& actx) -> cc::async_step_status
-                    {
-                        auto result = (*build)(*ctx, key);
-                        if (result.has_error())
-                            return actx.error(cc::move(result).error());
-                        return actx.success(cc::move(result).value());
-                    });
+                // The build's own node IS the entry — this cache adds the key -> node mapping and nothing else.
+                // Wrapping it in a frame of our own is what would have to block, and blocking a pool worker on another
+                // node parks the very workers that node needs.
+                auto node = _build(*_ctx, key);
                 m[key] = node;
                 return node;
             });
@@ -101,15 +99,3 @@ private:
     // Mutable: acquiring is logically a read — the get-or-create is an internal detail behind the mutex.
     mutable cc::mutex<map_t> _cache;
 };
-
-namespace sr
-{
-/// A `keyed_pipeline_cache<Key>` build callback in one line: acquire `desc` through ctx.cached and block on the build.
-///
-/// The two caches stack on purpose — the keyed cache maps the routine's key to a pipeline and owns reload invalidation, while identity and the build itself belong to ctx.cached.
-/// So two routines drawing the same shaders into the same target format share one PSO.
-/// Blocking here happens inside the keyed cache's own async frame, where a blocking_get participates in the graph rather than idling.
-[[nodiscard]] cc::result<sg::raster_pipeline_handle> build_cached_raster_pipeline(
-    sg::context& ctx,
-    sg::raster_pipeline_description const& desc);
-} // namespace sr

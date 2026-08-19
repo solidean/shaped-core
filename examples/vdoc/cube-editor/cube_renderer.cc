@@ -164,7 +164,7 @@ cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::sh
     auto out = cc::make_unique<renderer>();
     out->_pipelines.init(ctx,
                         [layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
-                            sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
+                                  sg::context& c, sg::pixel_format format) -> sg::async_raster_pipeline
                         {
                             auto const desc = sg::raster_pipeline_description{
                                  .layout = layout,
@@ -177,7 +177,7 @@ cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::sh
                                  .depth_stencil = {.depth_test = true, .depth_write = true},
                                  .color_targets = {{.format = format}},
                                  .depth_stencil_format = sg::pixel_format::depth32_float};
-                            return sr::build_cached_raster_pipeline(c, desc);
+                            return c.cached.acquire_raster_pipeline(desc);
                         });
     return out;
 }

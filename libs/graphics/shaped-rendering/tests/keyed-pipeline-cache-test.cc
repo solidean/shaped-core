@@ -11,7 +11,7 @@
 // keyed_pipeline_cache on a dx12 WARP device.
 // The cache is generic, so a stand-in "pipeline" (a shared_ptr<int>) exercises its dedup / warm / clear / error behavior exactly.
 // Only `init` needs a real context, which is why these are WARP-gated.
-// The real sg::raster_pipeline path — the default template arg, building through sr::build_cached_raster_pipeline — is exercised by sr::blit_routine.
+// The real sg::raster_pipeline path — the default template arg, built through ctx.cached.acquire_raster_pipeline — is exercised by sr::blit_routine.
 
 namespace
 {
@@ -33,10 +33,10 @@ TEST("sr - keyed pipeline cache builds one pipeline per key")
     auto builds = 0;
     auto cache = sr::keyed_pipeline_cache<sg::pixel_format, int>();
     cache.init(*ctx,
-               [&builds](sg::context&, sg::pixel_format) -> cc::result<fake_handle>
+               [&builds](sg::context&, sg::pixel_format) -> cc::shared_async<fake_handle>
                {
                    ++builds;
-                   return std::make_shared<int const>(builds);
+                   return cc::make_async_from_value<fake_handle>(std::make_shared<int const>(builds));
                });
 
     // Same key twice: built once, and the second acquire returns the same node.
@@ -59,10 +59,10 @@ TEST("sr - keyed pipeline cache prepare warms without rebuilding")
     auto builds = 0;
     auto cache = sr::keyed_pipeline_cache<sg::pixel_format, int>();
     cache.init(*ctx,
-               [&builds](sg::context&, sg::pixel_format) -> cc::result<fake_handle>
+               [&builds](sg::context&, sg::pixel_format) -> cc::shared_async<fake_handle>
                {
                    ++builds;
-                   return std::make_shared<int const>(builds);
+                   return cc::make_async_from_value<fake_handle>(std::make_shared<int const>(builds));
                });
 
     cache.prepare(sg::pixel_format::rgba8_unorm);
@@ -85,10 +85,10 @@ TEST("sr - keyed pipeline cache re-init clears the cache")
 
     auto first_builds = 0;
     cache.init(*ctx,
-               [&first_builds](sg::context&, sg::pixel_format) -> cc::result<fake_handle>
+               [&first_builds](sg::context&, sg::pixel_format) -> cc::shared_async<fake_handle>
                {
                    ++first_builds;
-                   return std::make_shared<int const>(1);
+                   return cc::make_async_from_value<fake_handle>(std::make_shared<int const>(1));
                });
     (void)cache.acquire(sg::pixel_format::rgba8_unorm);
     CHECK(first_builds == 1);
@@ -96,10 +96,10 @@ TEST("sr - keyed pipeline cache re-init clears the cache")
     // Re-init (a reload) drops the old entry, so the same key builds again through the new callback.
     auto second_builds = 0;
     cache.init(*ctx,
-               [&second_builds](sg::context&, sg::pixel_format) -> cc::result<fake_handle>
+               [&second_builds](sg::context&, sg::pixel_format) -> cc::shared_async<fake_handle>
                {
                    ++second_builds;
-                   return std::make_shared<int const>(2);
+                   return cc::make_async_from_value<fake_handle>(std::make_shared<int const>(2));
                });
     (void)cache.acquire(sg::pixel_format::rgba8_unorm);
     CHECK(second_builds == 1);
@@ -112,8 +112,9 @@ TEST("sr - keyed pipeline cache surfaces a build failure")
         SKIP("no dx12 WARP device");
 
     auto cache = sr::keyed_pipeline_cache<sg::pixel_format, int>();
-    cache.init(*ctx, [](sg::context&, sg::pixel_format) -> cc::result<fake_handle>
-               { return cc::error(cc::any_error("build failed")); });
+    cache.init(
+        *ctx, [](sg::context&, sg::pixel_format) -> cc::shared_async<fake_handle>
+        { return cc::make_async_from_error<fake_handle>(cc::async_error::make_error(cc::any_error("build failed"))); });
 
     // The sync try_ form collapses the failure to a result error.
     auto const r = cache.try_acquire(sg::pixel_format::rgba8_unorm);

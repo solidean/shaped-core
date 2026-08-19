@@ -75,8 +75,12 @@ void layout_routine::init_declare(sg::context& ctx)
     if (compiled_vs == nullptr || compiled_border == nullptr || compiled_view == nullptr || compiled_wipe == nullptr)
     {
         _group_layout = nullptr;
-        _pipelines.init(ctx, [](sg::context&, impl::layout_pipeline_key) -> cc::result<sg::raster_pipeline_handle>
-                        { return cc::error(cc::any_error("layout shaders did not compile")); });
+        _pipelines.init(ctx,
+                        [](sg::context&, impl::layout_pipeline_key) -> sg::async_raster_pipeline
+                        {
+                            return cc::make_async_from_error<sg::raster_pipeline_handle>(
+                                cc::async_error::make_error(cc::any_error("layout shaders did not compile")));
+                        });
         return;
     }
 
@@ -98,8 +102,12 @@ void layout_routine::init_declare(sg::context& ctx)
     if (constants_binding == nullptr)
     {
         _group_layout = nullptr;
-        _pipelines.init(ctx, [](sg::context&, impl::layout_pipeline_key) -> cc::result<sg::raster_pipeline_handle>
-                        { return cc::error(cc::any_error("layout.hlsl declares no layout_constants cbuffer")); });
+        _pipelines.init(ctx,
+                        [](sg::context&, impl::layout_pipeline_key) -> sg::async_raster_pipeline
+                        {
+                            return cc::make_async_from_error<sg::raster_pipeline_handle>(cc::async_error::make_error(
+                                cc::any_error("layout.hlsl declares no layout_constants cbuffer")));
+                        });
         return;
     }
 
@@ -109,7 +117,7 @@ void layout_routine::init_declare(sg::context& ctx)
     _pipelines.init(
         ctx,
         [layout = pipeline_layout, vertex_shader = *compiled_vs, border = *compiled_border, view = *compiled_view,
-         wipe = *compiled_wipe](sg::context& c, impl::layout_pipeline_key key) -> cc::result<sg::raster_pipeline_handle>
+         wipe = *compiled_wipe](sg::context& c, impl::layout_pipeline_key key) -> sg::async_raster_pipeline
         {
             // The border stage is the flat-color one, so a background renders through it too.
             auto const& fragment_shader = is_flat_fill(key.kind) ? border : key.kind == draw_kind::wipe ? wipe : view;
@@ -126,7 +134,7 @@ void layout_routine::init_declare(sg::context& ctx)
                 .rasterization = {.cull = sg::cull_mode::none},
                 .color_targets = {target},
             };
-            return sr::build_cached_raster_pipeline(c, desc);
+            return c.cached.acquire_raster_pipeline(desc);
         });
 }
 
