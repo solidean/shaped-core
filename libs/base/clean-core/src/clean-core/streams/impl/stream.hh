@@ -217,17 +217,19 @@ public:
     /// DO NOT hand-roll this over ready_bytes/flush in user code.
     /// The stream is ALREADY buffered by its adapter, so a manual loop just adds a second, pointless user-space buffer.
     /// This pushes each ready window straight into the result and refills — there is never a double copy.
-    /// When the source can report its remaining size, the buffer is sized exactly once up front and filled with stable appends, so the common case is a single precise allocation.
+    /// Where the source can report its remaining size that sizes the buffer up front, so the common case is a single allocation.
     /// That covers any seekable stream, and any non-seekable one whose adapter still tracks position (most real streams).
+    ///
+    /// The size is only ever a hint: a source can grow between the probe and the reads — a file another process is
+    /// appending to is the ordinary case — so the appends must stay able to grow, and the reservation is an
+    /// optimization rather than a bound.
     cc::result<cc::vector<byte>> read_all()
         requires(can_read)
     {
         CC_ASSERT(this->is_valid(), "read_all on invalid stream");
 
         auto out = cc::vector<byte>();
-        auto const hint = this->impl_remaining_hint(); // exact remaining bytes if the source can report them
-        auto const precise = hint.has_value();
-        if (precise)
+        if (auto const hint = this->impl_remaining_hint(); hint.has_value())
             out.reserve_back(isize(hint.value()));
 
         while (true)
@@ -240,10 +242,7 @@ public:
                 if (window.empty())
                     break; // genuine end of data
             }
-            if (precise)
-                out.push_back_range_stable(window); // capacity reserved exactly; no reallocation
-            else
-                out.push_back_range(window); // unknown size: grow as we go
+            out.push_back_range(window); // sized range, so a reserved buffer appends without reallocating
             this->consume(window.size());
         }
         return out;
@@ -507,7 +506,10 @@ private:
             return _end;
     }
 
-    /// Exact remaining byte count if the source can report it cheaply, else nullopt.
+    /// Remaining byte count if the source can report it cheaply, else nullopt.
+    /// A hint, never a bound: it is two probes taken at one instant, and a source that grows after them —
+    /// a file another process is appending to — leaves the answer stale before the caller can act on it.
+    /// Size a buffer with it; do not treat it as the amount that will arrive.
     /// Never disturbs the buffer — dry probes only.
     /// A dry_relative probe is safe on any stream (try_as_seekable uses the same one to detect seekability).
     /// A real position (>= 0) means the source tracks position, so the dry_end probe that follows is safe too.

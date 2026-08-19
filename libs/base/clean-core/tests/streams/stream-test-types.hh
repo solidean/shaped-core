@@ -10,6 +10,7 @@
 namespace cc_stream_test
 {
 class mock_pipe_read_stream_adapter;
+class mock_growing_read_stream_adapter;
 class recording_write_stream_adapter;
 class mock_split_bounds_read_write_adapter;
 } // namespace cc_stream_test
@@ -17,6 +18,7 @@ class mock_split_bounds_read_write_adapter;
 namespace cc_stream_test
 {
 class mock_pipe_read_stream_adapter;
+class mock_growing_read_stream_adapter;
 class recording_write_stream_adapter;
 class mock_split_bounds_read_write_adapter;
 } // namespace cc_stream_test
@@ -89,6 +91,67 @@ private:
     }
 
     cc::span<byte const> _data;
+    isize _chunk;
+    isize _pos = 0;
+    byte _buffer[64];
+};
+
+/// A READ source that under-reports its size, modelling a file that grows between the stat and the read.
+/// It answers the dry probes read_all sizes its buffer from, reporting `reported_size` bytes remaining, and then serves the whole of `data` anyway.
+/// Anything appending to a file another process is reading behaves this way.
+class cc_stream_test::mock_growing_read_stream_adapter
+{
+public:
+    mock_growing_read_stream_adapter(cc::span<byte const> data, isize reported_size, isize chunk)
+      : _data(data), _reported_size(reported_size), _chunk(chunk)
+    {
+    }
+
+    mock_growing_read_stream_adapter(mock_growing_read_stream_adapter&&) = delete; // pinned: the stream borrows _buffer
+    mock_growing_read_stream_adapter& operator=(mock_growing_read_stream_adapter&&) = delete;
+
+    [[nodiscard]] cc::read_stream stream() { return cc::read_stream(_buffer, _buffer, &impl_flush, this); }
+
+private:
+    static cc::result<i64> impl_flush(byte*& curr,
+                                      byte*& end,
+                                      byte*& /*write_end*/, // aliases end for a read-only stream
+                                      void* ctx,
+                                      i64 offset,
+                                      cc::seek_dir dir,
+                                      byte* /*first_write*/)
+    {
+        auto& self = *static_cast<mock_growing_read_stream_adapter*>(ctx);
+
+        // The two dry probes impl_remaining_hint takes, answered as a seekable source would — which is what
+        // gets read_all to size its buffer from a number that is already stale.
+        if (dir == cc::seek_dir::dry_relative && offset == 0)
+            return i64(self._pos - isize(end - curr));
+        if (dir == cc::seek_dir::dry_end && offset == 0)
+            return i64(self._reported_size);
+
+        if (!(dir == cc::seek_dir::relative && offset == 0))
+            return i64(-1);
+
+        byte* const base = self._buffer;
+        isize const leftover = isize(end - curr);
+        cc::memmove(base, curr, size_t(leftover));
+
+        isize const room = isize(sizeof(self._buffer)) - leftover;
+        isize const want = cc::min(self._chunk, room);
+        isize const avail = self._data.size() - self._pos;
+        isize const n = cc::min(want, avail);
+        if (n > 0)
+            cc::memcpy(base + leftover, self._data.data() + self._pos, size_t(n));
+        self._pos += n;
+
+        curr = base;
+        end = base + leftover + n;
+        return i64(self._pos - isize(end - curr));
+    }
+
+    cc::span<byte const> _data;
+    isize _reported_size;
     isize _chunk;
     isize _pos = 0;
     byte _buffer[64];

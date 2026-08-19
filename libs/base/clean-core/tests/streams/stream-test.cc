@@ -183,7 +183,7 @@ TEST("stream - first_write is set on write and reset after each flush")
     CHECK(adapter.flushes_with_pending() == 2); // exactly the two flushes that carried data
 }
 
-TEST("stream - read_all on a seekable source (precise, single allocation)")
+TEST("stream - read_all on a seekable source (sized up front, single allocation)")
 {
     byte data[5] = {b(10), b(11), b(12), b(13), b(14)};
     auto adapter = cc::span_read_stream_adapter(cc::span<byte const>(data));
@@ -208,6 +208,25 @@ TEST("stream - read_all on a non-seekable pipe (grows across chunks)")
 
     // chunk 16 < 64-byte buffer < 70-byte total, so the read spans several refills, and the pipe reports no position -> read_all cannot size up front and must grow.
     auto adapter = mock_pipe_read_stream_adapter(cc::span<byte const>(source), isize(16));
+    cc::read_stream s = adapter.stream();
+
+    auto all = s.read_all();
+    REQUIRE(all.has_value());
+    CHECK(bytes_equal(all.value(), cc::span<byte const>(source)));
+}
+
+TEST("stream - read_all keeps reading past a size hint the source outgrew")
+{
+    // The size a source reports is only ever a hint: a file being appended to has already moved on by the time the read happens.
+    // So read_all sizes its buffer from that number without treating it as a bound.
+    // shaped-shader-library's polling watcher re-reads shader files while a test writes them, which is where this first fired.
+    byte source[100];
+    auto const source_size = isize(sizeof(source));
+    for (auto i = isize(0); i < source_size; ++i)
+        source[i] = b(int(i));
+
+    // Reports 40 bytes remaining, then serves all 100, across several refills.
+    auto adapter = mock_growing_read_stream_adapter(cc::span<byte const>(source), isize(40), isize(16));
     cc::read_stream s = adapter.stream();
 
     auto all = s.read_all();
