@@ -55,11 +55,18 @@ c.compile(desc, opts={})                    // -> cc::result<sg::compiled_shader
 ssc::dxc::shader_cache           // thread-safe, hash-keyed get-or-create over compiler::compile
 cache.add_default_in_memory_provider(max=4096) // or add_provider(shared_ptr<key_value_provider<hash128, async_compiled_shader>>)
 cache.compile(desc, opts={})     // -> sg::async_compiled_shader  (same key => SAME node, never recompiled)
-                           //   key = hash128 over source + entry_point + stage + model + all options
+                           //   key = hash128 over source + entry_point + stage + model + all options + the DXC VERSION
+                           //   (the version only matters to the persistent tier — without it a DXC upgrade serves old DXIL)
+cache.set_blob_cache(&c)         // persistent 2nd tier: encoded compiled shaders surviving across RUNS (bcache::blob_cache*)
+                           //   defaults to bcache::default_cache(); nullptr = off. Encoded via sg::impl::encode_compiled_shader
+                           //   the compile PARKS on the store: with no ambient scheduler and no worker scope, the tier is skipped
+                           //   without threads the store is swept by whoever blocks (cc::thread_pump_all), not pumped by name
 cache.apply_bookkeeping()        // in-memory eviction on all tiers
-// drive: cc::async_blocking_get_singlethreaded(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
+compiler.version()               // -> cc::string_view "major.minor"; empty if DXC would not report one
+// drive: cc::async_blocking_get(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
+
 // a compile failure surfaces as an async error (sh->has_error()); DXC diagnostics carried through.
-// runs on the installed default async pool (cc::install_default_async_pool); inline if none installed.
+// runs on the ambient scheduler (cc::install_default_async_scheduler), which blocking on it drives.
 // each worker uses its own thread-local compiler (compiler is one-per-thread). Cache preprocessed source.
 ```
 

@@ -66,10 +66,10 @@ Cross-process duplicate computation is accepted: two processes may compute the s
 ## Driving it
 
 The cache hands work to `cc::async`, so something must drive that graph — the same contract every other async surface in the repo has.
-Install a default pool at startup (`cc::install_default_async_pool`), or drive the returned handles yourself.
+Install the ambient scheduler at startup (`cc::install_default_async_scheduler`), which is what runs the returned handles.
 
-Without threads, or with `cache_config::unthreaded`, there is no actor thread and `pump()` runs storage work on the calling thread.
-A caller that never pumps sees only misses and dropped puts — degraded, never deadlocked.
+Without threads, or with `cache_config::unthreaded`, there is no actor thread, and the actor registers itself with clean-core's pump registry instead.
+Storage work then runs on whoever blocks, so the same blocking call is correct in either build.
 
 ## Building & testing
 

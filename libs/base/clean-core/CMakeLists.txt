@@ -41,6 +41,7 @@ add_library(clean-core
     src/clean-core/container/key_value_cache.cc
     src/clean-core/thread/thread.cc
     src/clean-core/thread/threaded_actor.cc
+    src/clean-core/thread/thread_pump.cc
     src/clean-core/thread/async.cc
     src/clean-core/thread/async_ambient.cc
     src/clean-core/thread/async_thread_pool.cc
@@ -154,6 +155,7 @@ target_sources(clean-core
     src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
     src/clean-core/thread/thread.hh
+    src/clean-core/thread/thread_pump.hh
     src/clean-core/thread/threaded_actor.hh
     src/clean-core/thread/async_node.hh
     src/clean-core/thread/async.hh
@@ -406,6 +408,7 @@ if(SC_BUILD_TESTS)
         tests/thread/chase_lev_deque-test.cc
         tests/thread/mutex-test.cc
         tests/thread/thread-test.cc
+        tests/thread/thread_pump-test.cc
         tests/thread/threaded_actor-test.cc
     )
 

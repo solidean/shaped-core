@@ -86,6 +86,27 @@ private:
     void* _previous = nullptr;
 };
 
+/// Detach the calling thread's ambient for a scope, so what runs under it starts a fresh attribution root.
+///
+/// This is what a scheduler WORK ITEM is polled under, and the counterpart to async_ambient_poll_scope's inheritance.
+/// A node reaching a queue always carries its own token — the three write sites in
+/// libs/base/clean-core/docs/systems/async.md see to that — and a null
+/// token there means "no context", never "inherit the thread that dequeued me".
+/// Inheritance is for the inline dependency drive alone, where the driver genuinely is the parent.
+///
+/// Without it a participant parked inside a logical task bills every unrelated item it steals to that task.
+struct async_ambient_root_scope
+{
+    async_ambient_root_scope() : _previous(async_tls().ambient) { async_tls().ambient = nullptr; }
+    ~async_ambient_root_scope() { async_tls().ambient = _previous; }
+
+    async_ambient_root_scope(async_ambient_root_scope const&) = delete;
+    async_ambient_root_scope& operator=(async_ambient_root_scope const&) = delete;
+
+private:
+    void* _previous = nullptr;
+};
+
 /// Point `slot` at `a`, adjusting counts.
 /// The compare is what keeps the repeat writers free: a node's context is written at every hand-off, and after the first those all store the same word, so only the first pays the atomics.
 inline void async_ambient_store(void*& slot, void* a)

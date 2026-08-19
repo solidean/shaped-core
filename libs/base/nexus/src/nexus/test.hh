@@ -81,9 +81,10 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 //
 //   EXAMPLE("blob-cache/put-and-get")
 //
-// `no_scheduler` is baked in, so bodies run directly on the thread nx::run was entered on — the process main thread.
-// A trailing config item overrides it, and an example whose subject asserts on the main thread says so explicitly with `main_thread`.
-#define EXAMPLE(name, ...) NX_IMPL_TEST(name, __COUNTER__, example, no_scheduler __VA_OPT__(, ) __VA_ARGS__)
+// `main_thread` is baked in: bodies run on the thread nx::run was entered on, one at a time, which is what a window or a device context usually needs.
+// The run still installs an ambient async scheduler, so an example may use asyncs without standing up a pool of its own —
+// `no_scheduler` is the trailing config item for the example that wants to install one itself.
+#define EXAMPLE(name, ...) NX_IMPL_TEST(name, __COUNTER__, example, main_thread __VA_OPT__(, ) __VA_ARGS__)
 
 // An invocable test: an inert test body taking arguments, run only when a driver calls nx::invoke_tests with a matching (decayed) argument signature.
 // That is the parametrized / data-driven / generator pattern, and libs/base/nexus/docs/invocable-tests.md has the full mechanism.

@@ -78,20 +78,20 @@ cc::shared_async<int> make_failed()
 
 TEST("async coroutine - a coroutine with no await resolves")
 {
-    CHECK(cc::async_blocking_get_singlethreaded(coro_constant(42)) == 42);
+    CHECK(cc::async_blocking_get(coro_constant(42)) == 42);
 }
 
 TEST("async coroutine - awaiting a ready dependency never suspends")
 {
     auto const a = cc::make_async_from_value(20);
     REQUIRE(a->is_ready());
-    CHECK(cc::async_blocking_get_singlethreaded(coro_plus(a, 22)) == 42);
+    CHECK(cc::async_blocking_get(coro_plus(a, 22)) == 42);
 }
 
 TEST("async coroutine - awaiting a cold dependency drives it")
 {
     auto const a = cc::make_async_lazy([] { return 20; });
-    CHECK(cc::async_blocking_get_singlethreaded(coro_plus(a, 22)) == 42);
+    CHECK(cc::async_blocking_get(coro_plus(a, 22)) == 42);
 }
 
 TEST("async coroutine - a chain of coroutines composes")
@@ -99,7 +99,7 @@ TEST("async coroutine - a chain of coroutines composes")
     auto a = coro_constant(1);
     auto b = coro_plus(cc::move(a), 10);
     auto c = coro_plus(cc::move(b), 100);
-    CHECK(cc::async_blocking_get_singlethreaded(c) == 111);
+    CHECK(cc::async_blocking_get(c) == 111);
 }
 
 TEST("async coroutine - composes with lambda nodes in both directions")
@@ -107,20 +107,19 @@ TEST("async coroutine - composes with lambda nodes in both directions")
     // a lambda node depending on a coroutine
     auto const co = coro_constant(4);
     auto const via_lambda = cc::make_async_lazy([](int x) { return x * 10; }, co);
-    CHECK(cc::async_blocking_get_singlethreaded(via_lambda) == 40);
+    CHECK(cc::async_blocking_get(via_lambda) == 40);
 
     // a coroutine depending on a lambda node
     auto const lam = cc::make_async_lazy([] { return 7; });
-    CHECK(cc::async_blocking_get_singlethreaded(coro_plus(lam, 1)) == 8);
+    CHECK(cc::async_blocking_get(coro_plus(lam, 1)) == 8);
 }
 
 TEST("async coroutine - a cc::unit coroutine uses a bare co_return")
 {
     auto ran = 0;
     auto const a = coro_unit(&ran);
-    auto const r = cc::try_async_blocking_get_singlethreaded(a);
-    REQUIRE(r.has_value());
-    CHECK(r.value().has_value());
+    auto const r = cc::try_async_blocking_get(a);
+    CHECK(r.has_value());
     CHECK(ran == 1);
 }
 
@@ -159,7 +158,7 @@ TEST("async coroutine - async_yield reschedules and resumes")
     }(&steps);
 
     CHECK(steps == 0); // cold: creating the coroutine ran none of its body
-    CHECK(cc::async_blocking_get_singlethreaded(co) == 2);
+    CHECK(cc::async_blocking_get(co) == 2);
     CHECK(steps == 2);
 }
 
@@ -180,9 +179,8 @@ TEST("async coroutine - a failed dependency short-circuits the rest of the body"
         co_return v;
     }(make_failed(), &after_await, &destroyed);
 
-    auto const r = cc::try_async_blocking_get_singlethreaded(co);
-    REQUIRE(r.has_value());
-    CHECK(r.value().has_error());
+    auto const r = cc::try_async_blocking_get(co);
+    CHECK(r.has_error());
 
     CHECK(after_await == 0); // the body after the failed await never ran
     CHECK(destroyed == 1);   // but its in-scope local WAS destroyed
@@ -216,18 +214,16 @@ TEST("async coroutine - a dependency that fails while parked short-circuits too"
 
 TEST("async coroutine - async_fail resolves on the failure channel")
 {
-    auto const r = cc::try_async_blocking_get_singlethreaded(coro_failing());
-    REQUIRE(r.has_value());
-    CHECK(r.value().has_error());
+    auto const r = cc::try_async_blocking_get(coro_failing());
+    CHECK(r.has_error());
 }
 
 TEST("async coroutine - co_return cc::error resolves on the failure channel")
 {
     auto const co = []() -> cc::shared_async<int> { co_return cc::error("returned an error"); }();
 
-    auto const r = cc::try_async_blocking_get_singlethreaded(co);
-    REQUIRE(r.has_value());
-    CHECK(r.value().has_error());
+    auto const r = cc::try_async_blocking_get(co);
+    CHECK(r.has_error());
 }
 
 TEST("async coroutine - an escaped exception becomes the node's error")
@@ -238,10 +234,9 @@ TEST("async coroutine - an escaped exception becomes the node's error")
         co_return 1;
     }();
 
-    auto const r = cc::try_async_blocking_get_singlethreaded(co);
-    REQUIRE(r.has_value());
-    REQUIRE(r.value().has_error());
-    CHECK(!r.value().error().is_cancelled()); // a throw is a failure, never a cancellation
+    auto const r = cc::try_async_blocking_get(co);
+    REQUIRE(r.has_error());
+    CHECK(!r.error().is_cancelled()); // a throw is a failure, never a cancellation
 }
 
 TEST("async coroutine - async_as_result hands the failure to the body instead")
@@ -252,7 +247,7 @@ TEST("async coroutine - async_as_result hands the failure to the body instead")
         co_return r.has_error() ? -1 : r.value();
     }(make_failed());
 
-    CHECK(cc::async_blocking_get_singlethreaded(co) == -1);
+    CHECK(cc::async_blocking_get(co) == -1);
 }
 
 TEST("async coroutine - async_settled waits without short-circuiting")
@@ -263,7 +258,7 @@ TEST("async coroutine - async_settled waits without short-circuiting")
         co_return dep->has_error() ? -2 : *dep->try_value();
     }(make_failed());
 
-    CHECK(cc::async_blocking_get_singlethreaded(co) == -2);
+    CHECK(cc::async_blocking_get(co) == -2);
 }
 
 // ============================================================================
@@ -282,7 +277,7 @@ TEST("async coroutine - async_all awaits a pack, then each read is free")
         co_return co_await a + co_await b + co_await c;
     }();
 
-    CHECK(cc::async_blocking_get_singlethreaded(co) == 6);
+    CHECK(cc::async_blocking_get(co) == 6);
 }
 
 TEST("async coroutine - async_all short-circuits on a failed member")
@@ -296,9 +291,8 @@ TEST("async coroutine - async_all short-circuits on a failed member")
         co_return 0;
     }(make_failed(), &reached);
 
-    auto const r = cc::try_async_blocking_get_singlethreaded(co);
-    REQUIRE(r.has_value());
-    CHECK(r.value().has_error());
+    auto const r = cc::try_async_blocking_get(co);
+    CHECK(r.has_error());
     CHECK(reached == 0);
 }
 
@@ -318,7 +312,7 @@ TEST("async coroutine - async_all over a span")
         co_return sum;
     }();
 
-    CHECK(cc::async_blocking_get_singlethreaded(co) == 0 + 1 + 2 + 3 + 4);
+    CHECK(cc::async_blocking_get(co) == 0 + 1 + 2 + 3 + 4);
 }
 
 TEST("async coroutine - async_all requires every dependency before parking")
@@ -373,7 +367,7 @@ TEST("async coroutine - the plain return type is cold, async_scheduled is not")
     REQUIRE(eager->is_ready());
     CHECK(*eager->try_value() == 2);
 
-    CHECK(sched.blocking_get(lazy) == 1);
+    CHECK(cc::async_blocking_get_on(sched, lazy) == 1);
 }
 
 TEST("async coroutine - async_start schedules a cold coroutine and is idempotent")
@@ -480,12 +474,12 @@ cc::shared_async<i64> coro_sum_tree(int depth)
 
 TEST("async coroutine - a coroutine fan-out tree is correct on one thread")
 {
-    CHECK(cc::async_blocking_get_singlethreaded(coro_sum_tree(8)) == 256);
+    CHECK(cc::async_blocking_get(coro_sum_tree(8)) == 256);
 }
 
 // Not gated on CC_HAS_THREADS: the pool exists everywhere and falls back to driving inline, and the answer must be the same either way.
 TEST("async coroutine - a coroutine fan-out tree is correct on a pool")
 {
     cc::async_thread_pool pool;
-    CHECK(pool.blocking_get(coro_sum_tree(10)) == 1024);
+    CHECK(cc::async_blocking_get_on(pool, coro_sum_tree(10)) == 1024);
 }

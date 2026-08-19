@@ -54,12 +54,22 @@ impl::view_state& view_store::get_or_create(view_id id)
     return _entries.get_or_create(id);
 }
 
-impl::view_state* view_store::find(view_id id)
+impl::view_state* view_store::get_ptr(view_id id)
 {
-    return _entries.find(id);
+    return _entries.get_ptr(id);
 }
 
-impl::view_state const* view_store::peek(view_id id) const
+impl::view_state& view_store::get(view_id id)
+{
+    return _entries.get(id);
+}
+
+impl::view_state const* view_store::peek_ptr(view_id id) const
+{
+    return _entries.peek_ptr(id);
+}
+
+impl::view_state const& view_store::peek(view_id id) const
 {
     return _entries.peek(id);
 }
@@ -71,7 +81,7 @@ void view_store::set_payload_bytes(view_id id, isize bytes)
 
 u32 view_store::accumulated_frames(view_id id, u64 temporal_id) const
 {
-    auto const* const st = _entries.peek(id); // a query must not keep a view alive
+    auto const* const st = _entries.peek_ptr(id); // a query must not keep a view alive
     if (st == nullptr)
         return 0;
 

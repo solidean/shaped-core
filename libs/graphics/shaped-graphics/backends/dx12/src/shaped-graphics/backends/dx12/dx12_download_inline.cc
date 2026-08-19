@@ -8,6 +8,7 @@
 
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
@@ -29,6 +30,16 @@ public:
 protected:
     void on_message(dx12_download_copy_job job) override
     {
+        // Where this actor has no thread of its own it runs on whoever swept the pump registry, and blocking here would
+        // stall every other semantic thread with it — including the upload actor whose copy-queue fence this very
+        // submission can be waiting behind, which is a deadlock and not merely a stall.
+        // So yield first and let the others make the progress this needs; the blocking wait is for when nothing else
+        // has anything left to run and the GPU is genuinely all we are waiting on.
+        // With threads the sweep is one atomic load returning false, so this falls straight through to the wait.
+        while (!_sys.submission_complete(job.token) && cc::thread_pump_all())
+        {
+        }
+
         _sys.wait_for_submission(job.token);   // block until the recording list has run on the GPU
         if (auto const alive = job.pin.lock()) // future still wants the data?
             job.deferred_cpu_copy();
@@ -128,7 +139,7 @@ dx12_download_inline_system::span_reservation dx12_download_inline_system::reser
         // The ring is full, and only the actor draining copies frees space.
         // Where it has no thread of its own, run it here: the wait below would otherwise be on progress nobody can make.
         // A no-op with threads, where the actor is already draining and _freed_pos is what to sleep on.
-        if (pump_unthreaded())
+        if (cc::thread_pump_all())
             continue;
 
         u64 const seen = _freed_pos.load(std::memory_order_acquire);
@@ -280,6 +291,11 @@ void dx12_download_inline_system::on_epoch_advance(sg::epoch closed)
         });
 }
 
+bool dx12_download_inline_system::submission_complete(sg::submission_token token) const
+{
+    return _ctx.is_submission_complete(token);
+}
+
 void dx12_download_inline_system::wait_for_submission(sg::submission_token token)
 {
     if (_ctx.is_submission_complete(token))
@@ -308,7 +324,7 @@ void dx12_download_inline_system::wait_until_idle()
     isize cur = _outstanding.load(std::memory_order_acquire);
     while (cur != 0)
     {
-        if (!pump_unthreaded())
+        if (!cc::thread_pump_all())
             _outstanding.wait(cur, std::memory_order_acquire);
         cur = _outstanding.load(std::memory_order_acquire);
     }

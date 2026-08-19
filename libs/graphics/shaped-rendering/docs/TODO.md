@@ -31,7 +31,8 @@ Bigger design intent lives in [structure.md](structure.md).
 - imgui viewports: `ImGuiBackendFlags_HasMouseHoveredViewport` is not set, so imgui infers the hovered viewport from the mouse position rather than asking the platform.
   That is wrong when another application's window sits on top of a viewport — SDL would have to report the window under the cursor.
 - imgui: an Alpha8 atlas path (the shader samples `.rgba`, so `TexDesiredFormat` is pinned to RGBA32).
-- `imgui_routine` keeps its own pipeline-per-format map; fold it into `ctx.cached.acquire_raster_pipeline` once `pipeline_cache` grows a graphics tier.
+- `imgui_routine` still keeps its own pipeline-per-format map, though the build behind it now goes through `ctx.cached.acquire_raster_pipeline`.
+  Dropping the map means giving `keyed_pipeline_cache` a way to invalidate on reload without owning the entries.
 - Concrete routines currently need dx12 + DXC (Windows) for a real shader; the framework itself is cross-platform.
   Broaden once a non-Windows shader path exists.
 - The routine library watches `std::shared_ptr<slib::shader_library>`; `add_shader_library` accepts any number, though slib currently allows one alive at a time.

@@ -113,6 +113,9 @@ public:
     /// Blocks the actor until `token` has completed on the submission fence.
     void wait_for_submission(sg::submission_token token);
 
+    /// Whether `token` has completed, without blocking — what lets the actor yield instead of stalling every other pump.
+    [[nodiscard]] bool submission_complete(sg::submission_token token) const;
+
     /// Releases one outstanding copy from `epoch_copies` and reclaims any now-fully-drained epochs.
     /// Called by the actor after each copy.
     void on_copy_done(std::shared_ptr<std::atomic<isize>> const& epoch_copies);
@@ -121,9 +124,6 @@ public:
     void shutdown();
 
     /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
-    /// A no-op returning false wherever the actor has its own thread — see sg::context::pump_transfers.
-    bool pump_unthreaded() { return _actor != nullptr && _actor->process_messages_if_unthreaded(); }
-
     // --- test-only escape hatches --------------------------------------------------------------------
     // Backend tests peel the abstraction to assert ring-cursor behavior, e.g. seam-splitting.
     // Not part of the production surface — see libs/graphics/shaped-graphics/docs/testing.md.

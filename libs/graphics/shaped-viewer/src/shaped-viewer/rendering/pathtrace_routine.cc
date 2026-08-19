@@ -14,10 +14,10 @@ void pathtrace_routine::init_declare(sg::context& ctx)
     auto ch = sv::shaders::pt_hit.closest_hit.PtClosestHit->acquire(ctx);
 
     // No async pool is guaranteed here, so drive the compiles inline.
-    (void)cc::try_async_blocking_get_singlethreaded(rg);
-    (void)cc::try_async_blocking_get_singlethreaded(ms);
-    (void)cc::try_async_blocking_get_singlethreaded(sms);
-    (void)cc::try_async_blocking_get_singlethreaded(ch);
+    (void)cc::try_async_blocking_get(rg);
+    (void)cc::try_async_blocking_get(ms);
+    (void)cc::try_async_blocking_get(sms);
+    (void)cc::try_async_blocking_get(ch);
 
     auto const* const compiled_rg = rg->try_value();
     auto const* const compiled_ms = ms->try_value();
@@ -46,7 +46,11 @@ void pathtrace_routine::init_declare(sg::context& ctx)
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
     auto const shadow_miss_h = rpd.add_miss_shader(*compiled_sms);
     auto const hit_h = rpd.add_hit_shader({.closest_hit = *compiled_ch});
-    _pipeline = ctx.uncached.create_raytracing_pipeline(rpd);
+    // The build is async and no pool is guaranteed here, so drive it inline like the compiles above.
+    auto pipeline_r = cc::try_async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
+    if (pipeline_r.has_error())
+        return; // the state object did not build — execute no-ops, as for a broken shader
+    _pipeline = cc::move(pipeline_r).value();
 
     // Miss records in table order: index 0 = primary/bounce miss, index 1 = shadow miss (the raygen's shadow TraceRay passes MissShaderIndex 1).
     auto stbd = sg::raytracing_shader_table_description{.pipeline = _pipeline};
@@ -71,7 +75,7 @@ void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
     auto& ctx = cmd.context();
 
     if (self._pipeline == nullptr || self._table == nullptr)
-        return; // shaders did not compile; leave the target untouched
+        return; // shaders did not compile, or the pipeline did not build; leave the target untouched
 
     // The raygen writes both unconditionally, so a missing one faults inside the binding group rather than here.
     CC_ASSERT(d.output.raw() != nullptr, "pathtrace_routine: no output target bound");

@@ -8,7 +8,6 @@
 // immediate-mode viewer
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
-#include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/interactive.hh>
 #include <shaped-viewer/refs.hh>
 #include <shaped-viewer/viewer.hh>
@@ -19,7 +18,6 @@
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/mesh_flags.hh>
-#include <shaped-viewer/scene/mesh_parameter.hh>
 #include <shaped-viewer/scene/mesh_texture.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/scene_item.hh>

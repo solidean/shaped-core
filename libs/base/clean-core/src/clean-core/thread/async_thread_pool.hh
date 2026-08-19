@@ -13,11 +13,6 @@
 #include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/mutex.hh>
 
-namespace cc
-{
-struct scoped_default_async_pool;
-} // namespace cc
-
 #if CC_HAS_THREADS
 #include <clean-core/thread/impl/chase_lev_deque.hh>
 
@@ -32,15 +27,15 @@ struct scoped_default_async_pool;
 // The measured scaling, and the four benchmarks behind it, are in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 //
 //   cc::async_thread_pool pool;                           // hardware concurrency - 1; see the constructor
-//   cc::install_default_async_pool(pool);                 // compute nodes now route here
+//   cc::scoped_default_async_scheduler const ambient(pool); // every async now belongs to this pool
 //   auto a = cc::make_async_lazy([] { return heavy(); });
-//   int v = pool.blocking_get(a);                         // drive on the pool, block THIS (foreign) thread
+//   int v = cc::async_blocking_get(a);                    // drive on the ambient scheduler, block THIS thread
 //
 // Each worker owns a lock-free Chase-Lev deque (impl/chase_lev_deque.hh) and idle workers steal from a sibling's.
 // The shared, mutex-guarded injection queue is asymmetric: its PUSH side is cold, since only genuinely foreign
 // submits reach it, but its POP side sat on every idle worker's scan -- which is what _injection_hint below is for.
 //
-// blocking_get does NOT hand the graph over and park: the calling thread borrows a slot and runs the graph
+// Participation does NOT hand the graph over and park: the calling thread borrows a slot and runs the graph
 // itself, stealing like any worker, and parks only once there is genuinely nothing left for it.
 //
 // Lifetime: the pool must outlive every node routed to it, since a woken node reaches its pool through the
@@ -55,22 +50,22 @@ struct scoped_default_async_pool;
 // back rather than disappearing, so calling code stays identical across platforms.
 // It starts no threads and becomes cc::singlethreaded_scheduler wearing the pool's API — see "Without threads"
 // in libs/base/clean-core/docs/systems/async.md.
-// What it cannot do is wait: a graph parked on work only another thread could supply never completes, and
-// blocking_get's is_ready() assert reports that rather than hanging.
+// What it cannot do is wait: a graph parked on work only another thread could supply never completes here, so a
+// driver keeps asking for progress that can never come.
 
 struct cc::async_thread_pool final : async_scheduler
 {
     /// Starts `worker_count` (>= 1) worker threads.
-    /// Defaults to one FEWER than the hardware concurrency: a foreign thread in blocking_get participates as a worker for the duration, so the default leaves it a core.
+    /// Defaults to one FEWER than the hardware concurrency: a thread driving a graph participates as a worker for the duration, so the default leaves it a core.
     /// Without threads nothing is started and the count is ignored.
     explicit async_thread_pool(int worker_count = default_worker_count());
 
     /// num_hardware_threads() - 1, floored at 1 — see the constructor on why it is not the full count.
-    /// 0 without threads: the blocking_get caller is the only worker there ever is.
+    /// 0 without threads: whoever drives a graph is the only worker there ever is.
     [[nodiscard]] static int default_worker_count();
 
     /// Stops and joins all workers.
-    /// Asserts the pool is not still the installed default — uninstall it first, via uninstall_default_async_pool or scoped_default_async_pool.
+    /// Asserts the pool is not still the installed default — uninstall it first, via uninstall_default_async_scheduler or scoped_default_async_scheduler.
     /// Does not drain queued work: outstanding graphs must have completed, or be intentionally abandoned.
     ~async_thread_pool() override;
 
@@ -83,38 +78,32 @@ struct cc::async_thread_pool final : async_scheduler
 public:
     /// Local/hot enqueue onto the current worker's deque.
     /// Must be called from a worker of THIS pool — it is the route a running frame takes when scheduling a child or a cold dependency.
-    /// Without threads there are no workers and no such restriction: it queues onto the pump whoever calls blocking_get will drive.
+    /// Without threads there are no workers and no such restriction: it queues onto the pump whoever drives a graph will run.
     void enqueue(async_node_ptr node) override;
 
     /// Injection from any thread (foreign submits, cross-thread wakeups).
     void submit(async_node_ptr node) override;
 
+    /// Runs one node from the calling worker's own deque.
+    /// False on any other thread: running a pool's work needs a slot to run it in, and a foreign caller takes one by participating instead.
+    bool try_run_one() override;
+
+    /// Drives `root` to completion on the calling thread.
+    ///
+    /// The caller PARTICIPATES: it borrows a pool slot and runs the graph itself rather than handing it over, so a small graph never leaves this thread.
+    /// It parks on the root only once there is nothing left for it to run, which is why it returns ready even for a graph finished by an external push.
+    /// Legal from inside a worker — cc::async_blocking_get bridges sync and async code, and a nested drive keeps that thread working rather than idle.
+    /// Without threads the caller is not merely a participant but the only one, and runs the whole graph inline.
+    void participate_until_ready(async_node_base& root) override;
+
     // queries
 public:
-    /// Worker THREADS, excluding the external slots that foreign blocking_get callers borrow.
-    /// 0 without threads: the blocking_get caller is the only worker there is.
+    /// Worker THREADS, excluding the external slots that participating foreign threads borrow.
+    /// 0 without threads: whoever drives is the only worker there is.
     [[nodiscard]] int worker_count() const { return _thread_count; }
-
-    // blocking driver (call from a foreign thread — never from inside a worker/frame)
-public:
-    /// Drive `root` to completion and return its outcome.
-    /// The calling thread PARTICIPATES: it borrows a pool slot and runs the graph itself rather than handing it over, so a small graph never leaves this thread.
-    /// It parks only once there is nothing left for it to run.
-    /// Asserts if called from within a worker of this pool, which would park a pool thread on its own work.
-    /// Without threads the caller is not merely a participant but the only one, and runs the whole graph inline.
-    template <class T, class E = async_error>
-    [[nodiscard]] cc::result<T, E> try_blocking_get(shared_async<T, E> const& root);
-
-    /// Like try_blocking_get but returns the value (copy) and asserts on error/cancellation.
-    template <class T, class E = async_error>
-    [[nodiscard]] T blocking_get(shared_async<T, E> const& root);
 
     // internal
 private:
-    /// Drives `root` to completion on the calling thread.
-    /// The one seam the two builds implement differently: with threads the caller borrows a slot and steals alongside the workers; without them it just pumps.
-    void participate_until_ready(async_node_base& root);
-
 #if CC_HAS_THREADS
     struct worker
     {
@@ -133,7 +122,7 @@ private:
         std::thread thread; // empty on an external slot: those are driven by whichever foreign thread claims them
 
         // External slots only (index >= _thread_count).
-        // Foreign blocking_get callers claim one for the duration of their drive; worker slots are never claimed.
+        // A foreign thread participating claims one for the duration of its drive; worker slots are never claimed.
         cc::atomic<bool> claimed = {false};
     };
 
@@ -144,9 +133,9 @@ private:
     [[nodiscard]] async_node_ptr try_get_work(worker& w, bool authoritative = false);
     void push_local(worker& w, async_node_ptr node);
     void wake_one();
-    void wait_for_completion(async_node_base& root);
+    void wake_all();
 
-    // External participation: a foreign thread in blocking_get borrows a slot and runs the graph itself rather than handing it over and parking.
+    // External participation: a foreign thread borrows a slot and runs the graph itself rather than handing it over and parking.
     // For a small graph that removes the submit/wake round trip entirely — the root lands in the caller's OWN deque and it polls it on the spot.
     // Its deque is stealable like any other, so a large graph still spreads across the pool.
     [[nodiscard]] worker* try_claim_external_slot();
@@ -205,64 +194,3 @@ private:
 
 #endif
 };
-
-namespace cc
-{
-
-/// Install `pool` as the process-wide default: nodes that cannot run on the current thread route here.
-/// Install once at startup, before the graphs that depend on it run.
-/// Asserts if a default is already installed — overriding a live default is almost never correct, since outer asyncs may outlive the inner pool yet get scheduled on it.
-/// Pair with uninstall_default_async_pool, or use scoped_default_async_pool.
-void install_default_async_pool(async_thread_pool& pool);
-
-/// Remove `pool` as the process-wide default.
-/// Asserts it is the currently installed default, and must be called before the pool is destroyed.
-void uninstall_default_async_pool(async_thread_pool& pool);
-
-} // namespace cc
-
-/// RAII: installs `pool` as the process-wide default for the scope, uninstalling it on destruction.
-struct cc::scoped_default_async_pool
-{
-    explicit scoped_default_async_pool(async_thread_pool& pool) : _pool(pool) { install_default_async_pool(pool); }
-    ~scoped_default_async_pool() { uninstall_default_async_pool(_pool); }
-
-    scoped_default_async_pool(scoped_default_async_pool const&) = delete;
-    scoped_default_async_pool(scoped_default_async_pool&&) = delete;
-    scoped_default_async_pool& operator=(scoped_default_async_pool const&) = delete;
-    scoped_default_async_pool& operator=(scoped_default_async_pool&&) = delete;
-
-private:
-    async_thread_pool& _pool;
-};
-
-namespace cc
-{
-
-// ============================================================================
-// blocking driver — templated, defined inline
-// ============================================================================
-
-template <class T, class E>
-cc::result<T, E> async_thread_pool::try_blocking_get(shared_async<T, E> const& root)
-{
-    CC_ASSERT(root != nullptr, "cannot drive a null async");
-    CC_ASSERT(async_scheduler::current_or_null() != static_cast<async_scheduler*>(this),
-              "do not call blocking_get from inside a worker of this pool (it would park a pool thread)");
-
-    participate_until_ready(*root);
-
-    CC_ASSERT(root->is_ready(), "async graph could not complete (blocked on external work?)");
-    if (root->has_error())
-        return cc::error(root->propagate_error());
-    return *root->value_ptr(); // copy out
-}
-
-template <class T, class E>
-T async_thread_pool::blocking_get(shared_async<T, E> const& root)
-{
-    auto r = try_blocking_get(root);
-    CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");
-    return cc::move(r).value();
-}
-} // namespace cc

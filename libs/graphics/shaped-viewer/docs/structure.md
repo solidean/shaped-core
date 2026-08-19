@@ -33,10 +33,10 @@ view_renderer                            [done]         allocates every texture 
 viewer_renderer                          [done]         replays a plan: every trace first, then one layout_routine pass per refreshing target. Nesting falls out of the ordering
 authoring API (interactive / refs)       [done]         sv::interactive -> frame -> window_ref -> view_ref -> layout_ref / leaf_ref / scene_ref.
                                                         A frame inherits the window surface, which inherits the view surface, so f.add_scene() == f.window().view().add_scene()
-context provider (sv::acquire_context)   [done]         an overridable hook, called at most once per process; the default brings up dx12 (hardware, then WARP)
+context provider (set_acquire_context)   [done]         an overridable hook, called at most once per process; the default brings up dx12 (hardware, then WARP)
 input routing + key-bound zoom           [done]         picks the leaf under the cursor in painter's order through the plan's region links;
                                                         Ctrl+wheel magnifies what a leaf samples without touching a camera or a trace
-mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh: triangle_geometry (raw or indexed, pinned + hashed) plus named attributes, a material id, flags, parameters and textures
+mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh: triangle_geometry (raw or indexed, pinned + hashed) plus named attributes (per element, or per instance for a per-mesh value), a material id, flags and textures
 resource managers (mesh / material)      [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
 resource data (triangle / indexed / material)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
 pathtrace_routine                        [in progress]  the DXR GI trace view_renderer drives: TLAS + dispatch_rays into a UAV target

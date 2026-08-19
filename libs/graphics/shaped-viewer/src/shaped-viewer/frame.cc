@@ -236,7 +236,7 @@ void frame_iterator::advance()
     while (_viewer->is_running())
     {
         _current = frame_scope(_viewer->acquire_frame());
-        if (_current)
+        if (_current.is_open())
         {
             _active = true;
             return;

@@ -6,8 +6,8 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
+#include <shaped-rendering/gpu_types.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh> // area_light_gpu
 #include <shaped-viewer/scene/pbr_material.hh>
@@ -34,7 +34,7 @@ struct sv::pt_frame_constants_gpu
     /// false => the bound mesh is a non-indexed triangle list, so the closest-hit reads its vertices directly
     /// instead of through `Indices`. Set it from `mesh_record::is_indexed`; the trace binds one mesh per view,
     /// which is why per-mesh state can ride here at all.
-    gpu_boolean mesh_is_indexed = false;
+    sr::gpu_boolean mesh_is_indexed = false;
     f32 _padding5[3] = {};
 
     /// The camera the previous recorded frame traced from, which is what this frame reprojects its history through.
@@ -43,7 +43,7 @@ struct sv::pt_frame_constants_gpu
 
     /// Whether the bound history textures hold a previous frame at all.
     /// False on the first frame after any reset, where every pixel starts its estimate from nothing.
-    gpu_boolean has_history = false;
+    sr::gpu_boolean has_history = false;
 
     /// Ceiling on the per-pixel sample count a reprojected pixel may carry forward.
     ///

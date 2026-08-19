@@ -37,6 +37,9 @@ struct cache_config;
 /// The ceilings a garbage-collection pass enforces.
 /// All approximate — see the field docs.
 struct cache_limits;
+
+/// Installs a process-wide default cache for a scope and restores the previous one after.
+struct scoped_default_cache;
 } // namespace bcache
 
 // ---- identity ----------------------------------------------------------------------------------

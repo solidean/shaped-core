@@ -7,7 +7,7 @@ using namespace cc::primitive_defines;
 // The fluent authoring API, end to end, in a real window.
 //
 // `sv::interactive` owns the viewer for the loop's lifetime, so nothing here holds one — and no context is threaded
-// through either: the viewer acquires one through `sv::acquire_context`, which is unset here so the built-in default
+// through either: the viewer acquires one through `sv::set_acquire_context`, which is unset here so the built-in default
 // answers.
 // These tests deliberately bring up nothing of their own, because that is the path a caller takes.
 //
@@ -59,7 +59,8 @@ TEST("sv - interactive viewer, a layout of views (manual)", nx::config::manual)
         (void)inner.add_view("a");
 
         // Nearest sampling, so magnifying this one reads out texels rather than smearing them.
-        auto pixels = inner.leaf().sampler(sv::sampler_mode::nearest);
+        auto pixels = inner.leaf();
+        pixels.sampler(sv::sampler_mode::nearest);
         (void)pixels.add_view("b");
 
         // A small inset over the whole thing, out of the flow so its siblings tile as if it were absent.
@@ -87,7 +88,7 @@ TEST("sv - interactive viewer, the manual begin_frame/end_frame loop (manual)", 
     while (viewer.is_running())
     {
         auto& f = viewer.begin_frame();
-        if (!f)
+        if (!f.is_open())
             continue; // the window cannot draw right now — minimized, or closing; a closed frame needs no end_frame
 
         auto rows = f.window().view().layout_rows({.padding = 8, .spacing = 6});

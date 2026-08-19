@@ -20,7 +20,7 @@ for (auto f : sv::interactive("my viewer"))
 }
 ```
 
-No context is threaded through — one is acquired through `sv::acquire_context`, or from a built-in default.
+No context is threaded through — one is acquired through the provider `sv::set_acquire_context` installs, or from a built-in default.
 
 An application whose own loop must stay in charge writes the same loop out, with `begin_frame` / `end_frame` around the identical authoring calls.
 Both author the same `sv::frame`; only what ends it differs — the range yields an `sv::frame_scope` that presents when the loop body ends, `begin_frame` hands out the frame itself:
@@ -30,7 +30,7 @@ auto viewer = sv::viewer::create("my viewer");
 while (viewer.is_running())
 {
     auto& f = viewer.begin_frame();
-    if (!f) // the window cannot draw right now (minimized)
+    if (!f.is_open()) // the window cannot draw right now (minimized)
         continue;
     f.add_scene().add_mesh(mesh);
     viewer.end_frame();

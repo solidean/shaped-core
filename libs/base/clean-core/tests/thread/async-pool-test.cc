@@ -43,17 +43,17 @@ CC_ASYNC_AMBIENT_TAG(pool_tag)
 
 } // namespace
 
-TEST("async - a dependency tree drives correctly on a thread pool")
+TEST("async - a dependency tree drives correctly on a thread pool", nx::config::no_scheduler)
 {
     cc::async_thread_pool pool(4);
 
     int const depth = 10; // 1024 leaves
     auto root = build_sum_tree(depth);
 
-    CHECK(pool.blocking_get(root) == (i64(1) << depth));
+    CHECK(cc::async_blocking_get_on(pool, root) == (i64(1) << depth));
 }
 
-TEST("async - many independent asyncs fan out across the pool")
+TEST("async - many independent asyncs fan out across the pool", nx::config::no_scheduler)
 {
     cc::async_thread_pool pool(4);
 
@@ -79,17 +79,19 @@ TEST("async - many independent asyncs fan out across the pool")
             return actx.success(sum);
         });
 
-    CHECK(pool.blocking_get(root) == i64(n) * (n - 1) / 2);
+    CHECK(cc::async_blocking_get_on(pool, root) == i64(n) * (n - 1) / 2);
 }
 
 // Gated: the whole point is that a SECOND thread supplies the value the first is parked on.
 // With one thread the graph parks on a manual node nobody can ever push, which is exactly what blocking_get's is_ready() assert reports.
 // That is a different contract, covered by async-test.cc's no-progress tests.
 #if CC_HAS_THREADS
-TEST("async - external push from a foreign thread wakes a pool-parked dependent", exclusive("cc-default-async-pool"))
+TEST("async - external push from a foreign thread wakes a pool-parked dependent",
+     nx::config::no_scheduler,
+     exclusive("cc-default-async-pool"))
 {
     cc::async_thread_pool pool(2);
-    cc::scoped_default_async_pool as_default(pool); // so the foreign push routes the woken dependent back here
+    cc::scoped_default_async_scheduler as_default(pool); // so the foreign push routes the woken dependent back here
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
@@ -101,14 +103,14 @@ TEST("async - external push from a foreign thread wakes a pool-parked dependent"
             ext->push_value(41);
         });
 
-    int const v = pool.blocking_get(p);
+    int const v = cc::async_blocking_get_on(pool, p);
     pusher.join();
 
     CHECK(v == 42);
 }
 #endif
 
-TEST("async - two pools coexist; each drives its own submitted root")
+TEST("async - two pools coexist; each drives its own submitted root", nx::config::no_scheduler)
 {
     // Without a task-class system, routing to a specific pool means submitting the root to it via blocking_get or schedule_on, not pinning an affinity.
     // Two independent pools drive independently.
@@ -118,20 +120,20 @@ TEST("async - two pools coexist; each drives its own submitted root")
     auto ra = cc::make_async_lazy([] { return 7; });
     auto rb = cc::make_async_lazy([] { return 9; });
 
-    CHECK(pool_a.blocking_get(ra) == 7);
-    CHECK(pool_b.blocking_get(rb) == 9);
+    CHECK(cc::async_blocking_get_on(pool_a, ra) == 7);
+    CHECK(cc::async_blocking_get_on(pool_b, rb) == 9);
 }
 
-TEST("async - installing a second default pool asserts", exclusive("cc-default-async-pool"))
+TEST("async - installing a second default pool asserts", nx::config::no_scheduler, exclusive("cc-default-async-pool"))
 {
     cc::async_thread_pool pool_a(1);
     cc::async_thread_pool pool_b(1);
 
-    cc::scoped_default_async_pool as_default(pool_a);
-    CHECK_ASSERTS(cc::install_default_async_pool(pool_b)); // a default is already installed
+    cc::scoped_default_async_scheduler as_default(pool_a);
+    CHECK_ASSERTS(cc::install_default_async_scheduler(pool_b)); // a default is already installed
 }
 
-TEST("async - two pools coexist and drive independent graphs")
+TEST("async - two pools coexist and drive independent graphs", nx::config::no_scheduler)
 {
     cc::async_thread_pool pool_a(2);
     cc::async_thread_pool pool_b(3);
@@ -139,18 +141,18 @@ TEST("async - two pools coexist and drive independent graphs")
     auto root_a = build_sum_tree(8); // 256 leaves
     auto root_b = build_sum_tree(9); // 512 leaves
 
-    CHECK(pool_a.blocking_get(root_a) == (i64(1) << 8));
-    CHECK(pool_b.blocking_get(root_b) == (i64(1) << 9));
+    CHECK(cc::async_blocking_get_on(pool_a, root_a) == (i64(1) << 8));
+    CHECK(cc::async_blocking_get_on(pool_b, root_b) == (i64(1) << 9));
 }
 
-TEST("async - stress: many small graphs on a pool")
+TEST("async - stress: many small graphs on a pool", nx::config::no_scheduler)
 {
     cc::async_thread_pool pool(4);
 
     for (int iter = 0; iter < 200; ++iter)
     {
         auto root = build_sum_tree(6); // 64 leaves
-        CHECK(pool.blocking_get(root) == (i64(1) << 6));
+        CHECK(cc::async_blocking_get_on(pool, root) == (i64(1) << 6));
     }
 }
 
@@ -202,7 +204,7 @@ cc::shared_async<counted> spawn_counted_tree(int depth)
 }
 } // namespace
 
-TEST("async - destroying a pool releases work abandoned in its deques")
+TEST("async - destroying a pool releases work abandoned in its deques", nx::config::no_scheduler)
 {
     // Abandoning a graph is explicitly allowed (see the pool's lifetime note), and a pool torn down with work still queued must drop those nodes' strong refs.
     // Otherwise the abandoned work pins its whole graph.
@@ -235,7 +237,7 @@ TEST("async - destroying a pool releases work abandoned in its deques")
 }
 #endif
 
-TEST("async - the wake protocol survives workers repeatedly draining to empty")
+TEST("async - the wake protocol survives workers repeatedly draining to empty", nx::config::no_scheduler)
 {
     // The wake path has no counter of claimable work: a producer fences, reads _sleepers, and only bumps the epoch if somebody is actually asleep.
     // Losing that race means a task sits in a deque while every worker sleeps -- a HANG, not a wrong answer, so it cannot be caught by checking a value.
@@ -248,11 +250,11 @@ TEST("async - the wake protocol survives workers repeatedly draining to empty")
     for (int iter = 0; iter < 400; ++iter)
     {
         auto root = build_sum_tree(3); // tiny: finishes fast, so the pool goes idle between iterations
-        CHECK(pool.blocking_get(root) == (i64(1) << 3));
+        CHECK(cc::async_blocking_get_on(pool, root) == (i64(1) << 3));
     }
 }
 
-TEST("async - a pool with one worker still wakes for injected work")
+TEST("async - a pool with one worker still wakes for injected work", nx::config::no_scheduler)
 {
     // A 1-worker pool has no peers to steal from, so an injected task is only ever found by the sleeping worker
     // itself -- the wake protocol is the only thing that can deliver it.
@@ -261,7 +263,7 @@ TEST("async - a pool with one worker still wakes for injected work")
     for (int iter = 0; iter < 200; ++iter)
     {
         auto root = cc::make_async_lazy([iter] { return i64(iter); });
-        CHECK(pool.blocking_get(root) == i64(iter));
+        CHECK(cc::async_blocking_get_on(pool, root) == i64(iter));
     }
 }
 
@@ -272,13 +274,14 @@ TEST("async - a pool with one worker still wakes for injected work")
 // See "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md for what is and is not guaranteed.
 
 TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked in a pool",
+     nx::config::no_scheduler,
      exclusive("cc-default-async-pool"))
 {
     // The graph is parked on an unpushed manual node inside the pool, so a singlethreaded_scheduler cannot advance it however hard it pumps.
     // That is a report, not an abort -- it is not this scheduler's graph to fail.
     // The push then routes the woken dependent to the default pool, which finishes it.
     cc::async_thread_pool pool(1);
-    cc::scoped_default_async_pool as_default(pool);
+    cc::scoped_default_async_scheduler as_default(pool);
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
@@ -286,14 +289,15 @@ TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked i
     p->schedule_on(pool);
 
     cc::singlethreaded_scheduler sched;
-    CHECK(!sched.try_blocking_get(p).has_value());
+    CHECK(!cc::try_async_blocking_get_on(sched, p).has_value());
     CHECK(!p->is_ready());
 
     ext->push_value(41);
-    CHECK(pool.blocking_get(p) == 42);
+    CHECK(cc::async_blocking_get_on(pool, p) == 42);
 }
 
 TEST("async - a subtree shared between a pool and a singlethreaded_scheduler stays correct",
+     nx::config::no_scheduler,
      exclusive("cc-default-async-pool"))
 {
     // The real shape of the hybrid case: an outer API alternating single- and multi-threaded work over asyncs shared with previous calls, so one subtree is reachable from both schedulers at once.
@@ -307,7 +311,7 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
     // A wrong value or an abort is not legal.
     // Correctness only: st never publishes, so it may drag a subtree the pool could have parallelized into single-threaded execution.
     cc::async_thread_pool pool(4);
-    cc::scoped_default_async_pool as_default(pool);
+    cc::scoped_default_async_scheduler as_default(pool);
 
     i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
@@ -318,7 +322,7 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
         shared->schedule_on(pool); // the multi-threaded call drives the shared subtree
 
         cc::singlethreaded_scheduler sched;
-        auto const outcome = sched.try_blocking_get(root_st); // the single-threaded call, same subtree
+        auto const outcome = cc::try_async_blocking_get_on(sched, root_st); // the single-threaded call, same subtree
         if (outcome.has_value())
         {
             REQUIRE(outcome.value().has_value());
@@ -326,23 +330,24 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
         }
         // else: root_st migrated onto the pool mid-drive — no-progress is the correct report, not a failure
 
-        CHECK(pool.blocking_get(root_st) == expected); // resolves once, to the same value, whoever got there
+        CHECK(cc::async_blocking_get_on(pool, root_st) == expected); // resolves once, to the same value, whoever got there
     }
 }
 
 TEST("async - a node migrated into a singlethreaded_scheduler is not stranded when it stops driving",
+     nx::config::no_scheduler,
      exclusive("cc-default-async-pool"))
 {
     // Regression for migration stranding, which is a HANG rather than a wrong answer.
     // TWO separate roots share a subtree: root_mt is submitted to the pool, root_st is driven on a singlethreaded_scheduler.
     // When st wins the race to drive `shared` inline, `shared` completes on the ST THREAD, so root_mt — parked on it in the pool — is woken there and route_after_schedule enqueues it onto st's queue.
     // st's try_blocking_get returns once root_st is ready, which would leave root_mt sitting `scheduled` in an abandoned queue.
-    // schedule_on is idempotent on `scheduled`, so the later pool.blocking_get(root_mt) could never reclaim it.
+    // schedule_on is idempotent on `scheduled`, so the later cc::async_blocking_get_on(pool, root_mt) could never reclaim it.
     //
     // try_blocking_get drains its queue before returning, with its worker scope still bound, settling root_mt into a completed or re-parked state.
     // This test must finish, not hang.
     cc::async_thread_pool pool(4);
-    cc::scoped_default_async_pool as_default(pool);
+    cc::scoped_default_async_scheduler as_default(pool);
 
     i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
@@ -354,20 +359,22 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
         root_mt->schedule_on(pool); // the multi-threaded call
 
         cc::singlethreaded_scheduler sched;
-        (void)sched.try_blocking_get(root_st); // the single-threaded call, same subtree; may win or migrate
+        (void)cc::try_async_blocking_get_on(sched, root_st); // the single-threaded call, same subtree; may win or migrate
 
-        CHECK(pool.blocking_get(root_mt) == expected); // must not hang: root_mt was drained out of `scheduled`
-        CHECK(pool.blocking_get(root_st) == expected);
+        CHECK(cc::async_blocking_get_on(pool, root_mt) == expected); // must not hang: root_mt was drained out of `scheduled`
+        CHECK(cc::async_blocking_get_on(pool, root_st) == expected);
     }
 }
 
 #if CC_HAS_THREADS
-TEST("async - a node woken across threads still runs under its own ambient context", exclusive("cc-default-async-pool"))
+TEST("async - a node woken across threads still runs under its own ambient context",
+     nx::config::no_scheduler,
+     exclusive("cc-default-async-pool"))
 {
     // Needs real threads: the point is that the context comes from the node's own arm and never from the worker
     // that happens to pick it up, so the dependent must be re-polled somewhere other than where it parked.
     cc::async_thread_pool pool(4);
-    cc::scoped_default_async_pool as_default(pool);
+    cc::scoped_default_async_scheduler as_default(pool);
 
     int scope_value = 7;
     auto gate = cc::make_async_manual<i64>();
@@ -388,10 +395,10 @@ TEST("async - a node woken across threads still runs under its own ambient conte
     std::thread pusher([&] { gate->push_value(1); }); // completes it from a thread with nothing bound at all
     pusher.join();
 
-    CHECK(pool.blocking_get(dependent) == scope_value);
+    CHECK(cc::async_blocking_get_on(pool, dependent) == scope_value);
 }
 
-TEST("async - a throwing frame on a worker does not take the process down")
+TEST("async - a throwing frame on a worker does not take the process down", nx::config::no_scheduler)
 {
     // Needs real threads: a worker loop has no handler of its own, so an escaping exception would leave worker_main via std::thread and terminate the process outright.
     // Containment happens per node, in poll.
@@ -404,8 +411,75 @@ TEST("async - a throwing frame on a worker does not take the process down")
             return ctx.success(0); // unreachable
         });
 
-    auto const r = pool.try_blocking_get(root);
-    REQUIRE(r.has_error());
-    CHECK(r.error().underlying().to_string().contains("worker boom"));
+    auto const r = cc::try_async_blocking_get_on(pool, root);
+    REQUIRE(r.has_value()); // the pool completed it, on the failure channel
+    REQUIRE(r.value().has_error());
+    CHECK(r.value().error().underlying().to_string().contains("worker boom"));
+}
+
+TEST("async - a work item stolen by a parked participant runs under its own context, not the stealer's",
+     nx::config::no_scheduler,
+     exclusive("cc-default-async-pool"))
+{
+    // A blocking get parks INSIDE an ambient scope and steals while parked, so whatever it picks up would inherit that
+    // scope if a dequeued item were treated like an inline-driven dependency.
+    // It must not be: a node reaching a queue always carries its own token, so a null one there means "no context".
+    // Inheriting instead cross-attributes unrelated work to whichever logical task happened to be blocked.
+    //
+    // The pool's one worker is pinned inside `hog` for the whole test, so the parked participant is the only thread
+    // left that can run `victim` — the steal is forced rather than raced.
+    cc::async_thread_pool pool(1);
+    cc::scoped_default_async_scheduler as_default(
+        pool); // the pusher thread has nothing bound, and resolving `gate` routes a continuation
+
+    cc::atomic<bool> hog_running = {false};
+    cc::atomic<bool> release_hog = {false};
+    auto hog = cc::make_async_lazy<i64>(
+        [&]() -> i64
+        {
+            hog_running.store(true, cc::memory_order_release);
+            while (!release_hog.load(cc::memory_order_acquire))
+                std::this_thread::yield();
+            return 0;
+        });
+    hog->schedule_on(pool);
+    while (!hog_running.load(cc::memory_order_acquire))
+        std::this_thread::yield();
+
+    int scope_value = 7;
+    cc::atomic<int> observed = {-1}; // what `victim` saw: -1 not run, 0 no context, 7 the stealer's
+
+    auto gate = cc::make_async_manual<i64>();
+    auto root = cc::make_async_lazy([](i64 v) { return v; }, gate);
+
+    auto victim = cc::make_async_lazy<i64>(
+        [&]() -> i64
+        {
+            auto* const v = cc::async_ambient_lookup(pool_tag());
+            observed.store(v == nullptr ? 0 : *static_cast<int*>(v), cc::memory_order_release);
+            return 1;
+        });
+
+    // Nothing is bound on this thread, so `victim` reaches the queue with a null token — the case that inherits.
+    // Releasing the root only once `victim` has run is what makes the order the test claims the order it gets.
+    std::thread pusher(
+        [&]
+        {
+            victim->schedule_on(pool);
+            while (observed.load(cc::memory_order_acquire) < 0)
+                std::this_thread::yield();
+            gate->push_value(1);
+        });
+
+    {
+        cc::async_ambient_scope const s(pool_tag(), &scope_value);
+        CHECK(cc::async_blocking_get_on(pool, root) == 1);
+    }
+    pusher.join();
+
+    CHECK(observed.load(cc::memory_order_acquire) == 0);
+
+    release_hog.store(true, cc::memory_order_release);
+    (void)cc::async_blocking_get_on(pool, hog); // settle it before the pool goes away
 }
 #endif

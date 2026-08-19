@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/hash128.hh> // cc::hash128
 #include <clean-core/common/utility.hh> // cc::forward, cc::move
+#include <clean-core/container/array.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-viewer/fwd.hh>
@@ -102,16 +103,21 @@ struct sv::attribute_format
 
 /// How many elements an attribute carries, i.e. what its index means.
 ///
+/// `per_instance` is one element for the whole mesh — a tint, a fade, a slice plane's offset.
+/// It has no index at all: every instance contributes exactly one element, so a renderer can pack them into one buffer and hand the shader an instance index.
+/// This is how two meshes share one material and still draw differently, without either owning a material of its own.
+///
 /// `per_vertex` indexes the geometry's position buffer, so an indexed mesh shares an element across the triangles meeting at a vertex.
 /// `per_corner` is 3 elements per triangle, in triangle order — what a hard edge needs, since the two triangles then carry their own normal at the shared vertex.
 /// `per_triangle` is one element per triangle, indexed by `PrimitiveIndex()`.
 ///
 /// `per_edge` is RESERVED and rejected by `mesh_attribute::create` for now.
-/// The other three index something the geometry already numbers; an edge is not numbered at all, so per-edge data needs an edge table on triangle_geometry first —
+/// The other geometric frequencies index something the geometry already numbers; an edge is not numbered at all, so per-edge data needs an edge table on triangle_geometry first —
 /// the edges themselves (each naming its two vertices) plus each triangle's three edge indices, which is also what decides whether opposite half-edges share one entry.
 /// Only the mapping is missing: nothing else here changes when it lands, which is why the enumerator is spelled out now rather than renumbering later.
 enum class sv::attribute_frequency : sv::u8
 {
+    per_instance,
     per_vertex,
     per_corner,
     per_triangle,
@@ -225,6 +231,7 @@ inline constexpr attribute_format attribute_format_of = impl::attribute_format_t
 /// The payload is type-erased to bytes plus a `format` saying how to read them, so a mesh carries any number of attributes in one list.
 /// `name` is what a material looks the attribute up by; it is the contract between the two, and a material that misses one falls back rather than failing.
 /// `frequency` decides what an element index means, so it must agree with the geometry: `element_count()` must be its vertex, corner or triangle count.
+/// At `per_instance` there is no index and exactly one element — a per-mesh value the material reads by name, which is why a mesh needs no separate parameter list.
 ///
 /// The bytes are pinned and hashed like the geometry: the mesh keeps them alive, and equal contents carry equal hashes so an upload caches on the hash alone.
 struct sv::mesh_attribute
@@ -240,6 +247,7 @@ struct sv::mesh_attribute
     /// Pins `elements` and hashes their bytes, deducing `format` from the element type.
     /// The element type must be a scalar or a tg vector / matrix over one — whatever `attribute_format_of` names.
     /// `frequency` must not be per_edge: an edge has no index until triangle_geometry carries an edge table.
+    /// A per_instance attribute must be exactly one element; `create_value` is the shorthand for it.
     template <class Elements>
     [[nodiscard]] static mesh_attribute create(cc::string name, attribute_frequency frequency, Elements&& elements)
     {
@@ -248,6 +256,9 @@ struct sv::mesh_attribute
 
         auto pinned = cc::make_pinned_data(cc::forward<Elements>(elements));
         using element_t = std::remove_const_t<std::remove_reference_t<decltype(*pinned.data())>>;
+
+        CC_ASSERT(frequency != attribute_frequency::per_instance || pinned.size() == 1, "a per_instance attribute "
+                                                                                        "carries exactly one element");
 
         auto bytes = pinned.as_bytes();
         auto const hash = cc::hash128::create(bytes.span(), impl::attribute_hash_seed);
@@ -258,7 +269,22 @@ struct sv::mesh_attribute
                 .hash = hash};
     }
 
+    /// The per_instance attribute holding `value` — one element, pinned and hashed like any other.
+    /// This is what a per-mesh material input is: a name the material looks up, at a type it checks against `format`.
+    template <class T>
+    [[nodiscard]] static mesh_attribute create_value(cc::string name, T const& value)
+    {
+        return create(cc::move(name), attribute_frequency::per_instance, cc::array<T>::create_filled(1, value));
+    }
+
     [[nodiscard]] isize element_count() const { return data.size() / format.size_bytes(); }
+
+    /// Does this attribute hold elements of type T? What a material asks before reading one.
+    template <class T>
+    [[nodiscard]] bool holds() const
+    {
+        return format == attribute_format_of<T>;
+    }
 
     /// The elements read back as T, which must be the type `format` names.
     template <class T>
@@ -268,5 +294,13 @@ struct sv::mesh_attribute
         auto const view = data.span().try_reinterpret_as<T const>();
         CC_ASSERT(view.has_value(), "attribute byte count is not a multiple of the element size");
         return view.value();
+    }
+
+    /// The single element of a per_instance attribute, read as T.
+    template <class T>
+    [[nodiscard]] T value_as() const
+    {
+        CC_ASSERT(frequency == attribute_frequency::per_instance, "value_as reads a per_instance attribute");
+        return elements_as<T>()[0];
     }
 };

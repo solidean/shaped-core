@@ -4,7 +4,6 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/background.hh>
@@ -22,7 +21,6 @@
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 
-#include <type_traits>
 
 using namespace cc::primitive_defines;
 
@@ -478,30 +476,34 @@ TEST("sv - attribute_format spans scalars, vectors and matrices")
     CHECK(a.element_count() == 3);
 }
 
-TEST("sv - mesh parameters keep their type")
+TEST("sv - a per-instance value is a one-element attribute")
 {
-    auto const scale = sv::parameter_value::of(2.5f);
-    auto const tint = sv::parameter_value::of(tg::vec3f(1, 0, 0));
-    auto const on = sv::parameter_value::of(true);
+    auto const scale = sv::mesh_attribute::create_value("scale", 2.5f);
+    auto const tint = sv::mesh_attribute::create_value("tint", tg::vec3f(1, 0, 0));
+    auto const on = sv::mesh_attribute::create_value("enabled", true);
 
-    // Parameters are typed by the same attribute_format an attribute's elements are.
+    // A per-instance value is typed and counted like any other attribute — it just carries exactly one element.
+    CHECK(scale.frequency == sv::attribute_frequency::per_instance);
+    CHECK(scale.element_count() == 1);
     CHECK(scale.format == sv::attribute_format_of<f32>);
     CHECK(tint.format == sv::attribute_format_of<tg::vec3f>);
     CHECK(on.format == sv::attribute_format::of_scalar(sv::scalar_type::boolean));
 
-    CHECK(scale.as<f32>() == 2.5f);
-    CHECK(tint.as<tg::vec3f>() == tg::vec3f(1, 0, 0));
-    CHECK(on.as<bool>());
-    CHECK(sv::parameter_value::of(i32(-7)).as<i32>() == -7);
+    CHECK(scale.value_as<f32>() == 2.5f);
+    CHECK(tint.value_as<tg::vec3f>() == tg::vec3f(1, 0, 0));
+    CHECK(on.value_as<bool>());
+    CHECK(sv::mesh_attribute::create_value("count", i32(-7)).value_as<i32>() == -7);
 
     // holds<T>() is what a material asks before reading — a same-width different-type read is still a miss.
     CHECK(scale.holds<f32>());
     CHECK(!scale.holds<i32>());
     CHECK(!scale.holds<tg::vec3f>());
 
-    // Any scalar type, and vectors up to the inline budget.
-    CHECK(sv::parameter_value::of(tg::vec4<f64>(1, 2, 3, 4)).as<tg::vec4<f64>>()[3] == 4.0);
-    CHECK(sv::parameter_value{}.format == sv::attribute_format_of<f32>); // a default parameter is one f32
+    // Matrices need no inline budget here, so a per-instance value may be one.
+    CHECK(sv::mesh_attribute::create_value("uv_transform", tg::mat3f::identity).holds<tg::mat3f>());
+
+    // Content-hashed like every other attribute, and the name is not part of the hash.
+    CHECK(sv::mesh_attribute::create_value("other", 2.5f).hash == scale.hash);
 }
 
 TEST("sv - a mesh carries the data its material draws it with")
@@ -512,16 +514,15 @@ TEST("sv - a mesh carries the data its material draws it with")
     m.attributes.push_back(
         sv::mesh_attribute::create("normal", sv::attribute_frequency::per_vertex,
                                    cc::vector<tg::vec3f>{tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1)}));
-    m.parameters.push_back({.name = "fade", .value = sv::parameter_value::of(0.5f)});
+    m.attributes.push_back(sv::mesh_attribute::create_value("fade", 0.5f));
     m.textures.push_back({.name = "albedo", .texture = sv::texture_id(3)});
 
     // The lists are the material's input, keyed by name; the mesh only holds them.
-    REQUIRE(m.attributes.size() == 1);
+    REQUIRE(m.attributes.size() == 2);
     CHECK(m.attributes[0].name == "normal");
     CHECK(m.attributes[0].element_count() == 3);
-    REQUIRE(m.parameters.size() == 1);
-    CHECK(m.parameters[0].name == "fade");
-    CHECK(m.parameters[0].value.as<f32>() == 0.5f);
+    CHECK(m.attributes[1].name == "fade"); // a per-instance value rides the same list
+    CHECK(m.attributes[1].value_as<f32>() == 0.5f);
     REQUIRE(m.textures.size() == 1);
     CHECK(m.textures[0].texture == sv::texture_id(3));
 
@@ -535,29 +536,7 @@ TEST("sv - a mesh carries the data its material draws it with")
     CHECK(copy.geometry.positions.data() == m.geometry.positions.data());
 }
 
-TEST("sv - gpu_boolean packs a bool into one 32-bit lane")
-{
-    static_assert(sizeof(sv::gpu_boolean) == 4);
-    static_assert(std::is_trivially_copyable_v<sv::gpu_boolean>); // it rides into a cbuffer by memcpy
-
-    auto const t = sv::gpu_boolean(true);
-    auto const f = sv::gpu_boolean();
-
-    CHECK(t.value == 1u);
-    CHECK(f.value == 0u);
-    CHECK(bool(t));
-    CHECK(!bool(f));
-    CHECK(t == sv::gpu_boolean(true));
-    CHECK(t != f);
-
-    // A shader reads any non-zero lane as `true`, so an off-by-one bit pattern is still equal to `true` here.
-    auto raw = sv::gpu_boolean();
-    raw.value = 0xFFFFFFFFu;
-    CHECK(bool(raw));
-    CHECK(raw == t);
-}
-
-TEST("sv - gpu_boolean is a drop-in cbuffer field")
+TEST("sv - frame_constants_gpu takes a plain bool for its gpu_boolean lane")
 {
     static_assert(sizeof(sv::frame_constants_gpu) == 256);
 

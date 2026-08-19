@@ -1,5 +1,7 @@
 // dx12 context bring-up: debug layer, adapter selection, device + queue creation.
 
+#include <clean-core/string/conversion.hh> // utf16_to_utf8 — DXGI_ADAPTER_DESC1::Description is wide
+#include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
@@ -10,6 +12,38 @@ namespace sg::backend::dx12
 {
 namespace
 {
+/// What DXGI says about the adapter that was picked.
+///
+/// The driver version comes from CheckInterfaceSupport, which is the only place d3d12 exposes one at all.
+/// It fails on WARP and on some drivers, and the empty string it then leaves correctly reads as "unknown" rather than
+/// as a version anyone should compare.
+sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
+{
+    auto info = sg::adapter_info();
+
+    DXGI_ADAPTER_DESC1 desc = {};
+    if (FAILED(adapter->GetDesc1(&desc)))
+        return info;
+
+    // Description is a fixed-size WCHAR buffer, NUL-terminated within it rather than length-prefixed.
+    auto const capacity = isize(sizeof(desc.Description) / sizeof(desc.Description[0]));
+    auto length = isize(0);
+    while (length < capacity && desc.Description[length] != L'\0')
+        ++length;
+    info.name = cc::utf16_to_utf8(cc::span<char16_t const>(reinterpret_cast<char16_t const*>(desc.Description), length));
+
+    info.vendor_id = u32(desc.VendorId);
+    info.device_id = u32(desc.DeviceId);
+    info.is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+
+    LARGE_INTEGER umd = {};
+    if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd)))
+        info.driver_version = cc::format("{}.{}.{}.{}", u16(umd.HighPart >> 16), u16(umd.HighPart & 0xFFFF),
+                                         u16(umd.LowPart >> 16), u16(umd.LowPart & 0xFFFF));
+
+    return info;
+}
+
 dx12_message_severity to_sg_severity(D3D12_MESSAGE_SEVERITY severity)
 {
     switch (severity)
@@ -182,6 +216,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         raytracing_tier = options5.RaytracingTier;
 
     auto ctx = std::make_shared<dx12_context>();
+    ctx->set_adapter_info(describe_adapter(adapter.Get()));
     ctx->_factory = cc::move(factory);
     ctx->_device = cc::move(device);
     ctx->_queue = cc::move(queue);

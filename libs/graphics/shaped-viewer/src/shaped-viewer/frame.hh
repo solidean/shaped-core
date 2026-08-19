@@ -60,7 +60,7 @@ private:
 /// Move-only, and the authoring surface alone: a frame never presents itself.
 /// What ends it is the type that holds it — `frame_scope` when it falls out of scope, `viewer::end_frame` when the
 /// caller says so — so each loop has exactly one rule and the frame in the middle is the same object either way.
-/// A "closed" frame — `operator bool` false, returned while the window is minimized — does nothing.
+/// A "closed" frame — `is_open()` false, returned while the window is minimized — does nothing.
 class sv::frame : public window_api<frame>
 {
 public:
@@ -72,7 +72,6 @@ public:
 
     /// Whether this frame is drawable.
     /// A closed frame (minimized window) should be skipped.
-    [[nodiscard]] explicit operator bool() const { return _open; }
     [[nodiscard]] bool is_open() const { return _open; }
 
     /// Backbuffer size in pixels — the area the default window fills.

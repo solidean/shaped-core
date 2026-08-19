@@ -88,8 +88,8 @@ cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(tru
 cc::async_thread_pool::~async_thread_pool()
 {
     CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_default_async_pool / "
-              "scoped_default_async_pool)");
+              "uninstall this pool as the default before destroying it (uninstall_default_async_scheduler / "
+              "scoped_default_async_scheduler)");
 
     _stop.store(true, cc::memory_order_release);
     {
@@ -259,7 +259,7 @@ void cc::async_thread_pool::worker_main(worker& w)
     {
         if (auto n = try_get_work(w))
         {
-            n->poll();
+            impl::async_poll_work_item(*n);
             continue;
         }
 
@@ -271,7 +271,7 @@ void cc::async_thread_pool::worker_main(worker& w)
             cc::spin_pause();
             if (auto n = try_get_work(w))
             {
-                n->poll();
+                impl::async_poll_work_item(*n);
                 found = true;
                 break;
             }
@@ -294,7 +294,7 @@ void cc::async_thread_pool::worker_main(worker& w)
         if (auto n = try_get_work(w, /*authoritative*/ true))
         {
             _sleepers.fetch_sub(1, cc::memory_order_relaxed);
-            n->poll();
+            impl::async_poll_work_item(*n);
             continue;
         }
 
@@ -310,35 +310,16 @@ void cc::async_thread_pool::worker_main(worker& w)
     set_current_worker(nullptr);
 }
 
-// Park the calling thread until `root` completes.
-// Does NOT schedule it: the caller has already placed it, and re-scheduling a running node would only force a redundant re-poll.
-void cc::async_thread_pool::wait_for_completion(async_node_base& root)
+// Wake every sleeper, workers and parked participants alike.
+// One bump of the shared epoch, so a waiter that has not registered yet still sees it — same protocol as wake_one, but
+// unconditional: a completion latch fires exactly once and must not be lost to a stale _sleepers read.
+void cc::async_thread_pool::wake_all()
 {
-    struct sync
     {
-        std::mutex m;
-        std::condition_variable cv;
-        bool done = false;
-    };
-    sync s;
-
-    // notify UNDER the lock so this hook (running on a worker) fully returns before wait_for_completion's frame
-    // (and thus `s`) is destroyed.
-    bool const already = root.install_completion_hook_or_ready(
-        [](void* p)
-        {
-            auto* sp = static_cast<sync*>(p);
-            std::lock_guard<std::mutex> lk(sp->m);
-            sp->done = true;
-            sp->cv.notify_one();
-        },
-        &s);
-
-    if (already)
-        return; // completed before we installed the hook: no wait, no notify pending
-
-    std::unique_lock<std::mutex> lk(s.m);
-    s.cv.wait(lk, [&] { return s.done; });
+        std::lock_guard<std::mutex> const lk(_wait_m);
+        _wake_epoch.fetch_add(1, cc::memory_order_relaxed);
+    }
+    _wait_cv.notify_all();
 }
 
 cc::async_thread_pool::worker* cc::async_thread_pool::try_claim_external_slot()
@@ -376,19 +357,92 @@ void cc::async_thread_pool::drain_slot_to_injection(worker& w)
         wake_one();
 }
 
+bool cc::async_thread_pool::try_run_one()
+{
+    // Only from a slot of our own: a step runs on the calling thread's deque, and a foreign thread has none until it participates.
+    worker* const w = current_worker();
+    if (w == nullptr || w->pool != this)
+        return false;
+
+    async_worker_scope const scope(*this);
+    auto n = try_get_work(*w);
+    if (n == nullptr)
+        return false;
+
+    impl::async_poll_work_item(*n);
+    return true;
+}
+
 void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 {
-    worker* const slot = try_claim_external_slot();
+    // A nested drive on this pool reuses the slot this thread already holds rather than claiming a second one.
+    //
+    // There are only external_slot_count of them, so claiming per nesting level runs them out — and the fallback below
+    // parks on the root alone, deaf to the very work that would have freed it.
+    // Reuse is also what the slot is FOR: the deque belongs to this thread, and a nested drive is still this thread.
+    worker* const held_slot = current_worker();
+    bool const reuse = held_slot != nullptr && held_slot->pool == this;
+
+    worker* const slot = reuse ? held_slot : try_claim_external_slot();
     if (slot == nullptr)
     {
-        // No free slot: fall back to handing the root over and parking.
+        // No free slot: hand the root over and park on it alone.
+        // Deaf to injected work, but harmlessly so — with no slot there is nothing this thread could have run anyway.
         root.schedule_on(*this);
-        wait_for_completion(root);
+
+        struct sync
+        {
+            std::mutex m;
+            std::condition_variable cv;
+            bool done = false;
+        };
+        sync s;
+
+        // notify UNDER the lock so this hook (running on a worker) fully returns before this frame — and thus `s` —
+        // is destroyed.
+        bool const already = root.install_completion_hook_or_ready(
+            [](void* p)
+            {
+                auto* sp = static_cast<sync*>(p);
+                std::lock_guard<std::mutex> lk(sp->m);
+                sp->done = true;
+                sp->cv.notify_one();
+            },
+            &s);
+
+        if (already)
+            return; // completed before we installed the hook: no wait, no notify pending
+
+        std::unique_lock<std::mutex> lk(s.m);
+        s.cv.wait(lk, [&] { return s.done; });
         return;
     }
 
-    worker* const previous = current_worker();
-    set_current_worker(slot);
+    // RAII rather than a restore at the bottom: a poll below can throw — an assert handler that reports a check does —
+    // and a thread left pointing at a slot of a pool it is no worker of pushes onto the wrong deque from then on.
+    // The slot would stay claimed forever too, so the pool would lose an external seat per escape.
+    struct slot_scope
+    {
+        async_thread_pool& pool;
+        worker* const claimed;
+        worker* const previous;
+        bool const owned; // false for a reused slot: it is the outer drive's to release, not ours
+
+        slot_scope(async_thread_pool& p, worker* s, bool o) : pool(p), claimed(s), previous(current_worker()), owned(o)
+        {
+            set_current_worker(s);
+        }
+        ~slot_scope()
+        {
+            set_current_worker(previous);
+            if (owned)
+                claimed->claimed.store(false, cc::memory_order_release);
+        }
+        slot_scope(slot_scope const&) = delete;
+        slot_scope& operator=(slot_scope const&) = delete;
+    };
+
+    slot_scope const held(*this, slot, !reuse);
     {
         async_worker_scope const scope(*this); // binds THIS pool, so the root's children route to our own deque
 
@@ -398,11 +452,41 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         // Anything the root forks off is still published normally by the poll loop, so a real graph still spreads.
         root.poll();
 
-        while (!root.is_ready())
+        // A parked participant sleeps in the pool's OWN protocol rather than on the root alone, so that work arriving
+        // for the pool wakes it exactly as it wakes a worker.
+        //
+        // That is what keeps a nested drive from deadlocking the pool.
+        // A graph parked on an EXTERNAL push completes in two steps — the foreign thread resolves the promise, and then
+        // a pool thread has to run the continuation — and a participant asleep on the root alone is deaf to the second.
+        // With every thread of the pool parked that way, the continuation sits in the injection queue and each thread
+        // waits for work only another of them could run.
+        //
+        // The latch is installed at most once and lives for the whole call: it may fire at any point after, so its
+        // context has to outlast every park below.
+        // Which is also why the loop may only leave once the latch has RUN, never merely once the root reads ready —
+        // returning in that window would destroy the frame under a latch about to touch it.
+        struct parked_waiter
+        {
+            cc::atomic<bool> done = {false};
+            async_thread_pool* pool = nullptr;
+
+            static void fire(void* p)
+            {
+                auto* const self = static_cast<parked_waiter*>(p);
+                self->done.store(true, cc::memory_order_release);
+                self->pool->wake_all();
+            }
+        };
+
+        parked_waiter waiter;
+        waiter.pool = this;
+        auto latched = false;
+
+        while (latched ? !waiter.done.load(cc::memory_order_acquire) : !root.is_ready())
         {
             if (auto n = try_get_work(*slot))
             {
-                n->poll();
+                impl::async_poll_work_item(*n);
                 continue;
             }
 
@@ -414,24 +498,62 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                 cc::spin_pause();
                 if (auto n = try_get_work(*slot))
                 {
-                    n->poll();
+                    impl::async_poll_work_item(*n);
                     found = true;
                     break;
                 }
             }
-            if (found || root.is_ready())
+            if (found || (!latched && root.is_ready()))
                 continue;
 
-            // Genuinely nothing for us and the root is still out there — park on it rather than burn a core the pool wants.
+            if (!latched)
+            {
+                // Genuinely nothing for us and the root is still out there, so commit to sleeping on it.
+                if (root.install_completion_hook_or_ready(&parked_waiter::fire, &waiter))
+                    break; // completed before we installed: nothing was installed, so nothing can fire
+                latched = true;
+                continue; // re-check under the latch, which is the state the loop condition now reads
+            }
+
+            // Registered the same way a worker does, and for the same reason: capture the epoch BEFORE announcing
+            // ourselves, then re-scan, so a push that raced our registration cannot strand.
             // Anything we queued stays stealable while we sleep.
-            wait_for_completion(root);
-            break;
+            i64 const epoch = _wake_epoch.load(cc::memory_order_acquire);
+            _sleepers.fetch_add(1, cc::memory_order_seq_cst);
+            cc::atomic_thread_fence(cc::memory_order_seq_cst);
+
+            if (auto n = try_get_work(*slot, /*authoritative*/ true))
+            {
+                _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+                impl::async_poll_work_item(*n);
+                continue;
+            }
+
+            {
+                std::unique_lock<std::mutex> lk(_wait_m);
+                _wait_cv.wait(lk,
+                              [&]
+                              {
+                                  return waiter.done.load(cc::memory_order_relaxed)
+                                      || _stop.load(cc::memory_order_relaxed)
+                                      || _wake_epoch.load(cc::memory_order_relaxed) != epoch;
+                              });
+            }
+            _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+
+            // _stop without the latch having fired means the pool is going away under us; nothing will complete the
+            // root, and staying here would hang shutdown.
+            if (_stop.load(cc::memory_order_relaxed) && !waiter.done.load(cc::memory_order_acquire))
+                break;
         }
 
-        drain_slot_to_injection(*slot);
+        // Only for a slot we borrowed: it goes back to the pool when we leave, and a node left `scheduled` in a deque
+        // nobody owns any more would strand forever.
+        // A reused slot outlives this frame — the outer drive still owns it — so draining would only take that drive's
+        // own work away from it.
+        if (!reuse)
+            drain_slot_to_injection(*slot);
     }
-    set_current_worker(previous);
-    slot->claimed.store(false, cc::memory_order_release);
 }
 
 #else // CC_HAS_THREADS == 0
@@ -463,8 +585,8 @@ cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(fal
 cc::async_thread_pool::~async_thread_pool()
 {
     CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_default_async_pool / "
-              "scoped_default_async_pool)");
+              "uninstall this pool as the default before destroying it (uninstall_default_async_scheduler / "
+              "scoped_default_async_scheduler)");
 
     // No drain by hand, unlike the threaded destructor: _queue holds real handles, so abandoned work releases its own counts when the vector dies.
     // Same contract though — outstanding graphs are dropped, not run.
@@ -472,7 +594,7 @@ cc::async_thread_pool::~async_thread_pool()
 
 int cc::async_thread_pool::default_worker_count()
 {
-    return 0; // no threads to give: the blocking_get caller is the only worker there is
+    return 0; // no threads to give: whoever drives a graph is the only worker there is
 }
 
 void cc::async_thread_pool::enqueue(async_node_ptr node)
@@ -491,6 +613,18 @@ void cc::async_thread_pool::submit(async_node_ptr node)
     _queue.push_back(cc::move(node));
 }
 
+bool cc::async_thread_pool::try_run_one()
+{
+    async_worker_scope const scope(*this); // bind the pool, so what the node schedules routes back to _queue
+    if (_queue.empty())
+        return false;
+
+    async_node_ptr n = cc::move(_queue.back());
+    _queue.pop_back();
+    impl::async_poll_work_item(*n);
+    return true;
+}
+
 void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 {
     async_worker_scope const scope(*this); // bind the pool, so nodes the frames touch route back to _queue
@@ -500,28 +634,13 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     root.poll();
 
     // Then pump whatever it queued.
-    // Anything reachable runs, so falling out with the root not ready means the graph is parked on something no thread here will ever deliver -- blocking_get's assert names that.
+    // Anything reachable runs, so falling out with the root not ready means the graph is parked on something no thread here will ever deliver.
     while (!root.is_ready() && !_queue.empty())
     {
         async_node_ptr n = cc::move(_queue.back());
         _queue.pop_back();
-        n->poll();
+        impl::async_poll_work_item(*n);
     }
 }
 
 #endif // CC_HAS_THREADS
-
-void cc::install_default_async_pool(async_thread_pool& pool)
-{
-    CC_ASSERT(async_scheduler::default_or_null() == nullptr,
-              "a default async pool is already installed; overriding a live default is almost never correct "
-              "(uninstall it first, or use scoped_default_async_pool)");
-    async_scheduler::set_default(&pool);
-}
-
-void cc::uninstall_default_async_pool(async_thread_pool& pool)
-{
-    CC_ASSERT(async_scheduler::default_or_null() == static_cast<async_scheduler*>(&pool),
-              "uninstall_default_async_pool: this pool is not the currently installed default");
-    async_scheduler::set_default(nullptr);
-}

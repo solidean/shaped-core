@@ -147,6 +147,18 @@ struct cc::async_scheduler
     /// The default routes to enqueue; a pool overrides this with its injection queue.
     virtual void submit(async_node_ptr node) { enqueue(cc::move(node)); }
 
+    /// Run one unit of this scheduler's work on the CALLING thread; false if there was nothing to run.
+    /// A pool answers false on a thread that holds no slot of its own — a foreign caller helps by participating, not by stepping.
+    /// Binds whatever scope running that work needs, so a caller may step from an unbound thread.
+    virtual bool try_run_one() = 0;
+
+    /// Drive `root` on the calling thread, running this scheduler's work while it is not ready.
+    ///
+    /// Returns once `root` is ready, or once this scheduler can make no further progress here — which is the node
+    /// awaiting an external push, whose completion belongs to no scheduler at all.
+    /// cc::async_blocking_get is what turns that second case into "wait and try again", so a caller does not have to.
+    virtual void participate_until_ready(async_node_base& root) = 0;
+
     virtual ~async_scheduler() = default;
 
 protected:
@@ -159,10 +171,48 @@ public:
     [[nodiscard]] static async_scheduler* current_or_null();
 
     /// The process-wide default scheduler that compute nodes route to when they cannot run on the current thread.
-    /// Null unless one is installed (see install_default_async_pool).
+    /// Null unless one is installed (see install_default_async_scheduler).
     /// Read-mostly — install once at startup, before the graphs that depend on it run.
     static void set_default(async_scheduler* sched);
     [[nodiscard]] static async_scheduler* default_or_null();
+};
+
+namespace cc
+{
+/// Install `scheduler` as the process-wide default: everything the async system does needs one, and this is where it comes from.
+///
+/// **An application installs one early, before any async work**, and a nexus run installs one per phase — see nx::no_scheduler for the test that wants none.
+/// cc::async_thread_pool is the multi-threaded one to reach for; cc::singlethreaded_scheduler makes every graph run inline on whoever drives it.
+///
+/// Asserts if a default is already installed: overriding a live one is almost never correct, since asyncs created under the old default may outlive the new one.
+/// Pair with uninstall_default_async_scheduler, or use scoped_default_async_scheduler.
+void install_default_async_scheduler(async_scheduler& scheduler);
+
+/// Remove `scheduler` as the process-wide default.
+/// Asserts it is the currently installed one, and must run before it is destroyed.
+void uninstall_default_async_scheduler(async_scheduler& scheduler);
+
+/// The scheduler this thread's async work belongs to: the bound worker scope if there is one, else the installed default.
+/// Asserts if there is neither — interacting with the async system without an ambient scheduler is an error, not a fallback.
+[[nodiscard]] async_scheduler& ambient_async_scheduler();
+} // namespace cc
+
+/// RAII: installs `scheduler` as the process-wide default for the scope.
+struct cc::scoped_default_async_scheduler
+{
+    explicit scoped_default_async_scheduler(async_scheduler& scheduler) : _scheduler(scheduler)
+    {
+        install_default_async_scheduler(scheduler);
+    }
+    ~scoped_default_async_scheduler() { uninstall_default_async_scheduler(_scheduler); }
+
+    scoped_default_async_scheduler(scoped_default_async_scheduler const&) = delete;
+    scoped_default_async_scheduler(scoped_default_async_scheduler&&) = delete;
+    scoped_default_async_scheduler& operator=(scoped_default_async_scheduler const&) = delete;
+    scoped_default_async_scheduler& operator=(scoped_default_async_scheduler&&) = delete;
+
+private:
+    async_scheduler& _scheduler;
 };
 
 /// RAII begin/end of an async worker scope: binds `scheduler` to the calling thread for its lifetime, so node scheduling and polling on this thread route through it.
@@ -212,17 +262,17 @@ struct cc::singlethreaded_scheduler final : async_scheduler
 
     void enqueue(async_node_ptr node) override; // out-of-line: needs the node handle's traits complete
 
-    /// Drive `root` on this thread and return its outcome, or nullopt if this scheduler pumped everything reachable from here and `root` is still not ready.
-    /// Nullopt means "not from here, not yet": the graph may be parked on an unpushed manual node, or have migrated onto another scheduler.
-    /// Re-driving after the push, or letting the owning scheduler finish, resolves it — see "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md.
-    template <class T, class E = async_error>
-    [[nodiscard]] cc::optional<cc::result<T, E>> try_blocking_get(shared_async<T, E> const& root);
+    /// Runs one queued node with this scheduler bound, so what that node schedules lands here too.
+    bool try_run_one() override;
 
-    /// try_blocking_get, but returns the value directly; asserts on error/cancellation and on no-progress.
-    template <class T, class E = async_error>
-    [[nodiscard]] T blocking_get(shared_async<T, E> const& root);
+    /// Polls `root` here and then pumps the queue until it is ready or the queue drains.
+    ///
+    /// A drained queue is not completion: the graph may be parked on an unpushed manual node, or have migrated onto
+    /// another scheduler — see "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md.
+    void participate_until_ready(async_node_base& root) override;
 
-    /// Poll one queued node (LIFO). Returns false if the queue was empty.
+    /// Poll one queued node (LIFO), with no scope of its own.
+    /// Returns false if the queue was empty.
     bool run_one();
 
     /// Pump the queue until `done` returns true or the queue drains.
@@ -982,6 +1032,20 @@ private:
 namespace cc
 {
 static_assert(sizeof(async_node_base) == 16, "async_node_base must be a 16 B header (payload() offset relies on it)");
+
+/// Poll a node a scheduler just took off its queue, as its own attribution root.
+///
+/// EVERY dequeue site must go through this rather than calling poll() directly, and only a dequeue site may.
+/// An inline dependency drive, and the caller's own root in participate_until_ready, are on the calling frame's
+/// stack on purpose and keep inheriting from it.
+namespace impl
+{
+inline void async_poll_work_item(async_node_base& node)
+{
+    async_ambient_root_scope const root;
+    node.poll();
+}
+} // namespace impl
 
 // ============================================================================
 // async_node_traits — intrusive refcount ops (defined now that async_node_base is complete)

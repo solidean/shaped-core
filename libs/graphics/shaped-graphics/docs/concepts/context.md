@@ -43,7 +43,7 @@ Two rules cover almost every choice.
 It exists as the escape hatch for the cases the cache key cannot express.
 
 Layouts and pipelines are schemas rather than lifetime-scoped GPU memory, which is why they sit on their own pair of scopes instead of on `persistent` / `transient`.
-Raster pipelines and shader tables are `uncached`-only for now — `ctx.cached` has no `acquire_raster_pipeline`.
+Shader tables are `uncached`-only: one is tied to a single pipeline, so there is nothing to dedup across callers.
 
 Beside the scopes, `ctx.routines` is the per-context render-routine registry — see [render-routines](../render-routines.md).
 
@@ -95,7 +95,7 @@ So a caller that polls `try_create_*` in a retry loop must check `is_device_lost
 The context is where these mechanisms are reached, not where they are explained:
 
 - [epochs](epochs.md) — `current_epoch` / `advance_epoch` / `process_completed_epochs` / the `wait_for_*` family, deferred deletion, finalizers.
-- [threading](threading.md) — which of the above may be called concurrently, and why `pump_transfers()` is load-bearing in a build without threads.
+- [threading](threading.md) — which of the above may be called concurrently, and how a build without threads makes progress.
 - [async upload](upload.async.md) / [async download](download.async.md) — `ctx.upload` / `ctx.download`, the copy queues, and the automatic per-resource sync.
 - [inline upload](upload.inline.md) / [inline download](download.inline.md) — the `cmd.upload` / `cmd.download` siblings that record into a list instead.
 - [caches](caches.md) — `ctx.cached` vs `ctx.uncached`, the content-addressed keys, and the tiered cache behind them.

@@ -8,7 +8,9 @@ using namespace bcache::test;
 // Expiry is a LOGICAL property, checked at lookup.
 // An entry is a miss the instant it expires, whether or not any collection has run — which is what lets a caller cache short-lived data aggressively without it ever being served stale.
 
-TEST("bcache treats an expired entry as a miss before anything deletes it")
+// exclusive() because the subject IS the window between expired and deleted, and a sibling test sweeping the pump
+// registry drives this store's on_process — which closes that window — at a moment this test did not choose.
+TEST("bcache treats an expired entry as a miss before anything deletes it", exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -88,7 +90,9 @@ TEST("bcache leaves an entry with no ttl alone forever")
     CHECK(!f.settle(f.cache().get(temporary)).has_value());
 }
 
-TEST("bcache expiry beats eviction scoring")
+// exclusive() for the same reason: it counts what ONE pass expired, and a sibling's sweep would have run passes of
+// its own over this store first.
+TEST("bcache expiry beats eviction scoring", exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

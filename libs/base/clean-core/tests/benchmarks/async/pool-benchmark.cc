@@ -384,7 +384,7 @@ cc::vector<i32> make_random(isize n)
 }
 
 // The worker counts the full table sweeps.
-// The top entry is P-1, NOT P: blocking_get makes the calling thread participate as a worker, so a w-worker pool runs w+1 threads and P would oversubscribe the machine.
+// The top entry is P-1, NOT P: driving makes the calling thread participate as a worker, so a w-worker pool runs w+1 threads and P would oversubscribe the machine.
 cc::vector<int> sweep_workers()
 {
     int const p = cc::num_hardware_threads() - 1;
@@ -490,7 +490,7 @@ sweep_result case_quicksort(cc::span<int const> workers)
         {
             refill();
             auto root = async_quicksort(whole);
-            (void)pool.blocking_get(root);
+            pool.participate_until_ready(*root);
             return u64(work[0]);
         });
 }
@@ -511,7 +511,7 @@ sweep_result case_pfor(cc::span<int const> workers)
         [&](cc::async_thread_pool& pool)
         {
             auto root = async_pfor(whole);
-            (void)pool.blocking_get(root);
+            pool.participate_until_ready(*root);
             return u64(work[0]);
         });
 }
@@ -528,7 +528,8 @@ sweep_result case_reduce(cc::span<int const> workers)
         [&](cc::async_thread_pool& pool)
         {
             auto root = async_reduce(whole);
-            return u64(pool.blocking_get(root));
+            pool.participate_until_ready(*root);
+            return u64(*root->try_value());
         });
 }
 
@@ -548,7 +549,7 @@ sweep_result case_nested(cc::span<int const> workers)
         [&](cc::async_thread_pool& pool)
         {
             auto root = async_nested_outer(whole);
-            (void)pool.blocking_get(root);
+            pool.participate_until_ready(*root);
             return u64(work[0]);
         });
 }
@@ -562,7 +563,8 @@ sweep_result case_tree(cc::span<int const> workers)
         [&](cc::async_thread_pool& pool)
         {
             auto root = async_tree(tree_depth);
-            return u64(pool.blocking_get(root));
+            pool.participate_until_ready(*root);
+            return u64(*root->try_value());
         });
 }
 
@@ -586,7 +588,7 @@ void run_all()
     std::printf("  vs serial serial ns / pool ns, an ADJACENT pair -- valid even when the canary drifts.\n");
     std::printf("  vs 1w     the scheduler's own scaling, but 1w and Pw are rows apart in time -- so only trust\n");
     std::printf("            it where the serial column above it is flat.\n");
-    std::printf("A 'w worker' row runs w+1 THREADS: blocking_get makes the calling thread participate, so the\n");
+    std::printf("A 'w worker' row runs w+1 THREADS: driving makes the calling thread participate, so the\n");
     std::printf("sweep tops out at hardware concurrency MINUS ONE and '1w' is a 2-thread config, not a serial\n");
     std::printf("one. Judge near-linearity against the P-core count, not the thread count: the curve bends at\n");
     std::printf("the E-core and SMT boundaries by design. The spawn tree's 'vs serial' is expected to be ~0 and\n");

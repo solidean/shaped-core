@@ -134,11 +134,11 @@ Three properties worth knowing:
 
 ## Mesh authoring — geometry + what a material reads
 
-One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh`, `mesh_parameter.hh` and `mesh_texture.hh`.
+One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh` and `mesh_texture.hh`.
 
 ```cpp
 sv::mesh                         // { string name; triangle_geometry geometry; vector<mesh_attribute> attributes; affine_transform3f transform;
-                                 //   material_id material; mesh_flags flags; vector<mesh_parameter> parameters; vector<mesh_texture> textures; }
+                                 //   material_id material; mesh_flags flags; vector<mesh_texture> textures; }
 m.is_visible()                   // -> bool (flags.has(mesh_flag::visible)); the rest of a mesh is plain public data
 sv::triangle_geometry            // { pinned_data<pos3f const> positions; pinned_data<u32 const> indices; hash128 hash; } — raw or indexed, one type
 sv::triangle_geometry::create_from_triangles(triangles)            // -> from a range of tg::triangle3f; the pin is reinterpreted onto the positions, never copied
@@ -147,25 +147,24 @@ g.is_indexed() / g.is_empty() / g.vertex_count() / g.triangle_count()  // triang
 sv::triangle_data::from(g) / sv::indexed_triangle_data::from(g)    // -> the mesh_manager payload, same hash, sharing the pin (asserts on the wrong layout)
 sv::mesh_attribute               // { string name; attribute_format format; attribute_frequency frequency; pinned_data<byte const> data; hash128 hash; }
 sv::mesh_attribute::create(name, frequency, elements)       // -> mesh_attribute; format deduced from the element type, bytes pinned + hashed
+sv::mesh_attribute::create_value(name, x)                   // -> a per_instance attribute of exactly one element — what a per-mesh material input is
 a.element_count() / a.elements_as<tg::vec3f>()              // -> isize / span<T const> (asserts if T is not what format names)
+a.holds<T>() / a.value_as<T>()                              // -> bool / T; holds<T>() is what a material asks first, value_as reads the per_instance element
 sv::scalar_type                  // i8 i16 i32 i64 | u8 u16 u32 u64 | f32 f64 | boolean (1 byte, 0/1) — the complete set; scalar_type_size(t) -> i32 bytes
 sv::attribute_format             // { scalar_type scalar; int dim0, dim1; } — scalar + dimensionality, so every scalar/shape combination exists
                                  //   dim0 alone is a vector's component count; for a matrix dim0 is its rows and dim1 its columns
 attribute_format::of_scalar(s) / of_vector(s, dim) / of_matrix(s, rows, cols)  // both dims in 1..4; of_matrix is column-major, matching tg::mat<C, R, T>
 f.size_bytes() / f.component_count() / f.is_scalar() / f.is_vector() / f.is_matrix()
 sv::attribute_format_of<T>       // the format of an element type — scalars and tg vec / pos / comp / mat over them
-sv::attribute_frequency          // per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle | per_edge (RESERVED, create asserts)
+sv::attribute_frequency          // per_instance (exactly 1 element, create asserts) | per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle
+                                 //   per_edge is RESERVED and create asserts on it
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
-sv::mesh_parameter               // { string name; parameter_value value; } — per-mesh (instance) values the material reads by name
-sv::parameter_value              // { attribute_format format; byte storage[max_bytes]; } — typed by the SAME format an attribute's elements are
-                                 //   parameter_value::max_bytes is 32: 4 components of 8 bytes, so every scalar and vector fits inline
-sv::parameter_value::of(x)       // -> parameter_value from any scalar or vector (matrices don't fit the inline budget and assert)
-p.holds<T>() / p.as<T>()         // -> bool / T (as asserts on the wrong type); holds<T>() is what a material asks first
 sv::mesh_texture                 // { string name; texture_id texture; } — a texture offered under a slot name the material binds
 sv::material_id                  // thin handle naming ONE material definition (owned elsewhere); nothing mints one yet
 ```
 
-The material is what gives the four lists their meaning: it decides which attribute names it samples, which parameters it reads, which texture slots it binds, and how the flags change what it emits.
+The material is what gives the three lists their meaning: it decides which attribute names it samples, which texture slots it binds, and how the flags change what it emits.
+Per-mesh values are attributes too, at `per_instance` — one list, so a renderer can pack every instance's values into one buffer and index it by instance.
 So a mesh may carry data no material uses and miss data another would want — a material falls back rather than failing.
 The mesh offers no by-name lookup, deliberately: a material resolves the names it wants once, into whatever binding table it draws from, rather than scanning strings per draw.
 Copying a mesh shares the pinned payloads (a refcount bump), so passing one around is cheap.
@@ -261,7 +260,6 @@ sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // outp
 // The leaf routines they drive — each an sg::render_routine<> (everything that traces/draws is a routine):
 sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches the GI integrator into the UAV target (no-op if the shaders did not compile)
 sv::pt_frame_constants_gpu                           // { camera_gpu camera; area_light_gpu light; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; } — 256 bytes
-sv::gpu_boolean                                      // { u32 value; } — a bool as a cbuffer lane: implicit from bool, explicit to bool, false==0/true==1 (shader may declare it bool or uint)
 
 // Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
 sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
@@ -290,7 +288,8 @@ Everything a view keeps across frames hangs off its `view_id`, in **one** store 
 ```cpp
 sv::view_store                       // owned by sv::viewer, or by whoever drives view_renderer directly; NOT thread-safe
 store.begin_frame(u64(ctx.current_epoch()))   // reclaim against the just-finished frame, then advance
-store.get_or_create(id) / find / peek         // peek does NOT touch, so a hit-test cannot keep a view alive
+store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_ptr is null when absent; both mark it used
+store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
 store.accumulated_frames(id) -> u32
 sv::impl::view_state                 // the record: display_name, controller, camera, placement, zoom, composite, temporal, last_refresh_frame
@@ -311,14 +310,14 @@ What restarts a view after a shader reload is the reload generation `view_render
 ## Viewer + authoring API
 
 `sv::interactive` opens a viewer and hands back its frame loop, which **owns** it — so nothing needs a variable for the viewer and nothing needs tearing down.
-No context is threaded through: one is acquired through `sv::acquire_context`, or from a built-in default.
+No context is threaded through: one is acquired through the provider `sv::set_acquire_context` installs, or from a built-in default.
 
 A frame carries the whole *window* surface, which carries the whole *view* surface, so the shorthand and the long form are the same call:
 `f.add_scene()` is exactly `f.window().view().add_scene()`.
 
 ```cpp
-sv::acquire_context              // cc::unique_function<cc::result<sg::context_handle>()>; unset by default
-                                 //   sv::acquire_context = [] { return sg::create_dx12_context({.use_warp = true}); };
+sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_function<cc::result<sg::context_handle>()>; unset by default
+                                 //   sv::set_acquire_context([] { return sg::create_dx12_context({.use_warp = true}); }); pass {} to clear
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
 
@@ -332,7 +331,7 @@ viewer.frames() -> frame_range;  viewer.request_close()
 
 // the manual loop, for an application whose own loop must stay in charge — same frame, same authoring calls
 viewer.is_running()             // -> bool; not close-requested, not quit, not device-lost
-auto& f = viewer.begin_frame()  // -> frame&, owned by the viewer; a falsy frame means it cannot draw right now, so `continue`
+auto& f = viewer.begin_frame()  // -> frame&, owned by the viewer; `!f.is_open()` means it cannot draw right now, so `continue`
 viewer.end_frame()              // presents it — a bare frame ends nothing itself, so every open one needs this
 
 // on a frame — plus everything a window and a view offer, inherited
@@ -489,7 +488,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
   `mesh_record::is_indexed` says which a record is, and it must reach the closest-hit through `frame_constants_gpu::mesh_is_indexed` / `pt_frame_constants_gpu::mesh_is_indexed`.
-  That field is a `gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  That field is an `sr::gpu_boolean` (shaped-rendering owns it), so the plain `bool` off the record assigns straight into it.
   The `view_renderer` sets it for you; a test driving a routine directly must set it, or the flat path will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.

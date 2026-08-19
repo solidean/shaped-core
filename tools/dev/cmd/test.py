@@ -27,6 +27,12 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=60.0, metavar="SECS",
                    help="Per-binary timeout in seconds (default: 60; 0 disables). The binary is "
                         "killed and reported as failed if it exceeds it.")
+    p.add_argument("--jobs", "-j", type=int, metavar="N",
+                   help="Upper bound on how many tests run at once, forwarded to the runner (nexus understands it); "
+                        "0 means hardware concurrency. dev.py has to own the flag rather than let it fall through to "
+                        "runner_args: an unrecognized '--jobs N' leaves N as a bare token, which the test_name "
+                        "positional then swallows, and the run silently filters instead of narrowing its width. "
+                        "A low count is what reproduces a small CI runner's scheduling on a wide dev machine.")
     p.add_argument("--repeat", type=int, default=1, metavar="N",
                    help="Run the selection up to N times, stopping at the first failing iteration "
                         "(default: 1). For chasing a flake: the build and discovery happen once, and "
@@ -55,6 +61,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     runner_args = list(args.runner_args or [])
     if runner_args and runner_args[0] == "--":
         runner_args = runner_args[1:]
+
+    # Prepended, so an explicit `-- --jobs 4` after it still wins by being parsed later.
+    if args.jobs is not None:
+        runner_args = ["--jobs", str(args.jobs), *runner_args]
 
     # Optionally build first (incremental — fast when nothing changed).
     if not args.no_build:

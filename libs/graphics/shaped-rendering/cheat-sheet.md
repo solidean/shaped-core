@@ -14,6 +14,19 @@ Headers are included by full path from `src/`: `#include <shaped-rendering/<name
 #include <shaped-rendering/all.hh>   // umbrella (window API + concrete routines as they land)
 ```
 
+## GPU vocabulary
+
+Types that exist only to match what a GPU constant buffer expects, shared by every library recording draws above sg.
+
+```cpp
+#include <shaped-rendering/gpu_types.hh>
+
+sr::gpu_boolean   // { u32 value; } — a bool as a cbuffer lane: implicit from bool, explicit to bool, false==0/true==1
+```
+
+- **A C++ `bool` is one byte, so it can never be a cbuffer field** — every `*_gpu` struct spells its flags `sr::gpu_boolean` and assigns a plain `bool` to them.
+- **The shader may declare the lane `bool` or `uint`** — any non-zero value reads as `true`, which is why two `gpu_boolean`s compare by truth rather than by bit pattern.
+
 ## Windows
 
 Always available.
@@ -125,6 +138,7 @@ lib.add_package(sr::shader_package());       // once at startup, or routines acq
 auto imgui = sr::imgui_context::create();    // owns ImGuiContext; docking on, viewports off, Solidean theme on; move-only
 auto imgui = sr::imgui_context::create({.enable_viewports = true});  // opt in — changes coordinates, see below
 auto imgui = sr::imgui_context::create({.apply_default_style = false});  // keep stock imgui dark instead
+auto imgui = sr::imgui_context::create({.ini_file = "app.ini"});  // let imgui persist the layout itself; empty (default) = no file at all
 
 wsys->poll_events();
 imgui.process_events(*wsys);                 // feed input; MUST precede begin_frame (NewFrame commits it)
@@ -136,6 +150,11 @@ imgui.end_frame();                           // = ImGui::Render()
 
 imgui.wants_keyboard();  imgui.wants_mouse();  // -> bool — check before acting on the same input yourself
 imgui.process_event(e);                      // one event, when the caller filters the stream itself
+
+// layout persistence, with no ini_file: sr writes nothing, the caller stores the text wherever it likes
+imgui.load_settings(ini);                    // BEFORE the first frame
+imgui.take_dirty_settings();                 // -> cc::optional<cc::string> — set only when imgui flagged a change (~every 5 s)
+imgui.settings();                            // -> cc::string — the current layout, for the save at shutdown
 
 sr::apply_solidean_default_style();          // re-apply the Solidean theme to the current context (create() already did, unless opted out)
 sr::apply_solidean_default_style(style);     // or into any ImGuiStyle you own
@@ -186,10 +205,12 @@ The key is almost always the render-target pixel format.
 sr::keyed_pipeline_cache<sg::pixel_format> pipelines;   // Pipeline defaults to sg::raster_pipeline
 
 // In init_declare, after building the layout: (re)bind the build callback + CLEAR the cache.
+// The callback RETURNS the async — it never waits for one.
 pipelines.init(ctx, [layout, vs, ps](sg::context& c, sg::pixel_format format)
-                    { return c.uncached.try_create_raster_pipeline({.layout = layout, .vertex_shader = vs,
-                                                                     .fragment_shader = ps,
-                                                                     .color_targets = {{.format = format}}}); });
+                    { return c.cached.acquire_raster_pipeline({.layout = layout, .vertex_shader = vs,
+                                                               .fragment_shader = ps,
+                                                               .color_targets = {{.format = format}}}); });
+// a build that is not already a node: cc::make_async_from_value / cc::make_async_from_error
 
 auto pipe = pipelines.try_acquire(format);    // -> cc::result<handle>; the form for inside a rendering scope
 if (!pipe.has_error() && pipe.value())
@@ -200,6 +221,9 @@ pipelines.acquire_async(format);  // -> cc::shared_async<handle>; the fallible f
 pipelines.prepare(format);        // warm the cache for `format` ahead of the draw
 ```
 
+- **The callback returns the node; it must never block on one.**
+  The cache stores exactly what the callback returns, so `ctx.cached.acquire_raster_pipeline` is handed straight over and the PSO is shared with every other routine asking for the same description.
+  Blocking a pool worker on another node parks the very workers that node needs, and enough routines initializing at once deadlock — which is why there is no synchronous form to reach for.
 - **`init` clears the cache** — call it on every (re)load: a rebuilt layout invalidates every pipeline cached
   against the old one, and re-`init` both drops them and rebinds the fresh callback.
 - **`handle` is `std::shared_ptr<Pipeline const>`** — for the default it IS `sg::raster_pipeline_handle`.

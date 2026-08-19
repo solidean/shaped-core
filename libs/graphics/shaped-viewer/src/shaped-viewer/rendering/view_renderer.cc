@@ -347,7 +347,7 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
     // One budget entry per view, covering everything it holds — the store reclaims a view's textures whole or not at all.
     for (auto const id : plan.reachable)
     {
-        auto const* const rec = store.peek(id);
+        auto const* const rec = store.peek_ptr(id);
         if (rec == nullptr)
             continue;
 
