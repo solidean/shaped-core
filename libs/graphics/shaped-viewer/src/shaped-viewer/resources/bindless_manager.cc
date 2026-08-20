@@ -7,6 +7,8 @@
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 
+using namespace cc::primitive_defines;
+
 namespace sv
 {
 namespace
@@ -18,16 +20,6 @@ namespace
     return cc::make_hash(v);
 }
 
-// The full element list of one category: each occupied slot's view, the vacant marker everywhere else —
-// the backend synthesizes vacant elements' null descriptors from the binding.
-[[nodiscard]] sg::named_view mirror_to_named_view(cc::string_view name, sv::impl::slot_table const& table)
-{
-    auto elements = cc::vector<sg::raw_view>();
-    elements.reserve(table.capacity());
-    for (auto const& e : table.entries())
-        elements.push_back(e.occupied ? e.view : sg::raw_view(sg::vacant_view{}));
-    return {.name = cc::string(name), .view = cc::move(elements)};
-}
 } // namespace
 } // namespace sv
 
@@ -52,48 +44,56 @@ sv::bindless_manager::bindless_manager(sg::context& ctx, bindless_config const& 
 
 sv::bindless_buffer_slot sv::bindless_manager::acquire(sg::readonly_buffer_view<byte> const& view)
 {
-    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock_group first)");
-    auto const raw = sg::raw_view(view);
-    return bindless_buffer_slot(_buffers.acquire(key_of(raw), raw, _ctx.current_epoch()));
+    _ensure_staging(); // before _buffers_slot is read — the first acquire is what resolves it
+    return bindless_buffer_slot(_acquire(_buffers, _buffers_slot, view));
 }
 
 sv::bindless_texture_1d_slot sv::bindless_manager::acquire(sg::readonly_texture_view<sg::tv_1d> const& view)
 {
-    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock_group first)");
-    auto const raw = sg::raw_view(view);
-    return bindless_texture_1d_slot(_tex_1d.acquire(key_of(raw), raw, _ctx.current_epoch()));
+    _ensure_staging(); // before _tex_1d_slot is read — the first acquire is what resolves it
+    return bindless_texture_1d_slot(_acquire(_tex_1d, _tex_1d_slot, view));
 }
 
 sv::bindless_texture_2d_slot sv::bindless_manager::acquire(sg::readonly_texture_view<sg::tv_2d> const& view)
 {
-    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock_group first)");
-    auto const raw = sg::raw_view(view);
-    return bindless_texture_2d_slot(_tex_2d.acquire(key_of(raw), raw, _ctx.current_epoch()));
+    _ensure_staging(); // before _tex_2d_slot is read — the first acquire is what resolves it
+    return bindless_texture_2d_slot(_acquire(_tex_2d, _tex_2d_slot, view));
 }
 
 sv::bindless_texture_3d_slot sv::bindless_manager::acquire(sg::readonly_texture_view<sg::tv_3d> const& view)
 {
-    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock_group first)");
-    auto const raw = sg::raw_view(view);
-    return bindless_texture_3d_slot(_tex_3d.acquire(key_of(raw), raw, _ctx.current_epoch()));
+    _ensure_staging(); // before _tex_3d_slot is read — the first acquire is what resolves it
+    return bindless_texture_3d_slot(_acquire(_tex_3d, _tex_3d_slot, view));
 }
 
 sv::bindless_texture_cube_slot sv::bindless_manager::acquire(sg::readonly_texture_view<sg::tv_cube> const& view)
 {
-    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock_group first)");
-    auto const raw = sg::raw_view(view);
-    return bindless_texture_cube_slot(_tex_cube.acquire(key_of(raw), raw, _ctx.current_epoch()));
+    _ensure_staging(); // before _tex_cube_slot is read — the first acquire is what resolves it
+    return bindless_texture_cube_slot(_acquire(_tex_cube, _tex_cube_slot, view));
 }
 
 sg::binding_group_layout_handle const& sv::bindless_manager::layout()
 {
-    _ensure_layout();
+    _ensure_staging();
     return _layout;
 }
 
-void sv::bindless_manager::_ensure_layout()
+u32 sv::bindless_manager::_acquire(impl::slot_table& table, sg::binding_slot slot, sg::raw_view const& view)
 {
-    if (_layout != nullptr)
+    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock_group first)");
+
+    // The table resolves identity; every mint and reclaim is mirrored onto the staging group, which is what
+    // holds a mapped key's resource alive — so the key's raw pointer cannot be reused while it is mapped.
+    auto const r = table.acquire(key_of(view), _ctx.current_epoch(),
+                                 [&](u32 freed) { _staging->unset_array_element(slot, int(freed)); });
+    if (r.inserted)
+        _staging->set_array_element(slot, int(r.index), view);
+    return r.index;
+}
+
+void sv::bindless_manager::_ensure_staging()
+{
+    if (_staging != nullptr)
         return;
 
     // One register space per category (index 0 each), so shaders address a category with no register-offset
@@ -121,32 +121,29 @@ void sv::bindless_manager::_ensure_layout()
         tex_binding(_cfg.textures_cube_binding, 5, _cfg.texture_cube_count, vd::cube),
     };
     _layout = _ctx.cached.acquire_binding_group_layout(bindings);
+    _staging = _ctx.persistent.create_staging_binding_group(_layout);
+
+    _buffers_slot = _staging->slot_of(_cfg.buffers_binding);
+    _tex_1d_slot = _staging->slot_of(_cfg.textures_1d_binding);
+    _tex_2d_slot = _staging->slot_of(_cfg.textures_2d_binding);
+    _tex_3d_slot = _staging->slot_of(_cfg.textures_3d_binding);
+    _tex_cube_slot = _staging->slot_of(_cfg.textures_cube_binding);
+
+    // Every binding must be set once before the first snapshot; an empty table is a deliberate "nothing here".
+    _staging->unset_array(_buffers_slot);
+    _staging->unset_array(_tex_1d_slot);
+    _staging->unset_array(_tex_2d_slot);
+    _staging->unset_array(_tex_3d_slot);
+    _staging->unset_array(_tex_cube_slot);
 }
 
 sg::binding_group_handle sv::bindless_manager::lock_group()
 {
     CC_ASSERT(!_locked, "the bindless group is already locked");
-    _ensure_layout();
+    _ensure_staging();
 
-    auto const dirty = _buffers.dirty() || _tex_1d.dirty() || _tex_2d.dirty() || _tex_3d.dirty() || _tex_cube.dirty();
-    if (dirty || _group == nullptr)
-    {
-        cc::vector<sg::named_view> views;
-        views.push_back(mirror_to_named_view(_cfg.buffers_binding, _buffers));
-        views.push_back(mirror_to_named_view(_cfg.textures_1d_binding, _tex_1d));
-        views.push_back(mirror_to_named_view(_cfg.textures_2d_binding, _tex_2d));
-        views.push_back(mirror_to_named_view(_cfg.textures_3d_binding, _tex_3d));
-        views.push_back(mirror_to_named_view(_cfg.textures_cube_binding, _tex_cube));
-
-        // Overwrite, not patch: sg groups are immutable, and the old group's descriptor range is freed by
-        // an epoch finalizer once its last-using epoch retires.
-        _group = _ctx.persistent.create_binding_group(_layout, views);
-        _buffers.clear_dirty();
-        _tex_1d.clear_dirty();
-        _tex_2d.clear_dirty();
-        _tex_3d.clear_dirty();
-        _tex_cube.clear_dirty();
-    }
+    // The staging group mints only when a descriptor changed; an unchanged epoch gets the cached snapshot.
+    _group = _staging->snapshot();
 
     _locked = true;
     _lock_epoch = _ctx.current_epoch();

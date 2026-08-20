@@ -27,20 +27,20 @@ struct sv::bindless_config
     cc::string textures_cube_binding = "BindlessTexCube";
 };
 
-/// Owns ONE bindless descriptor group: five readonly binding arrays — buffers, texture1d/2d/3d/cube — each
-/// backed by a dirty-flagged CPU mirror (see impl/slot_table.hh).
+/// Owns ONE bindless descriptor group: five readonly binding arrays — buffers, texture1d/2d/3d/cube — kept
+/// in an sg::staging_binding_group, with one impl::slot_table per array as the key → element identity map.
 /// Writable views are never bindless; they stay ordinary bindings in another group.
 ///
 /// `acquire` returns a category-typed slot — the index a shader uses into that binding array.
 /// A slot is only valid for the epoch it was acquired in: re-acquire every view each epoch.
-/// Re-acquiring the same view is O(1), returns the same slot, and leaves the mirror clean, so an unchanged
-/// working set never causes a reupload.
+/// Re-acquiring the same view is O(1), returns the same slot, and touches no descriptor, so an unchanged
+/// working set never causes a reupload; a mint writes exactly one staging descriptor.
 ///
 /// `lock_group()` hands out the group and locks the manager — no acquires until `unlock_group(group)`,
 /// which must receive the same group back in the same epoch (both asserted; the handle is shared, so
 /// identity means pointer equality, not ownership transfer).
-/// The group is recreated only when a mirror changed since the last lock (sg groups are immutable —
-/// recreate is the only rebind); otherwise the same handle is served again.
+/// The group is the staging group's snapshot: minted only when a descriptor changed since the last lock,
+/// otherwise the same handle is served again.
 ///
 /// Access declaration stays the consumer's job: whoever binds the group declares the elements its dispatch
 /// reads via declare_array_*_access, using the config's binding names.
@@ -51,7 +51,8 @@ class sv::bindless_manager
 {
 public:
     /// A manager on `ctx` (which must outlive it), shaped by `cfg` (each count >= 2, asserted).
-    /// The layout and group are created lazily, so construction is safe where the backend cannot build them.
+    /// The layout and staging group are created lazily on first use, so construction is safe — but a first
+    /// acquire is not — where the backend cannot build them.
     [[nodiscard]] static bindless_manager create(sg::context& ctx, bindless_config const& cfg = {});
 
     /// The group's shape — capacities and the binding names a consumer declares access against.
@@ -71,7 +72,8 @@ public:
     /// The group's binding-group layout, created on first use — for building the pipeline layout.
     [[nodiscard]] sg::binding_group_layout_handle const& layout();
 
-    /// The bindless group, recreated first if any mirror changed since the last lock; locks the manager.
+    /// The bindless group — the staging group's snapshot, minted only if a descriptor changed since the
+    /// last lock; locks the manager.
     /// Slots acquired this epoch index the returned group.
     [[nodiscard]] sg::binding_group_handle lock_group();
 
@@ -83,18 +85,31 @@ public:
 private:
     bindless_manager(sg::context& ctx, bindless_config const& cfg);
 
-    void _ensure_layout();
+    /// Creates the layout + staging group and resolves the five binding slots on first use.
+    void _ensure_staging();
+
+    /// The shared acquire: resolve the key in `table`, mirror mints and reclaims onto the staging group.
+    [[nodiscard]] u32 _acquire(impl::slot_table& table, sg::binding_slot slot, sg::raw_view const& view);
 
     sg::context& _ctx;
     bindless_config _cfg;
     sg::binding_group_layout_handle _layout;
+
+    /// The descriptor image behind the group — it owns the descriptors and keeps their resources alive.
+    sg::staging_binding_group_handle _staging;
+    sg::binding_slot _buffers_slot = sg::binding_slot::invalid;
+    sg::binding_slot _tex_1d_slot = sg::binding_slot::invalid;
+    sg::binding_slot _tex_2d_slot = sg::binding_slot::invalid;
+    sg::binding_slot _tex_3d_slot = sg::binding_slot::invalid;
+    sg::binding_slot _tex_cube_slot = sg::binding_slot::invalid;
+
     impl::slot_table _buffers;
     impl::slot_table _tex_1d;
     impl::slot_table _tex_2d;
     impl::slot_table _tex_3d;
     impl::slot_table _tex_cube;
 
-    /// The served group; overwritten on recreate — the old range is freed by sg's epoch finalizer.
+    /// The snapshot lock_group served, for unlock_group's identity check.
     sg::binding_group_handle _group;
     bool _locked = false;
     sg::epoch _lock_epoch = sg::epoch::invalid;
