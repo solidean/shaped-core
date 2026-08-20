@@ -262,6 +262,63 @@ void destroy_decompressor(void* state)
     return u32(ZSTD_getDictID_fromDict(raw.data(), size_t(raw.size())));
 }
 
+// --- streaming --------------------------------------------------------------------------------------------
+
+[[nodiscard]] isize stream_compress_bound(void*, isize in_size)
+{
+    // compressBound covers a whole frame of that input, header and epilogue included.
+    // The extra block is slack for the case where the codec chooses to emit a buffered block alongside this input.
+    return isize(ZSTD_compressBound(size_t(in_size))) + isize(ZSTD_CStreamOutSize());
+}
+
+[[nodiscard]] cc::result<isize> stream_compress(void* state, cc::span<byte const> in, cc::span<byte> out, bool finish)
+{
+    auto* const cctx = static_cast<ZSTD_CCtx*>(state);
+    if (cctx == nullptr)
+        return cc::error("zstd: failed to create the streaming compression context");
+
+    auto zin = ZSTD_inBuffer{in.data(), size_t(in.size()), 0};
+    auto zout = ZSTD_outBuffer{out.data(), size_t(out.size()), 0};
+    auto const mode = finish ? ZSTD_e_end : ZSTD_e_continue;
+
+    while (true)
+    {
+        auto const remaining = ZSTD_compressStream2(cctx, &zout, &zin, mode);
+        if (ZSTD_isError(remaining))
+            return zstd_failure("zstd streaming compression failed", remaining);
+
+        if (zin.pos == zin.size && (!finish || remaining == 0))
+            break;
+
+        // The caller sized `out` from stream_compress_bound, so a full output buffer means that contract was broken
+        // rather than that more passes are needed — and looping here would spin forever.
+        if (zout.pos == zout.size)
+            return cc::error("zstd: streaming output buffer is smaller than stream_compress_bound");
+    }
+
+    return isize(zout.pos);
+}
+
+[[nodiscard]] cc::result<cc::impl::stream_decompress_step> stream_decompress(void* state,
+                                                                             cc::span<byte const> in,
+                                                                             cc::span<byte> out)
+{
+    auto* const dctx = static_cast<ZSTD_DCtx*>(state);
+    if (dctx == nullptr)
+        return cc::error("zstd: failed to create the streaming decompression context");
+
+    auto zin = ZSTD_inBuffer{in.data(), size_t(in.size()), 0};
+    auto zout = ZSTD_outBuffer{out.data(), size_t(out.size()), 0};
+
+    auto const status = ZSTD_decompressStream(dctx, &zout, &zin);
+    if (ZSTD_isError(status))
+        return cc::error(cc::format("zstd streaming decompression failed: {}", ZSTD_getErrorName(status)));
+
+    return cc::impl::stream_decompress_step{.consumed = isize(zin.pos),
+                                            .produced = isize(zout.pos),
+                                            .finished = status == 0};
+}
+
 constexpr cc::impl::compression_backend backend = {
     .compress_bound = &compress_bound,
     .create_compressor = &create_compressor,
@@ -275,6 +332,14 @@ constexpr cc::impl::compression_backend backend = {
     .matches_magic = &matches_magic,
     .train_dictionary = &train_dictionary,
     .dictionary_id = &dictionary_id,
+    // zstd's streaming and one-shot APIs are the same context type, so the one-shot constructors serve both.
+    .create_stream_compressor = &create_compressor,
+    .destroy_stream_compressor = &destroy_compressor,
+    .stream_compress_bound = &stream_compress_bound,
+    .stream_compress = &stream_compress,
+    .create_stream_decompressor = &create_decompressor,
+    .destroy_stream_decompressor = &destroy_decompressor,
+    .stream_decompress = &stream_decompress,
 };
 } // namespace
 

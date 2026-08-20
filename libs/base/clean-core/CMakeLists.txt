@@ -23,6 +23,7 @@ add_library(clean-core
     src/clean-core/bytes/hash256.cc
     src/clean-core/bytes/blake3.cc
     src/clean-core/bytes/compression.cc
+    src/clean-core/bytes/compression_stream.cc
     src/clean-core/bytes/impl/zstd_backend.cc
     src/clean-core/bytes/impl/lz4_backend.cc
 
@@ -88,6 +89,7 @@ target_sources(clean-core
     src/clean-core/bytes/blake3.hh
     src/clean-core/bytes/compression.hh
     src/clean-core/bytes/compression_dictionary.hh
+    src/clean-core/bytes/compression_stream.hh
     src/clean-core/bytes/impl/compression_backend.hh
 
     src/clean-core/platform/native.hh
@@ -347,6 +349,7 @@ if(SC_BUILD_TESTS)
         tests/bytes/hash256-test.cc
         tests/bytes/blake3-test.cc
         tests/bytes/compression-test.cc
+        tests/bytes/compression-stream-test.cc
 
         tests/platform/console-test.cc
         tests/platform/environment-test.cc

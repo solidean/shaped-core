@@ -12,6 +12,15 @@
 
 namespace cc::impl
 {
+/// What one pass of a streaming decompressor moved.
+/// `consumed` and `produced` may both be 0 while the codec waits for more input, so neither is an end signal.
+struct stream_decompress_step
+{
+    isize consumed = 0;
+    isize produced = 0;
+    bool finished = false;
+};
+
 struct compression_backend
 {
     [[nodiscard]] isize (*compress_bound)(isize size, compression_config const& cfg);
@@ -47,6 +56,34 @@ struct compression_backend
     [[nodiscard]] cc::result<cc::vector<byte>> (*train_dictionary)(cc::span<cc::span<byte const> const> samples,
                                                                    isize dict_size);
     [[nodiscard]] u32 (*dictionary_id)(cc::span<byte const> raw);
+
+    // --- streaming (bytes/compression_stream.hh) ----------------------------------------------------------
+    //
+    // A context of its own, because both codecs keep frame state across calls here and neither can resume a frame
+    // from a context that has served a whole-buffer call.
+    // `frame` framing only: a raw lz4 blob is one block with no continuation, so there is nothing to stream.
+
+    [[nodiscard]] void* (*create_stream_compressor)(compression_config const& cfg);
+    void (*destroy_stream_compressor)(void* state);
+
+    /// Output capacity a stream_compress of `in_size` bytes may need, header and epilogue included.
+    [[nodiscard]] isize (*stream_compress_bound)(void* state, isize in_size);
+
+    /// Compress all of `in` into `out`, returning bytes written; `finish` seals the frame.
+    /// `out` must be at least stream_compress_bound(in.size()), which is what lets this never partially consume.
+    [[nodiscard]] cc::result<isize> (*stream_compress)(void* state,
+                                                       cc::span<byte const> in,
+                                                       cc::span<byte> out,
+                                                       bool finish);
+
+    [[nodiscard]] void* (*create_stream_decompressor)(decompression_config const& cfg);
+    void (*destroy_stream_decompressor)(void* state);
+
+    /// Decompress from `in` into `out`, moving as much as each side allows.
+    /// Partial progress is normal, and `finished` is the only signal that the frame is complete.
+    [[nodiscard]] cc::result<stream_decompress_step> (*stream_decompress)(void* state,
+                                                                          cc::span<byte const> in,
+                                                                          cc::span<byte> out);
 };
 
 [[nodiscard]] compression_backend const& zstd_backend();

@@ -397,6 +397,130 @@ template <class Sink>
     return 0;
 }
 
+// --- streaming --------------------------------------------------------------------------------------------
+
+/// A streaming compressor is a frame in progress, so it carries the header state the one-shot path does not have.
+struct stream_compressor_state
+{
+    LZ4F_cctx* cctx = nullptr;
+    LZ4F_CDict* cdict = nullptr;
+    LZ4F_preferences_t prefs = {};
+    bool begun = false;
+};
+
+[[nodiscard]] void* create_stream_compressor(cc::compression_config const& cfg)
+{
+    auto* const state = new stream_compressor_state();
+
+    if (LZ4F_isError(LZ4F_createCompressionContext(&state->cctx, LZ4F_VERSION)))
+    {
+        delete state;
+        return nullptr;
+    }
+
+    // A streaming frame does not know its total length, so contentSize stays 0 — which is why cc::decompressed_size
+    // reports nothing for a streamed lz4 frame, unlike a one-shot one.
+    state->prefs = frame_preferences(cfg, 0);
+    state->prefs.frameInfo.contentSize = 0;
+
+    if (cfg.dictionary != nullptr && !cfg.dictionary->is_empty())
+    {
+        auto const raw = cfg.dictionary->bytes();
+        state->cdict = LZ4F_createCDict(raw.data(), size_t(raw.size()));
+        if (state->cdict == nullptr)
+        {
+            LZ4F_freeCompressionContext(state->cctx);
+            delete state;
+            return nullptr;
+        }
+    }
+
+    return state;
+}
+
+void destroy_stream_compressor(void* state)
+{
+    auto* const s = static_cast<stream_compressor_state*>(state);
+    if (s == nullptr)
+        return;
+
+    if (s->cdict != nullptr)
+        LZ4F_freeCDict(s->cdict);
+    if (s->cctx != nullptr)
+        LZ4F_freeCompressionContext(s->cctx);
+    delete s;
+}
+
+[[nodiscard]] isize stream_compress_bound(void* state, isize in_size)
+{
+    auto* const s = static_cast<stream_compressor_state*>(state);
+    if (s == nullptr)
+        return isize(0);
+
+    // The header is only emitted once, but budgeting for it every time costs a few bytes and removes a special case.
+    return isize(LZ4F_HEADER_SIZE_MAX) + isize(LZ4F_compressBound(size_t(in_size), &s->prefs));
+}
+
+[[nodiscard]] cc::result<isize> stream_compress(void* state, cc::span<byte const> in, cc::span<byte> out, bool finish)
+{
+    auto* const s = static_cast<stream_compressor_state*>(state);
+    if (s == nullptr || s->cctx == nullptr)
+        return cc::error("lz4: failed to create the streaming compression context");
+
+    auto written = isize(0);
+
+    if (!s->begun)
+    {
+        auto const n = LZ4F_compressBegin_usingCDict(s->cctx, out.data(), size_t(out.size()), s->cdict, &s->prefs);
+        if (LZ4F_isError(n))
+            return cc::error(cc::format("lz4: failed to write the frame header: {}", LZ4F_getErrorName(n)));
+
+        written += isize(n);
+        s->begun = true;
+    }
+
+    if (!in.empty())
+    {
+        auto const n = LZ4F_compressUpdate(s->cctx, out.data() + written, size_t(out.size() - written), in.data(),
+                                           size_t(in.size()), nullptr);
+        if (LZ4F_isError(n))
+            return cc::error(cc::format("lz4 streaming compression failed: {}", LZ4F_getErrorName(n)));
+
+        written += isize(n);
+    }
+
+    if (finish)
+    {
+        auto const n = LZ4F_compressEnd(s->cctx, out.data() + written, size_t(out.size() - written), nullptr);
+        if (LZ4F_isError(n))
+            return cc::error(cc::format("lz4: failed to seal the frame: {}", LZ4F_getErrorName(n)));
+
+        written += isize(n);
+    }
+
+    return written;
+}
+
+[[nodiscard]] cc::result<cc::impl::stream_decompress_step> stream_decompress(void* state,
+                                                                             cc::span<byte const> in,
+                                                                             cc::span<byte> out)
+{
+    auto* const s = static_cast<decompressor_state*>(state);
+    if (s == nullptr || s->dctx == nullptr)
+        return cc::error("lz4: failed to create the streaming decompression context");
+
+    auto out_size = size_t(out.size());
+    auto in_size = size_t(in.size());
+
+    auto const status = LZ4F_decompress(s->dctx, out.data(), &out_size, in.data(), &in_size, nullptr);
+    if (LZ4F_isError(status))
+        return cc::error(cc::format("lz4 streaming decompression failed: {}", LZ4F_getErrorName(status)));
+
+    return cc::impl::stream_decompress_step{.consumed = isize(in_size),
+                                            .produced = isize(out_size),
+                                            .finished = status == 0};
+}
+
 constexpr cc::impl::compression_backend backend = {
     .compress_bound = &compress_bound,
     .create_compressor = &create_compressor,
@@ -410,6 +534,14 @@ constexpr cc::impl::compression_backend backend = {
     .matches_magic = &matches_magic,
     .train_dictionary = &train_dictionary,
     .dictionary_id = &dictionary_id,
+    .create_stream_compressor = &create_stream_compressor,
+    .destroy_stream_compressor = &destroy_stream_compressor,
+    .stream_compress_bound = &stream_compress_bound,
+    .stream_compress = &stream_compress,
+    // Decompression needs no extra state beyond the LZ4F_dctx the one-shot path already carries.
+    .create_stream_decompressor = &create_decompressor,
+    .destroy_stream_decompressor = &destroy_decompressor,
+    .stream_decompress = &stream_decompress,
 };
 } // namespace
 

@@ -346,6 +346,8 @@ struct decompression_config;
 struct compression_dictionary;
 struct compressor;
 struct decompressor;
+struct decompressing_read_stream_adapter;
+struct compressing_write_stream_adapter;
 
 
 //
