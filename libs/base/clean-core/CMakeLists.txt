@@ -10,6 +10,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 #   src/clean-core/bytes/hash128.cc. Header stays private to that .cc.
 # - blake3 (private): backs cc::blake3 / cc::hash256 (the cryptographic hash); see
 #   src/clean-core/bytes/blake3.cc. Header stays private to that .cc.
+# - zstd, lz4 (private): the two algorithms behind cc::compress / cc::decompress; see
+#   src/clean-core/bytes/impl/. Each header stays private to its own backend .cc.
 
 # Define the library and its sources
 add_library(clean-core
@@ -20,6 +22,9 @@ add_library(clean-core
     src/clean-core/bytes/hash128.cc
     src/clean-core/bytes/hash256.cc
     src/clean-core/bytes/blake3.cc
+    src/clean-core/bytes/compression.cc
+    src/clean-core/bytes/impl/zstd_backend.cc
+    src/clean-core/bytes/impl/lz4_backend.cc
 
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
@@ -81,6 +86,9 @@ target_sources(clean-core
     src/clean-core/bytes/hash128.hh
     src/clean-core/bytes/hash256.hh
     src/clean-core/bytes/blake3.hh
+    src/clean-core/bytes/compression.hh
+    src/clean-core/bytes/compression_dictionary.hh
+    src/clean-core/bytes/impl/compression_backend.hh
 
     src/clean-core/platform/native.hh
     src/clean-core/platform/console.hh
@@ -190,7 +198,7 @@ target_include_directories(clean-core
 # mimalloc backs the default general memory resource; xxhash backs cc::hash128; blake3 backs cc::blake3.
 # PRIVATE: only mimalloc_resource.cc / hash128.cc / blake3.cc include the respective headers;
 # CMake still propagates the static libs to consumers' final link.
-target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3)
+target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3 zstd lz4)
 
 # std::thread / pthread_setname_np (cc::threaded_actor, cc::set_current_thread_name) need the
 # platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.
@@ -338,6 +346,7 @@ if(SC_BUILD_TESTS)
         tests/bytes/hash128-test.cc
         tests/bytes/hash256-test.cc
         tests/bytes/blake3-test.cc
+        tests/bytes/compression-test.cc
 
         tests/platform/console-test.cc
         tests/platform/environment-test.cc

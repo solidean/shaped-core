@@ -339,6 +339,14 @@ struct hash128;
 struct hash256;
 class blake3;
 
+enum class compression_algorithm : u8;
+enum class compression_framing : u8;
+struct compression_config;
+struct decompression_config;
+struct compression_dictionary;
+struct compressor;
+struct decompressor;
+
 
 //
 // Math

@@ -213,6 +213,16 @@ rules:
     files: src/clean-core/bytes/blake3.cc
 
   - kind: allow-include
+    value: [<zstd.h>, <zdict.h>]
+    reason: the Zstandard algorithm cc::compress forwards to
+    files: src/clean-core/bytes/impl/zstd_backend.cc
+
+  - kind: allow-include
+    value: [<lz4.h>, <lz4frame.h>, <lz4hc.h>]
+    reason: the LZ4 algorithm cc::compress forwards to
+    files: src/clean-core/bytes/impl/lz4_backend.cc
+
+  - kind: allow-include
     value: <mimalloc.h>
     reason: the allocator cc::mimalloc_resource wraps
     files: src/clean-core/memory/mimalloc_resource.cc
