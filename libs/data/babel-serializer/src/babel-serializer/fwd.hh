@@ -14,6 +14,11 @@ namespace babel
 using namespace cc::primitive_defines;
 } // namespace babel
 
+namespace babel::chrome_trace
+{
+struct write_options;
+} // namespace babel::chrome_trace
+
 namespace babel::json
 {
 enum class node_kind : u8;

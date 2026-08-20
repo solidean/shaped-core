@@ -336,7 +336,10 @@ Without threads (`SC_THREADS=OFF`, or `config::threaded = false`) no API changes
 
 ## What is here today
 
-`cc::rec` carries the stream and the vocabularies over it: logging, profiling scopes, values, markers and stats, plus the console listener.
+`cc::rec` carries the stream and the vocabularies over it: logging, profiling scopes, values, markers and stats, plus the console listener and the record algebra.
+
+To LOOK at a recording rather than assert on one, `babel::chrome_trace` writes it as Chrome Trace Event JSON for `chrome://tracing` and `ui.perfetto.dev`.
+`uv run dev.py example babel-serializer/chrome-trace` records a synthetic workload and writes one.
 
 Still to come: async scopes and the ambient-context deltas that carry them, tracing, serialization, the crash dump, and the query API that makes a recording a test assertion.
 The event kinds those need are already reserved in [fwd.hh](../../src/clean-core/record/fwd.hh).

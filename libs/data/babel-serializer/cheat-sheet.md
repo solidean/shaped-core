@@ -335,6 +335,38 @@ j.icc_profile; j.exif; j.comments;                    // [todo] designed, not ye
 babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stream, ...)
 ```
 
+## Chrome Trace (`trace/chrome_trace.hh`)
+
+Writes a `cc::rec::recording` as Chrome Trace Event JSON — the first thing that lets you LOOK at a recording rather than assert on one.
+Write-only: we write traces for other tools to read, and read our own recordings through `cc::rec`.
+
+```cpp
+#include <babel-serializer/trace/chrome_trace.hh>
+babel::chrome_trace::encode(recording);              // -> cc::result<cc::vector<byte>>
+babel::chrome_trace::write(out_stream, recording);   // -> cc::result<cc::unit>; encode + write
+
+babel::chrome_trace::write_options{
+    .process_id = 1, .process_name = "shaped-core",
+    .include_system_events = false,  // gaps / chunk acquisition / dropped spans: noise until you ask about the recorder
+    .include_logs = true, .include_values = true, .include_stats = true, .include_scopes = true,
+    .pretty = true,                  // one event per line, so a diff or a grep works
+};
+```
+
+The mapping:
+
+| cc::rec | Chrome Trace | note |
+|---|---|---|
+| `scope_begin` / `scope_end` | `"B"` / `"E"` | a scope that never closed still renders instead of being dropped |
+| `marker`, `value`, `log` | `"i"` instant | the payload's declared fields land in `args` |
+| `stat_snapshot` | `"C"` counter | the reading |
+| `stat_accumulate` | `"C"` counter | the **running total** — a counter track shows a level, not a delta |
+| a domain | `cat` | so a viewer filters per library |
+
+Timestamps are microseconds **relative to the earliest event**, not since the epoch: absolute time would spend most of a double's precision on a number no viewer shows.
+
+Run `uv run dev.py example babel-serializer/chrome-trace` for a synthetic workload, its query output and a trace file.
+
 ## Gotchas
 
 Only what the signatures above cannot tell you.
