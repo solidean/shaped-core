@@ -72,6 +72,87 @@ A fresh thread starts with `cur == end == nullptr`, so its first record fails th
 
 ---
 
+## The vocabularies
+
+Every one of these is the same descriptor-plus-write underneath, and they differ only in kind, category and payload.
+`clean-core/common/log.hh` and `clean-core/common/profiling.hh` are the convenience includes; nobody has to know the folder is called `record/`.
+
+**A site's name must be a compile-time constant.**
+It lives in the site's `static constexpr` descriptor, which is what keeps a site free of a guard variable — so a helper taking a runtime `char const*` does not compile, by construction.
+
+### Logging
+
+```cpp
+CC_LOG_INFO("shader cache warmed");            // no payload at all: the text is the descriptor
+CC_LOG_WARNING("fell back to {} after {}", name, reason);
+```
+
+A message with no arguments costs the stream nothing beyond its header.
+One with arguments is formatted directly into the chunk's remaining space by `cc::format_to`, so there is no temporary buffer, no allocation and no copy.
+
+The format string doubles as the site's name, so every message from one site groups under one string whatever it formatted to.
+That is what makes "how often does this fire" answerable at all.
+
+A message too long for what is left of a chunk is **truncated and flagged, never dropped** — a truncated message is still evidence.
+
+Levels are `trace`, `debug`, `info`, `warning`, `error`, and each gates on its own bit in the domain's mask.
+`trace` and `debug` are off by default, because a build that records them by default teaches everyone to turn logging off.
+A domain can also be told to capture a stack or break into the debugger at a level; errors capture a stack by default.
+
+### Profiling scopes
+
+```cpp
+CC_RECORD_SCOPE();                 // named after the enclosing function
+CC_RECORD_SCOPE("upload-pass");    // named explicitly
+CC_RECORD_SCOPE_BEGIN("span"); ... CC_RECORD_SCOPE_END("span");   // when the ends are in different functions
+```
+
+A scope opens and closes on one thread at one nesting depth, and both events carry that depth.
+Four bytes of payload buys best-effort re-nesting of a stream that lost its middle, which is exactly the stream a crash dump or a decimated ring buffer hands you.
+
+**A scope must not cross a `co_await`.**
+The work stopped, the thread went elsewhere, and the span it would report never happened.
+`cc::async`'s frame driver has exactly one place where a coroutine body runs, and it asserts there that the body left the scope depth where it found it.
+So the mistake is caught rather than reported as a wrong number.
+
+### Values, markers and stats
+
+```cpp
+CC_RECORD_MARK("fallback-taken");                          // did this code run
+CC_RECORD("mesh_vertices", vertex_count);                  // with what
+CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the current reading
+CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a delta to add up
+```
+
+A marker is the cheapest useful annotation there is, and the one to reach for in a fallback branch you are not sure is ever taken.
+
+`CC_RECORD` takes scalars, enums, pointers and text.
+An enum collapses onto its underlying type and a pointer onto an opaque address, so a consumer reads a number without knowing the type.
+Anything convertible to a `cc::string_view` — a `char const*` included — is recorded as its **bytes**, never as an address.
+
+The two stat kinds are not interchangeable, and picking the wrong one produces a plausible graph of the wrong thing.
+A snapshot is the current reading of something that exists whether or not you look; summing snapshots is meaningless.
+An accumulate is a delta, and summing is the whole point.
+
+Values are `f64` only, which also covers every integer up to 2^53.
+That is a deliberate cap: one numeric type means a listener graphs anything without a type switch.
+
+A `cc::rec::unit` says what a quantity means — singular and plural, symbol, prefix base, axis scale, aggregation, preferred range, whether higher is better.
+Deliberately a struct rather than an enum: everyone's enum of units is missing the case the next consumer needs.
+
+### The console
+
+`cc::rec::console_listener` turns log events back into lines, and is **deliberately a little behind in exchange for a total order**.
+Blocks arrive from different threads in no particular order, so printing them as they land would interleave a multi-threaded run into nonsense.
+One drain's worth is buffered, sorted by timestamp, and printed at the end of the batch.
+
+Only `event_kind::log` reaches the terminal.
+A console that also printed every scope and stat would be unreadable, and those have listeners of their own.
+
+It is not installed for you — see the note at the top of this document.
+
+---
+
 ## Chunks
 
 A thread writes into one **chunk** at a time and publishes progress through a single release-stored watermark, which is the only cross-thread word on the write path.
@@ -169,6 +250,73 @@ A recording replays into a listener that was never registered, which is what mak
 
 ---
 
+## The algebra, and asking questions of a recording
+
+A recording is a value, so it composes.
+
+```cpp
+auto const mine   = captured.from_thread(cc::current_thread_id());
+auto const errors = captured.filtered([](auto const&, auto const& e) { return e.level() >= cc::rec::level::error; });
+auto const window = captured.in_cycle_range(begin, end);
+auto const thin   = captured.decimated({.keep_from_cycles = cutoff});
+```
+
+Filtering **synthesizes** blocks rather than borrowing.
+The events it keeps are no longer contiguous, so they are copied into a buffer the result owns.
+Which also means a filtered recording stops pinning the chunks it came from, and stays readable long after the pool has recycled them.
+Capturing still copies nothing; only narrowing does.
+
+`decimated` exists to make a bounded-memory ring capture honest.
+It drops what finished before the cutoff, and keeps scopes still open across it — otherwise a thinned trace loses the frame you were sitting inside.
+What went is replaced by one `dropped_span` event per block, saying how many events it covered and over what span.
+So after decimating, a reader can still tell "nothing happened" from "we stopped looking".
+
+The queries are what turn a recording into a test assertion:
+
+```cpp
+r.count("cache-miss");                             // how many
+r.contains("cache-miss");                          // any at all
+r.first_value("vertex_count");                     // an optional<f64> — absent is not zero
+r.last_value("queue_depth");  r.values("attempts");
+r.first_text("path");                              // an optional<cc::string>
+r.contains_in_order({"open", "write", "close"});   // anything allowed between, wrong order is false
+r.messages();                                      // every log line, as it would print
+r.scopes();  r.scopes("upload-pass");              // matched begin/end pairs, with durations
+```
+
+Everything ordered is ordered by **timestamp**, not by block, so a query means the same thing across threads as within one.
+
+`scopes()` matches pairs per thread by name and depth, so two scopes sharing a name still nest correctly.
+A scope whose close is missing comes back with `is_open` set rather than being dropped — a truncated stream is the normal case here, not an error.
+
+Queries are linear scans.
+An index would be a hash from descriptor to offsets built on first use; nothing has needed one yet, and it is recorded in [TODO](../TODO.md) rather than built.
+
+### The assertion pattern
+
+This is the shape that replaces a debug getter: the code under test records what it did, and the test asks.
+
+```cpp
+cc::rec::recording_listener rl;
+{
+    auto const h = cc::rec::register_listener(rl);
+    load_mesh(cold_cache);
+    cc::rec::flush_blocking();
+    cc::rec::unregister_listener(h);
+}
+auto const r = rl.take().from_thread(cc::current_thread_id());
+
+CHECK(r.contains("cache-miss"));
+CHECK(r.first_value("vertex_count").value() == 1024);
+CHECK(r.contains_in_order({"vertex_count", "cache-miss", "bytes_read"}));
+```
+
+Narrowing by thread is what makes this reliable **synchronously**.
+Work that runs asynchronously needs the ambient context instead, since a logical task runs on whichever workers pick it up and several are in flight at once.
+That is what the nexus integration will filter on, and it waits on the ambient deltas.
+
+---
+
 ## Lifecycle constraints
 
 `initialize()` must be called once; a second call asserts rather than reconfiguring.
@@ -183,87 +331,6 @@ A generation counter backs the same invariant on the cold path.
 Both `initialize()` and `shutdown()` bump it, and a thread whose local copy is stale forgets everything it remembered about the previous incarnation.
 
 Without threads (`SC_THREADS=OFF`, or `config::threaded = false`) no API changes: draining happens on whichever thread flushes, and latency is worse.
-
----
-
-## The vocabularies
-
-Every one of these is the same descriptor-plus-write underneath, and they differ only in kind, category and payload.
-`clean-core/common/log.hh` and `clean-core/common/profiling.hh` are the convenience includes; nobody has to know the folder is called `record/`.
-
-**A site's name must be a compile-time constant.**
-It lives in the site's `static constexpr` descriptor, which is what keeps a site free of a guard variable — so a helper taking a runtime `char const*` does not compile, by construction.
-
-### Logging
-
-```cpp
-CC_LOG_INFO("shader cache warmed");            // no payload at all: the text is the descriptor
-CC_LOG_WARNING("fell back to {} after {}", name, reason);
-```
-
-A message with no arguments costs the stream nothing beyond its header.
-One with arguments is formatted directly into the chunk's remaining space by `cc::format_to`, so there is no temporary buffer, no allocation and no copy.
-
-The format string doubles as the site's name, so every message from one site groups under one string whatever it formatted to.
-That is what makes "how often does this fire" answerable at all.
-
-A message too long for what is left of a chunk is **truncated and flagged, never dropped** — a truncated message is still evidence.
-
-Levels are `trace`, `debug`, `info`, `warning`, `error`, and each gates on its own bit in the domain's mask.
-`trace` and `debug` are off by default, because a build that records them by default teaches everyone to turn logging off.
-A domain can also be told to capture a stack or break into the debugger at a level; errors capture a stack by default.
-
-### Profiling scopes
-
-```cpp
-CC_RECORD_SCOPE();                 // named after the enclosing function
-CC_RECORD_SCOPE("upload-pass");    // named explicitly
-CC_RECORD_SCOPE_BEGIN("span"); ... CC_RECORD_SCOPE_END("span");   // when the ends are in different functions
-```
-
-A scope opens and closes on one thread at one nesting depth, and both events carry that depth.
-Four bytes of payload buys best-effort re-nesting of a stream that lost its middle, which is exactly the stream a crash dump or a decimated ring buffer hands you.
-
-**A scope must not cross a `co_await`.**
-The work stopped, the thread went elsewhere, and the span it would report never happened.
-`cc::async`'s frame driver has exactly one place where a coroutine body runs, and it asserts there that the body left the scope depth where it found it.
-So the mistake is caught rather than reported as a wrong number.
-
-### Values, markers and stats
-
-```cpp
-CC_RECORD_MARK("fallback-taken");                          // did this code run
-CC_RECORD("mesh_vertices", vertex_count);                  // with what
-CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the current reading
-CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a delta to add up
-```
-
-A marker is the cheapest useful annotation there is, and the one to reach for in a fallback branch you are not sure is ever taken.
-
-`CC_RECORD` takes scalars, enums, pointers and text.
-An enum collapses onto its underlying type and a pointer onto an opaque address, so a consumer reads a number without knowing the type.
-Anything convertible to a `cc::string_view` — a `char const*` included — is recorded as its **bytes**, never as an address.
-
-The two stat kinds are not interchangeable, and picking the wrong one produces a plausible graph of the wrong thing.
-A snapshot is the current reading of something that exists whether or not you look; summing snapshots is meaningless.
-An accumulate is a delta, and summing is the whole point.
-
-Values are `f64` only, which also covers every integer up to 2^53.
-That is a deliberate cap: one numeric type means a listener graphs anything without a type switch.
-
-A `cc::rec::unit` says what a quantity means — singular and plural, symbol, prefix base, axis scale, aggregation, preferred range, whether higher is better.
-Deliberately a struct rather than an enum: everyone's enum of units is missing the case the next consumer needs.
-
-### The console
-
-`cc::rec::console_listener` turns log events back into lines, and is **deliberately a little behind in exchange for a total order**.
-Blocks arrive from different threads in no particular order, so printing them as they land would interleave a multi-threaded run into nonsense.
-One drain's worth is buffered, sorted by timestamp, and printed at the end of the batch.
-
-Only `event_kind::log` reaches the terminal.
-A console that also printed every scope and stat would be unreadable, and those have listeners of their own.
-
-It is not installed for you — see the note at the top of this document.
 
 ---
 

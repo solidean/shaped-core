@@ -454,6 +454,7 @@ if(SC_BUILD_TESTS)
 
         tests/record/record-test.cc
         tests/record/record-frontends-test.cc
+        tests/record/record-query-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc

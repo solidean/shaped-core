@@ -54,3 +54,16 @@ Add entries as we discover them, and remove them as they land.
 - **Error correction.**
   Reed-Solomon or similar, for bytes that have to survive a corrupted medium rather than merely get smaller.
   Speculative — nothing here needs it yet, and it is listed so the folder's shape is on record rather than because it is planned.
+
+## cc::rec
+
+- **A query index over a recording.**
+  The queries are linear scans today, which is fine to somewhere around a million events and no test comes close.
+  An index would be a hash from descriptor to event offsets plus a sorted timestamp array, built on first query and cached on the recording.
+- **A richer value codec.**
+  `CC_RECORD` takes scalars, enums, pointers and text; `desc::fields` already describes multi-field payloads, and nothing has needed one yet.
+- **A static/interned tier for recorded text.**
+  A literal already costs nothing when it is a site's NAME, and only a runtime string is copied — an interned handle could be stored as its id instead.
+- **The real `cc::capture_stack`.**
+  Frame-pointer walking for our own modules, addresses only, symbolized offline.
+  Until then a stacktrace-enriched event carries a frame count of zero.

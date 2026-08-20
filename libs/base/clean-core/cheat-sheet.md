@@ -1005,6 +1005,29 @@ e.field_as_double("bytes"); e.field_as_int("count"); e.field_as_text("path"); //
 chunk.wall_secs_of(e.cycles);              // exact on a sealed chunk; uses cycles_per_second on a live one
 ```
 
+The algebra — capturing copies nothing, NARROWING synthesizes owned blocks and stops pinning the chunks:
+
+```cpp
+rec.from_thread(cc::current_thread_id());  // the synchronous way to narrow to the code under test
+rec.from_domain(&sg::g_rec_domain); rec.of_kind(cc::rec::event_kind::log);
+rec.in_cycle_range(begin, end);
+rec.filtered([](auto const& chunk, auto const& e) { return e.level() >= cc::rec::level::error; });
+rec.decimated({.keep_from_cycles = cutoff}); // drops old, KEEPS open scopes, leaves a dropped_span saying what went
+rec.append(other);                           // concatenation
+```
+
+Queries — everything ordered is ordered by TIMESTAMP, so it means the same across threads as within one:
+
+```cpp
+rec.count("cache-miss"); rec.contains("cache-miss"); rec.count_of_kind(cc::rec::event_kind::marker);
+rec.first_value("vertex_count");           // -> optional<f64>; ABSENT is not zero, which is the point
+rec.last_value("queue_depth"); rec.values("attempts");   // -> vector<f64>
+rec.first_text("path");                    // -> optional<cc::string>
+rec.contains_in_order({"open", "write", "close"});       // anything allowed between; wrong order is false
+rec.messages();                            // -> vector<cc::string>, every log line as it would print
+rec.scopes(); rec.scopes("upload-pass");   // -> vector<scope_span>{name(), depth, duration_secs(), is_open}
+```
+
 ## Strings — encoding conversion
 
 ```cpp

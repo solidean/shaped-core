@@ -168,6 +168,8 @@ struct event_listener;
 struct recorded_block;
 struct recording;
 struct recording_listener;
+struct scope_span;
+struct decimation_options;
 
 namespace impl
 {
