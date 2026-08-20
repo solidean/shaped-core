@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pyyaml>=6"]
 # ///
 """Vendor the Dear ImGui bundle in-tree at pinned commits.
 
@@ -19,8 +19,8 @@ and deletes the clone.
 
 We track ImGui's *docking* branch, which upstream tags per release as `v<version>-docking`.
 Pinning that tag rather than the branch head is what keeps this reproducible — the branch itself moves.
-ImPlot pins a release tag the same way.
-ImGuizmo cuts no release tags, so it pins a raw commit on its default branch and fetches that sha directly.
+ImPlot's latest release predates ImGui 1.92's draw/texture API, and ImGuizmo cuts no release tags at all.
+So both pin a raw commit on their default branch and fetch that sha directly.
 
 ImGui and ImGuizmo keep their sources flat (ImGui at the repo root, ImGuizmo under src/), but we mirror the mimalloc layout for all three: translation units to src/, headers to include/imgui/.
 The extra imgui/ level is what lets a consumer write `#include <imgui/imgui.h>` — the whole bundle namespaced under one dir on a single public include root.
@@ -35,12 +35,12 @@ Deliberately not vendored:
 The demos *are* vendored — imgui_demo.cpp and implot_demo.cpp: they are the payload the renderer's GPU test draws, and the fastest way to exercise every draw path, scissor rect and glyph-atlas update at once.
 
 The vendored imconfig.h is kept byte-identical to upstream on purpose.
-WIPE deletes include/ on every re-vendor, so a local edit there would be silently clobbered on the next bump.
+The wipe deletes include/ on every re-vendor, so a local edit there would be silently clobbered on the next bump.
 Build-affecting defines live on the CMake target instead (see CMakeLists.txt), and allocation is routed through mimalloc at runtime via ImGui::SetAllocatorFunctions.
 
 Our own additions to the vendored library live in shaped/imgui/ — forward declarations (imgui_fwd.hh), the injected user config (imgui_config.hh), and the shaped-code interop umbrella (imgui_sc.hh, over impl/imgui_cc.hh + impl/imgui_tg.hh).
 They mirror the imgui/ level so they include as <imgui/...> alongside the vendored headers.
-That directory sits outside include/ and src/ precisely so WIPE never touches it;
+That directory sits outside include/ and src/ precisely so the wipe never touches it;
 CMakeLists.txt puts shaped/ on the include path.
 Anything that must survive a re-vendor goes there, never in include/.
 
@@ -71,29 +71,22 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Library:
-    # A single vendored library within the bundle.
-    # commit is the authority; tag is None for a library that cuts no release tags (fetched by sha instead).
+    # The vendoring plan for one library in the bundle: what to copy, and what to fix up afterwards.
+    # Its pin and its license destination come from dependency.yml — `name` is what pairs the two, so it must match a `name:` there.
     name: str
-    repo: str
-    commit: str
-    tag: str | None
     # Upstream-relative source -> vendored destination (relative to DEST).
     copy_map: dict[str, str] = field(default_factory=dict)
-    # Upstream-relative LICENSE -> vendored destination (relative to DEST).
-    license: tuple[str, str] = ("", "")
+    # Upstream-relative path of the library's LICENSE; its destination is dependency.yml's first `license_files` entry.
+    license_src: str = ""
     # Post-copy text substitutions on a vendored destination: {dest: (old, new)}.
     # Kept to filename-consistency renames, never logic — the sole use is fixing ImGuizmo's bare self-include after its lowercase rename.
     rewrites: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
-# Pinned upstream, one entry per library in the bundle.
-# Bump commit (and tag, where set) together, only after vetting the new commit.
+# The copy plan, one entry per library in the bundle. The pins live in dependency.yml.
 LIBRARIES = [
     Library(
         name="Dear ImGui",
-        repo="https://github.com/ocornut/imgui",
-        tag="v1.92.8-docking",
-        commit="b61e56346a92cfcaf1f43a545ca37b0b32239654",
         copy_map={
             "imgui.h": "include/imgui/imgui.h",
             "imconfig.h": "include/imgui/imconfig.h",
@@ -107,13 +100,10 @@ LIBRARIES = [
             "imgui_widgets.cpp": "src/imgui_widgets.cpp",
             "imgui_demo.cpp": "src/imgui_demo.cpp",
         },
-        license=("LICENSE.txt", "LICENSE-imgui.txt"),
+        license_src="LICENSE.txt",
     ),
     Library(
         name="ImPlot",
-        repo="https://github.com/epezent/implot",
-        tag=None,  # the latest release (v0.16) predates ImGui 1.92's draw/texture API; only master tracks it, so pin a commit
-        commit="d65a2bef53d32502407de3a4be80f191e2f412d7",
         copy_map={
             "implot.h": "include/imgui/implot.h",
             "implot_internal.h": "include/imgui/implot_internal.h",
@@ -121,20 +111,17 @@ LIBRARIES = [
             "implot_items.cpp": "src/implot_items.cpp",
             "implot_demo.cpp": "src/implot_demo.cpp",
         },
-        license=("LICENSE", "LICENSE-implot.txt"),
+        license_src="LICENSE",
     ),
     Library(
         name="ImGuizmo",
-        repo="https://github.com/cedricguillemet/ImGuizmo",
-        tag=None,  # no release tags; pinned by commit on the default branch
-        commit="dc25afb98bc3ebe00dfc9a23ba7235fead2ccb1d",
         copy_map={
             "src/ImGuizmo.h": "include/imgui/imguizmo.h",
             "src/ImGuizmo.cpp": "src/imguizmo.cpp",
         },
         # Lowercased for consistency with imgui.h / implot.h; fix the .cpp's bare self-include to match.
         rewrites={"src/imguizmo.cpp": ('#include "ImGuizmo.h"', '#include "imguizmo.h"')},
-        license=("LICENSE", "LICENSE-ImGuizmo.txt"),
+        license_src="LICENSE",
     ),
 ]
 
@@ -142,9 +129,14 @@ LIBRARIES = [
 DEST = Path(__file__).resolve().parent
 CLONE = DEST / ".clone"
 
+# The pins live in dependency.yml next to this script, so no pin is written twice.
+sys.path.insert(0, str(DEST.parent))
+import deps_manifest  # noqa: E402
+
 # Everything we own under DEST that a re-vendor must wipe first, so a file dropped upstream does not linger.
+# The per-library license destinations complete it, so it is built in main() once the manifest is loaded.
 # The script, CMakeLists.txt, shaped/, and this list itself stay.
-WIPE = ["include", "src"] + [lib.license[1] for lib in LIBRARIES]
+WIPE_DIRS = ["include", "src"]
 
 
 def _force_rmtree(path: Path) -> None:
@@ -165,40 +157,46 @@ def run(*args: str, cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
-def fetch(lib: Library, into: Path) -> None:
-    """Fetch lib's pinned commit into `into`, then assert it is exactly that commit.
+def fetch(up: "deps_manifest.Upstream", into: Path) -> None:
+    """Fetch the upstream's pinned commit into `into`, then assert it is exactly that commit.
 
     A tagged library is cloned by tag and cross-checked against the pinned hash, which catches a mistyped hash.
-    An untagged library (ImGuizmo) fetches the sha directly — GitHub serves an arbitrary commit on request.
+    An untagged library (ImPlot, ImGuizmo) fetches the sha directly — GitHub serves an arbitrary commit on request.
     """
-    if lib.tag is not None:
-        print(f"cloning {lib.repo} @ {lib.tag} ...")
-        run("git", "clone", "--depth", "1", "--branch", lib.tag, lib.repo, str(into))
+    if up.tag is not None:
+        print(f"cloning {up.repo} @ {up.tag} ...")
+        run("git", "clone", "--depth", "1", "--branch", up.tag, up.repo, str(into))
     else:
-        print(f"fetching {lib.repo} @ {lib.commit[:12]} ...")
+        print(f"fetching {up.repo} @ {up.pin_hash[:12]} ...")
         run("git", "init", "--quiet", str(into))
-        run("git", "-C", str(into), "remote", "add", "origin", lib.repo)
-        run("git", "-C", str(into), "fetch", "--depth", "1", "--quiet", "origin", lib.commit)
+        run("git", "-C", str(into), "remote", "add", "origin", up.repo)
+        run("git", "-C", str(into), "fetch", "--depth", "1", "--quiet", "origin", up.pin_hash)
         run("git", "-C", str(into), "checkout", "--quiet", "FETCH_HEAD")
 
     head = run("git", "-C", str(into), "rev-parse", "HEAD")
-    if head != lib.commit:
+    if head != up.pin_hash:
         _force_rmtree(CLONE)
-        ref = lib.tag if lib.tag is not None else lib.commit
+        ref = up.tag if up.tag is not None else up.pin_hash
         sys.exit(
-            f"pin mismatch for {lib.name}: {ref} resolved to {head}, expected {lib.commit}.\n"
-            "Update the commit (and tag) together after vetting the new commit."
+            f"pin mismatch for {up.name}: {ref} resolved to {head}, expected {up.pin_hash}.\n"
+            "Update pin_hash (and tag) together in dependency.yml, after vetting the new commit."
         )
 
 
 def main() -> int:
+    # Pair each library's copy plan with its manifest entry; a name in one and not the other is a hard error.
+    upstreams = {up.name: up for up in deps_manifest.load(DEST)}
+    missing = [lib.name for lib in LIBRARIES if lib.name not in upstreams]
+    if missing or len(upstreams) != len(LIBRARIES):
+        sys.exit(f"dependency.yml and LIBRARIES disagree: {sorted(upstreams)} vs {[lib.name for lib in LIBRARIES]}")
+
     # Clean slate: a stale clone or partial previous run must not leak in.
     if CLONE.exists():
         _force_rmtree(CLONE)
     CLONE.mkdir(parents=True, exist_ok=True)
 
     # Wipe the previously vendored payload up front, so a file dropped upstream in any library does not linger.
-    for name in WIPE:
+    for name in WIPE_DIRS + [f for up in upstreams.values() for f in up.license_files]:
         target = DEST / name
         if target.is_dir():
             shutil.rmtree(target)
@@ -206,11 +204,12 @@ def main() -> int:
             target.unlink()
 
     for lib in LIBRARIES:
+        up = upstreams[lib.name]
         clone_dir = CLONE / lib.name.replace(" ", "_")
-        fetch(lib, clone_dir)
+        fetch(up, clone_dir)
 
-        # Copy the minimal subset we build, plus the license under a per-library name.
-        for src, dst in {**lib.copy_map, lib.license[0]: lib.license[1]}.items():
+        # Copy the minimal subset we build, plus the license under the per-library name dependency.yml gives it.
+        for src, dst in {**lib.copy_map, lib.license_src: up.license_files[0]}.items():
             dest_path = DEST / dst
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(clone_dir / src, dest_path)
@@ -235,8 +234,8 @@ def main() -> int:
     )
 
     print(f"\nvendored the Dear ImGui bundle: {len(vendored)} files into {DEST.as_posix()}")
-    for lib in LIBRARIES:
-        print(f"  {lib.name} {lib.tag or lib.commit[:12]} ({lib.commit[:12]})")
+    for up in upstreams.values():
+        print(f"  {up.name} {up.tag or up.pin_hash[:12]} ({up.pin_hash[:12]})")
 
     return 0
 

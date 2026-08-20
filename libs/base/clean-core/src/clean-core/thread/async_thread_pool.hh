@@ -133,7 +133,7 @@ private:
     [[nodiscard]] async_node_ptr try_get_work(worker& w, bool authoritative = false);
     void push_local(worker& w, async_node_ptr node);
     void wake_one();
-    void wait_for_completion(async_node_base& root);
+    void wake_all();
 
     // External participation: a foreign thread borrows a slot and runs the graph itself rather than handing it over and parking.
     // For a small graph that removes the submit/wake round trip entirely — the root lands in the caller's OWN deque and it polls it on the spot.

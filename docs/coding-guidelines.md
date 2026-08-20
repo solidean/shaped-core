@@ -810,9 +810,27 @@ container& operator=(container&& rhs)
 
 ## Stability & Evolution
 
+**Beta through 2026, and probably most of 2027.**
+Headers move, APIs break, and shapes change under closely monitored production use — that is how the right shape gets found, not a failure of planning.
+So breaking changes are the normal cost of an improvement here, not an event to be routed around.
+
 **API Stability:** High priority.
 These are foundational libraries.
 We reserve the right to make breaking changes where they significantly improve a library.
+
+**Replace, do not shim.**
+When a lower library gains the capability a temporary local implementation was standing in for, replace every use site with the real one.
+Do not keep the old API alongside it for compatibility, and never leave a near-empty shim that only forwards to the new thing.
+A shim is two APIs to learn, and one of them is a lie about what the code does.
+Ask if a particular case looks like it needs the old spelling kept; do not decide it silently.
+
+**Never version a file format on your own.**
+A breaking change to one of our formats — `.vdoc` above all — is a question for the user, never a migration written unprompted.
+Most current work is on features that are not rolled out, so the usual answer is that no compatibility is needed and no version gets bumped.
+The rule exists because the cautious instinct is to invent a version bump rather than ask, and a format version added "just in case" is as permanent as one that was needed.
+
+**When a change breaks something, ask whether compatibility must be preserved.**
+That question is the meeting point: it costs one exchange, and it is much cheaper than either a silent break or an unnecessary migration.
 
 **ABI Stability:** Low priority.
 Expect to build from source in most environments.
@@ -820,7 +838,7 @@ Expect to build from source in most environments.
 **Evolution strategy:** Prefer monotonic extension over replacement.
 When superseding types, aim for "this type remains useful in scenario X, though the newer Y fits most use cases better" rather than "do not use this type anymore."
 
-**Deprecation:** Currently in greenfield phase with no pressing deprecation story.
+**Deprecation:** No deprecation story while in beta — superseded API is removed and its callers updated, rather than marked and left standing.
 
 **Experimental API:** Experimental/"incubator" API is fine but must be contained in `experimental/` for now.
 Liberal use of `friend` in core API is allowed to access internals in `experimental/`.
@@ -864,3 +882,4 @@ Liberal use of `friend` in core API is allowed to access internals in `experimen
 - [ ] `static_assert` used for quality error messages in templates
 - [ ] Debug/Release behavior is consistent
 - [ ] Experimental API in `experimental/` directory
+- [ ] Superseded API replaced at every use site, not shimmed; a format version bumped only after asking

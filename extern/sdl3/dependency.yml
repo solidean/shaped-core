@@ -1,0 +1,25 @@
+# Pin and license for the upstream fetched here.
+# fetch-sdl3.py reads its pin from this file; the strip prefix stays in the script.
+# tools/dev/lib/pipeline/prereqs.py scans this file for the `pin_hash:` line to decide whether .install/ is current,
+# without paying to start Python — keep that key on a line of its own.
+
+upstreams:
+  - name: SDL3
+    homepage: https://github.com/libsdl-org/SDL
+    install: fetched
+    source: github-release
+    repo: https://github.com/libsdl-org/SDL
+    track: github-releases
+    version: 3.4.12
+    tag: release-3.4.12
+    asset: SDL3-3.4.12.tar.gz
+    digest_algo: sha256
+    pin_hash: f07b958a9ac5020fb7a44cadb957f658b2149c3c8abb4f63145fac9303249db7
+    license: Zlib
+    license_files: [.install/LICENSE.txt]
+    used_by: shaped-rendering — sr::window_system and sr::window
+    notes: |
+      SDL vendors hidapi, which ships a GPL-3 option alongside its permissive one.
+      extern/sdl3/CMakeLists.txt sets SDL_HIDAPI OFF, so none of that code is compiled and the option never applies to us.
+      It also vendors yuv2rgb, which is BSD-3-Clause and carries no such choice.
+      Re-check both if the SDL_HIDAPI setting ever changes.

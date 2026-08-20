@@ -1,4 +1,4 @@
-#include <clean-core/common/blake3.hh>
+#include <clean-core/bytes/blake3.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>

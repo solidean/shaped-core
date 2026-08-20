@@ -302,6 +302,11 @@ struct async_worker_scope;
 struct async_no_worker_scope;
 struct singlethreaded_scheduler;
 struct async_thread_pool;
+struct thread_pump_registration; // one registered cooperative pump (thread/thread_pump.hh)
+namespace impl
+{
+struct thread_pump_entry;
+}
 struct scoped_default_async_scheduler;
 struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)
 struct async_ambient_scope;
@@ -327,12 +332,22 @@ using weak_async = weak_ptr<async<T, E>, impl::async_node_traits>;
 
 
 //
-// Hashing
+// Bytes
 //
 
 struct hash128;
 struct hash256;
 class blake3;
+
+enum class compression_algorithm : u8;
+enum class compression_framing : u8;
+struct compression_config;
+struct decompression_config;
+struct compression_dictionary;
+struct compressor;
+struct decompressor;
+struct decompressing_read_stream_adapter;
+struct compressing_write_stream_adapter;
 
 
 //

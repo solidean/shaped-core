@@ -27,7 +27,7 @@ ssc::dxc::shader_cache  ── get-or-create over the DXC compiler (a separate l
 
 ## The key is the content, not the handle
 
-A cache entry is keyed by a [`cc::hash128`](../../../../base/clean-core/src/clean-core/common/hash128.hh) computed from the **logical creation arguments**.
+A cache entry is keyed by a [`cc::hash128`](../../../../base/clean-core/src/clean-core/bytes/hash128.hh) computed from the **logical creation arguments**.
 So the key is independent of any backend handle identity, and stable across runs.
 The arguments are serialized into a [`cc::byte_stream_builder`](../../../../base/clean-core/src/clean-core/container/byte_stream_builder.hh), then hashed (XXH3-128).
 That builder length-prefixes each piece, which is what keeps different splits of the same data distinct.
@@ -35,11 +35,62 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
 
 - **binding group layout** = the reflected `binding`s **plus the static samplers**.
   Static samplers are baked into the root signature, so a different static sampler is a different group layout and must be part of the key.
-- **pipeline layout** = the **ordered group-layout handle identities**.
-  Pointer identity is enough because group layouts are shared and persistent — so acquire the group layouts *through the cache* first, for full dedup.
-- **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with the **pipeline-layout handle identity**, which transitively covers its group layouts.
-  Same reason, same advice: acquire the pipeline layout through the cache first, so structurally identical layouts collapse to one handle and the pipelines built on them dedup too.
-- **compiled shader** = source + entry point + stage + model + every compile option.
+- **pipeline layout** = its groups' own **structural hashes**, plus its register-bound static samplers and its inline constants.
+  All three change the root signature.
+  A layout carries that hash from creation — `layout->structural_hash()` — computed once by the backend through the same `sg::impl` functions this cache keys with, so the two can never disagree.
+- **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with the **pipeline layout's structural hash**, which transitively covers its group layouts.
+- **raytracing pipeline** = the same, over every shader it names, plus the pipeline limits.
+- **raster pipeline** = every shader plus the vertex input and each baked fixed-function state, over the layout's **address** rather than its structural hash.
+  That one is the odd one out, and deliberately in-memory-only.
+  An address dedups nothing across two identically built layouts, and means nothing at all in the next process.
+  So raster PSOs would have to go structural before they could be persisted.
+
+- **compiled shader** = source + entry point + stage + model + every compile option + **the DXC version**.
+  The version matters only to a key that outlives the process, and there it is load-bearing: without it a DXC upgrade keeps serving the previous compiler's DXIL forever.
+
+Structural rather than pointer identity is what makes a key mean anything outside the process that made it.
+Two independently created but identical group layouts collapse to one, so for the tiers keyed that way acquiring through the cache is a convenience rather than a precondition for dedup.
+A key computed in one run also still names the same thing in the next — the property the persistent tier needs, and one an address could never have given it.
+Which is exactly why the raster tier's address-keyed layout bounds what that tier can become.
+
+## The persistent tier
+
+A pipeline that misses in memory consults [blob-cache](../../../../data/blob-cache/docs/design.md) for a serialized PSO blob before building, and stores the one it produced on the way out.
+The DXC shader cache does the same with encoded `compiled_shader`s.
+So the in-memory tier holds live handles for this run, and bcache holds bytes for every run after it.
+
+The two differ in one way that shapes the code.
+For a shader the cacheable product and the expensive product are the same bytes, so it is a plain `acquire`: decode what comes back, compile and encode on a miss.
+For a pipeline they are not: the store holds a blob while the caller wants a live handle.
+So the singleflight's winner stashes what it built in a slot, which then doubles as the hit/miss signal `acquire` does not otherwise expose.
+Shaders go through [`sg::impl::encode_compiled_shader`](../../src/shaped-graphics/binding/impl/shader_codec.hh), a codec with its own version prefix.
+It refuses anything doubtful, because a cache may miss but must never lie.
+
+It is deliberately **not** a `cc::key_value_provider` tier, and it could not be one: a provider's `try_get` is synchronous and runs under the cache's lock, while bcache is async.
+Blocking there would stall every concurrent acquire.
+The store is consulted inside the miss build instead, through `bcache::acquire`, so the whole lookup-build-store pipeline singleflights and identical blobs deduplicate by content.
+
+The key is the in-memory key plus the **adapter and driver**, because a blob is only valid for the pair that wrote it.
+Under-keying is cheap by construction: a blob the driver refuses costs one failed create and nothing else, since the backend retries without it.
+
+**Staleness is observed, never predicted.**
+`used_cached_pipeline()` reports whether creation actually consumed the blob, and a refusal is what triggers replacing the entry.
+The tempting alternative is comparing the blob the pipeline hands back against the one that was stored, and it is wrong.
+A real driver re-serializes an accepted blob to different bytes, so that test would rewrite every entry on every run.
+It would also look perfectly healthy on WARP, which reproduces the bytes exactly.
+
+**It needs somewhere to schedule.**
+A build parks on the store, so it has to be able to resume somewhere.
+With no ambient scheduler installed and no worker scope active there is nowhere, and the tier is skipped rather than parked — the pipeline is built the plain way.
+
+**Without threads, blocking still works.**
+A store with no thread of its own registers a pump with clean-core, and `cc::async_blocking_get` sweeps that registry instead of sleeping.
+So the same blocking call drives the store and then resumes the build, and there is no threadless code path to write: one `cc::async_blocking_get` is correct in both builds.
+
+`ctx.cached.cache().set_blob_cache(...)` overrides the store per context; it defaults to `bcache::default_cache()`, and `nullptr` turns persistence off.
+Tests share the developer's real cache like anything else, and are faster for it — most of them only want a pipeline, not a cold build of one.
+A test that is *about* caching opens its own store and passes it here.
+`SC_BLOB_CACHE` turns the default off or redirects it to temp for a whole run, which is the lever for asking whether a stale entry is behind a result.
 
 ## Async: the build runs off the frame path
 

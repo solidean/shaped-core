@@ -28,6 +28,7 @@ enum class epoch : u64;
 enum class submission_token : u64;
 
 class context;
+struct adapter_info; // which GPU a context runs on (see context/adapter_info.hh)
 class context_persistent_scope;
 class context_transient_scope;
 class context_upload_scope;

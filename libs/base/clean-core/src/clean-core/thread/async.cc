@@ -3,6 +3,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/impl/async_tls.hh>
+#include <clean-core/thread/thread_pump.hh>
 
 #include <chrono> // the poll interval a driver waiting on an external push sleeps for
 #include <thread>
@@ -140,7 +141,7 @@ bool cc::singlethreaded_scheduler::run_one()
 
     auto node = cc::move(_queue.back()); // keep it alive across the poll, then release our queue ref
     _queue.remove_back();
-    node->poll();
+    impl::async_poll_work_item(*node);
     return true;
 }
 
@@ -216,6 +217,10 @@ void cc::impl::async_drive_until_ready(async_node_base& root)
             return;
 
         // The scheduler ran out of work it could do here, so what is left is somebody else's push.
+        // Some of those pushers have no thread to push from, and this blocked thread is the only one there is.
+        if (cc::thread_pump_all())
+            continue;
+
         async_sleep_a_moment();
     }
 }
@@ -230,6 +235,10 @@ bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms
     while (!root.is_ready())
     {
         if (scheduler.try_run_one())
+            continue;
+
+        // Same reason as the unbounded drive: a semantic thread with no thread of its own pushes only when swept.
+        if (cc::thread_pump_all())
             continue;
 
         if (std::chrono::steady_clock::now() >= deadline)

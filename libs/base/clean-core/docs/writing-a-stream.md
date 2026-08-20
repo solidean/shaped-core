@@ -68,6 +68,7 @@ private:
         case cc::seek_dir::dry_relative: return pos + offset;     // dry: report only, do not mutate
         case cc::seek_dir::dry_begin:    return offset;
         case cc::seek_dir::dry_end:      return size + offset;
+        case cc::seek_dir::remaining_size_hint: return size - pos;  // a count, not a position
         }
         CC_UNREACHABLE("invalid seek_dir");
     }
@@ -101,15 +102,22 @@ cc::result<cc::i64> flush(cc::byte*& curr, cc::byte*& end, cc::byte*& write_end,
   | `relative`     | seek `offset` from the current position   | yes             |
   | `end`          | seek to `offset` from the end (`<=0` in)  | yes             |
   | `dry_begin/relative/end` | **report** the resulting position | **no**          |
+  | `remaining_size_hint` | **report** bytes still to come after `curr` | **no** |
 
 - **Return** the global position of `curr` after the op, `-1` when the source has no meaningful position or is not seekable, or a `cc::result` error on I/O failure.
+  `remaining_size_hint` is the one exception: it returns a **count**, not a position.
 - **End-of-data rule:** a stream is at its end iff **`curr == end` after a flush**.
   Buffered adapters start with `curr == end` (empty), so the first read triggers a refill; an unbuffered span hands out the full window up front.
 - **`dry_*` must not touch** `curr`/`end`/`write_end` or the buffer — they only compute.
   `dry_relative, 0` doubles as the seekability probe (`try_as_seekable`): return `>= 0` if seekable, `-1` if not.
+- **`remaining_size_hint` is a size question, not a seek question**, and answering it says nothing about seekability.
+  It is what `read_all()` sizes its allocation from, so a source that knows its own length can save the caller a growing buffer without pretending it can be repositioned.
+  A decompressing stream reading a frame header is the case it exists for.
+  Return `-1` when you do not know, which is always a safe answer; the caller just grows instead.
+  Treat it as a hint on the way in as well: it may be stale by the time it is used, so `read_all` is written to survive an answer that turns out too small or too large.
 - **Unsupported ops:** the stream never issues a real *seek* outside its capability, and a read-only stream never asks for write-through, so you may `CC_ASSERT` on those.
-  **The `dry_*` dirs are the exception, and they reach every stream**: `read_all()` and `try_as_seekable()` probe with `dry_relative` / `dry_end` even on a non-seekable one.
-  Return `-1` from them rather than asserting — that is exactly how a non-seekable source reports "no meaningful position".
+  **The `dry_*` dirs and `remaining_size_hint` are the exception, and they reach every stream**: `read_all()` and `try_as_seekable()` probe even a non-seekable one.
+  Return `-1` from them rather than asserting — that is exactly how a source reports "no meaningful position" or "no idea how much is left".
 
 ### Buffered adapters (refill)
 
@@ -154,9 +162,9 @@ operator Stream() { return Stream(_base, _base + _size, &flush, this); }
 
 - The adapter **owns the buffer**; the stream only views it.
   The adapter must outlive any stream taken from it, and — if the buffer is an inline member — must not be moved once a stream is live.
-- Implement every `seek_dir` case; you may assert on real seeks your source cannot do, but never on `dry_*`.
+- Implement every `seek_dir` case; you may assert on real seeks your source cannot do, but never on `dry_*` or `remaining_size_hint`.
 - `curr == end` after a flush is the only end-of-data signal; get it right.
-- `dry_*` never mutates.
+- `dry_*` and `remaining_size_hint` never mutate.
   Seeks that reposition must leave the window consistent, so buffered adapters refill after seeking.
 - Return the global position, or `-1`, and surface I/O failures as `cc::error(...)`.
 - Never reset `first_write` yourself, and set both `end` and `write_end` on a read_write adapter.

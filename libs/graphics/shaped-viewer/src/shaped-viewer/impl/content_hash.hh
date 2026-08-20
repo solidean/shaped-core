@@ -1,6 +1,6 @@
 #pragma once
 
-#include <clean-core/common/hash128.hh> // cc::hash128
+#include <clean-core/bytes/hash128.hh> // cc::hash128
 #include <clean-core/container/span.hh>
 #include <shaped-viewer/fwd.hh>
 

@@ -2,8 +2,8 @@
 
 #include <clean-core/algorithm/search.hh>
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/bytes/blake3.hh>
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/blake3.hh>
 #include <clean-core/common/endian.hh>
 
 using namespace cc::primitive_defines;

@@ -1,5 +1,6 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/thread.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <clean-core/thread/threaded_actor.hh>
 
 #include <chrono>
@@ -22,10 +23,14 @@ void cc::threaded_actor_base::start(threaded_actor_mode mode)
     }
     else
     {
-        // No thread: the caller drives the loop via process_messages_if_unthreaded[_for_ms]().
+        // No thread: whoever blocks drives the loop, through the pump registry.
         // on_thread_init runs here, on the caller; there is no OS thread to name.
         _is_unthreaded = true;
         get_impl().on_thread_init();
+
+        // This actor IS a semantic thread, so it registers for as long as one would have run.
+        // That is what lets a blocking wait anywhere resolve it without naming it.
+        _pump_registration = cc::register_thread_pump([this] { return process_messages_if_unthreaded(); });
     }
 }
 
@@ -48,6 +53,10 @@ void cc::threaded_actor_base::shutdown()
 
     if (_is_unthreaded)
     {
+        // Deregister before draining: the drain below is this thread's, and a sweep arriving mid-teardown must not
+        // find a half-shut-down actor.
+        _pump_registration.reset();
+
         // Drain everything queued before shutdown, synchronously on the caller.
         // Loop until a cycle dispatches no messages, mirroring the threaded loop's "exit once the inbox is empty".
         auto& impl = get_impl();

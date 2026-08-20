@@ -35,6 +35,8 @@ span_adapter_flush(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 off
         return offset;
     case seek_dir::dry_end:
         return size + offset;
+    case seek_dir::remaining_size_hint:
+        return size - pos; // exact rather than a hint: a span cannot grow under us
     }
     CC_UNREACHABLE("invalid seek_dir");
 }

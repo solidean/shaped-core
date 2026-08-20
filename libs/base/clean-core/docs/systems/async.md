@@ -465,8 +465,17 @@ int v = cc::async_blocking_get(root);                    // participate in the p
 
 `participate_until_ready` is what a drive on a pool does: the calling thread borrows a pool slot and runs the graph itself, stealing like any worker.
 It parks only once there is nothing left for it to run.
-With every external slot already claimed it falls back to submitting the root and blocking on a one-shot completion hook.
+
+**Parked, it is still a sleeper of the pool**, registered the same way an idle worker is, so injected work wakes it as well as its own root completing.
+That is not an optimization but the thing that keeps a nested drive from deadlocking the pool.
+A graph parked on an EXTERNAL push finishes in two steps: a foreign thread resolves the promise, then a pool thread runs the continuation.
+A participant asleep on the root alone would never hear the second.
+With every thread of the pool parked that way the continuation strands in the injection queue, each thread waiting for work only another of them could run.
+It still returns only once the root is done, so `async_blocking_get_on` keeps its meaning.
+
 It is legal from inside a worker, where it becomes a nested drive — the price being that unrelated work then runs on that thread in the middle of a frame.
+A nested drive REUSES the slot the thread already holds rather than claiming a second one: there are only `external_slot_count` of them, and one per nesting level runs them out.
+Only a genuinely foreign thread finding every slot taken falls back to submitting the root and blocking on the completion hook alone, which is the one park that stays deaf to the pool.
 
 The node machinery is thread-safe under this — see [Multi-scheduler correctness](#multi-scheduler-correctness) for exactly what is and is not guaranteed.
 
@@ -608,6 +617,16 @@ The yield site is the easy one to forget: an inline-driven node was never schedu
 `poll()` installs the token for the whole poll, and **only if the node has one**.
 A node without one falls through and inherits its driver's context — which is what makes the eager depth-first drive pay one install for a 512-node chain rather than 512.
 Node creation costs nothing at all: no TLS read, no store, so born-ready, manual and lazy-then-inline-driven nodes never touch the word.
+
+Inheritance is for the INLINE drive alone, and a **dequeued work item is polled at a fresh attribution root** instead.
+That is `cc::impl::async_poll_work_item`, which every dequeue site goes through and only a dequeue site may.
+The three write sites above are what earn that: a node reaching a queue always carries its own token.
+So a null one there means "no context" rather than "inherit whoever dequeued me".
+
+That distinction is invisible on a worker, whose ambient is null anyway, and load-bearing for `participate_until_ready`.
+A participant parks INSIDE the logical task it is blocked on and steals while parked.
+Without the root, every unrelated item it picks up is billed to that task — which a consumer keying off the chain reads as real nesting.
+nexus is the one that shows it: its invocation-cycle guard walks the chain, so a stolen test node chained under a blocked test reports a cycle that does not exist.
 
 **Lifetime is safe, not merely checked.**
 Links are refcounted and hold their parent strongly, so retaining a head retains the whole chain and a lookup can never reach a freed link.

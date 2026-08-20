@@ -105,6 +105,11 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
 * **Test binaries are named `*-test`.** Never run one directly — go through `uv run dev.py test`.
 * **Example binaries are named `*-example`.** Run one example with `uv run dev.py example <match>`, never the binary directly.
   Examples build everywhere and are executed by nobody automatically — see [docs/guides/examples.md](docs/guides/examples.md).
+* **shaped-core is in beta through 2026 and likely most of 2027 — don't preserve compatibility on your own initiative.**
+  When a lower library gains the real capability, replace every use site; never leave a near-empty shim forwarding to it because a break felt risky.
+  **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
+  When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
+  See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
 * **Feature branches are mandatory** (see Git workflow) — don't commit to `main`.
 * **No force-push to `main`.**
 * **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
@@ -141,6 +146,7 @@ uv run dev.py format             # clang-format our C++ sources in place
 uv run dev.py lint clang-tidy    # run the clang-tidy whitelist gates
 uv run dev.py lint shaped        # run shaped-linter's own rules
 uv run dev.py check --fix        # run pre-commit checks, auto-fixing what's safe
+uv run dev.py deps list          # external dependency pins, and what upstream offers now
 uv run dev.py doctor             # sanity-check the toolchain
 ```
 
@@ -352,6 +358,8 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | The prose / lint workflow        | [docs/guides/prose.md](docs/guides/prose.md)                     |
 | Rework a topic's comments/docs   | the `reworking-prose` skill, applied via `uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]` |
 | Measure a doc surface's prose    | `uv run dev.py lint prose-stats <path>...` (lines + words, per file and total) |
+| See external dependency pins     | `uv run dev.py deps list` (`--offline` for no network; [dependencies](docs/guides/dependencies.md)) |
+| Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |

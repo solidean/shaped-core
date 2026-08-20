@@ -7,7 +7,9 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/context/adapter_info.hh>
 #include <shaped-graphics/context/cached.hh>
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/context/persistent.hh>
@@ -41,6 +43,10 @@ public:
 
     /// The threading guarantees this backend provides (see libs/graphics/shaped-graphics/docs/concepts/threading.md).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
+
+    /// Which GPU this context is running on, fixed at creation.
+    /// Fields a backend cannot report are left at their defaults, so a caller reads "unknown" and never a wrong answer.
+    [[nodiscard]] adapter_info const& adapter() const { return _adapter; }
 
     /// Whether the GPU device has been lost — driver reset, TDR, removed adapter.
     /// Sticky once set: the context is unusable and must be torn down and recreated.
@@ -136,14 +142,6 @@ public:
     /// Does not advance; safe to call from any thread.
     virtual void wait_for_next_inflight_epoch() = 0;
 
-    /// Runs one cycle of the upload/download copy actors' work, returning true if there may be more.
-    /// Where the platform has threads the actors drive themselves, so this returns false without doing anything.
-    ///
-    /// It is load-bearing only under CC_HAS_THREADS == 0, where a cc::threaded_actor runs on its caller and nothing advances a copy unless someone pumps it.
-    /// Every blocking wait must therefore drain this first — including GPU waits, since an async upload's copy-queue fence is signalled by the actor.
-    /// Backends with no actors can leave this alone.
-    virtual bool pump_transfers() { return false; }
-
     /// Blocks until a download future is delivered, then returns its bytes.
     /// nullopt if the future is invalid, unsubmitted, or cancelled.
     /// The only completion guarantee for a download — advance_epoch* drain GPU work but not the readback actor.
@@ -182,20 +180,24 @@ protected:
     /// `accepted_shader_formats` must be non-empty, most-preferred first.
     context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats);
 
-    /// Pumps transfers until `future` is ready or no transfer work is left.
-    /// Collapses to a single false test where the platform has threads; without them it is what makes a blocking wait terminate.
+    /// Records which adapter the backend picked.
+    /// Called once during creation, before the context is handed out; the adapter cannot change afterwards.
+    void set_adapter_info(adapter_info info) { _adapter = cc::move(info); }
+
+    /// Drives cooperative work until `future` is ready or nothing anywhere reports more.
+    /// Collapses to a single false test where every semantic thread has an OS thread of its own; without them it is what makes a blocking wait terminate.
     /// Leaving the future unready is fine — the wait below it reports the cancelled / not-yet-submitted cases rather than blocking.
     template <class FutureT>
     void drive_transfers_until_ready(FutureT const& future)
     {
-        while (!future.is_ready() && pump_transfers())
+        while (!future.is_ready() && cc::thread_pump_all())
         {
         }
     }
 
     // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
     // The try_* virtuals below are the fallible core a backend implements; the public façades add the throwing flavor (see docs/error-handling.md).
-    // A backend also implements the public pure virtuals above — submit / drop, the epoch surface, is_submission_complete — and usually overrides shutdown and pump_transfers.
+    // A backend also implements the public pure virtuals above — submit / drop, the epoch surface, is_submission_complete — and usually overrides shutdown.
     friend class context_persistent_scope;
     friend class context_transient_scope;
     friend class context_upload_scope;
@@ -327,6 +329,9 @@ protected:
 
     // Fixed at construction; inline for the realistic one-or-two-format backends, but not capped.
     cc::small_vector<shader_format, 2> _accepted_shader_formats;
+
+    // Filled by the backend during creation, from whatever the API tells it about the adapter it picked.
+    adapter_info _adapter;
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;

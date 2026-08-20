@@ -59,6 +59,9 @@ public:
 
     ~vulkan_context() override { shutdown(); } // runs shutdown() before the base dtor asserts it
 
+    // create_vulkan_context fills this in once it has picked a physical device.
+    using sg::context::set_adapter_info;
+
     // backend-typed API — prefer these when you already hold a vulkan_context
 
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();

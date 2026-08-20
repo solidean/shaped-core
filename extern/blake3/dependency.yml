@@ -1,0 +1,19 @@
+# Pin and license for the upstream vendored here.
+# vendor-blake3.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: BLAKE3
+    homepage: https://github.com/BLAKE3-team/BLAKE3
+    source: git
+    repo: https://github.com/BLAKE3-team/BLAKE3
+    track: tags
+    tag: "1.8.6"
+    digest_algo: git-commit
+    pin_hash: 77b257eee7da5cd608eaf6be8343d3a4c9776af2
+    license: CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception
+    license_files: [LICENSE_CC0, LICENSE_A2, LICENSE_A2LLVM]
+    used_by: clean-core — cc::blake3 / cc::hash256 (the cryptographic hash)
+    notes: |
+      Triple-licensed, at the consumer's choice.
+      All three texts are vendored so that choice stays open downstream.

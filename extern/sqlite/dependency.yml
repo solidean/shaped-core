@@ -1,0 +1,29 @@
+# Pin and license for the upstream fetched here.
+# fetch-sqlite.py reads its pin from this file; the copy map and strip prefix stay in the script.
+# tools/dev/lib/pipeline/prereqs.py scans this file for the `pin_hash:` line to decide whether .install/ is current,
+# without paying to start Python — keep that key on a line of its own.
+
+upstreams:
+  - name: SQLite
+    homepage: https://sqlite.org
+    install: fetched
+    source: url
+    track: sqlite
+    version: "3530300"
+    year: "2026"
+    asset: sqlite-amalgamation-3530300.zip
+    digest_algo: sha3-256
+    pin_hash: d45c688a8cb23f68611a894a756a12d7eb6ab6e9e2468ca70adbeab3808b5ab9
+    license: blessing
+    used_by: babel-serializer — the babel::sqlite engine wrapper
+    notes: |
+      SQLite 3.53.3. `version` is the download site's packed form, which the asset name and archive prefix are built from.
+      sqlite.org publishes a SHA3-256 for the amalgamation zip rather than a SHA-256, which is why `digest_algo` exists.
+      The amalgamation ships no license file at all, so the text below is the authority — upstream's public-domain blessing, quoted from sqlite.org/copyright.html.
+    license_text: |
+      The author disclaims copyright to this source code.  In place of
+      a legal notice, here is a blessing:
+
+        *   May you do good and not evil.
+        *   May you find forgiveness for yourself and forgive others.
+        *   May you share freely, never taking more than you give.

@@ -1,5 +1,6 @@
 # Vendored third-party dependencies.
-# Each lives in-tree under extern/<lib>/ at a pinned commit (see the per-lib vendor-*.py).
+# Each lives in-tree under extern/<lib>/ at a pinned commit, declared in that directory's dependency.yml.
+# `uv run dev.py deps list` shows every pin and whether upstream has moved on; the per-lib vendor-*.py / fetch-*.py reads its pin from the same manifest.
 # Each SC_USE_VENDORED_<LIB> defaults ON and builds the in-tree copy;
 # turning one OFF means the embedding project must already provide a target of that name.
 #
@@ -12,6 +13,15 @@ option(SC_USE_VENDORED_XXHASH "Build the in-tree vendored xxHash (OFF expects an
 # Backs cc::blake3 / cc::hash256, the cryptographic hash content addressing needs; linked PRIVATE by clean-core, so blake3.h reaches one TU.
 # Vendored rather than fetched because it is small and every build needs it — the xxHash tier, not the SQLite one.
 option(SC_USE_VENDORED_BLAKE3 "Build the in-tree vendored BLAKE3 (OFF expects an external `blake3` target)" ON)
+
+# Zstandard and LZ4, committed in-source: together they are cc::compress / cc::decompress.
+# Linked PRIVATE by clean-core, so neither upstream header reaches a cc public header.
+# Vendored rather than fetched because compression is not optional — a format that cannot decode its own blobs
+# when a flag is off is a broken format, so there is no configuration in which these may be absent.
+# zstd is the largest thing vendored in source here (~2.1 MB), which is the price of that guarantee;
+# upstream's legacy decoders, deprecated zbuff API and DLL projects are not part of it.
+option(SC_USE_VENDORED_ZSTD "Build the in-tree vendored Zstandard (OFF expects an external `zstd` target)" ON)
+option(SC_USE_VENDORED_LZ4 "Build the in-tree vendored LZ4 (OFF expects an external `lz4` target)" ON)
 
 # stb single-file image libraries (stb_image + stb_image_write), committed in-source (two small headers).
 # Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
@@ -56,6 +66,14 @@ endif()
 
 if(SC_USE_VENDORED_BLAKE3)
     add_subdirectory(blake3)
+endif()
+
+if(SC_USE_VENDORED_ZSTD)
+    add_subdirectory(zstd)
+endif()
+
+if(SC_USE_VENDORED_LZ4)
+    add_subdirectory(lz4)
 endif()
 
 if(SC_USE_VENDORED_STB)

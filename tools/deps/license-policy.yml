@@ -1,0 +1,59 @@
+# License policy for external dependencies — the allowlist `dev.py deps licenses --check` gates on.
+#
+# Every upstream's `license:` field in its extern/<dep>/dependency.yml must appear here, or the gate fails.
+# That is the point: a version bump that quietly swaps a permissive license for a copyleft one, or a new
+# dependency added without anyone reading its terms, stops at the pre-commit gate rather than at a customer.
+#
+# The values are SPDX identifiers, or SPDX expressions where an upstream offers a choice ("MIT OR Unlicense").
+# An expression is allowed when *every* identifier in it is allowed, since we may pick any of them.
+# Anything genuinely outside SPDX gets a `LicenseRef-` name and an entry under `exceptions`, never a
+# convenient-looking approximation.
+
+# Permissive licenses we accept without further thought.
+# Adding one here is a policy decision — argue it in the PR, do not slip it in with a bump.
+allowed:
+  - identifier: MIT
+    why: Permissive, attribution only. The bulk of our tree, and our own license.
+  - identifier: BSD-2-Clause
+    why: Permissive, attribution only.
+  - identifier: BSD-3-Clause
+    why: Permissive, attribution plus a no-endorsement clause we can satisfy.
+  - identifier: Zlib
+    why: Permissive, attribution only, with no requirement to ship the notice for binary distribution.
+  - identifier: Apache-2.0
+    why: Permissive with an explicit patent grant.
+  - identifier: Apache-2.0 WITH LLVM-exception
+    why: Apache-2.0 minus the notice requirement for compiled output, which is what makes it linkable into a binary.
+  - identifier: CC0-1.0
+    why: Public-domain dedication.
+  - identifier: Unlicense
+    why: Public-domain dedication.
+  - identifier: blessing
+    why: >-
+      SQLite's public-domain blessing. Imposes no conditions at all;
+      the identifier is SPDX's, oddly named because the text is a blessing rather than a license.
+
+# Non-SPDX licenses accepted case by case, each naming what was actually read and why it is tolerable.
+# Re-read the terms on any version bump — that is the whole reason these are listed individually rather than by category.
+exceptions:
+  - identifier: LicenseRef-Microsoft-DXC-Binary
+    why: >-
+      Microsoft Software License Terms for the prebuilt DirectX Shader Compiler release.
+      Proprietary, not open source: DXC's *source* is NCSA, but the binary release we download is not.
+      Accepted because it permits redistributing the distributable code (dxcompiler.dll, dxil.dll) with an
+      application, which is exactly and only how we use it, and because building DXC from source is an
+      LLVM-scale build we will not run in CI.
+      It is Windows-only and reaches no other platform's shipping bundle.
+
+# Licenses we will not take, listed so a refusal comes with a reason rather than a silent absence.
+denied:
+  - identifier: GPL-2.0-only
+    why: Copyleft. Linking it into our libraries would impose its terms on every consumer.
+  - identifier: GPL-3.0-only
+    why: Copyleft, plus patent and anti-tivoisation terms we cannot accept downstream.
+  - identifier: AGPL-3.0-only
+    why: Network copyleft. Reaches services built on our libraries, not just distributed binaries.
+  - identifier: LGPL-3.0-only
+    why: >-
+      Requires relinkability, which a statically linked C++ library cannot offer without shipping objects.
+      SDL vendors an LGPL-adjacent hidapi option; extern/sdl3/CMakeLists.txt sets SDL_HIDAPI OFF so it never compiles.

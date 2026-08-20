@@ -66,6 +66,13 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         # A moved file breaks links in other, untouched files, so this is always repo-wide: fix and scope are both ignored.
         return dev.report.summarize_crossrefs(dev.check_crossrefs(ctx.root), ctx.root)
 
+    def check_deps_licenses(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # A dependency's license is a property of the manifest set, not of the next commit's files, so this is repo-wide too.
+        # `--check` writes nothing and reaches no network, which is what makes it cheap enough to sit here; fix and scope are ignored.
+        from .deps import run_licenses
+
+        return run_licenses(ctx, check=True, verbose=verbose)
+
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
         # Not fixable, so fix and scope are ignored.
@@ -109,6 +116,8 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                             "(dirty-only; --commit or --all to rescope)",
                   True, check_format),
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
+        dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
+                  False, check_deps_licenses),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "
                   "(and where supported, sanitizer) presets",

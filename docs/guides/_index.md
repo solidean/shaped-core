@@ -25,6 +25,8 @@ Task-oriented how-tos for working in shaped-core.
   (instrument / train / optimize / measure), trained and measured via guide benchmarks.
 - [perf-results.md](perf-results.md) — guide benchmarks (`GUIDE_BENCHMARK` + `nx::guide`) and the
   `.perf.json` metric sidecar contract that `dev.py pgo` builds on.
+- [dependencies.md](dependencies.md) — the `extern/<dep>/dependency.yml` manifests, `dev.py deps list` / `deps licenses`, and the bump workflow.
+  Also the license allowlist that `dev.py check` gates on.
 - [cheat-sheets.md](cheat-sheets.md) — what a library cheat sheet is, its format, and where the
   colocated per-library sheets live (start with clean-core and nexus).
 - [postmortem.md](postmortem.md) — the end-of-session friction review behind the `/postmortem`

@@ -173,6 +173,7 @@ private:
     /// Both are shared because the actor owns the impl and only hands it back once it has stopped.
     cc::unique_ptr<cc::threaded_actor<impl::check_now>> _watcher;
     std::shared_ptr<cc::atomic<bool>> _watcher_stopping;
+    std::shared_ptr<cc::atomic<bool>> _watcher_poll_now;
     std::shared_ptr<impl::reload_wake> _wake;
 };
 

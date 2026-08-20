@@ -556,7 +556,7 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
     if tracer is None:
         ctx.die(f"{TRACER_TARGET} is not built for preset {preset.name!r} — it needs "
                 f"SC_BUILD_TOOLS=ON, Windows, and the fetched Zydis "
-                f"(uv run extern/zydis/fetch-zydis.py)")
+                f"(`uv run dev.py deps list` shows whether it is installed)")
 
     if external:
         # Symbols and source come from the PDB beside the exe, and without one the trace degrades to raw addresses.

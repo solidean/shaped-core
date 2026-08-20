@@ -30,9 +30,13 @@ cc::result<dx12_compute_pipeline_handle> dx12_compute_pipeline::create(ID3D12Dev
     }
 
     HRESULT hr = device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline->pipeline_state));
+    pipeline->_used_cached_pipeline = SUCCEEDED(hr) && !cached_pipeline.empty();
 
     // A stale or mismatched blob (e.g. after a driver update) fails PSO creation.
     // The cached PSO is a best-effort accelerator, so any failure with a blob present degrades to a fresh build rather than hard-failing.
+    //
+    // Taking this path is also the ONLY exact answer to "did the driver accept our blob" — d3d12 never silently
+    // ignores one — which is what used_cached_pipeline() reports.
     if (FAILED(hr) && !cached_pipeline.empty())
     {
         desc.CachedPSO = {};

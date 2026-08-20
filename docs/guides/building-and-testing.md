@@ -573,6 +573,24 @@ A program flag that collides with one of dev.py's own needs the `--` separator.
 `run` **refuses `*-test` targets** and points at `dev.py test` — bypassing discovery and result recording is exactly what the rule above forbids.
 It refuses `*-example` targets the same way, pointing at `dev.py example`, which resolves an example name across every example binary rather than making you find the one that holds it.
 
+## External dependencies (`deps`)
+
+`dev.py deps` reports what we pin under `extern/` and collects the licenses we ship.
+[dependencies.md](dependencies.md) is the full guide, including the manifest schema and the bump workflow.
+
+```bash
+uv run dev.py deps list              # every dependency, its pin, and what upstream offers now
+uv run dev.py deps list --offline    # manifests and installed pins only, no network
+uv run dev.py deps licenses          # regenerate docs/licenses/
+uv run dev.py deps licenses --check  # verify without writing; what `check` runs
+```
+
+Each dependency's pin lives in its own `extern/<dep>/dependency.yml`, which is what the vendor and fetch scripts read too.
+`list` reaches the network by default and caches for a day, so it stays out of `check`; `licenses --check` reaches none, so it is a gate.
+
+Worth knowing about `list`: its second block reports each fetched dependency as **current**, **stale** or **not fetched**.
+A `.install/` at the wrong pin is otherwise invisible, and is the thing that makes a build quietly use a version nobody chose.
+
 ## Sanitizers
 
 The `sanitize-*` presets are Debug builds with AddressSanitizer + UndefinedBehaviorSanitizer
