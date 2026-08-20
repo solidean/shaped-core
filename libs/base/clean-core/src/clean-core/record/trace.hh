@@ -29,9 +29,10 @@
 // That is exactly what cc::async's ambient chain already does, so a trace scope should BE an ambient scope carrying
 // an id, and then propagation, naming and the state deltas are one mechanism rather than two.
 //
-// The scope below is the thread-local stand-in until the ambient deltas land.
-// It is correct for synchronous work and it silently under-attributes the moment the work suspends: a `co_await`
-// moves the continuation to another thread, and this scope does not follow it.
+// That chain now carries async scopes (clean-core/record/async_scope.hh), so what remains is giving one an optional
+// id and deleting the thread-local path below.
+// Until then this scope is correct for synchronous work and silently under-attributes the moment the work suspends:
+// a `co_await` moves the continuation to another thread, and this scope does not follow it.
 // Ids and relations are unaffected either way — those are complete, and only attribution moves.
 
 /// The relation types that come up everywhere.

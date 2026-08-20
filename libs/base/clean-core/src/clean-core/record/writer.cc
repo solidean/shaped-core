@@ -194,6 +194,29 @@ bool cc::rec::impl::writer_rotate(isize needed)
     return w.cur + needed <= w.end;
 }
 
+bool cc::rec::impl::writer_reserve_event_and_pin(isize bytes)
+{
+    auto& w = t_writer;
+
+    auto const has_room = [&]
+    {
+        return w.current != nullptr && w.cur + bytes <= w.end
+            && isize(w.current->pin_count.load(cc::memory_order_relaxed)) < rec::chunk::pin_capacity;
+    };
+
+    if (has_room())
+        return true;
+
+    // A full pin array is as good a reason to rotate as a full chunk: the alternative is an event whose pin lives in
+    // a different chunk, which is a use-after-free waiting for the pool to recycle one of them.
+    if (w.current != nullptr && !w.current->is_sealed.load(cc::memory_order_relaxed))
+        seal_chunk(w.current, cc::current_cycles());
+    w.cur = nullptr;
+    w.end = nullptr;
+
+    return writer_rotate(bytes) && has_room();
+}
+
 void cc::rec::impl::writer_account_drop(isize bytes, u64 cycles)
 {
     auto& w = t_writer;

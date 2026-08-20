@@ -161,6 +161,17 @@ void drain_thread(processing& p, thread_state& ts)
         if (committed > ts.consume_offset)
         {
             dispatch(p, *c, ts, ts.consume_offset, committed);
+
+            // Carry the stream state past what was just dispatched, so the NEXT chunk's preamble is right.
+            // This is the whole reason the preamble is consumer-written: the producer would have to reconstruct
+            // what the consumer already knows.
+            auto const view = cc::rec::chunk_view{
+                .bytes = cc::span<byte const>(c->data + ts.consume_offset, isize(committed - ts.consume_offset))};
+            for (auto it = view.begin(); it != view.end(); ++it)
+                if (auto const e = *it; e.kind() == cc::rec::event_kind::ambient_changed)
+                    ts.consumer_state->ambient
+                        = reinterpret_cast<void*>(uintptr_t(e.field_as_u64("ambient").value_or(0)));
+
             ts.consume_offset = committed;
         }
 

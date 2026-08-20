@@ -172,6 +172,10 @@ cc::optional<u64> cc::rec::event_view::field_as_u64(cc::string_view field_name) 
         return read_as<u32, u64>(payload, *f);
     case rec::type_code::u64_:
         return read_as<u64, u64>(payload, *f);
+    case rec::type_code::pointer:
+        // An address is an identity here, not a number — which is exactly why it reads as the widest integer and
+        // never as a double.
+        return read_as<u64, u64>(payload, *f);
     default:
         return {};
     }

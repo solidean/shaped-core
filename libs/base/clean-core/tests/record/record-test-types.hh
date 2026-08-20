@@ -10,10 +10,14 @@
 
 // Shared scaffolding for the cc::rec tests.
 //
-// The recording system is a process-wide singleton with one initialize/shutdown pair, so every test that touches it
-// holds the same exclusion tag and none of them ever overlap.
+// The recording system is a process-wide singleton with one initialize/shutdown pair, and `shutdown()` requires that
+// no other thread is recording — see libs/base/clean-core/docs/systems/recording.md, "Lifecycle constraints".
+// Nexus opens an ambient scope per test, and an ambient scope publishes a delta, so EVERY test in this binary is a
+// recording thread the moment a fixture has the system up.
+// That is why these run alone rather than under a shared tag: an unrelated test in flight would be writing into the
+// pool a fixture is tearing down.
 
-#define REC_TEST(name_) TEST(name_, nx::config::exclusive("cc-record"))
+#define REC_TEST(name_) TEST(name_, nx::config::exclusive())
 
 namespace cc_rec_test
 {

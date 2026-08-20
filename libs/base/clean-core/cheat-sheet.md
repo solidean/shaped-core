@@ -959,6 +959,14 @@ CC_LOG_TRACE / _DEBUG / _INFO / _WARNING / _ERROR         // trace+debug off by 
 CC_RECORD_SCOPE();                           // times the block, named after the enclosing function
 CC_RECORD_SCOPE("upload-pass");              // ... or explicitly. MUST NOT cross a co_await (cc::async asserts)
 CC_RECORD_SCOPE_BEGIN("span"); CC_RECORD_SCOPE_END("span"); // when the two ends live in different functions
+
+#include <clean-core/record/async_scope.hh>
+CC_RECORD_ASYNC_SCOPE("load-level");         // an ambient-chain entry, so it DOES follow a co_await and every spawn
+cc::rec::current_async_scope();              // -> desc const*, the innermost one; null outside any
+// Pick by unit of work: async scope per logical operation, CC_RECORD_SCOPE per span of one thread's time.
+// It allocates a link and takes a refcount, so it is the heavier of the two — wrong tool for an inner loop.
+// Deltas are eager (an ambient_changed event at each cc::async restore that differs), because a chain of
+// co_awaits recording NOTHING still has to be attributed — the scope is about where time goes.
 CC_RECORD_MARK("fallback-taken");            // "did this code run" — the cheapest useful annotation
 CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES
 CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless
@@ -1037,7 +1045,7 @@ Tracing — correlating work the thread stack and the clock do not relate (the g
 CC_TRACE_SCOPE("handle-request");          // mints AND names the trace; the name is what a viewer shows
 CC_TRACE_SCOPE_WITH_ID("inbound", wire_id);// ... or carry an id from off the wire
 cc::rec::current_trace_id();  cc::rec::new_trace_id();   // per-thread counter; no allocation, registry or lock
-// INTERIM: thread-local, does NOT follow a co_await. Folds into cc::async's ambient chain later.
+// INTERIM: thread-local, does NOT follow a co_await. Folds onto an async scope carrying an id later.
 
 CC_RECORD_RELATION(cc::rec::relation_parent_of, request, fetch);      // n-ary; FIRST member is the subject
 CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c);           // symmetric: every member is a peer

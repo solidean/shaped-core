@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/fwd.hh>
+#include <clean-core/record/impl/ambient_hook.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/impl/async_tls.hh>
 
@@ -34,6 +35,11 @@ struct cc::async_ambient_link
     void* value = nullptr;
     async_ambient_link* parent = nullptr;
     cc::atomic<i32> refs = {1};
+
+    /// How many of `refs` are held by an OBSERVER rather than by outstanding work.
+    /// A recording that pinned this link keeps it alive without anything being left to run, and
+    /// async_ambient_scope::outstanding must not report that as work in flight.
+    cc::atomic<i32> observer_refs = {0};
 };
 
 namespace cc::impl
@@ -57,6 +63,28 @@ inline void async_ambient_release(void* a)
         async_ambient_free(l);
 }
 
+/// Retain `a` as an OBSERVER: the link stays alive, and outstanding() keeps reporting zero.
+/// This is for something that merely holds on to a context — a recording pinning it into a chunk — never for work.
+inline void async_ambient_observe(void* a)
+{
+    if (a == nullptr)
+        return;
+    auto* const l = static_cast<async_ambient_link*>(a);
+    l->observer_refs.fetch_add(1, cc::memory_order_relaxed);
+    l->refs.fetch_add(1, cc::memory_order_relaxed);
+}
+
+/// The counterpart to async_ambient_observe.
+inline void async_ambient_unobserve(void* a)
+{
+    if (a == nullptr)
+        return;
+    auto* const l = static_cast<async_ambient_link*>(a);
+    l->observer_refs.fetch_sub(1, cc::memory_order_relaxed);
+    if (l->refs.fetch_sub(1, cc::memory_order_acq_rel) == 1)
+        async_ambient_free(l);
+}
+
 /// Install `a` as the calling thread's ambient for a scope, restoring the previous head on the way out.
 /// A null `a` installs nothing, so a node with no context inherits whatever is driving it.
 ///
@@ -71,12 +99,28 @@ struct async_ambient_poll_scope
     {
         ++async_tls().poll_depth;
         if (a != nullptr)
+        {
             async_tls().ambient = a;
+
+            // The recorder only hears about a genuine change.
+            // A node with no token never gets here at all, and one adopting the context it already had compares equal
+            // — which is the common case on a worker draining related items.
+            if (a != _previous)
+            {
+                _changed = true;
+                cc::rec::impl::note_ambient_change(a);
+            }
+        }
     }
     ~async_ambient_poll_scope()
     {
         --async_tls().poll_depth;
         async_tls().ambient = _previous;
+
+        // Symmetric on purpose: the restore is a real transition, and leaving it out would bill everything the thread
+        // does after this poll to the context the poll installed.
+        if (_changed)
+            cc::rec::impl::note_ambient_change(_previous);
     }
 
     async_ambient_poll_scope(async_ambient_poll_scope const&) = delete;
@@ -84,6 +128,7 @@ struct async_ambient_poll_scope
 
 private:
     void* _previous = nullptr;
+    bool _changed = false;
 };
 
 /// Detach the calling thread's ambient for a scope, so what runs under it starts a fresh attribution root.
@@ -97,8 +142,18 @@ private:
 /// Without it a participant parked inside a logical task bills every unrelated item it steals to that task.
 struct async_ambient_root_scope
 {
-    async_ambient_root_scope() : _previous(async_tls().ambient) { async_tls().ambient = nullptr; }
-    ~async_ambient_root_scope() { async_tls().ambient = _previous; }
+    async_ambient_root_scope() : _previous(async_tls().ambient)
+    {
+        async_tls().ambient = nullptr;
+        if (_previous != nullptr)
+            cc::rec::impl::note_ambient_change(nullptr);
+    }
+    ~async_ambient_root_scope()
+    {
+        async_tls().ambient = _previous;
+        if (_previous != nullptr)
+            cc::rec::impl::note_ambient_change(_previous);
+    }
 
     async_ambient_root_scope(async_ambient_root_scope const&) = delete;
     async_ambient_root_scope& operator=(async_ambient_root_scope const&) = delete;
@@ -202,16 +257,26 @@ struct cc::async_ambient_install_scope
 {
     explicit async_ambient_install_scope(async_ambient_handle const& handle) : _previous(impl::async_tls().ambient)
     {
-        if (handle.head() != nullptr)
+        if (handle.head() != nullptr && handle.head() != _previous)
+        {
+            _changed = true;
             impl::async_tls().ambient = handle.head();
+            cc::rec::impl::note_ambient_change(handle.head());
+        }
     }
-    ~async_ambient_install_scope() { impl::async_tls().ambient = _previous; }
+    ~async_ambient_install_scope()
+    {
+        impl::async_tls().ambient = _previous;
+        if (_changed)
+            cc::rec::impl::note_ambient_change(_previous);
+    }
 
     async_ambient_install_scope(async_ambient_install_scope const&) = delete;
     async_ambient_install_scope& operator=(async_ambient_install_scope const&) = delete;
 
 private:
     void* _previous = nullptr;
+    bool _changed = false;
 };
 
 /// RAII push/pop of an ambient scope, and the ONLY supported way to install a link.

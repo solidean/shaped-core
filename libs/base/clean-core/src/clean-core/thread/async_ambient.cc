@@ -36,6 +36,9 @@ cc::async_ambient_scope::async_ambient_scope(void const* tag, void* value)
 
     _link = new (cc::placement_new, raw) async_ambient_link{tag, value, parent, {1}};
     impl::async_tls().ambient = _link;
+
+    // Creating a scope always changes the context, so this never needs the compare the poll sites do.
+    cc::rec::impl::note_ambient_change(_link);
 }
 
 cc::async_ambient_scope::~async_ambient_scope()
@@ -48,10 +51,12 @@ cc::async_ambient_scope::~async_ambient_scope()
     // The link is refcounted, so work outliving this scope is safe rather than dangling — see the type's docs.
 
     impl::async_tls().ambient = _link->parent;
+    cc::rec::impl::note_ambient_change(_link->parent);
     impl::async_ambient_release(_link);
 }
 
 i32 cc::async_ambient_scope::outstanding() const
 {
-    return _link->refs.load(cc::memory_order_acquire) - 1; // minus our own
+    // Minus our own, and minus every observer: a recording holding this link is not work in flight.
+    return _link->refs.load(cc::memory_order_acquire) - 1 - _link->observer_refs.load(cc::memory_order_acquire);
 }
