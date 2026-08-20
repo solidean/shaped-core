@@ -1,6 +1,10 @@
 #pragma once
 
 #include <clean-core/bytes/hash128.hh>
+#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
+#include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// The frozen schema of one bindable resource group/set: built from a shader's `binding`s, composed into a pipeline_layout, and instantiated by binding_groups.
@@ -20,9 +24,17 @@ public:
     /// disagree about which layouts are the same one.
     [[nodiscard]] cc::hash128 structural_hash() const { return _structural_hash; }
 
+    /// The reflected bindings this schema was built from, in the order they were declared — sampler bindings included, static ones among them.
+    /// A binding's position here is its *slot index*, the address a staging_binding_group resolves a name to.
+    [[nodiscard]] cc::span<binding const> bindings() const { return _bindings; }
+
 protected:
-    /// `structural_hash` must come from sg::impl::binding_group_layout_hash over the creation arguments.
-    explicit binding_group_layout(cc::hash128 structural_hash) : _structural_hash(structural_hash) {}
+    /// `structural_hash` must come from sg::impl::binding_group_layout_hash over the creation arguments, and `bindings` must be the span it hashed.
+    binding_group_layout(cc::hash128 structural_hash, cc::vector<binding> bindings)
+      : _structural_hash(structural_hash), _bindings(cc::move(bindings))
+    {
+    }
 
     cc::hash128 _structural_hash;
+    cc::vector<binding> _bindings;
 };

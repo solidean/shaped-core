@@ -323,6 +323,12 @@ protected:
                                                                                     cc::span<named_sampler const> samplers,
                                                                                     lifetime_scope scope) = 0;
 
+    /// Builds a staging_binding_group over `layout` — a mutable descriptor image, fully vacant, that mints binding_groups on demand.
+    /// `scope` must be persistent: a staging group exists to outlive the epoch that built it.
+    [[nodiscard]] virtual cc::result<staging_binding_group_handle> try_create_staging_binding_group(
+        binding_group_layout_handle layout,
+        lifetime_scope scope) = 0;
+
     backend_kind _backend;
     thread_model _thread_model;
     bool _is_shut_down = false;

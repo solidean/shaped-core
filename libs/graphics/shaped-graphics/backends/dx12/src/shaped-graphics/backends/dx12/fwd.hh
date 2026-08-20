@@ -84,11 +84,13 @@ class dx12_pipeline_layout;
 class dx12_compute_pipeline;
 class dx12_raster_pipeline;
 class dx12_binding_group;
+class dx12_staging_binding_group;
 using dx12_binding_group_layout_handle = std::shared_ptr<dx12_binding_group_layout const>;
 using dx12_pipeline_layout_handle = std::shared_ptr<dx12_pipeline_layout const>;
 using dx12_compute_pipeline_handle = std::shared_ptr<dx12_compute_pipeline const>;
 using dx12_raster_pipeline_handle = std::shared_ptr<dx12_raster_pipeline const>;
 using dx12_binding_group_handle = std::shared_ptr<dx12_binding_group const>;
+using dx12_staging_binding_group_handle = std::shared_ptr<dx12_staging_binding_group>; // mutable: it exists to be set
 
 // Ray-tracing pipeline + shader table (see dx12_raytracing_pipeline.hh / dx12_raytracing_shader_table.hh).
 class dx12_raytracing_pipeline;

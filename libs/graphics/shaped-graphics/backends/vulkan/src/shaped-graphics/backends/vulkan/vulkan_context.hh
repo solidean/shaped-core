@@ -152,6 +152,12 @@ public:
     {
         return cc::error("vulkan binding_group creation is not implemented yet");
     }
+    [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
+        sg::binding_group_layout_handle,
+        sg::lifetime_scope) override
+    {
+        return cc::error("vulkan staging_binding_group creation is not implemented yet");
+    }
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {

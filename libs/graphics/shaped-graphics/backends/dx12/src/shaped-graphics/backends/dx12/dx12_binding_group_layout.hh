@@ -16,7 +16,10 @@
 class sg::backend::dx12::dx12_binding_group_layout final : public sg::binding_group_layout
 {
 public:
-    explicit dx12_binding_group_layout(cc::hash128 structural_hash) : sg::binding_group_layout(structural_hash) {}
+    dx12_binding_group_layout(cc::hash128 structural_hash, cc::vector<sg::binding> bindings)
+      : sg::binding_group_layout(structural_hash, cc::move(bindings))
+    {
+    }
 
     /// A reflected binding plus where its descriptor(s) sit in the group's descriptor table.
     struct slot

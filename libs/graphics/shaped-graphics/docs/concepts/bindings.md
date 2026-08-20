@@ -49,6 +49,48 @@ Element resources are still kept alive by the group, exactly like scalar binding
 Arrays of samplers, uniform buffers or acceleration structures are not supported.
 Raster draws do not support array bindings yet.
 
+## Staging a group instead of rebuilding it
+
+A `binding_group` is immutable, so changing one binding means creating the group again — and creating it again writes *every* descriptor.
+At a handful of bindings that is free.
+At a bindless table of a few thousand it is the whole cost: re-pointing one texture reissues thousands of descriptor writes.
+
+[`staging_binding_group`](../../src/shaped-graphics/binding/staging_binding_group.hh) is the mutable builder that breaks that coupling.
+It owns a CPU-side descriptor image, `set` updates one descriptor in it, and `snapshot()` mints an immutable `binding_group` from the whole image.
+The immutable groups downstream are unchanged: a snapshot is an ordinary persistent `binding_group`, bound and hazard-declared like any other.
+
+- **A binding is addressed by `binding_slot`**, which `slot_of(name)` resolves once.
+  The slot is not a descriptor position: it indexes an internal table built at construction, pairing the layout's own `binding` with the heap and index its descriptors start at.
+  That indirection is what every set resolves and bounds-checks against, and it is why setting costs no string lookup and no search.
+  Validation reads the layout's binding through it rather than a copy, so what a set is checked against is exactly what the layout declared.
+- **The setters name the shape they act on and never infer it.**
+  `set_binding` is for a scalar binding and rejects an array.
+  `set_array_element` / `set_array_range` / `set_array` and their `unset_` twins are for an array binding and reject a scalar.
+  An element index is always an argument, never chosen for you, and always checked against the binding's count.
+  There is no `unset_binding`: only an array element can be *absent*, while a scalar is bound for the group's life and merely set to another view.
+  An empty scalar is one of those views rather than an absence — `sg::tlas_view{}` is the null acceleration structure every ray misses.
+- **`set_array` replaces, `set_array_range` patches.**
+  Both take a run of views and may place it at an offset, but `set_array` clears every element the run does not cover, so the array afterwards holds exactly what was passed.
+  `set_array_range` leaves everything outside the run alone.
+- **A snapshot is cached while nothing has changed.**
+  Two snapshots with no `set` between them are the *same* handle, so an unchanged frame copies nothing and rebinds nothing.
+- **A staging group starts fully vacant**, every descriptor at its binding's empty value.
+  Every binding still has to be set at least once before the first snapshot, exactly as `create_binding_group` rejects a binding that was not provided.
+  The demand is that you say what a binding holds, not that it holds anything: an array element may stay vacant, and `unset_array` — or even an empty range — is a perfectly good answer.
+  What it catches is the binding nobody wired, which reads zero at runtime and looks like a shader bug.
+  Only a static sampler is exempt, having no descriptor in the group to set.
+- **Snapshots are independent of the builder and of each other.**
+  Mutating after a snapshot only dirties the cache: each snapshot keeps its own resources alive, and stays valid for as long as anyone holds its handle.
+- **Not thread-safe** — one owner mutates it, and `snapshot()` counts as a mutation.
+
+In **dx12** the staging image is a private **non-shader-visible** descriptor heap, one per staging group.
+A `set` is a single `Create*View` into it.
+The backend seam is per *run* rather than per descriptor: one call writes a whole range, and a second clears one.
+So setting a range of a thousand elements is one dispatch, and a full `set_array` is three at most.
+A dirty `snapshot` allocates a persistent range in the shader-visible heap and fills it with one `CopyDescriptorsSimple`.
+That single driver-side descriptor copy, in place of a `Create*View` per slot, is what makes a large table affordable to re-snapshot.
+A clean `snapshot` does nothing at all.
+
 ## Samplers: not views
 
 A `sampler` binding (`is_sampler(binding_type)`) has no view: a sampler carries no memory and no `(access, shape)`, so `accepts` rejects any view for it.
@@ -101,6 +143,9 @@ A `binding_group`, being a per-instance set of bound resources, is genuinely lif
 `ctx.persistent.create_binding_group` for one that lives until released; `ctx.transient.create_binding_group` for per-frame scratch recycled when its epoch retires.
 The recording that binds and dispatches them — `cmd.compute.bind_pipeline` / `bind_group` / `dispatch` — is lifetime-agnostic.
 
+A `staging_binding_group` is persistent only: it exists to outlive the epoch that built it, and it is opened with `ctx.persistent.create_staging_binding_group`.
+Its snapshots are persistent groups too.
+
 The **dx12** backend implements the full chain.
 A `pipeline_layout` becomes the root signature, composed from its group layouts' descriptor tables and baked static samplers.
 A trailing 32-bit-constants root parameter is appended where the layout declares inline constants.
@@ -127,5 +172,6 @@ Texel/typed buffers (`Buffer<T>` / `RWBuffer<T>`) and append/consume/counter buf
 ## See also
 
 - [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
+- [staging_binding_group.hh](../../src/shaped-graphics/binding/staging_binding_group.hh) — the mutable builder and its `binding_slot` addressing.
 - [compiled_shader.hh](../../src/shaped-graphics/binding/compiled_shader.hh) — the shader data model.
 - [views](views.md) — the bound half: `raw_view` and the typed views that convert to it.

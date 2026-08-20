@@ -2,9 +2,11 @@
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
+#include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
@@ -459,11 +461,25 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
         return;
     }
     case sg::binding_type::uniform_buffer:
-    case sg::binding_type::sampler:
-    case sg::binding_type::acceleration_structure:
-        break;
+    {
+        // A null CBV: BufferLocation 0, size 0 — a legal descriptor whose loads read zero.
+        D3D12_CONSTANT_BUFFER_VIEW_DESC const desc = {};
+        device->CreateConstantBufferView(&desc, dst);
+        return;
     }
-    CC_UNREACHABLE("this binding kind never takes a vacant element");
+    case sg::binding_type::acceleration_structure:
+        create_accel_view(device, nullptr, dst); // the null acceleration structure — every ray misses it
+        return;
+    case sg::binding_type::sampler:
+    {
+        // A sampler heap's null value is the default sampler state, not a null descriptor: D3D12 has no
+        // null sampler, and an unset dynamic sampler filtering as the default is a sane resting state.
+        D3D12_SAMPLER_DESC const desc = to_d3d12_sampler_desc(sg::sampler{});
+        device->CreateSampler(&desc, dst);
+        return;
+    }
+    }
+    CC_UNREACHABLE("unhandled binding kind");
 }
 
 void create_accel_view(ID3D12Device* device, dx12_tlas const* tlas, D3D12_CPU_DESCRIPTOR_HANDLE dst)

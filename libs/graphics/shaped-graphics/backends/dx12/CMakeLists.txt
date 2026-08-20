@@ -29,6 +29,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.cc
     src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
+    src/shaped-graphics/backends/dx12/dx12_staging_binding_group.cc
     src/shaped-graphics/backends/dx12/dx12_descriptor_heap.cc
     src/shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.cc
     src/shaped-graphics/backends/dx12/dx12_view_desc.cc
@@ -76,6 +77,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh
     src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh
     src/shaped-graphics/backends/dx12/dx12_binding_group.hh
+    src/shaped-graphics/backends/dx12/dx12_staging_binding_group.hh
     src/shaped-graphics/backends/dx12/dx12_acceleration_structure.hh
     src/shaped-graphics/backends/dx12/dx12_query.hh
 )
@@ -124,6 +126,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-download-async-test.cc
         tests/dx12-copy-test.cc
         tests/dx12-compute-test.cc
+        tests/dx12-staging-binding-group-test.cc
         tests/dx12-pipeline-cache-test.cc
         tests/dx12-cached-pso-test.cc
         tests/dx12-placed-test.cc

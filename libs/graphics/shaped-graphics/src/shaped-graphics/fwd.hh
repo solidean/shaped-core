@@ -204,6 +204,11 @@ struct bound_view;    // one raw_view (inline) or a vector of them — a named_v
 struct named_view;    // {name, bound_view} — input to create_binding_group (one view per array element)
 struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
 
+// The mutable builder above the immutable group: set descriptors one at a time, snapshot an immutable binding_group out of it.
+// See binding/staging_binding_group.hh.
+class staging_binding_group;
+enum class binding_slot : u32; // opaque binding identity inside a staging_binding_group
+
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the
 // pipeline/primitive_topology.hh / pipeline/rasterization_state.hh / pipeline/blend_state.hh / pipeline/depth_stencil_state.hh /
 // pipeline/vertex_input.hh state headers). All value types unless noted.
@@ -323,6 +328,8 @@ using raster_pipeline_handle = std::shared_ptr<raster_pipeline const>; // immuta
 using raytracing_pipeline_handle = std::shared_ptr<raytracing_pipeline const>; // immutable DXR state object + shader ids
 using raytracing_shader_table_handle = std::shared_ptr<raytracing_shader_table const>; // immutable table over a pipeline
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
+// Mutable, unlike every other resource handle here: a staging group exists to be set, and snapshot() caches on it.
+using staging_binding_group_handle = std::shared_ptr<staging_binding_group>;
 using swapchain_handle = std::shared_ptr<swapchain>; // mutable: a swapchain is a per-frame driver (acquire/present)
 
 // Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,

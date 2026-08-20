@@ -49,6 +49,8 @@ src/shaped-graphics/
     binding_group_layout.hh/.cc   [in progress] abstract: one group's schema; dx12 = descriptor-table schema (vulkan stub)
     pipeline_layout.hh/.cc        [in progress] abstract: ordered group layouts (bind slots); dx12 = root signature (vulkan stub)
     binding_group.hh/.cc          [in progress] abstract: group-layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
+    staging_binding_group.hh/.cc  [in progress] abstract: mutable descriptor image that mints immutable groups (binding_slot -> slot table, shape-named setters, snapshot);
+                                                dx12 = private non-shader-visible heap + CopyDescriptorsSimple (vulkan stub)
 
   command_list/
     command_list.hh/.cc           [in progress] abstract, single-use recorder; owns the seven scopes below and the backend seams they call
@@ -195,7 +197,8 @@ barriers             [in progress]  inferred access + state tracking + concurren
 views                [in progress]  strongly-typed resource views; buffer + texture (SRV/UAV) views done (dx12 bindable
                                   in compute); render_target/depth_stencil views done and consumed by the rendering
                                   scope; texel buffers deferred
-bindings             [in progress]  compiled_shader + binding vocab; binding_group_layout / pipeline_layout / group + compute_pipeline (dx12 real, vulkan stub)
+bindings             [in progress]  compiled_shader + binding vocab; binding_group_layout / pipeline_layout / group + compute_pipeline (dx12 real, vulkan stub).
+                                  Bounded array bindings and staging_binding_group (the mutable builder behind a bindless table) are in; unbounded arrays are not
 texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation, dx12 layout barriers,
                                   SRV/UAV + RTV/DSV views and host↔device copies done; device→device copies remain
 pipeline             [in progress]  compute + raster pipelines and the bind path (dx12 real, vulkan stub); shaders are
