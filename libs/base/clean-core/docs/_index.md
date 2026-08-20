@@ -72,6 +72,8 @@ Deep dives on the internal machinery, including holes and gotchas not obvious fr
 - [systems/node-allocation](systems/node-allocation.md) — the slab allocator for small nodes: size classes, wait-free cross-thread free, and the slab lifecycle across thread exit and adoption.
 - [systems/shared-ptr](systems/shared-ptr.md) — `cc::shared_ptr` / `cc::weak_ptr`, the 8 B intrusive-refcount handle pair over one slab node.
   The Traits protocol is provisional and shaped by async's needs; the lifetime and release/adopt contracts are not.
+- [systems/compression](systems/compression.md) — which algorithm, which level, and when a small blob needs a dictionary, measured on payloads we actually store.
+  The short version: under a few hundred bytes nothing compresses without a dictionary, and zstd 19 costs 180x zstd 3's time for 24% better ratio.
 - [systems/async](systems/async.md) — `cc::async<T, E>`, the value/dataflow async.
   The frame model, the never-blocking poll loop, the 64 B node layout, the work-stealing pool, and what a node costs.
 

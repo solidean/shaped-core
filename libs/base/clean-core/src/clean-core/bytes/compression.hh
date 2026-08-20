@@ -15,10 +15,12 @@
 //   auto const back = cc::decompress(blob).value();                           // sniffs the frame
 //   auto const fast = cc::compress(payload, {.algorithm = cc::compression_algorithm::lz4, .level = -4});
 //
-// Dictionaries are bytes/compression_dictionary.hh.
+// Which algorithm and level to actually pick, measured on payloads we store: ../../../docs/systems/compression.md.
+// Dictionaries are bytes/compression_dictionary.hh, and streaming is bytes/compression_stream.hh.
 //
-// Every entry point takes the whole input and produces the whole output, both in memory.
-// There is no streaming form yet, and nothing here starts a worker pool behind a caller's back.
+// Every entry point here takes the whole input and produces the whole output, both in memory; the stream adapters are
+// what a payload too large for that goes through.
+// Nothing in either starts a worker pool behind a caller's back.
 
 /// Which algorithm.
 /// Stored in file formats, so the values are stable and only ever appended to.

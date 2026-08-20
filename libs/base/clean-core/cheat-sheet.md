@@ -587,6 +587,33 @@ cc::blake3::create(bytes);                 // -> hash256, one-shot
 cc::blake3 h;  h.update(bytes);  h.finalize();  h.reset();  // streaming: hash a sequence without concatenating it
 // finalize() is const and repeatable; update() may continue after it
 // ~8-20x slower than XXH3 depending on input size (tests/benchmarks/hash-benchmark.cc measures both)
+
+#include <clean-core/bytes/compression.hh>  // zstd + lz4; the algorithm is a VALUE a format writes down
+cc::compress(bytes);                       // -> vector<byte>; zstd, default level, framed. NO failure channel: preconditions assert
+cc::compress(bytes, {.algorithm = cc::compression_algorithm::lz4, .level = -4});
+cc::compress_into(bytes, out, cfg);        // -> result<isize> written; out >= compress_bound(size, cfg)
+cc::compress_bound(size, cfg);             // -> isize worst case; a buffer this large always suffices
+cc::decompress(blob);                      // -> result<vector<byte>>; sniffs the frame magic
+cc::decompress(blob, {.algorithm = a, .max_output_size = n});  // untrusted input MUST cap; default is no limit
+cc::decompress_into(blob, out, cfg);       // -> result<isize>; the only form that reads an lz4 `raw` blob
+cc::detect_algorithm(blob);                // -> optional<algorithm>; nullopt on raw and on garbage
+cc::decompressed_size(blob);               // -> optional<isize> the frame declares, without decompressing
+cc::compressor c(cfg);  c.compress(bytes); // reuse tier for MANY SMALL blobs; not thread-safe, one per thread
+cc::decompressor d(cfg);  d.decompress(blob);
+// level is the ALGORITHM'S own scale, never normalized; 0 = its default. zstd 1..22 (default 3), negatives are fast modes
+// framing: frame (magic + size + checksum, sniffable) | raw (stripped; format must record algorithm, and size for lz4)
+// under ~a few hundred bytes NOTHING compresses without a dictionary — see docs/systems/compression.md
+
+#include <clean-core/bytes/compression_dictionary.hh>  // shared context that makes small blobs compress at all
+cc::compression_dictionary::from_bytes(algo, raw);     // adopt content; lz4 has no other form
+cc::compression_dictionary::train(algo, samples, n);   // -> result<dict>; zstd only, ~100 samples minimum
+dict.algorithm();  dict.id();  dict.bytes();           // id() is what a format records; 0 when there is none
+// a const dictionary is shareable across threads, unlike the compressors themselves
+
+#include <clean-core/bytes/compression_stream.hh>  // compression as a stream filter; `frame` framing only
+cc::decompressing_read_stream_adapter::create(inner, {.algorithm = a});  // -> result<adapter>; not seekable
+cc::compressing_write_stream_adapter::create(inner, cfg);
+w.finish();                                // -> result<i64>; MUST be called or the frame is unreadable
 ```
 
 ## Comparators

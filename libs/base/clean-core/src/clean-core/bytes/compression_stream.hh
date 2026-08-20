@@ -22,7 +22,7 @@
 //
 // LIFETIME, and it is two levels deep here.
 // A stream borrows into its adapter's inline buffer, so the adapter must outlive any stream taken from it and must
-// not be moved once one is live — the usual rule, from docs/writing-a-stream.md.
+// not be moved once one is live — the usual rule, from ../../../docs/writing-a-stream.md.
 // On top of that, these adapters hold an INNER stream by value, which borrows into ITS adapter.
 // So the inner adapter must outlive this one, and neither hop is something the compiler can check for you.
 
