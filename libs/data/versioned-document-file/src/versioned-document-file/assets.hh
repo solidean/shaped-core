@@ -1,6 +1,6 @@
 #pragma once
 
-#include <clean-core/common/hash256.hh>
+#include <clean-core/bytes/hash256.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>

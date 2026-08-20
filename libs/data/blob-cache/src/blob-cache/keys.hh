@@ -1,9 +1,9 @@
 #pragma once
 
 #include <blob-cache/fwd.hh>
-#include <clean-core/common/blake3.hh>
+#include <clean-core/bytes/blake3.hh>
+#include <clean-core/bytes/hash256.hh>
 #include <clean-core/common/hash.hh>
-#include <clean-core/common/hash256.hh>
 #include <clean-core/common/utility.hh> // cc::memcmp
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>

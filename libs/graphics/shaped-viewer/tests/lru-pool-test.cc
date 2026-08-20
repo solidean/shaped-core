@@ -1,4 +1,4 @@
-#include <clean-core/common/hash128.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/fwd.hh> // sg::epoch
 #include <shaped-viewer/resources/impl/lru_pool.hh>

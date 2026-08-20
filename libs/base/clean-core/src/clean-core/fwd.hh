@@ -332,12 +332,22 @@ using weak_async = weak_ptr<async<T, E>, impl::async_node_traits>;
 
 
 //
-// Hashing
+// Bytes
 //
 
 struct hash128;
 struct hash256;
 class blake3;
+
+enum class compression_algorithm : u8;
+enum class compression_framing : u8;
+struct compression_config;
+struct decompression_config;
+struct compression_dictionary;
+struct compressor;
+struct decompressor;
+struct decompressing_read_stream_adapter;
+struct compressing_write_stream_adapter;
 
 
 //

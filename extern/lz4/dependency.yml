@@ -1,0 +1,20 @@
+# Pin and license for the upstream vendored here.
+# vendor-lz4.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: LZ4
+    homepage: https://github.com/lz4/lz4
+    source: git
+    repo: https://github.com/lz4/lz4
+    track: tags
+    tag: v1.10.0
+    digest_algo: git-commit
+    pin_hash: ebb370ca83af193212df4dcbadcc5d87bc0de2f0
+    license: BSD-2-Clause
+    license_files: [LICENSE]
+    used_by: clean-core — cc::compress / cc::decompress, the LZ4 algorithm
+    notes: |
+      The repository is split by license: everything under `lib/` is BSD-2-Clause, everything else is GPL-2.0-or-later.
+      Only `lib/` is vendored, so BSD-2-Clause is the whole of what is here — the vendored LICENSE is `lib/LICENSE`, upstream's own text for exactly that directory.
+      The CLI under `programs/` is where the GPL lives, and vendor-lz4.py never copies it.

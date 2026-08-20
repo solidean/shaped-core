@@ -1,7 +1,7 @@
 # byte hash benchmark (xxHash)
 
 Throughput of the raw xxHash entry points behind clean-core's hashing — `XXH3_64bits_withSeed` and `XXH3_128bits_withSeed` — and of the thin wrappers over them,
-`cc::make_hash_of_bytes` and [`cc::hash128::create`](../../src/clean-core/common/hash128.hh), over a key-length sweep.
+`cc::make_hash_of_bytes` and [`cc::hash128::create`](../../src/clean-core/bytes/hash128.hh), over a key-length sweep.
 Unlike the [string-hash benchmark](string-hash-benchmark.md), this hashes raw byte ranges, with no string or SSO layer.
 
 Source: [tests/benchmarks/hash-benchmark.cc](../../tests/benchmarks/hash-benchmark.cc).

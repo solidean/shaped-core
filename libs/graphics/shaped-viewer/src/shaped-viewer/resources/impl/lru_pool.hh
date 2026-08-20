@@ -1,7 +1,7 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh> // cc::hash128 (the content key)
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/hash128.hh> // cc::hash128 (the content key)
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>

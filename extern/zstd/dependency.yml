@@ -1,0 +1,20 @@
+# Pin and license for the upstream vendored here.
+# vendor-zstd.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: Zstandard
+    homepage: https://github.com/facebook/zstd
+    source: git
+    repo: https://github.com/facebook/zstd
+    track: tags
+    tag: v1.5.7
+    digest_algo: git-commit
+    pin_hash: f8745da6ff1ad1e7bab384bd1f9d742439278e99
+    license: BSD-3-Clause
+    license_files: [LICENSE]
+    used_by: clean-core — cc::compress / cc::decompress, the Zstandard algorithm
+    notes: |
+      Upstream offers the library under BSD-3-Clause OR GPL-2.0, at the consumer's choice.
+      We take the BSD-3-Clause branch, which is the header every file under `lib/` carries, and vendor only upstream's `LICENSE` — its BSD-3-Clause text.
+      `COPYING`, the GPL-2.0 text, is deliberately not vendored: declaring the `OR` expression here would offer a branch we do not exercise and that the license policy denies.

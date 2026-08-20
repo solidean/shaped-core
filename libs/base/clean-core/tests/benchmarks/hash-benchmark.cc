@@ -31,9 +31,9 @@
 #include "bench_util.hh"
 
 #include <blake3.h>
-#include <clean-core/common/blake3.hh>
+#include <clean-core/bytes/blake3.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/common/hash.hh>
-#include <clean-core/common/hash128.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>

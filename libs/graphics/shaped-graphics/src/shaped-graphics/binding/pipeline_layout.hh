@@ -1,6 +1,6 @@
 #pragma once
 
-#include <clean-core/common/hash128.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/binding/binding.hh>

@@ -34,3 +34,23 @@ Add entries as we discover them, and remove them as they land.
 - **Grow `tuple` and `variant`.**
   The first version deliberately left out converting construction from another `tuple<Us...>`, `tuple_cat`, `variant`'s `operator<=>` and multi-variant visitation.
   A `to_string` hidden friend for `variant` is missing too — it would drag `to_debug_string.hh` into a container header, so a `variant` currently debug-prints as a raw byte dump.
+
+## bytes
+
+- **base64.**
+  `babel::base64` exists and is text-oriented: it takes a `cc::string_view`, tolerates whitespace and both alphabets, and returns a `cc::string`.
+  A byte-level codec belongs here instead, and moving babel's would drag its tolerant-input contract down with it — the two want different answers on malformed input.
+  Blocked on somebody below babel needing it; nobody does yet.
+- **CRC32 and Adler32.**
+  Wanted by every container format that stores a per-member checksum — zip, gzip, PNG — so this lands with the first of those rather than before it.
+  Neither is a hash in the `common/hash.hh` sense and neither is cryptographic; they belong next to the codecs, not next to `blake3`.
+- **Further compression algorithms, deflate first.**
+  Deflate is what a zip or gzip container needs, and it slots in as one `compression_algorithm` value plus one backend file.
+  Its three framings — raw deflate, zlib and gzip — are exactly what `compression_framing` already models, which is why that is an axis rather than a bool.
+  Adding it also means a line in `cc::detect_algorithm`, which is the edit that compiles cleanly when forgotten.
+- **Async compression.**
+  `compress_async`, mirroring `algorithm/sort_async.hh`: explicit extra API over the synchronous core, never a hidden worker pool.
+  zstd's own multithreading is deliberately not enabled, so this would chunk over `cc::async` instead and keep the memory cost where the caller can see it.
+- **Error correction.**
+  Reed-Solomon or similar, for bytes that have to survive a corrupted medium rather than merely get smaller.
+  Speculative — nothing here needs it yet, and it is listed so the folder's shape is on record rather than because it is planned.

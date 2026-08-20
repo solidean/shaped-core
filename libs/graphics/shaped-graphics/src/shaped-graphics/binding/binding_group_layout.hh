@@ -1,6 +1,6 @@
 #pragma once
 
-#include <clean-core/common/hash128.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// The frozen schema of one bindable resource group/set: built from a shader's `binding`s, composed into a pipeline_layout, and instantiated by binding_groups.

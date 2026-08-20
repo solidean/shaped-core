@@ -234,6 +234,29 @@ TEST("stream - read_all keeps reading past a size hint the source outgrew")
     CHECK(bytes_equal(all.value(), cc::span<byte const>(source)));
 }
 
+TEST("stream - answering remaining_size_hint does not make a source seekable")
+{
+    // The two questions are deliberately separate dirs.
+    // A source that knows its own length but cannot be repositioned — a decompressing stream that has read a frame
+    // header — must be able to answer the first without being upgraded on the strength of it, because it cannot
+    // service the seeks that would follow.
+    byte source[40];
+    for (auto i = isize(0); i < isize(sizeof(source)); ++i)
+        source[i] = b(int(i));
+
+    auto adapter = mock_growing_read_stream_adapter(cc::span<byte const>(source), isize(40), isize(16));
+    cc::read_stream s = adapter.stream();
+
+    auto upgraded = cc::move(s).try_as_seekable();
+    CHECK(!upgraded.has_value());
+    CHECK(s.is_valid());
+
+    // and the hint it does answer still reaches read_all
+    auto all = s.read_all();
+    REQUIRE(all.has_value());
+    CHECK(bytes_equal(all.value(), cc::span<byte const>(source)));
+}
+
 TEST("stream - read_all on an empty source yields an empty buffer")
 {
     auto adapter = cc::span_read_stream_adapter(cc::span<byte const>());

@@ -1,4 +1,4 @@
-#include <clean-core/common/hash128.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
 #include <nexus/test.hh>
 

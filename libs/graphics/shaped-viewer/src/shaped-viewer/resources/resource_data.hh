@@ -1,7 +1,7 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh> // cc::hash128
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/hash128.hh> // cc::hash128
 #include <clean-core/common/utility.hh> // cc::forward, cc::move
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>

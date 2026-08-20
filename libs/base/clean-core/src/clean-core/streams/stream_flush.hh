@@ -24,6 +24,7 @@
 //   seek_offset, dir - the requested op.
 //                 (relative, 0) is a PLAIN FLUSH: refill the read window or write through the pending bytes, with no logical move.
 //                 The dry_* dirs only COMPUTE the resulting global position, and must not touch curr/end/write_end or the buffer.
+//                 remaining_size_hint is not a seek at all — see its own note below.
 //   first_write - start of the pending writes to flush through: the bytes [first_write, curr) must be written to the sink.
 //                 nullptr on reads, or when nothing is pending.
 //                 Do NOT reset it — the stream does, after a successful non-dry flush.
@@ -31,11 +32,16 @@
 // Return the global position of `curr` after the op, or -1 when the source has no meaningful position or is not seekable, or a cc::result error on I/O failure.
 // A stream is at its end iff `curr == end` AFTER a flush.
 //
+// remaining_size_hint answers a different question and returns a COUNT rather than a position: how many bytes are still to come after `curr`.
+// It exists so that a source which knows its own length can say so WITHOUT claiming to be seekable — a decompressing stream reading a frame header is the case it was added for.
+// Answering it is optional; -1 means "no idea", which costs the caller one growing allocation and nothing else.
+// try_as_seekable never asks it, so answering has no bearing on whether a stream can be upgraded.
+//
 // CALLER CONTRACT: the stream never calls flush with a dir outside its capability — a non-seekable stream issues no seeks, a read-only stream no write-through.
 // So your flush may assert on an unsupported op rather than handle it, and an unsupported seek on a non-seekable source should return -1.
 
-/// Where a seek offset is measured from.
-/// The dry_* variants only compute the resulting global position; they never move curr/end or disturb the buffer.
+/// Where a seek offset is measured from, plus the one query that is not a seek.
+/// The dry_* variants and remaining_size_hint only compute; they never move curr/end or disturb the buffer.
 enum class cc::seek_dir : cc::u8
 {
     begin,        // seek to `offset` bytes from the start
@@ -44,6 +50,10 @@ enum class cc::seek_dir : cc::u8
     dry_begin,    // like begin, but only report the resulting position — no mutation, no I/O
     dry_relative, // like relative (dry_relative, 0 == current position; also the seekability probe)
     dry_end,      // like end (dry_end, 0 == total size)
+
+    // NOT a seek: bytes still to come after `curr`, or -1 when unknown.
+    // `offset` is ignored, and a non-seekable source may answer — which is the whole point of it being separate from the dry_* probes.
+    remaining_size_hint,
 };
 
 namespace cc

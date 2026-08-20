@@ -86,6 +86,12 @@ cc::result<i64> file_read_stream_adapter::impl_flush(byte*& curr,
         CC_RETURN_IF_ERROR(sz);
         return sz.value() + offset;
     }
+    case sd::remaining_size_hint:
+    {
+        auto sz = self._file.size();
+        CC_RETURN_IF_ERROR(sz);
+        return cc::max(i64(0), sz.value() - pos);
+    }
     }
     CC_UNREACHABLE("invalid seek_dir");
 }
@@ -211,6 +217,8 @@ cc::result<i64> file_write_stream_adapter::impl_flush(byte*& curr,
         CC_RETURN_IF_ERROR(sz);
         return cc::max(sz.value(), pos) + offset;
     }
+    case sd::remaining_size_hint:
+        return i64(-1); // nothing remains to be READ from a write-only stream
     }
     CC_UNREACHABLE("invalid seek_dir");
 }
@@ -326,6 +334,12 @@ cc::result<i64> file_read_write_stream_adapter::impl_flush(byte*& curr,
         auto sz = self._file.size();
         CC_RETURN_IF_ERROR(sz);
         return cc::max(sz.value(), pos) + offset; // include buffered growth past the on-disk size
+    }
+    case sd::remaining_size_hint:
+    {
+        auto sz = self._file.size();
+        CC_RETURN_IF_ERROR(sz);
+        return cc::max(i64(0), cc::max(sz.value(), pos) - pos); // buffered growth counts here too
     }
     }
     CC_UNREACHABLE("invalid seek_dir");
