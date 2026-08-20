@@ -484,9 +484,11 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 ```cpp
 #include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
 sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
-sg::named_view              // { cc::string name; cc::vector<raw_view> views }  — input to create_binding_group (a typed view converts)
-                            //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element
+sg::named_view              // { cc::string name; bound_view view }  — input to create_binding_group (a typed view converts)
+sg::bound_view             // one raw_view (stored inline, `.view = tex.as_readonly_view()`) or a cc::vector<raw_view> for an array binding
+                            //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element (`.view = cc::move(vec)`)
                             //   vacant array element = sg::vacant_view{} -> null descriptor synthesized from the BINDING (type + texture_dimension)
+                            //   consumers read both arms via .span() / .size()
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `set`)

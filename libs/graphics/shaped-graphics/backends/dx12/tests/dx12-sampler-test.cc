@@ -94,7 +94,7 @@ INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group bu
     REQUIRE(tex.has_value());
     auto const typed = sg::texture_2d::from_raw(tex.value());
 
-    sg::named_view const views[] = {{.name = "Tex", .views = {typed.as_readonly_view()}}};
+    sg::named_view const views[] = {{.name = "Tex", .view = typed.as_readonly_view()}};
     sg::named_sampler const dyn[] = {{.name = "Dyn", .sampler = {.mag_filter = sg::sampler_filter::nearest}}};
 
     auto group = c.create_dx12_binding_group(layout.value(), views, dyn, sg::lifetime_scope::persistent);

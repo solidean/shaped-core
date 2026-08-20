@@ -116,22 +116,24 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access,
     ctx.submit_command_list(cc::move(up));
 
     // Groups: Out at slot 0; the arrays at slots 1 and 2, vacant elements as the vacant marker.
-    sg::named_view const g0_view = {.name = "Out", .views = {sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()}};
+    sg::named_view const g0_view = {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()};
     auto g0 = ctx.persistent.create_binding_group(group_layout0, cc::span<sg::named_view const>(&g0_view, 1));
     REQUIRE(g0 != nullptr);
 
-    auto bufs_nv = sg::named_view{.name = "Bufs", .views = {}};
-    bufs_nv.views.push_back(sg::buffer<byte>::from_raw(b0_buf).as_readonly_buffer());
-    bufs_nv.views.push_back(sg::vacant_view{});
-    bufs_nv.views.push_back(sg::vacant_view{});
-    bufs_nv.views.push_back(sg::buffer<byte>::from_raw(b3_buf).as_readonly_buffer());
+    auto buf_elements = cc::vector<sg::raw_view>();
+    buf_elements.push_back(sg::buffer<byte>::from_raw(b0_buf).as_readonly_buffer());
+    buf_elements.push_back(sg::vacant_view{});
+    buf_elements.push_back(sg::vacant_view{});
+    buf_elements.push_back(sg::buffer<byte>::from_raw(b3_buf).as_readonly_buffer());
+    auto const bufs_nv = sg::named_view{.name = "Bufs", .view = cc::move(buf_elements)};
     auto g1 = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&bufs_nv, 1));
     REQUIRE(g1 != nullptr);
 
-    auto texs_nv = sg::named_view{.name = "Texs", .views = {}};
+    auto tex_elements = cc::vector<sg::raw_view>();
     for (isize i = 0; i < 4; ++i)
-        texs_nv.views.push_back(sg::vacant_view{});
-    texs_nv.views[1] = sg::texture_2d::from_raw(tex).as_readonly_view();
+        tex_elements.push_back(sg::vacant_view{});
+    tex_elements[1] = sg::texture_2d::from_raw(tex).as_readonly_view();
+    auto const texs_nv = sg::named_view{.name = "Texs", .view = cc::move(tex_elements)};
     auto g2 = ctx.persistent.create_binding_group(group_layout2, cc::span<sg::named_view const>(&texs_nv, 1));
     REQUIRE(g2 != nullptr);
 
@@ -205,17 +207,19 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::con
 
     auto out_buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readwrite_buffer);
     REQUIRE(out_buf != nullptr);
-    sg::named_view const g0_view = {.name = "Out", .views = {sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()}};
+    sg::named_view const g0_view = {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()};
     auto g0 = ctx.persistent.create_binding_group(group_layout0, cc::span<sg::named_view const>(&g0_view, 1));
 
     // All-vacant arrays: null descriptors read as zero, so no data setup is needed here.
-    auto bufs_nv = sg::named_view{.name = "Bufs", .views = {}};
-    auto texs_nv = sg::named_view{.name = "Texs", .views = {}};
+    auto buf_elements = cc::vector<sg::raw_view>();
+    auto tex_elements = cc::vector<sg::raw_view>();
     for (isize i = 0; i < 4; ++i)
     {
-        bufs_nv.views.push_back(sg::vacant_view{});
-        texs_nv.views.push_back(sg::vacant_view{});
+        buf_elements.push_back(sg::vacant_view{});
+        tex_elements.push_back(sg::vacant_view{});
     }
+    auto const bufs_nv = sg::named_view{.name = "Bufs", .view = cc::move(buf_elements)};
+    auto const texs_nv = sg::named_view{.name = "Texs", .view = cc::move(tex_elements)};
     auto g1 = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&bufs_nv, 1));
     auto g2 = ctx.persistent.create_binding_group(group_layout2, cc::span<sg::named_view const>(&texs_nv, 1));
     REQUIRE(g1 != nullptr);

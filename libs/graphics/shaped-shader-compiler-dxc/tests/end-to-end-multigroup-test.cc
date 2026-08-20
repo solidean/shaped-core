@@ -102,16 +102,14 @@ INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 grou
 
     // Groups: slot 0 = {A, Out} (bound once), slot 1 = two groups over B1 / B2 (swapped between dispatches).
     sg::named_view const g0_views[] = {
-        {.name = "A", .views = {sg::buffer<u32>::from_raw(a_buf).as_readonly_buffer()}},
-        {.name = "Out", .views = {sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()}},
+        {.name = "A", .view = sg::buffer<u32>::from_raw(a_buf).as_readonly_buffer()},
+        {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()},
     };
     auto g0 = ctx.persistent.create_binding_group(group_layout0, g0_views);
     REQUIRE(g0 != nullptr);
 
-    auto const g1_b1_view
-        = sg::named_view{.name = "B", .views = {sg::buffer<u32>::from_raw(b1_buf).as_readonly_buffer()}};
-    auto const g1_b2_view
-        = sg::named_view{.name = "B", .views = {sg::buffer<u32>::from_raw(b2_buf).as_readonly_buffer()}};
+    auto const g1_b1_view = sg::named_view{.name = "B", .view = sg::buffer<u32>::from_raw(b1_buf).as_readonly_buffer()};
+    auto const g1_b2_view = sg::named_view{.name = "B", .view = sg::buffer<u32>::from_raw(b2_buf).as_readonly_buffer()};
     auto g1_b1 = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&g1_b1_view, 1));
     auto g1_b2 = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&g1_b2_view, 1));
     REQUIRE(g1_b1 != nullptr);

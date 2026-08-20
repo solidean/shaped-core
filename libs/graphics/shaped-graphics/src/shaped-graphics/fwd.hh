@@ -200,7 +200,8 @@ struct pipeline_layout_description; // {groups, static_samplers} — input to cr
 class compute_pipeline;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
-struct named_view;    // {name, vector<raw_view>} — input to create_binding_group (one view per array element)
+struct bound_view;    // one raw_view (inline) or a vector of them — a named_view's element list
+struct named_view;    // {name, bound_view} — input to create_binding_group (one view per array element)
 struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
 
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the

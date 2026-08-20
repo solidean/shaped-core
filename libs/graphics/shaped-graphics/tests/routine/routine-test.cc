@@ -96,7 +96,7 @@ public:
         auto const pipeline = cc::async_blocking_get(self._pipeline);
 
         auto const group = cmd.context().transient.create_binding_group(
-            self._group_layout, {{.name = "gValues", .views = {out.as_readwrite_buffer()}}});
+            self._group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
 
         cmd.compute.bind_pipeline(*pipeline);
         cmd.compute.bind_group(0, *group);

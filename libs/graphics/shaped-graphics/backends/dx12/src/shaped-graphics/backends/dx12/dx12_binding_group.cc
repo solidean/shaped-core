@@ -100,10 +100,11 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
 
         auto const& s = layout->view_slots[slot_index];
         bool const is_array = s.binding.is_array();
-        if (isize(nv.views.size()) != isize(s.binding.count))
+        auto const element_views = nv.view.span();
+        if (element_views.size() != isize(s.binding.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
                                         "exactly one per element; a vacant element is sg::vacant_view)",
-                                        nv.name, s.binding.count, nv.views.size()));
+                                        nv.name, s.binding.count, element_views.size()));
         CC_ASSERT(view_filled[slot_index] == char(0), "binding_group: a binding was provided more than once");
         view_filled[slot_index] = char(1);
 
@@ -111,9 +112,9 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
                                                 .is_texture = sg::shape_of(s.binding.type) == sg::view_shape::texture,
                                                 .elements = {}};
 
-        for (isize element = 0; element < nv.views.size(); ++element)
+        for (isize element = 0; element < element_views.size(); ++element)
         {
-            auto const& view = nv.views[element];
+            auto const& view = element_views[element];
             if (!sg::accepts(s.binding.type, view))
                 return cc::error(
                     cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));

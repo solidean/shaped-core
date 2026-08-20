@@ -305,7 +305,7 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
                 // With a single font atlas that is one group for the whole frame.
                 bound_group = ctx.transient.create_binding_group(
                     self->_group_layout,
-                    {sg::named_view{.name = "gTexture", .views = {texture.value().as_readonly_view()}}});
+                    {sg::named_view{.name = "gTexture", .view = texture.value().as_readonly_view()}});
                 scope.bind_group(0, *bound_group);
                 bound_texture = dc.GetTexID();
             }
