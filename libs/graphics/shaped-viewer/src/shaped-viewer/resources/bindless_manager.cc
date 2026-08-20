@@ -22,10 +22,11 @@ namespace
 // the backend synthesizes vacant elements' null descriptors from the binding.
 [[nodiscard]] sg::named_view mirror_to_named_view(cc::string_view name, sv::impl::slot_table const& table)
 {
-    auto nv = sg::named_view{.name = cc::string(name), .views = {}};
+    auto elements = cc::vector<sg::raw_view>();
+    elements.reserve(table.capacity());
     for (auto const& e : table.entries())
-        nv.views.push_back(e.occupied ? e.view : sg::raw_view(sg::vacant_view{}));
-    return nv;
+        elements.push_back(e.occupied ? e.view : sg::raw_view(sg::vacant_view{}));
+    return {.name = cc::string(name), .view = cc::move(elements)};
 }
 } // namespace
 } // namespace sv
