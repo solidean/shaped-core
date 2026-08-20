@@ -59,7 +59,7 @@ public:
     [[nodiscard]] cc::string_view name() const { return desc->name; }
     [[nodiscard]] rec::domain const* domain() const { return desc->dom; }
     [[nodiscard]] rec::unit const* quantity() const { return desc->quantity; }
-    [[nodiscard]] cc::source_location const& site() const { return desc->site; }
+    [[nodiscard]] rec::source_ref const& site() const { return desc->site; }
     [[nodiscard]] cc::span<rec::field const> fields() const
     {
         return cc::span<rec::field const>(desc->fields, isize(desc->field_count));

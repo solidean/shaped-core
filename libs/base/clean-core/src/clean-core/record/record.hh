@@ -25,7 +25,7 @@
         .name = (name_),                                                                                             \
         .quantity = (unit_),                                                                                         \
         .dom = cc_rec_domain(),                                                                                      \
-        .site = ::cc::source_location::current(),                                                                    \
+        .site = ::cc::rec::source_ref::from(::cc::source_location::current()),                                       \
         .fields = (fields_),                                                                                         \
         .field_count = (field_count_),                                                                               \
         .fixed_payload_size = (payload_size_),                                                                       \

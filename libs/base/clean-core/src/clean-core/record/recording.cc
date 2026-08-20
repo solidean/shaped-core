@@ -176,6 +176,11 @@ void cc::rec::recording::append(cc::rec::recording const& other)
         _blocks.push_back(b);
 }
 
+void cc::rec::recording::append_block(cc::rec::recorded_block block)
+{
+    _blocks.push_back(cc::move(block));
+}
+
 bool cc::rec::recording::empty() const
 {
     for (auto const& b : _blocks)
@@ -246,6 +251,12 @@ cc::rec::recording cc::rec::recording::from_thread(cc::thread_id id) const
 cc::rec::recording cc::rec::recording::from_domain(cc::rec::domain const* d) const
 {
     return filtered([d](rec::chunk_view const&, rec::event_view const& e) { return e.domain() == d; });
+}
+
+cc::rec::recording cc::rec::recording::from_domain(cc::string_view name) const
+{
+    return filtered([name](rec::chunk_view const&, rec::event_view const& e)
+                    { return cc::string_view(e.domain()->name()) == name; });
 }
 
 cc::rec::recording cc::rec::recording::of_kind(cc::rec::event_kind k) const

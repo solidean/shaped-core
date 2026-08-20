@@ -114,6 +114,10 @@ public:
     /// Appends every block of `other`, in order.
     void append(rec::recording const& other);
 
+    /// Appends a block that was built rather than captured.
+    /// For a deserializer and for tests; ordinary code captures through a listener.
+    void append_block(rec::recorded_block block);
+
     void clear() { _blocks.clear(); }
 
     // reading
@@ -147,7 +151,14 @@ public:
     [[nodiscard]] rec::recording from_thread(cc::thread_id id) const;
 
     /// Only events from sites in `d`.
+    ///
+    /// **Identity, not name.** A deserialized recording owns its own domain objects, so this matches nothing on one;
+    /// the by-name overload is what works on both.
     [[nodiscard]] rec::recording from_domain(rec::domain const* d) const;
+
+    /// Only events from sites in a domain called `name`.
+    /// The form that survives a round trip through a file.
+    [[nodiscard]] rec::recording from_domain(cc::string_view name) const;
 
     /// Only events of one kind.
     [[nodiscard]] rec::recording of_kind(rec::event_kind k) const;

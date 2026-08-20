@@ -242,7 +242,7 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             out += R"(,"s":"t","args":{"level":)";
             append_json_string(out, level_name(e.level()));
             out += R"(,"site":)";
-            append_json_string(out, cc::format("{}:{}", e.site().file_name(), e.site().line()));
+            append_json_string(out, cc::format("{}:{}", e.site().file, e.site().line));
             out += "}}";
             break;
         }

@@ -341,7 +341,9 @@ Without threads (`SC_THREADS=OFF`, or `config::threaded = false`) no API changes
 To LOOK at a recording rather than assert on one, `babel::chrome_trace` writes it as Chrome Trace Event JSON for `chrome://tracing` and `ui.perfetto.dev`.
 `uv run dev.py example babel-serializer/chrome-trace` records a synthetic workload and writes one.
 
-Still to come: async scopes and the ambient-context deltas that carry them, tracing, serialization, the crash dump, and the query API that makes a recording a test assertion.
+A recording also serializes, and a crash dump writes the same format without allocating — [systems/recording-formats](recording-formats.md) is that half.
+
+Still to come: async scopes and the ambient-context deltas that carry them, tracing, and the nexus integration that turns a recording into a test assertion.
 The event kinds those need are already reserved in [fwd.hh](../../src/clean-core/record/fwd.hh).
 
 `cc::capture_stack` ([stack_capture.hh](../../src/clean-core/platform/stack_capture.hh)) is a real seam with a stub behind it.

@@ -1028,6 +1028,24 @@ rec.messages();                            // -> vector<cc::string>, every log l
 rec.scopes(); rec.scopes("upload-pass");   // -> vector<scope_span>{name(), depth, duration_secs(), is_open}
 ```
 
+Persisting one, and the crash dump (see [systems/recording-formats](docs/systems/recording-formats.md)):
+
+```cpp
+#include <clean-core/record/serialize.hh>
+cc::rec::serialize(rec);                   // -> cc::vector<byte>, self-describing; NO stability guarantee
+cc::rec::save_recording(rec, path);        // -> cc::result<cc::unit>
+auto loaded = cc::rec::load_recording(path);  // -> cc::result<loaded_recording>; OWNS what its events point at
+loaded.value().events();                   // -> recording const&; algebra + queries work identically
+loaded.value().is_truncated(); loaded.value().cycles_per_second(); loaded.value().dumped_at_wall_secs();
+// gotcha: from_domain(domain const*) matches NOTHING on a loaded recording — use from_domain("name")
+
+#include <clean-core/record/crash_dump.hh>
+cc::install_crash_handler();                                  // the hook list this rides on
+cc::rec::install_crash_dump({.path = "crash.ccrec"});         // reserves its arena NOW; the handler allocates nothing
+cc::rec::write_crash_dump_now();                              // -> bool; the identical path, on demand
+// reads the chunks directly, so it sees events NO listener ever drained, and suspends no thread
+```
+
 ## Strings — encoding conversion
 
 ```cpp
@@ -1159,6 +1177,8 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   It lives in the site's `static constexpr` descriptor, which is what keeps a site free of a guard variable — so a helper taking a runtime `char const*` does not compile.
 - **`cc::rec` timestamps are non-decreasing within a thread only after clamping.**
   `RDTSCP` is not ordered against surrounding code on both sides, so two readings around a very short span can come back inverted; take the max with zero when computing a duration.
+- **A serialized recording carries no format stability guarantee** and will not for a good while.
+  A reader refuses a version it does not know rather than misreading it; durability comes from an exporter, not from these bytes.
 - **A recording is process-local.** Events point at descriptors, and descriptors are static objects in this binary — nothing about one survives a save or a wire.
 - **An `interned_string`'s identity is process-local and must never leave the process.**
   Serialize `as_string_view()`, and hash durable data over those bytes — two runs will not agree on anything else.

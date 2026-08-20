@@ -139,6 +139,7 @@ namespace cc::rec
 //
 
 struct domain; // also declared in domain_fwd.hh, which fwd.hh headers include instead of this one
+struct source_ref;
 struct field;
 struct unit;
 struct desc;
@@ -149,6 +150,7 @@ struct chunk_ref;
 struct chunk_pool;
 
 struct config;
+struct crash_dump_options;
 struct system_stats;
 struct stream_state;
 struct thread_info;
@@ -168,6 +170,7 @@ struct event_listener;
 struct recorded_block;
 struct recording;
 struct recording_listener;
+struct loaded_recording;
 struct scope_span;
 struct decimation_options;
 
@@ -177,6 +180,7 @@ struct writer_tls;
 struct thread_state;
 struct event_header;
 struct listener_registry;
+struct recording_loader;
 struct listener_layer_scope;
 } // namespace impl
 

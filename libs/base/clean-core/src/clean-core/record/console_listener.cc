@@ -94,8 +94,7 @@ void cc::rec::console_listener::on_chunk(cc::rec::chunk_view const& view)
             line += cc::console::dim(" ...(truncated)");
 
         if (_options.always_show_site || e.level() >= rec::level::warning)
-            line.appendf("{}",
-                         cc::console::dim(cc::format("  ({}:{})", short_file(e.site().file_name()), e.site().line())));
+            line.appendf("{}", cc::console::dim(cc::format("  ({}:{})", short_file(e.site().file), e.site().line)));
 
         _pending.push_back({
             .cycles = e.cycles,

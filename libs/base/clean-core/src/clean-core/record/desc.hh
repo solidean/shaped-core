@@ -13,6 +13,24 @@
 // initialization dance a function-local `static` would otherwise carry.
 // Never give one a member that cannot be built in a constant expression.
 
+/// Where a recording site is in the source.
+///
+/// Deliberately not a cc::source_location: that type has no constructor, so a loader could never rebuild one, and a
+/// recording that has been through a file would lose the one field that says where it came from.
+/// The pointers are into the binary's string data and outlive the process; a deserialized one owns its strings instead.
+struct cc::rec::source_ref
+{
+    char const* file = "";
+    char const* function = "";
+    u32 line = 0;
+
+    /// Built at the call site from cc::source_location::current(), which is where the values actually come from.
+    [[nodiscard]] static constexpr source_ref from(cc::source_location const& l)
+    {
+        return {.file = l.file_name(), .function = l.function_name(), .line = u32(l.line())};
+    }
+};
+
 /// One field of an event payload, so a consumer that has never heard of the type can still print, filter and compare it.
 struct cc::rec::field
 {
@@ -70,7 +88,7 @@ struct cc::rec::desc
     rec::unit const* quantity = nullptr;
     rec::domain* dom = nullptr;
 
-    cc::source_location site = {};
+    rec::source_ref site;
 
     rec::field const* fields = nullptr;
     u16 field_count = 0;
