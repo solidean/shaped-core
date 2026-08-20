@@ -140,6 +140,35 @@ That is a deliberate cap: one numeric type means a listener graphs anything with
 A `cc::rec::unit` says what a quantity means — singular and plural, symbol, prefix base, axis scale, aggregation, preferred range, whether higher is better.
 Deliberately a struct rather than an enum: everyone's enum of units is missing the case the next consumer needs.
 
+### Tracing
+
+A profiling scope answers "what was this thread doing", and it nests because a call stack does.
+Tracing answers the harder question: **which of these events belong to the same logical operation**.
+That operation spans threads, queues, retries and caches, and its parts have no lexical relationship at all.
+
+The whole mechanism is two things — an id that costs nothing to mint, and an event saying two ids are related.
+
+```cpp
+auto const request = cc::rec::new_trace_id();      // a per-thread counter; no allocation, no registry, no lock
+{
+    CC_TRACE_SCOPE(request);                       // everything recorded here is attributed to it
+    ...
+}
+cc::rec::record_relation(request, cc::rec::relation_kind::parent_of, fetch);
+```
+
+**The graph is reconstructed entirely offline.** Nothing in the recorder builds one.
+That is what makes a *late* discovery free.
+When a computation turns out to have produced a cache key another operation already used, you record `same_key_as` at the moment you learn it.
+The reconstruction does not care that it arrived last.
+An id that nothing tracks also cannot leak, cannot be looked up wrongly, and costs nothing to abandon.
+
+Trace membership is stream state, like everything else that is not per-event: a thread publishes a delta on entering and leaving, and a consumer carries the running value forward.
+`recording::from_trace(id)` does that carrying; `recording::trace_relations()` hands back the edges.
+
+`CC_TRACE_SCOPE` is thread-local and **does not follow a `co_await`** — carrying a trace across a suspend is what the ambient deltas will add.
+Until then, passing the id by hand is the synchronous way across a thread, and it works.
+
 ### The console
 
 `cc::rec::console_listener` turns log events back into lines, and is **deliberately a little behind in exchange for a total order**.
@@ -317,6 +346,33 @@ That is what the nexus integration will filter on, and it waits on the ambient d
 
 ---
 
+## What the recorder costs
+
+The whole design bets that annotation which is cheap is annotation that stays in the code.
+A bet like that is worth nothing without a number, and a number from someone else's machine is worth less than nothing.
+
+```cpp
+auto const model = cc::rec::measure_overhead();    // a few ms; records into the live system, in the cc.record domain
+model.fixed_cycles;      // a zero-payload event
+model.cycles_per_byte;   // the copy
+model.disabled_cycles;   // one load through the domain and a test — what "leave it in forever" rests on
+
+captured.estimated_overhead_cycles();
+captured.estimated_overhead_ratio();               // over wall time summed across threads
+```
+
+The model is a straight line, `fixed + per_byte * payload`.
+That is not a claim that a site is linear; it is a claim that the two things it does are the two terms worth fitting.
+Anything else is either rare enough to measure itself, or already reported as a cold-path event.
+A stacktrace capture carries its own end timestamp, and the estimate uses that in preference to the model.
+
+`measure_overhead` reports the **minimum** per-event cost across several rounds rather than the mean.
+A scheduling hiccup can only make a sample look slower, so the minimum estimates the cost and the mean estimates the cost plus the machine's mood.
+
+Backpressure needs no separate accounting: a stall happens inside the cold path, and `record.chunk_acquired` already carries how long that took.
+
+---
+
 ## Lifecycle constraints
 
 `initialize()` must be called once; a second call asserts rather than reconfiguring.
@@ -343,7 +399,8 @@ To LOOK at a recording rather than assert on one, `babel::chrome_trace` writes i
 
 A recording also serializes, and a crash dump writes the same format without allocating — [systems/recording-formats](recording-formats.md) is that half.
 
-Still to come: async scopes and the ambient-context deltas that carry them, tracing, and the nexus integration that turns a recording into a test assertion.
+Still to come: async scopes and the ambient-context deltas that carry them, and the nexus integration that turns a recording into a test assertion.
+Tracing is here in its synchronous form; what waits on the deltas is a trace that follows work across a `co_await`.
 The event kinds those need are already reserved in [fwd.hh](../../src/clean-core/record/fwd.hh).
 
 `cc::capture_stack` ([stack_capture.hh](../../src/clean-core/platform/stack_capture.hh)) is a real seam with a stub behind it.

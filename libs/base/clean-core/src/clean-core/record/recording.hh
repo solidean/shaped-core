@@ -44,6 +44,20 @@ struct cc::rec::scope_span
     [[nodiscard]] f64 duration_secs() const;
 };
 
+/// One recorded edge of the trace graph.
+///
+/// An edge is a fact, not a structure: the graph is whatever a reader builds out of the set, and nothing in the
+/// recorder ever holds one.
+/// That is what makes a LATE discovery free — an edge recorded once the relationship was learned is the same fact,
+/// however far after the work it arrived.
+struct cc::rec::trace_relation
+{
+    rec::trace_id from = rec::trace_id::none;
+    rec::trace_id to = rec::trace_id::none;
+    rec::relation_kind kind = rec::relation_kind::parent_of;
+    u64 cycles = 0;
+};
+
 /// What `recording::decimated` throws away, and what it leaves in its place.
 struct cc::rec::decimation_options
 {
@@ -170,6 +184,13 @@ public:
     /// What went is reported as a `dropped_span` event, so the result says what it no longer knows.
     [[nodiscard]] rec::recording decimated(rec::decimation_options const& options) const;
 
+    /// Only what was recorded while a thread was under `id`.
+    ///
+    /// Trace membership is stream STATE: a thread publishes a delta on entering and leaving, and this carries the
+    /// running value forward per thread.
+    /// So a trace entered BEFORE the recording starts is not attributed — the enter has to be in here somewhere.
+    [[nodiscard]] rec::recording from_trace(rec::trace_id id) const;
+
     // queries
 public:
     /// How many events carry this name.
@@ -204,6 +225,25 @@ public:
 
     /// The matched scope pairs with this name.
     [[nodiscard]] cc::vector<rec::scope_span> scopes(cc::string_view name) const;
+
+    /// Every recorded relation, in timestamp order.
+    /// The trace graph is what a reader builds from these; the recorder never holds one.
+    [[nodiscard]] cc::vector<rec::trace_relation> trace_relations() const;
+
+    // what the recorder itself cost
+public:
+    /// The cycles this recording's own events cost to write, estimated from cc::rec::overhead().
+    ///
+    /// An event that measured itself — one carrying an end timestamp, as a stacktrace capture does — contributes its
+    /// real cost rather than the model's.
+    [[nodiscard]] f64 estimated_overhead_cycles() const;
+
+    /// That, as a fraction of the recorded wall time summed over threads.
+    ///
+    /// Zero when the recording spans no time.
+    /// Past a few percent, the recording is changing what it measures — the number the whole "annotate everywhere"
+    /// argument rests on, so it is worth looking at rather than assuming.
+    [[nodiscard]] f64 estimated_overhead_ratio() const;
 
 private:
     cc::vector<rec::recorded_block> _blocks;

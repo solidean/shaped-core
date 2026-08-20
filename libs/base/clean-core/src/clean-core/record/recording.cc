@@ -2,8 +2,12 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/map.hh>
+#include <clean-core/container/pair.hh>
 #include <clean-core/record/domain.hh>
+#include <clean-core/record/overhead.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/record/trace.hh>
 
 using namespace cc::primitive_defines;
 
@@ -340,6 +344,98 @@ cc::rec::recording cc::rec::recording::decimated(cc::rec::decimation_options con
     }
 
     return out;
+}
+
+cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
+{
+    // Trace membership is carried forward per thread, because a thread publishes a delta rather than tagging events.
+    // A recording that does not contain the enter therefore attributes nothing, which is the honest answer.
+    cc::map<cc::thread_id, rec::trace_id> current;
+
+    return filtered(
+        [&](rec::chunk_view const& v, rec::event_view const& e)
+        {
+            auto& running = current[v.thread.id];
+
+            if (e.kind() == rec::event_kind::trace_scope)
+            {
+                running = rec::trace_id(u64(e.field_as_double("trace").value_or(0)));
+
+                // The delta itself belongs to the trace it names, so entering a trace is visible inside it.
+                return running == id;
+            }
+
+            return running == id;
+        });
+}
+
+cc::vector<cc::rec::trace_relation> cc::rec::recording::trace_relations() const
+{
+    cc::vector<rec::trace_relation> out;
+    for (auto const& le : sorted_events(*this))
+    {
+        if (le.event.kind() != rec::event_kind::trace_relation)
+            continue;
+
+        out.push_back({
+            .from = rec::trace_id(u64(le.event.field_as_double("from").value_or(0))),
+            .to = rec::trace_id(u64(le.event.field_as_double("to").value_or(0))),
+            .kind = rec::relation_kind(u8(le.event.field_as_int("kind").value_or(0))),
+            .cycles = le.event.cycles,
+        });
+    }
+    return out;
+}
+
+f64 cc::rec::recording::estimated_overhead_cycles() const
+{
+    auto const& model = rec::overhead();
+
+    auto total = 0.0;
+    for_each_event(
+        [&](rec::chunk_view const&, rec::event_view const& e)
+        {
+            // An event that measured itself beats the model: a stacktrace capture costs orders of magnitude more than
+            // the line would predict, which is exactly why it carries its own end timestamp.
+            if ((e.flags & rec::impl::flag_has_end_cycles) != 0 && e.payload.size() >= 8)
+            {
+                u64 end_cycles = 0;
+                cc::memcpy(&end_cycles, e.payload.data(), sizeof(end_cycles));
+                if (end_cycles > e.cycles)
+                {
+                    total += f64(end_cycles - e.cycles);
+                    return;
+                }
+            }
+
+            total += model.fixed_cycles + model.cycles_per_byte * f64(e.payload.size());
+        });
+
+    return total;
+}
+
+f64 cc::rec::recording::estimated_overhead_ratio() const
+{
+    // Summed over threads rather than wall-clock: overhead is spent ON threads, so two threads recording for a second
+    // each had two thread-seconds to spend it in.
+    cc::map<cc::thread_id, cc::pair<u64, u64>> spans;
+
+    for_each_event(
+        [&](rec::chunk_view const& v, rec::event_view const& e)
+        {
+            auto& span = spans[v.thread.id];
+            if (span.first == 0 || e.cycles < span.first)
+                span.first = e.cycles;
+            if (e.cycles > span.second)
+                span.second = e.cycles;
+        });
+
+    auto total_span = 0.0;
+    for (auto const& [thread, span] : spans)
+        if (span.second > span.first)
+            total_span += f64(span.second - span.first);
+
+    return total_span > 0 ? estimated_overhead_cycles() / total_span : 0.0;
 }
 
 //

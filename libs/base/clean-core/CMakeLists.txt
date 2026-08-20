@@ -49,6 +49,8 @@ add_library(clean-core
     src/clean-core/record/impl/serialized_format.cc
     src/clean-core/record/serialize.cc
     src/clean-core/record/crash_dump.cc
+    src/clean-core/record/trace.cc
+    src/clean-core/record/overhead.cc
     src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/format.cc
@@ -205,6 +207,8 @@ target_sources(clean-core
     src/clean-core/record/impl/serialized_format.hh
     src/clean-core/record/serialize.hh
     src/clean-core/record/crash_dump.hh
+    src/clean-core/record/trace.hh
+    src/clean-core/record/overhead.hh
 
     src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
@@ -462,6 +466,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-frontends-test.cc
         tests/record/record-query-test.cc
         tests/record/record-serialize-test.cc
+        tests/record/record-trace-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc

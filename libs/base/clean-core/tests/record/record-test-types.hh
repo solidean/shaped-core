@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/listener.hh>
+#include <clean-core/record/overhead.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -22,6 +23,7 @@ struct rec_fixture;
 struct collector;
 struct scoped_listener;
 struct scoped_domain_mask;
+struct scoped_overhead;
 } // namespace cc_rec_test
 
 /// Brings the system up for one test and tears it down again, whatever the body does.
@@ -136,6 +138,22 @@ struct cc_rec_test::scoped_listener
 
 private:
     cc::rec::listener_handle _handle;
+};
+
+/// Puts the overhead model back the way it was, so one test's measurement cannot leak into another's expectations.
+struct cc_rec_test::scoped_overhead
+{
+    explicit scoped_overhead(cc::rec::overhead_model const& model) : _saved(cc::rec::overhead())
+    {
+        cc::rec::set_overhead(model);
+    }
+    ~scoped_overhead() { cc::rec::set_overhead(_saved); }
+
+    scoped_overhead(scoped_overhead const&) = delete;
+    scoped_overhead& operator=(scoped_overhead const&) = delete;
+
+private:
+    cc::rec::overhead_model _saved;
 };
 
 /// Puts a domain's enable mask back the way it was, so one test's reconfiguration cannot leak into another.

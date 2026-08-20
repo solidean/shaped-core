@@ -21,6 +21,8 @@ enum class type_code : u8;
 enum class overflow_policy : u8;
 enum class aggregation : u8;
 enum class axis_scale : u8;
+enum class trace_id : u64;
+enum class relation_kind : u8;
 } // namespace cc::rec
 
 /// What an event IS.
@@ -123,6 +125,33 @@ enum class cc::rec::aggregation : cc::u8
     minimum,
 };
 
+/// A correlation id, unique within the process.
+///
+/// Deliberately opaque and deliberately not registered anywhere: minting one is a counter increment, and an id that
+/// nothing tracks cannot leak, cannot be looked up wrongly, and costs nothing to abandon.
+enum class cc::rec::trace_id : cc::u64
+{
+    none = 0,
+};
+
+/// How two trace ids are related.
+///
+/// A listener that has never heard of a kind still records the edge, so adding one breaks nothing.
+/// The reconstruction decides what each means; none of them is interpreted here.
+enum class cc::rec::relation_kind : cc::u8
+{
+    /// `from` spawned `to`.
+    parent_of = 0,
+    /// `to` happened because of `from`, without `from` having created it.
+    caused_by,
+    /// The two turned out to be the same work — a shared cache key, a deduplicated request.
+    same_key_as,
+    /// `to` is the next attempt after `from`, as in a retry.
+    follows,
+
+    count,
+};
+
 /// Whether a stat's natural axis is linear or logarithmic.
 enum class cc::rec::axis_scale : cc::u8
 {
@@ -151,6 +180,7 @@ struct chunk_pool;
 
 struct config;
 struct crash_dump_options;
+struct overhead_model;
 struct system_stats;
 struct stream_state;
 struct thread_info;
@@ -172,6 +202,7 @@ struct recording;
 struct recording_listener;
 struct loaded_recording;
 struct scope_span;
+struct trace_relation;
 struct decimation_options;
 
 namespace impl

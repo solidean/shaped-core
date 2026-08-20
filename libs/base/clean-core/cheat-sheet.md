@@ -1028,6 +1028,30 @@ rec.messages();                            // -> vector<cc::string>, every log l
 rec.scopes(); rec.scopes("upload-pass");   // -> vector<scope_span>{name(), depth, duration_secs(), is_open}
 ```
 
+Tracing — correlating work the thread stack and the clock do not relate (the graph is built OFFLINE):
+
+```cpp
+#include <clean-core/record/trace.hh>
+auto const id = cc::rec::new_trace_id();   // per-thread counter; no allocation, no registry, no lock
+CC_TRACE_SCOPE(id);                        // attributes what this thread records; does NOT follow a co_await
+cc::rec::current_trace_id();
+cc::rec::record_relation(a, cc::rec::relation_kind::parent_of, b);
+// kinds: parent_of, caused_by, same_key_as, follows — a LATE relation is the same fact, nothing is revisited
+rec.from_trace(id);                        // -> recording; carries the per-thread running value forward
+rec.trace_relations();                     // -> vector<trace_relation>{from, to, kind, cycles}
+```
+
+What the recorder itself cost:
+
+```cpp
+#include <clean-core/record/overhead.hh>
+cc::rec::measure_overhead();               // a few ms; RECORDS into the live system, in the cc.record domain
+cc::rec::overhead();                       // -> overhead_model{fixed_cycles, cycles_per_byte, disabled_cycles, is_measured}
+cc::rec::set_overhead(model);
+rec.estimated_overhead_cycles();           // an event that measured itself (a stacktrace) beats the model
+rec.estimated_overhead_ratio();            // over wall time summed across threads; 0 when no time passed
+```
+
 Persisting one, and the crash dump (see [systems/recording-formats](docs/systems/recording-formats.md)):
 
 ```cpp
