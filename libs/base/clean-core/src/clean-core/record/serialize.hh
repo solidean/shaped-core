@@ -56,6 +56,7 @@ private:
     cc::vector<char> _strings;
     cc::vector<rec::field> _fields;
     cc::vector<rec::unit> _units;
+    cc::vector<rec::relation_type> _relations;
     cc::vector<rec::desc> _descs;
     cc::vector<cc::unique_ptr<rec::domain>> _domains;
 

@@ -359,7 +359,8 @@ cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
 
             if (e.kind() == rec::event_kind::trace_scope)
             {
-                running = rec::trace_id(u64(e.field_as_double("trace").value_or(0)));
+                // Read as a raw u64: a trace id is opaque, and a double would quietly lose everything past 2^53.
+                running = rec::trace_id(e.field_as_u64("trace").value_or(0));
 
                 // The delta itself belongs to the trace it names, so entering a trace is visible inside it.
                 return running == id;
@@ -377,12 +378,11 @@ cc::vector<cc::rec::trace_relation> cc::rec::recording::trace_relations() const
         if (le.event.kind() != rec::event_kind::trace_relation)
             continue;
 
-        out.push_back({
-            .from = rec::trace_id(u64(le.event.field_as_double("from").value_or(0))),
-            .to = rec::trace_id(u64(le.event.field_as_double("to").value_or(0))),
-            .kind = rec::relation_kind(u8(le.event.field_as_int("kind").value_or(0))),
-            .cycles = le.event.cycles,
-        });
+        auto edge = rec::trace_relation{.type = le.event.relation(), .cycles = le.event.cycles};
+        for (auto const id : le.event.field_as_u64_array("members"))
+            edge.members.push_back(rec::trace_id(id));
+
+        out.push_back(cc::move(edge));
     }
     return out;
 }

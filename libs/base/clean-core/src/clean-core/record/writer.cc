@@ -330,6 +330,10 @@ cc::rec::impl::listener_layer_scope::~listener_layer_scope()
 
 void cc::rec::seal_current_thread_chunk()
 {
+    // Before touching anything: a thread that last recorded under a previous incarnation holds pointers into a pool
+    // that has since been freed, and this runs from a thread-exit handshake with no cold path ahead of it.
+    sync_generation();
+
     auto& w = impl::t_writer;
     auto const now = cc::current_cycles();
 

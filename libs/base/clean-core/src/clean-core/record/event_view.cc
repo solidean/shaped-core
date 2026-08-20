@@ -156,6 +156,53 @@ cc::optional<cc::string_view> cc::rec::event_view::field_as_text(cc::string_view
     return {};
 }
 
+cc::optional<u64> cc::rec::event_view::field_as_u64(cc::string_view field_name) const
+{
+    auto const* const f = find_field(*this, field_name);
+    if (f == nullptr)
+        return {};
+
+    switch (f->type)
+    {
+    case rec::type_code::u8_:
+        return read_as<u8, u64>(payload, *f);
+    case rec::type_code::u16_:
+        return read_as<u16, u64>(payload, *f);
+    case rec::type_code::u32_:
+        return read_as<u32, u64>(payload, *f);
+    case rec::type_code::u64_:
+        return read_as<u64, u64>(payload, *f);
+    default:
+        return {};
+    }
+}
+
+cc::vector<u64> cc::rec::event_view::field_as_u64_array(cc::string_view field_name) const
+{
+    cc::vector<u64> out;
+
+    auto const* const f = find_field(*this, field_name);
+    if (f == nullptr || f->type != rec::type_code::u64_array)
+        return out;
+
+    u32 count = 0;
+    if (!read_raw(payload, *f, count))
+        return out;
+
+    auto const start = isize(f->offset) + isize(sizeof(u32));
+    if (start + isize(count) * isize(sizeof(u64)) > payload.size())
+        return out;
+
+    out.reserve(isize(count));
+    for (u32 i = 0; i < count; ++i)
+    {
+        u64 value = 0;
+        cc::memcpy(&value, payload.data() + start + isize(i) * isize(sizeof(u64)), sizeof(value));
+        out.push_back(value);
+    }
+    return out;
+}
+
 f64 cc::rec::chunk_view::wall_secs_of(u64 cycles) const
 {
     // A sealed chunk carries both ends, so the mapping is exact over its own span and needs no global calibration.

@@ -51,6 +51,17 @@ struct serialized_unit
     f64 default_max = 0;
 };
 
+/// One relation type, by value, for the same reason a unit is: the file has to say what an edge MEANS.
+struct serialized_relation_type
+{
+    serialized_str name;
+    serialized_str inverse_name;
+    u8 is_symmetric = 0;
+    u8 is_transitive = 0;
+    u8 is_equivalence = 0;
+    u8 reserved[5] = {};
+};
+
 /// One payload field.
 struct serialized_field
 {
@@ -72,6 +83,8 @@ struct serialized_desc
     serialized_str name;
     i32 unit_index = -1;
     i32 domain_index = -1;
+    i32 relation_index = -1;
+    i32 reserved2 = 0;
     serialized_str site_file;
     serialized_str site_function;
     u32 site_line = 0;
@@ -118,6 +131,7 @@ struct serialized_header
     u32 string_bytes = 0;
     u32 domain_count = 0;
     u32 unit_count = 0;
+    u32 relation_count = 0;
     u32 field_count = 0;
     u32 desc_count = 0;
     u32 thread_count = 0;
@@ -129,6 +143,7 @@ struct serialized_header
     u64 offset_strings = 0;
     u64 offset_domains = 0;
     u64 offset_units = 0;
+    u64 offset_relations = 0;
     u64 offset_fields = 0;
     u64 offset_descs = 0;
     u64 offset_threads = 0;
@@ -141,10 +156,11 @@ static_assert(sizeof(serialized_str) == 8);
 static_assert(sizeof(serialized_domain) == 16);
 static_assert(sizeof(serialized_unit) == 48);
 static_assert(sizeof(serialized_field) == 16);
-static_assert(sizeof(serialized_desc) == 56);
+static_assert(sizeof(serialized_relation_type) == 24);
+static_assert(sizeof(serialized_desc) == 64);
 static_assert(sizeof(serialized_thread) == 24);
 static_assert(sizeof(serialized_block) == 64);
-static_assert(sizeof(serialized_header) == 136);
+static_assert(sizeof(serialized_header) == 152);
 
 /// The eight bytes a reader checks before anything else.
 inline constexpr char serialized_magic[8] = {'C', 'C', 'R', 'E', 'C', 'O', 'R', 'D'};
@@ -184,6 +200,7 @@ struct dump_builder
         cc::span<byte const> strings;
         cc::span<byte const> domains;
         cc::span<byte const> units;
+        cc::span<byte const> relations;
         cc::span<byte const> fields;
         cc::span<byte const> descs;
         cc::span<byte const> threads;
@@ -223,6 +240,7 @@ private:
     /// Interns a value keyed by its address, returning its table index; -1 on overflow.
     i32 _intern_domain(rec::domain const* d);
     i32 _intern_unit(rec::unit const* u);
+    i32 _intern_relation(rec::relation_type const* t);
     i32 _intern_desc(rec::desc const* d);
     i32 _intern_thread(rec::thread_info const& t);
 
@@ -244,6 +262,7 @@ private:
 
     serialized_domain* _domains = nullptr;
     serialized_unit* _units = nullptr;
+    serialized_relation_type* _relations = nullptr;
     serialized_field* _fields = nullptr;
     serialized_desc* _descs = nullptr;
     serialized_thread* _threads = nullptr;
@@ -252,6 +271,7 @@ private:
 
     isize _domains_used = 0;
     isize _units_used = 0;
+    isize _relations_used = 0;
     isize _fields_used = 0;
     isize _descs_used = 0;
     isize _threads_used = 0;
@@ -259,6 +279,7 @@ private:
 
     isize _domain_capacity = 0;
     isize _unit_capacity = 0;
+    isize _relation_capacity = 0;
     isize _field_capacity = 0;
     isize _desc_capacity = 0;
     isize _thread_capacity = 0;
@@ -269,6 +290,7 @@ private:
     // than the scan costs.
     void const** _domain_keys = nullptr;
     void const** _unit_keys = nullptr;
+    void const** _relation_keys = nullptr;
     void const** _desc_keys = nullptr;
     char const** _string_keys = nullptr;
     serialized_str* _string_values = nullptr;

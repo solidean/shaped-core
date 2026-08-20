@@ -74,6 +74,7 @@ cc::vector<byte> cc::rec::serialize(cc::rec::recording const& r)
         append(out, parts.strings);
         append(out, parts.domains);
         append(out, parts.units);
+        append(out, parts.relations);
         append(out, parts.fields);
         append(out, parts.descs);
         append(out, parts.threads);
@@ -154,6 +155,7 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
     if (!in_bounds(h.offset_strings, h.string_bytes, 1)
         || !in_bounds(h.offset_domains, h.domain_count, sizeof(serialized_domain))
         || !in_bounds(h.offset_units, h.unit_count, sizeof(serialized_unit))
+        || !in_bounds(h.offset_relations, h.relation_count, sizeof(serialized_relation_type))
         || !in_bounds(h.offset_fields, h.field_count, sizeof(serialized_field))
         || !in_bounds(h.offset_descs, h.desc_count, sizeof(serialized_desc))
         || !in_bounds(h.offset_threads, h.thread_count, sizeof(serialized_thread))
@@ -163,6 +165,7 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
 
     auto const* const s_domains = reinterpret_cast<serialized_domain const*>(file.data() + h.offset_domains);
     auto const* const s_units = reinterpret_cast<serialized_unit const*>(file.data() + h.offset_units);
+    auto const* const s_relations = reinterpret_cast<serialized_relation_type const*>(file.data() + h.offset_relations);
     auto const* const s_fields = reinterpret_cast<serialized_field const*>(file.data() + h.offset_fields);
     auto const* const s_descs = reinterpret_cast<serialized_desc const*>(file.data() + h.offset_descs);
     auto const* const s_threads = reinterpret_cast<serialized_thread const*>(file.data() + h.offset_threads);
@@ -191,6 +194,8 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
         string_arena_bytes += measure(s_domains[i].name);
     for (u32 i = 0; i < h.unit_count; ++i)
         string_arena_bytes += measure(s_units[i].singular) + measure(s_units[i].plural) + measure(s_units[i].symbol);
+    for (u32 i = 0; i < h.relation_count; ++i)
+        string_arena_bytes += measure(s_relations[i].name) + measure(s_relations[i].inverse_name);
     for (u32 i = 0; i < h.field_count; ++i)
         string_arena_bytes += measure(s_fields[i].name);
     for (u32 i = 0; i < h.desc_count; ++i)
@@ -238,6 +243,18 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
         });
     }
 
+    for (u32 i = 0; i < h.relation_count; ++i)
+    {
+        auto const& t = s_relations[i];
+        out._relations.push_back({
+            .name = take_string(t.name),
+            .inverse_name = take_string(t.inverse_name),
+            .is_symmetric = t.is_symmetric != 0,
+            .is_transitive = t.is_transitive != 0,
+            .is_equivalence = t.is_equivalence != 0,
+        });
+    }
+
     for (u32 i = 0; i < h.field_count; ++i)
         out._fields.push_back({
             .name = take_string(s_fields[i].name),
@@ -251,8 +268,9 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
         auto const& d = s_descs[i];
         if (u64(d.field_first) + d.field_count > h.field_count)
             return cc::error("recording is malformed: a descriptor names fields that are not there");
-        if (d.unit_index >= i32(h.unit_count) || d.domain_index >= i32(h.domain_count))
-            return cc::error("recording is malformed: a descriptor names a unit or domain that is not there");
+        if (d.unit_index >= i32(h.unit_count) || d.domain_index >= i32(h.domain_count)
+            || d.relation_index >= i32(h.relation_count))
+            return cc::error("recording is malformed: a descriptor names a unit, domain or relation that is not there");
 
         out._descs.push_back({
             .kind = rec::event_kind(d.kind),
@@ -260,6 +278,7 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
             .enable_bit = d.enable_bit,
             .name = take_string(d.name),
             .quantity = d.unit_index >= 0 ? out._units.data() + d.unit_index : nullptr,
+            .relation = d.relation_index >= 0 ? out._relations.data() + d.relation_index : nullptr,
             .dom = d.domain_index >= 0 ? out._domains[d.domain_index].get() : &rec::g_default_domain,
             .site = {.file = take_string(d.site_file), .function = take_string(d.site_function), .line = d.site_line},
             .fields = d.field_count > 0 ? out._fields.data() + d.field_first : nullptr,

@@ -380,10 +380,18 @@ void cc::rec::shutdown()
         {
             if (s.tls == nullptr)
                 return;
+
+            // The chunk POINTERS go too, not just the cursors.
+            // A thread that exits after this runs its seal handshake, and a `current` left pointing into the pool
+            // about to be freed is a use-after-free with no cold path in between to catch it.
             s.tls->cur = nullptr;
             s.tls->end = nullptr;
+            s.tls->current = nullptr;
             s.tls->alt_cur = nullptr;
             s.tls->alt_end = nullptr;
+            s.tls->alt_current = nullptr;
+            s.tls->state = nullptr;
+            s.tls->alt_state = nullptr;
         });
 
     // Drop every chunk still queued, so the pool can be torn down.

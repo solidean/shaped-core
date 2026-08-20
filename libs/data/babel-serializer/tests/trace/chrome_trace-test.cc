@@ -4,6 +4,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/record/trace.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
@@ -235,6 +236,46 @@ TRACE_TEST("chrome_trace - what is included is configurable, and an empty record
 
     auto const empty = encode_to_string(cc::rec::recording{});
     CHECK(babel::json::read(empty).has_value());
+}
+
+TRACE_TEST("chrome_trace - a relation carries its meaning and its members")
+{
+    rec_fixture const fixture;
+
+    auto const a = cc::rec::new_trace_id();
+    auto const b = cc::rec::new_trace_id();
+    auto const c = cc::rec::new_trace_id();
+
+    auto const r = capture([&] { CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c); });
+    auto const json = encode_to_string(r);
+
+    auto const doc = babel::json::read(json);
+    REQUIRE(doc.has_value());
+
+    auto found = false;
+    auto const traceEvents = doc.value().root()["traceEvents"];
+    for (isize i = 0; i < traceEvents.size(); ++i)
+    {
+        auto const e = traceEvents[i];
+        if (e["name"].as_string() != "same_key_as")
+            continue;
+
+        found = true;
+        CHECK(e["relation"].as_string() == "same_key_as");
+
+        // The flag a reconstruction can act on directly travels with the edge.
+        auto const is_equivalence = e["equivalence"].as_bool();
+        CHECK(is_equivalence);
+
+        // Members come out as an array, and a trace id goes out as a STRING rather than a lossy JSON number.
+        auto const members = e["args"]["members"];
+        REQUIRE(members.is_array());
+        CHECK(members.size() == 3);
+        // Three ids, each either a plain number or a string when it is too large for a JSON number to hold.
+        auto const renderable = members[0].is_string() || members[0].is_number();
+        CHECK(renderable);
+    }
+    CHECK(found);
 }
 
 TRACE_TEST("chrome_trace - text that needs escaping survives the round trip")

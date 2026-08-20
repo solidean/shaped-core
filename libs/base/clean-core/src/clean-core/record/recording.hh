@@ -52,10 +52,23 @@ struct cc::rec::scope_span
 /// however far after the work it arrived.
 struct cc::rec::trace_relation
 {
-    rec::trace_id from = rec::trace_id::none;
-    rec::trace_id to = rec::trace_id::none;
-    rec::relation_kind kind = rec::relation_kind::parent_of;
+    /// What the edge means.
+    /// Never null on an edge that came out of a recording.
+    rec::relation_type const* type = nullptr;
+
+    /// The subject first, then its objects.
+    /// One convention covers a fan-out (`parent_of(parent, children…)`) and a fan-in (`caused_by(effect, causes…)`)
+    /// alike; for a symmetric type the order carries nothing and every member is a peer.
+    cc::vector<rec::trace_id> members;
+
     u64 cycles = 0;
+
+    [[nodiscard]] rec::trace_id subject() const { return members.empty() ? rec::trace_id::none : members.front(); }
+
+    [[nodiscard]] cc::span<rec::trace_id const> objects() const
+    {
+        return members.empty() ? cc::span<rec::trace_id const>() : cc::span<rec::trace_id const>(members).subspan(1);
+    }
 };
 
 /// What `recording::decimated` throws away, and what it leaves in its place.

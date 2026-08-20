@@ -146,30 +146,56 @@ A profiling scope answers "what was this thread doing", and it nests because a c
 Tracing answers the harder question: **which of these events belong to the same logical operation**.
 That operation spans threads, queues, retries and caches, and its parts have no lexical relationship at all.
 
-The whole mechanism is two things — an id that costs nothing to mint, and an event saying two ids are related.
+The whole mechanism is two things — an id that costs nothing to mint, and an event saying that some ids are related.
 
 ```cpp
-auto const request = cc::rec::new_trace_id();      // a per-thread counter; no allocation, no registry, no lock
-{
-    CC_TRACE_SCOPE(request);                       // everything recorded here is attributed to it
-    ...
-}
-cc::rec::record_relation(request, cc::rec::relation_kind::parent_of, fetch);
+CC_TRACE_SCOPE("handle-request");                  // mints and names the trace
+auto const id = cc::rec::current_trace_id();
+CC_TRACE_SCOPE_WITH_ID("inbound", wire_id);        // ... or carry one from off the wire
+
+CC_RECORD_RELATION(cc::rec::relation_parent_of, request, fetch);
+CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c);   // n-ary
+CC_RECORD_RELATION_MANY(type, discovered_members);            // a runtime member list
 ```
+
+**Naming the trace is the point.**
+A bare id is an opaque number, and a viewer showing `0x0800000000000003` helps nobody, so a scope names the trace and mints its id.
+
+**A relation type is a static object, not an enum**, for the same reason a `cc::rec::unit` is: an enum of relation kinds is always missing the case the next consumer needs.
+
+```cpp
+struct relation_type { char const* name, * inverse_name; bool is_symmetric, is_transitive, is_equivalence; };
+```
+
+`inverse_name` is what lets a viewer render an edge from either end without hardcoding a vocabulary.
+`is_equivalence` is the one flag a reconstruction can act on directly: the members may be **merged into one logical operation**.
+That is exactly the "these turned out to be the same work" case, and `cc::disjoint_set` is sitting right there.
+The built-ins are `relation_parent_of`, `relation_caused_by`, `relation_same_key_as` and `relation_follows`; define your own next to the code that records it.
+
+**Relations are n-ary**, because several genuinely are: five requests that hit one cache key, eight inputs to one join.
+Decomposing those into pairs against a representative loses the fact that they were related *as a group*.
+The convention is **first member is the subject, the rest are objects**, which covers a fan-out (`parent_of(parent, children…)`) and a fan-in (`caused_by(effect, causes…)`) with one rule.
+Order carries nothing for a symmetric type.
 
 **The graph is reconstructed entirely offline.** Nothing in the recorder builds one.
 That is what makes a *late* discovery free.
-When a computation turns out to have produced a cache key another operation already used, you record `same_key_as` at the moment you learn it.
-The reconstruction does not care that it arrived last.
+When a computation turns out to have produced a cache key another operation already used, you record `same_key_as` the moment you learn it, and the reconstruction does not care that it arrived last.
 An id that nothing tracks also cannot leak, cannot be looked up wrongly, and costs nothing to abandon.
 
-Trace membership is stream state, like everything else that is not per-event: a thread publishes a delta on entering and leaving, and a consumer carries the running value forward.
+Trace membership is stream state: a thread publishes a delta on entering and leaving, and a consumer carries the running value forward.
 `recording::from_trace(id)` does that carrying; `recording::trace_relations()` hands back the edges.
 
-`CC_TRACE_SCOPE` is thread-local and **does not follow a `co_await`** — carrying a trace across a suspend is what the ambient deltas will add.
-Until then, passing the id by hand is the synchronous way across a thread, and it works.
+#### CC_TRACE_SCOPE is interim
 
-### The console
+A trace wants to be **infectious**: a request or a job spans threads, and every piece of work spawned under it belongs to it wherever it ends up running.
+That is exactly what `cc::async`'s ambient chain already does, so a trace scope should *be* an ambient scope carrying an id.
+Then propagation, naming and the state deltas are one mechanism rather than two.
+
+The scope that exists today is the thread-local stand-in until the ambient deltas land.
+It is correct for synchronous work, and it silently under-attributes the moment the work suspends.
+Ids and relations are unaffected either way: those are complete, and only attribution moves.
+
+### The console### The console
 
 `cc::rec::console_listener` turns log events back into lines, and is **deliberately a little behind in exchange for a total order**.
 Blocks arrive from different threads in no particular order, so printing them as they land would interleave a multi-threaded run into nonsense.

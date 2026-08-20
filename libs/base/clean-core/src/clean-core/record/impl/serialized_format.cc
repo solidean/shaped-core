@@ -16,11 +16,12 @@ using namespace cc::primitive_defines;
 // Generous on descriptors, which a long run accumulates; thin on domains and units, of which a program has a handful.
 constexpr isize domain_capacity = 128;
 constexpr isize unit_capacity = 256;
+constexpr isize relation_capacity = 256;
 constexpr isize field_capacity = 4096;
 constexpr isize desc_capacity = 8192;
 constexpr isize thread_capacity = 512;
 
-/// Four strings per descriptor is the worst case: name, unit spellings, file and function.
+/// Four strings per descriptor is the worst case: name, unit or relation spellings, file and function.
 constexpr isize string_key_capacity = desc_capacity * 4;
 
 /// Below this the fixed tables alone do not fit, so there is nothing to build into.
@@ -42,6 +43,7 @@ cc::rec::impl::dump_builder::dump_builder(cc::span<byte> arena) : _arena(arena)
 
     _domain_capacity = domain_capacity;
     _unit_capacity = unit_capacity;
+    _relation_capacity = relation_capacity;
     _field_capacity = field_capacity;
     _desc_capacity = desc_capacity;
     _thread_capacity = thread_capacity;
@@ -49,12 +51,15 @@ cc::rec::impl::dump_builder::dump_builder(cc::span<byte> arena) : _arena(arena)
 
     _domains = reinterpret_cast<serialized_domain*>(_alloc(_domain_capacity * isize(sizeof(serialized_domain)), 8));
     _units = reinterpret_cast<serialized_unit*>(_alloc(_unit_capacity * isize(sizeof(serialized_unit)), 8));
+    _relations = reinterpret_cast<serialized_relation_type*>(
+        _alloc(_relation_capacity * isize(sizeof(serialized_relation_type)), 8));
     _fields = reinterpret_cast<serialized_field*>(_alloc(_field_capacity * isize(sizeof(serialized_field)), 8));
     _descs = reinterpret_cast<serialized_desc*>(_alloc(_desc_capacity * isize(sizeof(serialized_desc)), 8));
     _threads = reinterpret_cast<serialized_thread*>(_alloc(_thread_capacity * isize(sizeof(serialized_thread)), 8));
 
     _domain_keys = reinterpret_cast<void const**>(_alloc(_domain_capacity * isize(sizeof(void*)), 8));
     _unit_keys = reinterpret_cast<void const**>(_alloc(_unit_capacity * isize(sizeof(void*)), 8));
+    _relation_keys = reinterpret_cast<void const**>(_alloc(_relation_capacity * isize(sizeof(void*)), 8));
     _desc_keys = reinterpret_cast<void const**>(_alloc(_desc_capacity * isize(sizeof(void*)), 8));
     _string_keys = reinterpret_cast<char const**>(_alloc(_string_key_capacity * isize(sizeof(char*)), 8));
     _string_values = reinterpret_cast<serialized_str*>(_alloc(_string_key_capacity * isize(sizeof(serialized_str)), 8));
@@ -175,6 +180,33 @@ i32 cc::rec::impl::dump_builder::_intern_unit(rec::unit const* u)
     return i32(index);
 }
 
+i32 cc::rec::impl::dump_builder::_intern_relation(rec::relation_type const* t)
+{
+    if (t == nullptr)
+        return -1;
+
+    for (isize i = 0; i < _relations_used; ++i)
+        if (_relation_keys[i] == t)
+            return i32(i);
+
+    if (_relations_used >= _relation_capacity)
+    {
+        _overflowed = true;
+        return -1;
+    }
+
+    auto const index = _relations_used++;
+    _relation_keys[index] = t;
+    _relations[index] = {
+        .name = _intern_string(t->name),
+        .inverse_name = _intern_string(t->inverse_name),
+        .is_symmetric = u8(t->is_symmetric ? 1 : 0),
+        .is_transitive = u8(t->is_transitive ? 1 : 0),
+        .is_equivalence = u8(t->is_equivalence ? 1 : 0),
+    };
+    return i32(index);
+}
+
 i32 cc::rec::impl::dump_builder::_intern_desc(rec::desc const* d)
 {
     if (d == nullptr)
@@ -213,6 +245,7 @@ i32 cc::rec::impl::dump_builder::_intern_desc(rec::desc const* d)
         .name = _intern_string(d->name),
         .unit_index = _intern_unit(d->quantity),
         .domain_index = _intern_domain(d->dom),
+        .relation_index = _intern_relation(d->relation),
         .site_file = _intern_string(d->site.file),
         .site_function = _intern_string(d->site.function),
         .site_line = d->site.line,
@@ -298,7 +331,8 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
     auto const strings_at = isize(sizeof(serialized_header));
     auto const domains_at = strings_at + _string_bytes;
     auto const units_at = domains_at + _domains_used * isize(sizeof(serialized_domain));
-    auto const fields_at = units_at + _units_used * isize(sizeof(serialized_unit));
+    auto const relations_at = units_at + _units_used * isize(sizeof(serialized_unit));
+    auto const fields_at = relations_at + _relations_used * isize(sizeof(serialized_relation_type));
     auto const descs_at = fields_at + _fields_used * isize(sizeof(serialized_field));
     auto const threads_at = descs_at + _descs_used * isize(sizeof(serialized_desc));
     auto const blocks_at = threads_at + _threads_used * isize(sizeof(serialized_thread));
@@ -323,6 +357,7 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
         .string_bytes = u32(_string_bytes),
         .domain_count = u32(_domains_used),
         .unit_count = u32(_units_used),
+        .relation_count = u32(_relations_used),
         .field_count = u32(_fields_used),
         .desc_count = u32(_descs_used),
         .thread_count = u32(_threads_used),
@@ -331,6 +366,7 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
         .offset_strings = u64(strings_at),
         .offset_domains = u64(domains_at),
         .offset_units = u64(units_at),
+        .offset_relations = u64(relations_at),
         .offset_fields = u64(fields_at),
         .offset_descs = u64(descs_at),
         .offset_threads = u64(threads_at),
@@ -345,6 +381,7 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
     parts.strings = as_bytes(_strings, _string_bytes);
     parts.domains = as_bytes(_domains, _domains_used * isize(sizeof(serialized_domain)));
     parts.units = as_bytes(_units, _units_used * isize(sizeof(serialized_unit)));
+    parts.relations = as_bytes(_relations, _relations_used * isize(sizeof(serialized_relation_type)));
     parts.fields = as_bytes(_fields, _fields_used * isize(sizeof(serialized_field)));
     parts.descs = as_bytes(_descs, _descs_used * isize(sizeof(serialized_desc)));
     parts.threads = as_bytes(_threads, _threads_used * isize(sizeof(serialized_thread)));

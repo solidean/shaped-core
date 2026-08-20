@@ -66,6 +66,34 @@ struct cc::rec::unit
     bool higher_is_better = false;
 };
 
+/// What a relation between trace ids MEANS, as a static object the event points at.
+///
+/// The same protocol as cc::rec::unit and for the same reason: an enum of relation kinds is missing the case the next
+/// consumer needs, and adding a member here breaks nobody where adding an enumerator forces every switch to be
+/// revisited.
+///
+/// The flags are not decoration.
+/// `is_equivalence` says a reconstruction may union-find the members into one logical operation, which is exactly the
+/// "these two turned out to be the same work" case; `inverse_name` is what lets a viewer render an edge from either
+/// end without hardcoding a vocabulary.
+struct cc::rec::relation_type
+{
+    /// How the edge reads from the subject: "parent_of".
+    char const* name = "";
+
+    /// How it reads from an object: "child_of". Empty when the relation is symmetric.
+    char const* inverse_name = "";
+
+    /// Order carries no meaning, and every member is a peer.
+    bool is_symmetric = false;
+
+    /// A relates to B and B to C implies A relates to C.
+    bool is_transitive = false;
+
+    /// Reflexive, symmetric and transitive: the members are interchangeable, and a reader may merge them.
+    bool is_equivalence = false;
+};
+
 /// The compile-time half of one recording site.
 ///
 /// `enable_bit` is precomputed rather than derived, so the gate is a single AND against the domain's mask.
@@ -86,6 +114,12 @@ struct cc::rec::desc
     char const* name = "";
 
     rec::unit const* quantity = nullptr;
+
+    /// What a trace_relation site's edge means; null for every other kind.
+    /// A second meta pointer rather than one slot shared with `quantity`: eight bytes on a static object is nothing
+    /// next to a `void const*` whose meaning a reader has to derive from `kind`.
+    rec::relation_type const* relation = nullptr;
+
     rec::domain* dom = nullptr;
 
     rec::source_ref site;

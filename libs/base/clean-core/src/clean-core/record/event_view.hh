@@ -78,8 +78,25 @@ public:
     /// Empty for a non-integral field, and for a u64 past 2^63.
     [[nodiscard]] cc::optional<i64> field_as_int(cc::string_view field_name) const;
 
+    /// The named field as a raw u64, for any unsigned field.
+    ///
+    /// The accessor an OPAQUE 64-bit value needs: a double loses everything past 2^53, and the signed reader refuses
+    /// anything past 2^63, so neither can carry an id that was never a quantity in the first place.
+    [[nodiscard]] cc::optional<u64> field_as_u64(cc::string_view field_name) const;
+
     /// The named field as text, for cstring and inline_text fields.
     [[nodiscard]] cc::optional<cc::string_view> field_as_text(cc::string_view field_name) const;
+
+    /// The named field as a list of u64s, for u64_array fields.
+    /// Empty when there is no such field or it is not an array; an array that IS empty is not a case the format can
+    /// produce, since a writer with nothing to say writes no event.
+    [[nodiscard]] cc::vector<u64> field_as_u64_array(cc::string_view field_name) const;
+
+    /// What a trace_relation site's edge means, or null for every other kind.
+    [[nodiscard]] rec::relation_type const* relation() const
+    {
+        return kind() == rec::event_kind::trace_relation ? desc->relation : nullptr;
+    }
 
     /// The whole payload read as inline text, which is how a formatted log message is stored.
     [[nodiscard]] cc::string_view payload_as_text() const

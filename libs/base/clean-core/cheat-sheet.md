@@ -1002,6 +1002,8 @@ rec.for_each_event([](auto const& chunk, auto const& e) { ... });
 rec.replay(some_listener);                 // works on a listener that was never registered
 e.name(); e.kind(); e.level(); e.domain(); e.cycles; e.core; e.site();
 e.field_as_double("bytes"); e.field_as_int("count"); e.field_as_text("path"); // empty when absent or wrong type
+e.field_as_u64("trace");                   // the LOSSLESS reader an opaque 64-bit id needs (double stops at 2^53)
+e.field_as_u64_array("members"); e.relation();  // u64_array fields, and a relation event's type
 chunk.wall_secs_of(e.cycles);              // exact on a sealed chunk; uses cycles_per_second on a live one
 ```
 
@@ -1032,13 +1034,22 @@ Tracing — correlating work the thread stack and the clock do not relate (the g
 
 ```cpp
 #include <clean-core/record/trace.hh>
-auto const id = cc::rec::new_trace_id();   // per-thread counter; no allocation, no registry, no lock
-CC_TRACE_SCOPE(id);                        // attributes what this thread records; does NOT follow a co_await
-cc::rec::current_trace_id();
-cc::rec::record_relation(a, cc::rec::relation_kind::parent_of, b);
-// kinds: parent_of, caused_by, same_key_as, follows — a LATE relation is the same fact, nothing is revisited
+CC_TRACE_SCOPE("handle-request");          // mints AND names the trace; the name is what a viewer shows
+CC_TRACE_SCOPE_WITH_ID("inbound", wire_id);// ... or carry an id from off the wire
+cc::rec::current_trace_id();  cc::rec::new_trace_id();   // per-thread counter; no allocation, registry or lock
+// INTERIM: thread-local, does NOT follow a co_await. Folds into cc::async's ambient chain later.
+
+CC_RECORD_RELATION(cc::rec::relation_parent_of, request, fetch);      // n-ary; FIRST member is the subject
+CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c);           // symmetric: every member is a peer
+CC_RECORD_RELATION_MANY(type, runtime_member_span);
+
+// A relation TYPE is a static object, not an enum — same protocol as cc::rec::unit, and for the same reason:
+struct relation_type { char const* name, * inverse_name; bool is_symmetric, is_transitive, is_equivalence; };
+// built-ins: relation_parent_of, relation_caused_by, relation_same_key_as, relation_follows
+// is_equivalence is the one flag a reconstruction acts on directly: those ids may be MERGED (cc::disjoint_set)
+
 rec.from_trace(id);                        // -> recording; carries the per-thread running value forward
-rec.trace_relations();                     // -> vector<trace_relation>{from, to, kind, cycles}
+rec.trace_relations();                     // -> vector<trace_relation>{type, members, cycles}; .subject() .objects()
 ```
 
 What the recorder itself cost:

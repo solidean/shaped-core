@@ -22,7 +22,6 @@ enum class overflow_policy : u8;
 enum class aggregation : u8;
 enum class axis_scale : u8;
 enum class trace_id : u64;
-enum class relation_kind : u8;
 } // namespace cc::rec
 
 /// What an event IS.
@@ -97,6 +96,7 @@ enum class cc::rec::type_code : cc::u8
     cstring,      ///< a char const* with static lifetime, stored as the pointer
     inline_text,  ///< a u32 length followed by that many bytes, inline in the payload
     pinned_bytes, ///< the bytes live behind a pin; the payload holds the pin index and the span
+    u64_array,    ///< a u32 count at the field's offset, then that many u64s starting four bytes later
 
     count,
 };
@@ -134,24 +134,6 @@ enum class cc::rec::trace_id : cc::u64
     none = 0,
 };
 
-/// How two trace ids are related.
-///
-/// A listener that has never heard of a kind still records the edge, so adding one breaks nothing.
-/// The reconstruction decides what each means; none of them is interpreted here.
-enum class cc::rec::relation_kind : cc::u8
-{
-    /// `from` spawned `to`.
-    parent_of = 0,
-    /// `to` happened because of `from`, without `from` having created it.
-    caused_by,
-    /// The two turned out to be the same work — a shared cache key, a deduplicated request.
-    same_key_as,
-    /// `to` is the next attempt after `from`, as in a retry.
-    follows,
-
-    count,
-};
-
 /// Whether a stat's natural axis is linear or logarithmic.
 enum class cc::rec::axis_scale : cc::u8
 {
@@ -171,6 +153,7 @@ struct domain; // also declared in domain_fwd.hh, which fwd.hh headers include i
 struct source_ref;
 struct field;
 struct unit;
+struct relation_type;
 struct desc;
 
 struct pin;

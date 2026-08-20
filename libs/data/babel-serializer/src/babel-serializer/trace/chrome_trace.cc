@@ -64,6 +64,19 @@ void append_json_string(cc::string& out, cc::string_view s)
     out += '"';
 }
 
+/// Renders a u64 without losing it.
+///
+/// A JSON number is a double, so anything past 2^53 has to go out as a string or arrive wrong.
+/// That is exactly the case for a trace id, which is opaque rather than a quantity, so precision is all it has.
+void append_json_u64(cc::string& out, u64 v)
+{
+    constexpr u64 exactly_representable = u64(1) << 53;
+    if (v < exactly_representable)
+        out.appendf("{}", v);
+    else
+        out.appendf("\"{}\"", v);
+}
+
 /// Renders a double the way JSON needs it, with no infinities or NaNs to trip a parser.
 void append_json_number(cc::string& out, f64 v)
 {
@@ -255,6 +268,16 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             common("i");
             out += R"(,"s":"t")";
 
+            // A relation says what it MEANS as well as who it links, so the edge is readable without the viewer
+            // knowing the vocabulary.
+            if (auto const* const t = e.relation(); t != nullptr)
+            {
+                out += R"(,"relation":)";
+                append_json_string(out, t->name);
+                if (t->is_equivalence)
+                    out += R"(,"equivalence":true)";
+            }
+
             // Whatever the payload declares, rendered generically — a viewer shows it without the exporter having
             // heard of the type.
             if (auto const fields = e.fields(); !fields.empty())
@@ -272,6 +295,21 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
 
                     if (auto const t = e.field_as_text(f.name); t.has_value())
                         append_json_string(out, t.value());
+                    else if (f.type == cc::rec::type_code::u64_array)
+                    {
+                        out += '[';
+                        auto first_value = true;
+                        for (auto const v : e.field_as_u64_array(f.name))
+                        {
+                            if (!first_value)
+                                out += ',';
+                            first_value = false;
+                            append_json_u64(out, v);
+                        }
+                        out += ']';
+                    }
+                    else if (f.type == cc::rec::type_code::u64_)
+                        append_json_u64(out, e.field_as_u64(f.name).value_or(0));
                     else if (auto const d = e.field_as_double(f.name); d.has_value())
                         append_json_number(out, d.value());
                     else

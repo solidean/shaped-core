@@ -2,6 +2,7 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/record/overhead.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/serialize.hh>
@@ -28,10 +29,16 @@ cc::rec::recording capture(cc::function_ref<void()> body)
     }
     return rl.take();
 }
+
+/// A relation type defined next to the code that records it, which is the normal way.
+constexpr cc::rec::relation_type relation_reads_from = {
+    .name = "reads_from",
+    .inverse_name = "read_by",
+};
 } // namespace
 
 //
-// Ids
+// Ids and scopes
 //
 
 REC_TEST("record/trace - ids are unique, cheap and need no registry")
@@ -55,44 +62,67 @@ REC_TEST("record/trace - ids are unique, cheap and need no registry")
     CHECK(cc::rec::current_trace_id() == cc::rec::trace_id::none);
 }
 
-REC_TEST("record/trace - a scope attributes what is recorded under it, and restores what was there")
+REC_TEST("record/trace - a scope mints and names its trace, and restores what was there")
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto const outer = cc::rec::new_trace_id();
-    auto const inner = cc::rec::new_trace_id();
+    cc::rec::trace_id outer_id = cc::rec::trace_id::none;
+    cc::rec::trace_id inner_id = cc::rec::trace_id::none;
 
     auto const r = capture(
         [&]
         {
             CC_RECORD_MARK("before");
             {
-                CC_TRACE_SCOPE(outer);
-                CHECK(cc::rec::current_trace_id() == outer);
+                // Naming it is the point: a bare id is an opaque number, useless in a viewer.
+                CC_TRACE_SCOPE("handle-request");
+                outer_id = cc::rec::current_trace_id();
+                CHECK(outer_id != cc::rec::trace_id::none);
                 CC_RECORD_MARK("in-outer");
                 {
-                    CC_TRACE_SCOPE(inner);
-                    CHECK(cc::rec::current_trace_id() == inner);
+                    CC_TRACE_SCOPE("fetch-asset");
+                    inner_id = cc::rec::current_trace_id();
                     CC_RECORD_MARK("in-inner");
                 }
-                CHECK(cc::rec::current_trace_id() == outer);
+                CHECK(cc::rec::current_trace_id() == outer_id);
                 CC_RECORD_MARK("back-in-outer");
             }
             CC_RECORD_MARK("after");
         });
 
+    CHECK(outer_id != inner_id);
     CHECK(cc::rec::current_trace_id() == cc::rec::trace_id::none);
 
-    auto const of_outer = r.from_trace(outer);
+    auto const of_outer = r.from_trace(outer_id);
     CHECK(of_outer.count("in-outer") == 1);
     CHECK(of_outer.count("back-in-outer") == 1);
     CHECK(of_outer.count("in-inner") == 0); // the inner scope took over
     CHECK(of_outer.count("before") == 0);
     CHECK(of_outer.count("after") == 0);
 
-    auto const of_inner = r.from_trace(inner);
-    CHECK(of_inner.count("in-inner") == 1);
-    CHECK(of_inner.count("in-outer") == 0);
+    CHECK(r.from_trace(inner_id).count("in-inner") == 1);
+
+    // The scope's name reaches the stream, which is how a reader learns what a trace id is called.
+    CHECK(r.count("handle-request") == 1);
+    CHECK(r.count("fetch-asset") == 1);
+}
+
+REC_TEST("record/trace - a trace can carry an id that came from somewhere else")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    // A request id off the wire, a job id from a queue: minting is the default, not the only way.
+    auto const wire_id = cc::rec::trace_id(0x1234'5678'9ABC'DEF0ull);
+
+    auto const r = capture(
+        [&]
+        {
+            CC_TRACE_SCOPE_WITH_ID("inbound-request", wire_id);
+            CHECK(cc::rec::current_trace_id() == wire_id);
+            CC_RECORD_MARK("handled");
+        });
+
+    CHECK(r.from_trace(wire_id).count("handled") == 1);
 }
 
 REC_TEST("record/trace - a trace spans threads, since an id is just a value")
@@ -104,15 +134,15 @@ REC_TEST("record/trace - a trace spans threads, since an id is just a value")
     auto const r = capture(
         [&]
         {
-            CC_TRACE_SCOPE(id);
+            CC_TRACE_SCOPE_WITH_ID("job", id);
             CC_RECORD_MARK("on-main");
 
             // Passing the id by hand is the synchronous way to carry a trace across a thread.
-            // Carrying it automatically is what the ambient deltas will add.
+            // Carrying it automatically is what folding trace scopes into cc::async's ambient chain will add.
             std::thread worker(
                 [&]
                 {
-                    CC_TRACE_SCOPE(id);
+                    CC_TRACE_SCOPE_WITH_ID("job", id);
                     CC_RECORD_MARK("on-worker");
                 });
             worker.join();
@@ -127,49 +157,132 @@ REC_TEST("record/trace - a trace spans threads, since an id is just a value")
 // Relations
 //
 
-REC_TEST("record/trace - relations are facts, and a late one is the same fact")
+REC_TEST("record/trace - a relation says what it means, not just who it links")
 {
     rec_fixture const fixture(deterministic_config());
 
     auto const request = cc::rec::new_trace_id();
     auto const fetch = cc::rec::new_trace_id();
-    auto const other = cc::rec::new_trace_id();
+
+    auto const r = capture([&] { CC_RECORD_RELATION(cc::rec::relation_parent_of, request, fetch); });
+
+    auto const edges = r.trace_relations();
+    REQUIRE(edges.size() == 1);
+    REQUIRE(edges[0].type != nullptr);
+
+    // The type is a static object, so the edge carries semantics a consumer can act on rather than an opaque tag.
+    CHECK(cc::string_view(edges[0].type->name) == "parent_of");
+    CHECK(cc::string_view(edges[0].type->inverse_name) == "child_of");
+    CHECK(edges[0].type->is_transitive);
+    CHECK(!edges[0].type->is_symmetric);
+    CHECK(!edges[0].type->is_equivalence);
+
+    CHECK(edges[0].subject() == request);
+    REQUIRE(edges[0].objects().size() == 1);
+    CHECK(edges[0].objects()[0] == fetch);
+}
+
+REC_TEST("record/trace - a relation is n-ary, and the first member is the subject")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const join = cc::rec::new_trace_id();
+    auto const a = cc::rec::new_trace_id();
+    auto const b = cc::rec::new_trace_id();
+    auto const c = cc::rec::new_trace_id();
 
     auto const r = capture(
         [&]
         {
-            cc::rec::record_relation(request, cc::rec::relation_kind::parent_of, fetch);
+            // A fan-in: one result, three causes.
+            // Decomposed into pairs this would lose that they were a group.
+            CC_RECORD_RELATION(cc::rec::relation_caused_by, join, a, b, c);
 
-            // Discovered only after the work: both requests resolved to one cache key.
-            // Nothing has to be revisited, because nothing holds a graph.
-            cc::rec::record_relation(fetch, cc::rec::relation_kind::same_key_as, other);
+            // A symmetric one, where every member is a peer and the order carries nothing.
+            CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c);
         });
 
     auto const edges = r.trace_relations();
     REQUIRE(edges.size() == 2);
 
-    CHECK(edges[0].from == request);
-    CHECK(edges[0].to == fetch);
-    CHECK(edges[0].kind == cc::rec::relation_kind::parent_of);
+    CHECK(edges[0].members.size() == 4);
+    CHECK(edges[0].subject() == join);
+    CHECK(edges[0].objects().size() == 3);
+    CHECK(edges[0].objects()[2] == c);
 
-    CHECK(edges[1].from == fetch);
-    CHECK(edges[1].to == other);
-    CHECK(edges[1].kind == cc::rec::relation_kind::same_key_as);
-    CHECK(edges[1].cycles >= edges[0].cycles);
+    CHECK(edges[1].members.size() == 3);
+    CHECK(edges[1].type->is_symmetric);
+
+    // An equivalence is the one flag a reconstruction can act on directly: these ids may be merged.
+    CHECK(edges[1].type->is_equivalence);
 }
 
-REC_TEST("record/trace - ids and relations survive a round trip through bytes")
+REC_TEST("record/trace - a relation type defined next to the code that uses it works the same")
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto const parent = cc::rec::new_trace_id();
-    auto const child = cc::rec::new_trace_id();
+    auto const shader = cc::rec::new_trace_id();
+    auto const source = cc::rec::new_trace_id();
+
+    auto const r = capture([&] { CC_RECORD_RELATION(relation_reads_from, shader, source); });
+
+    auto const edges = r.trace_relations();
+    REQUIRE(edges.size() == 1);
+    CHECK(cc::string_view(edges[0].type->name) == "reads_from");
+    CHECK(cc::string_view(edges[0].type->inverse_name) == "read_by");
+}
+
+REC_TEST("record/trace - a member list only known at runtime records the same edge")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::vector<cc::rec::trace_id> members;
+    for (int i = 0; i < 5; ++i)
+        members.push_back(cc::rec::new_trace_id());
+
+    auto const r = capture([&] { CC_RECORD_RELATION_MANY(cc::rec::relation_same_key_as, members); });
+
+    auto const edges = r.trace_relations();
+    REQUIRE(edges.size() == 1);
+    REQUIRE(edges[0].members.size() == 5);
+    CHECK(edges[0].members[4] == members[4]);
+}
+
+REC_TEST("record/trace - a late relation is the same fact")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const first = cc::rec::new_trace_id();
+    auto const second = cc::rec::new_trace_id();
 
     auto const r = capture(
         [&]
         {
-            cc::rec::record_relation(parent, cc::rec::relation_kind::parent_of, child);
-            CC_TRACE_SCOPE(child);
+            CC_RECORD_MARK("work-happens");
+
+            // Discovered only afterwards: both resolved to one cache key.
+            // Nothing has to be revisited, because nothing holds a graph.
+            CC_RECORD_RELATION(cc::rec::relation_same_key_as, first, second);
+        });
+
+    auto const edges = r.trace_relations();
+    REQUIRE(edges.size() == 1);
+    CHECK(edges[0].type->is_equivalence);
+}
+
+REC_TEST("record/trace - ids, names and relations survive a round trip through bytes")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const parent = cc::rec::new_trace_id();
+    cc::rec::trace_id child = cc::rec::trace_id::none;
+
+    auto const r = capture(
+        [&]
+        {
+            CC_TRACE_SCOPE("child-work");
+            child = cc::rec::current_trace_id();
+            CC_RECORD_RELATION(cc::rec::relation_parent_of, parent, child);
             CC_RECORD_MARK("inside-child");
         });
 
@@ -178,17 +291,26 @@ REC_TEST("record/trace - ids and relations survive a round trip through bytes")
 
     auto const edges = loaded.value().events().trace_relations();
     REQUIRE(edges.size() == 1);
-    CHECK(edges[0].from == parent);
-    CHECK(edges[0].to == child);
+    CHECK(edges[0].subject() == parent);
+    CHECK(edges[0].objects()[0] == child);
+
+    // The relation TYPE travelled by value, so a reader that never linked against this binary still knows what the
+    // edge means and which way it reads.
+    REQUIRE(edges[0].type != nullptr);
+    CHECK(cc::string_view(edges[0].type->name) == "parent_of");
+    CHECK(cc::string_view(edges[0].type->inverse_name) == "child_of");
+    CHECK(edges[0].type->is_transitive);
 
     CHECK(loaded.value().events().from_trace(child).count("inside-child") == 1);
+    CHECK(loaded.value().events().count("child-work") == 1);
 }
 
 REC_TEST("record/trace - tracing gates on its own category")
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto const id = cc::rec::new_trace_id();
+    auto const a = cc::rec::new_trace_id();
+    auto const b = cc::rec::new_trace_id();
 
     auto const r = capture(
         [&]
@@ -196,8 +318,8 @@ REC_TEST("record/trace - tracing gates on its own category")
             scoped_domain_mask const restore(cc::rec::g_default_domain);
             cc::rec::g_default_domain.set_enabled(cc::rec::category::tracing, false);
 
-            CC_TRACE_SCOPE(id);
-            cc::rec::record_relation(id, cc::rec::relation_kind::follows, id);
+            CC_TRACE_SCOPE("silenced");
+            CC_RECORD_RELATION(cc::rec::relation_follows, a, b);
             CC_RECORD_MARK("still-recorded"); // a different category, so it still lands
         });
 
@@ -248,8 +370,7 @@ REC_TEST("record/overhead - a recording estimates what it cost to make")
         });
 
     // Every marker is a zero-payload event, so the estimate is the fixed cost times the count.
-    auto const events = r.event_count();
-    REQUIRE(events >= 100);
+    REQUIRE(r.event_count() >= 100);
     CHECK(r.estimated_overhead_cycles() >= 100 * 100.0);
 
     // A ratio is only meaningful once time has passed, and it is a fraction rather than a percentage.
