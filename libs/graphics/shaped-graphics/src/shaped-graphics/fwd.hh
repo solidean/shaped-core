@@ -207,7 +207,7 @@ struct named_sampler; // {name, sampler} — static sampler (group layout) / dyn
 // The mutable builder above the immutable group: set descriptors one at a time, snapshot an immutable binding_group out of it.
 // See binding/staging_binding_group.hh.
 class staging_binding_group;
-enum class binding_slot : u32; // opaque binding identity inside a staging_binding_group
+enum class binding_slot : u32; // defined below — declared here so the definition can be written qualified
 
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the
 // pipeline/primitive_topology.hh / pipeline/rasterization_state.hh / pipeline/blend_state.hh / pipeline/depth_stencil_state.hh /
@@ -280,6 +280,15 @@ inline constexpr int max_color_targets = 8;
 inline constexpr int max_vertex_buffers = 8;
 
 } // namespace sg
+
+/// A binding's identity inside a staging_binding_group, resolved once from its name.
+/// Opaque: it is an index into the group's internal slot table, not a descriptor position — that indirection
+/// is what carries a binding's heap, its first descriptor and its element count, and it is where every set is bounds-checked.
+/// Only meaningful for the group it came from, and `invalid` is what an unknown name resolves to.
+enum class sg::binding_slot : sg::u32
+{
+    invalid = ~u32(0),
+};
 
 /// Frame-level GPU lifetime token, and a direct-queue timeline value.
 /// A monotonic counter where reaching value N on the queue's epoch fence means all GPU work of epoch N has finished.

@@ -5,6 +5,7 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 
 using namespace cc::primitive_defines;

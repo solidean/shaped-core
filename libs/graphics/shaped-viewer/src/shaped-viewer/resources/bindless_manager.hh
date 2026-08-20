@@ -1,7 +1,7 @@
 #pragma once
 
 #include <clean-core/string/string.hh>
-#include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/fwd.hh> // sg::binding_slot + the handle typedefs
 #include <shaped-graphics/resource/views.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/impl/slot_table.hh>

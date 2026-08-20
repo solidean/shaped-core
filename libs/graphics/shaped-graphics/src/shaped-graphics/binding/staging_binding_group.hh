@@ -11,14 +11,8 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
-/// A binding's identity inside a staging_binding_group, resolved once from its name.
-/// Opaque: it is an index into the group's internal slot table, not a descriptor position — that indirection
-/// is what carries a binding's heap, its first descriptor and its element count, and it is where every set is bounds-checked.
-/// Only meaningful for the group it came from, and `invalid` is what an unknown name resolves to.
-enum class sg::binding_slot : sg::u32
-{
-    invalid = ~sg::u32(0),
-};
+// sg::binding_slot — the opaque per-binding identity the setters below take — is defined in fwd.hh, so a
+// consumer can hold and default-initialize one without this header.
 
 /// A mutable builder for a binding_group: a CPU-side descriptor image the setters update in place, and `snapshot` mints an immutable binding_group from.
 /// This is what makes a large, mostly-stable group — a bindless table of textures and buffers — affordable:
