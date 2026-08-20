@@ -32,6 +32,7 @@ Source lives in `src/clean-core/`, grouped by topic:
 | `function/`  | type-erased callables (`function_ref`, `unique_function`) |
 | `error/`     | fallible value types (`optional`, `result`) and the crash handler |
 | `thread/`    | `async` and its work-stealing pool, `threaded_actor`, and the primitives under them (`atomic`, `mutex`, `spin`, `thread`) |
+| `record/`    | `cc::rec` — the event stream logging, profiling, values, stats and tracing all write into ([systems/recording](docs/systems/recording.md)) |
 
 `impl/` subfolders hold private implementation details (e.g.
 `container/impl/allocating_container.hh`, `memory/impl/object_lifetime_util.hh`) —

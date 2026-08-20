@@ -50,7 +50,8 @@
 #if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
 extern "C" void _mm_pause(void);
 extern "C" unsigned __int64 __rdtsc(void);
-#pragma intrinsic(_mm_pause, __rdtsc)
+extern "C" unsigned __int64 __rdtscp(unsigned int*);
+#pragma intrinsic(_mm_pause, __rdtsc, __rdtscp)
 #elif defined(CC_ARCH_ARM64) || defined(CC_ARCH_ARM32)
 extern "C" void __yield(void);
 #pragma intrinsic(__yield)
@@ -119,6 +120,25 @@ CC_FORCE_INLINE unsigned long long read_cycles()
     // ARM's CNTVCT_EL0 is readable from userspace on Linux but not reliably elsewhere, and MSVC reaches
     // it only through <intrin.h> constants.
     // Not worth the header for a counter nothing measures on yet.
+    return 0;
+#endif
+}
+
+/// The timestamp counter plus the IA32_TSC_AUX word the OS puts the core id in, or 0 for both where there is none.
+/// cc::current_cycles_and_core (clean-core/common/time.hh) is the public spelling.
+///
+/// RDTSCP costs roughly ten cycles more than RDTSC and waits for prior instructions to retire, which RDTSC does not.
+/// It still does not stop LATER instructions from being hoisted above it, so a reading is ordered on one side only.
+CC_FORCE_INLINE unsigned long long read_cycles_and_core(unsigned int& core_out)
+{
+#if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
+#if defined(CC_COMPILER_MSVC)
+    return __rdtscp(&core_out);
+#else
+    return __builtin_ia32_rdtscp(&core_out);
+#endif
+#else
+    core_out = 0;
     return 0;
 #endif
 }

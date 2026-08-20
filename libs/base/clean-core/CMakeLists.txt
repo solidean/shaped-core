@@ -35,6 +35,13 @@ add_library(clean-core
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
+    src/clean-core/record/domain.cc
+    src/clean-core/record/chunk.cc
+    src/clean-core/record/chunk_pool.cc
+    src/clean-core/record/writer.cc
+    src/clean-core/record/event_view.cc
+    src/clean-core/record/system.cc
+    src/clean-core/record/recording.cc
     src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/format.cc
@@ -164,6 +171,22 @@ target_sources(clean-core
     src/clean-core/error/result.hh
     src/clean-core/error/optional.hh
     src/clean-core/error/crash_handler.hh
+
+    src/clean-core/record/domain_fwd.hh
+    src/clean-core/record/fwd.hh
+    src/clean-core/record/desc.hh
+    src/clean-core/record/domain.hh
+    src/clean-core/record/chunk.hh
+    src/clean-core/record/chunk_pool.hh
+    src/clean-core/record/impl/thread_state.hh
+    src/clean-core/record/impl/writer_tls.hh
+    src/clean-core/record/impl/system_state.hh
+    src/clean-core/record/writer.hh
+    src/clean-core/record/event_view.hh
+    src/clean-core/record/listener.hh
+    src/clean-core/record/system.hh
+    src/clean-core/record/record.hh
+    src/clean-core/record/recording.hh
 
     src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
@@ -416,6 +439,8 @@ if(SC_BUILD_TESTS)
         tests/streams/span_stream-test.cc
         tests/streams/file_stream-test.cc
         tests/streams/read_line-test.cc
+
+        tests/record/record-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc

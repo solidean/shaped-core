@@ -913,6 +913,76 @@ co_return cc::error("boom");          // non-unit T only (return_void and return
 // conversion across a heterogeneous-E graph (the make_async_* sugar assumes a single E; raw frames bridge by hand).
 ```
 
+## Recording — logging / profiling / stats, one stream (see [systems/recording](docs/systems/recording.md))
+
+Every observability API in the repo writes into the same per-thread byte stream and differs only in its descriptor.
+A site is a `static constexpr cc::rec::desc` plus a write, so a disabled one costs a load and an AND.
+
+**Nothing is recorded before `cc::rec::initialize()`** — test and example binaries get it from `nx::run`.
+
+```cpp
+#include <clean-core/record/system.hh>
+cc::rec::initialize();                     // once, from the application; a second call asserts
+cc::rec::initialize({.chunk_bytes = 1 << 20, .budget_bytes = 64 << 20,
+                     .overflow = cc::rec::overflow_policy::drop, .threaded = true});
+cc::rec::shutdown();                       // no other thread may be recording, listeners already unregistered
+cc::rec::is_initialized();                 // -> bool
+cc::rec::cycles_per_second();              // -> f64; calibrated at initialize, 0 without a cycle counter
+cc::rec::stats();                          // -> system_stats{threads, allocated_bytes, events_processed, ...}
+```
+
+Domains tag a site with the part of the source it came from, resolved by unqualified name lookup:
+
+```cpp
+#include <clean-core/record/domain_fwd.hh>            // costs a fwd.hh nothing: one incomplete type + a constexpr address
+namespace sg { CC_REC_DECLARE_DOMAIN(g_rec_domain); } // in the library's fwd.hh
+namespace sg { CC_REC_DEFINE_DOMAIN(g_rec_domain, "shaped-graphics"); } // in exactly one .cc
+
+#include <clean-core/record/domain.hh>
+dom.set_enabled(cc::rec::category::profiling, false); // one word write; reaches every site under the domain at once
+dom.set_enabled(cc::rec::level::debug, true);
+dom.set_captures_stacktrace(cc::rec::level::error, true);
+cc::rec::find_domain("shaped-graphics");   // -> domain*, or null
+cc::rec::set_all_domains_enabled_mask(m);  // applies to domains registered later too
+```
+
+Recording sites:
+
+```cpp
+#include <clean-core/record/record.hh>
+// The name is part of the descriptor, so it MUST be a compile-time constant — a runtime char const* will not compile.
+CC_RECORD_EVENT(cc::rec::event_kind::marker, cc::rec::category::values, "cache-miss-fallback");
+CC_RECORD_EVENT_WITH(cc::rec::event_kind::value, cc::rec::category::values, "upload", nullptr, my_fields, payload);
+
+cc::rec::is_recording(desc);               // -> bool; the gate on its own
+cc::rec::record_event(desc, payload);      // POD payload, cc::span<byte const>, or nothing
+auto w = cc::rec::open_event(desc, 256);   // reserve, fill w.payload() in place, then w.commit(n) — no temp buffer
+cc::rec::set_current_thread_record_name("worker");
+cc::rec::seal_current_thread_chunk();      // hand this thread's tail over without waiting for the chunk to fill
+```
+
+Getting events out:
+
+```cpp
+#include <clean-core/record/listener.hh>
+#include <clean-core/record/recording.hh>
+struct my_listener : cc::rec::listener { void on_chunk(cc::rec::chunk_view const& v) override { ... } };
+struct per_event : cc::rec::event_listener<per_event> { void on_event(auto const& chunk, auto const& e) { ... } };
+
+cc::rec::recording_listener capture;
+auto const h = cc::rec::register_listener(capture); // the index IS the layer; register must-see-everything first
+cc::rec::flush_blocking();                 // drains on the CALLING thread; everything published before it is offered
+cc::rec::unregister_listener(h);           // blocks until no callback into it can still be running
+auto const rec = capture.take();           // a VALUE: append, replay, walk
+
+rec.event_count(); rec.block_count(); rec.empty();
+rec.for_each_event([](auto const& chunk, auto const& e) { ... });
+rec.replay(some_listener);                 // works on a listener that was never registered
+e.name(); e.kind(); e.level(); e.domain(); e.cycles; e.core; e.site();
+e.field_as_double("bytes"); e.field_as_int("count"); e.field_as_text("path"); // empty when absent or wrong type
+chunk.wall_secs_of(e.cycles);              // exact on a sealed chunk; uses cycles_per_second on a live one
+```
+
 ## Strings — encoding conversion
 
 ```cpp
@@ -1040,6 +1110,11 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`string` / `string_view` are NOT null-terminated.**
   `data()` is not a C string — use `str.c_str_materialize()`, whose result is valid only until the next non-const operation.
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
+- **A recording site's name must be a compile-time constant.**
+  It lives in the site's `static constexpr` descriptor, which is what keeps a site free of a guard variable — so a helper taking a runtime `char const*` does not compile.
+- **`cc::rec` timestamps are non-decreasing within a thread only after clamping.**
+  `RDTSCP` is not ordered against surrounding code on both sides, so two readings around a very short span can come back inverted; take the max with zero when computing a duration.
+- **A recording is process-local.** Events point at descriptors, and descriptors are static objects in this binary — nothing about one survives a save or a wire.
 - **An `interned_string`'s identity is process-local and must never leave the process.**
   Serialize `as_string_view()`, and hash durable data over those bytes — two runs will not agree on anything else.
 - **`interned_string` has no `<`, on purpose.** Everything about the type is a pointer operation except ordering by bytes, so making that cost visible beats a `<` that quietly memcmps.

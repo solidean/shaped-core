@@ -4,6 +4,9 @@
 #include <clean-core/thread/thread.hh>
 
 #if CC_HAS_THREADS
+// <chrono> is expensive and normally confined to time.cc; this is the one other place that needs it, because
+// std::this_thread::sleep_for takes a duration and there is no other portable way to spell one.
+#include <chrono>
 #include <thread>
 
 int cc::num_hardware_threads()
@@ -11,10 +14,31 @@ int cc::num_hardware_threads()
     unsigned const n = std::thread::hardware_concurrency();
     return n == 0 ? 1 : int(n);
 }
+void cc::this_thread_yield()
+{
+    std::this_thread::yield();
+}
+
+void cc::this_thread_sleep_secs(double secs)
+{
+    if (secs <= 0)
+        return;
+    std::this_thread::sleep_for(std::chrono::duration<double>(secs));
+}
 #else
 int cc::num_hardware_threads()
 {
     return 1;
+}
+
+void cc::this_thread_yield()
+{
+    // Nothing else can be runnable, so there is nobody to yield to.
+}
+
+void cc::this_thread_sleep_secs(double)
+{
+    // Nothing else can be runnable, so sleeping could only ever waste the wait.
 }
 #endif
 

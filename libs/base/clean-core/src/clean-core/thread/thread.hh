@@ -34,4 +34,15 @@ namespace cc
 /// Nothing marks it implicitly — call this from main() before anything starts a second thread.
 /// The calling thread must not already hold an id, and no other thread may have claimed main.
 void mark_current_thread_as_main();
+
+/// Offers the rest of this thread's time slice to whatever else is runnable.
+///
+/// A SCHEDULING yield, unlike cc::spin_pause — the thread genuinely gives up the core, so this is what a wait long
+/// enough to matter should call, and what a short bounded spin should not.
+/// A no-op where the platform has no threads.
+void this_thread_yield();
+
+/// Blocks this thread for at least `secs`, and typically a scheduler tick longer.
+/// A no-op for a non-positive duration, and where the platform has no threads.
+void this_thread_sleep_secs(double secs);
 } // namespace cc

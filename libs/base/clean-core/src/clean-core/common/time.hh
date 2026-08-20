@@ -48,4 +48,21 @@ namespace cc
 {
     return u64(impl::read_cycles());
 }
+
+/// current_cycles() plus the core the reading was taken on, or 0 for both where the architecture has none.
+///
+/// The core id is the point: without pinning, a thread migrates, and a migration is the usual explanation for a step in
+/// otherwise steady per-iteration timings.
+/// It costs about ten cycles over current_cycles(), so a caller taking one per event should mean it.
+///
+/// **Neither reading is ordered against surrounding code on both sides.**
+/// This one waits for prior instructions to retire but does not stop later ones from being hoisted above it, so two
+/// readings around a very short span can still come back out of order.
+[[nodiscard]] CC_FORCE_INLINE u64 current_cycles_and_core(u32& core_out)
+{
+    unsigned int core = 0;
+    auto const cycles = u64(impl::read_cycles_and_core(core));
+    core_out = u32(core);
+    return cycles;
+}
 } // namespace cc
