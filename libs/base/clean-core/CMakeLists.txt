@@ -7,18 +7,20 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # - mimalloc (private): backs the default general memory resource; see
 #   src/clean-core/memory/mimalloc_resource.cc. Header stays private to that .cc.
 # - xxhash (private): backs cc::hash128 (XXH3 128-bit); see
-#   src/clean-core/common/hash128.cc. Header stays private to that .cc.
+#   src/clean-core/bytes/hash128.cc. Header stays private to that .cc.
 # - blake3 (private): backs cc::blake3 / cc::hash256 (the cryptographic hash); see
-#   src/clean-core/common/blake3.cc. Header stays private to that .cc.
+#   src/clean-core/bytes/blake3.cc. Header stays private to that .cc.
 
 # Define the library and its sources
 add_library(clean-core
     src/clean-core/common/assert.cc
     src/clean-core/common/hash.cc
-    src/clean-core/common/hash128.cc
-    src/clean-core/common/hash256.cc
-    src/clean-core/common/blake3.cc
     src/clean-core/common/time.cc
+
+    src/clean-core/bytes/hash128.cc
+    src/clean-core/bytes/hash256.cc
+    src/clean-core/bytes/blake3.cc
+
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
     src/clean-core/platform/environment.cc
@@ -68,9 +70,6 @@ target_sources(clean-core
     src/clean-core/common/enum_traits.hh
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
-    src/clean-core/common/hash128.hh
-    src/clean-core/common/hash256.hh
-    src/clean-core/common/blake3.hh
     src/clean-core/common/endian.hh
     src/clean-core/common/assert.hh
     src/clean-core/common/time.hh
@@ -78,6 +77,10 @@ target_sources(clean-core
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
     src/clean-core/common/asserts.hh
+
+    src/clean-core/bytes/hash128.hh
+    src/clean-core/bytes/hash256.hh
+    src/clean-core/bytes/blake3.hh
 
     src/clean-core/platform/native.hh
     src/clean-core/platform/console.hh
@@ -326,14 +329,15 @@ if(SC_BUILD_TESTS)
         tests/common/flags-test.cc
         tests/common/hash-test.cc
         tests/common/hash-types-test.cc
-        tests/common/hash128-test.cc
-        tests/common/hash256-test.cc
-        tests/common/blake3-test.cc
         tests/common/endian-test.cc
         tests/common/invocable-test.cc
         tests/common/macros-test.cc
         tests/common/utility-test.cc
         tests/common/time-test.cc
+
+        tests/bytes/hash128-test.cc
+        tests/bytes/hash256-test.cc
+        tests/bytes/blake3-test.cc
 
         tests/platform/console-test.cc
         tests/platform/environment-test.cc

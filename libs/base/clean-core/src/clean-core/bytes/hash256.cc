@@ -1,7 +1,7 @@
 #include "hash256.hh"
 
+#include <clean-core/bytes/blake3.hh>
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/blake3.hh>
 
 cc::hash256 cc::hash256::create(cc::span<byte const> data)
 {

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <clean-core/common/hash128.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
-#include <shaped-graphics/binding/binding_group.hh>  // named_sampler
+#include <shaped-graphics/binding/binding_group.hh>   // named_sampler
 #include <shaped-graphics/binding/pipeline_layout.hh> // bound_sampler, pipeline_layout_description
 #include <shaped-graphics/fwd.hh>
 

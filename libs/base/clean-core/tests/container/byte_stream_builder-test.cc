@@ -1,4 +1,4 @@
-#include <clean-core/common/hash128.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/byte_stream_builder.hh>
 #include <nexus/test.hh>
 

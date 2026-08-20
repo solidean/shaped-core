@@ -332,7 +332,7 @@ using weak_async = weak_ptr<async<T, E>, impl::async_node_traits>;
 
 
 //
-// Hashing
+// Bytes
 //
 
 struct hash128;

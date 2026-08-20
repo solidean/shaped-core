@@ -27,7 +27,7 @@ ssc::dxc::shader_cache  ── get-or-create over the DXC compiler (a separate l
 
 ## The key is the content, not the handle
 
-A cache entry is keyed by a [`cc::hash128`](../../../../base/clean-core/src/clean-core/common/hash128.hh) computed from the **logical creation arguments**.
+A cache entry is keyed by a [`cc::hash128`](../../../../base/clean-core/src/clean-core/bytes/hash128.hh) computed from the **logical creation arguments**.
 So the key is independent of any backend handle identity, and stable across runs.
 The arguments are serialized into a [`cc::byte_stream_builder`](../../../../base/clean-core/src/clean-core/container/byte_stream_builder.hh), then hashed (XXH3-128).
 That builder length-prefixes each piece, which is what keeps different splits of the same data distinct.

@@ -205,12 +205,12 @@ rules:
     reason: the hash implementation cc::hash / cc::hash128 forward to
     files:
       - src/clean-core/common/hash.cc
-      - src/clean-core/common/hash128.cc
+      - src/clean-core/bytes/hash128.cc
 
   - kind: allow-include
     value: <blake3.h>
     reason: the cryptographic hash cc::blake3 / cc::hash256 forward to
-    files: src/clean-core/common/blake3.cc
+    files: src/clean-core/bytes/blake3.cc
 
   - kind: allow-include
     value: <mimalloc.h>

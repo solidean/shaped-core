@@ -1,7 +1,7 @@
 #include "op.hh"
 
+#include <clean-core/bytes/blake3.hh>
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/blake3.hh>
 #include <clean-core/common/endian.hh>
 #include <clean-core/string/string_view.hh>
 

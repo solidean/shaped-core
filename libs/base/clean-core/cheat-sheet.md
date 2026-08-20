@@ -563,19 +563,26 @@ cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold ov
 //           unique_* containers structural; unique_ptr by pointer identity
 // a char array hashes as the string it holds (needs string_view.hh), which is what makes m["literal"] work
 //   a raw char const* still hashes by ADDRESS — convert it to a string_view before using it as a key
+```
 
-#include <clean-core/common/hash128.hh>
+`common/hash.hh` is the protocol — how a *type* participates in hashing, which is why the containers depend on it.
+The digest algorithms below live in `bytes/` instead, alongside the other algorithms over byte ranges.
+
+## Bytes
+
+```cpp
+#include <clean-core/bytes/hash128.hh>
 cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)
 cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const> + u64 seed (content-addr IDs)
 hash(h128);                                // hidden-friend customization point -> low limb (u64)
 
-#include <clean-core/common/hash256.hh>
+#include <clean-core/bytes/hash256.hh>
 cc::hash256{.l0=..,.l1=..,.l2=..,.l3=..};  // 256-bit value, four u64 limbs; ==, <=> (lex by l0..l3, NOT byte order)
 cc::hash256::create(bytes);                // = cc::blake3::create; BLAKE3-256 of a span<byte const>
 h256.to_bytes(out32);  cc::hash256::from_bytes(in32);  // the durable 32-byte form: l0 first, each limb little-endian
 hash(h256);                                // hidden-friend customization point -> l0 (u64)
 
-#include <clean-core/common/blake3.hh>    // the CRYPTOGRAPHIC hash — for content addressing, not for maps
+#include <clean-core/bytes/blake3.hh>     // the CRYPTOGRAPHIC hash — for content addressing, not for maps
 cc::blake3::create(bytes);                 // -> hash256, one-shot
 cc::blake3 h;  h.update(bytes);  h.finalize();  h.reset();  // streaming: hash a sequence without concatenating it
 // finalize() is const and repeatable; update() may continue after it

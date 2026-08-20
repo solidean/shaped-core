@@ -11,7 +11,8 @@ clean-core's headers live in `src/clean-core/`, grouped by topic:
 ```text
 clean-core/
   fwd.hh        # forward declarations of the public types
-  common/       # macros, utility/meta, enum traits + flags, hash, assertions
+  common/       # macros, utility/meta, enum traits + flags, the hash protocol, assertions
+  bytes/        # algorithms over byte ranges: the hash128 / hash256 digests and blake3
   platform/     # console (color), native (demangling), source_location, stacktrace, win32_sanitized
   math/         # bit utilities, the random PRNG, wide_arith's 128-bit primitives
   memory/       # allocation, node_allocation, shared_ptr (+ impl/)

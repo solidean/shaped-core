@@ -1,7 +1,7 @@
 #pragma once
 
 #include <blob-cache/keys.hh> // bcache::cache_key, returned by value below
-#include <clean-core/common/hash128.hh>
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/key_value_cache.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh> // sg::async_compiled_shader
