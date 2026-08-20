@@ -123,12 +123,11 @@ private:
     {
         auto& self = *static_cast<mock_growing_read_stream_adapter*>(ctx);
 
-        // The two dry probes impl_remaining_hint takes, answered as a seekable source would — which is what
-        // gets read_all to size its buffer from a number that is already stale.
-        if (dir == cc::seek_dir::dry_relative && offset == 0)
-            return i64(self._pos - isize(end - curr));
-        if (dir == cc::seek_dir::dry_end && offset == 0)
-            return i64(self._reported_size);
+        // The hint impl_remaining_hint takes, answered from a size that is already stale — which is what gets
+        // read_all to size its buffer from a number the source then grows past.
+        // The dry_* probes stay unanswered, so this mock reports a size without ever claiming to be seekable.
+        if (dir == cc::seek_dir::remaining_size_hint)
+            return i64(self._reported_size) - i64(self._pos - isize(end - curr));
 
         if (!(dir == cc::seek_dir::relative && offset == 0))
             return i64(-1);

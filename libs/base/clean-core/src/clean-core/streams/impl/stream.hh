@@ -57,7 +57,8 @@ concept stream_narrows_to = requires {
 
 constexpr bool seek_dir_is_dry(seek_dir d)
 {
-    return d == seek_dir::dry_begin || d == seek_dir::dry_relative || d == seek_dir::dry_end;
+    return d == seek_dir::dry_begin || d == seek_dir::dry_relative || d == seek_dir::dry_end
+        || d == seek_dir::remaining_size_hint;
 }
 
 /// Empty placeholder occupying the `first_write` slot on read-only streams (zero-sized via
@@ -507,23 +508,17 @@ private:
     }
 
     /// Remaining byte count if the source can report it cheaply, else nullopt.
-    /// A hint, never a bound: it is two probes taken at one instant, and a source that grows after them —
-    /// a file another process is appending to — leaves the answer stale before the caller can act on it.
+    /// A hint, never a bound: a source that grows after the probe — a file another process is appending to —
+    /// leaves the answer stale before the caller can act on it.
     /// Size a buffer with it; do not treat it as the amount that will arrive.
-    /// Never disturbs the buffer — dry probes only.
-    /// A dry_relative probe is safe on any stream (try_as_seekable uses the same one to detect seekability).
-    /// A real position (>= 0) means the source tracks position, so the dry_end probe that follows is safe too.
-    /// A genuinely non-seekable source returns -1, and we bail.
+    /// Never disturbs the buffer.
     cc::optional<i64> impl_remaining_hint()
         requires(can_read)
     {
-        auto const pos = this->impl_flush(0, seek_dir::dry_relative);
-        if (pos.has_error() || pos.value() < 0)
+        auto const hint = this->impl_flush(0, seek_dir::remaining_size_hint);
+        if (hint.has_error() || hint.value() < 0)
             return cc::nullopt;
-        auto const end = this->impl_flush(0, seek_dir::dry_end);
-        if (end.has_error() || end.value() < 0)
-            return cc::nullopt;
-        return end.value() - pos.value();
+        return hint.value();
     }
 
     cc::result<i64> impl_flush(i64 offset, seek_dir dir)

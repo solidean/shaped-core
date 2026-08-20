@@ -999,6 +999,8 @@ adapter.stream();                         // -> the natural seekable_* stream (o
 
 #include <clean-core/streams/stream_flush.hh> // authoring: write your own adapter (socket, compressor, ...)
 cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see docs/writing-a-stream.md
+// seek_dir::remaining_size_hint is NOT a seek: bytes still to come, or -1. read_all() sizes its alloc from it,
+//   and answering it never implies seekability — that is what try_as_seekable's dry_relative probe is for.
 ```
 
 ## Gotchas
