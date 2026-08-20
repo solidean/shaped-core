@@ -29,6 +29,7 @@ add_library(shaped-graphics
     src/shaped-graphics/raytracing/raytracing_pipeline.cc
     src/shaped-graphics/raytracing/raytracing_shader_table.cc
     src/shaped-graphics/binding/binding_group.cc
+    src/shaped-graphics/binding/staging_binding_group.cc
     src/shaped-graphics/context/pipeline_cache.cc
     src/shaped-graphics/present/swapchain.cc
     src/shaped-graphics/routine/reload_generation.cc
@@ -111,6 +112,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/raytracing/raytracing_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_shader_table.hh
     src/shaped-graphics/binding/binding_group.hh
+    src/shaped-graphics/binding/staging_binding_group.hh
     src/shaped-graphics/present/swapchain.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/memory/allocation_info.hh
@@ -208,6 +210,7 @@ if(SC_BUILD_TESTS)
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc
             tests/binding/binding-group-array-test.cc
+            tests/binding/staging-binding-group-test.cc
             tests/barrier/barrier-test.cc
             tests/error-handling/error-handling-test.cc
             tests/raytracing/raytracing-test.cc

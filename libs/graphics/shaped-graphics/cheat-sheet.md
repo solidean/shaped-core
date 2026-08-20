@@ -506,6 +506,31 @@ ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
+layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its staging slot index
+
+// staging_binding_group — MUTABLE builder; set one descriptor at a time, snapshot immutable groups out of it. For big, mostly-stable (bindless) tables.
+#include <shaped-graphics/binding/staging_binding_group.hh>
+ctx.persistent.create_staging_binding_group(group_layout)  // -> staging_binding_group_handle = shared_ptr<staging_binding_group> (MUTABLE handle); persistent only (+ try_ twin)
+sg::binding_slot            // enum class : u32 — opaque binding identity; NOT a descriptor position, it indexes an internal table (heap, first descriptor, element count)
+                            //   that indirection is where every set is resolved and bounds-checked; `invalid` is what an unknown name resolves to
+sbg->slot_of(name)                    // -> binding_slot  THE name lookup, done ONCE; invalid if the layout has no binding of that name
+sbg->is_array(slot) / array_size(slot) // -> bool / int — the binding's shape, which decides the setter family and bounds every element index (1 for a scalar)
+// the setters NAME the shape and never infer it — a scalar rejects the array family and vice versa; an element index is always an argument, never chosen for you
+sbg->set_binding(slot, raw_view)      // void — the one descriptor of a SCALAR binding (a typed view converts); asserts on an array binding
+                                      //   no unset_binding: only an ARRAY element can be absent. an empty scalar is a VALUE you set — sg::tlas_view{} is the null AS
+sbg->set_array_element(slot, i, raw_view) / unset_array_element(slot, i)      // void — one ARRAY element; i is checked against array_size
+sbg->set_array_range(slot, first, span<raw_view const>) / unset_array_range(slot, first, count)  // void — PATCH a subrange; every other element is left alone
+sbg->set_array(slot[, first], span<raw_view const>)  // void — REPLACE the whole array: the run lands at `first` (0 by default) and every element it does NOT cover is CLEARED
+sbg->unset_array(slot)                // void — clear every element
+sbg->set_sampler(slot, sampler) / unset_sampler(slot)  // void — dynamic samplers only (a static one asserts); unset = the default sampler state
+// by NAME (asserts the binding exists) — the one-shot whole-binding calls only; per-element work runs off a resolved slot, which is the point of having one:
+sbg->set_binding(name, raw_view) / set_array(name, views) / unset_array(name) / set_sampler(name, sampler) / unset_sampler(name)
+sbg->snapshot()                       // -> binding_group_handle — SAME handle while nothing changed since the last one; throws sg::binding_group_exception (+ try_ twin)
+sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle const&
+                                      // starts FULLY VACANT, but EVERY binding must be set once before the first snapshot (static samplers excepted) — say what it holds,
+                                      //   even if that is nothing: unset_array, or an empty range, answers it. array elements themselves may stay vacant
+                                      // NOT thread-safe (snapshot() mutates); a taken snapshot is independent — later sets never touch it
+                                      // dx12: sets write a private non-shader-visible heap; a dirty snapshot is ONE CopyDescriptorsSimple, a clean one is free
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size + bound pipeline layout)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group at slot `set` (indexes the pipeline layout's groups)
