@@ -30,7 +30,7 @@ struct cc::compression_dictionary
 
     /// Build a dictionary from representative samples.
     ///
-    /// `dict_size` is a budget rather than a target, and 100 kB is upstream's usual starting point.
+    /// `dict_size` must be > 0, and it is a budget rather than a target — 100 kB is upstream's usual starting point.
     /// Aim for at least a hundred samples that look like what will actually be compressed.
     /// Too few, or samples that do not resemble the real payloads, produce a dictionary that helps nothing.
     ///
