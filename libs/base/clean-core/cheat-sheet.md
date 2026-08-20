@@ -946,11 +946,30 @@ cc::rec::find_domain("shaped-graphics");   // -> domain*, or null
 cc::rec::set_all_domains_enabled_mask(m);  // applies to domains registered later too
 ```
 
-Recording sites:
+Recording sites — every name below MUST be a compile-time constant, since it lives in the site's descriptor:
+
+```cpp
+#include <clean-core/common/log.hh>          // CC_LOG_*
+CC_LOG_INFO("shader cache warmed");          // no payload at all: the text IS the descriptor
+CC_LOG_WARNING("fell back to {} after {}", name, reason); // formatted straight into the chunk, no temp buffer
+CC_LOG_TRACE / _DEBUG / _INFO / _WARNING / _ERROR         // trace+debug off by default; error captures a stack
+                                             // too long for the chunk => truncated and flagged, never dropped
+
+#include <clean-core/common/profiling.hh>    // scopes, values, markers, stats
+CC_RECORD_SCOPE();                           // times the block, named after the enclosing function
+CC_RECORD_SCOPE("upload-pass");              // ... or explicitly. MUST NOT cross a co_await (cc::async asserts)
+CC_RECORD_SCOPE_BEGIN("span"); CC_RECORD_SCOPE_END("span"); // when the two ends live in different functions
+CC_RECORD_MARK("fallback-taken");            // "did this code run" — the cheapest useful annotation
+CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES
+CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless
+CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a DELTA to add up
+// units: unit_count, unit_bytes, unit_seconds, unit_ratio, unit_hertz — or define your own cc::rec::unit
+```
+
+The low-level seam the above expand into:
 
 ```cpp
 #include <clean-core/record/record.hh>
-// The name is part of the descriptor, so it MUST be a compile-time constant — a runtime char const* will not compile.
 CC_RECORD_EVENT(cc::rec::event_kind::marker, cc::rec::category::values, "cache-miss-fallback");
 CC_RECORD_EVENT_WITH(cc::rec::event_kind::value, cc::rec::category::values, "upload", nullptr, my_fields, payload);
 
@@ -968,6 +987,9 @@ Getting events out:
 #include <clean-core/record/recording.hh>
 struct my_listener : cc::rec::listener { void on_chunk(cc::rec::chunk_view const& v) override { ... } };
 struct per_event : cc::rec::event_listener<per_event> { void on_event(auto const& chunk, auto const& e) { ... } };
+
+#include <clean-core/record/console_listener.hh>
+auto console = cc::rec::console_listener({.min_level = cc::rec::level::info}); // log events only, in timestamp order
 
 cc::rec::recording_listener capture;
 auto const h = cc::rec::register_listener(capture); // the index IS the layer; register must-see-everything first

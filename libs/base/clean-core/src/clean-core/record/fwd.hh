@@ -160,6 +160,8 @@ struct event_iterator;
 
 struct listener;
 struct listener_handle;
+struct console_listener;
+struct console_options;
 template <class Derived>
 struct event_listener;
 

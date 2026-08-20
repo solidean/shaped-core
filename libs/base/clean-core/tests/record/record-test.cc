@@ -1,3 +1,5 @@
+#include "record-test-types.hh"
+
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/record.hh>
@@ -10,94 +12,10 @@
 #include <thread>
 
 using namespace cc::primitive_defines;
-
-// The recording system is a process-wide singleton with one initialize/shutdown pair, so every test here holds the
-// same exclusion tag and none of them ever overlap.
-#define REC_TEST(name_) TEST(name_, nx::config::exclusive("cc-record"))
+using namespace cc_rec_test;
 
 namespace
 {
-/// Brings the system up for one test and tears it down again, whatever the body does.
-struct rec_fixture
-{
-    explicit rec_fixture(cc::rec::config cfg) { cc::rec::initialize(cfg); }
-    ~rec_fixture() { cc::rec::shutdown(); }
-
-    rec_fixture(rec_fixture const&) = delete;
-    rec_fixture& operator=(rec_fixture const&) = delete;
-};
-
-/// The deterministic configuration: no background thread, so a flush_blocking() is the only thing that ever drains.
-/// This is what lets the core be tested without injecting a clock or a scheduler, which would tax every real use.
-cc::rec::config deterministic_config()
-{
-    auto cfg = cc::rec::config{};
-    cfg.threaded = false;
-    cfg.chunk_bytes = 64 * 1024;
-    cfg.budget_bytes = 4 * 1024 * 1024;
-    cfg.overflow = cc::rec::overflow_policy::grow_unbounded;
-    cfg.ready_chunks = 2;
-    return cfg;
-}
-
-/// Collects every event it is offered, so a test can assert on what actually reached a listener.
-struct collector final : cc::rec::listener
-{
-    struct entry
-    {
-        cc::string name;
-        cc::rec::event_kind kind = cc::rec::event_kind::invalid;
-        u64 cycles = 0;
-        cc::string domain;
-        u16 layer = 0;
-    };
-
-    void on_chunk(cc::rec::chunk_view const& view) override
-    {
-        for (auto it = view.begin(); it != view.end(); ++it)
-        {
-            auto const e = *it;
-            events.push_back({
-                .name = cc::string(e.name()),
-                .kind = e.kind(),
-                .cycles = e.cycles,
-                .domain = cc::string(e.domain()->name()),
-                .layer = view.layer,
-            });
-        }
-        ++chunk_count;
-    }
-
-    [[nodiscard]] cc::string_view listener_name() const override { return "collector"; }
-
-    [[nodiscard]] isize count_named(cc::string_view n) const
-    {
-        isize c = 0;
-        for (auto const& e : events)
-            if (cc::string_view(e.name) == n)
-                ++c;
-        return c;
-    }
-
-    cc::vector<entry> events;
-    isize chunk_count = 0;
-};
-
-/// Registers a listener for a scope and unregisters it again, so a test never leaves one behind.
-struct scoped_listener
-{
-    explicit scoped_listener(cc::rec::listener& l) : _handle(cc::rec::register_listener(l)) {}
-    ~scoped_listener() { cc::rec::unregister_listener(_handle); }
-
-    scoped_listener(scoped_listener const&) = delete;
-    scoped_listener& operator=(scoped_listener const&) = delete;
-
-    [[nodiscard]] isize layer() const { return _handle.layer(); }
-
-private:
-    cc::rec::listener_handle _handle;
-};
-
 struct sample_payload
 {
     u64 index = 0;
@@ -108,7 +26,6 @@ constexpr cc::rec::field sample_fields[] = {
     {.name = "index", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
     {.name = "value", .type = cc::rec::type_code::f64_, .offset = 8, .size = 8},
 };
-
 } // namespace
 
 // A site's name is part of its descriptor, so it must be a compile-time constant — these are macros for exactly that
@@ -209,6 +126,7 @@ REC_TEST("record - a disabled category costs nothing and records nothing")
     collector c;
     {
         scoped_listener const reg(c);
+        scoped_domain_mask const restore(cc::rec::g_default_domain);
 
         cc::rec::g_default_domain.set_enabled(cc::rec::category::values, false);
         REC_MARK("silenced");

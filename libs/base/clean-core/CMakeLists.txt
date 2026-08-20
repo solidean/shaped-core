@@ -31,6 +31,7 @@ add_library(clean-core
     src/clean-core/platform/console.cc
     src/clean-core/platform/environment.cc
     src/clean-core/platform/file_path.cc
+    src/clean-core/platform/stack_capture.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
@@ -42,6 +43,9 @@ add_library(clean-core
     src/clean-core/record/event_view.cc
     src/clean-core/record/system.cc
     src/clean-core/record/recording.cc
+    src/clean-core/record/value.cc
+    src/clean-core/record/log.cc
+    src/clean-core/record/console_listener.cc
     src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/format.cc
@@ -86,6 +90,8 @@ target_sources(clean-core
     src/clean-core/common/endian.hh
     src/clean-core/common/assert.hh
     src/clean-core/common/time.hh
+    src/clean-core/common/log.hh
+    src/clean-core/common/profiling.hh
     src/clean-core/common/impl/small_size_type.hh
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
@@ -105,6 +111,7 @@ target_sources(clean-core
     src/clean-core/platform/file_path.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
+    src/clean-core/platform/stack_capture.hh
     src/clean-core/platform/win32_sanitized.hh
     src/clean-core/platform/intrinsics.hh
 
@@ -187,6 +194,11 @@ target_sources(clean-core
     src/clean-core/record/system.hh
     src/clean-core/record/record.hh
     src/clean-core/record/recording.hh
+    src/clean-core/record/value.hh
+    src/clean-core/record/stat.hh
+    src/clean-core/record/log.hh
+    src/clean-core/record/scope.hh
+    src/clean-core/record/console_listener.hh
 
     src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
@@ -441,6 +453,7 @@ if(SC_BUILD_TESTS)
         tests/streams/read_line-test.cc
 
         tests/record/record-test.cc
+        tests/record/record-frontends-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc

@@ -4,6 +4,7 @@
 #include <clean-core/container/tuple.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/node_allocation.hh>
+#include <clean-core/record/impl/writer_tls.hh>
 #include <clean-core/thread/async.hh>
 
 #include <coroutine>
@@ -153,8 +154,19 @@ struct async_coro_frame
             p.check = nullptr;
             resume = fn(a, &p); // a failed dependency writes the failure slot here and refuses the resume
         }
+#if CC_ASSERT_ENABLED
+        // The one place a coroutine body runs, so this is where a profiling scope crossing a co_await shows up.
+        // The check is exact: between two suspends the body may open and close scopes freely, and must leave the depth
+        // where it found it.
+        auto const rec_depth_before = cc::rec::impl::t_writer.scope_depth;
+#endif
         if (resume)
             handle.resume();
+#if CC_ASSERT_ENABLED
+        CC_ASSERT(cc::rec::impl::t_writer.scope_depth == rec_depth_before,
+                  "a CC_RECORD_SCOPE crossed a co_await — the work stopped and the span it reports never happened; "
+                  "use CC_RECORD_ASYNC_SCOPE for work that suspends");
+#endif
         p.ctx = nullptr;
 
         auto ctx = async_context<T, E>(base);

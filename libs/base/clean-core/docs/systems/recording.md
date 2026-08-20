@@ -186,13 +186,97 @@ Without threads (`SC_THREADS=OFF`, or `config::threaded = false`) no API changes
 
 ---
 
+## The vocabularies
+
+Every one of these is the same descriptor-plus-write underneath, and they differ only in kind, category and payload.
+`clean-core/common/log.hh` and `clean-core/common/profiling.hh` are the convenience includes; nobody has to know the folder is called `record/`.
+
+**A site's name must be a compile-time constant.**
+It lives in the site's `static constexpr` descriptor, which is what keeps a site free of a guard variable — so a helper taking a runtime `char const*` does not compile, by construction.
+
+### Logging
+
+```cpp
+CC_LOG_INFO("shader cache warmed");            // no payload at all: the text is the descriptor
+CC_LOG_WARNING("fell back to {} after {}", name, reason);
+```
+
+A message with no arguments costs the stream nothing beyond its header.
+One with arguments is formatted directly into the chunk's remaining space by `cc::format_to`, so there is no temporary buffer, no allocation and no copy.
+
+The format string doubles as the site's name, so every message from one site groups under one string whatever it formatted to.
+That is what makes "how often does this fire" answerable at all.
+
+A message too long for what is left of a chunk is **truncated and flagged, never dropped** — a truncated message is still evidence.
+
+Levels are `trace`, `debug`, `info`, `warning`, `error`, and each gates on its own bit in the domain's mask.
+`trace` and `debug` are off by default, because a build that records them by default teaches everyone to turn logging off.
+A domain can also be told to capture a stack or break into the debugger at a level; errors capture a stack by default.
+
+### Profiling scopes
+
+```cpp
+CC_RECORD_SCOPE();                 // named after the enclosing function
+CC_RECORD_SCOPE("upload-pass");    // named explicitly
+CC_RECORD_SCOPE_BEGIN("span"); ... CC_RECORD_SCOPE_END("span");   // when the ends are in different functions
+```
+
+A scope opens and closes on one thread at one nesting depth, and both events carry that depth.
+Four bytes of payload buys best-effort re-nesting of a stream that lost its middle, which is exactly the stream a crash dump or a decimated ring buffer hands you.
+
+**A scope must not cross a `co_await`.**
+The work stopped, the thread went elsewhere, and the span it would report never happened.
+`cc::async`'s frame driver has exactly one place where a coroutine body runs, and it asserts there that the body left the scope depth where it found it.
+So the mistake is caught rather than reported as a wrong number.
+
+### Values, markers and stats
+
+```cpp
+CC_RECORD_MARK("fallback-taken");                          // did this code run
+CC_RECORD("mesh_vertices", vertex_count);                  // with what
+CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the current reading
+CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a delta to add up
+```
+
+A marker is the cheapest useful annotation there is, and the one to reach for in a fallback branch you are not sure is ever taken.
+
+`CC_RECORD` takes scalars, enums, pointers and text.
+An enum collapses onto its underlying type and a pointer onto an opaque address, so a consumer reads a number without knowing the type.
+Anything convertible to a `cc::string_view` — a `char const*` included — is recorded as its **bytes**, never as an address.
+
+The two stat kinds are not interchangeable, and picking the wrong one produces a plausible graph of the wrong thing.
+A snapshot is the current reading of something that exists whether or not you look; summing snapshots is meaningless.
+An accumulate is a delta, and summing is the whole point.
+
+Values are `f64` only, which also covers every integer up to 2^53.
+That is a deliberate cap: one numeric type means a listener graphs anything without a type switch.
+
+A `cc::rec::unit` says what a quantity means — singular and plural, symbol, prefix base, axis scale, aggregation, preferred range, whether higher is better.
+Deliberately a struct rather than an enum: everyone's enum of units is missing the case the next consumer needs.
+
+### The console
+
+`cc::rec::console_listener` turns log events back into lines, and is **deliberately a little behind in exchange for a total order**.
+Blocks arrive from different threads in no particular order, so printing them as they land would interleave a multi-threaded run into nonsense.
+One drain's worth is buffered, sorted by timestamp, and printed at the end of the batch.
+
+Only `event_kind::log` reaches the terminal.
+A console that also printed every scope and stat would be unreadable, and those have listeners of their own.
+
+It is not installed for you — see the note at the top of this document.
+
+---
+
 ## What is here today
 
-`cc::rec` currently carries the stream itself: descriptors, domains, the chunk pool, the write path, listeners with the layer rule, the recording value type and replay.
+`cc::rec` carries the stream and the vocabularies over it: logging, profiling scopes, values, markers and stats, plus the console listener.
 
-The vocabularies on top of it — `CC_LOG_*`, `CC_RECORD_SCOPE`, `CC_RECORD`, `CC_RECORD_MARK`, `CC_RECORD_STAT` — plus tracing, serialization, the crash dump and the query API are still to come.
-`CC_RECORD_EVENT` and `CC_REC_DEFINE_DESC` in [record.hh](../../src/clean-core/record/record.hh) are the seam they all expand into.
-The event kinds they need are already reserved in [fwd.hh](../../src/clean-core/record/fwd.hh).
+Still to come: async scopes and the ambient-context deltas that carry them, tracing, serialization, the crash dump, and the query API that makes a recording a test assertion.
+The event kinds those need are already reserved in [fwd.hh](../../src/clean-core/record/fwd.hh).
+
+`cc::capture_stack` ([stack_capture.hh](../../src/clean-core/platform/stack_capture.hh)) is a real seam with a stub behind it.
+It returns an empty capture on every platform today, so a stacktrace-enriched event carries a frame count of zero rather than a wrong stack.
+Filling it in touches that one file.
 
 **No binary format here is stable**, and none will be for a good while.
 Durability comes from an exporter, not from the raw bytes.
