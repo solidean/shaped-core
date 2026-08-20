@@ -40,25 +40,25 @@ TEST("sv bindless_manager - unchanged mirrors serve the same group, changes recr
     CHECK(buf_slot != sv::bindless_buffer_slot::invalid);
     CHECK(tex_slot != sv::bindless_texture_2d_slot::invalid);
 
-    auto const group = manager.lock_group();
+    auto const group = manager.lock();
     CHECK(group != nullptr);
-    manager.unlock_group(group);
+    manager.unlock(group);
 
     // Next epoch, same working set: same slots, same group — nothing was reuploaded.
     ctx.advance_epoch_and_wait_for_idle();
     CHECK(manager.acquire(tex.as_readonly_view()) == tex_slot);
-    auto const group_again = manager.lock_group();
+    auto const group_again = manager.lock();
     CHECK(group_again.get() == group.get());
-    manager.unlock_group(group_again);
+    manager.unlock(group_again);
 
     // A new acquire dirties the mirror: the next lock serves a recreated group.
     ctx.advance_epoch_and_wait_for_idle();
     auto const tex2 = make_texture(ctx);
     auto const tex2_slot = manager.acquire(tex2.as_readonly_view());
     CHECK(tex2_slot != tex_slot);
-    auto const group_recreated = manager.lock_group();
+    auto const group_recreated = manager.lock();
     CHECK(group_recreated.get() != group.get());
-    manager.unlock_group(group_recreated);
+    manager.unlock(group_recreated);
 
     ctx.advance_epoch_and_wait_for_idle();
 }
@@ -75,20 +75,50 @@ TEST("sv bindless_manager - lock/unlock protocol violations assert")
     (void)manager.acquire(tex.as_readonly_view());
 
     // Unlock without a lock.
-    auto const group = manager.lock_group();
-    manager.unlock_group(group);
-    CHECK_ASSERTS(manager.unlock_group(group));
+    auto const group = manager.lock();
+    manager.unlock(group);
+    CHECK_ASSERTS(manager.unlock(group));
 
     // Acquires and a second lock are refused while locked; unlock must get the served group back.
-    auto const locked = manager.lock_group();
+    auto const locked = manager.lock();
     CHECK(manager.is_locked());
     CHECK_ASSERTS(manager.acquire(tex.as_readonly_view()));
-    CHECK_ASSERTS(manager.lock_group());
-    CHECK_ASSERTS(manager.unlock_group(nullptr));
-    manager.unlock_group(locked);
+    CHECK_ASSERTS(manager.lock());
+    CHECK_ASSERTS(manager.unlock(nullptr));
+    manager.unlock(locked);
 
     // Lock and unlock must happen in the same epoch.
-    auto const cross_epoch = manager.lock_group();
+    auto const cross_epoch = manager.lock();
     ctx.advance_epoch_and_wait_for_idle();
-    CHECK_ASSERTS(manager.unlock_group(cross_epoch));
+    CHECK_ASSERTS(manager.unlock(cross_epoch));
+}
+
+TEST("sv bindless_manager - the scoped lock unlocks at scope exit")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context& ctx = *ctx_r.value();
+
+    auto manager = sv::bindless_manager::create(ctx, {.buffer_count = 4, .texture_2d_count = 4});
+    auto const tex = make_texture(ctx);
+    (void)manager.acquire(tex.as_readonly_view());
+
+    // The lock carries the group and holds the manager locked for its scope.
+    {
+        auto const lock = manager.lock_scoped();
+        CHECK(lock.group() != nullptr);
+        CHECK(manager.is_locked());
+        CHECK_ASSERTS(manager.acquire(tex.as_readonly_view()));
+    }
+    CHECK(!manager.is_locked());
+
+    // A moved-from lock is disarmed: exactly one unlock happens, from the survivor.
+    {
+        auto lock = manager.lock_scoped();
+        auto const moved = cc::move(lock);
+        CHECK(moved.group() != nullptr);
+        CHECK(manager.is_locked());
+    }
+    CHECK(!manager.is_locked());
 }

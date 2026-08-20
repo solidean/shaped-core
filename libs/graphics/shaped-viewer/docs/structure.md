@@ -40,7 +40,7 @@ mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh:
 resource managers (mesh / material)      [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
 resource data (triangle / indexed / material)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
 bindless manager                         [in progress]  ONE readonly bindless binding group (buffers + tex 1d/2d/3d/cube) over dirty-flagged CPU mirrors;
-                                                        lock_group/unlock_group same-epoch protocol, per-epoch slots, stale-sweep reclaim. No consumer wired yet — the per-instance mesh table is next
+                                                        lock/unlock same-epoch protocol, per-epoch slots, stale-sweep reclaim. No consumer wired yet — the per-instance mesh table is next
 pathtrace_routine                        [in progress]  the DXR GI trace view_renderer drives: TLAS + dispatch_rays into a UAV target
 pbr_raytrace_routine                     [in progress]  the flat single-bounce IBL DXR trace (SH environment), driven directly
 sv_shaders package                       [in progress]  raygen / miss+closest-hit, plus layout.hlsl (border / view / wipe), via slib

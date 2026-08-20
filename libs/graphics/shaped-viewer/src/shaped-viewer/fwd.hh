@@ -88,6 +88,7 @@ class texture_manager;
 // the bindless descriptor group (see resources/bindless_manager.hh); its slot ids are defined at the bottom
 struct bindless_config;
 class bindless_manager;
+class bindless_lock; // RAII lock over the manager: carries the group handle, unlocks on destruction
 enum class bindless_buffer_slot : u32;
 enum class bindless_texture_1d_slot : u32;
 enum class bindless_texture_2d_slot : u32;

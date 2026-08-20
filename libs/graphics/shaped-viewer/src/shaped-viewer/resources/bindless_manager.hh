@@ -36,9 +36,11 @@ struct sv::bindless_config
 /// Re-acquiring the same view is O(1), returns the same slot, and touches no descriptor, so an unchanged
 /// working set never causes a reupload; a mint writes exactly one staging descriptor.
 ///
-/// `lock_group()` hands out the group and locks the manager — no acquires until `unlock_group(group)`,
+/// `lock()` hands out the group and locks the manager — no acquires until `unlock(group)`,
 /// which must receive the same group back in the same epoch (both asserted; the handle is shared, so
 /// identity means pointer equality, not ownership transfer).
+/// `lock_scoped()` is the RAII form: the returned `bindless_lock` carries the handle and
+/// unlocks at scope exit.
 /// The group is the staging group's snapshot: minted only when a descriptor changed since the last lock,
 /// otherwise the same handle is served again.
 ///
@@ -75,10 +77,14 @@ public:
     /// The bindless group — the staging group's snapshot, minted only if a descriptor changed since the
     /// last lock; locks the manager.
     /// Slots acquired this epoch index the returned group.
-    [[nodiscard]] sg::binding_group_handle lock_group();
+    [[nodiscard]] sg::binding_group_handle lock();
 
-    /// Unlocks; `group` must be the handle `lock_group` returned, in the same epoch (both asserted).
-    void unlock_group(sg::binding_group_handle const& group);
+    /// Unlocks; `group` must be the handle `lock` returned, in the same epoch (both asserted).
+    void unlock(sg::binding_group_handle const& group);
+
+    /// The RAII form of the pair above: locks now, unlocks when the returned lock leaves scope.
+    /// The lock must be destroyed in the epoch it was taken in — the same-epoch rule, made structural.
+    [[nodiscard]] bindless_lock lock_scoped();
 
     [[nodiscard]] bool is_locked() const { return _locked; }
 
@@ -109,8 +115,52 @@ private:
     impl::slot_table _tex_3d;
     impl::slot_table _tex_cube;
 
-    /// The snapshot lock_group served, for unlock_group's identity check.
+    /// The snapshot lock served, for unlock's identity check.
     sg::binding_group_handle _group;
     bool _locked = false;
     sg::epoch _lock_epoch = sg::epoch::invalid;
 };
+
+/// Holds the bindless manager's lock for its lifetime — `lock_scoped()`'s return value.
+/// Carries the group handle the lock covers, and unlocks on destruction, so lock and unlock cannot come
+/// apart; the same-epoch rule becomes "do not carry this across an epoch advance".
+/// Move-only: the moved-from lock is disarmed and unlocks nothing.
+class sv::bindless_lock
+{
+public:
+    /// The locked group — what the dispatch binds.
+    /// A copy, deliberately: the handle is shared, and a copy stays valid after the lock is gone — a
+    /// reference into the lock would dangle at scope exit.
+    [[nodiscard]] sg::binding_group_handle group() const { return _group; }
+
+    ~bindless_lock()
+    {
+        if (_manager != nullptr)
+            _manager->unlock(_group);
+    }
+
+    bindless_lock(bindless_lock&& rhs) noexcept : _manager(rhs._manager), _group(cc::move(rhs._group))
+    {
+        rhs._manager = nullptr;
+    }
+
+    bindless_lock(bindless_lock const&) = delete;
+    bindless_lock& operator=(bindless_lock const&) = delete;
+    bindless_lock& operator=(bindless_lock&&) = delete;
+
+private:
+    // Only the manager mints one, through lock_scoped().
+    friend class bindless_manager;
+    bindless_lock(bindless_manager& manager, sg::binding_group_handle group)
+      : _manager(&manager), _group(cc::move(group))
+    {
+    }
+
+    bindless_manager* _manager = nullptr; // null = disarmed (moved-from)
+    sg::binding_group_handle _group;
+};
+
+inline sv::bindless_lock sv::bindless_manager::lock_scoped()
+{
+    return bindless_lock(*this, lock());
+}

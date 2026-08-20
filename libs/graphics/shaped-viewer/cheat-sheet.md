@@ -245,8 +245,9 @@ manager.config()                        // -> bindless_config const& — read th
 manager.acquire(readonly_buffer_view<byte>)  // -> bindless_buffer_slot      compile-time readonly; same view -> same slot, O(1), no reupload
 manager.acquire(readonly_texture_view<sg::tv_1d / tv_2d / tv_3d / tv_cube>)  // -> the category's slot newtype
 manager.layout()                        // -> binding_group_layout_handle — one slot of the consumer's pipeline layout (lazy)
-manager.lock_group()                    // -> binding_group_handle — the staging group's snapshot: minted ONLY if a descriptor changed, else the SAME handle; locks (no acquires)
-manager.unlock_group(group)             // must get the served group back (pointer identity), in the SAME epoch — both asserted
+manager.lock()                          // -> binding_group_handle — the staging group's snapshot: minted ONLY if a descriptor changed, else the SAME handle; locks (no acquires)
+manager.unlock(group)                   // must get the served group back (pointer identity), in the SAME epoch — both asserted
+manager.lock_scoped()                   // -> sv::bindless_lock — RAII form: carries .group(), unlocks at scope exit; move-only
 sv::bindless_buffer_slot / bindless_texture_{1d,2d,3d,cube}_slot  // enum class : u32; ::invalid; u32(slot) is what a shader consumes
 ```
 

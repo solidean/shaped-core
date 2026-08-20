@@ -80,7 +80,7 @@ sg::binding_group_layout_handle const& sv::bindless_manager::layout()
 
 u32 sv::bindless_manager::_acquire(impl::slot_table& table, sg::binding_slot slot, sg::raw_view const& view)
 {
-    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock_group first)");
+    CC_ASSERT(!_locked, "no acquires while the bindless group is locked (unlock first)");
 
     // The table resolves identity; every mint and reclaim is mirrored onto the staging group, which is what
     // holds a mapped key's resource alive — so the key's raw pointer cannot be reused while it is mapped.
@@ -137,7 +137,7 @@ void sv::bindless_manager::_ensure_staging()
     _staging->unset_array(_tex_cube_slot);
 }
 
-sg::binding_group_handle sv::bindless_manager::lock_group()
+sg::binding_group_handle sv::bindless_manager::lock()
 {
     CC_ASSERT(!_locked, "the bindless group is already locked");
     _ensure_staging();
@@ -150,10 +150,10 @@ sg::binding_group_handle sv::bindless_manager::lock_group()
     return _group;
 }
 
-void sv::bindless_manager::unlock_group(sg::binding_group_handle const& group)
+void sv::bindless_manager::unlock(sg::binding_group_handle const& group)
 {
-    CC_ASSERT(_locked, "unlock_group without a lock_group");
-    CC_ASSERT(group.get() == _group.get(), "unlock_group must receive the group lock_group returned");
-    CC_ASSERT(_ctx.current_epoch() == _lock_epoch, "lock_group and unlock_group must happen in the same epoch");
+    CC_ASSERT(_locked, "unlock without a lock");
+    CC_ASSERT(group.get() == _group.get(), "unlock must receive the group lock returned");
+    CC_ASSERT(_ctx.current_epoch() == _lock_epoch, "lock and unlock must happen in the same epoch");
     _locked = false;
 }
