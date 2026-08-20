@@ -41,4 +41,17 @@ void command_list_raytracing_scope::dispatch_rays(raytracing_shader_table const&
 {
     _cmd.raytracing_dispatch_rays(table, raygen, width, height, depth);
 }
+
+void command_list_raytracing_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                                cc::span<array_buffer_access const> elements)
+{
+    // Ray tracing binds through the compute path (same root signature, same pending state), so the compute seam serves both.
+    _cmd.compute_declare_array_buffer_access(binding_name, elements);
+}
+
+void command_list_raytracing_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                                 cc::span<array_texture_access const> elements)
+{
+    _cmd.compute_declare_array_texture_access(binding_name, elements);
+}
 } // namespace sg

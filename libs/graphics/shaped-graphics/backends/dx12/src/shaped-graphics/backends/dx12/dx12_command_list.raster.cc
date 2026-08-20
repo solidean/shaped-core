@@ -310,6 +310,8 @@ void dx12_command_list::declare_raster_draw_barriers(bool indexed)
     {
         if (bound_group == nullptr)
             continue;
+        // The raster scope has no declare_array_*_access yet, so an array binding here would go untracked.
+        CC_ASSERT(bound_group->array_bindings.empty(), "array bindings are not supported in raster draws yet");
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
                 track_buffer_access(view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,

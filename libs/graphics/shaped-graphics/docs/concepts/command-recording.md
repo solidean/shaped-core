@@ -60,9 +60,10 @@ Commands execute in the order they were recorded.
 Access is **inferred** from each operation rather than declared — an upload implies `copy_write`, a dispatch implies its bound views' access — and the barriers that ordering needs are emitted for you.
 Uploading, downloading and copying the *same* buffer in one list therefore works.
 
-One thing is not inferable, and it is not yet wired either.
-Per-element access for an array / bindless binding cannot be derived from the shader, since it may index only some elements or use them differently.
-`cmd.compute.declare_array_*_access` exists to declare it — but no backend applies the declaration today, so see the gaps below before relying on it.
+One thing is not inferable: per-element access for an array / bindless binding, since the shader may index only some elements or use them differently.
+`cmd.compute.declare_array_*_access` (mirrored on `cmd.raytracing`) declares it for the next dispatch.
+The dispatch asserts every bound array binding was declared — an empty span declares "unused".
+See [bindings — array bindings](bindings.md#array-bindings).
 [barriers](barriers.md) owns the state machine, and its slot model is why several lists may record against the same resource concurrently.
 
 ## Rendering is the one nested scope
@@ -93,7 +94,7 @@ An epoch advance does **not** deliver a download — it drains the GPU, and the 
 1. **A list is consumed exactly once**, by submit or by drop, both through the context.
 2. **A list cannot span epochs** — enforced per list, and in aggregate at `advance_epoch`.
 3. **Recording is single-threaded per list**; concurrent lists are fine and each takes its own access-tracking slot.
-4. **Access is inferred, never declared.** The one exception, array/bindless elements, has an API and no implementation behind it.
+4. **Access is inferred, never declared.** The one exception is array/bindless elements, declared per dispatch via `declare_array_*_access` and accounted for.
 5. **A scope is pinned to its list** — no copy, no move, no independent lifetime.
 6. **Draws require an open rendering scope**, and `begin_rendering` / `end_rendering` must balance.
 
@@ -103,11 +104,8 @@ An epoch advance does **not** deliver a download — it drains the GPU, and the 
 **vulkan** creates devices and resources, but its recording paths are stubs.
 Only `raytracing.is_supported()` and `query.is_supported()` answer honestly, returning false; every other recording call is a `CC_UNREACHABLE` that aborts rather than a no-op.
 
-Two gaps in the dx12 path are worth knowing before you rely on them.
+One gap in the dx12 path is worth knowing before you rely on it:
 `cmd.copy` is buffer-only; texture copies land under the same `<resource>_<bytes|data>_region` naming.
-`cmd.compute.declare_array_*_access` validates its arguments and then does nothing.
-The buffer form drops the declaration; the texture form **asserts on a non-empty one**, since silently ignoring a required layout would leave the texture wrong.
-Applying either needs an array binding path plus a binding-name→resource reflection map; [TODO.md](../TODO.md) tracks both.
 
 ## See also
 

@@ -27,6 +27,30 @@ struct sg::backend::dx12::dx12_texture_hazard_view
     sg::view_class access;
 };
 
+/// One element of an array binding: the bound resource (exactly one of buffer / texture set, both null when vacant)
+/// plus, for a texture, the subresource range its view exposes.
+/// Holding the handle keeps the element's resource alive while the group lives — array elements are not pushed
+/// into the group's `referenced` vectors.
+struct sg::backend::dx12::dx12_array_element
+{
+    dx12_buffer_handle buffer;
+    dx12_texture_handle texture;
+    sg::subresource_range range;
+
+    /// Whether this element was bound as a null view — a null descriptor with no resource behind it.
+    /// Declaring access on a vacant element is an error (there is nothing to track).
+    [[nodiscard]] bool is_vacant() const { return buffer == nullptr && texture == nullptr; }
+};
+
+/// An array binding's per-element resources, keyed by the binding's reflection name.
+/// The resolution target of `declare_array_*_access`: a declared element index reads this vector.
+struct sg::backend::dx12::dx12_array_binding
+{
+    cc::string name;
+    bool is_texture = false;
+    cc::vector<dx12_array_element> elements;
+};
+
 /// dx12 binding_group: a contiguous range of descriptors in the context's shader-visible heap, one per layout binding, created from the bound views.
 /// `table_start` is the GPU handle the command list binds as a root descriptor table.
 ///
@@ -58,6 +82,10 @@ public:
     cc::vector<dx12_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives
     cc::vector<dx12_hazard_view> hazard_views;           // (buffer + access class) — declared for hazards at dispatch
     cc::vector<dx12_texture_hazard_view> texture_hazard_views; // (texture + range + access) — declared at dispatch
+
+    // Array bindings (count > 1) are not auto-tracked: their elements appear here instead of in the hazard vectors,
+    // and the dispatching caller must declare the used elements via declare_array_*_access (resolved against this).
+    cc::vector<dx12_array_binding> array_bindings;
 
     // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so
     // binding one afterwards is a hard error (checked at bind). Both are inert for a persistent group.

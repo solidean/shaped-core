@@ -12,16 +12,21 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// A group layout carrying nothing but its identity, which is all these tests read.
+/// A group layout carrying nothing but its identity and its bindings, which is all these tests read.
 struct fake_group_layout final : sg::binding_group_layout
 {
-    explicit fake_group_layout(cc::hash128 h) : sg::binding_group_layout(h) {}
+    fake_group_layout(cc::hash128 h, cc::vector<sg::binding> bindings) : sg::binding_group_layout(h, cc::move(bindings))
+    {
+    }
 };
 
 sg::binding_group_layout_handle group_of(cc::span<sg::binding const> bindings,
                                          cc::span<sg::named_sampler const> static_samplers = {})
 {
-    return std::make_shared<fake_group_layout>(sg::impl::binding_group_layout_hash(bindings, static_samplers));
+    auto declared = cc::vector<sg::binding>();
+    declared.push_back_range(bindings);
+    return std::make_shared<fake_group_layout>(sg::impl::binding_group_layout_hash(bindings, static_samplers),
+                                               cc::move(declared));
 }
 
 sg::binding uniform(cc::string_view name, u32 index)
@@ -57,6 +62,10 @@ TEST("sg binding-group-layout hash separates every field it covers")
     auto counted = base[0];
     counted.count = 4;
     CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&counted, 1), {}) != key);
+
+    auto dimensioned = base[0];
+    dimensioned.texture_dimension = sg::texture_view_dimension::cube;
+    CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&dimensioned, 1), {}) != key);
 
     // Order is part of the layout: slot i is a different slot from slot j.
     sg::binding const forward[] = {uniform("A", 0), uniform("B", 1)};

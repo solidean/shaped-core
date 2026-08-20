@@ -77,7 +77,10 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
     if (!group->sampler_table.is_empty())
         group->sampler_table_start = ctx._sampler_heap.gpu_at(group->sampler_table.offset);
 
-    // Match each provided view to a view slot by name, validate it, and create its descriptor.
+    // Match each provided view list to a view slot by name, validate it, and create its descriptors.
+    // A scalar slot (count == 1) is auto-tracked: its view lands in the hazard vectors, declared at dispatch.
+    // An array slot (count > 1) is not: its elements land in `array_bindings`, and the dispatching caller
+    // declares the used elements via declare_array_*_access.
     cc::vector<char> view_filled;
     for (isize i = 0; i < layout->view_slots.size(); ++i)
         view_filled.push_back(char(0));
@@ -96,53 +99,111 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
             return cc::error(cc::format("binding_group: no view binding named '{}' in the layout", nv.name));
 
         auto const& s = layout->view_slots[slot_index];
-        if (!sg::accepts(s.binding.type, nv.view))
-            return cc::error(
-                cc::format("binding_group: the view bound to '{}' does not match its declared kind", nv.name));
+        bool const is_array = s.binding.is_array();
+        auto const element_views = nv.view.span();
+        if (element_views.size() != isize(s.binding.count))
+            return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
+                                        "exactly one per element; a vacant element is sg::vacant_view)",
+                                        nv.name, s.binding.count, element_views.size()));
         CC_ASSERT(view_filled[slot_index] == char(0), "binding_group: a binding was provided more than once");
         view_filled[slot_index] = char(1);
 
-        auto const dst = ctx._descriptor_heap.cpu_at(view_base + s.table_offset);
-        if (auto const* av = sg::try_as_tlas_view(nv.view))
-        {
-            // A null handle is the null acceleration structure, not a mistake: it binds a valid descriptor that
-            // every ray misses, so there is no storage to keep alive and nothing to declare a hazard on.
-            auto dx_tlas = std::shared_ptr<dx12_tlas const>();
-            if (av->tlas != nullptr)
-            {
-                dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
-                CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
-            }
+        auto array_binding = dx12_array_binding{.name = nv.name,
+                                                .is_texture = sg::shape_of(s.binding.type) == sg::view_shape::texture,
+                                                .elements = {}};
 
-            create_accel_view(ctx._device.Get(), dx_tlas.get(), dst);
+        for (isize element = 0; element < element_views.size(); ++element)
+        {
+            auto const& view = element_views[element];
+            if (!sg::accepts(s.binding.type, view))
+                return cc::error(
+                    cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));
 
-            if (dx_tlas != nullptr)
+            auto const dst = ctx._descriptor_heap.cpu_at(view_base + s.table_offset + int(element));
+            if (sg::is_vacant(view))
             {
-                // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
-                group->referenced.push_back(dx_tlas->_dx12_storage);
-                group->hazard_views.push_back({dx_tlas->_dx12_storage, sg::view_class::acceleration_structure});
+                if (!is_array)
+                    return cc::error(cc::format("binding_group: '{}' — a vacant element is only valid in an array "
+                                                "binding; a scalar binding must bind a resource",
+                                                nv.name));
+
+                // The null descriptor is synthesized from the binding alone — a vacant element carries nothing.
+                create_null_view(ctx._device.Get(), s.binding, dst);
+                array_binding.elements.push_back({});
             }
-        }
-        else if (auto const* tv = sg::try_as_texture_view(nv.view))
-        {
-            create_texture_view(ctx._device.Get(), *tv, dst);
-            auto dx = std::dynamic_pointer_cast<dx12_texture const>(tv->texture);
-            CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
-            group->referenced_textures.push_back(dx);
-            group->texture_hazard_views.push_back({dx, tv->range, tv->access}); // → dispatch hazard declare
-        }
-        else
-        {
-            auto const& bv = sg::as_buffer_view(nv.view);
-            create_buffer_view(ctx._device.Get(), bv, dst);
-            if (bv.buffer)
+            else if (auto const* av = sg::try_as_tlas_view(view))
             {
+                if (is_array)
+                    return cc::error(cc::format("binding_group: '{}' — acceleration-structure arrays are not "
+                                                "supported yet",
+                                                nv.name));
+
+                // A null handle is the null acceleration structure, not a mistake: it binds a valid descriptor that
+                // every ray misses, so there is no storage to keep alive and nothing to declare a hazard on.
+                auto dx_tlas = std::shared_ptr<dx12_tlas const>();
+                if (av->tlas != nullptr)
+                {
+                    dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
+                    CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
+                }
+
+                create_accel_view(ctx._device.Get(), dx_tlas.get(), dst);
+
+                if (dx_tlas != nullptr)
+                {
+                    // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
+                    group->referenced.push_back(dx_tlas->_dx12_storage);
+                    group->hazard_views.push_back({dx_tlas->_dx12_storage, sg::view_class::acceleration_structure});
+                }
+            }
+            else if (auto const* tv = sg::try_as_texture_view(view))
+            {
+                // A view always binds a resource — an empty element is sg::vacant_view, never a null handle.
+                if (tv->texture == nullptr)
+                    return cc::error(cc::format("binding_group: '{}' — a texture view must bind a texture (a vacant "
+                                                "array element is sg::vacant_view)",
+                                                nv.name));
+
+                create_texture_view(ctx._device.Get(), *tv, dst);
+                auto dx = std::dynamic_pointer_cast<dx12_texture const>(tv->texture);
+                CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
+                if (is_array)
+                {
+                    array_binding.elements.push_back({.buffer = {}, .texture = cc::move(dx), .range = tv->range});
+                }
+                else
+                {
+                    group->referenced_textures.push_back(cc::move(dx));
+                    group->texture_hazard_views.push_back(
+                        {group->referenced_textures.back(), tv->range, tv->access}); // → dispatch hazard declare
+                }
+            }
+            else
+            {
+                auto const& bv = sg::as_buffer_view(view);
+                if (bv.buffer == nullptr)
+                    return cc::error(cc::format("binding_group: '{}' — a buffer view must bind a buffer (a vacant "
+                                                "array element is sg::vacant_view)",
+                                                nv.name));
+
+                create_buffer_view(ctx._device.Get(), bv, dst);
                 auto dx = std::dynamic_pointer_cast<dx12_buffer const>(bv.buffer);
                 CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
-                group->referenced.push_back(dx);
-                group->hazard_views.push_back({dx, bv.access}); // (buffer, access class) → dispatch hazard declare
+                if (is_array)
+                {
+                    array_binding.elements.push_back({.buffer = cc::move(dx), .texture = {}, .range = {}});
+                }
+                else
+                {
+                    group->referenced.push_back(cc::move(dx));
+                    group->hazard_views.push_back(
+                        {group->referenced.back(), bv.access}); // (buffer, access class) → dispatch hazard declare
+                }
             }
         }
+
+        if (is_array)
+            group->array_bindings.push_back(cc::move(array_binding));
     }
 
     // Match each provided dynamic sampler to a sampler slot by name and create its descriptor.
@@ -166,6 +227,8 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
                                         "sampler must not be supplied per group)",
                                         ns.name));
         CC_ASSERT(sampler_filled[slot_index] == char(0), "binding_group: a sampler was provided more than once");
+        CC_ASSERT(layout->sampler_slots[slot_index].binding.count == 1, "dynamic sampler arrays are not supported "
+                                                                        "yet");
         sampler_filled[slot_index] = char(1);
 
         D3D12_SAMPLER_DESC const desc = to_d3d12_sampler_desc(ns.sampler);

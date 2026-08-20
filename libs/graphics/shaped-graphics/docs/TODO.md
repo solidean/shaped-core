@@ -11,9 +11,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
   - **vulkan** barrier emission — it reuses the shared vocabulary and state machine, and lands with vulkan's compute/transfer milestone;
-  - `declare_array_buffer_access` / `declare_array_texture_access` **full wiring** — the API and its validation are in, but neither is applied.
-    Applying either needs an array binding path plus a binding-name→resource reflection map.
-    The texture form additionally asserts on a non-empty declaration today;
+  - **array bindings in raster draws** — compute/RT dispatches resolve `declare_array_*_access` against the bound groups, but the raster scope has no declare pair and asserts on a bound array binding;
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:

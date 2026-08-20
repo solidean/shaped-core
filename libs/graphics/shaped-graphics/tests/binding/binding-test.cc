@@ -158,14 +158,37 @@ TEST("sg bindings - split_off_sampler_bindings partitions in order")
     CHECK(bindings.size() == 2);
 }
 
-TEST("sg bindings - named_view pairs a name with a bound view")
+TEST("sg bindings - named_view pairs a name with bound views")
 {
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
 
-    // A typed view converts implicitly to the named_view's raw_view.
+    // A typed view converts implicitly, and a single view stores inline — no vector, no braces.
     sg::named_view const nv = {.name = "Output", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
     CHECK(nv.name == "Output");
-    CHECK(sg::access_of(nv.view) == sg::view_class::readwrite);
-    CHECK(sg::shape_of(nv.view) == sg::view_shape::structured);
-    CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.view));
+    CHECK(nv.view.size() == 1);
+    CHECK(sg::access_of(nv.view.span()[0]) == sg::view_class::readwrite);
+    CHECK(sg::shape_of(nv.view.span()[0]) == sg::view_shape::structured);
+    CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.view.span()[0]));
+
+    // An array binding carries a vector, one view per element; a vacant element is the sg::vacant_view
+    // marker, which satisfies every view kind — the backend synthesizes its null descriptor from the binding.
+    auto elements = cc::vector<sg::raw_view>();
+    for (isize i = 0; i < 3; ++i)
+        elements.push_back(sg::vacant_view{});
+    sg::named_view const array = {.name = "Textures", .view = cc::move(elements)};
+    CHECK(array.view.size() == 3);
+    CHECK(sg::is_vacant(array.view.span()[1]));
+    CHECK(sg::accepts(sg::binding_type::readonly_texture, array.view.span()[1]));
+    CHECK(sg::accepts(sg::binding_type::readonly_raw_buffer, array.view.span()[1]));
+    CHECK(!sg::accepts(sg::binding_type::sampler, array.view.span()[1]));
+
+    // is_array and the reflected texture dimension are what a backend reads off an array binding.
+    auto const b = sg::binding{.name = "Textures",
+                               .count = 4,
+                               .type = sg::binding_type::readonly_texture,
+                               .texture_dimension = sg::texture_view_dimension::cube};
+    CHECK(b.is_array());
+    auto const scalar = sg::binding{.name = "One", .count = 1};
+    CHECK(!scalar.is_array());
+    CHECK(b.texture_dimension == sg::texture_view_dimension::cube);
 }

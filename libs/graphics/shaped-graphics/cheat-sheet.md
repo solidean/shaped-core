@@ -385,10 +385,12 @@ sg::texture_view<VT>         // access-erased middle: any access of a texture vi
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
 sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)
-sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view> — erased sum every typed view converts into
+sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view> — erased sum every typed view converts into
+sg::vacant_view              // {} — a vacant ARRAY element (no view); the backend synthesizes its null descriptor from the binding
+sg::is_vacant(rv)            // bool — gate on it before access_of / shape_of (a vacancy has neither)
 v.to_raw()  /  (implicit)    // -> raw_view; sg::access_of(rv) / sg::shape_of(rv) read the active arm's access/shape
 sg::try_as_buffer_view(rv)   // -> raw_buffer_view const*, null on a different arm (+ _texture_ / _tlas_; as_*_view asserts instead)
-// backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view) to build the native descriptor
+// backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view | vacant_view) to build the native descriptor
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
 // INVERSE (erased -> typed leaf): as_* asserts (access, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
 mid.as_readonly() / as_readwrite() / as_uniform()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
@@ -454,8 +456,9 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 #include <shaped-graphics/binding/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
-sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
-                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count 0 = unbounded
+sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size;
+                            //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
+                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count > 1 = bounded array (.is_array()); count 0 = unbounded (unsupported)
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
@@ -481,7 +484,11 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 ```cpp
 #include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
 sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
-sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
+sg::named_view              // { cc::string name; bound_view view }  — input to create_binding_group (a typed view converts)
+sg::bound_view             // one raw_view (stored inline, `.view = tex.as_readonly_view()`) or a cc::vector<raw_view> for an array binding
+                            //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element (`.view = cc::move(vec)`)
+                            //   vacant array element = sg::vacant_view{} -> null descriptor synthesized from the BINDING (type + texture_dimension)
+                            //   consumers read both arms via .span() / .size()
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `set`)
@@ -499,14 +506,40 @@ ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
+layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its staging slot index
+
+// staging_binding_group — MUTABLE builder; set one descriptor at a time, snapshot immutable groups out of it. For big, mostly-stable (bindless) tables.
+#include <shaped-graphics/binding/staging_binding_group.hh>
+ctx.persistent.create_staging_binding_group(group_layout)  // -> staging_binding_group_handle = shared_ptr<staging_binding_group> (MUTABLE handle); persistent only (+ try_ twin)
+sg::binding_slot            // enum class : u32 — opaque binding identity; NOT a descriptor position, it indexes an internal table (heap, first descriptor, element count)
+                            //   that indirection is where every set is resolved and bounds-checked; `invalid` is what an unknown name resolves to
+sbg->slot_of(name)                    // -> binding_slot  THE name lookup, done ONCE; invalid if the layout has no binding of that name
+sbg->is_array(slot) / array_size(slot) // -> bool / int — the binding's shape, which decides the setter family and bounds every element index (1 for a scalar)
+// the setters NAME the shape and never infer it — a scalar rejects the array family and vice versa; an element index is always an argument, never chosen for you
+sbg->set_binding(slot, raw_view)      // void — the one descriptor of a SCALAR binding (a typed view converts); asserts on an array binding
+                                      //   no unset_binding: only an ARRAY element can be absent. an empty scalar is a VALUE you set — sg::tlas_view{} is the null AS
+sbg->set_array_element(slot, i, raw_view) / unset_array_element(slot, i)      // void — one ARRAY element; i is checked against array_size
+sbg->set_array_range(slot, first, span<raw_view const>) / unset_array_range(slot, first, count)  // void — PATCH a subrange; every other element is left alone
+sbg->set_array(slot[, first], span<raw_view const>)  // void — REPLACE the whole array: the run lands at `first` (0 by default) and every element it does NOT cover is CLEARED
+sbg->unset_array(slot)                // void — clear every element
+sbg->set_sampler(slot, sampler) / unset_sampler(slot)  // void — dynamic samplers only (a static one asserts); unset = the default sampler state
+// by NAME (asserts the binding exists) — the one-shot whole-binding calls only; per-element work runs off a resolved slot, which is the point of having one:
+sbg->set_binding(name, raw_view) / set_array(name, views) / unset_array(name) / set_sampler(name, sampler) / unset_sampler(name)
+sbg->snapshot()                       // -> binding_group_handle — SAME handle while nothing changed since the last one; throws sg::binding_group_exception (+ try_ twin)
+sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle const&
+                                      // starts FULLY VACANT, but EVERY binding must be set once before the first snapshot (static samplers excepted) — say what it holds,
+                                      //   even if that is nothing: unset_array, or an empty range, answers it. array elements themselves may stay vacant
+                                      // NOT thread-safe (snapshot() mutates); a taken snapshot is independent — later sets never touch it
+                                      // dx12: sets write a private non-shader-visible heap; a dirty snapshot is ONE CopyDescriptorsSimple, a clean one is free
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size + bound pipeline layout)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group at slot `set` (indexes the pipeline layout's groups)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
-cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding
+cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
-                                                         // (scalar bindings are inferred; arrays can't be — declare them)
+                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
+                                                         // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
