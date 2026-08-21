@@ -3,20 +3,23 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 
-#if CC_HAS_THREADS
-// <chrono> is expensive and normally confined to time.cc; this is the one other place that needs it, because
-// std::this_thread::sleep_for takes a duration and there is no other portable way to spell one.
-#include <chrono>
-#include <thread>
-
-// The OS's own thread id, which cc::thread_id deliberately is not.
+// Outside the CC_HAS_THREADS guard: the OS's own thread id and its scheduler tick describe the PLATFORM, and a
+// single-threaded build still runs on one.
 #if defined(_WIN32)
+#include <clean-core/common/utility.hh>
 #include <clean-core/platform/win32_sanitized.hh>
+#include <timeapi.h> // timeBeginPeriod / timeEndPeriod, which <Windows.h> does not pull in under LEAN_AND_MEAN
 #elif defined(__APPLE__)
 #include <pthread.h>
 #elif defined(__linux__)
 #include <unistd.h>
 #endif
+
+#if CC_HAS_THREADS
+// <chrono> is expensive and normally confined to time.cc; this is the one other place that needs it, because
+// std::this_thread::sleep_for takes a duration and there is no other portable way to spell one.
+#include <chrono>
+#include <thread>
 
 int cc::num_hardware_threads()
 {
@@ -62,6 +65,41 @@ thread_local cc::thread_id tl_thread_id = cc::thread_id::invalid;
 
 cc::atomic<bool> g_main_claimed = {false};
 } // namespace
+
+double cc::scheduler_tick_secs()
+{
+#if defined(_WIN32)
+    // The scheduler tick is what a sleep rounds up to, and NtQueryTimerResolution reports it in 100ns units.
+    // The documented alternative — GetSystemTimeAdjustment — reports the clock's update interval, which tracks it.
+    DWORD increment = 0;
+    DWORD adjustment = 0;
+    BOOL disabled = FALSE;
+    if (::GetSystemTimeAdjustment(&adjustment, &increment, &disabled) != 0 && increment > 0)
+        return double(increment) * 1e-7;
+    return 0.0156;
+#else
+    return 0.001;
+#endif
+}
+
+cc::scoped_scheduler_tick::scoped_scheduler_tick(double secs)
+{
+#if defined(_WIN32) && CC_HAS_THREADS
+    auto const ms = secs > 0 ? cc::max(1u, unsigned(secs * 1000.0 + 0.5)) : 1u;
+    if (::timeBeginPeriod(ms) == TIMERR_NOERROR)
+        _granted_ms = ms;
+#else
+    (void)secs;
+#endif
+}
+
+cc::scoped_scheduler_tick::~scoped_scheduler_tick()
+{
+#if defined(_WIN32) && CC_HAS_THREADS
+    if (_granted_ms != 0)
+        ::timeEndPeriod(_granted_ms);
+#endif
+}
 
 cc::u64 cc::native_thread_id()
 {
