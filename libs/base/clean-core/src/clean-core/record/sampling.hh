@@ -70,6 +70,18 @@ struct cc::rec::sampling_config
     /// Such a thread has no stream, so its samples carry frames and a native id but no anchor, and splicing leaves
     /// them where they are.
     bool include_unknown_threads = true;
+
+    /// Intern a stack rather than writing it out, from this many frames up.
+    /// Zero never interns.
+    ///
+    /// A kilohertz across twenty threads is megabytes a second of return addresses, and nearly all of them repeat —
+    /// the same stack, sampled again a millisecond later.
+    /// Interning writes each distinct stack ONCE, as its own event, and every sample after that carries an id.
+    ///
+    /// **The threshold is why this is not simply on.**
+    /// With `stop_at_scope` an instrumented stack is often one or two frames, and an id is no smaller than the frames
+    /// it replaces; only a deep stack — an uninstrumented thread, a recursive descent — actually pays.
+    isize intern_min_frames = 4;
 };
 
 namespace cc::rec
@@ -126,6 +138,10 @@ namespace cc::rec::impl
 ///
 /// The anchor is a POSITION rather than a copy of the state at that position, which is what lets a consumer recover
 /// the trace, the ambient context and the open scope stack — all of which it already carries while replaying.
+///
+/// **The frames array is not always frames.**
+/// A sample whose stack was interned carries `flag_interned_stack` and exactly one entry, which is the stack id.
+/// `rec::stack_table` resolves either shape, and is what a consumer should go through rather than reading the field.
 inline constexpr rec::field sample_fields[] = {
     {.name = "thread_index", .type = rec::type_code::u32_, .offset = 0, .size = 4},
     {.name = "chunk_offset", .type = rec::type_code::u32_, .offset = 4, .size = 4},
@@ -140,6 +156,21 @@ inline constexpr u32 sample_unknown_thread = ~u32(0);
 
 /// Where a sample's frames start, past the fixed part and the array's own count.
 inline constexpr isize sample_frames_offset = 28;
+
+/// One interned stack: the id, and the addresses it stands for.
+///
+/// Always written BEFORE the first sample that refers to it, so a consumer reading the stream in order never meets an
+/// id it cannot resolve.
+inline constexpr rec::field stack_definition_fields[] = {
+    {.name = "id", .type = rec::type_code::u64_, .offset = 0, .size = 8},
+    {.name = "frames", .type = rec::type_code::u64_array, .offset = 8, .size = 4},
+};
+
+/// Where an interned stack's frames start, past the id and the array's own count.
+inline constexpr isize stack_definition_frames_offset = 12;
+
+/// The descriptor an interned stack is defined through.
+[[nodiscard]] rec::desc const& stack_definition_desc();
 
 /// The descriptor every sample is written through.
 /// One site, because a sample has no source location worth naming — the frames ARE the location.

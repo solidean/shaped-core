@@ -71,6 +71,3 @@ Add entries as we discover them, and remove them as they land.
   Windows suspends a thread and walks it from outside; POSIX has no equivalent.
   There it wants `SIGPROF` via `timer_create`, plus a handler that walks its own stack and hands the frames and the anchor to the sampler thread.
   The event layout and the splice are already shared, so only the capture half differs.
-- **Interning captured stacks.**
-  A sampling profiler at a kilohertz across twenty threads is megabytes a second of return addresses, most of them repeats.
-  A hash from stack to id, stored per event, is the fix; the early-out above shortens the stacks but does not deduplicate them.

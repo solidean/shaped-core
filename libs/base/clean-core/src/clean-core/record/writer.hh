@@ -46,6 +46,7 @@ inline constexpr u16 flag_has_end_cycles = 1 << 0; ///< the payload opens with a
 inline constexpr u16 flag_has_stacktrace = 1 << 1; ///< the payload carries captured return addresses
 inline constexpr u16 flag_payload_pinned = 1 << 2; ///< the payload references bytes held alive by a chunk pin
 inline constexpr u16 flag_truncated = 1 << 3;      ///< the payload did not fit and was cut short
+inline constexpr u16 flag_interned_stack = 1 << 4; ///< the stacktrace array holds ONE id, not addresses
 
 /// Whether events carry the core they were recorded on, which costs about ten cycles per event.
 extern cc::atomic<bool> g_capture_core_id;

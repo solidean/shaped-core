@@ -986,6 +986,12 @@ sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:
 // The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
 // A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
 
+#include <clean-core/record/stack_table.hh>   // resolves a captured stack, interned or not
+cc::rec::stack_table const stacks(rec);              // ONE scan; build it once per analysis, never per event
+stacks.frames_of(event);                             // -> cc::vector<u64>, whichever shape the sample used
+// ALWAYS go through this rather than reading the "frames" field: an interned sample stores ONE id there.
+// {.intern_min_frames = 4} on sampling_config; 0 never interns. Ids are per sampling run, not across recordings.
+
 #include <clean-core/record/hot_functions.hh> // where the time went, without a viewer
 auto const hot = cc::rec::hot_functions(rec);        // symbolizes and folds every sampled stack by function
 hot.to_string(20);                                   // a self%/total% table, ordered by SELF time

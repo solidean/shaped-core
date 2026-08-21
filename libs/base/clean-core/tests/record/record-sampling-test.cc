@@ -8,6 +8,7 @@
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
+#include <clean-core/record/stack_table.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -195,14 +196,18 @@ REC_TEST("record/sampling - a scope shortens what a sample has to carry")
 
     rec_fixture const fixture(deterministic_config());
 
+    // Through the table, because a deep stack is interned and its frames field then holds one id.
+    // Reading the field directly would measure the encoding rather than the depth.
     auto const deepest = [&](cc::rec::recording const& r)
     {
+        cc::rec::stack_table const stacks(r);
+
         isize longest = 0;
         r.for_each_event(
             [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
             {
                 if (e.kind() == cc::rec::event_kind::sample)
-                    longest = cc::max(longest, e.field_as_u64_array("frames").size());
+                    longest = cc::max(longest, stacks.frames_of(e).size());
             });
         return longest;
     };

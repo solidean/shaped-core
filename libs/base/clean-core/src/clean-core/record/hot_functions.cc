@@ -5,6 +5,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/platform/symbolize.hh>
 #include <clean-core/record/fwd.hh>
+#include <clean-core/record/stack_table.hh>
 #include <clean-core/string/format.hh>
 
 using namespace cc::primitive_defines;
@@ -83,6 +84,10 @@ cc::rec::hot_report cc::rec::hot_functions(rec::recording const& r, rec::hot_opt
     // had rather than whatever this process happens to have loaded at those addresses.
     auto symbols = r.modules().empty() ? cc::symbolizer() : cc::symbolizer(r.modules());
 
+    // Samples may carry an id rather than addresses, and which one is the sampler's decision — the table makes that
+    // invisible here.
+    rec::stack_table const stacks(r);
+
     cc::map<cc::string, accumulator> by_function;
 
     // Reused across stacks so a deep recursion does not reallocate on every sample.
@@ -130,9 +135,9 @@ cc::rec::hot_report cc::rec::hot_functions(rec::recording const& r, rec::hot_opt
         [&](rec::chunk_view const&, rec::event_view const& e)
         {
             if (e.desc->kind == rec::event_kind::sample)
-                fold(e.field_as_u64_array("frames"));
+                fold(stacks.frames_of(e));
             else if (opts.include_stacktrace_events && cc::string_view(e.desc->name) == "record.stacktrace")
-                fold(e.field_as_u64_array("frames"));
+                fold(stacks.frames_of(e));
         });
 
     if (report.sample_count == 0)

@@ -544,6 +544,17 @@ A foreign table is worth having even when the binaries are not.
 Failing to load one costs the function and the line and still leaves the module and the offset, so a frame degrades to `app.exe+0x1234`.
 An unresolved frame keeps its address rather than acquiring a confident wrong name.
 
+**A repeated stack is written once.**
+A kilohertz across twenty threads is megabytes a second of return addresses and nearly all of them repeat, so a deep stack is written once as its own event and the samples after it carry an id.
+Measured on a deep burn loop it roughly halves the sampled bytes, with five to seven distinct stacks behind a thousand samples.
+
+The threshold (`intern_min_frames`, 4 by default) is why this is not simply always on.
+With `stop_at_scope` an instrumented stack is often one or two frames, and an id is no smaller than the frames it would replace.
+
+**A consumer must go through [`cc::rec::stack_table`](../../src/clean-core/record/stack_table.hh)** rather than reading the frames field.
+Which shape a sample used is the sampler's decision and not the reader's.
+Ids mean something only within the recording that defines them.
+
 **`cc::rec::hot_functions`** ([hot_functions.hh](../../src/clean-core/record/hot_functions.hh)) is the reduction that makes all of this usable without a viewer.
 It symbolizes every captured stack and folds them by function, into self time and inclusive time.
 

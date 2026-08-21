@@ -68,6 +68,10 @@ public:
     /// True when the payload was cut short because the chunk ran out.
     [[nodiscard]] bool is_truncated() const { return (flags & rec::impl::flag_truncated) != 0; }
 
+    /// Whether the frames array holds a stack ID rather than the addresses themselves.
+    /// Resolving it needs the rest of the recording, which is what `rec::stack_table` is for.
+    [[nodiscard]] bool has_interned_stack() const { return (flags & rec::impl::flag_interned_stack) != 0; }
+
     // generic field access, so a consumer that has never heard of the payload can still read it
 public:
     /// The named field as a double, for any numeric type.

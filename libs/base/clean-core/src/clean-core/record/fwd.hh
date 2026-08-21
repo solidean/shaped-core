@@ -56,6 +56,10 @@ enum class cc::rec::event_kind : cc::u8
     late_event,     ///< an event surfaced below an ordered listener's emitted watermark
     dropped_span,   ///< a listener decimated a time span away, and knows it
 
+    /// One interned stack: an id, and the addresses it stands for.
+    /// Written once per distinct stack, so it is NOT a sample and must never be counted as one.
+    stack_definition,
+
     count,
 };
 
