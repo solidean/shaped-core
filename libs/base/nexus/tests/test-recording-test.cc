@@ -11,13 +11,15 @@
 // What a test can ask about its own recording.
 //
 // These run under the recorder nx::run stood up, so they exercise the real bucketing rather than a fixture's.
-// A binary run without nx::run has no recorder, so every recorder here reports unattached and the checks below would
-// be vacuous — which is why each one that matters asserts is_attached() first.
+// A run started with --no-recording has no recorder, so every recorder here reports unattached.
+// Those tests SKIP rather than fail: the flag exists to time the tests themselves, and it would be a poor flag that
+// broke the suite it is meant to measure.
 
-TEST("test recording - a test sees what it recorded, and nothing before it")
+TEST("test recording - a test sees what it recorded, and nothing before it", nx::config::recorded)
 {
     auto rec = nx::test_recording();
-    REQUIRE(rec.is_attached());
+    if (!rec.is_attached())
+        SKIP("the run has no recorder (--no-recording)");
 
     CC_RECORD_MARK("first-mark");
     rec.sync();
@@ -26,10 +28,11 @@ TEST("test recording - a test sees what it recorded, and nothing before it")
     CHECK(rec.all().count("never-recorded") == 0);
 }
 
-TEST("test recording - sync returns the delta, all accumulates")
+TEST("test recording - sync returns the delta, all accumulates", nx::config::recorded)
 {
     auto rec = nx::test_recording();
-    REQUIRE(rec.is_attached());
+    if (!rec.is_attached())
+        SKIP("the run has no recorder (--no-recording)");
 
     CC_RECORD_MARK("early");
     rec.sync();
@@ -46,10 +49,11 @@ TEST("test recording - sync returns the delta, all accumulates")
     CHECK(rec.all().count("late") == 1);
 }
 
-TEST("test recording - a log message and a value both land in the bucket")
+TEST("test recording - a log message and a value both land in the bucket", nx::config::recorded)
 {
     auto rec = nx::test_recording();
-    REQUIRE(rec.is_attached());
+    if (!rec.is_attached())
+        SKIP("the run has no recorder (--no-recording)");
 
     CC_LOG_INFO("a message from the test");
     CC_RECORD("vertex_count", 1024);
@@ -59,10 +63,11 @@ TEST("test recording - a log message and a value both land in the bucket")
     CHECK(rec.all().messages().size() >= 1);
 }
 
-TEST("test recording - a syncing a second time with nothing new returns nothing")
+TEST("test recording - a syncing a second time with nothing new returns nothing", nx::config::recorded)
 {
     auto rec = nx::test_recording();
-    REQUIRE(rec.is_attached());
+    if (!rec.is_attached())
+        SKIP("the run has no recorder (--no-recording)");
 
     CC_RECORD_MARK("once");
     rec.sync();
@@ -72,7 +77,7 @@ TEST("test recording - a syncing a second time with nothing new returns nothing"
     CHECK(rec.all().count("once") == 1);
 }
 
-TEST("test recording - an opted-out test records into nothing", nx::config::no_recording)
+TEST("test recording - a test that did not opt in records into nothing")
 {
     auto rec = nx::test_recording();
 
@@ -83,19 +88,29 @@ TEST("test recording - an opted-out test records into nothing", nx::config::no_r
     CHECK(rec.sync().empty());
 }
 
-TEST("test recording - a nested test's events belong to the nested test", no_scheduler)
+TEST("test recording - a nested test is its own bucket only if it opted in", no_scheduler, nx::config::recorded)
 {
     auto rec = nx::test_recording();
-    REQUIRE(rec.is_attached());
+    if (!rec.is_attached())
+        SKIP("the run has no recorder (--no-recording)");
 
     CC_RECORD_MARK("outer-mark");
 
+    auto bucketed = nx::config::cfg{};
+    bucketed.recorded = true;
+
     nx::test_registry reg;
-    reg.add_declaration("inner", {},
+    reg.add_declaration("inner-bucketed", bucketed,
                         []
                         {
-                            CC_RECORD_MARK("inner-mark");
+                            CC_RECORD_MARK("inner-bucketed-mark");
                             CHECK(true); // nexus fails a test that checks nothing
+                        });
+    reg.add_declaration("inner-plain", {},
+                        []
+                        {
+                            CC_RECORD_MARK("inner-plain-mark");
+                            CHECK(true);
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);
@@ -104,9 +119,12 @@ TEST("test recording - a nested test's events belong to the nested test", no_sch
 
     rec.sync();
 
-    // The nested test ran under this one's ambient chain and still minted its own trace, so the segment it produced
-    // is filed under that trace and not this one.
-    // Attribution nests logically; buckets do not.
     CHECK(rec.all().count("outer-mark") == 1);
-    CHECK(rec.all().count("inner-mark") == 0);
+
+    // The one that opted in minted its own trace, so its events are filed under that and not under this test.
+    CHECK(rec.all().count("inner-bucketed-mark") == 0);
+
+    // The one that did not mints nothing, so it stays under whatever context was already in effect — this test's.
+    // That is the honest answer rather than a gap: the work really did run under this test.
+    CHECK(rec.all().count("inner-plain-mark") == 1);
 }

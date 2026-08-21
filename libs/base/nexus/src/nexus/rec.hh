@@ -19,6 +19,7 @@ struct test_recorder;
 // That is why this is a handle you hold rather than a comparison you write inline: one drain per question would put a
 // process-wide mutex inside a loop of CHECKs, where one drain per test is nothing.
 //
+//     TEST("cache warms", nx::config::recorded)   // bucketing is opt-in, and paid per test
 //     auto rec = nx::test_recording();
 //     do_the_work();
 //     rec.sync();
@@ -28,7 +29,7 @@ struct test_recorder;
 //     auto const since = rec.sync();          // only what arrived in between
 //     CHECK(since.contains("flush"));
 //
-// A test declared `nx::config::no_recording` is not bucketed, so its recorder stays empty.
+// A test without `nx::config::recorded` is not bucketed, so its recorder reports unattached and stays empty.
 
 /// Everything the running test has recorded, and the delta since the last sync.
 ///
@@ -52,7 +53,7 @@ struct nx::test_recorder
     [[nodiscard]] cc::rec::trace_id trace() const { return _trace; }
 
     /// Whether this recorder is attached to anything at all.
-    /// False outside a test, and false for one declared `nx::config::no_recording`.
+    /// False outside a test, for one that did not ask for `nx::config::recorded`, and under `--no-recording`.
     [[nodiscard]] bool is_attached() const { return _trace != cc::rec::trace_id::none; }
 
 private:

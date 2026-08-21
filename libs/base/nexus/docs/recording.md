@@ -12,10 +12,12 @@ That gives three things at once, for zero source changes in a test binary:
 
 ## Reading your own recording
 
+**A test opts in.** Bucketing is per test and paid per test, so a binary of tests that never ask pays nothing.
+
 ```cpp
 #include <nexus/rec.hh>
 
-TEST("cache warms on first miss")
+TEST("cache warms on first miss", nx::config::recorded)
 {
     auto rec = nx::test_recording();
 
@@ -38,7 +40,8 @@ That is `count`, `contains_in_order`, `first_value`, `messages` and `scopes`.
 **`sync()` is the only call here that touches the recorder**, and it drains the actor under a process-wide mutex.
 A few per test costs nothing; one per check inside a loop is a different thing entirely, which is why this is a handle you hold rather than a comparison you write inline.
 
-Outside a test, or in one declared `nx::config::no_recording`, `is_attached()` is false and everything reports empty.
+Without `nx::config::recorded`, outside a test, or under `--no-recording`, `is_attached()` is false and everything reports empty.
+A test that means to read its recording should say so rather than check for it — `SKIP` is the right answer only for a test that must also survive `--no-recording`.
 
 ---
 
@@ -50,8 +53,9 @@ So nexus mints a **trace id per test** and installs it on `cc::async`'s ambient 
 Every event recorded under that test — on any worker, across any `co_await` — is then attributed by the `ambient_changed` delta that names the id.
 [systems/recording](../../clean-core/docs/systems/recording.md#async-scopes) is that mechanism; nexus is just its first heavy user.
 
-A nested test (one run through `nx::test_registry` from inside another) mints its own id, so its events belong to it and not to its parent.
-Attribution nests logically; buckets do not.
+A nested test (one run through `nx::test_registry` from inside another) mints its own id **if it opted in**, and its events then belong to it rather than to its parent.
+One that did not mints nothing and stays under whatever context was already in effect, so its events land in the parent's bucket.
+That is the honest answer rather than a gap, since the work really did run under the parent.
 
 ---
 
@@ -72,20 +76,25 @@ A segment whose trace has no bucket costs one lookup and is dropped.
 
 ## What it costs
 
-Measured on this repo's own suite, `relwithdebinfo-clang`, median of a dozen runs:
+Measured on this repo's own suite, `relwithdebinfo-clang`, median of sixteen runs:
 
-| binary | `--no-recording` | default | delta |
+| binary | no recorder | opt-in default | every test bucketed |
 |---|---|---|---|
-| `clean-core-test` (1194 tests) | ~121 ms | ~155 ms | **+28%** |
-| `nexus-test` (184 tests, most running nested registries) | ~536 ms | ~705 ms | **+32%** |
+| `clean-core-test` (1194 tests) | ~122 ms | ~155 ms | ~155 ms |
+| `nexus-test` (184 tests) | ~540 ms | ~544 ms | ~705 ms |
 
-The cost is per **test**, not per event: a trace link, two scope events and the ambient deltas that carry them.
-A binary of a few long tests barely notices; `nexus-test` is the worst case in the repo because almost every one of its tests runs a whole nested test registry.
+**Opting in is what makes it free.**
+`nexus-test` is the worst case in the repo, since almost every one of its tests runs a whole nested test registry.
+Bucketing every test costs it 31%; bucketing the handful that ask costs it nothing measurable.
 
-Two switches, and they are different:
+`clean-core-test`'s ~33 ms is a different cost and does not move with this switch.
+It is the ~54 `REC_TEST`s that own the recorder: each hands the singleton over, so each pays a `shutdown` plus an `initialize`, and an `initialize` pre-faults its ready chunks.
+Only a binary with recorder-owning tests sees it.
 
-* **`nx::config::no_recording`** on one test — no trace, no bucket, and `nx::test_recording()` reports unattached.
-  For a test that records enough not to be worth keeping.
+Three switches, and they are different:
+
+* **`nx::config::recorded`** on one test — bucket it, so `nx::test_recording()` can answer and a failure keeps the evidence.
+* **`nx::config::owns_recorder`** on one test — hand the whole singleton over, for a test that drives `cc::rec::initialize` itself.
 * **`--no-recording`** on the run — no recorder at all, so no console logger and no dumps either.
   For timing the tests themselves.
 
@@ -95,6 +104,10 @@ Two switches, and they are different:
 
 A passing test's events are dropped the moment it ends, which is what returns their chunks to the pool.
 A failing test's are kept and written to `test-recording-<name>.ccrec` beside the run's JUnit XML, if one was asked for.
+
+Only for a test that opted in, since only those have a bucket.
+A test that fails without one is not left with nothing, though.
+The ambient deltas are in the stream either way, so a crash dump or a whole-run capture still carries the attribution — [systems/recording](../../clean-core/docs/systems/recording.md) has that half.
 
 They are written **at the end of the run**, not when the test fails.
 A test finishing does not mean its events are drained, since the actor is a millisecond behind.

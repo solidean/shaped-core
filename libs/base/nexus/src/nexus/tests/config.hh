@@ -69,8 +69,9 @@ struct nx::config::cfg
     bool exclusive_global = false; // excludes every other test, not just fellow tag holders
 
     // Bucket this test's cc::rec events so nx::test_recording() can read them back.
-    // On by default: the cost is one hash lookup per ambient segment, and a test that never syncs never pays more.
-    bool recorded = true;
+    // OFF by default, because attribution is paid per test whether or not the test ever asks — see
+    // libs/base/nexus/docs/recording.md.
+    bool recorded = false;
 
     // This test drives cc::rec::initialize / shutdown itself, so the run hands its own recorder over for the duration.
     // Only meaningful with `exclusive`, since a torn-down recorder is torn down for every thread at once.
@@ -87,15 +88,18 @@ constexpr struct
     void apply(cfg& result) const { result.enabled = false; }
 } disabled;
 
-// Do not bucket this test's recorded events; nx::test_recording() then sees nothing for it.
-// For a test that records enough to be worth not keeping, or one whose subject is the recorder itself.
+// Bucket this test's cc::rec events, so nx::test_recording() can read them back and a failure keeps them.
+//
+// Opt-in, because attribution is per TEST rather than per event: a trace link, plus an ambient delta wherever the work
+// moves between contexts.
+// A test that never asks would pay all of it for an answer nobody reads, and most tests never ask.
 constexpr struct
 {
-    void apply(cfg& result) const { result.recorded = false; }
-} no_recording;
+    void apply(cfg& result) const { result.recorded = true; }
+} recorded;
 
 // This test owns the cc::rec singleton: the run shuts its recorder down before the body and re-initializes after.
-// Implies no_recording, since there is no run recorder to bucket into.
+// Bucketing is meaningless alongside it, since there is no run recorder to bucket into.
 // Combine with `exclusive` — a recorder torn down on one thread is torn down for every thread.
 constexpr struct
 {
