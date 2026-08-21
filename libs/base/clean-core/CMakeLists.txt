@@ -357,6 +357,9 @@ sc_declare_pch_tier(CC_ALL EXTENDS CC HEADERS
     <clean-core/platform/console.hh>
     <clean-core/platform/stacktrace.hh>
     <clean-core/sequence/sequence.hh>
+    <clean-core/common/log.hh>
+    <clean-core/common/profiling.hh>
+    <clean-core/record/record.hh>
 )
 
 # CC_ALL plus the expensive standard headers our containers and strings reach anyway.
