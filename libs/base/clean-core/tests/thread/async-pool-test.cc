@@ -75,7 +75,7 @@ TEST("async - many independent asyncs fan out across the pool", nx::config::no_s
             }
             i64 sum = 0;
             for (auto const& k : kids)
-                sum += *k->value_ptr();
+                sum += k->value();
             return actx.success(sum);
         });
 
@@ -199,7 +199,7 @@ cc::shared_async<counted> spawn_counted_tree(int depth)
                 (void)actx.require(r);
                 return actx.wait_for_dependencies();
             }
-            return actx.success(counted(l->value_ptr()->v + r->value_ptr()->v));
+            return actx.success(counted(l->value().v + r->value().v));
         });
 }
 } // namespace

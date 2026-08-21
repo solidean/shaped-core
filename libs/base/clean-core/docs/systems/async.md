@@ -27,6 +27,21 @@ The handle:
 * **`shared_async<T, E>` = `cc::shared_ptr<async<T, E>>`** — the normal, composable handle: 8 B, an intrusive refcount over one slab node.
   Many dependents may observe it.
   `async<T, E>` itself is non-copyable and immovable — you copy the handle, never the node.
+* **`shared_async<T const, E>`** — the same node, read-only: it can be read, required and driven, but never pushed to, taken from or edited.
+  A `shared_async<T, E>` converts to it implicitly, and never back.
+
+### `async<T const, E>` — the read-only view
+
+`async<T const, E>` is a **base class** of `async<T, E>`, not a second kind of node.
+
+That is what makes it free.
+The conversion is `cc::shared_ptr`'s ordinary derived-to-base one, the storage is the same object, and there is one payload layout, one ops descriptor and one size class.
+So a view costs no allocation, no indirection and no bytes.
+It also keeps deduction working, because `shared_async<X const>` *is* `shared_ptr<async<X const, E>, traits>`.
+Every `template <class U, class Ue> f(shared_async<U, Ue> const&)` still deduces, seeing `U = X const`.
+
+A view is never created, only converted to — the factories and both coroutine return types reject a const `T` by name.
+Read-only means the **payload**: `schedule()`, `poll()` and the continuation hooks stay available, because a view holder still has to be able to require and drive the node it is waiting on.
 
 ### The raw compute frame
 
@@ -44,7 +59,7 @@ auto a = cc::make_async_lazy<int>(
             actx.require(child);
             return actx.wait_for_dependencies();
         default:
-            return actx.resolve_to_value(*child->value_ptr() + 5); // or actx.success(...)
+            return actx.resolve_to_value(child->value() + 5); // or actx.success(...)
         }
     });
 ```
@@ -316,21 +331,47 @@ ext->push_value(41);                       // wakes parked dependents
 
 ```cpp
 int const* v = a->try_value();               // non-owning; null unless ready with a value
+int const& x = a->value();                   // same, but requires has_value()
 cc::async_error const* e = a->try_error();   // non-owning, typed E const*; null unless ready with an error
 bool r = a->is_ready(); bool ok = a->has_value(); bool bad = a->has_error();
 ```
 
-`try_value()` / `try_error()` return non-owning pointers **into** the node's payload — copy-free, and stable for as long as your handle keeps the node alive.
+`try_value()` / `value()` / `try_error()` reach **into** the node's payload — copy-free, and stable for as long as your handle keeps the node alive.
+They are the whole of `async<T const, E>`, so they work on a view too.
 
-To **move** the outcome out instead of reading it in place, consume the handle:
+### Owner-side access
+
+An async is not a shared-immutable.
+After completion one party is often the only one left, and moving a big payload out or editing it in place beats copying it — so `async<T, E>` carries a writing half that its view does not:
+
+```cpp
+int* p = a->try_mutable_value();   // null unless ready with a value
+a->mutable_value() = 7;            // requires has_value()
+auto v = a->take_value();          // requires has_value(); MOVES the value out
+auto e = a->take_error();          // requires has_error(); MOVES the error out
+```
+
+What must hold is **no concurrent access**, which is weaker than sole ownership: two owners sequenced by their own happens-before are fine, which is why none of this checks the reference count.
+What is *not* enough is readiness — a node is published once, and a dependent that already read the value has no reason to re-acquire.
+A mutation racing a reader is a data race however ready the node is.
+
+Both `take_*` leave the node in `ready_value` / `ready_error` over a moved-from husk, which teardown still destroys.
+So **any other live handle's later `try_value()` / `try_error()` reads that husk.**
+`take_error()` is the sharper of the two, because its loss is silent: the node still reports `has_error()`.
+Every later `propagate_error()` on it hands back an error re-materialized from a message that is now empty.
+Take an error only from a node nothing else will ever read.
+
+Hand out `shared_async<T const, E>` and none of this is reachable — that is what the view is for.
+
+### Consuming the whole handle
 
 ```cpp
 cc::result<int, cc::async_error> r = cc::into_result(cc::move(a));  // a must be ready; MOVES value/error out
 ```
 
-`into_result` takes the handle by value and moves the payload out into a `cc::result<T, E>`.
-It moves out of shared node storage, so **any other live handle's later `try_value()` / `try_error()` reads a moved-from value** — use it only when you are done with the async.
+`into_result` takes the handle by value and moves the payload out into a `cc::result<T, E>` — `take_value` / `take_error` in one step, over a handle it consumes.
 `T` must be move-constructible; an immovable `T` is a compile error by design, so read it in place via `try_value()`.
+A read-only `shared_async<T const, E>` cannot be consumed at all.
 
 ### Born-ready factories
 
@@ -541,6 +582,10 @@ Build and coexist as many pools as you like; only one may be the process-wide de
 ### Node layout (size & locking)
 
 A node is a **16 B header** followed by a payload slot; `async<int>` is **64 B — one cache line**, cacheline-aligned so unrelated nodes never share a line.
+
+The `async<T const, E>` layer in between adds nothing: single, non-virtual, member-less inheritance, so the base subobject stays at offset 0 and `sizeof(async<T const, E>) == sizeof(async<T, E>)`.
+That equality is load-bearing rather than incidental: the ops descriptor's size class is computed off the typed node, while `make_shared` allocates the derived one.
+So it is pinned by a `static_assert` in `async<T, E>` and by the 64 B guards in the tests.
 
 * **16 B header** — one `atomic<u64>` intrusive refcount plus one `atomic<u64>` control word.
   The refcount is fused, strong in the high half and weak in the low half, so a handle is one pointer with no separate control block.

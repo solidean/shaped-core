@@ -99,7 +99,7 @@ Both build on [`cc::async`](../../../../base/clean-core/docs/systems/async.md): 
 Blocking on it drives it there, so the same handle works whether that scheduler is a pool or a single-threaded one.
 
 The result types are the `sg::async_*` typedefs (`async_compiled_shader`, `async_compute_pipeline`, `async_raster_pipeline`, `async_raytracing_pipeline`).
-`cc::async<T>` cannot hold a `const T` — its internal `cc::optional<T>` forbids it — so const arrives at the **read** side.
+They are the producing `cc::async<T>` rather than the read-only `cc::async<T const>`, so const arrives at the **read** side.
 `try_value()` yields the const `*_handle`, and `cc::async_blocking_get` yields the handle by value.
 A build failure surfaces as an **async error** on the node (`has_error()`) carrying the DXC / PSO diagnostics; it is not thrown.
 

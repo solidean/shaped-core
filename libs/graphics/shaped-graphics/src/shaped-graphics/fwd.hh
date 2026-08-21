@@ -333,8 +333,8 @@ using staging_binding_group_handle = std::shared_ptr<staging_binding_group>;
 using swapchain_handle = std::shared_ptr<swapchain>; // mutable: a swapchain is a per-frame driver (acquire/present)
 
 // Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,
-// pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). cc::async<T> cannot hold a const T
-// (its internal cc::optional<T> forbids it), so const arrives at the read side: an async's try_value()
+// pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). These are the producing cc::async<T>
+// rather than the read-only cc::async<T const>, so const arrives at the read side: an async's try_value()
 // yields a non-owning `T const*` into the node — hold the async handle below to keep it alive while you read
 // (a shareable projection back to a *_handle is a deferred follow-up).
 using async_compiled_shader = cc::shared_async<compiled_shader>;          // try_value() -> compiled_shader const*
