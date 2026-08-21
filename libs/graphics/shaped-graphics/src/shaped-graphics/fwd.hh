@@ -262,7 +262,7 @@ enum class hit_index : u32;
 enum class callable_index : u32;
 
 /// Hard cap on the number of group slots a pipeline_layout can hold (dx12 root-parameter / vulkan set
-/// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `set`.
+/// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `group_index`.
 inline constexpr int max_binding_groups = 4;
 
 // The next two caps are real GPU pipeline limits rather than arbitrary array sizes — an output-merger

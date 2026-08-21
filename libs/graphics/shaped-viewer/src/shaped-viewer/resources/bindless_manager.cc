@@ -100,10 +100,10 @@ void sv::bindless_manager::_ensure_staging()
     // One register space per category (index 0 each), so shaders address a category with no register-offset
     // math: `ByteAddressBuffer BindlessBuffers[N] : register(t0, space1);` and so on.
     // A hand-written texture binding carries its dimension — what shapes vacant elements' null descriptors.
-    auto const tex_binding = [](cc::string_view name, u32 set, u32 count, sg::texture_view_dimension dim)
+    auto const tex_binding = [](cc::string_view name, u32 space, u32 count, sg::texture_view_dimension dim)
     {
         return sg::binding{.name = cc::string(name),
-                           .set = set,
+                           .space = space,
                            .index = 0,
                            .count = count,
                            .type = sg::binding_type::readonly_texture,
@@ -112,7 +112,7 @@ void sv::bindless_manager::_ensure_staging()
     using vd = sg::texture_view_dimension;
     sg::binding const bindings[] = {
         {.name = _cfg.buffers_binding,
-         .set = 1,
+         .space = 1,
          .index = 0,
          .count = _cfg.buffer_count,
          .type = sg::binding_type::readonly_raw_buffer},

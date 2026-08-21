@@ -10,7 +10,7 @@ namespace sg::backend::dx12
 [[nodiscard]] D3D12_SAMPLER_DESC to_d3d12_sampler_desc(sg::sampler const& s);
 
 /// Translates a sampler into a *static* sampler baked into a root signature, addressed at
-/// (register = binding.index, space = binding.set) with the given shader visibility.
+/// (register = binding.index, space = binding.space) with the given shader visibility.
 [[nodiscard]] D3D12_STATIC_SAMPLER_DESC to_d3d12_static_sampler_desc(sg::sampler const& s,
                                                                      UINT shader_register,
                                                                      UINT register_space,

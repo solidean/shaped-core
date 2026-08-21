@@ -28,13 +28,18 @@ public:
     /// A binding's position here is its *slot index*, the address a staging_binding_group resolves a name to.
     [[nodiscard]] cc::span<binding const> bindings() const { return _bindings; }
 
+    /// The group index the bindings pin this layout to, inherited from them at creation — nothing if none of them declares one.
+    /// Present means this layout may only ever be bound at that one slot, which every backend's `bind_group` checks.
+    [[nodiscard]] cc::optional<u32> group_index() const { return _group_index; }
+
 protected:
     /// `structural_hash` must come from sg::impl::binding_group_layout_hash over the creation arguments, and `bindings` must be the span it hashed.
     binding_group_layout(cc::hash128 structural_hash, cc::vector<binding> bindings)
-      : _structural_hash(structural_hash), _bindings(cc::move(bindings))
+      : _structural_hash(structural_hash), _bindings(cc::move(bindings)), _group_index(group_index_of(_bindings))
     {
     }
 
     cc::hash128 _structural_hash;
     cc::vector<binding> _bindings;
+    cc::optional<u32> _group_index;
 };

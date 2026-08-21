@@ -27,7 +27,8 @@ void add_sampler(cc::byte_stream_builder& b, sampler const& s)
 
 void add_binding(cc::byte_stream_builder& b, binding const& bnd)
 {
-    b.add_pod(bnd.set);
+    b.add_optional(bnd.group_index);
+    b.add_optional(bnd.space);
     b.add_pod(bnd.index);
     b.add_pod(bnd.count);
     b.add_pod(bnd.type);

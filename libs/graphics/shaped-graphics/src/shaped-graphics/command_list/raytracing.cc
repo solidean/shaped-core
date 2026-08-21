@@ -28,9 +28,9 @@ void command_list_raytracing_scope::bind_pipeline(raytracing_pipeline const& pip
     _cmd.raytracing_bind_pipeline(pipeline);
 }
 
-void command_list_raytracing_scope::bind_group(int set, binding_group const& group)
+void command_list_raytracing_scope::bind_group(int group_index, binding_group const& group)
 {
-    _cmd.raytracing_bind_group(set, group);
+    _cmd.raytracing_bind_group(group_index, group);
 }
 
 void command_list_raytracing_scope::dispatch_rays(raytracing_shader_table const& table,

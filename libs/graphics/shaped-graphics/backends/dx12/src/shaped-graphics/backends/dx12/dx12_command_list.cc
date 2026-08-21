@@ -2,6 +2,7 @@
 // Raster and query recording live in dx12_command_list.raster.cc / dx12_command_list.queries.cc.
 // Allocators are epoch-gated, recycled once the epoch retires — see libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
+#include <clean-core/common/assertf.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
@@ -153,11 +154,12 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->groups.size(), nullptr);
 }
 
-void dx12_command_list::compute_bind_group(int set, sg::binding_group const& group)
+void dx12_command_list::compute_bind_group(int group_index, sg::binding_group const& group)
 {
     CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before binding groups");
-    CC_ASSERT(set >= 0 && set < int(_bound_groups.size()), "binding-group slot out of range for the bound pipeline "
-                                                           "layout");
+    CC_ASSERT(group_index >= 0 && group_index < int(_bound_groups.size()),
+              "binding-group slot out of range for the bound pipeline "
+              "layout");
 
     auto const* dg = dynamic_cast<dx12_binding_group const*>(&group);
     CC_ASSERT(dg != nullptr, "binding_group is not a dx12 binding_group");
@@ -169,13 +171,18 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
 
     // The group's own schema must match what the pipeline layout declared at this slot (same root-signature
     // table shape), otherwise the descriptor tables below would be bound against the wrong parameters.
-    auto const& gslot = _bound_pipeline_layout->groups[set];
+    auto const& gslot = _bound_pipeline_layout->groups[group_index];
     CC_ASSERT(dg->layout == gslot.layout, "binding_group's layout does not match the pipeline layout's slot");
+    // A layout whose bindings name a descriptor set may only be bound at that one slot.
+    // value_or keeps the message's arguments valid in a release build, where CC_ASSERTF still evaluates them.
+    CC_ASSERTF(dg->layout->group_index().value_or(u32(group_index)) == u32(group_index),
+               "binding_group is pinned to group index {} by its bindings and cannot be bound at slot {}",
+               dg->layout->group_index().value_or(0), group_index);
 
     // Remember the bound group so its views' accesses are declared at dispatch, the point work runs.
     // The forward async-upload wait for each bound buffer is folded in there too, via track_buffer_access.
     // The root-parameter indices come from the pipeline layout's slot, not the group.
-    _bound_groups[set] = dg;
+    _bound_groups[group_index] = dg;
     if (gslot.resource_root_param >= 0)
         _list->SetComputeRootDescriptorTable(UINT(gslot.resource_root_param), dg->table_start);
     if (gslot.sampler_root_param >= 0)
@@ -260,10 +267,10 @@ void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& 
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->groups.size(), nullptr);
 }
 
-void dx12_command_list::raytracing_bind_group(int set, sg::binding_group const& group)
+void dx12_command_list::raytracing_bind_group(int group_index, sg::binding_group const& group)
 {
     // Identical to compute: DXR binds through the compute root signature.
-    compute_bind_group(set, group);
+    compute_bind_group(group_index, group);
 }
 
 void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table const& table,

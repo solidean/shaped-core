@@ -57,8 +57,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     {
         CC_ASSERT(sg::is_sampler(bs.binding.type), "pipeline_layout static sampler binding must be a sampler");
         for (int i = 0; i < int(bs.binding.count); ++i)
-            static_sampler_descs.push_back(to_d3d12_static_sampler_desc(bs.sampler, UINT(bs.binding.index) + UINT(i),
-                                                                        bs.binding.set, D3D12_SHADER_VISIBILITY_ALL));
+            static_sampler_descs.push_back(to_d3d12_static_sampler_desc(
+                bs.sampler, UINT(bs.binding.index) + UINT(i), bs.binding.space.value_or(0), D3D12_SHADER_VISIBILITY_ALL));
     }
 
     // Inline constants become a 32-bit-constants root parameter, appended last so the group slots' root-parameter indices above stay put.
@@ -76,7 +76,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL; // compute uses ALL
         param.Constants.Num32BitValues = UINT(ic.block_size.value() / 4);
         param.Constants.ShaderRegister = ic.index;
-        param.Constants.RegisterSpace = ic.set;
+        param.Constants.RegisterSpace = ic.space.value_or(0);
         pl->inline_constants_root_param = int(params.size());
         pl->inline_constants_num_32bit = int(ic.block_size.value() / 4);
         params.push_back(param);

@@ -89,7 +89,6 @@ TEST("sg bindings - compiled_shader holds reflection")
     shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 1, .z = 1};
     shader.bindings.push_back(sg::binding{
         .name = "Output",
-        .set = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,
@@ -103,6 +102,21 @@ TEST("sg bindings - compiled_shader holds reflection")
 
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
     CHECK(sg::accepts(b.type, sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()));
+}
+
+TEST("sg bindings - group_index_of agrees or is absent")
+{
+    // Nothing declares a group index: the bind slot alone decides, which is the HLSL path.
+    auto const spaced = cc::vector<sg::binding>{
+        {.name = "Tex", .space = 3, .index = 0, .type = sg::binding_type::readonly_texture},
+        {.name = "Buf", .space = 7, .index = 0, .type = sg::binding_type::readonly_raw_buffer}};
+    CHECK(!sg::group_index_of(spaced).has_value()); // a space is a register namespace, never a bind slot
+
+    // A declaring binding pins the group even when its neighbours stay silent.
+    auto const mixed = cc::vector<sg::binding>{
+        {.name = "Tex", .index = 0, .type = sg::binding_type::readonly_texture},
+        {.name = "Buf", .group_index = 2, .index = 1, .type = sg::binding_type::readonly_raw_buffer}};
+    CHECK(sg::group_index_of(mixed) == 2u);
 }
 
 TEST("sg bindings - merge_bindings unions stages by name")

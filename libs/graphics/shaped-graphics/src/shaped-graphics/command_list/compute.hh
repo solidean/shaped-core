@@ -39,8 +39,8 @@ public:
     void bind_pipeline(compute_pipeline const& pipeline);
 
     /// Binds `group` to descriptor set `set` of the active pipeline.
-    /// The group's layout must match the pipeline's for that set.
-    void bind_group(int set, binding_group const& group);
+    /// The group's layout must match the pipeline's for that slot.
+    void bind_group(int group_index, binding_group const& group);
 
     /// Dispatches `x`*`y`*`z` **workgroups** of the active pipeline.
     void dispatch_groups(int x, int y = 1, int z = 1);

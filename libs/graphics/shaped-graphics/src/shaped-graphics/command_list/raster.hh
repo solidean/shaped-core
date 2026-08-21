@@ -131,8 +131,8 @@ public:
 
     /// Binds `pipeline` as the active raster pipeline for subsequent bind_group / draw calls.
     void bind_pipeline(raster_pipeline const& pipeline);
-    /// Binds `group` to descriptor set `set` of the active pipeline's layout (must match that slot).
-    void bind_group(int set, binding_group const& group);
+    /// Binds `group` at slot `group_index` of the active pipeline's layout (must match that slot).
+    void bind_group(int group_index, binding_group const& group);
     /// Binds vertex buffers to consecutive input slots starting at `first_slot` (slot first_slot+i <- views[i]).
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
@@ -184,7 +184,7 @@ public:
     // Identical to `rendering_scope`'s, which documents each call; all forward to the owning command list.
 
     void bind_pipeline(raster_pipeline const& pipeline);
-    void bind_group(int set, binding_group const& group);
+    void bind_group(int group_index, binding_group const& group);
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
@@ -234,7 +234,7 @@ public:
     // Identical to `rendering_scope`'s, which documents each call; all forward to the owning command list.
 
     void bind_pipeline(raster_pipeline const& pipeline);
-    void bind_group(int set, binding_group const& group);
+    void bind_group(int group_index, binding_group const& group);
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);

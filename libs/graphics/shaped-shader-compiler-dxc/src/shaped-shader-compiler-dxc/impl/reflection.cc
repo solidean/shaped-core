@@ -89,10 +89,11 @@ template <class ReflectionT>
                                         "are not supported)",
                                         bd.Name));
 
-        // Faithful (register, space, kind) -> (index, set, type). No remapping; see reflection.hh.
+        // Faithful (register, space, kind) -> (index, space, type). No remapping; see reflection.hh.
+        // HLSL has no descriptor set, so `group_index` stays absent and the bind slot alone decides where the group goes.
         sg::binding b;
         b.name = cc::string(bd.Name);
-        b.set = bd.Space;
+        b.space = bd.Space;
         b.index = bd.BindPoint;
         b.count = bd.BindCount;
         b.type = type.value();

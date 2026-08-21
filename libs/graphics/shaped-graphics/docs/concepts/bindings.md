@@ -13,10 +13,34 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
 - **`binding_type`** — the kind of resource a slot expects, and the backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
   `uniform_buffer`, `readonly_structured_buffer`, `readwrite_structured_buffer`, `readonly_raw_buffer`, `readwrite_raw_buffer`.
   Then `readonly_texture`, `readwrite_texture`, `sampler`, `acceleration_structure`.
-- **`(set, index)` + `count`** — the address, following SPIR-V (set/binding), WGSL (`@group`/`@binding`) and Metal argument buffers.
-  A D3D12 backend derives its `(register-type, register, space)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`, space = `set`.
+- **`index` + `count`** — the address within the group, following SPIR-V (`binding`), WGSL (`@binding`) and Metal argument buffers.
+  A D3D12 backend derives its `(register-type, register)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`.
   `count == 0` is an unbounded array.
+- **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
+  They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
 - **`block_size`** — a uniform block's declared byte size, used to validate a bound view's size.
+
+## A group index binds, a space only numbers
+
+A **group index** is a descriptor set the hardware sees: SPIR-V's `set`, WGSL's `@group`.
+Vulkan guarantees four of them, and binding a descriptor set means naming the very index the shader was compiled against — bind it elsewhere and the shader reads the wrong table.
+A **space** is HLSL's `space`, and it is only a namespace for register numbers: `t0, space1` and `t0, space2` are two distinct registers.
+Neither of them says anything about which descriptor table they end up in.
+An arbitrary number of spaces is fine, which is exactly why a space could never stand in for a set.
+
+So a `binding` carries whichever its language reflects, and neither is invented for it:
+
+- **DXC reflection fills `space`** — always, even for the default space 0 — and leaves `group_index` absent.
+- **SPIR-V reflection fills `group_index`**, as would any other language where the set is part of the binding.
+- **A hand-written binding fills what it means.** Absent `space` is space 0; absent `group_index` means the bind slot alone decides.
+
+A declared group index then propagates, so that it cannot be declared and quietly ignored:
+
+- **A `binding_group_layout` inherits it from its bindings.**
+  All the bindings that declare one must declare the same one — they end up in a single group, and a group is bound at a single slot.
+- **A `binding_group` reaches it through its layout**, which the backend already holds to match the bind slot's schema.
+- **Every backend's `bind_group` asserts the slot matches**, next to the assert that the layout matches the pipeline layout's slot at all.
+  A layout that pins no group index binds anywhere, which is the HLSL path and stays free.
 
 ## Bindings and views speak the same vocabulary
 

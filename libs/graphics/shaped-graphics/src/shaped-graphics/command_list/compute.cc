@@ -21,9 +21,9 @@ void command_list_compute_scope::bind_pipeline(compute_pipeline const& pipeline)
     _cmd.compute_bind_pipeline(pipeline);
 }
 
-void command_list_compute_scope::bind_group(int set, binding_group const& group)
+void command_list_compute_scope::bind_group(int group_index, binding_group const& group)
 {
-    _cmd.compute_bind_group(set, group);
+    _cmd.compute_bind_group(group_index, group);
 }
 
 void command_list_compute_scope::dispatch_groups(int x, int y, int z)

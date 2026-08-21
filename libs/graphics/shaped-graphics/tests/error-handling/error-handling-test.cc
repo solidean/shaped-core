@@ -201,7 +201,6 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
     // A one-entry layout expecting a read-write structured buffer named "Data".
     sg::binding const b = {
         .name = "Data",
-        .set = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,

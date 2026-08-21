@@ -28,7 +28,6 @@ sg::compiled_shader make_double_shader()
         cc::span<byte const>(reinterpret_cast<byte const*>(double_compute_dxil), isize(sizeof(double_compute_dxil))));
     shader.bindings.push_back(sg::binding{
         .name = "Output",
-        .set = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,
@@ -108,8 +107,8 @@ TEST("sg pipeline_cache - static samplers participate in the layout key")
     // A texture SRV (t0) plus one static sampler (s0). The sampler is baked into the layout, so it must
     // be part of the cache key: the same bindings with a different static sampler is a different layout.
     sg::binding const bindings[] = {
-        {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
-        {.name = "Samp", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+        {.name = "Tex", .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Samp", .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
     sg::named_sampler const clamp[] = {{.name = "Samp", .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}}};
     sg::named_sampler const repeat[] = {{.name = "Samp", .sampler = {.address_u = sg::sampler_address_mode::repeat}}};
@@ -158,7 +157,7 @@ TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipe
     sg::context& ctx = *handle;
 
     sg::binding const bindings[] = {
-        {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
     };
     auto gl = ctx.cached.acquire_binding_group_layout(bindings);
     REQUIRE(gl != nullptr);
@@ -170,7 +169,7 @@ TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipe
         sg::pipeline_layout_description d;
         d.groups = {gl};
         d.static_samplers.push_back(
-            {.binding = {.name = "Samp", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+            {.binding = {.name = "Samp", .index = 0, .count = 1, .type = sg::binding_type::sampler},
              .sampler = {.address_u = mode}});
         return d;
     };
@@ -191,7 +190,7 @@ TEST("sg pipeline_cache - inline constants participate in the pipeline-layout ke
     sg::context& ctx = *handle;
 
     sg::binding const bindings[] = {
-        {.name = "Out", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_structured_buffer},
+        {.name = "Out", .index = 0, .count = 1, .type = sg::binding_type::readwrite_structured_buffer},
     };
     auto gl = ctx.cached.acquire_binding_group_layout(bindings);
     REQUIRE(gl != nullptr);
@@ -203,7 +202,6 @@ TEST("sg pipeline_cache - inline constants participate in the pipeline-layout ke
         sg::pipeline_layout_description d;
         d.groups = {gl};
         d.inline_constants = sg::binding{.name = "Params",
-                                         .set = 0,
                                          .index = 0,
                                          .count = 1,
                                          .type = sg::binding_type::uniform_buffer,

@@ -31,7 +31,7 @@ sg::binding_group_layout_handle group_of(cc::span<sg::binding const> bindings,
 
 sg::binding uniform(cc::string_view name, u32 index)
 {
-    return {.name = cc::string::create_copy_of(name), .set = 0, .index = index, .type = sg::binding_type::uniform_buffer};
+    return {.name = cc::string::create_copy_of(name), .index = index, .type = sg::binding_type::uniform_buffer};
 }
 } // namespace
 
@@ -114,12 +114,12 @@ TEST("sg pipeline-layout hash covers static samplers and inline constants")
     auto const bare = sg::pipeline_layout_description{.groups = {group_of(bindings)}};
 
     auto sampled = sg::pipeline_layout_description{.groups = {group_of(bindings)}};
-    sampled.static_samplers.push_back({.binding = {.set = 1, .index = 0, .type = sg::binding_type::sampler}});
+    sampled.static_samplers.push_back({.binding = {.space = 1, .index = 0, .type = sg::binding_type::sampler}});
     CHECK(sg::impl::pipeline_layout_hash(sampled) != sg::impl::pipeline_layout_hash(bare));
 
     auto inlined = sg::pipeline_layout_description{.groups = {group_of(bindings)}};
     inlined.inline_constants
-        = sg::binding{.name = cc::string("Push"), .set = 2, .type = sg::binding_type::uniform_buffer, .block_size = 64};
+        = sg::binding{.name = cc::string("Push"), .space = 2, .type = sg::binding_type::uniform_buffer, .block_size = 64};
     CHECK(sg::impl::pipeline_layout_hash(inlined) != sg::impl::pipeline_layout_hash(bare));
 
     // block_size sizes the root-constants parameter, so it is part of the identity.

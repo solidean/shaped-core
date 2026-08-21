@@ -59,8 +59,8 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
             if (auto const* sd = find_static(b.name); sd != nullptr)
             {
                 for (int i = 0; i < int(b.count); ++i)
-                    layout->static_sampler_descs.push_back(
-                        to_d3d12_static_sampler_desc(*sd, UINT(b.index) + UINT(i), b.set, D3D12_SHADER_VISIBILITY_ALL));
+                    layout->static_sampler_descs.push_back(to_d3d12_static_sampler_desc(
+                        *sd, UINT(b.index) + UINT(i), b.space.value_or(0), D3D12_SHADER_VISIBILITY_ALL));
                 ++matched_static;
             }
             else
@@ -69,7 +69,7 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
                 range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
                 range.NumDescriptors = b.count;
                 range.BaseShaderRegister = b.index;
-                range.RegisterSpace = b.set;
+                range.RegisterSpace = b.space.value_or(0);
                 range.OffsetInDescriptorsFromTableStart = UINT(sampler_offset);
                 layout->sampler_ranges.push_back(range);
                 layout->sampler_slots.push_back({b, sampler_offset});
@@ -81,8 +81,8 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
         D3D12_DESCRIPTOR_RANGE range = {};
         range.RangeType = range_type_of(b.type);
         range.NumDescriptors = b.count;
-        range.BaseShaderRegister = b.index; // (set, index) -> (space, register); register-type from the kind
-        range.RegisterSpace = b.set;
+        range.BaseShaderRegister = b.index; // (space, index) -> (register space, register); register-type from the kind
+        range.RegisterSpace = b.space.value_or(0);
         range.OffsetInDescriptorsFromTableStart = UINT(view_offset);
         layout->view_ranges.push_back(range);
         layout->view_slots.push_back({b, view_offset});

@@ -213,7 +213,7 @@ cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, b
 
 // draw recording — on the `pass` scope, or equivalently cmd.raster / cmd.raster.manual (all forward to the one list); valid while a scope is open:
 cmd.raster.bind_pipeline(raster_pipeline)               // void — active raster PSO + IA topology + graphics root sig
-cmd.raster.bind_group(set, binding_group)              // void — bind at slot `set` (indexes the pipeline layout's groups)
+cmd.raster.bind_group(group_index, binding_group)      // void — bind at slot `group_index` (indexes the pipeline layout's groups)
 cmd.raster.bind_vertex_buffers({vbuf->as_vertex_buffer<Vtx>()}, first_slot=0)  // void — also: bind_vertex_buffer(view, slot) / span overload
 cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  // void
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
@@ -456,9 +456,12 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 #include <shaped-graphics/binding/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
-sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size;
+sg::binding                 // { cc::string name; cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
-                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count > 1 = bounded array (.is_array()); count 0 = unbounded (unsupported)
+                            //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded (unsupported)
+                            //   group_index = descriptor set / @group (SPIR-V) — PINS the bind slot: every bind_group asserts it matches
+                            //   space = HLSL register space (DXC reflection only) — a register-numbering namespace, never a bind slot; absent = 0
+sg::group_index_of(bindings) // -> cc::optional<u32>  the one group index they agree on (they must); what a group layout inherits
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
@@ -484,6 +487,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 ```cpp
 #include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
 sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
+layout->group_index()       // -> cc::optional<u32> — inherited from the bindings; set = bindable at that ONE slot (every backend's bind_group asserts it)
 sg::named_view              // { cc::string name; bound_view view }  — input to create_binding_group (a typed view converts)
 sg::bound_view             // one raw_view (stored inline, `.view = tex.as_readonly_view()`) or a cc::vector<raw_view> for an array binding
                             //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element (`.view = cc::move(vec)`)
@@ -491,7 +495,7 @@ sg::bound_view             // one raw_view (stored inline, `.view = tex.as_reado
                             //   consumers read both arms via .span() / .size()
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
-sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `set`)
+sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `group_index`)
 sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle, max_binding_groups> groups; cc::vector<bound_sampler> static_samplers }  — groups ordered; index = bind slot
 sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout; pinned_data<byte const> cached_pipeline={} }
 compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backend's serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported / accelerator only, NOT in the cache key)
@@ -533,7 +537,7 @@ sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle c
                                       // dx12: sets write a private non-shader-visible heap; a dirty snapshot is ONE CopyDescriptorsSimple, a clean one is free
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size + bound pipeline layout)
-cmd.compute.bind_group(set, group)       // void — bind a binding_group at slot `set` (indexes the pipeline layout's groups)
+cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
@@ -611,7 +615,7 @@ ctx.uncached.create_raytracing_shader_table(tbl)   // -> raytracing_shader_table
 
 // recording (on a command_list, via cmd.raytracing). Binds through the compute root signature.
 cmd.raytracing.bind_pipeline(raytracing_pipeline const&)          // void — sets the DXR state object + global root signature
-cmd.raytracing.bind_group(int set, binding_group const&)         // void — like compute; bind a tlas here (surfaces accel_read)
+cmd.raytracing.bind_group(int group_index, binding_group const&) // void — like compute; bind a tlas here (surfaces accel_read)
 cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — traces w*h*d rays (product <= 2^30)
 ```
 

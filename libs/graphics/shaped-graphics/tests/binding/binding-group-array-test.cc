@@ -2,6 +2,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_view
+#include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/resource/buffer.hh>
@@ -38,13 +39,31 @@ namespace
 [[nodiscard]] sg::binding texture_array_binding(u32 count)
 {
     return {.name = "Textures",
-            .set = 0,
             .index = 0,
             .count = count,
             .type = sg::binding_type::readonly_texture,
             .texture_dimension = sg::texture_view_dimension::tex_2d};
 }
 } // namespace
+
+INVOCABLE_TEST("sg - a declared group index reaches the group layout", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // A binding that names its descriptor set pins the layout built from it to that one bind slot,
+    // which is what every backend's bind_group asserts against.
+    auto b = texture_array_binding(4);
+    b.group_index = 2;
+    auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
+    REQUIRE(layout != nullptr);
+    CHECK(layout->group_index() == 2u);
+
+    // A binding that declares nothing leaves the slot open, which is what the HLSL path relies on.
+    auto const open = texture_array_binding(4);
+    auto open_layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&open, 1));
+    REQUIRE(open_layout != nullptr);
+    CHECK(!open_layout->group_index().has_value());
+}
 
 INVOCABLE_TEST("sg - array binding accepts a partially vacant element list", (sg::context_handle const& ctx))
 {
@@ -91,8 +110,7 @@ INVOCABLE_TEST("sg - buffer array binding accepts bound and vacant elements", (s
 {
     REQUIRE(ctx != nullptr);
 
-    sg::binding const b
-        = {.name = "Buffers", .set = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_raw_buffer};
+    sg::binding const b = {.name = "Buffers", .index = 0, .count = 4, .type = sg::binding_type::readonly_raw_buffer};
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
 
