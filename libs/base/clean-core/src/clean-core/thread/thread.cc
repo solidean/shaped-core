@@ -9,6 +9,15 @@
 #include <chrono>
 #include <thread>
 
+// The OS's own thread id, which cc::thread_id deliberately is not.
+#if defined(_WIN32)
+#include <clean-core/platform/win32_sanitized.hh>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 int cc::num_hardware_threads()
 {
     unsigned const n = std::thread::hardware_concurrency();
@@ -53,6 +62,22 @@ thread_local cc::thread_id tl_thread_id = cc::thread_id::invalid;
 
 cc::atomic<bool> g_main_claimed = {false};
 } // namespace
+
+cc::u64 cc::native_thread_id()
+{
+#if !CC_HAS_THREADS
+    return 0;
+#elif defined(_WIN32)
+    return u64(::GetCurrentThreadId());
+#elif defined(__APPLE__)
+    u64 id = 0;
+    return pthread_threadid_np(nullptr, &id) == 0 ? id : 0;
+#elif defined(__linux__)
+    return u64(::gettid());
+#else
+    return 0;
+#endif
+}
 
 cc::thread_id cc::current_thread_id()
 {

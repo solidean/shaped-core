@@ -19,6 +19,11 @@ struct cc::rec::impl::thread_state
 {
     // identity, written once at registration
     cc::thread_id tid = cc::thread_id::invalid;
+
+    /// The OS's own id, for whoever has to hand this thread back to the OS.
+    /// The sampler opens a handle from it; an exporter names a thread by it.
+    u64 native_tid = 0;
+
     u32 index = 0;
     char name[48] = {};
 

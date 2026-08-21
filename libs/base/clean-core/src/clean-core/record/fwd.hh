@@ -46,6 +46,10 @@ enum class cc::rec::event_kind : cc::u8
     async_scope_begin,
     async_scope_end,
 
+    /// A sampler caught a thread mid-work: an anchor into that thread's stream, plus the frames it was in.
+    /// Written to the SAMPLER's stream, never the sampled thread's — see record/sampling.hh.
+    sample,
+
     stream_state,   ///< the consumer-written preamble that makes a chunk independently decodable
     gap,            ///< events were dropped; carries how many, over what span, and how many bytes
     chunk_acquired, ///< the cold path ran, and how long it took

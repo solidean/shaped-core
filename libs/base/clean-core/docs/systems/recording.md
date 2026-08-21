@@ -154,6 +154,36 @@ That cost one pin per context switch against a 64-slot array, force-rotating a w
 That measured as a 75% tax on an async-heavy workload, bought for an identity a value carries for nothing.
 A recording therefore outlives every link it ever saw and still tells the contexts apart.
 
+### Sampling
+
+```cpp
+#include <clean-core/record/sampling.hh>
+cc::rec::sampling_scope const sampling({.rate_hz = 1000.0});   // or start_sampling / stop_sampling
+...
+auto const merged = captured.spliced_samples();
+```
+
+Instrumentation says how long the things you NAMED took, and is blind to everything nobody named.
+A sampler answers the other half, and the two compose rather than compete.
+
+**A sample is written to the sampler's own stream, never the sampled thread's.**
+A suspended thread may be mid-event, or mid-rotation holding the pool lock, so writing into its stream from outside would corrupt it or deadlock against it.
+Each sample instead carries an **anchor** — which thread it caught, and how far that thread's stream had committed — and `recording::spliced_samples()` puts it back there.
+
+The anchor is a POSITION rather than a copy of the state at that position, and that is what makes it worth more than a trace id would be.
+A consumer replaying the anchored thread already carries the trace, the ambient context and the open scope stack, so all of it is in hand when the sample arrives.
+The scope stack is the half that matters: a sample stops at `current_scope_frame()`, and the frames below it are exactly what that stack names.
+
+So a sample taken inside instrumented code is **short on purpose** — often a single address — and splicing supplies the rest.
+That cuts the walk and the payload by the same factor, which matters most for sampling, the one thing that can flood the stream.
+
+The order the sampler obeys is not negotiable: take the registry lock, suspend, read the anchor and walk into a fixed buffer, resume, and only then write.
+A suspended thread may hold the allocator's lock or the pool's, so allocating or writing before the resume hangs on a lock its owner cannot release.
+
+Two limits worth knowing.
+Only threads the recorder already knows are sampled, which a thread joins by recording anything at all — enumerating the process's OS threads instead is in the [TODO](../TODO.md).
+And there is no sampler at all without threads (`SC_THREADS=OFF`) or on a platform that cannot walk a foreign thread's stack; `is_sampling()` reports which you are in rather than pretending.
+
 ### Values, markers and stats
 
 ```cpp

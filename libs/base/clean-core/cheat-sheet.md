@@ -969,6 +969,14 @@ cc::rec::current_trace_id();                 // -> trace_id; an async scope ALWA
 // It allocates two links and takes their refcounts, so it is the heavier of the two — wrong tool for an inner loop.
 // Deltas are eager (an ambient_changed event at each cc::async restore whose TRACE differs), because a chain of
 // co_awaits recording NOTHING still has to be attributed — the scope is about where time goes.
+#include <clean-core/record/sampling.hh>      // what the threads were ACTUALLY doing, beside what they were told to say
+cc::rec::sampling_scope const s({.rate_hz = 1000.0});    // or start_sampling / stop_sampling / is_sampling
+auto const merged = captured.spliced_samples();          // samples ride the SAMPLER's stream until you splice them
+// A sample carries an ANCHOR (which thread, how far its stream had committed), not a copy of that thread's state —
+// so splicing recovers the trace, the ambient context AND the open scopes, none of which an id could give you.
+// It stops at the innermost open scope, so a sample inside instrumented code is often one address. That is the point.
+// No sampler without threads, or where a foreign thread's stack cannot be walked; is_sampling() says which.
+
 CC_RECORD_MARK("fallback-taken");            // "did this code run" — the cheapest useful annotation
 CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES
 CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless

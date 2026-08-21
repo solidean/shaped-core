@@ -30,6 +30,13 @@ namespace cc
 /// This thread's identity, claimed on first call.
 [[nodiscard]] thread_id current_thread_id();
 
+/// The OS's own id for this thread, or 0 where there is none.
+///
+/// Distinct from cc::thread_id, which is a portable counter and deliberately not the OS's number.
+/// This is for the cases that must hand a thread to the OS or to another tool: opening a thread handle to sample it,
+/// and naming a thread in a trace a profiler will read.
+[[nodiscard]] u64 native_thread_id();
+
 /// Claims thread_id::main for the calling thread, so code that must run there can check it.
 /// Nothing marks it implicitly — call this from main() before anything starts a second thread.
 /// The calling thread must not already hold an id, and no other thread may have claimed main.

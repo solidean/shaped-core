@@ -40,6 +40,13 @@ void reclaim_thread_state(thread_state* s);
 /// Calls `f` for every registered thread, alive or not, under the registry lock.
 void for_each_thread_state(cc::function_ref<void(thread_state&)> f);
 
+/// Runs `f` on one registered thread state, chosen as `n` modulo however many there are, and reports that count.
+///
+/// The callback runs UNDER the registry lock, which is the whole point: a state is reaped the moment its owner has
+/// died and been drained, and a sampler that picked one outside the lock would be holding freed memory.
+/// Returns 0 without calling `f` when nothing is registered.
+isize with_nth_thread_state(isize n, cc::function_ref<void(thread_state&)> f);
+
 /// How many threads have ever recorded.
 [[nodiscard]] isize thread_state_count();
 } // namespace cc::rec::impl

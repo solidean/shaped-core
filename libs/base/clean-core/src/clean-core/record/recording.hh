@@ -204,6 +204,18 @@ public:
     /// So a trace entered BEFORE the recording starts is not attributed — the enter has to be in here somewhere.
     [[nodiscard]] rec::recording from_trace(rec::trace_id id) const;
 
+    /// Puts a sampling sideband back where it belongs.
+    ///
+    /// A sample is written to the SAMPLER's stream carrying an anchor — which thread it caught, and how far that
+    /// thread's stream had committed — because writing into a suspended thread's stream would corrupt it.
+    /// This moves each sample into the anchored thread's block at the anchored offset, so a reader replaying that
+    /// stream has the trace, the ambient context and the open scopes already in hand when the sample arrives.
+    ///
+    /// A sample whose anchor names bytes this recording does not contain — dropped under an overflow policy, or simply
+    /// not captured — stays where it was rather than being discarded.
+    /// Splicing an already-spliced recording is therefore a no-op rather than a duplication.
+    [[nodiscard]] rec::recording spliced_samples() const;
+
     // queries
 public:
     /// How many events carry this name.

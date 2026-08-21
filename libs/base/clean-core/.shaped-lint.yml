@@ -122,6 +122,11 @@ rules:
       - src/clean-core/platform/native.cc
 
   - kind: allow-include
+    value: [<pthread.h>, <unistd.h>]
+    reason: gettid and pthread_threadid_np are the only routes to the OS's own thread id
+    files: src/clean-core/thread/thread.cc
+
+  - kind: allow-include
     value: <pthread.h>
     reason: a thread's stack bounds are what a frame-chain walk validates against, and pthread is the only source
     files: src/clean-core/platform/stack_capture.cc

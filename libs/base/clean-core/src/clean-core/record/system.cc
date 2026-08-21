@@ -339,6 +339,29 @@ isize cc::rec::impl::thread_state_count()
     return g_registry.lock([](registry const& r) { return r.count; });
 }
 
+isize cc::rec::impl::with_nth_thread_state(isize n, cc::function_ref<void(thread_state&)> f)
+{
+    return g_registry.lock(
+        [&](registry& r)
+        {
+            if (r.count <= 0)
+                return isize(0);
+
+            auto const total = isize(r.count);
+            auto const wanted = ((n % total) + total) % total;
+
+            auto position = isize(0);
+            for (auto* s = r.head; s != nullptr; s = s->registry_next, ++position)
+                if (position == wanted)
+                {
+                    f(*s);
+                    break;
+                }
+
+            return total;
+        });
+}
+
 void cc::rec::impl::detach_thread_state_tls(thread_state* s)
 {
     // Under the registry lock, because shutdown reads `tls` while holding it and would otherwise race an exiting

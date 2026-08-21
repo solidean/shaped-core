@@ -346,6 +346,156 @@ cc::rec::recording cc::rec::recording::decimated(cc::rec::decimation_options con
     return out;
 }
 
+namespace
+{
+/// One sample lifted out of the sideband, with the anchor it has to go back to.
+struct anchored_sample
+{
+    u32 thread_index = 0;
+    u64 chunk_seq = 0;
+    u32 chunk_offset = 0;
+    cc::rec::event_view event;
+    bool placed = false;
+};
+
+/// Where in its chunk the event under `it` begins.
+/// A block's `from` is a chunk offset, so this is what an anchor is comparable against.
+[[nodiscard]] u32 chunk_offset_of(cc::rec::recorded_block const& b, byte const* position)
+{
+    return b.from + u32(position - b.bytes().data());
+}
+} // namespace
+
+cc::rec::recording cc::rec::recording::spliced_samples() const
+{
+    // Collect first, because a sample has to be matched against a block that may come before or after it.
+    cc::vector<anchored_sample> samples;
+    for (auto const& b : _blocks)
+    {
+        auto const v = b.view();
+        for (auto it = v.begin(); it != v.end(); ++it)
+        {
+            auto const e = *it;
+            if (e.kind() != rec::event_kind::sample)
+                continue;
+
+            samples.push_back({
+                .thread_index = u32(e.field_as_u64("thread_index").value_or(0)),
+                .chunk_seq = e.field_as_u64("chunk_seq").value_or(0),
+                .chunk_offset = u32(e.field_as_u64("chunk_offset").value_or(0)),
+                .event = e,
+            });
+        }
+    }
+
+    if (samples.empty())
+        return *this;
+
+    rec::recording out;
+
+    for (auto const& b : _blocks)
+    {
+        // A synthesized block has no chunk identity, so nothing can be anchored into it.
+        auto const splices_here = bool(b.source);
+
+        // Which samples land in this block, in the order they land.
+        cc::vector<isize> incoming;
+        if (splices_here)
+            for (isize i = 0; i < samples.size(); ++i)
+            {
+                auto& s = samples[i];
+                if (s.placed || s.thread_index != b.thread_index || s.chunk_seq != b.chunk_seq)
+                    continue;
+                if (s.chunk_offset < b.from || s.chunk_offset > b.to)
+                    continue;
+                incoming.push_back(i);
+            }
+
+        cc::sort(incoming, [&](isize a, isize c) { return samples[a].chunk_offset < samples[c].chunk_offset; });
+
+        // Which sample events this block itself carries, so a spliced one is not left behind as well.
+        auto const carries_samples = [&]
+        {
+            auto const v = b.view();
+            for (auto it = v.begin(); it != v.end(); ++it)
+                if ((*it).kind() == rec::event_kind::sample)
+                    return true;
+            return false;
+        }();
+
+        if (incoming.empty() && !carries_samples)
+        {
+            out._blocks.push_back(b);
+            continue;
+        }
+
+        auto const v = b.view();
+        auto builder = block_builder(b);
+        auto next = isize(0);
+
+        for (auto it = v.begin(); it != v.end(); ++it)
+        {
+            auto const offset = chunk_offset_of(b, it.position());
+            while (next < incoming.size() && samples[incoming[next]].chunk_offset <= offset)
+            {
+                builder.add(samples[incoming[next]].event);
+                samples[incoming[next]].placed = true;
+                ++next;
+            }
+
+            auto const e = *it;
+            if (e.kind() == rec::event_kind::sample)
+                continue; // held back until every block has been offered it
+
+            builder.add(e);
+        }
+
+        // Anything anchored past the last event belongs at the end.
+        while (next < incoming.size())
+        {
+            builder.add(samples[incoming[next]].event);
+            samples[incoming[next]].placed = true;
+            ++next;
+        }
+
+        if (!builder.empty())
+            out._blocks.push_back(builder.take());
+    }
+
+    // A sample nobody could place — its bytes were dropped, or never captured — keeps its original home rather than
+    // vanishing, which is also what makes splicing twice a no-op.
+    cc::vector<isize> unplaced;
+    for (isize i = 0; i < samples.size(); ++i)
+        if (!samples[i].placed)
+            unplaced.push_back(i);
+
+    if (!unplaced.empty())
+        for (auto const& b : _blocks)
+        {
+            auto const v = b.view();
+            auto builder = block_builder(b);
+
+            for (auto it = v.begin(); it != v.end(); ++it)
+            {
+                auto const e = *it;
+                if (e.kind() != rec::event_kind::sample)
+                    continue;
+
+                for (auto const i : unplaced)
+                    if (samples[i].event.payload.data() == e.payload.data())
+                    {
+                        builder.add(e);
+                        break;
+                    }
+            }
+
+            if (!builder.empty())
+                out._blocks.push_back(builder.take());
+        }
+
+    return out;
+}
+
 cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
 {
     // Trace membership is carried forward per thread from the ambient deltas, because a thread publishes a delta

@@ -101,6 +101,7 @@ void register_current_thread()
 
     auto* const s = new cc::rec::impl::thread_state();
     s->tid = cc::current_thread_id();
+    s->native_tid = cc::native_thread_id();
     s->tls = &w;
     cc::rec::impl::register_thread_state(s);
     w.state = s;
