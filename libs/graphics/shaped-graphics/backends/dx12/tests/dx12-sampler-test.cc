@@ -78,9 +78,9 @@ INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group bu
 
     // A sampled texture (t0), one dynamic sampler (s0), and one static sampler (s1).
     sg::binding const bindings[] = {
-        {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
-        {.name = "Dyn", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
-        {.name = "Static", .set = 0, .index = 1, .count = 1, .type = sg::binding_type::sampler},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Dyn", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+        {.name = "Static", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::sampler},
     };
     sg::named_sampler const statics[]
         = {{.name = "Static", .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}}};
@@ -107,7 +107,7 @@ INVOCABLE_TEST("sg dx12 - static sampler naming no binding is rejected", (dx12::
     auto& c = *handle;
 
     sg::binding const bindings[] = {
-        {.name = "Dyn", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+        {.name = "Dyn", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
     sg::named_sampler const statics[] = {{.name = "Nope", .sampler = {}}}; // matches no sampler binding
 
@@ -122,7 +122,7 @@ INVOCABLE_TEST("sg dx12 - a missing dynamic sampler is rejected at group creatio
     auto& c = *handle;
 
     sg::binding const bindings[] = {
-        {.name = "Dyn", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+        {.name = "Dyn", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
     auto layout = c.cached.acquire_binding_group_layout(bindings);
     REQUIRE(layout != nullptr);
@@ -145,7 +145,7 @@ INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root si
 
     // A group layout with just a texture SRV — no samplers of its own.
     sg::binding const bindings[] = {
-        {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
     };
     auto group_layout = c.create_dx12_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -155,7 +155,7 @@ INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root si
     sg::pipeline_layout_description pld;
     pld.groups = {group_layout.value()};
     pld.static_samplers.push_back(
-        {.binding = {.name = "Samp", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+        {.binding = {.name = "Samp", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
          .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}});
 
     auto pipeline_layout = c.create_dx12_pipeline_layout(pld, sg::lifetime_scope::persistent);

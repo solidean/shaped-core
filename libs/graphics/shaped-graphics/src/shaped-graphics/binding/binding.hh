@@ -100,14 +100,29 @@ namespace sg
 } // namespace sg
 
 /// A single reflected shader resource binding: a named slot the shader reads.
-/// Identified by a backend-agnostic (set, index) address — SPIR-V set/binding, WGSL @group/@binding, Metal argument index.
-/// A D3D12 backend derives (register-type from `type`, register = index, space = set).
+/// `index` is the address within its group — SPIR-V @binding, WGSL @binding, HLSL register number, Metal argument index.
+/// `group_index` and `space` are the two ways a shading language namespaces that address, and a binding carries whichever its language reflects.
+///
+/// The two are not interchangeable, which is why neither one stands in for the other:
+/// a **group index** is a hardware-visible descriptor set that the bind slot must match (SPIR-V `set`, WGSL `@group`),
+/// while a **space** is only a namespace for register numbers and never reaches the descriptor table (HLSL `space`).
 struct sg::binding
 {
     cc::string name; ///< reflection name — the key a binding_group matches a bound view against
-    u32 set = 0;     ///< descriptor set / @group
-    u32 index = 0;   ///< binding within the set / @binding
-    u32 count = 1;   ///< array length; 0 = unbounded array
+
+    /// The descriptor set / @group this binding lives in — reflected by SPIR-V and other languages where the set is part of the hardware binding.
+    /// Present means the whole chain is pinned: the group layout inherits it, and binding a group at any other slot is an error.
+    /// Absent means the shading language does not fix a group, and the bind slot alone decides.
+    cc::optional<u32> group_index;
+
+    /// The HLSL register space this binding's `index` is numbered in — reflected by DXC, absent elsewhere.
+    /// A namespace for register numbers only: it never constrains which slot the group is bound at.
+    /// Absent means the shading language has no register spaces at all, which is NOT the same as space 0 —
+    /// the structural layout hash keeps them apart, so dx12 requires an explicit one and asserts on absence.
+    cc::optional<u32> space;
+
+    u32 index = 0; ///< binding within the group / @binding / HLSL register number
+    u32 count = 1; ///< array length; 0 = unbounded array
     binding_type type = binding_type::uniform_buffer;
 
     /// For `uniform_buffer` bindings: the declared block size in bytes, used to validate a bound view's size.
@@ -130,7 +145,7 @@ namespace sg
 /// Appends every binding of `from` whose name `into` does not already carry.
 /// One pipeline has one binding interface, so a multi-stage pipeline's group layout must cover the union of
 /// its stages' reflected bindings — merge them stage by stage, then hand the result to a group layout.
-/// A name already in `into` keeps its existing entry: two stages disagreeing on (set, index), count or type
+/// A name already in `into` keeps its existing entry: two stages disagreeing on the address, count or type
 /// is a shader bug this does not detect.
 void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from);
 
@@ -143,4 +158,9 @@ void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from);
 /// second time (as a dynamic sampler), which the backend rejects.
 /// Sampler bindings kept in `bindings` are the ones the group layout binds: name-matched static, or dynamic per group.
 [[nodiscard]] cc::vector<binding> split_off_sampler_bindings(cc::vector<binding>& bindings);
+
+/// The one group index `bindings` declare, or nothing if none of them declares one.
+/// Every binding that carries a `group_index` must carry the same one — they end up in one group layout, and a
+/// group is bound at a single slot, so two of them naming different sets could not both be satisfied.
+[[nodiscard]] cc::optional<u32> group_index_of(cc::span<binding const> bindings);
 } // namespace sg

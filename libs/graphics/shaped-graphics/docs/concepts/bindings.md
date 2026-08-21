@@ -13,10 +13,38 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
 - **`binding_type`** — the kind of resource a slot expects, and the backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
   `uniform_buffer`, `readonly_structured_buffer`, `readwrite_structured_buffer`, `readonly_raw_buffer`, `readwrite_raw_buffer`.
   Then `readonly_texture`, `readwrite_texture`, `sampler`, `acceleration_structure`.
-- **`(set, index)` + `count`** — the address, following SPIR-V (set/binding), WGSL (`@group`/`@binding`) and Metal argument buffers.
-  A D3D12 backend derives its `(register-type, register, space)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`, space = `set`.
-  `count == 0` is an unbounded array.
+- **`index` + `count`** — the address within the group, following SPIR-V (`binding`), WGSL (`@binding`) and Metal argument buffers.
+  A D3D12 backend derives its `(register-type, register)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`.
+  `count == 0` is an unbounded array, which sg rejects — see [Array bindings](#array-bindings) for why.
+- **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
+  They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
 - **`block_size`** — a uniform block's declared byte size, used to validate a bound view's size.
+
+## A group index binds, a space only numbers
+
+A **group index** is a descriptor set the hardware sees: SPIR-V's `set`, WGSL's `@group`.
+Vulkan guarantees four of them, and binding a descriptor set means naming the very index the shader was compiled against — bind it elsewhere and the shader reads the wrong table.
+A **space** is HLSL's `space`, and it is only a namespace for register numbers: `t0, space1` and `t0, space2` are two distinct registers.
+Neither of them says anything about which descriptor table they end up in.
+An arbitrary number of spaces is fine, which is exactly why a space could never stand in for a set.
+
+So a `binding` carries whichever its language reflects, and neither is invented for it:
+
+- **DXC reflection fills `space`** — always, even for the default space 0 — and leaves `group_index` absent.
+- **SPIR-V reflection fills `group_index`**, as would any other language where the set is part of the binding.
+- **A hand-written binding fills what it means.**
+  Absent `space` means "this shading language has no register spaces", which is not the same as space 0.
+  The structural layout hash writes a presence byte, so the two produce distinct `binding_group_layout` objects even with byte-identical root signatures, and `bind_group` compares layouts by pointer.
+  HLSL always has a space, so the dx12 backend requires one and asserts on absence; a hand-written binding for it says `.space = 0` explicitly.
+  Absent `group_index` means the bind slot alone decides.
+
+A declared group index then propagates, so that it cannot be declared and quietly ignored:
+
+- **A `binding_group_layout` inherits it from its bindings.**
+  All the bindings that declare one must declare the same one — they end up in a single group, and a group is bound at a single slot.
+- **A `binding_group` reaches it through its layout**, which the backend already holds to match the bind slot's schema.
+- **Every backend's `bind_group` asserts the slot matches**, next to the assert that the layout matches the pipeline layout's slot at all.
+  A layout that pins no group index binds anywhere, which is the HLSL path and stays free.
 
 ## Bindings and views speak the same vocabulary
 
@@ -28,7 +56,15 @@ That equivalence is what lets a binding validate a bound view with no backend in
 ## Array bindings
 
 An array binding is a `binding` with `count > 1`: `count` consecutive descriptors under one name — `Texture2D Texs[4]` in HLSL, and the building block of a bindless table.
-`count == 0` (unbounded) remains unsupported; a bindless table declares a bounded count and treats it as capacity.
+`count == 0` (unbounded) is **rejected**: `try_create_binding_group_layout` returns an error naming the binding, on every backend alike.
+A bindless table declares a bounded count and treats it as capacity.
+
+The reason is WebGPU, which has no unbounded binding arrays, and sg is meant to stay ready for the day it does.
+So this is the portable floor the storage-buffer offset rules in [views.md](views.md) already use: fail loudly on the dx12 dev box rather than letting it surface later on the weaker backend.
+The shape stays conditional enough that full support later needs no redesign.
+It is an error rather than an assert because these bindings usually come from reflecting someone's shader, which makes an unbounded array content rather than a contract violation.
+See [error-handling.md](../../../../../docs/error-handling.md).
+The dx12 layout builder keeps its own assert as a backstop.
 
 Three rules distinguish an array binding from a scalar one:
 
@@ -90,6 +126,25 @@ So setting a range of a thousand elements is one dispatch, and a full `set_array
 A dirty `snapshot` allocates a persistent range in the shader-visible heap and fills it with one `CopyDescriptorsSimple`.
 That single driver-side descriptor copy, in place of a `Create*View` per slot, is what makes a large table affordable to re-snapshot.
 A clean `snapshot` does nothing at all.
+
+## Filling a bindless table: bindless_array
+
+A staging group makes a big table cheap to *change*; what a bindless renderer still needs is the mapping from a view to the element index its shader indexes with.
+[`bindless_array`](../../src/shaped-graphics/binding/bindless_array.hh) is that mapping, over exactly one array binding: `bindless_array::for_binding(ctx, group, "Textures")`.
+
+It is deliberately small: it shares the group's handle, so the group cannot go out from under it, but it owns no descriptor and mints nothing.
+The layout, how many tables there are and what they are called all stay with the caller.
+One array touches nothing but its own binding, so several arrays over one group are independent.
+
+- **`acquire(view)` returns the element index**, minting one on a miss and writing exactly one staging descriptor.
+  Identity is the view's hash, so re-acquiring the same view is O(1), returns the same index and touches no descriptor.
+  An unchanged working set therefore never dirties the group, and its snapshot is the cached one.
+- **An index is valid only for the epoch it was acquired in.**
+  Re-acquire the working set every epoch.
+  When the array is full, every index not acquired this epoch is reclaimed at once — the mint dirties the group and forces a snapshot anyway, so there is nothing to save by evicting less.
+  If every index was acquired this epoch, the working set exceeds the binding's count and `acquire` asserts.
+- **`lock()` refuses acquires until `unlock()`**, in the same epoch, and mints nothing.
+  It guards the window in which a snapshot is bound; taking that snapshot stays the group owner's job.
 
 ## Samplers: not views
 
@@ -173,5 +228,6 @@ Texel/typed buffers (`Buffer<T>` / `RWBuffer<T>`) and append/consume/counter buf
 
 - [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
 - [staging_binding_group.hh](../../src/shaped-graphics/binding/staging_binding_group.hh) — the mutable builder and its `binding_slot` addressing.
+- [bindless_array.hh](../../src/shaped-graphics/binding/bindless_array.hh) — view identity → element index over one array binding.
 - [compiled_shader.hh](../../src/shaped-graphics/binding/compiled_shader.hh) — the shader data model.
 - [views](views.md) — the bound half: `raw_view` and the typed views that convert to it.

@@ -42,9 +42,9 @@ public:
     /// Requires is_supported().
     void bind_pipeline(raytracing_pipeline const& pipeline);
 
-    /// Binds `group` at slot `set` of the bound pipeline's layout, validated against it.
+    /// Binds `group` at slot `group_index` of the bound pipeline's layout, validated against it.
     /// Ray tracing binds through the pipeline's global root signature, like compute.
-    void bind_group(int set, binding_group const& group);
+    void bind_group(int group_index, binding_group const& group);
 
     /// Traces a `width` x `height` x `depth` grid of rays, launching the raygen shader at `raygen` in `table`.
     /// Each dimension must be >= 1, and their product <= 2^30.

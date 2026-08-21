@@ -55,9 +55,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access,
     cc::vector<sg::binding> set2;
     for (auto const& b : shader.bindings)
     {
-        if (b.set == 0)
+        if (b.space == 0u)
             set0.push_back(b);
-        else if (b.set == 1)
+        else if (b.space == 1u)
             set1.push_back(b);
         else
             set2.push_back(b);
@@ -190,9 +190,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::con
     cc::vector<sg::binding> set2;
     for (auto const& b : shader.bindings)
     {
-        if (b.set == 0)
+        if (b.space == 0u)
             set0.push_back(b);
-        else if (b.set == 1)
+        else if (b.space == 1u)
             set1.push_back(b);
         else
             set2.push_back(b);

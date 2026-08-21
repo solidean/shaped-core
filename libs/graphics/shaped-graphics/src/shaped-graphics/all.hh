@@ -6,6 +6,7 @@
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/binding/staging_binding_group.hh>

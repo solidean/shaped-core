@@ -53,7 +53,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 grou
     cc::vector<sg::binding> set0;
     cc::vector<sg::binding> set1;
     for (auto const& b : shader.bindings)
-        (b.set == 0 ? set0 : set1).push_back(b);
+        (b.space == 0u ? set0 : set1).push_back(b);
     REQUIRE(set0.size() == 2);
     REQUIRE(set1.size() == 1);
 

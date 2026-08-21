@@ -9,7 +9,7 @@
 
 /// A static sampler bound directly to a shader register, for attaching to a pipeline_layout — the register-bound counterpart to a group layout's name-matched `named_sampler`.
 /// Use this for a static sampler a pipeline needs on top of, or independent of, its group layouts.
-/// `binding` carries the register/space (set/index) and count, and its `type` must be a sampler binding.
+/// `binding` carries the register (index), its space and count, and its `type` must be a sampler binding.
 struct sg::bound_sampler
 {
     sg::binding binding;
@@ -17,7 +17,7 @@ struct sg::bound_sampler
 };
 
 /// Description for building a pipeline_layout: an ordered list of binding_group_layouts, one per bind slot, plus any extra register-bound static samplers.
-/// `groups[i]` is the schema bound at slot `i` — the `set` index of cmd.compute.bind_group.
+/// `groups[i]` is the schema bound at slot `i` — the `group_index` of cmd.compute.bind_group.
 struct sg::pipeline_layout_description
 {
     // Ordered; index = bind slot.

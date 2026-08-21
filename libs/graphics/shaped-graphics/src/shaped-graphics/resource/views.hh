@@ -146,6 +146,11 @@ struct sg::raw_buffer_view
                              v.stride_in_bytes);
     }
 
+    /// View IDENTITY equality over the same fields `hash` above folds — a hash map keyed on views needs the
+    /// two to agree, and defaulting it is what keeps them agreeing as fields are added.
+    /// The handle compares by stored pointer, which is the `.get()` the hash takes.
+    [[nodiscard]] friend bool operator==(raw_buffer_view const&, raw_buffer_view const&) = default;
+
     // Re-type this erased arm as a strongly-typed leaf of element `T`, which you supply — no element tag is stored, so `T` is your claim about the bytes.
     // Adds the layout check `buffer_view<T>` does, since it delegates there.
     // Member function templates, so the struct stays an aggregate and brace / designated init is unaffected.
@@ -171,6 +176,9 @@ struct sg::vacant_view
 {
     /// All vacancies are one value; the enclosing raw_view's hash separates the arm.
     [[nodiscard]] friend u64 hash(vacant_view const&) { return 0; }
+
+    /// One value, so any two vacancies are equal — the counterpart of the constant hash above.
+    [[nodiscard]] friend bool operator==(vacant_view const&, vacant_view const&) { return true; }
 };
 
 /// A texture view's erased payload: the sampled (SRV) or storage (UAV) descriptor a backend builds over a subresource range.
@@ -192,6 +200,11 @@ struct sg::raw_texture_view
         return cc::make_hash(v.texture.get(), v.access, v.view_dimension, v.format, v.range, v.depth_slice_range.start,
                              v.depth_slice_range.end);
     }
+
+    /// View IDENTITY equality over the same fields `hash` above folds — a hash map keyed on views needs the
+    /// two to agree, and defaulting it is what keeps them agreeing as fields are added.
+    /// The handle compares by stored pointer, which is the `.get()` the hash takes.
+    [[nodiscard]] friend bool operator==(raw_texture_view const&, raw_texture_view const&) = default;
 
     // Re-type this erased arm as a strongly-typed leaf of shape `Traits`, which you supply.
     // Adds a check that the runtime `view_dimension` matches `Traits::dimension`.
@@ -215,6 +228,10 @@ struct sg::raw_tlas_view
 
     /// View-IDENTITY hash: the TLAS by address (a null TLAS hashes as null).
     [[nodiscard]] friend u64 hash(raw_tlas_view const& v) { return cc::make_hash(v.tlas.get()); }
+
+    /// View IDENTITY equality over the same TLAS `hash` above folds — the handle compares by stored pointer,
+    /// which is the `.get()` the hash takes.
+    [[nodiscard]] friend bool operator==(raw_tlas_view const&, raw_tlas_view const&) = default;
 };
 
 namespace sg

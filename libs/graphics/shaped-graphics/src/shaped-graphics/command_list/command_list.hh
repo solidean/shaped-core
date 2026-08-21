@@ -92,7 +92,7 @@ protected:
                                     isize size_in_bytes) = 0;
 
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
-    virtual void compute_bind_group(int set, binding_group const& group) = 0;
+    virtual void compute_bind_group(int group_index, binding_group const& group) = 0;
     virtual void compute_dispatch(int x, int y, int z) = 0;
     virtual void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
 
@@ -116,7 +116,7 @@ protected:
     // that root signature, and the set/bind ops configure IA + dynamic state.
     // All are valid only inside an open rendering scope, which the backend asserts.
     virtual void raster_bind_pipeline(raster_pipeline const& pipeline) = 0;
-    virtual void raster_bind_group(int set, binding_group const& group) = 0;
+    virtual void raster_bind_group(int group_index, binding_group const& group) = 0;
     virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
     virtual void raster_bind_index_buffer(index_buffer_view const& view) = 0;
     virtual void raster_set_viewport(viewport const& vp) = 0;
@@ -144,7 +144,7 @@ protected:
     // bind_pipeline sets the DXR state object + global root signature, and bind_group binds through that root signature, like compute.
     // dispatch_rays traces a width x height x depth grid, launching the raygen at `raygen` in `table`.
     virtual void raytracing_bind_pipeline(raytracing_pipeline const& pipeline) = 0;
-    virtual void raytracing_bind_group(int set, binding_group const& group) = 0;
+    virtual void raytracing_bind_group(int group_index, binding_group const& group) = 0;
     virtual void raytracing_dispatch_rays(raytracing_shader_table const& table,
                                           raygen_index raygen,
                                           int width,

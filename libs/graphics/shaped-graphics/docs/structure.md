@@ -58,6 +58,8 @@ src/shaped-graphics/
     binding_group.hh/.cc          [in progress] abstract: group-layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
     staging_binding_group.hh/.cc  [in progress] abstract: mutable descriptor image that mints immutable groups (binding_slot -> slot table, shape-named setters, snapshot);
                                                 dx12 = private non-shader-visible heap + CopyDescriptorsSimple (vulkan stub)
+    bindless_array.hh/.cc         [done]        non-owning view identity -> element index map over ONE array binding of a staging group
+                                                (impl/slot_table.hh is the fixed-capacity table with the per-epoch stale sweep)
 
   command_list/
     command_list.hh/.cc           [in progress] abstract, single-use recorder; owns the seven scopes below and the backend seams they call
@@ -205,7 +207,8 @@ views                [in progress]  strongly-typed resource views; buffer + text
                                   in compute); render_target/depth_stencil views done and consumed by the rendering
                                   scope; texel buffers deferred
 bindings             [in progress]  compiled_shader + binding vocab; binding_group_layout / pipeline_layout / group + compute_pipeline (dx12 real, vulkan stub).
-                                  Bounded array bindings and staging_binding_group (the mutable builder behind a bindless table) are in; unbounded arrays are not
+                                  Bounded array bindings, staging_binding_group (the mutable builder behind a bindless table) and bindless_array over one of its
+                                  array bindings are in; unbounded arrays are rejected at layout creation (WebGPU has none — see concepts/bindings.md)
 texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation, dx12 layout barriers,
                                   SRV/UAV + RTV/DSV views and host↔device copies done; device→device copies remain
 pipeline             [in progress]  compute + raster pipelines and the bind path (dx12 real, vulkan stub); shaders are

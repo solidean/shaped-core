@@ -174,7 +174,7 @@ protected:
 
     // Compute recording (reached through cmd.compute). Bodies in dx12_command_list.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
-    void compute_bind_group(int set, sg::binding_group const& group) override;
+    void compute_bind_group(int group_index, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
     void compute_declare_array_buffer_access(cc::string_view binding_name,
                                              cc::span<sg::array_buffer_access const> elements) override;
@@ -191,7 +191,7 @@ protected:
     // The rest configure IA / dynamic state and record draws through the graphics bind point.
     // Valid only inside an open rendering scope.
     void raster_bind_pipeline(sg::raster_pipeline const& pipeline) override;
-    void raster_bind_group(int set, sg::binding_group const& group) override;
+    void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
     void raster_set_viewport(sg::viewport const& vp) override;
@@ -214,7 +214,7 @@ protected:
     // Ray-tracing dispatch, reached through cmd.raytracing.
     // Bodies in dx12_command_list.cc, next to the compute equivalents — ray tracing binds through the compute root signature.
     void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;
-    void raytracing_bind_group(int set, sg::binding_group const& group) override;
+    void raytracing_bind_group(int group_index, sg::binding_group const& group) override;
     void raytracing_dispatch_rays(sg::raytracing_shader_table const& table,
                                   sg::raygen_index raygen,
                                   int width,

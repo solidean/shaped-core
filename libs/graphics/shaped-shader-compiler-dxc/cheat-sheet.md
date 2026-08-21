@@ -75,8 +75,9 @@ compiler.version()               // -> cc::string_view "major.minor"; empty if D
 ```
 D3D12_SHADER_INPUT_BIND_DESC        ->  sg::binding
   BindPoint  -> index               (register number)      // sg address model: index=register,
-  Space      -> set                 (register space)        //   set=space, class from binding_type
+  Space      -> space               (register space)        //   space=register space, class from binding_type
   BindCount  -> count                                       //   (see shaped-graphics binding.hh)
+  (no descriptor set in HLSL, so `group_index` stays absent — the bind slot alone places the group)
   Name       -> name
   Type -> binding_type: CBUFFER->uniform_buffer(+block_size); STRUCTURED->readonly_structured;
           BYTEADDRESS->readonly_raw; UAV_RWSTRUCTURED->readwrite_structured; UAV_RWBYTEADDRESS->readwrite_raw;

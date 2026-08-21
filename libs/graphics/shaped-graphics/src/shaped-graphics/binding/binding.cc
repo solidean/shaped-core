@@ -1,3 +1,4 @@
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh>
 #include <shaped-graphics/binding/binding.hh>
 
@@ -48,5 +49,23 @@ cc::vector<binding> split_off_sampler_bindings(cc::vector<binding>& bindings)
     bindings.resize_down_to(kept);
 
     return samplers;
+}
+
+cc::optional<u32> group_index_of(cc::span<binding const> bindings)
+{
+    auto found = cc::optional<u32>();
+    for (auto const& b : bindings)
+    {
+        if (!b.group_index.has_value())
+            continue;
+
+        auto const declared = b.group_index.value();
+        auto const agreed = found.value_or(declared);
+        CC_ASSERTF(agreed == declared,
+                   "bindings of one group layout disagree about their group index ({} vs {}, at '{}')", agreed,
+                   declared, b.name);
+        found = declared;
+    }
+    return found;
 }
 } // namespace sg

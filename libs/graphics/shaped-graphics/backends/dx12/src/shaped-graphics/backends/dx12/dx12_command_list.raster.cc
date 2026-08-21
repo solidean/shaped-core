@@ -3,9 +3,11 @@
 // Also the raster bind path: pipeline and groups, IA buffers, dynamic state, and draw recording.
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/fixed_vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -195,23 +197,29 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
     _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->groups.size(), nullptr);
 }
 
-void dx12_command_list::raster_bind_group(int set, sg::binding_group const& group)
+void dx12_command_list::raster_bind_group(int group_index, sg::binding_group const& group)
 {
     CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before binding groups");
-    CC_ASSERT(set >= 0 && set < int(_bound_raster_groups.size()), "binding-group slot out of range for the bound "
-                                                                  "pipeline layout");
+    CC_ASSERT(group_index >= 0 && group_index < int(_bound_raster_groups.size()),
+              "binding-group slot out of range for the bound "
+              "pipeline layout");
 
     auto const* dg = dynamic_cast<dx12_binding_group const*>(&group);
     CC_ASSERT(dg != nullptr, "binding_group is not a dx12 binding_group");
     CC_ASSERT(!(dg->transient && dg->creation_epoch != _ctx.current_epoch()),
               "transient binding_group used past its epoch (its descriptors have been recycled)");
 
-    auto const& gslot = _bound_raster_layout->groups[set];
+    auto const& gslot = _bound_raster_layout->groups[group_index];
     CC_ASSERT(dg->layout == gslot.layout, "binding_group's layout does not match the pipeline layout's slot");
+    // A layout whose bindings name a descriptor set may only be bound at that one slot.
+    auto const pinned = dg->layout->group_index();
+    CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),
+               "binding_group is pinned to group index {} by its bindings and cannot be bound at slot {}",
+               pinned.value_or(0), group_index);
 
     // Remembered so its views' accesses are declared at draw (like compute). Root-parameter indices come
     // from the pipeline layout's slot; graphics uses the graphics root bind point.
-    _bound_raster_groups[set] = dg;
+    _bound_raster_groups[group_index] = dg;
     if (gslot.resource_root_param >= 0)
         _list->SetGraphicsRootDescriptorTable(UINT(gslot.resource_root_param), dg->table_start);
     if (gslot.sampler_root_param >= 0)

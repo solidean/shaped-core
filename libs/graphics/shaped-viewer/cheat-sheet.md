@@ -236,6 +236,9 @@ It never evicts this frame's working set; `begin_frame` in its header states tha
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
 A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
 
+Bindless tables are `sg::bindless_array` over a staging binding group the caller owns — see the shaped-graphics cheat sheet.
+sv holds no bindless type of its own.
+
 ## Rendering — the view_renderer + routines
 
 ```cpp

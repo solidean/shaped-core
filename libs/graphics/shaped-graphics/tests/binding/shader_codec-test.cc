@@ -21,9 +21,9 @@ sg::compiled_shader make_shader()
     shader.bytecode = cc::make_pinned_data(cc::span<byte const>(code));
 
     shader.bindings.push_back(
-        {.name = "Output", .set = 0, .index = 1, .count = 2, .type = sg::binding_type::readwrite_structured_buffer});
+        {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::readwrite_structured_buffer});
     shader.bindings.push_back(
-        {.name = "Params", .set = 1, .index = 0, .count = 1, .type = sg::binding_type::uniform_buffer, .block_size = 64});
+        {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::uniform_buffer, .block_size = 64});
 
     shader.compiler = {.name = "dxc", .version = "1.8", .signature = "-T cs_6_8 -E main"};
     return shader;
@@ -44,7 +44,8 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
     {
         auto const& x = a.bindings[i];
         auto const& y = b.bindings[i];
-        if (x.name != y.name || x.set != y.set || x.index != y.index || x.count != y.count || x.type != y.type)
+        if (x.name != y.name || x.group_index != y.group_index || x.space != y.space || x.index != y.index
+            || x.count != y.count || x.type != y.type)
             return false;
         if (x.block_size.has_value() != y.block_size.has_value())
             return false;

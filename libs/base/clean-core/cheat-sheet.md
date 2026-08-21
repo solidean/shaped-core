@@ -459,7 +459,7 @@ cc::min(a, b);  cc::max(a, b);  cc::clamp(v, lo, hi);  cc::min({a, b, c});
 cc::is_power_of_two(x);  cc::align_up(v, align);  cc::align_down(v, align);  cc::is_aligned(v, align);
 cc::int_div_round_up(n, d);  cc::wrapped_increment(pos, max);
 cc::invoke(f, args...);                   // calls callables AND member pointers uniformly
-cc::offset_size{.offset=o, .size=n};  cc::start_end{.start=a, .end=b};   // named-range args (span/string subview/replace)
+cc::offset_size{.offset=o, .size=n};  cc::start_end{.start=a, .end=b};   // named-range args (span/string subview/replace); both compare field-wise (==)
 cc::memcpy(dst, src, n);  cc::memmove(dst, src, n);  cc::memset(dst, v, n);  cc::memcmp(a, b, n);  // <cstring>'s, blessed here
 // NOT strlen / strcmp: cc::string_view(cstr) walks it once and knows .size(), and two views compare with ==.
 CC_DEFER { cleanup(); };                  // run at scope exit — CAPTURES BY REFERENCE

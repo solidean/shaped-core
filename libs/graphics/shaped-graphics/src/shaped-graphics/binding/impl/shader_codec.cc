@@ -48,10 +48,17 @@ void put_string(cc::vector<byte>& out, cc::string_view text)
         out.push_back(byte(c));
 }
 
+void put_optional_u32(cc::vector<byte>& out, cc::optional<u32> const& value)
+{
+    put_bool(out, value.has_value());
+    put_u32(out, value.value_or(0));
+}
+
 void put_binding(cc::vector<byte>& out, binding const& b)
 {
     put_string(out, b.name);
-    put_u32(out, b.set);
+    put_optional_u32(out, b.group_index);
+    put_optional_u32(out, b.space);
     put_u32(out, b.index);
     put_u32(out, b.count);
     put_u32(out, u32(b.type));
@@ -143,11 +150,19 @@ struct reader
         return count;
     }
 
+    [[nodiscard]] cc::optional<u32> get_optional_u32()
+    {
+        auto const present = get_bool();
+        auto const value = get_u32();
+        return present ? cc::optional<u32>(value) : cc::optional<u32>();
+    }
+
     [[nodiscard]] binding get_binding()
     {
         auto b = binding();
         b.name = get_string();
-        b.set = get_u32();
+        b.group_index = get_optional_u32();
+        b.space = get_optional_u32();
         b.index = get_u32();
         b.count = get_u32();
 

@@ -52,7 +52,7 @@ TEST("ssc::dxc compile - compute shader -> DXIL + reflection")
     sg::binding const& b = shader.bindings[0];
     CHECK(b.name == cc::string_view("Output"));
     CHECK(b.type == sg::binding_type::readwrite_structured_buffer);
-    CHECK(b.set == 0u);
+    CHECK(b.space == 0u); // DXC always reflects a register space, even the default one
     CHECK(b.index == 0u);
     CHECK(b.count == 1u);
 

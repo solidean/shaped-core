@@ -36,7 +36,7 @@ namespace
 [[nodiscard]] sg::binding texture_binding(u32 count)
 {
     return {.name = "Textures",
-            .set = 0,
+            .space = 0,
             .index = 0,
             .count = count,
             .type = sg::binding_type::readonly_texture,
@@ -202,7 +202,7 @@ INVOCABLE_TEST("sg - a staging scalar binding can be set to an empty view", (sg:
     // An empty scalar is a VALUE, not an absence: sg::tlas_view{} is the null acceleration structure every ray misses.
     // It goes in through set_binding like any other view, and satisfies the demand above.
     sg::binding const b
-        = {.name = "Scene", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::acceleration_structure};
+        = {.name = "Scene", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::acceleration_structure};
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
 
