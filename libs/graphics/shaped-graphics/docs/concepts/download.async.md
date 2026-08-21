@@ -46,12 +46,16 @@ That is a clean cross-queue GPU wait, so `submit-upload → async-download` of t
 Both waits point strictly **backward in the CPU submission order**, so *per operation* the dependency graph is acyclic — no deadlock.
 Multiple async downloads of the **same** buffer are independent reads; two reads never conflict, so they need no ordering against each other.
 
+Reads are picked **out of order across sources**, keyed by an ordering family, exactly as [async upload](upload.async.md) picks copies.
+So a read blocked behind a slow command list is filled around rather than stalling every later readback behind it.
+
 **One scheduling rule keeps that acyclic at the window level.**
 Each forward wait — the submission token *and* the upload-completion value — is issued once per *window*, on the max over its reads, hoisted ahead of the window's execute.
 So a window must never *both* signal a completion `V` that a later writer waits on *and* carry a forward wait that transitively depends on `V`.
 The hoisted wait would then sit ahead of the very read whose signal it needs, closing a cycle.
-The actor enforces this exactly as async upload does.
-It **closes the open window before staging a job** whose forward token or upload-completion value is still pending, once the window has already finished a read.
+The actor enforces this exactly as async upload does, with the same two order-independent rules.
+A read with either wait still pending may not join a window that has already finished a read; and once such a read *is* in the open window, no other read may join it.
+A read's own completion is safe beside its own waits, since both were captured before its value was reserved.
 
 **Why upload and download own separate transfer queues.** A `Wait` on a GPU queue blocks *all* work behind it in that queue's FIFO.
 If upload and download shared one queue, an upload window waiting on a direct-queue token, and a download window queued behind it that would release that token, could **deadlock**.
@@ -117,9 +121,6 @@ Preserve these; the rest is tuning:
 Not invariants — v1 shortcuts:
 
 - **Persistent buffers only**, and **single-writer**: an async download of a buffer concurrently written by an in-flight list is the caller's hazard to avoid.
-- **In-order reads (head-of-line blocking).**
-  Reads run strictly in submission order on the download's own transfer queue, so a forward wait on a slow command list stalls all later async reads behind it.
-  A deferred optimization, as with upload.
 - **Coarser than per-buffer state**: the stamps are single monotonic values per buffer, a down-payment on the per-resource state-tracking layer landing separately, which should replace them.
 - **Submits a partially-filled window early** when the inbox drains, rather than claiming its unused tail for the next job — a low-latency choice, not a size limit.
   Unlike the [inline download](download.inline.md) ring, the staging is slot-based (three fixed windows, no ring cursor), so there is **no would-be-wrap tail waste and no ring-exceed ceiling**.
