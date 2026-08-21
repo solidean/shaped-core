@@ -348,8 +348,9 @@ cc::rec::recording cc::rec::recording::decimated(cc::rec::decimation_options con
 
 cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
 {
-    // Trace membership is carried forward per thread, because a thread publishes a delta rather than tagging events.
-    // A recording that does not contain the enter therefore attributes nothing, which is the honest answer.
+    // Trace membership is carried forward per thread from the ambient deltas, because a thread publishes a delta
+    // rather than tagging events.
+    // A recording that does not contain the delta therefore attributes nothing, which is the honest answer.
     cc::map<cc::thread_id, rec::trace_id> current;
 
     return filtered(
@@ -357,12 +358,12 @@ cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
         {
             auto& running = current[v.thread.id];
 
-            if (e.kind() == rec::event_kind::trace_scope)
+            if (e.kind() == rec::event_kind::ambient_changed)
             {
                 // Read as a raw u64: a trace id is opaque, and a double would quietly lose everything past 2^53.
                 running = rec::trace_id(e.field_as_u64("trace").value_or(0));
 
-                // The delta itself belongs to the trace it names, so entering a trace is visible inside it.
+                // The delta belongs to the context it names, so entering a trace is visible inside it.
                 return running == id;
             }
 

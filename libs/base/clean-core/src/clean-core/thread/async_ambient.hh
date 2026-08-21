@@ -35,11 +35,6 @@ struct cc::async_ambient_link
     void* value = nullptr;
     async_ambient_link* parent = nullptr;
     cc::atomic<i32> refs = {1};
-
-    /// How many of `refs` are held by an OBSERVER rather than by outstanding work.
-    /// A recording that pinned this link keeps it alive without anything being left to run, and
-    /// async_ambient_scope::outstanding must not report that as work in flight.
-    cc::atomic<i32> observer_refs = {0};
 };
 
 namespace cc::impl
@@ -62,29 +57,23 @@ inline void async_ambient_release(void* a)
     if (l->refs.fetch_sub(1, cc::memory_order_acq_rel) == 1)
         async_ambient_free(l);
 }
+} // namespace cc::impl
 
-/// Retain `a` as an OBSERVER: the link stays alive, and outstanding() keeps reporting zero.
-/// This is for something that merely holds on to a context — a recording pinning it into a chunk — never for work.
-inline void async_ambient_observe(void* a)
+namespace cc
 {
-    if (a == nullptr)
-        return;
-    auto* const l = static_cast<async_ambient_link*>(a);
-    l->observer_refs.fetch_add(1, cc::memory_order_relaxed);
-    l->refs.fetch_add(1, cc::memory_order_relaxed);
-}
-
-/// The counterpart to async_ambient_observe.
-inline void async_ambient_unobserve(void* a)
+/// How much work still carries `head`, beyond the one reference its owner holds.
+/// One definition, because `refs - 1` written out by hand is a spelling that drifts.
+[[nodiscard]] inline i32 async_ambient_outstanding(void const* head)
 {
-    if (a == nullptr)
-        return;
-    auto* const l = static_cast<async_ambient_link*>(a);
-    l->observer_refs.fetch_sub(1, cc::memory_order_relaxed);
-    if (l->refs.fetch_sub(1, cc::memory_order_acq_rel) == 1)
-        async_ambient_free(l);
-}
+    if (head == nullptr)
+        return 0;
 
+    return static_cast<async_ambient_link const*>(head)->refs.load(cc::memory_order_acquire) - 1;
+}
+} // namespace cc
+
+namespace cc::impl
+{
 /// Install `a` as the calling thread's ambient for a scope, restoring the previous head on the way out.
 /// A null `a` installs nothing, so a node with no context inherits whatever is driving it.
 ///

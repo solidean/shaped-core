@@ -39,8 +39,12 @@ enum class cc::rec::event_kind : cc::u8
     stat_snapshot,   ///< the current reading of a quantity (queue depth, resident bytes)
     stat_accumulate, ///< a delta to add up (bytes uploaded, tasks finished)
     ambient_changed, ///< the thread adopted a different cc::async ambient context
-    trace_relation,  ///< two trace ids are related; the graph is reconstructed offline
-    trace_scope,     ///< the thread entered or left a trace id
+    trace_relation,  ///< some trace ids are related; the graph is reconstructed offline
+
+    /// An async scope was declared, naming it and binding it to its trace id.
+    /// The pair brackets the SCOPE OBJECT's life, not the work under it — that outlives the scope by design.
+    async_scope_begin,
+    async_scope_end,
 
     stream_state,   ///< the consumer-written preamble that makes a chunk independently decodable
     gap,            ///< events were dropped; carries how many, over what span, and how many bytes

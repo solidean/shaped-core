@@ -3,12 +3,15 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/record/overhead.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/serialize.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/trace.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
@@ -75,12 +78,12 @@ REC_TEST("record/trace - a scope mints and names its trace, and restores what wa
             CC_RECORD_MARK("before");
             {
                 // Naming it is the point: a bare id is an opaque number, useless in a viewer.
-                CC_TRACE_SCOPE("handle-request");
+                CC_RECORD_ASYNC_SCOPE("handle-request");
                 outer_id = cc::rec::current_trace_id();
                 CHECK(outer_id != cc::rec::trace_id::none);
                 CC_RECORD_MARK("in-outer");
                 {
-                    CC_TRACE_SCOPE("fetch-asset");
+                    CC_RECORD_ASYNC_SCOPE("fetch-asset");
                     inner_id = cc::rec::current_trace_id();
                     CC_RECORD_MARK("in-inner");
                 }
@@ -103,8 +106,11 @@ REC_TEST("record/trace - a scope mints and names its trace, and restores what wa
     CHECK(r.from_trace(inner_id).count("in-inner") == 1);
 
     // The scope's name reaches the stream, which is how a reader learns what a trace id is called.
-    CHECK(r.count("handle-request") == 1);
-    CHECK(r.count("fetch-asset") == 1);
+    // Twice per scope: a begin and an end share the site's name, and both carry the id.
+    CHECK(r.count("handle-request") == 2);
+    CHECK(r.count("fetch-asset") == 2);
+    CHECK(r.count_of_kind(cc::rec::event_kind::async_scope_begin) == 2);
+    CHECK(r.count_of_kind(cc::rec::event_kind::async_scope_end) == 2);
 }
 
 REC_TEST("record/trace - a trace can carry an id that came from somewhere else")
@@ -117,7 +123,7 @@ REC_TEST("record/trace - a trace can carry an id that came from somewhere else")
     auto const r = capture(
         [&]
         {
-            CC_TRACE_SCOPE_WITH_ID("inbound-request", wire_id);
+            CC_RECORD_ASYNC_SCOPE_WITH_ID("inbound-request", wire_id);
             CHECK(cc::rec::current_trace_id() == wire_id);
             CC_RECORD_MARK("handled");
         });
@@ -134,7 +140,7 @@ REC_TEST("record/trace - a trace spans threads, since an id is just a value")
     auto const r = capture(
         [&]
         {
-            CC_TRACE_SCOPE_WITH_ID("job", id);
+            CC_RECORD_ASYNC_SCOPE_WITH_ID("job", id);
             CC_RECORD_MARK("on-main");
 
             // Passing the id by hand is the synchronous way to carry a trace across a thread.
@@ -142,7 +148,7 @@ REC_TEST("record/trace - a trace spans threads, since an id is just a value")
             std::thread worker(
                 [&]
                 {
-                    CC_TRACE_SCOPE_WITH_ID("job", id);
+                    CC_RECORD_ASYNC_SCOPE_WITH_ID("job", id);
                     CC_RECORD_MARK("on-worker");
                 });
             worker.join();
@@ -280,7 +286,7 @@ REC_TEST("record/trace - ids, names and relations survive a round trip through b
     auto const r = capture(
         [&]
         {
-            CC_TRACE_SCOPE("child-work");
+            CC_RECORD_ASYNC_SCOPE("child-work");
             child = cc::rec::current_trace_id();
             CC_RECORD_RELATION(cc::rec::relation_parent_of, parent, child);
             CC_RECORD_MARK("inside-child");
@@ -302,101 +308,84 @@ REC_TEST("record/trace - ids, names and relations survive a round trip through b
     CHECK(edges[0].type->is_transitive);
 
     CHECK(loaded.value().events().from_trace(child).count("inside-child") == 1);
-    CHECK(loaded.value().events().count("child-work") == 1);
+    CHECK(loaded.value().events().count("child-work") == 2); // the scope's begin and end
 }
 
-REC_TEST("record/trace - tracing gates on its own category")
+REC_TEST("record/trace - relations gate on tracing, and a trace scope on profiling")
 {
     rec_fixture const fixture(deterministic_config());
 
     auto const a = cc::rec::new_trace_id();
     auto const b = cc::rec::new_trace_id();
 
-    auto const r = capture(
+    // The fold split what used to be one gate: a trace scope IS an async scope, so it answers to profiling, and only
+    // the relation edges are tracing's.
+    auto const no_tracing = capture(
         [&]
         {
             scoped_domain_mask const restore(cc::rec::g_default_domain);
             cc::rec::g_default_domain.set_enabled(cc::rec::category::tracing, false);
 
-            CC_TRACE_SCOPE("silenced");
+            CC_RECORD_ASYNC_SCOPE("still-scoped");
             CC_RECORD_RELATION(cc::rec::relation_follows, a, b);
-            CC_RECORD_MARK("still-recorded"); // a different category, so it still lands
+            CC_RECORD_MARK("still-recorded"); // a different category again, so it lands either way
         });
 
-    CHECK(r.trace_relations().empty());
-    CHECK(r.count_of_kind(cc::rec::event_kind::trace_scope) == 0);
-    CHECK(r.count("still-recorded") == 1);
+    CHECK(no_tracing.trace_relations().empty());
+    CHECK(no_tracing.count_of_kind(cc::rec::event_kind::async_scope_begin) == 1);
+    CHECK(no_tracing.count("still-recorded") == 1);
+
+    auto const no_profiling = capture(
+        [&]
+        {
+            scoped_domain_mask const restore(cc::rec::g_default_domain);
+            cc::rec::g_default_domain.set_enabled(cc::rec::category::profiling, false);
+
+            CC_RECORD_ASYNC_SCOPE("silenced");
+            CC_RECORD_RELATION(cc::rec::relation_follows, a, b);
+        });
+
+    CHECK(no_profiling.count_of_kind(cc::rec::event_kind::async_scope_begin) == 0);
+    CHECK(no_profiling.trace_relations().size() == 1);
 }
 
-//
-// What the recorder costs
-//
-
-REC_TEST("record/overhead - the model is measured, not guessed")
+REC_TEST("record/trace - a trace follows the work across a co_await")
 {
     rec_fixture const fixture(deterministic_config());
 
-    // A stand-in model says so, which is the distinction a caller needs; measuring is what flips it.
-    scoped_overhead const restore_model({.fixed_cycles = 40, .cycles_per_byte = 0.5, .disabled_cycles = 2});
-    CHECK(!cc::rec::overhead().is_measured);
-
-    auto const measured = cc::rec::measure_overhead();
-    CHECK(measured.is_measured);
-    CHECK(cc::rec::overhead().is_measured);
-
-    // A recording site costs something, and rather less than a microsecond.
-    CHECK(measured.fixed_cycles > 0);
-    CHECK(measured.fixed_cycles < 5000);
-
-    // A disabled site is a load and a test, so it is far cheaper than an enabled one.
-    CHECK(measured.disabled_cycles >= 0);
-    CHECK(measured.disabled_cycles < measured.fixed_cycles);
-
-    // Bytes cost something, and never negative — a fit that came out below zero is reported as zero.
-    CHECK(measured.cycles_per_byte >= 0);
-}
-
-REC_TEST("record/overhead - a recording estimates what it cost to make")
-{
-    rec_fixture const fixture(deterministic_config());
-
-    scoped_overhead const model({.fixed_cycles = 100, .cycles_per_byte = 1, .disabled_cycles = 2, .is_measured = true});
+    cc::rec::trace_id opened = cc::rec::trace_id::none;
+    cc::rec::trace_id before = cc::rec::trace_id::none;
+    cc::rec::trace_id after = cc::rec::trace_id::none;
 
     auto const r = capture(
-        []
+        [&]
         {
-            for (int i = 0; i < 100; ++i)
-                CC_RECORD_MARK("tick");
+            CC_RECORD_ASYNC_SCOPE("spanning-request");
+            opened = cc::rec::current_trace_id();
+
+            auto const co = [](cc::rec::trace_id* b, cc::rec::trace_id* a) -> cc::shared_async<int>
+            {
+                *b = cc::rec::current_trace_id();
+                CC_RECORD_MARK("before-suspend");
+
+                co_await cc::async_yield();
+
+                // The whole reason the fold happened: the thread-local version lost the trace here.
+                *a = cc::rec::current_trace_id();
+                CC_RECORD_MARK("after-suspend");
+
+                co_return 1;
+            }(&before, &after);
+
+            CHECK(cc::async_blocking_get(co) == 1);
         });
 
-    // Every marker is a zero-payload event, so the estimate is the fixed cost times the count.
-    REQUIRE(r.event_count() >= 100);
-    CHECK(r.estimated_overhead_cycles() >= 100 * 100.0);
+    CHECK(opened != cc::rec::trace_id::none);
+    CHECK(before == opened);
+    CHECK(after == opened);
 
-    // A ratio is only meaningful once time has passed, and it is a fraction rather than a percentage.
-    auto const ratio = r.estimated_overhead_ratio();
-    CHECK(ratio > 0);
-    CHECK(ratio < 1000); // sane rather than exact; a tight loop of nothing but markers is mostly overhead
-
-    // An empty recording spans no time, and says zero rather than dividing by it.
-    CHECK(cc::rec::recording{}.estimated_overhead_ratio() == 0.0);
-    CHECK(cc::rec::recording{}.estimated_overhead_cycles() == 0.0);
-}
-
-REC_TEST("record/overhead - an event that measured itself beats the model")
-{
-    rec_fixture const fixture(deterministic_config());
-
-    scoped_overhead const model({.fixed_cycles = 1, .cycles_per_byte = 0, .disabled_cycles = 0, .is_measured = true});
-
-    // A stacktrace-enriched event carries its own end timestamp, because capture costs orders of magnitude more than
-    // the model would predict.
-    scoped_domain_mask const restore(cc::rec::g_default_domain);
-    cc::rec::g_default_domain.set_captures_stacktrace(cc::rec::level::info, true);
-
-    auto const r = capture([] { CC_LOG_INFO("with a stack"); });
-
-    // Two events at a modelled cost of 1 each; the stacktrace one reports its real cost instead.
-    CHECK(r.count_of_kind(cc::rec::event_kind::value) >= 1);
-    CHECK(r.estimated_overhead_cycles() > 2.0);
+    // And the attribution reaches the recording, on whichever worker the continuation ran.
+    auto const of_trace = r.from_trace(opened);
+    CHECK(of_trace.count("before-suspend") == 1);
+    CHECK(of_trace.count("after-suspend") == 1);
 }

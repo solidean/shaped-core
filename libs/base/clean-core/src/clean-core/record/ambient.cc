@@ -1,4 +1,4 @@
-#include <clean-core/record/chunk.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/impl/ambient_hook.hh>
 #include <clean-core/record/impl/writer_tls.hh>
@@ -12,15 +12,20 @@
 // attributed to whatever context preceded it, and an async scope exists precisely to show where TIME goes.
 // A chain of co_awaits that logs nothing is the region you most want attributed correctly.
 //
-// The cost this does impose is one compare at each restore site, against a value already loaded to restore from.
-// A node with no token never reaches it; see clean-core/thread/async_ambient.hh.
+// **The delta carries the trace id, not the ambient address, and dedups on it.**
+// An address is unique only while its link lives, so an earlier version pinned each head into the chunk to reserve it.
+// That cost one pin per context switch against a 64-slot array, force-rotating a whole megabyte chunk every 64
+// switches — a 75% tax on an async-heavy workload, bought for an identity that a value carries for free.
+// An id compares soundly with no pin, no atomic and no lifetime.
+//
+// What a restore site pays is a short chain walk for the id, which measures as free beside the event it gates.
 
 namespace
 {
 using namespace cc::primitive_defines;
 
 constexpr cc::rec::field ambient_fields[] = {
-    {.name = "ambient", .type = cc::rec::type_code::pointer, .offset = 0, .size = 8},
+    {.name = "trace", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
 };
 
 constexpr cc::rec::desc ambient_desc = {
@@ -32,51 +37,23 @@ constexpr cc::rec::desc ambient_desc = {
     .field_count = 1,
     .fixed_payload_size = 8,
 };
-
-/// What a chunk does with a pinned ambient link when it is recycled.
-void release_ambient(void* link)
-{
-    cc::impl::async_ambient_unobserve(link);
-}
 } // namespace
 
 void cc::rec::impl::note_ambient_change(void* head)
 {
-    auto& w = t_writer;
-
-    // A worker draining related items restores the same context over and over, and the header at the call site says so.
-    // That repeat costs a compare and nothing else.
-    if (w.last_ambient == head)
-        return;
-
+    // Before the walk, so a build with profiling silenced pays one load and a branch.
     if (!rec::is_recording(ambient_desc))
         return;
 
-    auto const bytes = event_bytes_for(isize(sizeof(void*)));
-    if (!writer_reserve_event_and_pin(bytes))
-    {
-        writer_account_drop(bytes, cc::current_cycles());
+    auto const trace
+        = head == nullptr ? u64(0) : reinterpret_cast<u64>(cc::async_ambient_lookup_in(head, rec::impl::trace_tag()));
+
+    // A worker draining related items restores the same context over and over, and two different heads under one
+    // trace are the same attribution anyway — so this skips strictly more than an address compare could.
+    auto& w = t_writer;
+    if (w.last_trace == trace)
         return;
-    }
 
-    // The event names a link the recording may outlive, so the chunk holds a reference until it is recycled.
-    // Retaining the head retains the WHOLE CHAIN in O(1), because a link's parent reference is strong — which is what
-    // makes this affordable at all.
-    // As an OBSERVER, so nothing reads the recording's grip on a context as work still in flight.
-    if (head != nullptr)
-    {
-        cc::impl::async_ambient_observe(head);
-        if (!w.current->try_add_pin({.object = head, .release = &release_ambient}))
-        {
-            // Reserved above, so this cannot happen; releasing rather than leaking is what to do if it ever does.
-            cc::impl::async_ambient_unobserve(head);
-            return;
-        }
-    }
-
-    u16 core = 0;
-    auto const cycles = record_timestamp(core);
-    write_event_at(ambient_desc, cycles, core, flag_none, &head, isize(sizeof(head)));
-
-    w.last_ambient = head;
+    rec::record_event(ambient_desc, trace);
+    w.last_trace = trace;
 }

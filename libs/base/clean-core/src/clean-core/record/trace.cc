@@ -1,6 +1,7 @@
 #include "trace.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/thread/thread.hh>
 
@@ -20,21 +21,7 @@ constexpr isize max_relation_members = 1024;
 /// The calling thread's next counter value.
 /// Thread-local, so minting takes no lock and no atomic.
 thread_local u64 tl_next_counter = 1;
-
-/// The trace the calling thread is under.
-/// Not in writer_tls: that struct is on the hot path and this is read only by tracing itself.
-thread_local cc::rec::trace_id tl_current_trace = cc::rec::trace_id::none;
 } // namespace
-
-cc::rec::desc const cc::rec::impl::trace_restore_desc = {
-    .kind = cc::rec::event_kind::trace_scope,
-    .enable_bit = cc::rec::enable_bit_of(cc::rec::category::tracing),
-    .name = "trace.restore",
-    .dom = &cc::rec::g_default_domain,
-    .fields = cc::rec::impl::trace_scope_fields,
-    .field_count = 1,
-    .fixed_payload_size = 8,
-};
 
 cc::rec::trace_id cc::rec::new_trace_id()
 {
@@ -45,7 +32,8 @@ cc::rec::trace_id cc::rec::new_trace_id()
 
 cc::rec::trace_id cc::rec::current_trace_id()
 {
-    return tl_current_trace;
+    // The chain, not a thread-local: a trace has to survive a co_await, and a thread-local cannot.
+    return rec::trace_id(reinterpret_cast<u64>(cc::async_ambient_lookup(rec::impl::trace_tag())));
 }
 
 void cc::rec::impl::record_relation_members(cc::rec::desc const& d, cc::span<cc::rec::trace_id const> members)
@@ -73,25 +61,4 @@ void cc::rec::impl::record_relation_members(cc::rec::desc const& d, cc::span<cc:
     }
 
     writer.commit(payload_bytes, count < members.size() ? rec::impl::flag_truncated : rec::impl::flag_none);
-}
-
-void cc::rec::impl::write_trace_scope(cc::rec::desc const& d, cc::rec::trace_id id)
-{
-    rec::record_event(d, u64(id));
-}
-
-cc::rec::impl::trace_scope_guard::trace_scope_guard(cc::rec::desc const& d, cc::rec::trace_id id)
-  : _previous(tl_current_trace)
-{
-    tl_current_trace = id;
-    write_trace_scope(d, id);
-}
-
-cc::rec::impl::trace_scope_guard::~trace_scope_guard()
-{
-    tl_current_trace = _previous;
-
-    // The delta says what is in effect NOW, so leaving publishes whatever the thread went back to.
-    // A separate descriptor, because the entering site's name belongs to the trace it opened.
-    write_trace_scope(trace_restore_desc, _previous);
 }

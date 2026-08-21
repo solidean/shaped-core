@@ -20,20 +20,13 @@
 // it arrived last.
 // An id that nothing tracks also cannot leak, cannot be looked up wrongly, and costs nothing to abandon.
 //
-// -------------------------------------------------------------------------------------------------------
-// CC_TRACE_SCOPE is INTERIM and will be replaced
-// -------------------------------------------------------------------------------------------------------
-//
+// **A trace scope IS an async scope.**
 // A trace wants to be infectious: a request or a job spans threads, and every piece of work spawned under it belongs
 // to it wherever it ends up running.
-// That is exactly what cc::async's ambient chain already does, so a trace scope should BE an ambient scope carrying
-// an id, and then propagation, naming and the state deltas are one mechanism rather than two.
+// That is exactly what cc::async's ambient chain does, so CC_RECORD_ASYNC_SCOPE in clean-core/record/async_scope.hh is
+// where a trace is opened, and propagation, naming and the state deltas are one mechanism rather than two.
 //
-// That chain now carries async scopes (clean-core/record/async_scope.hh), so what remains is giving one an optional
-// id and deleting the thread-local path below.
-// Until then this scope is correct for synchronous work and silently under-attributes the moment the work suspends:
-// a `co_await` moves the continuation to another thread, and this scope does not follow it.
-// Ids and relations are unaffected either way — those are complete, and only attribution moves.
+// This file is what remains once that fold is done: minting, the relation vocabulary, and recording an edge.
 
 /// The relation types that come up everywhere.
 /// Define your own next to the code that records it; these are only the ones with no better home.
@@ -75,6 +68,9 @@ inline constexpr rec::relation_type relation_follows = {
 [[nodiscard]] rec::trace_id new_trace_id();
 
 /// The trace the calling thread is currently under, or `none`.
+///
+/// Read off cc::async's ambient chain, so it follows a `co_await` and every task spawned under the scope.
+/// A chain walk, not a thread-local read — cheap, but not free enough for an inner loop.
 [[nodiscard]] rec::trace_id current_trace_id();
 } // namespace cc::rec
 
@@ -90,36 +86,12 @@ inline constexpr rec::field relation_fields[] = {
     {.name = "members", .type = rec::type_code::u64_array, .offset = 0, .size = 4},
 };
 
-/// The layout of a trace-scope event, which publishes the id now in effect.
-inline constexpr rec::field trace_scope_fields[] = {
-    {.name = "trace", .type = rec::type_code::u64_, .offset = 0, .size = 8},
-};
-
 /// Writes one relation event.
 /// **The first member is the SUBJECT and the rest are objects**, which is what lets one convention cover a fan-out
 /// (`parent_of(parent, children…)`) and a fan-in (`caused_by(effect, causes…)`) alike.
 /// Order is meaningless for a symmetric type, where every member is a peer.
 void record_relation_members(rec::desc const& d, cc::span<rec::trace_id const> members);
 
-/// Publishes "this thread is now under `id`".
-void write_trace_scope(rec::desc const& d, rec::trace_id id);
-
-/// The descriptor a scope uses on the way out, when it publishes whatever the thread went back to.
-/// A separate site because the entering site's name belongs to the trace it entered, not to the one it restored.
-extern rec::desc const trace_restore_desc;
-
-/// Puts the calling thread under a trace for a scope, restoring the previous one on the way out.
-struct trace_scope_guard
-{
-    trace_scope_guard(rec::desc const& d, rec::trace_id id);
-    ~trace_scope_guard();
-
-    trace_scope_guard(trace_scope_guard const&) = delete;
-    trace_scope_guard& operator=(trace_scope_guard const&) = delete;
-
-private:
-    rec::trace_id _previous;
-};
 } // namespace cc::rec::impl
 
 /// Defines a relation site's descriptor.
@@ -159,32 +131,3 @@ private:
         CC_REC_DEFINE_RELATION_DESC(cc_rec_site_desc_, (type_));                 \
         ::cc::rec::impl::record_relation_members(cc_rec_site_desc_, (members_)); \
     } while (false)
-
-/// Defines a trace scope's descriptor, whose name is what the trace is called.
-#define CC_REC_DEFINE_TRACE_DESC(var_name, name_)                              \
-    static constexpr ::cc::rec::desc var_name = {                              \
-        .kind = ::cc::rec::event_kind::trace_scope,                            \
-        .enable_bit = ::cc::rec::enable_bit_of(::cc::rec::category::tracing),  \
-        .name = (name_),                                                       \
-        .dom = cc_rec_domain(),                                                \
-        .site = ::cc::rec::source_ref::from(::cc::source_location::current()), \
-        .fields = ::cc::rec::impl::trace_scope_fields,                         \
-        .field_count = 1,                                                      \
-        .fixed_payload_size = 8,                                               \
-    }
-
-/// Opens a named trace on this thread, minting its id.
-///
-///   CC_TRACE_SCOPE("handle-request");
-///   auto const id = cc::rec::current_trace_id();   // to relate it to something else
-///
-/// Naming it is the point: a bare id is an opaque number, and a viewer showing "0x0800000000000003" helps nobody.
-/// Interim, and thread-local only — see the header comment.
-#define CC_TRACE_SCOPE(name_)                            \
-    CC_REC_DEFINE_TRACE_DESC(cc_rec_trace_desc_, name_); \
-    auto const cc_rec_trace_scope_ = ::cc::rec::impl::trace_scope_guard(cc_rec_trace_desc_, ::cc::rec::new_trace_id())
-
-/// The same, for a trace whose id came from somewhere else — a request id off the wire, a job id from a queue.
-#define CC_TRACE_SCOPE_WITH_ID(name_, id_)               \
-    CC_REC_DEFINE_TRACE_DESC(cc_rec_trace_desc_, name_); \
-    auto const cc_rec_trace_scope_ = ::cc::rec::impl::trace_scope_guard(cc_rec_trace_desc_, (id_))

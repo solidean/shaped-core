@@ -57,6 +57,5 @@ cc::async_ambient_scope::~async_ambient_scope()
 
 i32 cc::async_ambient_scope::outstanding() const
 {
-    // Minus our own, and minus every observer: a recording holding this link is not work in flight.
-    return _link->refs.load(cc::memory_order_acquire) - 1 - _link->observer_refs.load(cc::memory_order_acquire);
+    return cc::async_ambient_outstanding(_link);
 }

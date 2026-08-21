@@ -51,6 +51,7 @@ add_library(clean-core
     src/clean-core/record/crash_dump.cc
     src/clean-core/record/trace.cc
     src/clean-core/record/ambient.cc
+    src/clean-core/record/async_scope.cc
     src/clean-core/record/overhead.cc
     src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc

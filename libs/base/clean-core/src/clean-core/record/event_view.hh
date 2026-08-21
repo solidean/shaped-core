@@ -120,6 +120,9 @@ struct cc::rec::event_iterator
     [[nodiscard]] bool operator!=(cc::sentinel) const { return _cur < _end; }
     [[nodiscard]] bool operator==(cc::sentinel) const { return _cur >= _end; }
 
+    /// Where in the block this iterator sits, for a consumer that slices a block rather than reading it.
+    [[nodiscard]] byte const* position() const { return _cur; }
+
 private:
     byte const* _cur = nullptr;
     byte const* _end = nullptr;

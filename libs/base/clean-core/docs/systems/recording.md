@@ -118,8 +118,10 @@ So the mistake is caught rather than reported as a wrong number.
 ### Async scopes
 
 ```cpp
-CC_RECORD_ASYNC_SCOPE("load-level");                     // follows the work, wherever it resumes
-auto const* s = cc::rec::current_async_scope();          // the innermost one, or null
+CC_RECORD_ASYNC_SCOPE("load-level");                       // follows the work, wherever it resumes
+CC_RECORD_ASYNC_SCOPE_WITH_ID("inbound", id_off_the_wire); // ... under an id from somewhere else
+auto const* s = cc::rec::current_async_scope();            // the innermost one, or null
+auto const id = cc::rec::current_trace_id();               // ... and the trace it is
 ```
 
 An async scope is the answer to the restriction above: it is an entry in `cc::async`'s ambient chain rather than a stack frame.
@@ -127,19 +129,30 @@ So a `co_await` carries it along, and every task spawned underneath inherits it.
 That makes it the right tool for a logical operation — a request, a job, a level load — and `CC_RECORD_SCOPE` the right one for a span of one thread's time.
 
 It is also strictly the more expensive of the two.
-Installing one allocates a link and takes a refcount, where a profiling scope writes two events and touches a counter.
+Installing one allocates two links and takes their refcounts, where a profiling scope writes two events and touches a counter.
 Per operation that is nothing; per inner-loop iteration it is the wrong tool.
 
+**An async scope IS a trace, and its id is not optional.**
+The id is what the stream attributes by, so a scope without one would propagate a context no recording could name.
+Every scope therefore mints one unless handed one, and `cc::rec::current_trace_id()` reads it back off the chain — which is why a trace now follows a `co_await` where a thread-local one could not.
+
+The scope writes an `async_scope_begin` / `async_scope_end` pair carrying that id.
+That pair is what puts a **name** on a trace: an id is minted at runtime and a descriptor is static, so nothing else in the stream could say that trace `0x0800…03` was called `handle-request`.
+The pair brackets the scope OBJECT's life, not the work under it — that outlives the scope by design.
+
 **The deltas are eager, and that is the whole design.**
-Whenever `cc::async` restores a context that differs from the one this thread last published, the recorder writes an `ambient_changed` event naming the new head.
+Whenever `cc::async` restores a context whose trace differs from the one this thread last published, the recorder writes an `ambient_changed` event naming the new one.
 A lazy scheme — stamping the ambient onto the next event that happens to be recorded — would be free on the write path and wrong.
 A chain of `co_await`s that logs nothing would be billed to whatever context preceded it, and an async scope exists precisely to show where **time** goes.
 
-The cost at each restore site is one compare against a value that was already loaded in order to restore from it, and a node carrying no ambient token never reaches even that.
+The cost at each restore site is a short chain walk for the id plus one compare, and a node carrying no ambient token never reaches even that.
 A worker draining related items restores the same context repeatedly, and those repeats stop at the compare.
 
-The event names a link that the recording may outlive, so the chunk **pins** it.
-Retaining the head retains the whole chain in constant time, because a link's reference to its parent is strong — which is what makes pinning affordable at all.
+**The delta carries the ID rather than the ambient address**, which is what makes it free.
+An address is unique only while its link lives, so an earlier version pinned each head into the chunk to reserve it.
+That cost one pin per context switch against a 64-slot array, force-rotating a whole megabyte chunk every 64 switches.
+That measured as a 75% tax on an async-heavy workload, bought for an identity a value carries for nothing.
+A recording therefore outlives every link it ever saw and still tells the contexts apart.
 
 ### Values, markers and stats
 
@@ -211,15 +224,16 @@ An id that nothing tracks also cannot leak, cannot be looked up wrongly, and cos
 Trace membership is stream state: a thread publishes a delta on entering and leaving, and a consumer carries the running value forward.
 `recording::from_trace(id)` does that carrying; `recording::trace_relations()` hands back the edges.
 
-#### CC_TRACE_SCOPE is interim
+#### A trace is an async scope
 
 A trace wants to be **infectious**: a request or a job spans threads, and every piece of work spawned under it belongs to it wherever it ends up running.
-That is exactly what `cc::async`'s ambient chain already does, so a trace scope should *be* an ambient scope carrying an id.
-Then propagation, naming and the state deltas are one mechanism rather than two.
+That is exactly what `cc::async`'s ambient chain does, so a trace scope IS an ambient scope carrying an id, and propagation, naming and the state deltas are one mechanism rather than two.
 
-The ambient chain now carries async scopes, so the mechanism `CC_TRACE_SCOPE` should fold into exists — what remains is giving an async scope an optional id and deleting the thread-local path.
-Until then `CC_TRACE_SCOPE` stays thread-local: correct for synchronous work, and silently under-attributing the moment the work suspends.
-Ids and relations are unaffected either way, since those are complete and only attribution moves.
+So there is no separate trace scope: `CC_RECORD_ASYNC_SCOPE` opens one, minting the id, and `CC_RECORD_ASYNC_SCOPE_WITH_ID` takes one from elsewhere.
+`cc::rec::current_trace_id()` reads the chain, so it is correct on whichever worker resumed the work.
+
+What stays here is minting, the relation vocabulary and recording an edge.
+A relation gates on `category::tracing`; the scope itself is an async scope and gates on `category::profiling`.
 
 ### The console
 
@@ -394,7 +408,9 @@ CHECK(r.contains_in_order({"vertex_count", "cache-miss", "bytes_read"}));
 
 Narrowing by thread is what makes this reliable **synchronously**.
 Work that runs asynchronously needs the ambient context instead, since a logical task runs on whichever workers pick it up and several are in flight at once.
-That is what the nexus integration filters on, over the `ambient_changed` deltas an async scope publishes.
+
+That is what nexus does: every `nx::run` stands a recorder up, mints a trace per test, and buckets each test's events by it, so a test reads its own back with `nx::test_recording()`.
+[nexus/recording](../../../nexus/docs/recording.md) is that half, including what it costs and how to turn it off.
 
 ---
 
@@ -456,9 +472,10 @@ To LOOK at a recording rather than assert on one, `babel::chrome_trace` writes i
 
 A recording also serializes, and a crash dump writes the same format without allocating — [systems/recording-formats](recording-formats.md) is that half.
 
-Async scopes and their ambient deltas are here, so attribution follows work across a `co_await`.
-Tracing is not yet on them: `CC_TRACE_SCOPE` is still thread-local, and folding it onto an async scope carrying an id is the next step.
-Still to come as well: the nexus integration that turns a recording into a test assertion, which filters per test on exactly those deltas.
+Async scopes and their ambient deltas are here, so attribution follows work across a `co_await` — and tracing rides them, so a trace does too.
+
+nexus turns that into test assertions: `nx::test_recording()` hands a test what it recorded, and a failing test's recording is written out.
+[nexus/recording](../../../nexus/docs/recording.md) is that half.
 
 `cc::capture_stack` ([stack_capture.hh](../../src/clean-core/platform/stack_capture.hh)) is a real seam with a stub behind it.
 It returns an empty capture on every platform today, so a stacktrace-enriched event carries a frame count of zero rather than a wrong stack.

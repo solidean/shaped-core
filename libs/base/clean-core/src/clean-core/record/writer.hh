@@ -83,13 +83,6 @@ CC_COLD_FUNC bool writer_rotate(isize needed);
 /// Accounts one event this thread could not write, for the next gap event to report.
 CC_COLD_FUNC void writer_account_drop(isize bytes, u64 cycles);
 
-/// Makes room for one event of `bytes` AND one more pin in the same chunk, rotating if either is short.
-///
-/// A pin and the event that names what it keeps alive must land in the SAME chunk, or recycling that chunk would
-/// release something an event still points at.
-/// So the space for both is secured before either is written.
-CC_COLD_FUNC bool writer_reserve_event_and_pin(isize bytes);
-
 /// Writes header and payload at the cursor and publishes them; the space must already be reserved.
 CC_FORCE_INLINE void write_event_at(rec::desc const& d, u64 cycles, u16 core, u16 flags, void const* payload, isize payload_size)
 {

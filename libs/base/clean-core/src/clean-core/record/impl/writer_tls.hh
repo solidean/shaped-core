@@ -21,9 +21,10 @@ struct cc::rec::impl::writer_tls
     byte* end;
     rec::chunk* current;
 
-    /// The cc::async ambient chain head last written into this thread's stream.
+    /// The trace id this thread last published an ambient delta for.
     /// Compared against the live one to turn ambient context into a state delta rather than a per-event field.
-    void* last_ambient;
+    /// An id rather than the chain head, because an ADDRESS is unique only while its link lives.
+    u64 last_trace;
 
     /// How many profiling scopes are open on this thread.
     u32 scope_depth;

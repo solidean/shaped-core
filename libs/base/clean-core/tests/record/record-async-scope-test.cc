@@ -155,7 +155,7 @@ REC_TEST("record/async-scope - a repeat restore to the same context costs no del
     CHECK(ambient_changes(r) == 2);
 }
 
-REC_TEST("record/async-scope - the recording keeps the ambient chain alive")
+REC_TEST("record/async-scope - attribution outlives the links it came from")
 {
     auto cfg = deterministic_config();
     cfg.chunk_bytes = 8 * 1024; // small, so the events rotate through several chunks
@@ -176,24 +176,25 @@ REC_TEST("record/async-scope - the recording keeps the ambient chain alive")
         captured = rl.take();
     }
 
-    // Every scope object is long gone; the links they installed are kept alive by the chunks that reference them.
-    // Counting DISTINCT addresses is what proves the pin worked: two hundred links held at once cannot share one, so a
-    // pin that dangled would show up as a reused address rather than as a crash.
+    // Every scope object and every link is long gone, and the recording still tells the two hundred contexts apart.
+    // That is the point of attributing by ID rather than by the ambient ADDRESS: an address is unique only while its
+    // link lives, so keeping it meaningful would have meant pinning one per context switch.
     CHECK(captured.count("work") == 200);
-    CHECK(ambient_changes(captured) == 400);
 
-    cc::set<u64> heads;
+    cc::set<u64> traces;
     captured.for_each_event(
         [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
         {
             if (e.kind() != cc::rec::event_kind::ambient_changed)
                 return;
-            if (auto const a = e.field_as_u64("ambient").value_or(0); a != 0)
-                heads.insert(a);
+            if (auto const t = e.field_as_u64("trace").value_or(0); t != 0)
+                traces.insert(t);
         });
 
-    // The two hundred scopes, plus whatever context the test itself was already running under.
-    CHECK(heads.size() >= 200);
+    CHECK(traces.size() == 200);
+
+    // Two per scope, plus one wherever a chunk rotation made the next write unconditional.
+    CHECK(ambient_changes(captured) >= 400);
 }
 
 REC_TEST("record/async-scope - ambient deltas gate on the profiling category")

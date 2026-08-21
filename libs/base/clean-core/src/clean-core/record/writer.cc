@@ -168,7 +168,7 @@ bool cc::rec::impl::writer_rotate(isize needed)
     w.retry_at_cycles = 0;
 
     // A fresh chunk starts from no known state, so the next ambient write is unconditional.
-    w.last_ambient = nullptr;
+    w.last_trace = 0;
 
     if (w.state->dropped_events > 0)
     {
@@ -194,28 +194,6 @@ bool cc::rec::impl::writer_rotate(isize needed)
     return w.cur + needed <= w.end;
 }
 
-bool cc::rec::impl::writer_reserve_event_and_pin(isize bytes)
-{
-    auto& w = t_writer;
-
-    auto const has_room = [&]
-    {
-        return w.current != nullptr && w.cur + bytes <= w.end
-            && isize(w.current->pin_count.load(cc::memory_order_relaxed)) < rec::chunk::pin_capacity;
-    };
-
-    if (has_room())
-        return true;
-
-    // A full pin array is as good a reason to rotate as a full chunk: the alternative is an event whose pin lives in
-    // a different chunk, which is a use-after-free waiting for the pool to recycle one of them.
-    if (w.current != nullptr && !w.current->is_sealed.load(cc::memory_order_relaxed))
-        seal_chunk(w.current, cc::current_cycles());
-    w.cur = nullptr;
-    w.end = nullptr;
-
-    return writer_rotate(bytes) && has_room();
-}
 
 void cc::rec::impl::writer_account_drop(isize bytes, u64 cycles)
 {
@@ -379,11 +357,34 @@ thread_exit_sentinel::~thread_exit_sentinel()
     cc::rec::seal_current_thread_chunk();
 
     auto& w = t_writer;
-    if (w.state != nullptr)
-        w.state->is_alive.store(false, cc::memory_order_release);
-    if (w.alt_state != nullptr)
-        w.alt_state->is_alive.store(false, cc::memory_order_release);
+
+    // Order matters, because marking a state dead is what lets the consumer REAP it.
+    //
+    // The pointer back into thread-local storage goes first, since that storage dies with the thread and shutdown
+    // writes through it to invalidate a live cursor.
+    // Then this thread's own pointers go, so a thread_local destroyed after this one cannot record through a state
+    // that is about to be freed — destruction order between thread_locals is not ours to choose.
+    // Only then is the state published as dead.
+    auto* const state = cc::exchange(w.state, nullptr);
+    auto* const alt_state = cc::exchange(w.alt_state, nullptr);
+
+    // The sealed chunks go with them: they belong to a queue the consumer is about to finish with, and a late record
+    // on this thread must start from a fresh registration rather than append to one.
+    w.current = nullptr;
+    w.alt_current = nullptr;
+
+    if (state != nullptr)
+    {
+        cc::rec::impl::detach_thread_state_tls(state);
+        state->is_alive.store(false, cc::memory_order_release);
+    }
+    if (alt_state != nullptr)
+    {
+        cc::rec::impl::detach_thread_state_tls(alt_state);
+        alt_state->is_alive.store(false, cc::memory_order_release);
+    }
 }
+
 } // namespace
 
 void cc::rec::set_current_thread_record_name(cc::string_view name)
