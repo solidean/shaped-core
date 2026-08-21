@@ -269,6 +269,27 @@ auto res = test->execute_fuzzer(seed);      // one deterministic run; res.failin
 auto min = res.failing_run.value().minimize(rng);   // shrink; min.emit_regression("test", dialect)
 ```
 
+## Recording — what did this test record?
+
+```cpp
+#include <nexus/rec.hh>
+auto rec = nx::test_recording();     // the running test's bucket, found via the ambient chain
+rec.sync();                          // -> recording, ONLY the new events; the sole blocking call here
+rec.all();                           // -> recording, everything synced so far — the full cc::rec query API
+rec.is_attached();                   // false outside a test, and under nx::config::no_recording
+
+TEST("x", nx::config::no_recording)  // do not bucket this test at all
+TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test drives cc::rec::initialize itself
+```
+
+- **`sync()` drains the recorder under a process-wide mutex** — a few per test is nothing, one per check in a loop is not.
+- Every `nx::run` installs the console logger, so `CC_LOG_*` prints from tests and examples with zero source changes.
+- A **failing** test's recording is written next to the JUnit XML at the end of the run; a passing one's is dropped.
+- Costs a run roughly a quarter to a third of its wall time.
+  `--no-recording` turns the whole thing off.
+
+[docs/recording.md](docs/recording.md) has the mechanism and the measurements.
+
 ## Gotchas
 
 - **Never run the `*-test` binary directly** — `uv run dev.py test` configures, builds, discovers and records results.

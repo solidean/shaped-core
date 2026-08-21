@@ -59,6 +59,11 @@ struct nx::test_schedule_config
     bool report_catch2_xml_results = false;
     bool verbose = false;
 
+    // Skip the run's cc::rec recorder entirely — no per-test buckets, no console listener, no dumps.
+    // Recording costs a run roughly a quarter to a third of its wall time (see libs/base/nexus/docs/recording.md), which is
+    // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
+    bool no_recording = false;
+
     // When non-empty, run() writes a JUnit XML report to this path, additionally to the normal console output.
     // Set via --junit-xml <file>.
     cc::string junit_xml_file;

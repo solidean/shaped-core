@@ -67,6 +67,14 @@ struct nx::config::cfg
     char const* exclusion_tags[max_exclusion_tags] = {};
     int exclusion_tag_count = 0;
     bool exclusive_global = false; // excludes every other test, not just fellow tag holders
+
+    // Bucket this test's cc::rec events so nx::test_recording() can read them back.
+    // On by default: the cost is one hash lookup per ambient segment, and a test that never syncs never pays more.
+    bool recorded = true;
+
+    // This test drives cc::rec::initialize / shutdown itself, so the run hands its own recorder over for the duration.
+    // Only meaningful with `exclusive`, since a torn-down recorder is torn down for every thread at once.
+    bool owns_recorder = false;
 };
 
 namespace nx::config
@@ -78,6 +86,25 @@ constexpr struct
 {
     void apply(cfg& result) const { result.enabled = false; }
 } disabled;
+
+// Do not bucket this test's recorded events; nx::test_recording() then sees nothing for it.
+// For a test that records enough to be worth not keeping, or one whose subject is the recorder itself.
+constexpr struct
+{
+    void apply(cfg& result) const { result.recorded = false; }
+} no_recording;
+
+// This test owns the cc::rec singleton: the run shuts its recorder down before the body and re-initializes after.
+// Implies no_recording, since there is no run recorder to bucket into.
+// Combine with `exclusive` — a recorder torn down on one thread is torn down for every thread.
+constexpr struct
+{
+    void apply(cfg& result) const
+    {
+        result.owns_recorder = true;
+        result.recorded = false;
+    }
+} owns_recorder;
 
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
 // It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.

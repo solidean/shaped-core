@@ -13,6 +13,8 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
   The shared-state section is required reading before fuzzing over a GPU context or any other resource your operations close over.
 - [threaded-checks](threaded-checks.md) — which test a `CHECK` belongs to once work runs on more than one thread.
   Why an unattributable check fails the run, and how to attribute a thread you started yourself.
+- [recording](recording.md) — `nx::test_recording()`, the per-test `cc::rec` bucket, the console logger, and a failing test's recording.
+  Read the cost section before assuming the default is free.
 - [parallel-execution](parallel-execution.md) — a run is a graph of `cc::async` nodes: `--jobs`, per-test scheduler modes, `exclusive` tags, and `ASYNC_TEST`.
   Read the exclusion section before assuming two tests can share a resource.
 - [catch2-runner-compat](catch2-runner-compat.md) — the CLI layer: which Catch2 v3 flags nexus accepts, how IDE discovery works, buckets, name and file filters, and the JUnit and JSON side-outputs.

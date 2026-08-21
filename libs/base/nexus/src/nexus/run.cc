@@ -8,6 +8,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/thread.hh>
+#include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/catch2.hh>
@@ -102,6 +103,18 @@ void collect_invoked(nx::test_execution const& exec, std::unordered_set<void con
         collect_invoked(child, out);
     }
 }
+
+/// The directory part of `path`, or empty when it has none.
+cc::string_view directory_of(cc::string_view path)
+{
+    for (auto i = path.size(); i > 0; --i)
+    {
+        auto const c = path[i - 1];
+        if (c == '/' || c == '\\')
+            return path.subview({.offset = 0, .size = i - 1});
+    }
+    return {};
+}
 } // namespace
 
 int nx::run(int argc, char** argv)
@@ -192,8 +205,18 @@ int nx::run(int argc, char** argv)
         cc::println();
     }
 
+    // Stand the recorder up for the WHOLE run, never per test.
+    // Per-test attribution rides the ambient chain instead, so a test that records nothing costs nothing, and a test
+    // asking what it recorded gets an answer without anyone parsing history back to the start of the process.
+    if (!config.no_recording)
+        nx::impl::begin_run_recording();
+
     // Execute the scheduled tests
     auto execution = execute_tests(schedule, config);
+
+    // A failing test's recording is written beside the run's other artifacts, which is why this follows the JUnit
+    // file's directory rather than inventing a location of its own.
+    nx::impl::end_run_recording(directory_of(config.junit_xml_file));
 
     // Write a JUnit XML report if requested.
     // This is additive: the console output below still runs, whatever the reporting mode.

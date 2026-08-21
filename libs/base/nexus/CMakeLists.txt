@@ -4,6 +4,7 @@ project(nexus LANGUAGES CXX)
 # Define the library and its sources
 add_library(nexus
     src/nexus/run.cc
+    src/nexus/rec.cc
     src/nexus/test.cc
     src/nexus/guide.cc
     src/nexus/bench/hardware_counters.cc
@@ -39,6 +40,8 @@ target_sources(nexus
     FILES
     src/nexus/fwd.hh
     src/nexus/run.hh
+    src/nexus/rec.hh
+    src/nexus/impl/rec_session.hh
     src/nexus/test.hh
     src/nexus/guide.hh
     src/nexus/bench/fwd.hh
@@ -122,6 +125,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/test-api-test.cc
         tests/test-check-test.cc
+        tests/test-recording-test.cc
         tests/test-check-render-test.cc
         tests/test-threaded-check-test.cc
         tests/test-parallel-test.cc

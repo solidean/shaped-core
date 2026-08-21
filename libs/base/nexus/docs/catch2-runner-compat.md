@@ -33,6 +33,7 @@ Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc](../
 | `--manual` | Selects the *manual* bucket for sweeps (see below). Not a Catch2 flag |
 | `--guide-benchmarks` | Selects the *guide_benchmark* bucket (perf benchmarks; see [perf-results.md](../../../../docs/guides/perf-results.md)). Not a Catch2 flag |
 | `--perf-json <file>` | Writes recorded `nx::guide` metrics to `<file>` (additive). Not a Catch2 flag |
+| `--no-recording` | Leaves `cc::rec` down for the whole run: no per-test buckets, no console logger, no failure dumps (see [recording.md](recording.md)). Not a Catch2 flag |
 | `--list-tests-json <file>` | Writes a JSON listing of every registered test (with eligibility under the other args) to `<file>` — `-` means stdout — then exits 0 without running anything. Used by `dev.py test` to pre-select binaries. Not a Catch2 flag |
 | `--match-files` | Reads the filters as globs over the tests' source files, skipping name matching. Not a Catch2 flag |
 | `--match-names` | Reads the filters as test names only, without the file fallback. Not a Catch2 flag |

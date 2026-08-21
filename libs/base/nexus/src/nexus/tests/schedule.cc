@@ -130,6 +130,12 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
             config.verbose = true;
             continue;
         }
+        // No recording: leave cc::rec down for the whole run.
+        else if (arg == "--no-recording")
+        {
+            config.no_recording = true;
+            continue;
+        }
         // Manual mode: select the manual bucket, so wildcard filters can select among manual tests (e.g.
         // `--manual bench` runs every manual test whose name contains "bench"). Disabled tests stay out.
         else if (arg == "--manual")

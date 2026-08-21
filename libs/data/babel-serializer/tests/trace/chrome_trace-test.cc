@@ -12,7 +12,9 @@
 using namespace cc::primitive_defines;
 
 // The recording system is a process-wide singleton, so every test here holds one exclusion tag and none overlap.
-#define TRACE_TEST(name_) TEST(name_, nx::config::exclusive("cc-record"))
+// These stand the cc::rec singleton up themselves, so they run alone and take the run's recorder over for the
+// duration — see libs/base/clean-core/docs/systems/recording.md, "Lifecycle constraints".
+#define TRACE_TEST(name_) TEST(name_, nx::config::exclusive(), nx::config::owns_recorder)
 
 namespace
 {

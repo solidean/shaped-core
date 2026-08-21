@@ -17,7 +17,7 @@
 // That is why these run alone rather than under a shared tag: an unrelated test in flight would be writing into the
 // pool a fixture is tearing down.
 
-#define REC_TEST(name_) TEST(name_, nx::config::exclusive())
+#define REC_TEST(name_) TEST(name_, nx::config::exclusive(), nx::config::owns_recorder)
 
 namespace cc_rec_test
 {
