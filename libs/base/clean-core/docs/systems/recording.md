@@ -180,6 +180,15 @@ That cuts the walk and the payload by the same factor, which matters most for sa
 The order the sampler obeys is not negotiable: take the registry lock, suspend, read the anchor and walk into a fixed buffer, resume, and only then write.
 A suspended thread may hold the allocator's lock or the pool's, so allocating or writing before the resume hangs on a lock its owner cannot release.
 
+**The sampler records its own ticks**, as `record.sample_tick` scopes on its own lane.
+A sampled profile is only as trustworthy as its cadence, and a reader asking whether a 16 ms frame was sampled evenly or aliased against it needs to see when the ticks landed and what each one cost.
+
+`rate_hz` is a per-thread rate, because a tick covers every thread by default.
+It is capped by what the OS timer delivers, which measured about **1.9 kHz** on Windows.
+A high-resolution waitable timer floors near half a millisecond, and neither `timeBeginPeriod` nor a periodic timer beats that.
+`threads_per_tick = 1` gives a fixed budget split across however many threads exist instead.
+For one frame's worth of ticks that is a couple of samples each, which is not a profile of anything.
+
 Two limits worth knowing.
 Only threads the recorder already knows are sampled, which a thread joins by recording anything at all — enumerating the process's OS threads instead is in the [TODO](../TODO.md).
 And there is no sampler at all without threads (`SC_THREADS=OFF`) or on a platform that cannot walk a foreign thread's stack; `is_sampling()` reports which you are in rather than pretending.

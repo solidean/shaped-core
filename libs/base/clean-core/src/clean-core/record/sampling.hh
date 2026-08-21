@@ -29,11 +29,24 @@ struct sampling_scope;
 
 struct cc::rec::sampling_config
 {
-    /// Samples per second across ALL threads, not per thread.
+    /// Ticks per second, and — with the default `threads_per_tick` — each thread's own sampling rate.
     ///
-    /// One thread is sampled per tick, round-robin, so a thread's own rate is this divided by the number of recording
-    /// threads — which is what keeps the cost fixed as a process grows threads.
+    /// **Capped by what the OS timer can deliver**, which measured about 1.9 kHz on Windows: a high-resolution
+    /// waitable timer floors near half a millisecond, and neither timeBeginPeriod nor a periodic timer beats it.
+    /// Asking for more than that quietly gets you the floor.
     f64 rate_hz = 1000.0;
+
+    /// How many threads one tick samples, or 0 for all of them.
+    ///
+    /// All of them by default, so `rate_hz` means what a profiler user expects — each thread's rate — rather than a
+    /// budget divided by however many threads happen to exist.
+    /// A 16 ms frame at 1 kHz is sixteen samples.
+    /// Splitting those across eight threads is two per thread, which is not a profile of anything.
+    ///
+    /// The cost follows directly: a tick suspends and walks each thread it covers, so this multiplies the sampler's
+    /// own load.
+    /// Set it to 1 for a fixed budget instead.
+    isize threads_per_tick = 0;
 
     /// The most frames one sample keeps; deeper stacks are truncated and say so.
     isize max_frames = 64;

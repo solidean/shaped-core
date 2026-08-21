@@ -30,6 +30,15 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+// The sampler's own events are recorder bookkeeping, so they answer to the system domain rather than to whatever a
+// caller's default happens to be.
+// In the anonymous namespace on purpose: the macros look the name up unqualified, so this shadows the global fallback
+// for this file and collides with nothing.
+[[nodiscard]] constexpr cc::rec::domain* cc_rec_domain()
+{
+    return &cc::rec::g_system_domain;
+}
+
 /// The order everything below is written to obey.
 ///
 /// 1. Take the registry lock, so the target's thread_state cannot be reaped underneath us.
@@ -355,7 +364,6 @@ void sampler_main()
             break;
 
         sample s;
-        auto sampled = false;
 
 #if defined(_WIN32)
         if (cfg.include_unknown_threads && cc::current_time_steady_secs() >= next_refresh_at)
@@ -367,40 +375,60 @@ void sampler_main()
         // One round-robin over both halves, so a thread with no stream competes for slots on equal terms.
         // The two differ only in whether there is a stream to anchor into; the walk is the same.
         auto const unknown_count = cfg.include_unknown_threads ? os_threads.tids.size() : isize(0);
-        auto const slot = known_count + unknown_count > 0 ? cursor % (known_count + unknown_count) : isize(0);
+        auto const total_targets = known_count + unknown_count;
+        auto const per_tick = cfg.threads_per_tick > 0 ? cc::min(cfg.threads_per_tick, total_targets) : total_targets;
 
-        if (slot < known_count || unknown_count == 0)
+        if (total_targets > 0)
         {
-            known_count = cc::rec::impl::with_nth_thread_state(
-                slot,
-                [&](cc::rec::impl::thread_state& ts)
+            // The sampler's own cost, on the sampler's own lane.
+            //
+            // Not vanity: a sampled profile is only as trustworthy as its cadence, and a reader judging whether a
+            // 16 ms frame was sampled evenly or aliased against it needs to SEE when the ticks landed and what each
+            // one cost.
+            CC_RECORD_SCOPE("record.sample_tick");
+
+            for (isize n = 0; n < per_tick; ++n)
+            {
+                auto const slot = (cursor + n) % total_targets;
+                s = sample{};
+                auto took = false;
+
+                if (slot < known_count || unknown_count == 0)
                 {
-                    if (!is_sampleable(ts))
-                        return;
+                    known_count = cc::rec::impl::with_nth_thread_state(
+                        slot,
+                        [&](cc::rec::impl::thread_state& ts)
+                        {
+                            if (!is_sampleable(ts))
+                                return;
 
-                    s.native_tid = ts.native_tid;
-                    if (auto* const h = handles.get(ts.native_tid); h != nullptr)
-                        sampled = sample_suspended(h, &ts, frames, cfg.stop_at_scope, s);
-                });
-        }
-        else
-        {
-            auto const tid = os_threads.tids[slot - known_count];
-            s.native_tid = tid;
-            if (auto* const h = handles.get(tid); h != nullptr)
-                sampled = sample_suspended(h, nullptr, frames, cfg.stop_at_scope, s);
+                            s.native_tid = ts.native_tid;
+                            if (auto* const h = handles.get(ts.native_tid); h != nullptr)
+                                took = sample_suspended(h, &ts, frames, cfg.stop_at_scope, s);
+                        });
+                }
+                else
+                {
+                    auto const tid = os_threads.tids[slot - known_count];
+                    s.native_tid = tid;
+                    if (auto* const h = handles.get(tid); h != nullptr)
+                        took = sample_suspended(h, nullptr, frames, cfg.stop_at_scope, s);
+                }
+
+                if (took)
+                {
+                    // Inside the tick scope, so the sample and its cost stay together until splicing moves the sample
+                    // onto the thread it caught.
+                    write_sample(s, frames);
+                    g_taken.fetch_add(1, cc::memory_order_relaxed);
+                }
+                else
+                    g_idle.fetch_add(1, cc::memory_order_relaxed);
+            }
         }
 #endif
 
-        ++cursor;
-
-        if (sampled)
-        {
-            write_sample(s, frames);
-            g_taken.fetch_add(1, cc::memory_order_relaxed);
-        }
-        else
-            g_idle.fetch_add(1, cc::memory_order_relaxed);
+        cursor += per_tick > 0 ? per_tick : 1;
     }
 
 #if defined(_WIN32)

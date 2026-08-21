@@ -971,6 +971,8 @@ cc::rec::current_trace_id();                 // -> trace_id; an async scope ALWA
 // co_awaits recording NOTHING still has to be attributed — the scope is about where time goes.
 #include <clean-core/record/sampling.hh>      // what the threads were ACTUALLY doing, beside what they were told to say
 cc::rec::sampling_scope const s({.rate_hz = 1000.0});    // or start_sampling / stop_sampling / is_sampling
+// rate_hz is PER THREAD (a tick covers all of them). Capped ~1.9 kHz by the OS timer — measured, not guessed.
+// threads_per_tick = 1 restores a fixed budget split across threads. The sampler logs its own ticks as scopes.
 auto const merged = captured.spliced_samples();          // samples ride the SAMPLER's stream until you splice them
 // A sample carries an ANCHOR (which thread, how far its stream had committed), not a copy of that thread's state —
 // so splicing recovers the trace, the ambient context AND the open scopes, none of which an id could give you.

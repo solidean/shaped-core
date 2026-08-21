@@ -3,6 +3,7 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/recording.hh>
@@ -261,4 +262,55 @@ REC_TEST("record/sampling - threads the recorder never heard of are sampled too,
     auto const without
         = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .include_unknown_threads = false});
     CHECK(unknown_count(without) == 0);
+}
+
+REC_TEST("record/sampling - the sampler records its own cadence and cost")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture(deterministic_config());
+
+    auto const r = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0});
+
+    // The sampler's own lane says when it ran and what each tick cost, which is what lets a reader judge whether a
+    // profile is evenly sampled or aliased against a periodic workload.
+    auto const ticks = r.scopes("record.sample_tick");
+    CHECK(ticks.size() > 0);
+
+    // Every tick is a closed span with a duration, not a bare marker.
+    for (auto const& t : ticks)
+        CHECK(!t.is_open);
+}
+
+REC_TEST("record/sampling - one tick covers every thread, so a rate is a per-thread rate")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture(deterministic_config());
+
+    auto const per_thread = [](cc::rec::recording const& r)
+    {
+        cc::map<u64, isize> counts;
+        r.for_each_event(
+            [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+            {
+                if (e.kind() == cc::rec::event_kind::sample)
+                    ++counts[e.field_as_u64("native_tid").value_or(0)];
+            });
+        return counts;
+    };
+
+    // Covering every thread per tick is what makes rate_hz mean what a profiler user expects.
+    // One thread per tick divides the rate by however many threads exist, which for a frame's worth of ticks is a
+    // handful each.
+    auto const wide = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0});
+    auto const narrow = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .threads_per_tick = 1});
+
+    auto const wide_counts = per_thread(wide);
+    auto const narrow_counts = per_thread(narrow);
+
+    REQUIRE(wide_counts.size() > 1); // more than one thread was sampled at all
+    CHECK(count_samples(wide) > count_samples(narrow));
 }
