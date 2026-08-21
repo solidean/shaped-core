@@ -194,3 +194,27 @@ TEST("sg transfer_scheduler - a zero ratio lets async starve streaming")
     auto const only_stream = cc::vector<transfer_candidate>{stream_job(1, 10, 0)};
     CHECK(s.pick_next(only_stream).has_value());
 }
+
+TEST("sg transfer_scheduler - aging needs a real age to act on")
+{
+    // The regression this pins is not the arithmetic — that is covered above — but the wiring.
+    // An actor that never fills age_seconds leaves every candidate at 0, and a caller who turned aging on gets a
+    // knob that is accepted, documented and inert.
+    transfer_scheduler aging;
+    aging.set_aging_factor(1.0f);
+    aging.begin_window();
+
+    auto const unaged = cc::vector<transfer_candidate>{
+        transfer_candidate{.flavor = transfer_flavor::streaming, .priority = 10, .family = 1, .sequence = 1},
+        transfer_candidate{.flavor = transfer_flavor::streaming, .priority = 0, .family = 2, .sequence = 2},
+    };
+    auto const without_age = aging.pick_next(unaged);
+    REQUIRE(without_age.has_value());
+    CHECK(unaged[without_age.value()].priority == 10); // no age means aging cannot change anything
+
+    auto aged = unaged;
+    aged[1].age_seconds = 100; // the same jobs, one of them having actually waited
+    auto const with_age = aging.pick_next(aged);
+    REQUIRE(with_age.has_value());
+    CHECK(aged[with_age.value()].priority == 0);
+}

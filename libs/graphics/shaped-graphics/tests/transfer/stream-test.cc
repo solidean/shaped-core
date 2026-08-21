@@ -505,3 +505,41 @@ INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed rows", 
     CHECK(got[0] == src[0]);
     CHECK(got[src.size() - 1] == src[src.size() - 1]);
 }
+
+INVOCABLE_TEST("sg stream - promote_to_async makes a later writer wait on a download", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto const seeded = pattern(4096, 71);
+    auto buf = c.persistent.create_raw_buffer(4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto up = c.create_command_list();
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(seeded));
+    c.submit_command_list(cc::move(up));
+
+    auto stream = c.stream.bytes_from_buffer(buf, 0, 4096);
+    REQUIRE(stream.is_valid());
+
+    // The mirror of the upload case, with the direction flipped: promotion makes a list that WRITES the source wait
+    // for the read, so overwriting it immediately afterwards cannot race the readback.
+    // Without the hook installed this call flips a flag and does nothing, and the overwrite below is a data race the
+    // test would only lose intermittently — which is exactly why it is pinned here.
+    stream.promote_to_async();
+
+    auto const overwrite = pattern(4096, 99);
+    auto over = c.create_command_list();
+    REQUIRE(over != nullptr);
+    over->upload.bytes_to_buffer(buf, cc::span<byte const>(overwrite));
+    c.submit_command_list(cc::move(over));
+
+    REQUIRE(cc::try_async_blocking_get(stream.completion()).has_value());
+    auto const got = stream.future().try_get_bytes();
+    REQUIRE(got.has_value());
+
+    // The read saw the seeded bytes, not the overwrite that was submitted after the promotion.
+    CHECK(got.value()[0] == seeded[0]);
+    CHECK(got.value()[4095] == seeded[4095]);
+}

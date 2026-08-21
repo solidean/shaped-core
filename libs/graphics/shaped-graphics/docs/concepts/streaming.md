@@ -81,9 +81,12 @@ That is where nearly all of the system's risk lives.
 
 Preserve these; the rest is tuning:
 
-1. **A streaming transfer never stamps the forward reader value.**
-   That stamp is what makes a later command list wait, and not paying it is the entire point of the tier.
-   The storage still has to outlive the copy, so the lifetime gate reads a *separate* per-resource stamp, and deferred deletion waits on the max of the two.
+1. **A streaming transfer never stamps the value a later command list waits on.**
+   That stamp is what makes a later list wait, and not paying it is the entire point of the tier.
+   For an upload the storage still has to outlive the copy, so the lifetime gate reads a *separate* per-resource stamp, and deferred deletion waits on the max of the two.
+
+   A completion value is still **reserved** and still folded into its window, in both directions.
+   That is what `promote_to_async` has to hand out: promotion stamps the resource with that already-reserved value, and a value the fence never reaches would hang the very list it was given to.
 2. **Every teardown path settles the completion node.**
    Cancellation, a dropped handle, a dropped destination, context shutdown — all of them push `cc::async_error::make_cancelled()`.
    A manual async node nobody pushes parks its dependents for the process's lifetime, so silence is the one unacceptable outcome.

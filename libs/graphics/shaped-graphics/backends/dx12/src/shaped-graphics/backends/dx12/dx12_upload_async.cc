@@ -3,6 +3,7 @@
 // Source bytes are read only during the memcpy into staging, so a job and its pin die as soon as it is fully staged — on the actor thread, off the submission path.
 // Why the acyclicity guard is load-bearing: libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
 
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -62,6 +63,11 @@ struct active_upload
     std::shared_ptr<void const> keepalive;
     u64 sequence = 0; // actor-assigned submission order
     u64 family = 0;   // destination resource: same-family jobs must stay in sequence order
+
+    // When the actor took this job on, for aging.
+    // Read once per window rather than per candidate: aging changes an effective priority continuously, but the
+    // scheduler only acts on it when a window opens, so a finer reading would cost clock reads to no effect.
+    double admitted_at = 0;
 
     // Source-driven jobs only: the chunk sequence, and the pin keeping the CURRENT chunk's bytes alive while its
     // packer reads them window by window.
@@ -144,6 +150,9 @@ private:
     // A destination already released skips the copy entirely — a 1 GiB upload to a dead buffer must not stage.
     void admit_pending()
     {
+        // One reading for the whole batch: these all arrive together, and dating them apart by microseconds would
+        // only make the aging order depend on clock noise.
+        double const admitted_at = cc::current_time_steady_secs();
         for (auto& job : _pending)
         {
             active_upload a;
@@ -180,6 +189,7 @@ private:
                 a.keepalive = cc::move(strong);
             }
             a.sequence = _next_sequence++;
+            a.admitted_at = admitted_at;
             a.source = cc::move(job.source);
             if (a.source)
             {
@@ -306,6 +316,8 @@ private:
             c.flavor = sg::impl::transfer_flavor::streaming;
             c.priority = a.job.stream->priority.load(std::memory_order_relaxed);
         }
+
+        c.age_seconds = float(_window_opened_at - a.admitted_at);
 
         if (a.stalled) // its source has nothing right now; fill the window with other work rather than spin
             c.eligible = false;
@@ -537,6 +549,7 @@ private:
         _open_risky_job = {};
         _window_async_bytes = 0;
         _window_stream_bytes = 0;
+        _window_opened_at = cc::current_time_steady_secs();
         _sys._scheduler.begin_window();
         _window_open = true;
     }
@@ -649,6 +662,7 @@ private:
 
     isize _window_async_bytes = 0; // what the open window has moved, per flavor, for the scheduler's deficit
     isize _window_stream_bytes = 0;
+    double _window_opened_at = 0; // the one clock reading every candidate's age is measured against this window
 };
 } // namespace
 

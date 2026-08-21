@@ -2,6 +2,7 @@
 // The shape and the two fences are on the class doc there.
 // Why the drain rule and the acyclicity guard are load-bearing: libs/graphics/shaped-graphics/docs/concepts/download.async.md.
 
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
@@ -58,6 +59,11 @@ struct active_download
     std::shared_ptr<void const> keepalive; // the read source, held across the deferred CPU copies
     u64 sequence = 0;                      // actor-assigned submission order
     u64 family = 0;                        // source resource: same-family reads stay in sequence order
+
+    // When the actor took this job on, for aging.
+    // Read once per window rather than per candidate: aging changes an effective priority continuously, but the
+    // scheduler only acts on it when a window opens, so a finer reading would cost clock reads to no effect.
+    double admitted_at = 0;
 };
 
 /// The async-download copy actor: one thread that packs readbacks into staging windows, submits them, and drains completed windows into their destinations.
@@ -124,6 +130,8 @@ private:
     // The source is held strong for the job's whole lifetime, so its storage survives the read without a deferred-deletion gate.
     void admit_pending()
     {
+        // One reading for the whole batch — see the upload actor's twin.
+        double const admitted_at = cc::current_time_steady_secs();
         for (auto& job : _pending)
         {
             // A sink-driven read has no resident destination, so it has no pin either — cancellation comes from
@@ -161,6 +169,7 @@ private:
                 a.keepalive = job.buffer_source;
             }
             a.sequence = _next_sequence++;
+            a.admitted_at = admitted_at;
             a.job = cc::move(job);
             _active.push_back(cc::move(a));
         }
@@ -205,6 +214,8 @@ private:
             c.flavor = sg::impl::transfer_flavor::streaming;
             c.priority = a.job.stream->priority.load(std::memory_order_relaxed);
         }
+
+        c.age_seconds = float(_window_opened_at - a.admitted_at);
 
         if (has_pending_wait(a.job) && _open_highest_finished > 0)
             c.eligible = false;
@@ -359,6 +370,7 @@ private:
         _open_risky_job = {};
         _window_async_bytes = 0;
         _window_stream_bytes = 0;
+        _window_opened_at = cc::current_time_steady_secs();
         _open_mem_jobs.clear();
         _sys._scheduler.begin_window();
         _window_open = true;
@@ -524,6 +536,7 @@ private:
 
     isize _window_async_bytes = 0; // what the open window has moved, per flavor, for the scheduler's deficit
     isize _window_stream_bytes = 0;
+    double _window_opened_at = 0; // the one clock reading every candidate's age is measured against this window
 
     cc::vector<inflight_window> _inflight; // submitted, not-yet-drained windows (FIFO, oldest at the front)
 };
@@ -669,22 +682,34 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
 
 namespace
 {
-/// The half a streaming readback shares with its async twin: destination, pin, control block.
-/// Kept together so the two entry points below differ only in what they read from.
-struct stream_download_setup
+/// The control block every streaming readback shares, with its completion node and its promotion hook installed.
+///
+/// Promotion means the same thing here as it does for an upload, with the direction flipped: the reserved value moves
+/// onto the resource's REVERSE stamp, so a command list that WRITES the source after the call waits for the read.
+/// Nothing stamps it up front — a streamed extent costs a later writer nothing until someone asks for that.
+template <class ResourceT>
+[[nodiscard]] std::shared_ptr<sg::impl::stream_control> make_stream_control(std::shared_ptr<ResourceT const> source,
+                                                                            u64 value,
+                                                                            i64 total_hint)
 {
-    cc::pinned_data<byte> dst;
-    std::shared_ptr<sg::impl::stream_control> control;
-};
-
-[[nodiscard]] stream_download_setup make_stream_download_setup(isize size)
-{
-    stream_download_setup setup;
-    setup.dst = cc::pinned_data<byte>::create_uninitialized(size);
-    setup.control = std::make_shared<sg::impl::stream_control>();
-    setup.control->completion = cc::make_async_manual<cc::unit>();
-    setup.control->total_hint.store(size, std::memory_order_relaxed);
-    return setup;
+    auto control = std::make_shared<sg::impl::stream_control>();
+    control->completion = cc::make_async_manual<cc::unit>();
+    control->total_hint.store(total_hint, std::memory_order_relaxed);
+    // Weak: promoting a read whose source is already gone must not resurrect it.
+    control->on_promote = [weak = std::weak_ptr<ResourceT const>(cc::move(source)), value]
+    {
+        if (auto const strong = weak.lock())
+        {
+            u64 prev = strong->_pending_async_download_value.load(std::memory_order_relaxed);
+            while (prev < value
+                   && !strong->_pending_async_download_value.compare_exchange_weak(
+                       prev, value, std::memory_order_release, std::memory_order_relaxed))
+            {
+                // CAS retries; `prev` is refreshed with the current value each time.
+            }
+        }
+    };
+    return control;
 }
 } // namespace
 
@@ -699,27 +724,32 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
                                                             "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
-    auto setup = make_stream_download_setup(size);
-    cc::span<byte> const dst_span = setup.dst.span();
+    // A value is RESERVED but not stamped: nothing waits on a streamed read until promote_to_async says so.
+    // It is still folded into the window when the read finishes, so the fence reaches it — otherwise a promotion
+    // would hand a later writer a value the fence never gets to, and hang it.
+    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+
+    auto dst = cc::pinned_data<byte>::create_uninitialized(size);
+    cc::span<byte> const dst_span = dst.span();
+    auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    auto control = make_stream_control(typed, value, size);
 
     dx12_async_download_job job;
-    job.buffer_source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.buffer_source = typed;
     job.src_offset = offset;
     job.size = size;
     job.dst = dst_span;
-    job.pin = std::weak_ptr<void const>(setup.dst.pin());
-    job.stream = setup.control;
+    job.pin = std::weak_ptr<void const>(dst.pin());
+    job.stream = control;
     // One node serves both the future and the handle, so the drain path already settles them together.
-    job.completion = setup.control->completion;
-    // No completion_value: a streaming read stamps nothing, so a later writer inherits no wait.
-    // Keeping the extent clear until the handle settles is the caller's half of the streaming contract.
+    job.completion = control->completion;
+    job.completion_value = dx12_download_fence_value(value);
     // The forward waits stay, since reading bytes an earlier list has not finished writing would just be wrong.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
 
-    return sg::stream_download_handle(cc::move(setup.control),
-                                      sg::bytes_future(cc::move(setup.dst), setup.control->completion));
+    return sg::stream_download_handle(cc::move(control), sg::bytes_future(cc::move(dst), control->completion));
 }
 
 sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_texture_handle texture,
@@ -736,23 +766,27 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
-    auto setup = make_stream_download_setup(fp.tight_size());
-    cc::span<byte> const dst_span = setup.dst.span();
+    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+
+    auto dst = cc::pinned_data<byte>::create_uninitialized(fp.tight_size());
+    cc::span<byte> const dst_span = dst.span();
+    auto typed = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    auto control = make_stream_control(typed, value, fp.tight_size());
 
     dx12_async_download_job job;
-    job.texture_source = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.texture_source = typed;
     job.footprint = fp;
     job.is_texture = true;
     job.dst = dst_span;
-    job.pin = std::weak_ptr<void const>(setup.dst.pin());
-    job.stream = setup.control;
-    job.completion = setup.control->completion;
+    job.pin = std::weak_ptr<void const>(dst.pin());
+    job.stream = control;
+    job.completion = control->completion;
+    job.completion_value = dx12_download_fence_value(value);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
 
-    return sg::stream_download_handle(cc::move(setup.control),
-                                      sg::bytes_future(cc::move(setup.dst), setup.control->completion));
+    return sg::stream_download_handle(cc::move(control), sg::bytes_future(cc::move(dst), control->completion));
 }
 
 sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::raw_buffer_handle buffer,
@@ -769,17 +803,19 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
                                                             "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
-    auto control = std::make_shared<sg::impl::stream_control>();
-    control->completion = cc::make_async_manual<cc::unit>();
-    control->total_hint.store(size, std::memory_order_relaxed);
+    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+
+    auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    auto control = make_stream_control(typed, value, size);
 
     dx12_async_download_job job;
-    job.buffer_source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.buffer_source = typed;
     job.src_offset = offset;
     job.size = size;
     job.sink = std::make_shared<dx12_download_sink>(cc::move(sink));
     job.stream = control;
     job.completion = control->completion;
+    job.completion_value = dx12_download_fence_value(value);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
@@ -805,17 +841,19 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
-    auto control = std::make_shared<sg::impl::stream_control>();
-    control->completion = cc::make_async_manual<cc::unit>();
-    control->total_hint.store(fp.tight_size(), std::memory_order_relaxed);
+    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+
+    auto typed = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    auto control = make_stream_control(typed, value, fp.tight_size());
 
     dx12_async_download_job job;
-    job.texture_source = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.texture_source = typed;
     job.footprint = fp;
     job.is_texture = true;
     job.sink = std::make_shared<dx12_download_sink>(cc::move(sink));
     job.stream = control;
     job.completion = control->completion;
+    job.completion_value = dx12_download_fence_value(value);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
