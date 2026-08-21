@@ -522,5 +522,13 @@ The scope guard stores that frame next to the depth it already touches, so the e
 
 Emscripten has no walkable native stack and returns an empty capture; `cc::stack_capture_available()` says which you are in.
 
+**Names come later, from `cc::symbolizer`** ([symbolize.hh](../../src/clean-core/platform/symbolize.hh)).
+Capture writes addresses and never asks who they belong to, because asking costs orders of magnitude more than the event it would hang off.
+So the asking happens at analysis time, and the result is cached — a sampled profile is thousands of hits on a handful of addresses.
+
+It resolves against **this process's** loaded modules, which is right for a trace exported by the program that recorded it.
+A recording loaded from elsewhere mostly resolves to nothing and says so, because a different run has a different address layout.
+An unresolved frame keeps its address rather than acquiring a confident wrong name.
+
 **No binary format here is stable**, and none will be for a good while.
 Durability comes from an exporter, not from the raw bytes.

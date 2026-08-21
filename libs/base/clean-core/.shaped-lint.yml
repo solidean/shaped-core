@@ -122,6 +122,11 @@ rules:
       - src/clean-core/platform/native.cc
 
   - kind: allow-include
+    value: <dbghelp.h>
+    reason: SymFromAddr and SymGetLineFromAddr64 are the only route from an address to a name on Windows
+    files: src/clean-core/platform/symbolize.cc
+
+  - kind: allow-include
     value: <tlhelp32.h>
     reason: the thread snapshot is the only way to find a thread the recorder was never told about
     files: src/clean-core/record/sampling.cc

@@ -32,6 +32,7 @@ add_library(clean-core
     src/clean-core/platform/environment.cc
     src/clean-core/platform/file_path.cc
     src/clean-core/platform/stack_capture.cc
+    src/clean-core/platform/symbolize.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
@@ -120,6 +121,7 @@ target_sources(clean-core
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
     src/clean-core/platform/stack_capture.hh
+    src/clean-core/platform/symbolize.hh
     src/clean-core/platform/win32_sanitized.hh
     src/clean-core/platform/intrinsics.hh
 
@@ -417,6 +419,7 @@ if(SC_BUILD_TESTS)
         tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
         tests/platform/stack-capture-test.cc
+        tests/platform/symbolize-test.cc
 
         tests/algorithm/sort-test.cc
         tests/algorithm/select-test.cc

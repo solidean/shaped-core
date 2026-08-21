@@ -67,6 +67,9 @@ Add entries as we discover them, and remove them as they land.
 - **Sampling threads the recorder has never heard of.**
   The sampler walks the thread registry, which a thread joins by recording something — so a thread that records nothing is invisible, and that is exactly the thread worth sampling.
   Enumerating the process's OS threads instead would cover it, at the cost of sampling threads nothing in this process owns.
+- **Symbolizing a foreign recording.**
+  `cc::symbolizer` resolves against this process's loaded modules, so a `.ccrec` from another run or another machine mostly resolves to nothing.
+  Doing better needs the recording to carry its module base table and build ids, and the analysis side to load the matching binaries.
 - **A POSIX sampler.**
   Windows suspends a thread and walks it from outside; POSIX has no equivalent.
   There it wants `SIGPROF` via `timer_create`, plus a handler that walks its own stack and hands the frames and the anchor to the sampler thread.

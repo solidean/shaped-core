@@ -977,6 +977,11 @@ auto const merged = captured.spliced_samples();          // samples ride the SAM
 // It stops at the innermost open scope, so a sample inside instrumented code is often one address. That is the point.
 // No sampler without threads, or where a foreign thread's stack cannot be walked; is_sampling() says which.
 
+#include <clean-core/platform/symbolize.hh>  // addresses -> names, at ANALYSIS time and never on the hot path
+cc::symbolizer sym;                          // caches; NOT thread-safe (DbgHelp needs callers to serialize)
+sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:42", or "app.exe+0x1234", or <unknown>
+// Resolves against THIS process's modules. A recording from another run resolves to nothing and admits it.
+
 CC_RECORD_MARK("fallback-taken");            // "did this code run" — the cheapest useful annotation
 CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES
 CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless
