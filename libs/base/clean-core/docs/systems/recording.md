@@ -544,6 +544,27 @@ A foreign table is worth having even when the binaries are not.
 Failing to load one costs the function and the line and still leaves the module and the offset, so a frame degrades to `app.exe+0x1234`.
 An unresolved frame keeps its address rather than acquiring a confident wrong name.
 
+### Changing what the sampler does, while it does it
+
+The whole `sampling_config` is re-read once per tick, so `cc::rec::reconfigure_sampling` takes effect within one interval and nothing needs the sampler stopped.
+That matters beyond convenience: stopping it would throw away the interned stack table, whose ids are already in the stream.
+
+```cpp
+cc::rec::reconfigure_sampling({.rate_hz = 2000.0});                  // a slider in a profiler window
+cc::rec::sampling_override const all({.include_unknown_threads = true}); // ...or just around what you are debugging
+```
+
+**`include_unknown_threads` is off by default, because it costs the profile and not only the CPU.**
+A tick walks every OS thread instead of the ones the recorder knows, and measured over half a second at 1 kHz:
+
+| unknown threads | ticks | samples | mean tick | sampler load |
+|---|---|---|---|---|
+| off | 374 | 373 | 18 µs | 1.4% |
+| on | 220 | 3989 | 167 µs | 7.4% |
+
+The tick count is the number that matters.
+Turning it on samples the threads you actually asked about **40% less often**, so it is a mode for hunting a thread that records nothing — which is exactly what it is for — rather than a default.
+
 ### Placing samples while the program runs
 
 A sample is written to the sampler's stream carrying an anchor into the sampled thread's, and [`recording::spliced_samples`](../../src/clean-core/record/recording.hh) moves it home.

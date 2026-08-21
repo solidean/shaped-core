@@ -69,7 +69,13 @@ struct cc::rec::sampling_config
     /// and that is exactly the thread a profiler is looking for.
     /// Such a thread has no stream, so its samples carry frames and a native id but no anchor, and splicing leaves
     /// them where they are.
-    bool include_unknown_threads = true;
+    ///
+    /// **Off by default, because it costs the profile and not just the CPU.**
+    /// A tick walks every thread rather than one, and measured over half a second at 1 kHz that turned 374 ticks into
+    /// 220 — so the threads you asked about get sampled 40% less often, on top of the sampler going from 1.4% of a
+    /// core to 7.4%.
+    /// Turn it on when you are hunting a thread that records nothing, which is exactly what it is for.
+    bool include_unknown_threads = false;
 
     /// Intern a stack rather than writing it out, from this many frames up.
     /// Zero never interns.
@@ -103,7 +109,42 @@ void stop_sampling();
 
 [[nodiscard]] bool is_sampling();
 
+/// Replaces the configuration of a RUNNING sampler, in effect from its next tick.
+///
+/// Everything is live, including the rate: nothing here needs the sampler stopped, and stopping it would throw away
+/// the interned stack table along with the ids already written into the stream.
+/// The intended callers are a checkbox in a profiler UI and a test narrowing what it samples.
+///
+/// Does nothing useful before `start_sampling`, which replaces the configuration wholesale.
+void reconfigure_sampling(rec::sampling_config const& cfg);
+
+/// What the sampler is running with right now.
+[[nodiscard]] rec::sampling_config current_sampling_config();
+
 } // namespace cc::rec
+
+/// Applies a sampling configuration for a scope, putting the previous one back afterwards.
+///
+/// For turning something on around the code being investigated rather than for a whole run:
+///
+///     cc::rec::sampling_override const all_threads({.include_unknown_threads = true});
+///
+/// Composes with `sampling_scope`, which starts and stops the sampler; this only changes what a running one does.
+struct cc::rec::sampling_override
+{
+    explicit sampling_override(rec::sampling_config const& cfg) : _previous(rec::current_sampling_config())
+    {
+        rec::reconfigure_sampling(cfg);
+    }
+
+    ~sampling_override() { rec::reconfigure_sampling(_previous); }
+
+    sampling_override(sampling_override const&) = delete;
+    sampling_override& operator=(sampling_override const&) = delete;
+
+private:
+    rec::sampling_config _previous;
+};
 
 /// How many samples were taken and how many were lost, since the last start.
 struct cc::rec::sampling_stats

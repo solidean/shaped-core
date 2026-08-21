@@ -16,6 +16,7 @@
 #include <clean-core/record/writer.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 
 #if CC_HAS_THREADS
@@ -55,7 +56,16 @@ namespace
 constexpr char const* sampler_thread_name = "cc-sample";
 constexpr char const* actor_thread_name = "cc-record";
 
-cc::rec::sampling_config g_config;
+/// The live configuration, which a UI or a test may replace while the sampler runs.
+///
+/// Behind a lock rather than a pile of atomics: it is read once per tick, half a millisecond apart at the fastest,
+/// so the lock is free and the config stays one coherent object rather than fields that can disagree mid-tick.
+cc::mutex<cc::rec::sampling_config> g_config;
+
+[[nodiscard]] cc::rec::sampling_config load_config()
+{
+    return g_config.lock([](cc::rec::sampling_config const& c) { return c; });
+}
 cc::atomic<bool> g_running = false;
 cc::atomic<bool> g_stop = false;
 
@@ -386,7 +396,7 @@ void write_stack_definition(u64 id, cc::span<void* const> frames)
 }
 
 /// Writes one sample into the sampler's own stream.
-void write_sample(sample const& s, cc::span<void* const> frames)
+void write_sample(sample const& s, cc::span<void* const> frames, isize intern_min_frames)
 {
     auto const& d = cc::rec::impl::sample_desc();
     if (!cc::rec::is_recording(d))
@@ -396,7 +406,7 @@ void write_sample(sample const& s, cc::span<void* const> frames)
 
     // An interned sample carries ONE entry — the id — in the same array the addresses would have gone in, so the
     // layout does not grow by a byte for the samples that are not worth interning.
-    auto const interned = g_config.intern_min_frames > 0 && count >= g_config.intern_min_frames
+    auto const interned = intern_min_frames > 0 && count >= intern_min_frames
                             ? intern_stack(frames.subspan({.offset = 0, .size = count}))
                             : u64(0);
 
@@ -439,8 +449,7 @@ void sampler_main()
     cc::set_current_thread_name(sampler_thread_name);
     cc::rec::set_current_thread_record_name(sampler_thread_name);
 
-    auto const cfg = g_config;
-    auto const interval = cfg.rate_hz > 0 ? 1.0 / cfg.rate_hz : 0.001;
+    auto cfg = load_config();
 
     cc::vector<void*> frames;
     frames.resize_to_constructed(cc::max(cfg.max_frames, isize(1)), nullptr);
@@ -468,6 +477,13 @@ void sampler_main()
 
     while (!g_stop.load(cc::memory_order_acquire))
     {
+        // Re-read every tick, so a UI checkbox or a scoped override takes effect within one interval rather than
+        // needing the sampler stopped and restarted — which would throw away the intern table with it.
+        cfg = load_config();
+        if (frames.size() != cc::max(cfg.max_frames, isize(1)))
+            frames.resize_to_constructed(cc::max(cfg.max_frames, isize(1)), nullptr);
+
+        auto const interval = cfg.rate_hz > 0 ? 1.0 / cfg.rate_hz : 0.001;
         auto const wobble = cfg.jitter > 0 ? 1.0 + cfg.jitter * (rng.uniform(0.0, 2.0) - 1.0) : 1.0;
 #if defined(_WIN32)
         timer.sleep(interval * wobble);
@@ -534,7 +550,7 @@ void sampler_main()
                 {
                     // Inside the tick scope, so the sample and its cost stay together until splicing moves the sample
                     // onto the thread it caught.
-                    write_sample(s, frames);
+                    write_sample(s, frames, cfg.intern_min_frames);
                     g_taken.fetch_add(1, cc::memory_order_relaxed);
                 }
                 else
@@ -595,7 +611,7 @@ void cc::rec::start_sampling(cc::rec::sampling_config const& cfg)
 
     rec::stop_sampling();
 
-    g_config = cfg;
+    g_config.lock([&](cc::rec::sampling_config& c) { c = cfg; });
 
     // Ids are only meaningful within one run, so a new run starts a new numbering rather than inheriting stacks that
     // nothing in this recording defines.
@@ -611,6 +627,16 @@ void cc::rec::start_sampling(cc::rec::sampling_config const& cfg)
 
     g_sampler = std::thread(sampler_main);
 #endif
+}
+
+void cc::rec::reconfigure_sampling(cc::rec::sampling_config const& cfg)
+{
+    g_config.lock([&](cc::rec::sampling_config& c) { c = cfg; });
+}
+
+cc::rec::sampling_config cc::rec::current_sampling_config()
+{
+    return load_config();
 }
 
 void cc::rec::stop_sampling()

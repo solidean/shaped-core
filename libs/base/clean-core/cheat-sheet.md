@@ -986,6 +986,13 @@ sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:
 // The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
 // A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
 
+cc::rec::reconfigure_sampling(cfg);          // LIVE: takes effect next tick, no stop/restart, keeps the intern table
+cc::rec::current_sampling_config();          // what it is running with now — drive a UI checkbox off this
+cc::rec::sampling_override const o({...});   // apply a config for a scope, restored on exit
+// include_unknown_threads is OFF by default: it walks every OS thread per tick, and measured at 1 kHz over 0.5s
+// that turned 374 ticks into 220 — the threads you asked about get sampled 40% less often. Turn it on to hunt a
+// thread that records nothing, which is the only thing it is for.
+
 #include <clean-core/record/splicing_listener.hh>  // samples placed where they were taken, LIVE
 cc::rec::splicing_listener splicer(my_listener);     // register THIS, not my_listener; it must outlive the splicer
 splicer.flush();                                     // after the final flush_blocking, or the last samples stay put

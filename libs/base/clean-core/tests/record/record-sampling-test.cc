@@ -10,6 +10,7 @@
 #include <clean-core/record/sampling.hh>
 #include <clean-core/record/stack_table.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
@@ -310,12 +311,118 @@ REC_TEST("record/sampling - one tick covers every thread, so a rate is a per-thr
     // Covering every thread per tick is what makes rate_hz mean what a profiler user expects.
     // One thread per tick divides the rate by however many threads exist, which for a frame's worth of ticks is a
     // handful each.
-    auto const wide = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0});
-    auto const narrow = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .threads_per_tick = 1});
+    // Unknown threads on explicitly: the subject here is threads_per_tick, and only one thread in this test records
+    // anything, so the recorder's own set gives nothing to divide.
+    auto const wide = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .include_unknown_threads = true});
+    auto const narrow = capture_sampled([] { busy_for_secs(0.25); },
+                                        {.rate_hz = 500.0, .threads_per_tick = 1, .include_unknown_threads = true});
 
     auto const wide_counts = per_thread(wide);
     auto const narrow_counts = per_thread(narrow);
 
     REQUIRE(wide_counts.size() > 1); // more than one thread was sampled at all
     CHECK(count_samples(wide) > count_samples(narrow));
+}
+
+TEST("record/sampling - what sampling unknown threads costs",
+     nx::config::manual,
+     nx::config::exclusive(),
+     nx::config::owns_recorder)
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler");
+
+    rec_fixture const fixture(deterministic_config());
+
+    cc::println("");
+    cc::println("  unknown   ticks   samples   mean tick us   total tick ms   sampler load");
+
+    for (auto const unknown : {false, true})
+    {
+        auto const r
+            = capture_sampled([] { busy_for_secs(0.5); }, {.rate_hz = 1000.0, .include_unknown_threads = unknown});
+
+        auto const ticks = r.scopes("record.sample_tick");
+
+        auto total = 0.0;
+        for (auto const& s : ticks)
+            total += s.duration_secs();
+
+        cc::println("  {:7}   {:5}   {:7}   {:12.1f}   {:13.2f}   {:11.1f}%", unknown ? "yes" : "no", ticks.size(),
+                    count_samples(r), ticks.empty() ? 0.0 : total / f64(ticks.size()) * 1e6, total * 1e3,
+                    total / 0.5 * 100);
+    }
+}
+
+REC_TEST("record/sampling - unknown threads are off unless asked for")
+{
+    // The default costs the profile and not just the CPU, so it has to be the quiet one.
+    CHECK(!cc::rec::sampling_config{}.include_unknown_threads);
+}
+
+REC_TEST("record/sampling - the configuration can change while the sampler runs")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener rl;
+    {
+        scoped_listener const reg(rl);
+        {
+            cc::rec::sampling_scope const sampling({.rate_hz = 500.0, .include_unknown_threads = false});
+            CHECK(!cc::rec::current_sampling_config().include_unknown_threads);
+
+            busy_for_secs(0.1);
+
+            {
+                // What a checkbox in a profiler window does, and what a test narrows with.
+                // The sampler must not have to be stopped for this: stopping it would throw away the interned stacks
+                // whose ids are already in the stream.
+                cc::rec::sampling_override const all_threads({.rate_hz = 500.0, .include_unknown_threads = true});
+                CHECK(cc::rec::current_sampling_config().include_unknown_threads);
+
+                busy_for_secs(0.15);
+            }
+
+            // Restored, which is what makes it usable around a suspicious region rather than for a whole run.
+            CHECK(!cc::rec::current_sampling_config().include_unknown_threads);
+            busy_for_secs(0.1);
+        }
+        cc::rec::flush_blocking();
+    }
+
+    auto const r = rl.take();
+    REQUIRE(count_samples(r) > 0);
+
+    // The override was live, so the run holds samples of threads that have no stream to anchor into — which a run
+    // with the flag off throughout could not produce.
+    isize unanchored = 0;
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() != cc::rec::event_kind::sample)
+                return;
+            if (e.field_as_u64("thread_index").value_or(0) == cc::rec::impl::sample_unknown_thread)
+                ++unanchored;
+        });
+    CHECK(unanchored > 0);
+}
+
+REC_TEST("record/sampling - a live rate change is picked up too")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::sampling_scope const sampling({.rate_hz = 200.0});
+    CHECK(cc::rec::current_sampling_config().rate_hz == 200.0);
+
+    // Everything is live, not just the flag that motivated it — a config read once per tick has no reason to make
+    // one field special.
+    cc::rec::reconfigure_sampling({.rate_hz = 900.0, .max_frames = 8});
+    CHECK(cc::rec::current_sampling_config().rate_hz == 900.0);
+    CHECK(cc::rec::current_sampling_config().max_frames == 8);
 }
