@@ -127,8 +127,12 @@ template <class T>
 inline constexpr bool is_fixed_size_value = is_scalar_value<T> || is_literal_text<T>;
 
 /// How many bytes T's value occupies, for the fixed-size cases.
+///
+/// A literal is eight whatever `sizeof(char const*)` happens to be: a payload slot holding a POINTER is eight bytes on
+/// every target, so the wire layout does not follow the writer's architecture.
+/// wasm32 is the target that makes that concrete, with four-byte pointers and a 64-bit file to write.
 template <class T>
-inline constexpr u16 fixed_value_bytes = is_literal_text<T> ? u16(sizeof(char const*)) : u16(sizeof(value_storage_t<T>));
+inline constexpr u16 fixed_value_bytes = is_literal_text<T> ? u16(sizeof(u64)) : u16(sizeof(value_storage_t<T>));
 
 /// The one `value` field of a fixed-size payload, at a caller-chosen offset.
 template <class T>
@@ -174,8 +178,9 @@ CC_FORCE_INLINE void record_named(rec::desc const& d, cc::string_view name, T co
 
     if constexpr (is_literal_text<T>)
     {
-        auto const* const p = static_cast<char const*>(value);
-        record_named_value(d, static_cast<void const*>(&p), isize(sizeof(p)), name);
+        // Widened to eight bytes, matching fixed_value_bytes and every other pointer-carrying slot.
+        auto const address = u64(reinterpret_cast<uintptr_t>(static_cast<char const*>(value)));
+        record_named_value(d, &address, isize(sizeof(address)), name);
     }
     else
     {
@@ -197,7 +202,8 @@ CC_FORCE_INLINE void record_value(rec::desc const& d, T const& value)
     if constexpr (is_scalar_value<T>)
         rec::record_event(d, value_storage_t<T>(value));
     else if constexpr (is_literal_text<T>)
-        rec::record_event(d, static_cast<char const*>(value)); // the address; the bytes stay in the binary
+        // The address, widened to eight bytes so the slot is the same size on every target; the bytes stay in the binary.
+        rec::record_event(d, u64(reinterpret_cast<uintptr_t>(static_cast<char const*>(value))));
     else
         record_text_value(d, cc::string_view(value));
 }

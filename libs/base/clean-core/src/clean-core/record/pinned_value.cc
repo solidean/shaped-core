@@ -57,7 +57,8 @@ bool cc::rec::impl::record_pinned_bytes(cc::rec::desc const& d, cc::pinned_data<
         }
     }
 
-    auto const payload = pinned_payload{.data = bytes.data(), .size = u64(bytes.size())};
+    auto const payload
+        = pinned_payload{.data = u64(reinterpret_cast<uintptr_t>(bytes.data())), .size = u64(bytes.size())};
     cc::memcpy(out.data(), &payload, sizeof(payload));
 
     writer.commit(isize(sizeof(payload)), rec::impl::flag_payload_pinned);

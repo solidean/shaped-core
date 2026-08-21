@@ -49,6 +49,18 @@ Everything a consumer needs to interpret an event without having heard of the co
 | per block: the chunk sequence, layer, and both (cycles, wall) pairs | so a cycle count still maps to a time |
 | the measured cycle rate | so a duration in cycles becomes one in seconds |
 
+### A payload slot holding a pointer is always eight bytes
+
+`desc_ref`, `cstring` and `pinned_bytes` all hold an address, and all three occupy **eight bytes regardless of the writer's pointer width**.
+
+That is a rule rather than an accident of the machines we develop on.
+A field's offset and size live in the descriptor, so letting them follow `sizeof(void*)` would make the wire layout depend on the architecture that wrote it.
+wasm32 is what makes that concrete: four-byte pointers, against a file the rest of the tier reads as 64-bit.
+See [platforms.md](../../../../../docs/platforms.md#64-bit-only), which is where that split is spelled out.
+
+So a producer widens the address on the way in and a reader narrows it on the way out; neither ever memcpys a native pointer into or out of a payload.
+`event_view::field_as_desc`, `field_as_text` and `field_as_bytes` are what do the narrowing, which is the other reason to go through them.
+
 The stream state travels too, because it is an ordinary event rather than something alongside the stream.
 Every chunk opens with an `event_kind::stream_state` naming the trace and the scopes already open, so it is written and read like any other event — see [recording.md](recording.md#the-chunk-preamble).
 

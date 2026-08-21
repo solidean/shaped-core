@@ -381,7 +381,11 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
                     cc::memcpy(&referenced, slot, sizeof(referenced));
 
                     rec::desc const* target = referenced < h.desc_count ? out._descs.data() + referenced : nullptr;
-                    cc::memcpy(slot, &target, sizeof(target));
+
+                    // Back as a u64, because that is the slot's width on every target — a four-byte write here would
+                    // leave the other half of a wasm32 payload holding whatever the index had in it.
+                    auto const address = u64(reinterpret_cast<uintptr_t>(target));
+                    cc::memcpy(slot, &address, sizeof(address));
                 }
                 else if (field.type == rec::type_code::cstring)
                 {
@@ -436,11 +440,12 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
                     cc::memcpy(&blob_offset, slot, sizeof(blob_offset));
                     cc::memcpy(&size, slot + 8, sizeof(size));
 
-                    // A slot the file cannot justify becomes null, which `field_as_bytes` already reads as empty.
-                    byte const* data = nullptr;
+                    // A slot the file cannot justify becomes zero, which `field_as_bytes` already reads as empty.
+                    // Written back as a u64 rather than as a pointer: the slot is eight bytes on every target.
+                    u64 address = 0;
                     if (size > 0 && blob_offset + size <= h.blob_bytes)
-                        data = out._blobs.data() + blob_offset;
-                    cc::memcpy(slot, &data, sizeof(data));
+                        address = u64(reinterpret_cast<uintptr_t>(out._blobs.data() + blob_offset));
+                    cc::memcpy(slot, &address, sizeof(address));
                     continue;
                 }
 
@@ -459,9 +464,11 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
                 }
 
                 // A slot the file could not justify becomes the empty string rather than an address.
+                // Written back as a u64, since the slot is eight bytes whatever this target's pointers are.
                 char const* const written
                     = u64(str.offset) + str.length <= h.string_bytes ? text : out._payload_strings.data();
-                cc::memcpy(slot, &written, sizeof(written));
+                auto const address = u64(reinterpret_cast<uintptr_t>(written));
+                cc::memcpy(slot, &address, sizeof(address));
             }
 
             offset += impl::event_bytes_for(isize(header->payload_size));

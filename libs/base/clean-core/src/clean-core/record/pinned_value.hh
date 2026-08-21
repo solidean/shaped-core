@@ -56,9 +56,12 @@ inline constexpr rec::field pinned_value_fields[] = {
 };
 
 /// What a pinned payload holds.
+///
+/// `data` is a u64 rather than a pointer, like every other payload slot that carries one: eight bytes on every target,
+/// so the wire layout does not follow the writer's pointer width.
 struct pinned_payload
 {
-    void const* data = nullptr;
+    u64 data = 0;
     u64 size = 0;
 };
 static_assert(sizeof(pinned_payload) == 16, "pinned_value_fields describes this layout");

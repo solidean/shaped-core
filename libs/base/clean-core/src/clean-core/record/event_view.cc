@@ -135,10 +135,11 @@ cc::optional<cc::string_view> cc::rec::event_view::field_as_text(cc::string_view
 
     if (f->type == rec::type_code::cstring)
     {
-        char const* p = nullptr;
-        if (!read_raw(payload, *f, p) || p == nullptr)
+        // Eight bytes on every target, so it is read as a u64 and cast back rather than read as a pointer.
+        u64 address = 0;
+        if (!read_raw(payload, *f, address) || address == 0)
             return {};
-        return cc::string_view(p);
+        return cc::string_view(reinterpret_cast<char const*>(uintptr_t(address)));
     }
 
     if (f->type == rec::type_code::inline_text)
@@ -199,18 +200,19 @@ cc::span<byte const> cc::rec::event_view::field_as_bytes(cc::string_view field_n
     if (f == nullptr || f->type != rec::type_code::pinned_bytes)
         return {};
 
-    byte const* data = nullptr;
-    if (!read_raw(payload, *f, data) || data == nullptr)
+    // Both halves are u64: the address slot is eight bytes on every target, wasm32's four-byte pointers included.
+    u64 address = 0;
+    if (!read_raw(payload, *f, address) || address == 0)
         return {};
 
     // The size sits in the next eight bytes, which is what the pinned layout declares.
-    // Read through the field list rather than assumed, so a payload that says something else reads as empty.
+    // Read through a field rather than assumed, so a payload too short for it reads as empty.
     u64 size = 0;
     auto const size_field = rec::field{.name = "", .type = rec::type_code::u64_, .offset = u16(f->offset + 8), .size = 8};
     if (!read_raw(payload, size_field, size))
         return {};
 
-    return cc::span<byte const>(data, isize(size));
+    return cc::span<byte const>(reinterpret_cast<byte const*>(uintptr_t(address)), isize(size));
 }
 
 cc::rec::desc const* cc::rec::event_view::field_as_desc(cc::string_view field_name) const
@@ -219,11 +221,12 @@ cc::rec::desc const* cc::rec::event_view::field_as_desc(cc::string_view field_na
     if (f == nullptr || f->type != rec::type_code::desc_ref)
         return nullptr;
 
-    rec::desc const* target = nullptr;
+    // Read as a u64, never as a pointer: the slot is eight bytes on every target, and wasm32's pointers are four.
+    u64 target = 0;
     if (!read_raw(payload, *f, target))
         return nullptr;
 
-    return target;
+    return reinterpret_cast<rec::desc const*>(uintptr_t(target));
 }
 
 cc::vector<u64> cc::rec::event_view::field_as_u64_array(cc::string_view field_name) const

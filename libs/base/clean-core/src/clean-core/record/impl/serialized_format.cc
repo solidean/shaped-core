@@ -321,36 +321,40 @@ void cc::rec::impl::dump_builder::rewrite_payload_pointers(rec::desc const& d, c
 
         if (field.type == rec::type_code::desc_ref)
         {
-            rec::desc const* target = nullptr;
-            cc::memcpy(&target, payload.data() + field.offset, sizeof(target));
+            u64 address = 0;
+            cc::memcpy(&address, payload.data() + field.offset, sizeof(address));
+            auto const* const target = reinterpret_cast<rec::desc const*>(uintptr_t(address));
 
             // A null slot stays null, and so does one whose target never made it into the table — a reader treats both
             // as "not named here", which is exactly what a preamble with fewer scopes than depth already means.
-            auto const written = u64(target != nullptr ? desc_index_of_pointer(target) : i64(-1));
+            auto const written = u64(address != 0 ? desc_index_of_pointer(target) : i64(-1));
             cc::memcpy(payload.data() + field.offset, &written, sizeof(written));
         }
         else if (field.type == rec::type_code::cstring)
         {
-            char const* text = nullptr;
-            cc::memcpy(&text, payload.data() + field.offset, sizeof(text));
+            u64 address = 0;
+            cc::memcpy(&address, payload.data() + field.offset, sizeof(address));
+            auto const* const text = reinterpret_cast<char const*>(uintptr_t(address));
 
             // Into the string table, where the descriptors' own names already live, so a literal recorded a thousand
             // times costs the file one copy.
-            auto const written = text != nullptr ? _intern_string(cc::string_view(text)) : serialized_str{};
+            auto const written = address != 0 ? _intern_string(cc::string_view(text)) : serialized_str{};
             cc::memcpy(payload.data() + field.offset, &written, sizeof(written));
         }
         else if (field.type == rec::type_code::pinned_bytes)
         {
             // The size lives in the next eight bytes, which is what the pinned layout declares — the address alone
             // says nothing about how much to copy.
-            byte const* data = nullptr;
-            u64 size = 0;
-            cc::memcpy(&data, payload.data() + field.offset, sizeof(data));
             if (isize(field.offset) + 16 > payload.size())
                 continue;
+
+            u64 address = 0;
+            u64 size = 0;
+            cc::memcpy(&address, payload.data() + field.offset, sizeof(address));
             cc::memcpy(&size, payload.data() + field.offset + 8, sizeof(size));
 
-            auto const offset = data != nullptr && size > 0 ? _intern_blob(data, size) : i64(0);
+            auto const* const data = reinterpret_cast<byte const*>(uintptr_t(address));
+            auto const offset = address != 0 && size > 0 ? _intern_blob(data, size) : i64(0);
             auto const written = u64(offset < 0 ? 0 : offset);
             cc::memcpy(payload.data() + field.offset, &written, sizeof(written));
         }
@@ -411,18 +415,18 @@ bool cc::rec::impl::dump_builder::add_block(rec::chunk_view const& view)
 
             if (field.type == rec::type_code::desc_ref)
             {
-                rec::desc const* target = nullptr;
-                cc::memcpy(&target, e.payload.data() + field.offset, sizeof(target));
-                if (target != nullptr && _intern_desc(target) < 0)
+                u64 address = 0;
+                cc::memcpy(&address, e.payload.data() + field.offset, sizeof(address));
+                if (address != 0 && _intern_desc(reinterpret_cast<rec::desc const*>(uintptr_t(address))) < 0)
                     return false;
             }
             else if (field.type == rec::type_code::cstring)
             {
-                char const* text = nullptr;
-                cc::memcpy(&text, e.payload.data() + field.offset, sizeof(text));
-                if (text != nullptr)
+                u64 address = 0;
+                cc::memcpy(&address, e.payload.data() + field.offset, sizeof(address));
+                if (address != 0)
                 {
-                    _intern_string(cc::string_view(text));
+                    _intern_string(cc::string_view(reinterpret_cast<char const*>(uintptr_t(address))));
                     if (_overflowed)
                         return false;
                 }
@@ -432,12 +436,13 @@ bool cc::rec::impl::dump_builder::add_block(rec::chunk_view const& view)
                 if (isize(field.offset) + 16 > e.payload.size())
                     continue;
 
-                byte const* data = nullptr;
+                u64 address = 0;
                 u64 size = 0;
-                cc::memcpy(&data, e.payload.data() + field.offset, sizeof(data));
+                cc::memcpy(&address, e.payload.data() + field.offset, sizeof(address));
                 cc::memcpy(&size, e.payload.data() + field.offset + 8, sizeof(size));
 
-                if (data != nullptr && size > 0 && _intern_blob(data, size) < 0)
+                auto const* const data = reinterpret_cast<byte const*>(uintptr_t(address));
+                if (address != 0 && size > 0 && _intern_blob(data, size) < 0)
                     return false;
             }
         }

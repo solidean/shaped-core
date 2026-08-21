@@ -60,7 +60,14 @@ struct stream_state_payload
     u64 trace = 0;
     u32 scope_depth = 0;
     u32 named_scopes = 0;
-    cc::rec::desc const* scopes[cc::rec::impl::named_scope_capacity] = {};
+
+    /// The scope descriptors, as u64 rather than as pointers.
+    ///
+    /// **Every payload slot holding a pointer is eight bytes on every target**, because a `.ccrec` is meant to be read
+    /// by a build that is not the one that wrote it — and wasm32's pointers are four.
+    /// A field's offset and size live in the descriptor, so letting them follow `sizeof(void*)` would make the wire
+    /// layout depend on the writer's architecture.
+    u64 scopes[cc::rec::impl::named_scope_capacity] = {};
 };
 static_assert(sizeof(stream_state_payload) == 40, "the preamble layout is what stream_state_fields describes");
 
@@ -216,7 +223,7 @@ bool cc::rec::impl::writer_rotate(isize needed)
         .named_scopes = cc::min(w.scope_depth, rec::impl::named_scope_capacity),
     };
     for (u32 i = 0; i < preamble.named_scopes; ++i)
-        preamble.scopes[i] = w.scope_descs[i];
+        preamble.scopes[i] = u64(reinterpret_cast<uintptr_t>(w.scope_descs[i]));
     write_bookkeeping(stream_state_desc, &preamble, isize(sizeof(preamble)), cold_begin);
 
     if (w.state->dropped_events > 0)
