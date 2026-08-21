@@ -56,6 +56,7 @@ add_library(clean-core
     src/clean-core/record/async_scope.cc
     src/clean-core/record/sampling.cc
     src/clean-core/record/overhead.cc
+    src/clean-core/record/hot_functions.cc
     src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/format.cc
@@ -213,6 +214,7 @@ target_sources(clean-core
     src/clean-core/record/console_listener.hh
     src/clean-core/record/impl/serialized_format.hh
     src/clean-core/record/serialize.hh
+    src/clean-core/record/hot_functions.hh
     src/clean-core/record/crash_dump.hh
     src/clean-core/record/trace.hh
     src/clean-core/record/impl/ambient_hook.hh
@@ -491,6 +493,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-trace-test.cc
         tests/record/record-async-scope-test.cc
         tests/record/record-sampling-test.cc
+    tests/record/record-hot-functions-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc

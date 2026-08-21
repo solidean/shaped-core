@@ -4,6 +4,7 @@
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/record/domain.hh>
+#include <clean-core/record/hot_functions.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
@@ -251,6 +252,16 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     cc::println("");
     cc::println("  {} event(s) from example.render", captured.from_domain(&example_render::g_rec_domain).event_count());
     cc::println("  {} event(s) from example.assets", captured.from_domain(&example_assets::g_rec_domain).event_count());
+
+    // The same samples the trace shows, reduced to where the time actually went.
+    // That reduction is the point: a sampled recording is answerable without opening a viewer, which is what lets a
+    // test assert on it.
+    auto const hot = cc::rec::hot_functions(captured);
+    if (hot.sample_count > 0)
+    {
+        cc::println("");
+        cc::print("{}", hot.to_string(10));
+    }
 
     //
     // And out to a file a viewer can open.

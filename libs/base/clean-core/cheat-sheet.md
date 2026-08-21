@@ -986,6 +986,14 @@ sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:
 // The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
 // A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
 
+#include <clean-core/record/hot_functions.hh> // where the time went, without a viewer
+auto const hot = cc::rec::hot_functions(rec);        // symbolizes and folds every sampled stack by function
+hot.to_string(20);                                   // a self%/total% table, ordered by SELF time
+hot.self_ratio_of("render_frame") > 0.3;             // the assertion form: a regression is a ratio that moved
+// SELF is the innermost frame and is what a profile is for; a high TOTAL and low SELF is a caller, not a problem.
+// Inclusive counts cover only what was CAPTURED — sampling stops at the innermost open scope by design.
+// {.include_stacktrace_events = true} folds in the stacks logs captured, which is a different question.
+
 #include <clean-core/platform/module_table.hh>   // which binaries were mapped where
 cc::enumerate_loaded_modules();              // -> cc::vector<cc::loaded_module>{base, size, path, identity}
 loaded_module::identity                      // the exact BUILD (PE TimeDateStamp+SizeOfImage), not just the path

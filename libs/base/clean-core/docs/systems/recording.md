@@ -544,5 +544,17 @@ A foreign table is worth having even when the binaries are not.
 Failing to load one costs the function and the line and still leaves the module and the offset, so a frame degrades to `app.exe+0x1234`.
 An unresolved frame keeps its address rather than acquiring a confident wrong name.
 
+**`cc::rec::hot_functions`** ([hot_functions.hh](../../src/clean-core/record/hot_functions.hh)) is the reduction that makes all of this usable without a viewer.
+It symbolizes every captured stack and folds them by function, into self time and inclusive time.
+
+Self time — the innermost captured frame — is what a profile is for, and the split is what the report is worth:
+a function high in inclusive time and absent from self time is a caller, and moving it would change nothing.
+
+**Inclusive counts only cover what was captured.**
+A sample stops at the innermost open profiling scope, so a stack under one is deliberately short and the scope spans carry the rest.
+Reading the two together is the intent, and the exporter nests them for exactly that reason.
+
+Being a value rather than a rendering is what makes it assertable: `self_ratio_of("decode")` in a test is a performance regression caught in CI rather than one noticed in a viewer.
+
 **No binary format here is stable**, and none will be for a good while.
 Durability comes from an exporter, not from the raw bytes.
