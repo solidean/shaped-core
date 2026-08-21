@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/function_ref.hh>
+#include <clean-core/platform/module_table.hh>
 #include <clean-core/record/chunk.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/listener.hh>
@@ -147,6 +148,15 @@ public:
 
     void clear() { _blocks.clear(); }
 
+    /// The modules this recording's addresses are relative to.
+    ///
+    /// **Empty means "this process's own"**, which is the case for anything captured live, and is why nothing has to
+    /// snapshot a table it is not going to need.
+    /// A recording read back from a file carries the table the file recorded, because by then the process that gave
+    /// those addresses meaning is gone.
+    [[nodiscard]] cc::span<cc::loaded_module const> modules() const { return _modules; }
+    void set_modules(cc::vector<cc::loaded_module> modules) { _modules = cc::move(modules); }
+
     // reading
 public:
     [[nodiscard]] cc::span<rec::recorded_block const> blocks() const { return _blocks; }
@@ -272,6 +282,7 @@ public:
 
 private:
     cc::vector<rec::recorded_block> _blocks;
+    cc::vector<cc::loaded_module> _modules;
 };
 
 /// A listener that captures everything it is offered into a recording.

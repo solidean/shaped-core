@@ -67,9 +67,6 @@ Add entries as we discover them, and remove them as they land.
 - **Sampling above the OS timer's ceiling.**
   A high-resolution waitable timer floors near half a millisecond on Windows — about 1.9 kHz — and going faster means sleeping short and spinning the remainder, which burns a core for the privilege.
   Worth it only for a short, deliberate capture, so it wants to be an explicit mode rather than a rate that quietly starts spinning.
-- **Symbolizing a foreign recording.**
-  `cc::symbolizer` resolves against this process's loaded modules, so a `.ccrec` from another run or another machine mostly resolves to nothing.
-  Doing better needs the recording to carry its module base table and build ids, and the analysis side to load the matching binaries.
 - **A POSIX sampler.**
   Windows suspends a thread and walks it from outside; POSIX has no equivalent.
   There it wants `SIGPROF` via `timer_create`, plus a handler that walks its own stack and hands the frames and the anchor to the sampler thread.

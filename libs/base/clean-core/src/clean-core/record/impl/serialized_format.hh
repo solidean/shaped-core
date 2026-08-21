@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/platform/module_table.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/fwd.hh>
 
@@ -102,6 +103,18 @@ struct serialized_thread
     serialized_str name;
 };
 
+/// One binary that was mapped when the recording was made, and where.
+///
+/// Without this a recording's addresses mean nothing outside the process that produced them — and a crash dump is
+/// exactly a recording whose process is gone.
+struct serialized_module
+{
+    u64 base = 0;
+    u64 size = 0;
+    serialized_str path;
+    serialized_str identity;
+};
+
 /// One block of events, and where its bytes sit in the file.
 struct serialized_block
 {
@@ -136,7 +149,7 @@ struct serialized_header
     u32 desc_count = 0;
     u32 thread_count = 0;
     u32 block_count = 0;
-    u32 reserved = 0;
+    u32 module_count = 0;
 
     u64 total_event_bytes = 0;
 
@@ -147,6 +160,7 @@ struct serialized_header
     u64 offset_fields = 0;
     u64 offset_descs = 0;
     u64 offset_threads = 0;
+    u64 offset_modules = 0;
     u64 offset_blocks = 0;
     u64 offset_events = 0;
 };
@@ -159,8 +173,9 @@ static_assert(sizeof(serialized_field) == 16);
 static_assert(sizeof(serialized_relation_type) == 24);
 static_assert(sizeof(serialized_desc) == 64);
 static_assert(sizeof(serialized_thread) == 24);
+static_assert(sizeof(serialized_module) == 32);
 static_assert(sizeof(serialized_block) == 64);
-static_assert(sizeof(serialized_header) == 152);
+static_assert(sizeof(serialized_header) == 160);
 
 /// The eight bytes a reader checks before anything else.
 inline constexpr char serialized_magic[8] = {'C', 'C', 'R', 'E', 'C', 'O', 'R', 'D'};
@@ -204,6 +219,7 @@ struct dump_builder
         cc::span<byte const> fields;
         cc::span<byte const> descs;
         cc::span<byte const> threads;
+        cc::span<byte const> modules;
         cc::span<byte const> blocks;
     };
 
@@ -213,6 +229,10 @@ struct dump_builder
     {
         _wall_secs = dumped_at_wall_secs, _rate = cycles_per_second;
     }
+
+    /// Records the modules this recording's addresses are relative to.
+    /// Anything past the arena's capacity is dropped, which costs names rather than correctness.
+    void add_modules(cc::span<cc::loaded_module const> modules);
 
     /// Records one block and everything its events reference.
     /// Returns false when the arena ran out, in which case the dump is finished with what it already has.
@@ -266,6 +286,7 @@ private:
     serialized_field* _fields = nullptr;
     serialized_desc* _descs = nullptr;
     serialized_thread* _threads = nullptr;
+    serialized_module* _modules = nullptr;
     serialized_block* _blocks = nullptr;
     block_source* _block_sources = nullptr;
 
@@ -275,6 +296,7 @@ private:
     isize _fields_used = 0;
     isize _descs_used = 0;
     isize _threads_used = 0;
+    isize _modules_used = 0;
     isize _blocks_used = 0;
 
     isize _domain_capacity = 0;
@@ -283,6 +305,7 @@ private:
     isize _field_capacity = 0;
     isize _desc_capacity = 0;
     isize _thread_capacity = 0;
+    isize _module_capacity = 0;
     isize _block_capacity = 0;
 
     // Interning keys, parallel to the tables above.

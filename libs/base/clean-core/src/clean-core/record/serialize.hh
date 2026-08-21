@@ -69,7 +69,7 @@ namespace cc::rec
 {
 /// The format version these bytes are written at.
 /// A reader refuses anything else rather than guessing.
-inline constexpr u32 serialized_version = 1;
+inline constexpr u32 serialized_version = 2;
 
 /// Writes `r` to a self-contained buffer.
 [[nodiscard]] cc::vector<byte> serialize(rec::recording const& r);

@@ -3,6 +3,8 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/platform/module_table.hh>
+#include <clean-core/platform/symbolize.hh>
 #include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/recording.hh>
@@ -312,4 +314,80 @@ REC_TEST("record/crash - an arena too small truncates the dump and says so")
 
     // Leave a usable arena behind for whatever runs next.
     cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+}
+
+REC_TEST("record/serialize - a recording carries the modules its addresses mean")
+{
+    if (!cc::module_enumeration_available())
+        SKIP("no module enumeration on this platform");
+
+    rec_fixture const fixture(deterministic_config());
+
+    auto const r = capture([] { CC_LOG_ERROR("something went wrong"); });
+    REQUIRE(r.event_count() > 0);
+
+    // A live recording carries none: its addresses mean this process, which is still here to ask.
+    CHECK(r.modules().empty());
+
+    auto const bytes = cc::rec::serialize(r);
+    auto loaded = cc::rec::deserialize(bytes);
+    REQUIRE(loaded.has_value());
+
+    // Read back, it carries the table — because by then the process that gave those addresses meaning may be gone,
+    // which for a crash dump it always is.
+    auto const modules = loaded.value().events().modules();
+    REQUIRE(!modules.empty());
+
+    auto const self = reinterpret_cast<u64>(&cc::rec::serialize);
+    auto found = false;
+    for (auto const& m : modules)
+        if (m.contains(self))
+        {
+            found = true;
+            CHECK(!m.path.empty());
+            CHECK(!m.identity.empty());
+        }
+
+    CHECK(found);
+}
+
+REC_TEST("record/serialize - a loaded recording symbolizes its own stacks")
+{
+    if (!cc::module_enumeration_available() || !cc::symbolizer::is_available())
+        SKIP("no module enumeration or no symbolization on this platform");
+
+    rec_fixture const fixture(deterministic_config());
+
+    // An error log captures a stack, which is the payload that is worthless without a module table.
+    auto const r = capture([] { CC_LOG_ERROR("a failure worth a stack"); });
+    auto const bytes = cc::rec::serialize(r);
+    auto loaded = cc::rec::deserialize(bytes);
+    REQUIRE(loaded.has_value());
+
+    auto const& events = loaded.value().events();
+    cc::symbolizer sym(events.modules());
+    CHECK(sym.is_foreign());
+
+    isize frames = 0;
+    isize with_module = 0;
+    events.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (cc::string_view(e.desc->name) != "record.stacktrace")
+                return;
+
+            for (auto const address : e.field_as_u64_array("frames"))
+            {
+                ++frames;
+                if (!sym.resolve(reinterpret_cast<void const*>(address)).module.empty())
+                    ++with_module;
+            }
+        });
+
+    if (frames == 0)
+        SKIP("this build captured no frames");
+
+    // Every frame resolves at least to a module and an offset, which comes from the TABLE rather than from anything
+    // this process has loaded — the whole point of carrying it.
+    CHECK(with_module == frames);
 }

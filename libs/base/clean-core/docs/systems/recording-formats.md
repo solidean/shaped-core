@@ -75,6 +75,7 @@ domains     name + enable mask
 units       inlined by value
 fields      the payload layouts descriptors point into
 descs       one per recording site; unit and domain by index, fields by range
+modules     which binaries were mapped where, and which build each was
 threads     id, index, name
 blocks      per block: thread, layer, chunk sequence, both time pairs, and where its bytes are
 events      the event bytes themselves
@@ -113,9 +114,31 @@ That is what makes the constrained writer testable at all, rather than something
 
 ---
 
+## The module table
+
+A captured stack is addresses, and an address only means something against the module it fell in.
+Inside the recording process that is implicit, because the modules are still loaded.
+The moment a recording travels — to another machine, or merely past its process's death — it is the missing half, and **a crash dump is always that case**.
+
+So a serialized recording carries the table: for every mapped binary its base, its size, its path, and its identity.
+`cc::symbolizer(recording.modules())` resolves against it in a session of its own, loading each module at the base the recording used rather than wherever this process would have put it.
+
+**The identity matters as much as the base.**
+Two builds of the same path are different binaries, and resolving against the wrong one produces confident nonsense rather than an error.
+On Windows it is the PE `TimeDateStamp` and `SizeOfImage` as hex — literally the key a symbol server URL is built from.
+
+The two writers gather it at different times, for the same reason they differ everywhere else.
+`cc::rec::serialize` enumerates the modules when it writes, once per process.
+The crash dump enumerates at **install** time and keeps the result, because a crash handler may not allocate.
+A module loaded after that is missing from the dump, which is the price of not allocating on the way down.
+
+A recording that carries no table means "this process's own", and symbolizing it falls back to the live modules.
+
+---
+
 ## Known gaps
 
 - **Nexus does not install a dump yet.** It belongs with the rest of the nexus wiring, which waits on ambient filtering.
 - **A dump is not a minidump.** It carries what was recorded, not the machine state; `cc::install_crash_handler` still owns the stack traces.
 - **Stacktrace events carry return addresses, never names.**
-  Symbolizing them needs the module base table below plus the matching binaries, which is why analysis happens offline and a capture stays cheap.
+  Symbolizing them needs [the module table](#the-module-table) plus the matching binaries, which is why analysis happens offline and a capture stays cheap.

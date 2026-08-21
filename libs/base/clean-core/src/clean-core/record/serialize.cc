@@ -18,6 +18,19 @@ namespace
 using namespace cc::primitive_defines;
 using cc::rec::impl::dump_builder;
 
+namespace
+{
+/// This process's modules, taken once.
+///
+/// Once because a snapshot walks every module in the process and allocates, and a program serializing several
+/// recordings would pay that each time for an answer that barely changes.
+[[nodiscard]] cc::span<cc::loaded_module const> process_modules()
+{
+    static cc::vector<cc::loaded_module> const modules = cc::enumerate_loaded_modules();
+    return modules;
+}
+} // namespace
+
 /// The arena the table builder starts with, doubled on overflow.
 /// A megabyte covers a few thousand descriptors, which is far more than any run has produced.
 constexpr isize initial_arena_bytes = 1 << 20;
@@ -56,6 +69,11 @@ cc::vector<byte> cc::rec::serialize(cc::rec::recording const& r)
         auto builder = dump_builder(cc::span<byte>(arena));
         builder.set_meta(cc::current_time_wall_secs(), rec::cycles_per_second());
 
+        // What the recording's addresses are relative to.
+        // A recording that already carries a table keeps it — it came from a file, and re-snapshotting would replace
+        // the modules the addresses actually mean with this process's.
+        builder.add_modules(r.modules().empty() ? cc::span<cc::loaded_module const>(process_modules()) : r.modules());
+
         for (auto const& b : r.blocks())
             if (!builder.add_block(b.view()))
                 break;
@@ -78,6 +96,7 @@ cc::vector<byte> cc::rec::serialize(cc::rec::recording const& r)
         append(out, parts.fields);
         append(out, parts.descs);
         append(out, parts.threads);
+        append(out, parts.modules);
         append(out, parts.blocks);
 
         for (isize i = 0; i < builder.block_count(); ++i)
@@ -159,6 +178,7 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
         || !in_bounds(h.offset_fields, h.field_count, sizeof(serialized_field))
         || !in_bounds(h.offset_descs, h.desc_count, sizeof(serialized_desc))
         || !in_bounds(h.offset_threads, h.thread_count, sizeof(serialized_thread))
+        || !in_bounds(h.offset_modules, h.module_count, sizeof(serialized_module))
         || !in_bounds(h.offset_blocks, h.block_count, sizeof(serialized_block))
         || !in_bounds(h.offset_events, h.total_event_bytes, 1))
         return cc::error("recording is malformed: a table runs past the end of the file");
@@ -169,6 +189,7 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
     auto const* const s_fields = reinterpret_cast<serialized_field const*>(file.data() + h.offset_fields);
     auto const* const s_descs = reinterpret_cast<serialized_desc const*>(file.data() + h.offset_descs);
     auto const* const s_threads = reinterpret_cast<serialized_thread const*>(file.data() + h.offset_threads);
+    auto const* const s_modules = reinterpret_cast<serialized_module const*>(file.data() + h.offset_modules);
     auto const* const s_blocks = reinterpret_cast<serialized_block const*>(file.data() + h.offset_blocks);
     auto const* const s_strings = reinterpret_cast<char const*>(file.data() + h.offset_strings);
 
@@ -203,6 +224,8 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
             += measure(s_descs[i].name) + measure(s_descs[i].site_file) + measure(s_descs[i].site_function);
     for (u32 i = 0; i < h.thread_count; ++i)
         string_arena_bytes += measure(s_threads[i].name);
+    for (u32 i = 0; i < h.module_count; ++i)
+        string_arena_bytes += measure(s_modules[i].path) + measure(s_modules[i].identity);
 
     out._strings.resize_to_uninitialized(string_arena_bytes);
     isize string_at = 0;
@@ -358,6 +381,20 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
             .state_at_start = nullptr,
         });
     }
+
+    // The modules the addresses are relative to, which is what makes a loaded recording symbolizable at all — the
+    // process that gave those addresses meaning is gone by definition.
+    // Owned strings rather than arena slices: a module table outlives the file's bytes in every consumer that has one.
+    auto modules = cc::vector<cc::loaded_module>();
+    modules.reserve(isize(h.module_count));
+    for (u32 i = 0; i < h.module_count; ++i)
+        modules.push_back({
+            .base = s_modules[i].base,
+            .size = s_modules[i].size,
+            .path = cc::string(cc::string_view(take_string(s_modules[i].path))),
+            .identity = cc::string(cc::string_view(take_string(s_modules[i].identity))),
+        });
+    out._events.set_modules(cc::move(modules));
 
     return out;
 }

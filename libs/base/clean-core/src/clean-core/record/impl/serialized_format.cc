@@ -21,6 +21,10 @@ constexpr isize field_capacity = 4096;
 constexpr isize desc_capacity = 8192;
 constexpr isize thread_capacity = 512;
 
+/// A process maps tens to low hundreds of modules; the cap is generous rather than tuned, and overflowing it costs
+/// names for the frames in the modules that did not fit.
+constexpr isize module_capacity = 512;
+
 /// Four strings per descriptor is the worst case: name, unit or relation spellings, file and function.
 constexpr isize string_key_capacity = desc_capacity * 4;
 
@@ -47,6 +51,7 @@ cc::rec::impl::dump_builder::dump_builder(cc::span<byte> arena) : _arena(arena)
     _field_capacity = field_capacity;
     _desc_capacity = desc_capacity;
     _thread_capacity = thread_capacity;
+    _module_capacity = module_capacity;
     _string_key_capacity = string_key_capacity;
 
     _domains = reinterpret_cast<serialized_domain*>(_alloc(_domain_capacity * isize(sizeof(serialized_domain)), 8));
@@ -56,6 +61,7 @@ cc::rec::impl::dump_builder::dump_builder(cc::span<byte> arena) : _arena(arena)
     _fields = reinterpret_cast<serialized_field*>(_alloc(_field_capacity * isize(sizeof(serialized_field)), 8));
     _descs = reinterpret_cast<serialized_desc*>(_alloc(_desc_capacity * isize(sizeof(serialized_desc)), 8));
     _threads = reinterpret_cast<serialized_thread*>(_alloc(_thread_capacity * isize(sizeof(serialized_thread)), 8));
+    _modules = reinterpret_cast<serialized_module*>(_alloc(_module_capacity * isize(sizeof(serialized_module)), 8));
 
     _domain_keys = reinterpret_cast<void const**>(_alloc(_domain_capacity * isize(sizeof(void*)), 8));
     _unit_keys = reinterpret_cast<void const**>(_alloc(_unit_capacity * isize(sizeof(void*)), 8));
@@ -281,6 +287,27 @@ i64 cc::rec::impl::dump_builder::desc_index_of_pointer(rec::desc const* d) const
     return -1;
 }
 
+void cc::rec::impl::dump_builder::add_modules(cc::span<cc::loaded_module const> modules)
+{
+    for (auto const& m : modules)
+    {
+        if (_modules_used >= _module_capacity)
+        {
+            _overflowed = true;
+            return;
+        }
+
+        // Dropping a module costs names for the frames inside it, never correctness for the rest — so this fills what
+        // it can rather than failing the dump.
+        _modules[_modules_used++] = {
+            .base = m.base,
+            .size = m.size,
+            .path = _intern_string(m.path),
+            .identity = _intern_string(m.identity),
+        };
+    }
+}
+
 bool cc::rec::impl::dump_builder::add_block(rec::chunk_view const& view)
 {
     if (_overflowed || view.bytes.empty())
@@ -335,7 +362,8 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
     auto const fields_at = relations_at + _relations_used * isize(sizeof(serialized_relation_type));
     auto const descs_at = fields_at + _fields_used * isize(sizeof(serialized_field));
     auto const threads_at = descs_at + _descs_used * isize(sizeof(serialized_desc));
-    auto const blocks_at = threads_at + _threads_used * isize(sizeof(serialized_thread));
+    auto const modules_at = threads_at + _threads_used * isize(sizeof(serialized_thread));
+    auto const blocks_at = modules_at + _modules_used * isize(sizeof(serialized_module));
     auto const events_at = blocks_at + _blocks_used * isize(sizeof(serialized_block));
 
     // Only the final layout knows where a block's bytes land, so the offsets are filled in here.
@@ -362,6 +390,7 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
         .desc_count = u32(_descs_used),
         .thread_count = u32(_threads_used),
         .block_count = u32(_blocks_used),
+        .module_count = u32(_modules_used),
         .total_event_bytes = total_event_bytes,
         .offset_strings = u64(strings_at),
         .offset_domains = u64(domains_at),
@@ -370,6 +399,7 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
         .offset_fields = u64(fields_at),
         .offset_descs = u64(descs_at),
         .offset_threads = u64(threads_at),
+        .offset_modules = u64(modules_at),
         .offset_blocks = u64(blocks_at),
         .offset_events = u64(events_at),
     };
@@ -385,6 +415,7 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
     parts.fields = as_bytes(_fields, _fields_used * isize(sizeof(serialized_field)));
     parts.descs = as_bytes(_descs, _descs_used * isize(sizeof(serialized_desc)));
     parts.threads = as_bytes(_threads, _threads_used * isize(sizeof(serialized_thread)));
+    parts.modules = as_bytes(_modules, _modules_used * isize(sizeof(serialized_module)));
     parts.blocks = as_bytes(_blocks, _blocks_used * isize(sizeof(serialized_block)));
     return parts;
 }

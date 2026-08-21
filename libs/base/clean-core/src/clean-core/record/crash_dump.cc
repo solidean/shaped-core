@@ -3,6 +3,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/platform/module_table.hh>
 #include <clean-core/record/chunk.hh>
 #include <clean-core/record/impl/serialized_format.hh>
 #include <clean-core/record/impl/system_state.hh>
@@ -31,6 +32,11 @@ struct installed_dump
     /// Reserved at install time.
     /// Everything the builder needs comes out of this.
     cc::vector<byte> arena;
+
+    /// The modules as they were when the handler was installed.
+    /// Enumerated then rather than at dump time, because a snapshot allocates and takes a lock, and a crash handler
+    /// may do neither.
+    cc::vector<cc::loaded_module> modules;
 };
 
 installed_dump g_dump;
@@ -94,6 +100,10 @@ bool write_dump()
     auto builder = cc::rec::impl::dump_builder(cc::span<byte>(g_dump.arena));
     builder.set_meta(cc::current_time_wall_secs(), cc::rec::cycles_per_second());
 
+    // Snapshotted at INSTALL time, not here: enumerating modules allocates, and a crash handler may not.
+    // The table is what makes a dump's addresses mean anything once the process is gone.
+    builder.add_modules(g_dump.modules);
+
     isize event_bytes = 0;
     cc::rec::impl::for_each_thread_state(
         [&](cc::rec::impl::thread_state& ts)
@@ -122,7 +132,8 @@ bool write_dump()
     if (!write_all(file.value(), header_bytes) || !write_all(file.value(), parts.strings)
         || !write_all(file.value(), parts.domains) || !write_all(file.value(), parts.units)
         || !write_all(file.value(), parts.fields) || !write_all(file.value(), parts.descs)
-        || !write_all(file.value(), parts.threads) || !write_all(file.value(), parts.blocks))
+        || !write_all(file.value(), parts.threads) || !write_all(file.value(), parts.modules)
+        || !write_all(file.value(), parts.blocks))
         return false;
 
     // The event bytes go out straight from the chunks, with the descriptor pointer in each header rewritten into its
@@ -178,6 +189,7 @@ void cc::rec::install_crash_dump(cc::rec::crash_dump_options const& options)
 
     // Reserved here, and never touched again except by the dump itself.
     g_dump.arena.resize_to_uninitialized(options.arena_bytes);
+    g_dump.modules = cc::enumerate_loaded_modules();
     g_dump.is_installed = true;
 
     if (!already_installed)
