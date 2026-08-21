@@ -117,11 +117,8 @@ void dx12_context::process_completed_epochs()
     if (!_epoch_fence)
         return;
     u64 const completed = _epoch_fence->GetCompletedValue();
-    // Second release gate: how far the async upload copy queue has drained.
-    // A resource an in-flight async upload still references must not be freed even after its epoch retired, since the copy queue is decoupled from epochs.
-    // The upload system owns the fence; `~0` when it is not up yet, so the gate is trivially open before bring-up completes.
-    ID3D12Fence* const upload_fence = _upload_async._completion_fence.Get();
-    u64 const copy_completed = upload_fence ? upload_fence->GetCompletedValue() : u64(-1);
+    // The second release gate — how far the copy queue has drained past the resource's own pending value — is now
+    // asked per resource, since each carries its own timeline (see dx12_group_value::has_reached below).
 
     // Reclaim inline upload ring space held by every epoch the GPU has now finished.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
@@ -142,7 +139,7 @@ void dx12_context::process_completed_epochs()
 
             auto const gate = [&](dx12_expiring_resource& r, cc::vector<dx12_expiring_resource>& not_ready)
             {
-                if (u64(r.copy_wait) <= copy_completed)
+                if (r.copy_wait.has_reached())
                     ready.push_back(cc::move(r));
                 else
                     not_ready.push_back(cc::move(r));

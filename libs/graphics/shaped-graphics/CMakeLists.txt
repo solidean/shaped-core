@@ -44,6 +44,10 @@ add_library(shaped-graphics
     src/shaped-graphics/context/cached.cc
     src/shaped-graphics/memory/memory_heap.cc
     src/shaped-graphics/resource/impl/texture_copy_region.cc
+    src/shaped-graphics/transfer/impl/transfer_scheduler.cc
+    src/shaped-graphics/transfer/stream.cc
+    src/shaped-graphics/transfer/stream_handle.cc
+    src/shaped-graphics/transfer/stream_source.cc
 )
 
 # Public headers live co-located in src/. FILE_SET models the public API explicitly.
@@ -64,6 +68,10 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/download.hh
     src/shaped-graphics/context/uncached.hh
     src/shaped-graphics/context/cached.hh
+    src/shaped-graphics/transfer/stream.hh
+    src/shaped-graphics/transfer/stream_handle.hh
+    src/shaped-graphics/transfer/stream_sink.hh
+    src/shaped-graphics/transfer/stream_source.hh
     src/shaped-graphics/routine/reload_generation.hh
     src/shaped-graphics/routine/render_routine.hh
     src/shaped-graphics/routine/render_routine_base.hh
@@ -177,6 +185,8 @@ if(SC_BUILD_TESTS)
         tests/texture/texture-test.cc
         tests/texture/texture-view-test.cc
         tests/transfer/bytes_future-test.cc
+        tests/transfer/stream_handle-test.cc
+        tests/transfer/transfer_scheduler-test.cc
         tests/binding/binding-test.cc
         tests/binding/layout_hash-test.cc
         tests/binding/shader_codec-test.cc
@@ -207,6 +217,7 @@ if(SC_BUILD_TESTS)
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc
             tests/transfer/download-async-test.cc
+            tests/transfer/stream-test.cc
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc
             tests/binding/binding-group-array-test.cc

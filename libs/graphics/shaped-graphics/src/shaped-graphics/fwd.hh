@@ -27,6 +27,16 @@ enum class lifetime_scope;
 enum class epoch : u64;
 enum class submission_token : u64;
 
+enum class stream_scope : u8;         // how much of a resource one streaming transfer claims (see types.hh)
+class context_stream_scope;           // the ctx.stream facade (see transfer/stream.hh)
+class stream_upload_handle;           // control handle for one streaming upload (see transfer/stream_handle.hh)
+class stream_download_handle;         // …and for one streaming download
+struct stream_progress;               // value type — bytes done plus an optional total hint
+enum class stream_source_status : u8; // why a source poll returned what it did (see transfer/stream_source.hh)
+struct stream_chunk;                  // value type — bytes plus their offset in the destination extent
+struct stream_poll;                   // value type — a source poll's status and its chunk
+class stream_source;                  // the lazy chunk sequence feeding a streaming upload
+
 class context;
 struct adapter_info; // which GPU a context runs on (see context/adapter_info.hh)
 class context_persistent_scope;
@@ -104,8 +114,7 @@ struct texture_cube_array_ms_description;
 enum class pixel_format : u16;     // texel format (see resource/pixel_format.hh)
 enum class texture_usage : u32;    // one texture usage; a set of them is texture_usages (see types.hh)
 enum class texture_dimension : u8; // 1D / 2D / 3D (see resource/raw_texture.hh)
-class bytes_waiter;
-class ready_bytes_waiter; // the already-satisfied waiter (see bytes_future.hh)
+class bytes_wait_gate;             // deadlock guard on a blocking wait (see bytes_future.hh)
 class bytes_future;
 template <class T>
 class data_future;

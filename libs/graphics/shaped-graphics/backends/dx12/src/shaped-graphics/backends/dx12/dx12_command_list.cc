@@ -33,6 +33,23 @@ dx12_command_list::dx12_command_list(dx12_context& ctx,
 {
 }
 
+namespace
+{
+/// Folds one timeline's completion value into a list's wait set: raise the entry that shares its group, or add one.
+/// Waits on different timelines cannot be merged — that is the whole point of a group — so the set grows with the
+/// number of distinct resources the list touches that actually have a transfer pending, which is small.
+void fold_group_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
+                     sg::backend::dx12::dx12_group_value const& wait)
+{
+    if (!wait.is_pending())
+        return;
+    for (auto& existing : waits)
+        if (existing.try_raise_to(wait))
+            return;
+    waits.push_back(wait);
+}
+} // namespace
+
 void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
                                             sg::pipeline_stage_flags stages,
                                             sg::access_flags access)
@@ -42,17 +59,15 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
 
     // Forward cross-queue sync: if an async upload (ctx.upload) is still writing this buffer on the copy queue, the direct queue must wait for that copy before this list runs.
     // Fold its completion value into _required_copy_wait (idempotent max); the single wait is issued at submit.
-    u64 const async_v = buffer->_pending_async_upload_value.load(std::memory_order_acquire);
-    if (async_v > u64(_required_copy_wait))
-        _required_copy_wait = dx12_copy_fence_value(async_v);
+    fold_group_wait(_required_copy_waits,
+                    {buffer->_upload_group, buffer->_pending_async_upload_value.load(std::memory_order_acquire)});
 
     // Reverse cross-queue sync for ctx.download: if this op WRITES a buffer an async readback is still reading, the direct queue must wait for that read before overwriting it.
     // Only writes conflict, so fold the download value only for a write access.
     if (sg::is_unordered_write(access))
     {
-        u64 const dl_v = buffer->_pending_async_download_value.load(std::memory_order_acquire);
-        if (dl_v > u64(_required_download_wait))
-            _required_download_wait = dx12_download_fence_value(dl_v);
+        fold_group_wait(_required_download_waits,
+                        {buffer->_download_group, buffer->_pending_async_download_value.load(std::memory_order_acquire)});
     }
 
     // Accumulate the access; no barrier yet.
@@ -81,15 +96,12 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
     // Cross-queue forward waits, mirroring track_buffer_access.
     // If a ctx.upload wrote this texture on the copy queue this list must wait for that copy, and if this access WRITES while a ctx.download is still reading it, wait for the readback first.
     // Both fold into a single per-list wait issued at submit.
-    u64 const async_up = texture->_pending_async_upload_value.load(std::memory_order_acquire);
-    if (async_up > u64(_required_copy_wait))
-        _required_copy_wait = dx12_copy_fence_value(async_up);
+    fold_group_wait(_required_copy_waits,
+                    {texture->_upload_group, texture->_pending_async_upload_value.load(std::memory_order_acquire)});
     if (sg::is_unordered_write(access))
-    {
-        u64 const async_dl = texture->_pending_async_download_value.load(std::memory_order_acquire);
-        if (async_dl > u64(_required_download_wait))
-            _required_download_wait = dx12_download_fence_value(async_dl);
-    }
+        fold_group_wait(
+            _required_download_waits,
+            {texture->_download_group, texture->_pending_async_download_value.load(std::memory_order_acquire)});
 
     // Accumulate the access over the range; no barrier yet.
     // Declaring rather than flushing here is what lets a texture bound several times to one op merge its declares into one barrier per subresource box.
@@ -614,15 +626,17 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                 CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed");
             }
 
-            // If this list reads a buffer an async upload is still writing, make the direct queue wait on the copy queue's completion fence before executing, so the copy is visible.
-            // Over-waiting on a higher value is safe, and a stale or already-signaled value returns immediately.
-            if (cmd->_required_copy_wait != dx12_copy_fence_value::none)
-                _queue->Wait(_upload_async._completion_fence.Get(), u64(cmd->_required_copy_wait));
+            // If this list reads a resource an async upload is still writing, make the direct queue wait on that
+            // resource's upload timeline before executing, so the copy is visible.
+            // One Wait per timeline: over-waiting on a higher value is safe, and an already-signaled one returns at once.
+            for (auto const& w : cmd->_required_copy_waits)
+                _queue->Wait(w.group->fence.Get(), w.value);
 
-            // Symmetric reverse sync: if this list WRITES a buffer an async readback is still reading, wait on the download completion fence first.
+            // Symmetric reverse sync: if this list WRITES a resource an async readback is still reading, wait on that
+            // resource's download timeline first.
             // The write then never overwrites bytes the read consumes.
-            if (cmd->_required_download_wait != dx12_download_fence_value::none)
-                _queue->Wait(_download_async._completion_fence.Get(), u64(cmd->_required_download_wait));
+            for (auto const& w : cmd->_required_download_waits)
+                _queue->Wait(w.group->fence.Get(), w.value);
 
             ID3D12CommandList* lists[] = {cmd->_list.Get()};
             _queue->ExecuteCommandLists(1, lists);

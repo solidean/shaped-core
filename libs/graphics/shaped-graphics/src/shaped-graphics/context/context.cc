@@ -56,6 +56,7 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     transient(*this),
     upload(*this),
     download(*this),
+    stream(*this),
     uncached(*this),
     cached(*this),
     _backend(backend),

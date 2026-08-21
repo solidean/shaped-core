@@ -31,9 +31,11 @@ struct sg::backend::dx12::dx12_expiring_resource
 {
     ComPtr<ID3D12Resource> resource;
     cc::vector<cc::unique_function<void()>> finalizers;
-    /// Copy-queue completion value that must be reached before release: the buffer's highest pending async-upload value (`dx12_buffer::_pending_async_upload_value`).
-    /// `none` (0) when no async upload ever targeted it, so the copy gate is trivially satisfied.
-    dx12_copy_fence_value copy_wait = dx12_copy_fence_value::none;
+    /// Copy-queue completion value that must be reached before release, on the resource's own upload timeline.
+    /// Empty when no async upload or stream ever targeted it, so the copy gate is trivially satisfied.
+    /// It keeps the group alive on its own, which is what lets a resource be released while its timeline is still
+    /// being waited on.
+    dx12_group_value copy_wait;
 };
 
 /// Everything one epoch owns and must reclaim once its GPU work finishes.

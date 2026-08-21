@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
@@ -329,6 +330,88 @@ public:
         return _download_async.download_texture(cc::move(texture), subresource, region);
     }
 
+    // Reached through ctx.stream — the same copy queues and the same windows, at the weaker tier.
+    // These deliberately do NOT stamp the forward reader value, so a streamed extent costs a later command list
+    // nothing; the streaming lifetime stamp keeps the storage alive without buying that wait.
+    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_buffer(sg::raw_buffer_handle buffer,
+                                                                  cc::pinned_data<byte const> data,
+                                                                  isize offset_in_bytes,
+                                                                  sg::stream_scope) override
+    {
+        return _upload_async.stream_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_texture(sg::raw_texture_handle texture,
+                                                                   cc::pinned_data<byte const> data,
+                                                                   sg::subresource_index const& subresource,
+                                                                   sg::texture_region const& region,
+                                                                   sg::stream_scope) override
+    {
+        return _upload_async.stream_texture(cc::move(texture), cc::move(data), subresource, region);
+    }
+
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle buffer,
+                                                                   std::unique_ptr<sg::stream_source> source,
+                                                                   isize offset_in_bytes,
+                                                                   sg::stream_scope) override
+    {
+        return _upload_async.stream_source_buffer(cc::move(buffer), cc::move(source), offset_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle texture,
+                                                                    std::unique_ptr<sg::stream_source> source,
+                                                                    sg::subresource_index const& subresource,
+                                                                    sg::texture_region const& region,
+                                                                    sg::stream_scope) override
+    {
+        return _upload_async.stream_source_texture(cc::move(texture), cc::move(source), subresource, region);
+    }
+
+    [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                                      isize offset_in_bytes,
+                                                                      isize size_in_bytes,
+                                                                      sg::stream_scope) override
+    {
+        return _download_async.stream_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_download_handle stream_bytes_from_texture(sg::raw_texture_handle texture,
+                                                                       sg::subresource_index const& subresource,
+                                                                       sg::texture_region const& region,
+                                                                       sg::stream_scope) override
+    {
+        return _download_async.stream_texture(cc::move(texture), subresource, region);
+    }
+
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_buffer(sg::raw_buffer_handle buffer,
+                                                                        sg::stream_sink sink,
+                                                                        isize offset_in_bytes,
+                                                                        isize size_in_bytes,
+                                                                        sg::stream_scope) override
+    {
+        return _download_async.stream_sink_buffer(cc::move(buffer), cc::move(sink), offset_in_bytes, size_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_texture(sg::raw_texture_handle texture,
+                                                                         sg::stream_sink sink,
+                                                                         sg::subresource_index const& subresource,
+                                                                         sg::texture_region const& region,
+                                                                         sg::stream_scope) override
+    {
+        return _download_async.stream_sink_texture(cc::move(texture), cc::move(sink), subresource, region);
+    }
+
+    // The scope is consumed entirely by the sg layer's static check against the resource's usage flags, so the
+    // backend never needs it — dx12 already tracks state per subresource, and the one case that is not free is
+    // handled at creation by ALLOW_SIMULTANEOUS_ACCESS rather than per transfer.
+    void set_stream_upload_ratio(float ratio) override { _upload_async._scheduler.set_stream_ratio(ratio); }
+    void set_stream_download_ratio(float ratio) override { _download_async._scheduler.set_stream_ratio(ratio); }
+    void set_stream_upload_aging(float per_second) override { _upload_async._scheduler.set_aging_factor(per_second); }
+    void set_stream_download_aging(float per_second) override
+    {
+        _download_async._scheduler.set_aging_factor(per_second);
+    }
+
     // Runtime transfer-resource resizing, reached via ctx.upload / ctx.download.
     // Each records a pending change on the owning system, applied at a later safe point — see the systems and advance_epoch.
     void set_async_upload_window_bytes(isize bytes) override { _upload_async.set_window_bytes(bytes); }
@@ -409,6 +492,10 @@ public:
     // Extra systems — owned by value, constructed with *this.
     // The command-allocator pool recycles command allocators (epoch-gated) and command lists per queue.
     dx12_command_allocator_pool _cmd_pool;
+
+    // Hands every copyable resource its per-direction completion timelines, and takes them back when it dies.
+    // Brought up before any resource can be created and torn down after the last one is gone.
+    dx12_completion_group_pool _group_pool;
 
     // Inline host↔device transfer over UPLOAD / READBACK ring buffers on the direct queue.
     // Initialized in create_dx12_context: ring buffers mapped, download actor started.

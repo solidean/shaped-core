@@ -50,4 +50,5 @@
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-graphics/routine/routine_registry.hh>
+#include <shaped-graphics/transfer/stream.hh>
 #include <shaped-graphics/types.hh>

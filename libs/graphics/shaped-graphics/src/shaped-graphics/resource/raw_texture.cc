@@ -33,6 +33,11 @@ bool texture_description::is_valid() const
     if (sample_count > 1 && (dimension != texture_dimension::d2 || mip_levels != 1))
         return false;
 
+    // allow_region_stream is D3D12's ALLOW_SIMULTANEOUS_ACCESS, which the runtime rejects on both of these.
+    // Rejected here rather than per backend so the strictest backend's rule is the one every dev box sees.
+    if (usage.has(texture_usage::allow_region_stream) && (usage.has(texture_usage::depth_stencil) || sample_count > 1))
+        return false;
+
     return true;
 }
 
@@ -56,6 +61,19 @@ void texture_description::assert_valid() const
     {
         CC_ASSERT(dimension == texture_dimension::d2, "multisampling is 2D only");
         CC_ASSERT(mip_levels == 1, "multisampled textures have a single mip level");
+    }
+
+    // allow_region_stream becomes D3D12's ALLOW_SIMULTANEOUS_ACCESS, which the runtime rejects on a depth/stencil or
+    // multisampled resource — so the combination fails here, naming the conflict, rather than as an opaque
+    // CreateCommittedResource error.
+    // stream_scope::subresource wants only allow_subresource_stream, which carries no such restriction.
+    if (usage.has(texture_usage::allow_region_stream))
+    {
+        CC_ASSERT(!usage.has(texture_usage::depth_stencil), "texture_usage::allow_region_stream is incompatible with "
+                                                            "depth_stencil — stream a whole subresource with "
+                                                            "allow_subresource_stream instead");
+        CC_ASSERT(sample_count == 1, "texture_usage::allow_region_stream is incompatible with multisampling — stream a "
+                                     "whole subresource with allow_subresource_stream instead");
     }
 }
 } // namespace sg

@@ -115,6 +115,16 @@ void dx12_buffer::discard_slot(sg::command_list_slot slot) const
         });
 }
 
+void dx12_buffer::acquire_completion_groups()
+{
+    // Only where a transfer can actually happen: a buffer with neither copy usage can never be stamped, so a fence
+    // for it would sit at zero forever.
+    if (usage().has(sg::buffer_usage::copy_dst))
+        _upload_group = _ctx._group_pool.acquire();
+    if (usage().has(sg::buffer_usage::copy_src))
+        _download_group = _ctx._group_pool.acquire();
+}
+
 void dx12_buffer::release_storage() const
 {
     // Stage the GPU handle + finalizers for deletion once the current epoch retires.
@@ -126,7 +136,10 @@ void dx12_buffer::release_storage() const
         expiring.finalizers = cc::move(_finalizers);
         // Gate release on the async copy queue too: an in-flight upload to this buffer may still reference the resource after its epoch has retired on the direct queue.
         // This is the buffer's highest pending async value, and deferred deletion holds the resource until the copy fence reaches it.
-        expiring.copy_wait = dx12_copy_fence_value(_pending_async_upload_value.load(std::memory_order_acquire));
+        // Both stamps live on the upload timeline, so the gate is one value on one group.
+        expiring.copy_wait
+            = dx12_group_value{_upload_group, cc::max(_pending_async_upload_value.load(std::memory_order_acquire),
+                                                      _pending_stream_copy_value.load(std::memory_order_acquire))};
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }
 }

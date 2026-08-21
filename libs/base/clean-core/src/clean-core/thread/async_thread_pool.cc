@@ -473,8 +473,13 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             static void fire(void* p)
             {
                 auto* const self = static_cast<parked_waiter*>(p);
+
+                // Read the pool BEFORE publishing `done`: that store is what releases the parked participant to
+                // leave the loop, and the waiter lives on ITS stack, so `self` may already be dead by the next line.
+                // The pool cannot be — it is the one being driven, and its caller holds it.
+                auto* const pool = self->pool;
                 self->done.store(true, cc::memory_order_release);
-                self->pool->wake_all();
+                pool->wake_all();
             }
         };
 

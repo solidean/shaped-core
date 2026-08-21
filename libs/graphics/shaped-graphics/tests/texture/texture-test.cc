@@ -91,6 +91,41 @@ TEST("sg - texture_description shape is derived, not flagged")
     CHECK((sg::texture_traits<texture_dimension::d2, false, false, /*ms*/ true>::matches(ms)));
 }
 
+TEST("sg - allow_region_stream rejects the shapes dx12 cannot give it")
+{
+    // allow_region_stream is D3D12's ALLOW_SIMULTANEOUS_ACCESS, which that runtime refuses on a depth/stencil or
+    // multisampled resource.
+    // Catching it here names the conflict; letting it through yields an opaque CreateCommittedResource failure.
+    auto base = sg::texture_description{};
+    base.format = sg::pixel_format::rgba8_unorm;
+    base.width = 64;
+    base.height = 32;
+
+    auto ok = base;
+    ok.usage = sg::texture_usage::copy_dst | sg::texture_usage::allow_region_stream;
+    CHECK(ok.is_valid());
+    ok.assert_valid();
+
+    // The wide claim carries no such restriction, which is why it is a separate flag rather than a degree of one.
+    auto ms_subresource = base;
+    ms_subresource.format = sg::pixel_format::rgba8_unorm;
+    ms_subresource.sample_count = 4;
+    ms_subresource.usage = sg::texture_usage::copy_dst | sg::texture_usage::allow_subresource_stream;
+    CHECK(ms_subresource.is_valid());
+
+    auto ds = base;
+    ds.format = sg::pixel_format::depth32_float;
+    ds.usage = sg::texture_usage::depth_stencil | sg::texture_usage::allow_region_stream;
+    CHECK(!ds.is_valid());
+    CHECK_ASSERTS(ds.assert_valid());
+
+    auto ms = base;
+    ms.sample_count = 4;
+    ms.usage = sg::texture_usage::copy_dst | sg::texture_usage::allow_region_stream;
+    CHECK(!ms.is_valid());
+    CHECK_ASSERTS(ms.assert_valid());
+}
+
 // The shape-gated accessors exist only where the shape has that axis — a compile-time contract.
 // Detection through a template parameter keeps the constraint check SFINAE-friendly.
 namespace

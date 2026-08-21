@@ -128,6 +128,28 @@ A hash map keyed on the real value is the default, and it is not a cost worth av
 When a type has a `hash()` hidden friend and no `operator==`, adding the operator over exactly the fields the hash folds is usually the whole fix.
 Those two staying in agreement is then the invariant to state.
 
+### Out-of-order execution invalidates every collapsed maximum
+
+When a change lets work complete out of the order it was submitted in, go looking for every place that folds a set of values into a single number and waits on it.
+A shared counter signaled to "the highest value finished so far" is correct only while completion order matches submission order.
+That premise usually lives in a comment nobody rechecks when the ordering changes.
+
+**The fix is to split the signal, never to serialize it.**
+A watermark — signal only the contiguous prefix that has actually finished — restores correctness and reintroduces the head-of-line blocking the change existed to remove, one queue further down.
+Splitting means one timeline per *ordering family*, so values stay comparable within a family and unrelated work never speaks for anything but itself.
+
+The worked example is sg's transfer completion.
+`ctx.stream` made the copy actors select jobs out of order, and both actors still signaled one per-system fence to the highest value each window finished.
+A stream to one buffer finishing therefore reported an older upload to a different buffer complete, and a reader stopped waiting for a copy that had not run.
+`dx12_completion_group` is the split: one fence per resource per direction, pooled and recycled.
+
+### "No callers in the repo" is not evidence of dead code
+
+It is evidence only for something the repo alone can use.
+A symbol in a library's exported `FILE_SET` — a backend header included — is reachable by consumers this tree does not contain.
+An unused-looking member there wants its *correctness* checked rather than its existence questioned.
+Say which of the two you are claiming, because they get answered differently.
+
 ### Drive-by cleanups are welcome where the PR already is
 
 The libraries are in flux, so cleanups get postponed by prioritization rather than by policy — fringe and niche APIs carry debt on purpose.

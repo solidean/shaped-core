@@ -29,30 +29,13 @@ enum class cpu_descriptor_slot : int;  // a slot in a CPU descriptor heap (see d
 enum class dx12_query_heap_type : u32; // which query heap a query lives in (see dx12_query.hh)
 enum class layout_combine;             // how two texture layouts merge (see dx12_texture_access.hh)
 
-// The two fence-value newtypes this header goes on to DEFINE, named here so each definition can be written qualified.
-enum class dx12_copy_fence_value : u64;
-enum class dx12_download_fence_value : u64;
+// Transfer completion timelines — one per resource per direction (see dx12_completion_group.hh).
+// A bare value no longer identifies anything on its own, so every stamp and every wait carries its group with it.
+struct dx12_completion_group;
+struct dx12_group_value;
+class dx12_completion_group_pool;
+using dx12_completion_group_handle = std::shared_ptr<dx12_completion_group>;
 
-} // namespace sg::backend::dx12
-
-/// Monotonic value on the async-upload completion fence (dx12_upload_async_system::_completion_fence).
-/// Its own newtype so it cannot be confused with the epoch / submission / staging fence timelines.
-/// A later direct-queue list waits on this value to see an async upload's writes; `none` means no pending upload.
-enum class sg::backend::dx12::dx12_copy_fence_value : sg::u64
-{
-    none = 0,
-};
-
-/// Monotonic value on the async-download completion fence (dx12_download_async_system::_completion_fence).
-/// Its own newtype so it cannot be confused with the other fence timelines.
-/// A later direct-queue list that WRITES a buffer waits on this value to know the async readback has finished reading it; `none` means no pending async download.
-enum class sg::backend::dx12::dx12_download_fence_value : sg::u64
-{
-    none = 0,
-};
-
-namespace sg::backend::dx12
-{
 
 class dx12_context;
 /// A backend-typed context handle: an sg::context_handle known to point at a dx12_context.
@@ -105,15 +88,16 @@ struct dx12_resource_upload;
 struct dx12_buffer_upload;
 struct dx12_resource_download;
 struct dx12_buffer_download;
-class dx12_download_waiter;
 struct dx12_download_copy_job;
 
 // Async buffer upload on a dedicated copy queue (see dx12_upload_async.hh).
 class dx12_upload_async_system;
 struct dx12_async_upload_job;
+struct dx12_transfer_wake;
+class dx12_upload_waker;
 
 // Async buffer download on a dedicated copy queue (see dx12_download_async.hh).
 class dx12_download_async_system;
 struct dx12_async_download_job;
-class dx12_async_download_waiter;
+struct dx12_download_sink;
 } // namespace sg::backend::dx12

@@ -34,6 +34,7 @@ Creation is grouped into scopes that name the *lifetime* or the *transfer direct
 | `ctx.transient` | per-frame scratch buffers, textures and binding groups | the next `advance_epoch` — using one past its epoch asserts |
 | `ctx.upload` | *no resources* — streams host bytes into a buffer or texture | n/a ([async upload](upload.async.md)) |
 | `ctx.download` | *no resources* — streams device bytes back, returning a future | n/a ([async download](download.async.md)) |
+| `ctx.stream` | *no resources* — bulk transfers with a control handle instead of automatic sync | n/a ([streaming](streaming.md)) |
 | `ctx.uncached` | binding-group layouts, pipeline layouts, every pipeline kind, shader tables — freshly built every call | refcount |
 | `ctx.cached` | layouts plus compute and raytracing pipelines, deduplicated get-or-create | refcount ([caches](caches.md)) |
 
@@ -74,6 +75,16 @@ That is not refcounted for you: a `raw_buffer_handle` does not keep its context 
 
 `shutdown()` releases all backend state and leaves the context unusable.
 It is idempotent, and a backend's destructor runs it for you — call it yourself only to release the device earlier than the handle goes away.
+
+## Downloads need an ambient async scheduler
+
+A download's completion is a [`cc::async`](../../../../base/clean-core/src/clean-core/thread/async.hh) node.
+`ctx.wait_for(future)` drives that node on the **ambient scheduler**, and asserts when none is installed.
+Install one at startup with `cc::install_default_async_scheduler` or a `cc::scoped_default_async_scheduler`; a nexus run installs its own, so tests need nothing.
+
+That buys the composition: `future.completion()` is a node other async work can depend on, so a readback chains into a graph without anyone blocking.
+Cancellation — a dropped recording list, a dropped destination — arrives on that node as `cc::async_error::make_cancelled()` rather than as a future that simply never completes.
+So `is_ready()` means **settled**, by delivery or by cancellation, and `try_get_bytes()` is what distinguishes the two.
 
 ## When things go wrong
 

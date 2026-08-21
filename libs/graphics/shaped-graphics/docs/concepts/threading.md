@@ -56,7 +56,7 @@ The waits that need the sweep are
 
 - `wait_for(future)` and `wait_for_ticks` / `wait_for_seconds` — the readback actor delivers the bytes.
 - `wait_for_epoch`, and so also `wait_for_next_inflight_epoch` and `advance_epoch`'s throttle — *not* just a GPU wait.
-  A submitted list can be parked on the async-upload completion fence, which the copy actor signals, so without the sweep the GPU never reaches the epoch fence.
+  A submitted list can be parked on a resource's async-upload timeline, which the copy actor signals, so without the sweep the GPU never reaches the epoch fence.
 - the inline-download ring's back-pressure and its drain-to-idle — only the actor frees ring space and decrements the outstanding count.
 
 The last two are the traps: they look like waits on the GPU or on an atomic, not on an actor.

@@ -209,6 +209,10 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
         .samples = VkSampleCountFlagBits(desc.sample_count), // enum values equal the sample counts
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = to_vk_image_usage(desc.usage),
+        // TODO: the streaming usages need VK_SHARING_MODE_CONCURRENT over the graphics + transfer
+        // families — EXCLUSIVE cannot express two families holding a resource at once, and ownership
+        // transfer serializes the very concurrency streaming exists to allow.
+        // Vulkan is the strict backend here: dx12 needs a flag only for a region inside a subresource.
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };

@@ -15,44 +15,20 @@
 
 #include <atomic>
 
-/// bytes_waiter for an inline download: ready once the download actor has copied the readback bytes into the destination.
-/// wait() can only block after the recording list has been submitted — blocking earlier would deadlock the very thread that must submit.
-/// A dropped recording list cancels the download: its future never becomes ready, and wait() reports failure.
-class sg::backend::dx12::dx12_download_waiter final : public sg::bytes_waiter
-{
-public:
-    /// Set true when the recording command list is submitted; gates wait().
-    std::atomic_bool submitted = false;
-
-    /// Marks the download cancelled: its list was dropped, so the copy will never run.
-    /// wait() then fails instead of blocking forever.
-    /// A cancelled download is never submitted, so this cannot race a thread blocked inside wait().
-    void mark_cancelled() { _cancelled.store(true, std::memory_order_release); }
-
-    [[nodiscard]] bool wait() override
-    {
-        if (_cancelled.load(std::memory_order_acquire))
-            return false;
-        if (!submitted.load(std::memory_order_acquire) && !is_ready())
-            return false;
-        _is_ready.wait(false, std::memory_order_acquire); // blocks until mark_ready() stores true
-        return true;
-    }
-
-private:
-    std::atomic_bool _cancelled = false;
-};
-
 /// One deferred readback copy, recorded token-less into a command list and enqueued on the download actor at submit.
 /// The actor waits for `token` on the submission fence, then runs `deferred_cpu_copy` if `pin` is still alive.
 /// A dropped future expires the pin and cancels the copy.
-/// It then marks `waiter` ready and releases one count from `epoch_copies`, the per-epoch tally gating ring reclaim.
+/// It then settles `completion` and releases one count from `epoch_copies`, the per-epoch tally gating ring reclaim.
+///
+/// `completion` and `gate` ride only on the read's LAST chunk, so the future settles once every chunk has drained.
+/// The actor copies in enqueue order, which is what makes the last chunk the right carrier.
 struct sg::backend::dx12::dx12_download_copy_job
 {
     sg::submission_token token = sg::submission_token::not_submitted;
     cc::unique_function<void()> deferred_cpu_copy;
     std::weak_ptr<void const> pin;
-    std::shared_ptr<dx12_download_waiter> waiter;
+    cc::shared_async<cc::unit> completion;
+    std::shared_ptr<sg::bytes_wait_gate> gate;
 
     /// The reserving epoch's outstanding-copy counter, held until this job is drained or its list is dropped.
     /// The epoch's ring span frees once the counter reaches zero.
@@ -87,7 +63,7 @@ public:
                                                     ID3D12Resource* src,
                                                     dx12_texture_footprint const& fp);
 
-    /// Stamps `jobs` with `token`, marks their waiters submitted, and enqueues them on the actor in order.
+    /// Stamps `jobs` with `token`, opens their wait gates, and enqueues them on the actor in order.
     /// Called from submit while the submission order is held.
     void enqueue_submitted(sg::submission_token token, cc::vector<dx12_download_copy_job>& jobs);
 

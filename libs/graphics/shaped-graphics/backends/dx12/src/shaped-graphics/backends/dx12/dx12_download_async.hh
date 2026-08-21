@@ -6,26 +6,17 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
+#include <shaped-graphics/transfer/stream_handle.hh>
+#include <shaped-graphics/transfer/stream_sink.hh>
 
 #include <atomic>
-
-/// bytes_waiter for an async download: ready once the copy actor has memcpy'd the readback bytes into the destination.
-/// There is no "submitted" gate, unlike the inline path — an async download is always handed to the actor.
-/// The actor drains every window before it sleeps, so a blocking wait always makes progress.
-class sg::backend::dx12::dx12_async_download_waiter final : public sg::bytes_waiter
-{
-public:
-    [[nodiscard]] bool wait() override
-    {
-        _is_ready.wait(false, std::memory_order_acquire); // blocks until mark_ready() stores true
-        return true;
-    }
-};
 
 /// One async download handed to the copy actor.
 /// `buffer_source` / `texture_source` is held **strong** for the job's whole lifetime, so its storage stays alive across the copy-queue read.
@@ -44,14 +35,21 @@ struct sg::backend::dx12::dx12_async_download_job
     bool is_texture = false;                            // discriminant: texture read vs buffer read
     isize src_offset = 0;
     isize size = 0;
-    cc::span<byte> dst;                                 // destination bytes (valid while `pin` is)
-    std::weak_ptr<void const> pin;                      // future's pin; expired == caller cancelled
-    std::shared_ptr<dx12_async_download_waiter> waiter; // marked ready after the memcpy
-    dx12_download_fence_value completion_value = dx12_download_fence_value::none; // reverse-sync value for this read
+    cc::span<byte> dst;                    // destination bytes (valid while `pin` is)
+    std::weak_ptr<void const> pin;         // future's pin; expired == caller cancelled
+    cc::shared_async<cc::unit> completion; // settled after the memcpy, or with a cancelled error
+    dx12_group_value completion_value;     // reverse-sync value for this read, on the source's download timeline
     sg::submission_token wait_token = sg::submission_token::invalid; // defer the read until this token completes
     // Forward cross-queue sync vs a pending async upload to the same buffer.
     // The read waits on the upload completion fence for this value, so it observes the upload — the two copy queues are independent.
-    dx12_copy_fence_value upload_wait_value = dx12_copy_fence_value::none;
+    dx12_group_value upload_wait_value;
+
+    // Set only for a sink-driven readback; the bytes are handed over chunk by chunk instead of landing in `dst`.
+    std::shared_ptr<dx12_download_sink> sink;
+
+    // Set only for a STREAMING readback; null marks the job as the async tier.
+    // Carries the priority and cancel flag the actor reads when picking, plus the completion node it must settle.
+    std::shared_ptr<sg::impl::stream_control> stream;
 };
 
 /// Async GPU→CPU readback on the dedicated COPY queue, decoupled from epochs.
@@ -90,6 +88,29 @@ public:
                                                     sg::subresource_index const& subresource,
                                                     sg::texture_region const& region);
 
+    /// Records a streaming readback of [offset, offset+size) from `buffer`, returning its control handle.
+    /// Unlike download_buffer this does NOT stamp the reverse value, so a later command list that writes the buffer
+    /// waits on nothing — the streamed extent is the caller's to keep clear until the handle settles.
+    [[nodiscard]] sg::stream_download_handle stream_buffer(sg::raw_buffer_handle buffer, isize offset, isize size);
+
+    /// Records a streaming readback of [offset, offset+size) from `buffer` delivered to `sink`.
+    /// Nothing accumulates: each chunk is handed over at drain, in order, and then its staging window is recycled.
+    [[nodiscard]] sg::stream_download_handle stream_sink_buffer(sg::raw_buffer_handle buffer,
+                                                                sg::stream_sink sink,
+                                                                isize offset,
+                                                                isize size);
+
+    /// Records a streaming readback of one texture region delivered to `sink`, a run of whole rows at a time.
+    [[nodiscard]] sg::stream_download_handle stream_sink_texture(sg::raw_texture_handle texture,
+                                                                 sg::stream_sink sink,
+                                                                 sg::subresource_index const& subresource,
+                                                                 sg::texture_region const& region);
+
+    /// Records a streaming readback of one texture region, under stream_buffer's rules.
+    [[nodiscard]] sg::stream_download_handle stream_texture(sg::raw_texture_handle texture,
+                                                            sg::subresource_index const& subresource,
+                                                            sg::texture_region const& region);
+
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows.
     /// It drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`.
     /// Thread-safe; the change is picked up before the next download is staged, so in-flight downloads are unaffected.
@@ -110,22 +131,20 @@ public:
     byte* _mapped = nullptr;
     isize _window_bytes = 0;
     ComPtr<ID3D12Fence> _window_fence; // per-window monotonic timeline: window reuse + one window's read done
-    // Async-download completion fence, owned here and download-only.
-    // Signaled by the copy queue up to the highest finished read value each window.
-    // A later direct-queue list that WRITES the buffer waits on it at submit, so it never overwrites bytes the read is still reading.
-    // Read externally only by dx12_command_list (reverse wait).
-    // Created in initialize; empty until then.
-    ComPtr<ID3D12Fence> _completion_fence;
+    // Completion is per SOURCE rather than per system: each resource carries its own download timeline, and a
+    // window signals every timeline whose read it finished.
+    // See dx12_completion_group.hh for why one shared fence stopped being correct.
     HANDLE _wait_event = nullptr; // actor-thread wait on the window fence
 
     // A pending set_window_bytes request; the actor compares it to _window_bytes each process cycle and rebuilds staging when they differ.
     // Written by any thread, read by the actor.
     std::atomic<isize> _desired_window_bytes = 0;
 
-private:
-    // Reserved on the caller thread (fetch_add) and handed out as dx12_download_fence_value.
-    // The actor's windows signal _completion_fence up to the highest finished read value.
-    std::atomic<u64> _next_download_value = 0;
+    // Which read fills the open window next, and how windows are shared between the async and streaming flavors.
+    // Actor-thread state like the window bookkeeping around it, so it needs no lock.
+    // It lives here rather than in the actor only because the actor type is file-local to the .cc.
+    sg::impl::transfer_scheduler _scheduler;
 
+private:
     cc::unique_ptr<cc::threaded_actor<dx12_async_download_job>> _actor;
 };

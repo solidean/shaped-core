@@ -12,6 +12,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc
     src/shaped-graphics/backends/dx12/dx12_barrier.cc
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.cc
+    src/shaped-graphics/backends/dx12/dx12_completion_group.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
     src/shaped-graphics/backends/dx12/dx12_texture.cc
     src/shaped-graphics/backends/dx12/dx12_swapchain.cc
@@ -53,6 +54,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_command_list.hh
     src/shaped-graphics/backends/dx12/dx12_barrier.hh
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh
+    src/shaped-graphics/backends/dx12/dx12_completion_group.hh
     src/shaped-graphics/backends/dx12/dx12_buffer.hh
     src/shaped-graphics/backends/dx12/dx12_texture.hh
     src/shaped-graphics/backends/dx12/dx12_swapchain.hh
@@ -119,6 +121,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-context-test.cc
         tests/dx12-epoch-test.cc
         tests/dx12-command-pool-test.cc
+        tests/dx12-completion-group-test.cc
         tests/dx12-transfer-test.cc
         tests/dx12-transfer-resize-test.cc
         tests/dx12-transfer-wrap-test.cc

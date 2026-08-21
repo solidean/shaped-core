@@ -41,17 +41,21 @@ sg::async_compute_pipeline  // std::shared_ptr<cc::async<compute_pipeline_handle
 // these are async<T>, not the read-only async<T const>, so const lands at the read side (try_value yields the const *_handle).
 ```
 
-## bytes_future / bytes_waiter — download results
+## bytes_future — download results
 
 ```cpp
 #include <shaped-graphics/bytes_future.hh>
-sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, waiter}
+sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, completion}
 f.is_valid()                        // bool — backed by a real download (vs default-constructed)
-f.is_ready()                        // bool — NON-BLOCKING poll; true once the actor copied the bytes back
-f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt until ready)
+f.is_ready()                        // bool — NON-BLOCKING poll; true once SETTLED, by delivery OR by cancellation
+f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt unless delivered)
+f.completion()                      // -> cc::shared_async<cc::unit const> — depend on it to chain WITHOUT blocking
 sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
-sg::bytes_waiter                    // abstract poll handle a backend subclasses; sg::ready_bytes_waiter = ready-on-construction
+sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already settled (empty / synchronous downloads)
+sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
 // to BLOCK until a download is delivered, use ctx.wait_for(future) (see epochs) — the future has no blocking wait
+// cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
+// sg REQUIRES an installed ambient async scheduler (cc::install_default_async_scheduler, or a nexus run's)
 ```
 
 ## Enums
@@ -107,6 +111,39 @@ ctx.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_fut
 ctx.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — ASYNC read one texture (sub)region back (needs copy_src), tightly packed
 ctx.download.set_async_window_size(bytes)          // void — resize the async readback staging window (x3 buffered); copy actor adopts it between windows; dx12 default 16 MiB
 ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); dx12 default 16 MiB
+
+// ctx.stream — the WEAKER tier (see docs/concepts/streaming.md). No automatic sync: the streamed extent is YOURS
+// ALONE until the handle settles, and a list touching it must be SUBMITTED after you observed that.
+ctx.stream.bytes_to_buffer(buf, pinned, offset=0, scope=resource)   // -> sg::stream_upload_handle (needs copy_dst)
+ctx.stream.data_to_buffer(typed_buf, pinned, off_in_elements=0, scope=resource) // -> same; T from buffer<T>
+ctx.stream.bytes_to_texture(tex, pinned, subresource={}, region={}, scope=resource)   // -> sg::stream_upload_handle
+ctx.stream.bytes_from_buffer(buf, offset, size, scope=resource)     // -> sg::stream_download_handle (needs copy_src)
+ctx.stream.data_from_buffer<T>(typed_buf, off_in_elements, count, scope=resource)     // -> same
+ctx.stream.bytes_from_texture(tex, subresource={}, region={}, scope=resource)         // -> sg::stream_download_handle
+ctx.stream.from_source_to_buffer(buf, std::unique_ptr<sg::stream_source>, offset=0, scope=resource)  // -> handle
+ctx.stream.from_source_to_texture(tex, source, subresource={}, region={}, scope=resource)             // -> handle
+ctx.stream.to_sink_from_buffer(buf, sg::stream_sink, offset, size, scope=resource)     // -> handle, NO future
+ctx.stream.to_sink_from_texture(tex, sink, subresource={}, region={}, scope=resource)  // -> handle, NO future
+// sg::stream_sink = cc::unique_function<bool(cc::span<byte const> bytes, isize offset)>
+//   actor thread; MUST NOT BLOCK and MUST NOT RETAIN the span (it points into the recycled staging window)
+//   chunks of ONE transfer arrive in order (textures: whole tightly-packed rows); false fails the transfer
+// sg::stream_source: try_next_chunk() -> sg::stream_poll {status, chunk{pinned_data, offset}}
+//   status: ready | not_yet (passed over, NOT spun on) | done | failed (settles on the error channel)
+//   POLLED ON THE COPY ACTOR THREAD — must not block. set_waker(f): call f when a not_yet becomes answerable.
+//   total_size_hint() -> i64, < 0 = unknown. Texture chunk offsets must be ROW-aligned.
+sg::make_pinned_stream_source(pinned, offset=0)  // the default: one always-ready chunk (what bytes_to_* builds)
+// sg::stream_scope::resource (free everywhere) | subresource (texture_usage::allow_subresource_stream)
+//                  | region (buffer_usage/texture_usage::allow_region_stream — NOT free: see the doc)
+ctx.stream.set_upload_ratio(f) / set_download_ratio(f)   // void — share of copied bytes streaming is OWED; default 0.1
+ctx.stream.set_upload_aging(f) / set_download_aging(f)   // void — priority += f * seconds_waiting; default 0 = off
+
+h.completion()          // -> cc::shared_async<cc::unit const> — THE completion signal; chain off it without blocking
+h.is_settled() / h.is_complete()  // bool — settled (delivered OR cancelled) / actually delivered
+h.progress()            // -> sg::stream_progress {i64 bytes_done; cc::optional<i64> total_hint}  (hint, never a test)
+h.set_priority(i32) / h.priority()  // reordered against other streams; takes effect within ~one window; any thread
+h.cancel()              // stops it being served; recorded chunks still run. DROPPING THE HANDLE CANCELS TOO
+h.promote_to_async()    // ADDITIVE: keeps the handle, and gains the automatic waits — the clean prewarm upgrade
+dl.future()             // stream_download_handle only -> sg::bytes_future, independent of the handle's lifetime
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in); throws sg::device_lost_exception on device loss
 ctx.submit_command_list_and_present(sc, std::move(cmd)) // -> submission_token — THE present path: folds the swapchain back-buffer's present-layout transition into cmd, submits, then presents (see swapchain)
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; explicit discard (same epoch). NB a list left to leave

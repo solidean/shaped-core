@@ -15,9 +15,9 @@ In a build without threads the actor owns no thread and runs on whoever pumps it
 
 1. **Record**, on the caller thread: reserve a ring window, record the readback copy into the list, and append a **token-less** copy job to it.
    The future's destination is kept alive by a `pin` — a `weak_ptr` on the actor side.
-2. **Submit**, under the submission lock: stamp every job with the list's `submission_token`, mark its waiter *submitted*, and enqueue the jobs on the actor **in submission order**.
+2. **Submit**, under the submission lock: stamp every job with the list's `submission_token`, open its `bytes_wait_gate`, and enqueue the jobs on the actor **in submission order**.
 3. **Drain**, on the actor thread: block on the submission fence until the recording list has run, then memcpy the readback bytes into the destination **if the pin is still alive**.
-   Then mark the waiter ready and release the job's hold on its epoch.
+   Then settle the future's completion async and release the job's hold on its epoch.
 
 The completion-guaranteeing call is **`ctx.wait_for(future)`**.
 The future itself carries only the non-blocking `is_ready()` / `try_get_bytes()` polls, since a blocking wait is a context-level effect and is kept off the future.
@@ -28,7 +28,7 @@ A future is waitable as soon as its list is submitted, **before** its epoch ends
 `advance_epoch(...)` and `advance_epoch_and_wait_for_idle()` wait on the **GPU epoch fence** only.
 Reaching idle means every readback copy has finished on the GPU and the ring bytes are valid, but the actor thread may not yet have been scheduled to run the CPU memcpy.
 So `future.is_ready()` can be transiently **false** right after idle returns — a scheduling race, not a bug.
-Only `ctx.wait_for(future)`, which blocks on the future's own waiter, guarantees the bytes have landed in the caller's destination.
+Only `ctx.wait_for(future)`, which blocks on the future's own completion node, guarantees the bytes have landed in the caller's destination.
 
 ## Why reclaim is epoch-granular (the load-bearing decision)
 
@@ -72,7 +72,9 @@ Dropping a recording list (`drop_command_list`) is distinct from dropping the *f
   The list was still submitted, so the actor runs the job, sees the dead pin, **skips the memcpy** and still counts the drain — space reclaims normally.
   This is how a caller cancels a download it no longer wants.
 - **Dropping the list** means the recorded copies will **never run**.
-  Those futures can never complete, so each is explicitly **cancelled**: `wait()` fails instead of blocking forever, and `try_get_bytes` stays empty.
+  Those copies can never run, so each future is explicitly **cancelled** — `push_error(cc::async_error::make_cancelled())` on its completion node.
+  It then reads as settled, `try_get_bytes` stays empty, and `ctx.wait_for` fails instead of blocking forever.
+  Saying it out loud is mandatory rather than tidy: a manual async node nobody ever pushes parks its dependents for the process's lifetime.
   The job's epoch-copy count is released, so the epoch can still reach zero and reclaim.
   The reserved bytes are **not** freed individually — they sit inside the open epoch's span and reclaim with it at the next advance.
 
@@ -85,8 +87,9 @@ Dropping a recording list (`drop_command_list`) is distinct from dropping the *f
 - [`dx12_resource_download.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_download.hh)
   — the per-resource readback recorder plus its **deferred CPU copy** (`dx12_buffer_download`), the closure the actor runs once the GPU copy has completed.
 - [`bytes_future.hh`](../../src/shaped-graphics/bytes_future.hh)
-  — the future/waiter the caller polls (`is_ready` / `try_get_bytes`) or waits on via `ctx.wait_for(future)`.
-  `dx12_download_waiter` adds the *submitted* and *cancelled* gates.
+  — the future the caller polls (`is_ready` / `try_get_bytes`), chains off (`completion()`), or waits on via `ctx.wait_for(future)`.
+  Cancellation rides the completion node's error channel.
+  The separate `sg::bytes_wait_gate` carries only the *submitted* question, since blocking before submit would stall the very thread that must submit.
 - The advance hook is called from [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
 
 ## Load-bearing invariants

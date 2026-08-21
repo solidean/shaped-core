@@ -65,6 +65,10 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = VkDeviceSize(size_in_bytes),
             .usage = to_vk_buffer_usage(usage),
+            // TODO: the streaming usages need VK_SHARING_MODE_CONCURRENT over the graphics + transfer
+            // families — EXCLUSIVE cannot express two families holding a resource at once, and ownership
+            // transfer serializes the very concurrency streaming exists to allow.
+            // Vulkan is the strict backend here: dx12 needs a flag only for a region inside a subresource.
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
 
