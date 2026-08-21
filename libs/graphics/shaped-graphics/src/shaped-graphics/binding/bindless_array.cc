@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/hash.hh>
+#include <clean-core/common/utility.hh> // cc::move
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 
@@ -21,19 +22,21 @@ namespace
 } // namespace
 } // namespace sg
 
-sg::bindless_array sg::bindless_array::for_binding(context& ctx, staging_binding_group& group, cc::string_view name)
+sg::bindless_array sg::bindless_array::for_binding(context& ctx, staging_binding_group_handle group, cc::string_view name)
 {
-    auto const slot = group.slot_of(name);
+    CC_ASSERT(group != nullptr, "a bindless array needs a staging binding group");
+    auto const slot = group->slot_of(name);
     CC_ASSERT(slot != binding_slot::invalid, "the group's layout has no binding of that name");
-    CC_ASSERT(group.is_array(slot), "a bindless array needs an array binding (count >= 2, so elements can be vacant)");
+    CC_ASSERT(group->is_array(slot), "a bindless array needs an array binding (count >= 2, so elements can be vacant)");
 
     // The table starts empty, so the descriptors must too — and this is also what says the binding was set.
-    group.unset_array(slot);
-    return bindless_array(ctx, group, slot, u32(group.array_size(slot)));
+    group->unset_array(slot);
+    auto const capacity = u32(group->array_size(slot));
+    return bindless_array(ctx, cc::move(group), slot, capacity);
 }
 
-sg::bindless_array::bindless_array(context& ctx, staging_binding_group& group, binding_slot slot, u32 capacity)
-  : _ctx(ctx), _group(group), _slot(slot), _table(capacity)
+sg::bindless_array::bindless_array(context& ctx, staging_binding_group_handle group, binding_slot slot, u32 capacity)
+  : _ctx(ctx), _group(cc::move(group)), _slot(slot), _table(capacity)
 {
 }
 
@@ -44,9 +47,9 @@ u32 sg::bindless_array::acquire(raw_view const& view)
     // The table resolves identity; every mint and reclaim is mirrored onto the staging group, which is what
     // holds a mapped key's resource alive — so the key's raw pointer cannot be reused while the key is mapped.
     auto const r = _table.acquire(key_of(view), _ctx.current_epoch(),
-                                  [&](u32 freed) { _group.unset_array_element(_slot, int(freed)); });
+                                  [&](u32 freed) { _group->unset_array_element(_slot, int(freed)); });
     if (r.inserted)
-        _group.set_array_element(_slot, int(r.index), view);
+        _group->set_array_element(_slot, int(r.index), view);
     return r.index;
 }
 

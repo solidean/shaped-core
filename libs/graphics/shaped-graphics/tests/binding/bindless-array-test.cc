@@ -14,7 +14,7 @@ using namespace cc::primitive_defines;
 
 // sg::bindless_array over one array binding of a staging group: identity, per-epoch index lifetime, and the
 // lock/unlock protocol.
-// The group and its snapshot stay the caller's — the array only maps views to indices.
+// Minting the snapshot stays the caller's — the array shares the group's handle and only maps views to indices.
 // The slot mechanics underneath are covered CPU-side by slot-table-test.cc.
 // Each test is an INVOCABLE_TEST run against every available backend (see tests/context/context-test.cc).
 
@@ -59,8 +59,8 @@ INVOCABLE_TEST("sg - an unchanged bindless working set serves the same snapshot"
 
     auto group = make_group(ctx, 4);
     REQUIRE(group != nullptr);
-    auto buffers = sg::bindless_array::for_binding(*ctx, *group, "Buffers");
-    auto textures = sg::bindless_array::for_binding(*ctx, *group, "Textures");
+    auto buffers = sg::bindless_array::for_binding(*ctx, group, "Buffers");
+    auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
     CHECK(buffers.capacity() == 4);
 
     auto const buf = make_buffer(ctx);
@@ -94,8 +94,8 @@ INVOCABLE_TEST("sg - two bindless arrays over one group are independent", (sg::c
 
     auto group = make_group(ctx, 4);
     REQUIRE(group != nullptr);
-    auto buffers = sg::bindless_array::for_binding(*ctx, *group, "Buffers");
-    auto textures = sg::bindless_array::for_binding(*ctx, *group, "Textures");
+    auto buffers = sg::bindless_array::for_binding(*ctx, group, "Buffers");
+    auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
 
     // Each array indexes its own binding, so the first view of either lands at element 0.
     CHECK(buffers.acquire(make_buffer(ctx)) == textures.acquire(make_texture(ctx).as_readonly_view()));
@@ -115,8 +115,8 @@ INVOCABLE_TEST("sg - bindless lock/unlock protocol violations assert", (sg::cont
 
     auto group = make_group(ctx, 4);
     REQUIRE(group != nullptr);
-    auto textures = sg::bindless_array::for_binding(*ctx, *group, "Textures");
-    (void)sg::bindless_array::for_binding(*ctx, *group, "Buffers"); // so the group is fully wired
+    auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
+    (void)sg::bindless_array::for_binding(*ctx, group, "Buffers"); // so the group is fully wired
     auto const tex = make_texture(ctx);
     (void)textures.acquire(tex.as_readonly_view());
 
@@ -144,7 +144,7 @@ INVOCABLE_TEST("sg - the scoped bindless lock unlocks at scope exit", (sg::conte
 
     auto group = make_group(ctx, 4);
     REQUIRE(group != nullptr);
-    auto textures = sg::bindless_array::for_binding(*ctx, *group, "Textures");
+    auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
     auto const tex = make_texture(ctx);
     (void)textures.acquire(tex.as_readonly_view());
 

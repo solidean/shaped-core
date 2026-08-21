@@ -120,8 +120,8 @@ A clean `snapshot` does nothing at all.
 A staging group makes a big table cheap to *change*; what a bindless renderer still needs is the mapping from a view to the element index its shader indexes with.
 [`bindless_array`](../../src/shaped-graphics/binding/bindless_array.hh) is that mapping, over exactly one array binding: `bindless_array::for_binding(ctx, group, "Textures")`.
 
-It is non-owning, and deliberately small.
-The layout, the group, how many tables there are and what they are called all stay with the caller.
+It is deliberately small: it shares the group's handle, so the group cannot go out from under it, but it owns no descriptor and mints nothing.
+The layout, how many tables there are and what they are called all stay with the caller.
 One array touches nothing but its own binding, so several arrays over one group are independent.
 
 - **`acquire(view)` returns the element index**, minting one on a miss and writing exactly one staging descriptor.

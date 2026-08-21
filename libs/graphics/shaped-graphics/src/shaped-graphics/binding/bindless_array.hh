@@ -7,8 +7,8 @@
 
 /// A bindless view over ONE array binding of a staging_binding_group: the key → element-index map that turns
 /// a view into the index a shader uses into that array.
-/// Non-owning — the context and the group live outside and must outlive it, and nothing here mints, binds or
-/// snapshots.
+/// It shares the group's handle, so the group cannot go out from under it — but it owns no descriptor of its
+/// own and nothing here mints, binds or snapshots; the context lives outside and must outlive it.
 /// Several arrays over different bindings of one group are independent of each other.
 ///
 /// `acquire` returns the element index for a view, minting it on a miss.
@@ -31,12 +31,12 @@
 class sg::bindless_array
 {
 public:
-    /// A bindless view over `group`'s array binding named `name`; `ctx` and `group` must outlive it.
-    /// The binding must exist and must be an array (count > 1 — a count of 1 is a scalar binding to sg and
-    /// loses the vacant-element semantics); both are asserted.
+    /// A bindless view over `group`'s array binding named `name`; the handle is kept, and `ctx` must outlive it.
+    /// `group` must be non-null, and the binding must exist and be an array (count > 1 — a count of 1 is a
+    /// scalar binding to sg and loses the vacant-element semantics); all three are asserted.
     /// Clears the array, so the empty table and the descriptors agree — which also counts as having said what
     /// the binding holds, satisfying the group's "every binding set before the first snapshot" rule.
-    [[nodiscard]] static bindless_array for_binding(context& ctx, staging_binding_group& group, cc::string_view name);
+    [[nodiscard]] static bindless_array for_binding(context& ctx, staging_binding_group_handle group, cc::string_view name);
 
     /// The binding this array writes, resolved once at construction.
     [[nodiscard]] binding_slot slot() const { return _slot; }
@@ -61,10 +61,10 @@ public:
     [[nodiscard]] bool is_locked() const { return _locked; }
 
 private:
-    bindless_array(context& ctx, staging_binding_group& group, binding_slot slot, u32 capacity);
+    bindless_array(context& ctx, staging_binding_group_handle group, binding_slot slot, u32 capacity);
 
     context& _ctx;
-    staging_binding_group& _group;
+    staging_binding_group_handle _group;
     binding_slot _slot = binding_slot::invalid;
     impl::slot_table _table;
 

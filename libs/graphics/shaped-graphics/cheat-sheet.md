@@ -535,9 +535,9 @@ sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle c
                                       //   even if that is nothing: unset_array, or an empty range, answers it. array elements themselves may stay vacant
                                       // NOT thread-safe (snapshot() mutates); a taken snapshot is independent — later sets never touch it
                                       // dx12: sets write a private non-shader-visible heap; a dirty snapshot is ONE CopyDescriptorsSimple, a clean one is free
-// sg::bindless_array — a NON-OWNING bindless view over ONE array binding of a staging group: view identity -> element index. Owns no descriptor, mints nothing.
+// sg::bindless_array — a bindless view over ONE array binding of a staging group: view identity -> element index. Owns no descriptor, mints nothing.
 #include <shaped-graphics/binding/bindless_array.hh>
-sg::bindless_array::for_binding(ctx, sbg, name)  // -> bindless_array (by value); asserts the binding exists and is an ARRAY; CLEARS it (which also counts as setting it)
+sg::bindless_array::for_binding(ctx, sbg_handle, name)  // -> bindless_array (by value); KEEPS the group handle; asserts the binding exists and is an ARRAY; CLEARS it (which also counts as setting it)
 arr.acquire(raw_view)       // -> u32 element index — same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor
                             //   an index is valid ONLY for the epoch it was acquired in — re-acquire the working set every epoch
                             //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
