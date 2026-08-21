@@ -9,6 +9,9 @@
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/transfer/stream_sink.hh>
+
+#include <atomic>
 
 
 /// A window inside the persistently-mapped READBACK ring buffer, handed to execute_next_job.
@@ -52,6 +55,28 @@ struct sg::backend::dx12::dx12_resource_download
 };
 
 /// Buffer download: CopyBufferRegion from `src` into the readback window, then a deferred memcpy into `dst`.
+/// Where a readback's chunks go when the caller supplied a sink instead of taking a resident destination.
+///
+/// Shared, because each chunk's deferred copy runs later — at drain — and any one of them may be the one that fails.
+/// A sink that has already given up is not called again: it said it could not continue, and calling it repeatedly to
+/// tell it so is no kindness.
+struct sg::backend::dx12::dx12_download_sink
+{
+    explicit dx12_download_sink(sg::stream_sink s) : sink(cc::move(s)) {}
+
+    sg::stream_sink sink;
+    std::atomic<bool> failed = false;
+
+    /// Called on the actor thread at drain, in the transfer's own chunk order.
+    void deliver(cc::span<byte const> bytes, isize offset)
+    {
+        if (failed.load(std::memory_order_relaxed))
+            return;
+        if (!sink(bytes, offset))
+            failed.store(true, std::memory_order_relaxed);
+    }
+};
+
 /// Resumable — each execute_next_job reads as much as the window holds and yields that chunk's deferred copy.
 /// A read larger than the window therefore splits across successive calls.
 /// `dst` must outlive every deferred copy; the future's pin is what keeps it alive.
@@ -64,11 +89,18 @@ struct sg::backend::dx12::dx12_buffer_download final : dx12_resource_download
 
     // Raw-resource overload: `src` must outlive the recorded copies.
     dx12_buffer_download(ID3D12Resource* src, isize src_offset, cc::span<byte> dst)
-      : _src(src), _src_offset(src_offset), _dst(dst)
+      : _src(src), _src_offset(src_offset), _dst(dst), _size(dst.size())
     {
     }
 
-    [[nodiscard]] isize total_bytes() const override { return _dst.size(); }
+    /// Sink form: the bytes are handed to `sink` chunk by chunk instead of landing in a resident destination.
+    /// `size` is what the read covers, since there is no destination span to take it from.
+    dx12_buffer_download(ID3D12Resource* src, isize src_offset, isize size, std::shared_ptr<dx12_download_sink> sink)
+      : _src(src), _src_offset(src_offset), _size(size), _sink(cc::move(sink))
+    {
+    }
+
+    [[nodiscard]] isize total_bytes() const override { return _size; }
 
     /// Bytes read and recorded so far.
     [[nodiscard]] isize consumed() const { return _consumed; }
@@ -76,27 +108,35 @@ struct sg::backend::dx12::dx12_buffer_download final : dx12_resource_download
     // See dx12_buffer_upload::prepare — buffers need no explicit barrier for copies.
     void prepare(dx12_command_list&) override {}
 
-    [[nodiscard]] bool is_finished() const override { return _consumed == _dst.size(); }
+    [[nodiscard]] bool is_finished() const override { return _consumed == _size; }
 
     [[nodiscard]] dx12_pending_copy execute_next_job(ID3D12GraphicsCommandList& list,
                                                      dx12_download_allocation const& alloc) override
     {
-        isize const remaining = _dst.size() - _consumed;
+        isize const remaining = _size - _consumed;
         isize const n = remaining < alloc.size ? remaining : alloc.size;
         CC_ASSERT(n > 0, "readback allocation too small to make progress");
         list.CopyBufferRegion(alloc.buffer, UINT64(alloc.offset), _src, UINT64(_src_offset + _consumed), UINT64(n));
 
         byte const* const src_ptr = alloc.base + alloc.offset;
-        byte* const dst_ptr = _dst.data() + _consumed;
         auto const size = std::size_t(n);
+        isize const offset = _consumed;
         _consumed += n;
+
+        if (_sink)
+            return dx12_pending_copy{
+                [sink = _sink, src_ptr, n, offset] { sink->deliver(cc::span<byte const>(src_ptr, n), offset); }, n};
+
+        byte* const dst_ptr = _dst.data() + offset;
         return dx12_pending_copy{[dst_ptr, src_ptr, size] { cc::memcpy(dst_ptr, src_ptr, size); }, n};
     }
 
 private:
     ID3D12Resource* _src = nullptr;
     isize _src_offset = 0;
-    cc::span<byte> _dst;
+    cc::span<byte> _dst;                       // empty in the sink form
+    isize _size = 0;                           // what the read covers, sink form included
+    std::shared_ptr<dx12_download_sink> _sink; // null when the bytes land in `_dst`
     isize _consumed = 0;
 };
 
@@ -110,6 +150,12 @@ struct sg::backend::dx12::dx12_texture_download final : dx12_resource_download
 {
     dx12_texture_download(ID3D12Resource* src, dx12_texture_footprint const& fp, cc::span<byte> dst)
       : _src(src), _fp(fp), _dst(dst)
+    {
+    }
+
+    /// Sink form: the un-padded rows are handed to `sink` a run at a time instead of landing in a resident buffer.
+    dx12_texture_download(ID3D12Resource* src, dx12_texture_footprint const& fp, std::shared_ptr<dx12_download_sink> sink)
+      : _src(src), _fp(fp), _sink(cc::move(sink))
     {
     }
 
@@ -183,11 +229,25 @@ struct sg::backend::dx12::dx12_texture_download final : dx12_resource_download
         list.CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, &src_box);
 
         byte const* const src_base = alloc.base + aligned;
-        byte* const dst_base = _dst.data();
         isize const first_row = _rows_done;
         isize const row_bytes = _fp.row_bytes;
         isize const padded = _fp.padded_pitch;
         _rows_done += n;
+
+        // A sink is handed whole rows, one contiguous run per staging row: the staged rows are padded and the sink's
+        // contract is tightly-packed bytes, so there is no larger span that could be handed over without first
+        // assembling one — which is the copy a sink exists to avoid.
+        if (_sink)
+            return dx12_pending_copy{.deferred_cpu_copy =
+                                         [sink = _sink, src_base, first_row, n, row_bytes, padded]
+                                     {
+                                         for (isize i = 0; i < n; ++i)
+                                             sink->deliver(cc::span<byte const>(src_base + i * padded, row_bytes),
+                                                           (first_row + i) * row_bytes);
+                                     },
+                                     .bytes = waste + n * padded};
+
+        byte* const dst_base = _dst.data();
         return dx12_pending_copy{.deferred_cpu_copy =
                                      [src_base, dst_base, first_row, n, row_bytes, padded]
                                  {
@@ -204,6 +264,7 @@ private:
 
     ID3D12Resource* _src = nullptr;
     dx12_texture_footprint _fp;
-    cc::span<byte> _dst;
-    isize _rows_done = 0; // padded staging rows read so far (flat over slices)
+    cc::span<byte> _dst;                       // empty in the sink form
+    std::shared_ptr<dx12_download_sink> _sink; // null when the rows land in `_dst`
+    isize _rows_done = 0;                      // padded staging rows read so far (flat over slices)
 };

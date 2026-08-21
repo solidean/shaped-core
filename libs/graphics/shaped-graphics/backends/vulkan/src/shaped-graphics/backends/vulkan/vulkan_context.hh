@@ -242,6 +242,23 @@ public:
         CC_UNREACHABLE("vulkan streaming texture download is not implemented yet");
     }
 
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_buffer(sg::raw_buffer_handle,
+                                                                        sg::stream_sink,
+                                                                        isize,
+                                                                        isize,
+                                                                        sg::stream_scope) override
+    {
+        CC_UNREACHABLE("vulkan sink-driven streaming download is not implemented yet");
+    }
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_texture(sg::raw_texture_handle,
+                                                                         sg::stream_sink,
+                                                                         sg::subresource_index const&,
+                                                                         sg::texture_region const&,
+                                                                         sg::stream_scope) override
+    {
+        CC_UNREACHABLE("vulkan sink-driven streaming texture download is not implemented yet");
+    }
+
     // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once that epoch retires.
     // Called from ~vulkan_buffer and ~vulkan_texture; safe to call from any thread.
     void schedule_deferred_deletion(vulkan_expiring_resource expiring);

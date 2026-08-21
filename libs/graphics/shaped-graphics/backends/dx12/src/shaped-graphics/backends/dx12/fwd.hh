@@ -116,4 +116,5 @@ class dx12_upload_waker;
 // Async buffer download on a dedicated copy queue (see dx12_download_async.hh).
 class dx12_download_async_system;
 struct dx12_async_download_job;
+struct dx12_download_sink;
 } // namespace sg::backend::dx12

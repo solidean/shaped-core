@@ -36,6 +36,7 @@ src/shaped-graphics/
     stream.hh/.cc                 [done]       the ctx.stream facade, scope validation, the ratio / aging knobs
     stream_handle.hh/.cc          [done]       stream_upload_handle / stream_download_handle — priority, progress, cancel, promote
     stream_source.hh/.cc          [done]       the lazy chunk sequence feeding an upload, plus the resident default
+    stream_sink.hh                [done]       where a download's chunks go when a resident destination is not wanted
     impl/transfer_scheduler.hh/.cc [done]      job selection: PWM window sharing, priority, aging, family ordering (GPU-free)
 
   barrier/                                     # the access-tracking substrate; shared vocabulary, per-backend emission

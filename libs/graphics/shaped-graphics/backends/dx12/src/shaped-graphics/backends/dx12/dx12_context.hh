@@ -382,6 +382,24 @@ public:
         return _download_async.stream_texture(cc::move(texture), subresource, region);
     }
 
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_buffer(sg::raw_buffer_handle buffer,
+                                                                        sg::stream_sink sink,
+                                                                        isize offset_in_bytes,
+                                                                        isize size_in_bytes,
+                                                                        sg::stream_scope) override
+    {
+        return _download_async.stream_sink_buffer(cc::move(buffer), cc::move(sink), offset_in_bytes, size_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_texture(sg::raw_texture_handle texture,
+                                                                         sg::stream_sink sink,
+                                                                         sg::subresource_index const& subresource,
+                                                                         sg::texture_region const& region,
+                                                                         sg::stream_scope) override
+    {
+        return _download_async.stream_sink_texture(cc::move(texture), cc::move(sink), subresource, region);
+    }
+
     // The scope is consumed entirely by the sg layer's static check against the resource's usage flags, so the
     // backend never needs it — dx12 already tracks state per subresource, and the one case that is not free is
     // handled at creation by ALLOW_SIMULTANEOUS_ACCESS rather than per transfer.

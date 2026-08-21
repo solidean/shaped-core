@@ -21,6 +21,7 @@
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/routine/routine_registry.hh>
 #include <shaped-graphics/transfer/stream.hh>
+#include <shaped-graphics/transfer/stream_sink.hh>
 #include <shaped-graphics/types.hh>
 
 /// Mutable entry point to a graphics backend: the factory for command lists and GPU resources.
@@ -301,6 +302,22 @@ protected:
                                                                            subresource_index const& subresource,
                                                                            texture_region const& region,
                                                                            stream_scope scope) = 0;
+
+    /// Streams `size_in_bytes` from `buffer` into `sink` rather than into a resident destination.
+    /// The implementation calls the sink on its copy actor thread, in the transfer's own chunk order, with spans
+    /// pointing into the readback staging window — so it must neither block nor retain them.
+    [[nodiscard]] virtual stream_download_handle stream_to_sink_from_buffer(raw_buffer_handle buffer,
+                                                                            stream_sink sink,
+                                                                            isize offset_in_bytes,
+                                                                            isize size_in_bytes,
+                                                                            stream_scope scope) = 0;
+
+    /// Streams one region of `texture` into `sink`, a run of whole tightly-packed rows at a time.
+    [[nodiscard]] virtual stream_download_handle stream_to_sink_from_texture(raw_texture_handle texture,
+                                                                             stream_sink sink,
+                                                                             subresource_index const& subresource,
+                                                                             texture_region const& region,
+                                                                             stream_scope scope) = 0;
 
     // Streaming scheduling knobs, reached via ctx.stream.
     // Defaults are no-ops so a backend without a streaming tier simply ignores them.

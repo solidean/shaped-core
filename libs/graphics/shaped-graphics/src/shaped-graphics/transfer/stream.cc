@@ -142,6 +142,42 @@ stream_download_handle context_stream_scope::bytes_from_texture(raw_texture_hand
     return _ctx.stream_bytes_from_texture(cc::move(texture), subresource, box, scope);
 }
 
+stream_download_handle context_stream_scope::to_sink_from_buffer(raw_buffer_handle buffer,
+                                                                 stream_sink sink,
+                                                                 isize offset_in_bytes,
+                                                                 isize size_in_bytes,
+                                                                 stream_scope scope)
+{
+    CC_ASSERT(buffer != nullptr, "stream download source buffer is null");
+    CC_ASSERT(sink, "stream download sink is empty");
+    CC_ASSERT(size_in_bytes >= 0, "stream download size must be non-negative");
+    CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= buffer->size_in_bytes(),
+              "stream download range is out of the buffer's bounds");
+    assert_buffer_scope(buffer, scope);
+
+    if (size_in_bytes == 0)
+        return stream_download_handle(make_settled_control(), bytes_future());
+    return _ctx.stream_to_sink_from_buffer(cc::move(buffer), cc::move(sink), offset_in_bytes, size_in_bytes, scope);
+}
+
+stream_download_handle context_stream_scope::to_sink_from_texture(raw_texture_handle texture,
+                                                                  stream_sink sink,
+                                                                  subresource_index const& subresource,
+                                                                  cc::optional<texture_region> region,
+                                                                  stream_scope scope)
+{
+    CC_ASSERT(texture != nullptr, "stream download source texture is null");
+    CC_ASSERT(sink, "stream download sink is empty");
+    impl::assert_valid_subresource(texture, subresource);
+    texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
+    impl::assert_texture_region_in_bounds(texture, subresource, box);
+    assert_texture_scope(texture, scope);
+
+    if (box.is_empty())
+        return stream_download_handle(make_settled_control(), bytes_future());
+    return _ctx.stream_to_sink_from_texture(cc::move(texture), cc::move(sink), subresource, box, scope);
+}
+
 void context_stream_scope::set_upload_ratio(float ratio)
 {
     _ctx.set_stream_upload_ratio(ratio);

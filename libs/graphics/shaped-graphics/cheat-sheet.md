@@ -136,6 +136,11 @@ h.set_priority(i32) / h.priority()  // reordered against other streams; takes ef
 h.cancel()              // stops it being served; recorded chunks still run. DROPPING THE HANDLE CANCELS TOO
 h.promote_to_async()    // ADDITIVE: keeps the handle, and gains the automatic waits — the clean prewarm upgrade
 dl.future()             // stream_download_handle only -> sg::bytes_future, independent of the handle's lifetime
+ctx.stream.to_sink_from_buffer(buf, sg::stream_sink, offset, size, scope=resource)     // -> handle, NO future
+ctx.stream.to_sink_from_texture(tex, sink, subresource={}, region={}, scope=resource)  // -> handle, NO future
+// sg::stream_sink = cc::unique_function<bool(cc::span<byte const> bytes, isize offset)>
+//   actor thread; MUST NOT BLOCK and MUST NOT RETAIN the span (it points into the recycled staging window)
+//   chunks of ONE transfer arrive in order (textures: whole tightly-packed rows); false fails the transfer
 // sg::stream_scope::resource (free everywhere) | subresource (texture_usage::allow_subresource_stream)
 //                  | region (buffer_usage/texture_usage::allow_region_stream — NOT free: see the doc)
 ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); dx12 default 16 MiB

@@ -35,6 +35,7 @@ struct download_mem_job
     std::weak_ptr<void const> pin;                // future's pin; expired == caller cancelled the copy
     cc::shared_async<cc::unit> completion;        // set only on a job's last chunk; settles the future
     std::shared_ptr<void const> source_keepalive; // holds the source (buffer or texture) alive across the read
+    std::shared_ptr<dx12_download_sink> sink;     // set for a sink-driven read; its `failed` decides how this settles
 };
 
 // A submitted-but-not-yet-drained window.
@@ -125,7 +126,9 @@ private:
     {
         for (auto& job : _pending)
         {
-            if (job.pin.expired())
+            // A sink-driven read has no resident destination, so it has no pin either — cancellation comes from
+            // its handle instead, which reap_cancelled picks up.
+            if (job.sink == nullptr && job.pin.expired())
             {
                 fold_cancelled_completion(job);
                 continue;
@@ -138,15 +141,23 @@ private:
                                                                                           "exceeds one staging "
                                                                                           "window");
                 a.family = u64(reinterpret_cast<u64>(job.texture_source->_resource.Get()));
-                a.packer = std::make_unique<dx12_texture_download>(job.texture_source->_resource.Get(), job.footprint,
-                                                                   job.dst);
+                if (job.sink)
+                    a.packer = std::make_unique<dx12_texture_download>(job.texture_source->_resource.Get(),
+                                                                       job.footprint, job.sink);
+                else
+                    a.packer = std::make_unique<dx12_texture_download>(job.texture_source->_resource.Get(),
+                                                                       job.footprint, job.dst);
                 a.keepalive = job.texture_source;
             }
             else
             {
                 a.family = u64(reinterpret_cast<u64>(job.buffer_source->_resource.Get()));
-                a.packer = std::make_unique<dx12_buffer_download>(job.buffer_source->_resource.Get(), job.src_offset,
-                                                                  job.dst);
+                if (job.sink)
+                    a.packer = std::make_unique<dx12_buffer_download>(job.buffer_source->_resource.Get(),
+                                                                      job.src_offset, job.size, job.sink);
+                else
+                    a.packer = std::make_unique<dx12_buffer_download>(job.buffer_source->_resource.Get(),
+                                                                      job.src_offset, job.dst);
                 a.keepalive = job.buffer_source;
             }
             a.sequence = _next_sequence++;
@@ -300,7 +311,8 @@ private:
         // Defer the CPU memcpy until this window's GPU read completes, at drain.
         // Only the last chunk settles the future: windows drain in order, so every earlier chunk is copied by then.
         _open_mem_jobs.push_back(download_mem_job{cc::move(chunk.deferred_cpu_copy), a.job.pin,
-                                                  last ? a.job.completion : cc::shared_async<cc::unit>(), a.keepalive});
+                                                  last ? a.job.completion : cc::shared_async<cc::unit>(), a.keepalive,
+                                                  a.job.sink});
         return true;
     }
 
@@ -424,17 +436,22 @@ private:
         wait_for_window(w.window_index);
         for (auto& mj : w.mem_jobs)
         {
-            bool const wanted = mj.pin.lock() != nullptr; // future still wants the data?
+            // A sink-driven read has no pin to consult: its sink is the destination, and it lives as long as the
+            // transfer does.
+            bool const wanted = mj.sink != nullptr || mj.pin.lock() != nullptr;
             if (wanted)
                 mj.deferred_cpu_copy();
             if (mj.completion)
             {
-                // A destination dropped mid-flight is a cancellation, not a delivery: the bytes were never written.
-                // Settling it either way is mandatory — a manual node nobody ever pushes parks its dependents forever.
-                if (wanted)
-                    mj.completion->push_value(cc::unit{});
-                else
+                // Settling is mandatory on every branch — a manual node nobody ever pushes parks its dependents for
+                // the process's lifetime.
+                if (!wanted) // the destination was dropped mid-flight: a cancellation, not a delivery
                     mj.completion->push_error(cc::async_error::make_cancelled());
+                else if (mj.sink && mj.sink->failed.load(std::memory_order_relaxed))
+                    mj.completion->push_error(cc::async_error::make_error(cc::any_error("stream sink rejected the "
+                                                                                        "downloaded bytes")));
+                else
+                    mj.completion->push_value(cc::unit{});
             }
         }
     }
@@ -736,6 +753,74 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
 
     return sg::stream_download_handle(cc::move(setup.control),
                                       sg::bytes_future(cc::move(setup.dst), setup.control->completion));
+}
+
+sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::raw_buffer_handle buffer,
+                                                                          sg::stream_sink sink,
+                                                                          isize offset,
+                                                                          isize size)
+{
+    CC_ASSERT(buffer != nullptr, "stream download source buffer is null");
+    auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
+    CC_ASSERT(src != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(!src->is_expired(), "stream download source is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(src->_resource, "stream download source buffer has no storage");
+    CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "stream download source buffer must have "
+                                                            "buffer_usage::copy_src");
+    CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
+
+    auto control = std::make_shared<sg::impl::stream_control>();
+    control->completion = cc::make_async_manual<cc::unit>();
+    control->total_hint.store(size, std::memory_order_relaxed);
+
+    dx12_async_download_job job;
+    job.buffer_source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.src_offset = offset;
+    job.size = size;
+    job.sink = std::make_shared<dx12_download_sink>(cc::move(sink));
+    job.stream = control;
+    job.completion = control->completion;
+    job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
+    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    _actor->enqueue_message(cc::move(job));
+
+    // No bytes_future: the sink IS the delivery channel, and handing back an empty future beside it would only
+    // invite someone to wait on bytes that were never going to land anywhere.
+    return sg::stream_download_handle(cc::move(control), sg::bytes_future());
+}
+
+sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::raw_texture_handle texture,
+                                                                           sg::stream_sink sink,
+                                                                           sg::subresource_index const& subresource,
+                                                                           sg::texture_region const& region)
+{
+    CC_ASSERT(texture != nullptr, "stream download source texture is null");
+    auto const* const src = dynamic_cast<dx12_texture const*>(texture.get());
+    CC_ASSERT(src != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!src->is_expired(), "stream download source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(src->_resource, "stream download source texture has no storage");
+    CC_ASSERT(src->usage().has(sg::texture_usage::copy_src), "stream download source texture must have "
+                                                             "texture_usage::copy_src");
+    CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
+
+    auto control = std::make_shared<sg::impl::stream_control>();
+    control->completion = cc::make_async_manual<cc::unit>();
+    control->total_hint.store(fp.tight_size(), std::memory_order_relaxed);
+
+    dx12_async_download_job job;
+    job.texture_source = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.footprint = fp;
+    job.is_texture = true;
+    job.sink = std::make_shared<dx12_download_sink>(cc::move(sink));
+    job.stream = control;
+    job.completion = control->completion;
+    job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
+    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    _actor->enqueue_message(cc::move(job));
+
+    return sg::stream_download_handle(cc::move(control), sg::bytes_future());
 }
 
 void dx12_download_async_system::set_window_bytes(isize bytes)

@@ -68,6 +68,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/download.hh
     src/shaped-graphics/transfer/stream.hh
     src/shaped-graphics/transfer/stream_handle.hh
+    src/shaped-graphics/transfer/stream_sink.hh
     src/shaped-graphics/transfer/stream_source.hh
     src/shaped-graphics/context/uncached.hh
     src/shaped-graphics/context/cached.hh

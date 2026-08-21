@@ -11,6 +11,7 @@
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture_descriptions.hh>
+#include <shaped-graphics/transfer/stream_sink.hh>
 #include <shaped-graphics/transfer/stream_source.hh>
 #include <shaped-graphics/types.hh>
 
@@ -387,4 +388,120 @@ INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg::conte
     CHECK(bytes.value()[0] == src[0]);
     CHECK(bytes.value()[row_bytes * 8] == src[row_bytes * 8]); // the second chunk's first row
     CHECK(bytes.value()[src.size() - 1] == src[src.size() - 1]);
+}
+
+INVOCABLE_TEST("sg stream - a download sink receives every chunk in order", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto const src = pattern(6000, 61);
+    auto buf = c.persistent.create_raw_buffer(6000, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto up = c.create_command_list();
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src));
+    c.submit_command_list(cc::move(up));
+
+    // The sink appends, which is only sound because chunks of one transfer arrive in order.
+    cc::vector<byte> got;
+    isize next_expected_offset = 0;
+    bool in_order = true;
+    auto stream = c.stream.to_sink_from_buffer(
+        buf,
+        [&](cc::span<byte const> bytes, isize offset)
+        {
+            in_order = in_order && offset == next_expected_offset;
+            next_expected_offset = offset + bytes.size();
+            for (auto b : bytes)
+                got.push_back(b);
+            return true;
+        },
+        0, 6000);
+
+    REQUIRE(cc::try_async_blocking_get(stream.completion()).has_value());
+    CHECK(stream.is_complete());
+    CHECK(in_order);
+    REQUIRE(got.size() == 6000);
+    CHECK(got[0] == src[0]);
+    CHECK(got[2999] == src[2999]);
+    CHECK(got[5999] == src[5999]);
+
+    // The sink IS the delivery channel, so there is deliberately no future beside it to wait on.
+    CHECK(!stream.future().is_valid());
+}
+
+INVOCABLE_TEST("sg stream - a sink that refuses fails the transfer", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto buf = c.persistent.create_raw_buffer(4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    int calls = 0;
+    auto stream = c.stream.to_sink_from_buffer(
+        buf,
+        [&](cc::span<byte const>, isize)
+        {
+            ++calls;
+            return false; // disk full, decoder rejected the data, …
+        },
+        0, 4096);
+
+    // A refusing sink settles the transfer on its error channel rather than leaving it pending, and is not called
+    // again to be told the same thing twice.
+    CHECK(!cc::try_async_blocking_get(stream.completion()).has_value());
+    CHECK(stream.is_settled());
+    CHECK(!stream.is_complete());
+    CHECK(calls == 1);
+}
+
+INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed rows", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 32;
+    desc.height = 32;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    isize const row_bytes = 32 * 4;
+    auto const src = pattern(row_bytes * 32, 67);
+
+    // Seeded through the COPY queue, not an inline list: a copy queue cannot run layout barriers, so it requires
+    // the texture in COMMON, and an inline upload would leave it in COPY_DEST.
+    // The readback below still observes this write — its window waits on the upload completion fence.
+    c.upload.bytes_to_texture(tex, cc::make_pinned_data(src));
+
+    // Staged rows are padded to 256 and the sink's contract is tightly-packed bytes, so a row is the largest run
+    // that can be handed over without first assembling one — which is the copy a sink exists to avoid.
+    cc::vector<byte> got;
+    for (isize i = 0; i < src.size(); ++i)
+        got.push_back(byte(0));
+    int rows_seen = 0;
+    bool whole_rows = true;
+    auto stream = c.stream.to_sink_from_texture(tex,
+                                                [&](cc::span<byte const> bytes, isize offset)
+                                                {
+                                                    whole_rows = whole_rows && bytes.size() == row_bytes
+                                                              && offset % row_bytes == 0;
+                                                    ++rows_seen;
+                                                    for (isize i = 0; i < bytes.size(); ++i)
+                                                        got[offset + i] = bytes[i];
+                                                    return true;
+                                                });
+
+    REQUIRE(cc::try_async_blocking_get(stream.completion()).has_value());
+    CHECK(stream.is_complete());
+    CHECK(whole_rows);
+    CHECK(rows_seen == 32);
+    CHECK(got[0] == src[0]);
+    CHECK(got[src.size() - 1] == src[src.size() - 1]);
 }

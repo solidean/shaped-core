@@ -6,6 +6,7 @@
 #include <shaped-graphics/resource/buffer.hh> // typed buffer<T> — the preferred overloads below take it
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
+#include <shaped-graphics/transfer/stream_sink.hh>
 #include <shaped-graphics/transfer/stream_source.hh>
 #include <shaped-graphics/types.hh>
 
@@ -111,6 +112,25 @@ public:
                                                             subresource_index const& subresource = {},
                                                             cc::optional<texture_region> region = {},
                                                             stream_scope scope = stream_scope::resource);
+
+    // Sink-driven downloads — the bytes are handed over as they arrive rather than accumulating in one buffer.
+    // See transfer/stream_sink.hh; "called on the copy actor thread, must not block, must not retain the span" is
+    // the load-bearing part.
+    // The returned handle carries no `bytes_future`: the sink IS the delivery channel.
+
+    /// Streams `size_in_bytes` from `buffer` into `sink`, chunk by chunk and in order.
+    [[nodiscard]] stream_download_handle to_sink_from_buffer(raw_buffer_handle buffer,
+                                                             stream_sink sink,
+                                                             isize offset_in_bytes,
+                                                             isize size_in_bytes,
+                                                             stream_scope scope = stream_scope::resource);
+
+    /// Streams one region of `texture` into `sink`, a run of whole tightly-packed rows at a time.
+    [[nodiscard]] stream_download_handle to_sink_from_texture(raw_texture_handle texture,
+                                                              stream_sink sink,
+                                                              subresource_index const& subresource = {},
+                                                              cc::optional<texture_region> region = {},
+                                                              stream_scope scope = stream_scope::resource);
 
     // Configuration.
 public:

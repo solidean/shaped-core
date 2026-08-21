@@ -143,12 +143,40 @@ destination unreadable until the handle settles.
 For a texture the offsets are into the region's tightly-packed bytes and must fall on **row** boundaries — a row is
 the smallest unit a texture copy can place, so a part-row chunk has nothing it could be copied into.
 
+## Where the bytes go
+
+The mirror of the source, on the download side.
+The default is one pinned buffer the whole readback lands in, reached through the handle's `bytes_future`; a
+download that must not hold its result resident takes a
+[`stream_sink`](../../src/shaped-graphics/transfer/stream_sink.hh) instead, and each chunk is handed over as it
+arrives.
+
+Its contract is the source's, with one addition and one guarantee.
+
+The **addition**: the span must not be retained.
+It points into the readback staging window, which is recycled a few windows later, so the bytes are valid for the
+duration of the call and no longer.
+Copying them somewhere is fine; keeping the span is not.
+
+The **guarantee**: chunks of one transfer arrive **in order**, which is what lets a sink append rather than seek.
+That is free rather than engineered — a readback's source is fully resident on the GPU, so its chunks have no
+readiness constraint and are simply taken in cursor order.
+Nothing is guaranteed *between* transfers, and promising that would mean buffering, which is the copy a sink exists
+to avoid.
+
+For a texture the sink is handed a run of **whole tightly-packed rows**.
+Staged rows are padded to 256 and the sink's contract is tight bytes, so a row is the largest run that can be handed
+over without first assembling one.
+
+A sink that returns false fails the transfer: the handle settles on its error channel, and the sink is not called
+again to be told the same thing twice.
+A sink-driven download's handle carries no `bytes_future` — the sink is the delivery channel, and handing back an
+empty future beside it would only invite someone to wait on bytes that were never going to land anywhere.
+
 ## Current simplifications (deferred)
 
 Not invariants — v1 shortcuts:
 
-- **The destination sink is the pinned buffer.**
-  A custom sink would let a streamed download land in a file or a decoder without a full CPU-side copy.
 - **No absolute bandwidth cap.**
   The ratio protects streaming from the rest of the system; a cap would protect the rest of the system from streaming.
   It wants profiles first.
@@ -156,6 +184,9 @@ Not invariants — v1 shortcuts:
   The static check against usage flags is always on.
   Catching a command list that actually touches a streamed extent needs a per-resource record checked at submit,
   and for `region` scope an interval set that is dev-only.
+- **`ctx.download` has no sink form.**
+  The packers underneath support one, so it is a small addition — but an async download's whole point is a future
+  carrying bytes, and a sink form of it would return a future carrying nothing.
 - **dx12 only**, like the async tier it rides on.
 
 ## See also
