@@ -751,6 +751,119 @@ cc::vector<cc::rec::scope_span> cc::rec::recording::scopes(cc::string_view name)
     return out;
 }
 
+namespace
+{
+/// When a block's coverage ENDED, in wall time.
+///
+/// A live block has not been sealed, so its base is the only time it has; using zero there would make every unsealed
+/// block look infinitely old and evict exactly the events a bounded capture exists to keep.
+[[nodiscard]] f64 block_end_wall_secs(cc::rec::recorded_block const& b)
+{
+    return b.seal_wall_secs > 0 ? b.seal_wall_secs : b.base_wall_secs;
+}
+} // namespace
+
+isize cc::rec::recording::total_bytes() const
+{
+    isize n = 0;
+    for (auto const& b : _blocks)
+        n += b.bytes().size();
+    return n;
+}
+
+isize cc::rec::recording::trim(rec::retention_policy const& policy)
+{
+    if (policy.keeps_everything() || _blocks.empty())
+        return 0;
+
+    // Newest across every thread rather than per thread: a thread that went quiet must not drag its own window along
+    // behind the rest of the process.
+    auto newest = 0.0;
+    for (auto const& b : _blocks)
+        newest = cc::max(newest, block_end_wall_secs(b));
+
+    cc::vector<bool> keep;
+    keep.reserve(_blocks.size());
+    for (isize i = 0; i < _blocks.size(); ++i)
+        keep.push_back(true);
+
+    // The age limit first, because it is the stricter promise: nothing older than max_secs is kept whatever the byte
+    // budget would have allowed.
+    if (policy.max_secs > 0)
+    {
+        auto const floor = newest - policy.max_secs;
+        for (isize i = 0; i < _blocks.size(); ++i)
+            if (block_end_wall_secs(_blocks[i]) < floor)
+                keep[i] = false;
+    }
+
+    if (policy.max_bytes > 0)
+    {
+        isize held = 0;
+        for (isize i = 0; i < _blocks.size(); ++i)
+            if (keep[i])
+                held += _blocks[i].bytes().size();
+
+        if (held > policy.max_bytes)
+        {
+            // Oldest first, which is the only eviction order that leaves a usable window rather than a sieve.
+            cc::vector<isize> order;
+            order.reserve(_blocks.size());
+            for (isize i = 0; i < _blocks.size(); ++i)
+                if (keep[i])
+                    order.push_back(i);
+
+            cc::sort(order, [&](isize a, isize b)
+                     { return block_end_wall_secs(_blocks[a]) < block_end_wall_secs(_blocks[b]); });
+
+            // The guarantee is what makes a byte cap safe for forensics: without it a burst of logging evicts the
+            // seconds before a crash, which is the only part anybody wanted.
+            auto const guaranteed_floor = policy.guaranteed_secs > 0 ? newest - policy.guaranteed_secs : newest + 1;
+
+            for (auto const i : order)
+            {
+                if (held <= policy.max_bytes)
+                    break;
+                if (block_end_wall_secs(_blocks[i]) >= guaranteed_floor)
+                    continue; // promised, so the cap is the thing that gives
+
+                keep[i] = false;
+                held -= _blocks[i].bytes().size();
+            }
+        }
+    }
+
+    cc::vector<rec::recorded_block> kept;
+    kept.reserve(_blocks.size());
+    isize dropped = 0;
+    for (isize i = 0; i < _blocks.size(); ++i)
+    {
+        if (keep[i])
+            kept.push_back(cc::move(_blocks[i])); // order preserved, so a trimmed recording replays like any other
+        else
+            ++dropped;
+    }
+
+    _blocks = cc::move(kept);
+    return dropped;
+}
+
+cc::rec::recording cc::rec::recording::retained(rec::retention_policy const& policy) const
+{
+    auto out = *this;
+    out.trim(policy);
+    return out;
+}
+
+void cc::rec::recording_listener::on_chunk(rec::chunk_view const& view)
+{
+    _recording.append(view);
+
+    // As chunks arrive rather than on read, so the listener never holds more than the policy allows even for a moment.
+    if (!_policy.keeps_everything())
+        _dropped_blocks += _recording.trim(_policy);
+}
+
 cc::rec::recording cc::rec::recording_listener::take()
 {
     return cc::move(_recording);

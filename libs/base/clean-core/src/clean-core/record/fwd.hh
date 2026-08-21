@@ -199,6 +199,7 @@ struct loaded_recording;
 struct scope_span;
 struct trace_relation;
 struct decimation_options;
+struct retention_policy;
 
 namespace impl
 {

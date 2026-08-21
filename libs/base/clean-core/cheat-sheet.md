@@ -986,6 +986,12 @@ sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:
 // The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
 // A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
 
+cc::rec::recording_listener bounded({.max_secs = 30, .max_bytes = 128 << 20});  // both are CAPS; first to bind wins
+cc::rec::recording_listener forensic({.guaranteed_secs = 20, .max_bytes = 64 << 20}); // 20s promised, cap gives way
+rec.trim(policy); rec.retained(policy); rec.total_bytes();  // in place / as a value / what is held
+// Every limit is off at zero, so a default policy keeps everything. max_secs outranks guaranteed_secs.
+// Block-granular: a block is what a chunk ref keeps alive, so the bound is approximate by one chunk.
+
 #include <clean-core/record/stack_table.hh>   // resolves a captured stack, interned or not
 cc::rec::stack_table const stacks(rec);              // ONE scan; build it once per analysis, never per event
 stacks.frames_of(event);                             // -> cc::vector<u64>, whichever shape the sample used

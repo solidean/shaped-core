@@ -544,6 +544,30 @@ A foreign table is worth having even when the binaries are not.
 Failing to load one costs the function and the line and still leaves the module and the offset, so a frame degrades to `app.exe+0x1234`.
 An unresolved frame keeps its address rather than acquiring a confident wrong name.
 
+### Keeping a bounded window
+
+A capture that runs for hours has to throw something away, and **which** thing depends entirely on what the capture is for.
+A crash ring wants the recent past whatever it costs; a background trace wants a memory ceiling it never breaches.
+
+Those are not one policy with different numbers, so [`cc::rec::retention_policy`](../../src/clean-core/record/recording.hh) expresses both:
+
+```cpp
+cc::rec::recording_listener bounded({.max_secs = 30, .max_bytes = 128 << 20});
+cc::rec::recording_listener forensic({.guaranteed_secs = 20, .max_bytes = 64 << 20});
+```
+
+The first is two caps, and whichever binds first wins.
+The second promises the last twenty seconds whatever they cost, and the byte cap is what gives way.
+
+**`guaranteed_secs` is what makes a byte cap safe for forensics.**
+Without it a burst of logging evicts the seconds before a crash, which is the only part anybody wanted.
+`max_secs` outranks it where the two disagree, since a hard age limit is the stricter promise — otherwise a guarantee would silently disable a cap set right next to it.
+
+Every limit is off at zero, so a default policy keeps everything and an ordinary scoped capture pays nothing.
+
+**Retention is block-granular**, so a bound is approximate by up to one chunk.
+A block is the unit a chunk reference keeps alive, and evicting anything smaller would free no memory at all.
+
 **A repeated stack is written once.**
 A kilohertz across twenty threads is megabytes a second of return addresses and nearly all of them repeat, so a deep stack is written once as its own event and the samples after it carry an id.
 Measured on a deep burn loop it roughly halves the sampled bytes, with five to seven distinct stacks behind a thousand samples.

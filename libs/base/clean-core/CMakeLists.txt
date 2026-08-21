@@ -497,6 +497,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-sampling-test.cc
     tests/record/record-hot-functions-test.cc
     tests/record/record-stack-table-test.cc
+    tests/record/record-retention-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc

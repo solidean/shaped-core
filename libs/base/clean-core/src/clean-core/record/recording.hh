@@ -93,6 +93,41 @@ struct cc::rec::decimation_options
 /// A block either BORROWS a live chunk — the capture case, which copies nothing — or owns a buffer of its own, which
 /// is what filtering produces since the events it keeps are no longer contiguous.
 /// Exactly one of `source` and `owned` is set.
+/// What a bounded capture is allowed to keep.
+///
+/// A long-running capture has to throw something away, and which thing depends entirely on what the capture is FOR.
+/// A crash ring wants the recent past whatever it costs; a background trace wants a memory ceiling it never breaches.
+/// The two are not the same policy with different numbers, so both are expressible here rather than one being the
+/// built-in and the other a workaround.
+///
+/// **Every limit is off at zero**, so a default-constructed policy keeps everything — which is what an ordinary
+/// scoped capture wants.
+///
+/// Two shapes worth naming, because they are the ones people actually ask for:
+///
+///     {.max_secs = 30, .max_bytes = 128 << 20}       // the last 30s, and never more than 128 MB
+///     {.guaranteed_secs = 20, .max_bytes = 64 << 20} // the last 20s WHATEVER it costs, then 64 MB for the rest
+///
+/// The difference is which one yields when they conflict, and that is the whole point of having both.
+struct cc::rec::retention_policy
+{
+    /// Never evicted to satisfy `max_bytes`, however large it grows.
+    ///
+    /// This is the knob that makes a byte cap safe for forensics: without it a burst of logging can evict the very
+    /// seconds before a crash, which is the only part anybody wanted.
+    f64 guaranteed_secs = 0;
+
+    /// Nothing older than this is kept, whatever the byte budget would allow.
+    /// Outranks `guaranteed_secs` if both are set and they disagree, since a hard age limit is the stricter promise.
+    f64 max_secs = 0;
+
+    /// Evicted oldest-first to stay at or under this, `guaranteed_secs` permitting.
+    /// Counts the bytes of the blocks held, which is what the chunk references are actually keeping alive.
+    isize max_bytes = 0;
+
+    [[nodiscard]] bool keeps_everything() const { return guaranteed_secs <= 0 && max_secs <= 0 && max_bytes <= 0; }
+};
+
 struct cc::rec::recorded_block
 {
     /// Keeps the bytes alive.
@@ -141,6 +176,18 @@ public:
 
     /// Appends every block of `other`, in order.
     void append(rec::recording const& other);
+
+    /// Drops the oldest blocks until `policy` is satisfied, and returns how many went.
+    ///
+    /// **Block-granular**, so the result is approximate by design: a block is the unit a chunk reference keeps alive,
+    /// and freeing anything smaller would free no memory at all.
+    isize trim(rec::retention_policy const& policy);
+
+    /// This recording with `policy` applied, leaving this one alone.
+    [[nodiscard]] rec::recording retained(rec::retention_policy const& policy) const;
+
+    /// Bytes of event stream this recording holds alive.
+    [[nodiscard]] isize total_bytes() const;
 
     /// Appends a block that was built rather than captured.
     /// For a deserializer and for tests; ordinary code captures through a listener.
@@ -291,15 +338,27 @@ private:
 /// yours with no copying and no lifetime question.
 struct cc::rec::recording_listener final : rec::listener
 {
-    void on_chunk(rec::chunk_view const& view) override { _recording.append(view); }
+    recording_listener() = default;
+
+    /// Captures under a bound, which is what makes a capture that runs for hours possible at all.
+    /// Trimming happens as chunks arrive, so the listener never holds more than the policy allows.
+    explicit recording_listener(rec::retention_policy const& policy) : _policy(policy) {}
+
+    void on_chunk(rec::chunk_view const& view) override;
 
     [[nodiscard]] cc::string_view listener_name() const override { return "recording"; }
 
     [[nodiscard]] rec::recording const& result() const { return _recording; }
+
+    /// Blocks retention has dropped so far.
+    /// Nonzero means this recording has holes, which a reader has to know before concluding anything from a gap.
+    [[nodiscard]] isize dropped_blocks() const { return _dropped_blocks; }
 
     /// Moves the recording out, leaving this listener empty and ready to capture again.
     [[nodiscard]] rec::recording take();
 
 private:
     rec::recording _recording;
+    rec::retention_policy _policy;
+    isize _dropped_blocks = 0;
 };
