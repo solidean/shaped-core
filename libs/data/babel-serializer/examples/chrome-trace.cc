@@ -4,6 +4,7 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/recording.hh>
+#include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -118,7 +119,9 @@ void load_assets()
 }
 } // namespace example_assets
 
-EXAMPLE("babel-serializer/chrome-trace")
+// owns_recorder because this drives cc::rec::initialize itself, and nx::run stands a recorder up for the whole binary.
+// Without it the initialize below is a second one, which asserts.
+EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
 {
     using namespace cc::primitive_defines;
 
@@ -134,6 +137,10 @@ EXAMPLE("babel-serializer/chrome-trace")
 
         CC_LOG_INFO("starting the synthetic workload");
 
+        // Sampling runs alongside the instrumentation and answers the other half of the question: the scopes below say
+        // how long the named things took, and the samples say where the time went in everything nobody named.
+        cc::rec::sampling_scope const sampling({.rate_hz = 4000.0});
+
         auto loader = std::thread(example_assets::load_assets);
         for (auto frame = 0; frame < 8; ++frame)
             example_render::render_frame(frame);
@@ -145,7 +152,9 @@ EXAMPLE("babel-serializer/chrome-trace")
         cc::rec::flush_blocking();
         cc::rec::unregister_listener(handle);
 
-        captured = capture.take();
+        // Samples arrive on the sampler's own stream carrying an anchor; splicing puts each one back on the thread
+        // it caught, at the point that thread's stream had reached.
+        captured = capture.take().spliced_samples();
     }
 
     //
@@ -154,6 +163,12 @@ EXAMPLE("babel-serializer/chrome-trace")
 
     cc::println("recorded {} events across {} block(s)", captured.event_count(), captured.block_count());
     cc::println("  {} scope(s), {} log message(s)", captured.scopes().size(), captured.messages().size());
+
+    auto const stats = cc::rec::sampling_statistics();
+    cc::println("  {} sample(s) taken, {} tick(s) found nothing to sample",
+                captured.count_of_kind(cc::rec::event_kind::sample), stats.idle);
+    cc::println("  (their stacks are short on purpose: a sample stops at the innermost open scope, so instrumented");
+    cc::println("   code samples down to a single address and the scope stack supplies the rest)");
     cc::println("  the slow path was taken {} time(s)", captured.count("sort-fallback"));
 
     auto uploaded = 0.0;

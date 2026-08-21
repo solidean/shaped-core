@@ -2,7 +2,10 @@
 #include <babel-serializer/trace/chrome_trace.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>
+#include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/recording.hh>
+#include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/trace.hh>
 #include <clean-core/string/string.hh>
@@ -44,6 +47,18 @@ cc::rec::recording capture(cc::function_ref<void()> body)
     cc::rec::flush_blocking();
     cc::rec::unregister_listener(h);
     return rl.take().from_thread(cc::current_thread_id());
+}
+
+/// Captures every thread, which is what a sampled recording needs: the samples live on the SAMPLER's thread until
+/// they are spliced, so narrowing to the calling thread throws them away.
+cc::rec::recording capture_all(cc::function_ref<void()> body)
+{
+    cc::rec::recording_listener rl;
+    auto const h = cc::rec::register_listener(rl);
+    body();
+    cc::rec::flush_blocking();
+    cc::rec::unregister_listener(h);
+    return rl.take();
 }
 
 cc::string encode_to_string(cc::rec::recording const& r, babel::chrome_trace::write_options opts = {})
@@ -299,4 +314,73 @@ TRACE_TEST("chrome_trace - text that needs escaping survives the round trip")
             CHECK(traceEvents[i]["args"]["value"].as_string() == "a \"quoted\" \\ path\nwith a newline");
         }
     CHECK(found);
+}
+
+TRACE_TEST("chrome_trace - no samples means no sampled track")
+{
+    rec_fixture const fixture;
+
+    auto const r = capture([] { CC_RECORD_MARK("anchor"); });
+    auto const json = encode_to_string(r);
+
+    // The reconstruction must not invent a track for a recording that was never sampled.
+    CHECK(!json.contains("(sampled)"));
+    CHECK(!json.contains(R"("cat":"sampled")"));
+}
+
+TRACE_TEST("chrome_trace - sampled stacks become spans on a track of their own")
+{
+    if (!cc::stack_capture_from_context_available() || !CC_HAS_THREADS)
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture;
+
+    auto const raw = capture_all(
+        [&]
+        {
+            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
+
+            CC_RECORD_MARK("work-begins"); // joins this thread to the set the sampler knows
+
+            auto const start = cc::current_time_steady_secs();
+            u64 volatile sink = 0;
+            while (cc::current_time_steady_secs() - start < 0.2)
+                for (int i = 0; i < 4096; ++i)
+                    sink = sink + u64(i);
+        });
+
+    REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
+
+    // Splicing first is the realistic path: it moves each sample onto the thread it caught, so the exporter puts the
+    // sampled track beside that thread rather than beside the sampler.
+    auto const r = raw.spliced_samples();
+    auto const json = encode_to_string(r);
+
+    // A track of its own, because Chrome's B/E phases are one stack per tid and the recorded scopes own the real one.
+    CHECK(json.contains("(sampled)"));
+    CHECK(json.contains(R"("cat":"sampled")"));
+
+    // Spans, not instants: every B the reconstruction opens is closed.
+    auto const doc = babel::json::read(json);
+    REQUIRE(doc.has_value());
+
+    auto opened = 0;
+    auto closed = 0;
+    auto const events = doc.value().root()["traceEvents"];
+    for (isize i = 0; i < events.size(); ++i)
+    {
+        auto const e = events[i];
+        auto const phase = e["ph"].as_string();
+        auto const tid = e["tid"].as_double();
+        if (tid < (1 << 20))
+            continue;
+
+        if (phase == "B")
+            ++opened;
+        else if (phase == "E")
+            ++closed;
+    }
+
+    CHECK(opened > 0);
+    CHECK(opened == closed);
 }

@@ -16,6 +16,15 @@ namespace
 using namespace cc::primitive_defines;
 
 /// One event plus the block it came from, since the timestamp mapping is per block.
+/// One sample, reduced to what a flame graph needs.
+struct sampled_stack
+{
+    f64 ts_us = 0;
+
+    /// Innermost first, as cc::capture_stack produces them.
+    cc::vector<u64> frames;
+};
+
 struct located_event
 {
     cc::rec::chunk_view view;
@@ -187,6 +196,9 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     // An accumulate carries a delta, but a counter track shows a level — so the running total is what gets emitted.
     cc::map<cc::string, f64> running_totals;
 
+    // Samples are collected rather than emitted inline: a span needs the NEXT sample to know where it ends.
+    cc::map<u32, cc::vector<sampled_stack>> samples_by_thread;
+
     for (auto const& le : events)
     {
         auto const& e = le.event;
@@ -206,6 +218,18 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             out += R"(,"cat":)";
             append_json_string(out, e.domain()->name());
         };
+
+        if (kind == cc::rec::event_kind::sample)
+        {
+            if (!opts.include_samples)
+                continue;
+
+            // The payload names the sampled thread, which is not this block's thread until the recording has been
+            // spliced — so reading it here works either way.
+            auto const owner = u32(e.field_as_u64("thread_index").value_or(u64(tid)));
+            samples_by_thread[owner].push_back({ts_us, e.field_as_u64_array("frames")});
+            continue;
+        }
 
         switch (kind)
         {
@@ -320,6 +344,66 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             out += '}';
             break;
         }
+        }
+    }
+
+    // Sampled stacks become spans on a track of their own, one span per frame that survives from one sample to the
+    // next.
+    // Consecutive samples sharing a prefix share its spans, which is what turns a pile of instants into a flame graph.
+    for (auto const& [owner, stacks] : samples_by_thread)
+    {
+        if (stacks.empty())
+            continue;
+
+        auto const sampled_tid = i32(owner) + opts.sampled_tid_offset;
+
+        {
+            open_event();
+            out.appendf(R"("ph":"M","name":"thread_name","pid":{},"tid":{},"args":{{"name":)", opts.process_id,
+                        sampled_tid);
+            append_json_string(out, cc::format("thread {} (sampled)", owner));
+            out += "}}";
+        }
+
+        cc::vector<u64> current;
+        auto last_ts = stacks.front().ts_us;
+
+        for (auto const& s : stacks)
+        {
+            // A capture runs innermost first; a flame graph is drawn outermost first.
+            cc::vector<u64> stack;
+            stack.reserve(s.frames.size());
+            for (isize i = s.frames.size() - 1; i >= 0; --i)
+                stack.push_back(s.frames[i]);
+
+            isize shared = 0;
+            while (shared < current.size() && shared < stack.size() && current[shared] == stack[shared])
+                ++shared;
+
+            for (isize i = current.size() - 1; i >= shared; --i)
+            {
+                open_event();
+                out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, sampled_tid, s.ts_us);
+                out += '}';
+            }
+
+            for (isize i = shared; i < stack.size(); ++i)
+            {
+                open_event();
+                out.appendf(R"("ph":"B","pid":{},"tid":{},"ts":{:.3f},"name":)", opts.process_id, sampled_tid, s.ts_us);
+                append_json_string(out, cc::format("0x{:x}", stack[i]));
+                out += R"(,"cat":"sampled"})";
+            }
+
+            current = cc::move(stack);
+            last_ts = s.ts_us;
+        }
+
+        for (isize i = current.size() - 1; i >= 0; --i)
+        {
+            open_event();
+            out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, sampled_tid, last_ts);
+            out += '}';
         }
     }
 

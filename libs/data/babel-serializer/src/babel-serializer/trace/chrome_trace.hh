@@ -41,6 +41,19 @@ struct babel::chrome_trace::write_options
     bool include_stats = true;
     bool include_scopes = true;
 
+    /// Turn sampled stacks into scopes on a track of their own.
+    ///
+    /// A sample is a stack at an instant, and a viewer draws spans — so consecutive samples sharing a frame become one
+    /// span over that frame, which is the usual flame-graph reconstruction.
+    /// The frames are ADDRESSES: nothing here symbolizes, so a span is named by its hexadecimal address.
+    bool include_samples = true;
+
+    /// Where a thread's sampled track sits, as an offset from its own tid.
+    ///
+    /// A separate track rather than the thread's own, because Chrome's B/E phases are one stack per tid: interleaving
+    /// synthesized spans with recorded scopes would break the nesting of both.
+    i32 sampled_tid_offset = 1 << 20;
+
     /// One event per line.
     /// Costs bytes, and makes a diff or a grep possible.
     bool pretty = true;
