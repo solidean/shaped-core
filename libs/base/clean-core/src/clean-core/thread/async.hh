@@ -115,7 +115,6 @@ struct alignas(64) async_typed_node : cc::async_node_base
     {
         return this->has_value() ? reinterpret_cast<T const*>(this->payload()) : nullptr;
     }
-    [[nodiscard]] T* value_ptr() { return this->has_value() ? reinterpret_cast<T*>(this->payload()) : nullptr; }
 
     /// Pointer to the produced error; null unless ready with an error.
     /// Stable while the node is alive.
@@ -123,6 +122,12 @@ struct alignas(64) async_typed_node : cc::async_node_base
     {
         return this->has_error() ? reinterpret_cast<E const*>(this->payload()) : nullptr;
     }
+
+    // The mutating twins are protected on purpose: async<T const, E> inherits this layer, and a public T*
+    // here would hand a view holder write access to the payload, which is the one thing the view exists to deny.
+    // async<T, E> republishes them as try_mutable_value / mutable_value / take_value / take_error.
+protected:
+    [[nodiscard]] T* value_ptr() { return this->has_value() ? reinterpret_cast<T*>(this->payload()) : nullptr; }
     [[nodiscard]] E* error_ptr() { return this->has_error() ? reinterpret_cast<E*>(this->payload()) : nullptr; }
 
 private:
@@ -254,8 +259,9 @@ inline constexpr cc::async_type_ops const& async_type_ops_for_frame
 
 // error-propagation hook: produce a fresh, independent copy of a dependency's error for a dependent node.
 // The default copies, so a custom E must be copyable where this is used.
-// The async_error overload re-materializes from the message instead, because cc::any_error is move-only and a shared node's error must not be moved out.
+// The async_error overload re-materializes from the message instead, because cc::any_error is move-only and PROPAGATION must never move a shared node's error out.
 // That loses the context chain but preserves cancellation; a non-template overload wins over the template for async_error.
+// async<T, E>::take_error is the deliberate exception — an owner may move the error out, and a node that has been taken from propagates an empty message from then on.
 template <class E>
 [[nodiscard]] E async_error_propagate(E const& e)
 {
@@ -283,16 +289,83 @@ namespace impl
 struct async_manual_tag
 {
 };
+
+/// The base async<T, E> derives from: its own read-only view, async<T const, E>.
+///
+/// The indirection is what makes a bad T diagnosable.
+/// `T const` on a reference type drops the const, so spelling the base directly would make async<T&, E> ITS OWN BASE — an
+/// incomplete-type error at the base-clause, which no static_assert in the class body can intercept, because a base clause is
+/// instantiated before the members.
+template <class T, class E>
+struct async_view_of
+{
+    static_assert(!std::is_reference_v<T>, "async<T, E>: T must not be a reference");
+    static_assert(!std::is_void_v<T>, "async<T, E>: T must not be void — use cc::unit for a value-less async");
+    static_assert(!std::is_const_v<T>,
+                  "async<T const, E> is a read-only VIEW of async<T, E> — create the async<T, E> and convert");
+
+    using type = cc::async<T const, E>;
+};
 } // namespace impl
 
 } // namespace cc
+
+/// The READ-ONLY view of an async: the same node, minus every way to change its payload.
+/// Reached only by conversion — shared_async<T, E> turns into shared_async<T const, E> implicitly, and never back.
+///
+/// It is a BASE of async<T, E> rather than a separate node type, which is what makes the conversion free:
+/// cc::shared_ptr's derived-to-base ctor does it, the storage is the same object, and there is one ops descriptor and one size class.
+///
+/// Read-only means the PAYLOAD.
+/// Scheduling stays open — schedule(), poll() and the continuation hooks are inherited and must be, since a view holder
+/// still has to be able to require and drive the node it is waiting on.
+template <class T, class E>
+struct cc::async<T const, E> : impl::async_typed_node<T, E>
+{
+    // zero-copy access
+public:
+    /// Pointer to the stored value, or null unless ready with a value.
+    /// Non-owning, and valid only while the node is alive — you keep it alive through the shared_async handle, never through this pointer.
+    [[nodiscard]] T const* try_value() const { return this->value_ptr(); }
+
+    /// The stored value.
+    /// Requires has_value().
+    /// Same non-owning lifetime as try_value: the reference dies with the node, not with the expression.
+    [[nodiscard]] T const& value() const
+    {
+        CC_ASSERT(this->has_value(), "async has no value (not ready, or ready with an error)");
+        return *this->value_ptr();
+    }
+
+    /// Pointer to the failure-channel value (typed E), or null unless ready with an error.
+    /// Non-owning, and valid only while the node is alive.
+    [[nodiscard]] E const* try_error() const { return this->error_ptr(); }
+
+    /// A fresh, independent copy of this node's error, for propagation to a dependent (see async_error_propagate).
+    /// A move-only async_error is re-materialized from its message; a copyable custom E is copied.
+    /// Requires has_error().
+    [[nodiscard]] E propagate_error() const
+    {
+        CC_ASSERT(this->has_error(), "no error to propagate");
+        // unqualified call: the async_error overload wins for E = async_error, which is move-only and cannot be copied.
+        // The copy template is selected for a copyable custom E.
+        return impl::async_error_propagate(*this->error_ptr());
+    }
+
+    // A view is never constructed, only converted to — async<T, E> is the only thing that may build one.
+protected:
+    async() = default;
+};
 
 /// The normal composable async handle, always used through shared_async<T, E> — the node itself is non-copyable and immovable.
 /// E is the failure-channel type, defaulting to async_error.
 /// Create with cc::make_async_lazy / cc::make_async_scheduled, whose variadic dependency form covers single- and multi-dependency transforms, or with the make_async_from_* factories.
 /// Drive with cc::async_blocking_get_singlethreaded.
+///
+/// It derives from its own read-only view, async<T const, E>, which carries the reading half of the surface — so a handle
+/// converts to shared_async<T const, E> implicitly, and that view can no longer push, take or edit the payload.
 template <class T, class E>
-struct cc::async : impl::async_typed_node<T, E>
+struct cc::async : impl::async_view_of<T, E>::type
 {
     /// Install this concrete type's ops for the intrusive free and typed value/error teardown paths.
     /// Nodes are only ever created via make_async_* / cc::make_shared<async<T, E>>, which allocate exactly node_class_index_for<async<T, E>>(), matching the ops' class_index.
@@ -318,6 +391,8 @@ private:
     {
         static_assert(sizeof(async) == sizeof(impl::async_typed_node<T, E>),
                       "async<T, E> must add no data members over async_typed_node<T, E> (ops class_index needs it)");
+        static_assert(sizeof(async<T const, E>) == sizeof(impl::async_typed_node<T, E>),
+                      "async<T const, E> must add no data members either — the view and the node are one object");
     }
 
     // compute frame
@@ -352,25 +427,61 @@ public:
         }
     }
 
-    // zero-copy access
+    // owner-side access to the produced value
+    //
+    // Reading is on the view (try_value / value); these are the writing half, and they exist because an async is not a
+    // shared-immutable: after completion one party is often the only one left, and moving a big payload out or editing it in
+    // place beats copying it.
+    //
+    // What must hold is NO CONCURRENT ACCESS, which is weaker than sole ownership: two owners sequenced by their own
+    // happens-before are fine, and that is why none of this asserts on the reference count.
+    // What is NOT enough is readiness — finish_value publishes once, and a dependent that already read the value has no
+    // reason to re-acquire, so a mutation racing a reader is a data race however ready the node is.
 public:
-    /// Pointer to the stored value, or null unless ready with a value.
-    /// Non-owning, and valid only while the node is alive — you keep it alive through the shared_async handle, never through this pointer.
-    [[nodiscard]] T const* try_value() const { return this->value_ptr(); }
+    /// Pointer to the stored value for WRITING, or null unless ready with a value.
+    /// See the section note: no concurrent access.
+    [[nodiscard]] T* try_mutable_value() { return this->value_ptr(); }
 
-    /// Pointer to the failure-channel value (typed E), or null unless ready with an error.
-    /// Non-owning, and valid only while the node is alive.
-    [[nodiscard]] E const* try_error() const { return this->error_ptr(); }
-
-    /// A fresh, independent copy of this node's error, for propagation to a dependent (see async_error_propagate).
-    /// A move-only async_error is re-materialized from its message; a copyable custom E is copied.
-    /// Requires has_error().
-    [[nodiscard]] E propagate_error() const
+    /// The stored value, for writing.
+    /// Requires has_value().
+    /// See the section note: no concurrent access.
+    [[nodiscard]] T& mutable_value()
     {
-        CC_ASSERT(this->has_error(), "no error to propagate");
-        // unqualified call: the async_error overload wins for E = async_error, which is move-only and cannot be copied.
-        // The copy template is selected for a copyable custom E.
-        return impl::async_error_propagate(*this->error_ptr());
+        CC_ASSERT(this->has_value(), "async has no value (not ready, or ready with an error)");
+        return *this->value_ptr();
+    }
+
+    /// MOVE the value out of the node.
+    /// Requires has_value().
+    ///
+    /// The node stays ready_value over a moved-from husk, which teardown still destroys — so any OTHER live handle's later
+    /// try_value() reads that husk.
+    /// cc::into_result is the same operation over a handle it consumes.
+    ///
+    /// A copy-only T is silently COPIED rather than moved: T&& binds to T const&, so this leaves the stored value intact and
+    /// "take" is then a lie.
+    /// Nothing catches that but this sentence.
+    [[nodiscard]] T take_value()
+    {
+        static_assert(std::is_move_constructible_v<T>, "take_value moves the value out of the node — T must be "
+                                                       "move-constructible");
+        CC_ASSERT(this->has_value(), "async has no value to take (not ready, or ready with an error)");
+        return cc::move(*this->value_ptr());
+    }
+
+    /// MOVE the error out of the node.
+    /// Requires has_error().
+    ///
+    /// Sharper than take_value, because the loss is SILENT: the node still reports has_error(), and every later
+    /// propagate_error() on it — a dependent short-circuiting, try_async_blocking_get — hands back an async_error
+    /// re-materialized from a message that is now empty.
+    /// Take an error only from a node nothing else will ever read.
+    [[nodiscard]] E take_error()
+    {
+        static_assert(std::is_move_constructible_v<E>, "take_error moves the error out of the node — E must be "
+                                                       "move-constructible");
+        CC_ASSERT(this->has_error(), "async has no error to take");
+        return cc::move(*this->error_ptr());
     }
 
     // manual / promise-style completion (for externally produced values)
@@ -564,10 +675,11 @@ void async_collect_arg_error(cc::optional<E>& out, shared_async<U, Ue> const& de
 }
 
 // returns a reference into the dependency node's stored value (stable while the node is alive)
+// U is whatever the handle carries, so a shared_async<X const> dependency gives U = X const and this collapses to X const&.
 template <class U, class Ue>
 U const& async_unwrap_arg(shared_async<U, Ue> const& dep)
 {
-    return *dep->value_ptr();
+    return dep->value();
 }
 
 // invoke the user function, with the leading typed async_context<T, E>& if it takes one, else without it
@@ -660,6 +772,17 @@ struct async_frame_holder
     }
 };
 
+/// Allocate a node, and refuse a const T here rather than inside make_shared.
+/// Every creation path goes through this — the make_async_* factories and the coroutine's get_return_object.
+/// Without it, make_async_manual<int const>() reports a protected constructor from deep inside make_shared, instead of naming the fix.
+template <class T, class E, class... Args>
+[[nodiscard]] shared_async<T, E> async_new_node(Args&&... args)
+{
+    static_assert(!std::is_const_v<T>, "async<T const, E> is a read-only VIEW of async<T, E> — create the async<T, E> "
+                                       "and convert");
+    return cc::make_shared<async<T, E>, async_node_traits>(cc::forward<Args>(args)...);
+}
+
 // shared factory for make_async_*: build async<R, E> and install the wrapped frame
 template <class T, class E, class F, class... Deps>
 auto async_make_node(F&& f, Deps&&... deps)
@@ -670,7 +793,7 @@ auto async_make_node(F&& f, Deps&&... deps)
                   "a raw async_context frame resolves via ctx and returns a status, not a value — give the "
                   "result type explicitly, e.g. make_async_lazy<int>(...)");
 
-    auto node = cc::make_shared<async<result_t, E>, async_node_traits>();
+    auto node = async_new_node<result_t, E>();
     node->set_frame(async_make_frame<result_t, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
     return node;
 }
@@ -710,7 +833,7 @@ template <class T = impl::async_deduce_result, class E = async_error, class F, c
 template <class T, class E = async_error, class F, class... Args>
 [[nodiscard]] shared_async<T, E> make_async_lazy_emplace(Args&&... args)
 {
-    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    auto node = impl::async_new_node<T, E>();
     node->template set_frame_emplace<impl::async_frame_holder<T, E, F>>(cc::forward<Args>(args)...);
     return node;
 }
@@ -733,7 +856,7 @@ template <class T, class E = async_error>
 [[nodiscard]] shared_async<T, E> make_async_manual()
 {
     // The manual-tag ctor births the node external_pending in one store.
-    return cc::make_shared<async<T, E>, impl::async_node_traits>(impl::async_manual_tag{});
+    return impl::async_new_node<T, E>(impl::async_manual_tag{});
 }
 
 // ============================================================================
@@ -746,7 +869,7 @@ template <class T, class E = async_error>
 template <class T, class E = async_error>
 [[nodiscard]] shared_async<T, E> make_async_from_value(T v)
 {
-    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    auto node = impl::async_new_node<T, E>();
     node->push_value(cc::move(v)); // cold node, empty unresolved arm -> drives straight to ready_value
     return node;
 }
@@ -756,7 +879,7 @@ template <class T, class E = async_error>
 template <class T, class E = async_error, class... Args>
 [[nodiscard]] shared_async<T, E> make_async_from_value_emplace(Args&&... args)
 {
-    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    auto node = impl::async_new_node<T, E>();
     node->push_value_emplace(cc::forward<Args>(args)...);
     return node;
 }
@@ -766,7 +889,7 @@ template <class T, class E = async_error, class... Args>
 template <class T, class E = async_error>
 [[nodiscard]] shared_async<T, E> make_async_from_error(E e)
 {
-    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    auto node = impl::async_new_node<T, E>();
     node->push_error(cc::move(e)); // cold node, empty unresolved arm -> drives straight to ready_error
     return node;
 }
@@ -776,7 +899,7 @@ template <class T, class E = async_error>
 template <class T, class E = async_error, class... Args>
 [[nodiscard]] shared_async<T, E> make_async_from_error_emplace(Args&&... args)
 {
-    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    auto node = impl::async_new_node<T, E>();
     node->push_error_emplace(cc::forward<Args>(args)...);
     return node;
 }
@@ -790,17 +913,21 @@ template <class T, class E = async_error, class... Args>
 /// Unlike a getter this MOVES the payload out of the shared node, so any OTHER live handle's later try_value() / try_error() reads a moved-from value.
 /// Use it only when you are done with the async.
 /// T must be move-constructible; an immovable T is a compile error by design.
+/// A read-only shared_async<T const, E> cannot be consumed at all — take_value / take_error are the owner's, and this is their handle-shaped spelling.
 template <class T, class E = async_error>
 [[nodiscard]] cc::result<T, E> into_result(shared_async<T, E> root)
 {
+    static_assert(!std::is_const_v<T>,
+                  "into_result MOVES the outcome out, which a read-only async<T const, E> does not "
+                  "allow — consume the async<T, E> instead");
     static_assert(std::is_move_constructible_v<T>, "into_result moves the value out of the node — T must be "
                                                    "move-constructible");
     CC_ASSERT(root != nullptr, "cannot consume a null async");
     CC_ASSERT(root->is_ready(), "into_result requires a ready async (drive it first)");
 
     if (root->has_error())
-        return cc::error(cc::move(*root->error_ptr()));
-    return cc::move(*root->value_ptr());
+        return cc::error(root->take_error());
+    return root->take_value();
 }
 
 // ============================================================================
@@ -831,21 +958,25 @@ void async_drive_until_ready(async_node_base& root);
 /// Requires an ambient scheduler (cc::install_default_async_scheduler, or a nexus run's).
 /// Never returns while the graph is unfinished, so a node awaiting a push that never comes hangs here — that is the
 /// honest failure, and try_async_blocking_get_for is the way out for a caller that cannot afford it.
+///
+/// A read-only shared_async<T const, E> works here: this copies rather than consumes, and the const is stripped from the
+/// outcome because neither cc::result nor cc::optional can hold a const T.
 template <class T, class E = async_error>
-[[nodiscard]] cc::result<T, E> try_async_blocking_get(shared_async<T, E> const& root)
+[[nodiscard]] cc::result<std::remove_const_t<T>, E> try_async_blocking_get(shared_async<T, E> const& root)
 {
+    using result_t = cc::result<std::remove_const_t<T>, E>;
     CC_ASSERT(root != nullptr, "cannot drive a null async");
     impl::async_drive_until_ready(*root);
 
     if (root->has_error())
-        return cc::result<T, E>(cc::error(root->propagate_error()));
-    return cc::result<T, E>(*root->value_ptr()); // copy out
+        return result_t(cc::error(root->propagate_error()));
+    return result_t(root->value()); // copy out
 }
 
 /// try_async_blocking_get, returning the value as a copy and asserting on error or cancellation.
 /// For zero-copy access use root->try_value() after driving.
 template <class T, class E = async_error>
-[[nodiscard]] T async_blocking_get(shared_async<T, E> const& root)
+[[nodiscard]] std::remove_const_t<T> async_blocking_get(shared_async<T, E> const& root)
 {
     auto r = try_async_blocking_get<T, E>(root);
     CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");
@@ -858,22 +989,23 @@ template <class T, class E = async_error>
 /// Nullopt is "that scheduler could not finish it here" — the graph is parked on an external push, or another
 /// scheduler already owns it — and the caller decides whether to push, wait, or try elsewhere.
 template <class T, class E = async_error>
-[[nodiscard]] cc::optional<cc::result<T, E>> try_async_blocking_get_on(async_scheduler& scheduler,
-                                                                       shared_async<T, E> const& root)
+[[nodiscard]] cc::optional<cc::result<std::remove_const_t<T>, E>> try_async_blocking_get_on(async_scheduler& scheduler,
+                                                                                            shared_async<T, E> const& root)
 {
+    using result_t = cc::result<std::remove_const_t<T>, E>;
     CC_ASSERT(root != nullptr, "cannot drive a null async");
     scheduler.participate_until_ready(*root);
     if (!root->is_ready())
         return cc::nullopt;
 
     if (root->has_error())
-        return cc::result<T, E>(cc::error(root->propagate_error()));
-    return cc::result<T, E>(*root->value_ptr()); // copy out
+        return result_t(cc::error(root->propagate_error()));
+    return result_t(root->value()); // copy out
 }
 
 /// try_async_blocking_get_on, returning the value as a copy and asserting on error, cancellation, or no progress.
 template <class T, class E = async_error>
-[[nodiscard]] T async_blocking_get_on(async_scheduler& scheduler, shared_async<T, E> const& root)
+[[nodiscard]] std::remove_const_t<T> async_blocking_get_on(async_scheduler& scheduler, shared_async<T, E> const& root)
 {
     auto r = try_async_blocking_get_on<T, E>(scheduler, root);
     CC_ASSERT(r.has_value(), "that scheduler could not complete the graph (parked on an external push, or owned by "
@@ -888,14 +1020,16 @@ template <class T, class E = async_error>
 /// It helps where it can — a scheduler bound here still runs work — but it never claims a slot to park in, so a
 /// pool-driven graph simply continues on its own workers while this polls.
 template <class T, class E = async_error>
-[[nodiscard]] cc::optional<cc::result<T, E>> try_async_blocking_get_for(shared_async<T, E> const& root, i64 timeout_ms)
+[[nodiscard]] cc::optional<cc::result<std::remove_const_t<T>, E>> try_async_blocking_get_for(shared_async<T, E> const& root,
+                                                                                             i64 timeout_ms)
 {
+    using result_t = cc::result<std::remove_const_t<T>, E>;
     CC_ASSERT(root != nullptr, "cannot drive a null async");
     if (!impl::async_drive_until_ready_for(*root, timeout_ms))
         return cc::nullopt;
 
     if (root->has_error())
-        return cc::result<T, E>(cc::error(root->propagate_error()));
-    return cc::result<T, E>(*root->value_ptr()); // copy out
+        return result_t(cc::error(root->propagate_error()));
+    return result_t(root->value()); // copy out
 }
 } // namespace cc

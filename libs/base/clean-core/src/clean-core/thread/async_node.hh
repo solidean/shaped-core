@@ -673,8 +673,8 @@ public:
     }
     [[nodiscard]] bool is_cold() const { return load_state(cc::memory_order_acquire) == async_node_state::cold; }
 
-    // The failure-channel value is typed, so it is read and propagated through async<T, E>, not here.
-    // The base only knows a node HAS an error (has_error), not its type — see async<T, E>::try_error / propagate_error in async.hh.
+    // The failure-channel value is typed, so it is read and propagated through the typed layer, not here.
+    // The base only knows a node HAS an error (has_error), not its type — see async<T const, E>::try_error / propagate_error in async.hh.
 
     // debug/introspection (used by tests) — racy on a live node; call only when it is quiescent (single-threaded)
 public:

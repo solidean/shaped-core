@@ -38,7 +38,7 @@ sg::swapchain_handle      // std::shared_ptr<sg::swapchain>          — MUTABLE
 sg::async_compiled_shader   // std::shared_ptr<cc::async<compiled_shader>>   — async compile result (try_value() -> compiled_shader_handle)
 sg::async_compute_pipeline  // std::shared_ptr<cc::async<compute_pipeline_handle>> — async PSO build (blocking_get -> compute_pipeline_handle)
 // layout acquires (group + pipeline) are SYNC (cheap) — no async_* typedef for them.
-// cc::async<T> can't hold a const T, so const lands at the read side (try_value yields the const *_handle).
+// these are async<T>, not the read-only async<T const>, so const lands at the read side (try_value yields the const *_handle).
 ```
 
 ## bytes_future / bytes_waiter — download results

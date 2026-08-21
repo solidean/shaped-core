@@ -828,8 +828,23 @@ int v2 = cc::async_blocking_get_on(pool, a);                         // drive on
 cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
 int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value
+int const& rv2 = a->value();      // same, but requires has_value()
 cc::async_error const* pe = a->try_error();   // typed E const*; null unless ready with an error
 m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")));  // complete a manual node
+
+// async<T const> — the SAME node, read-only: reads, requires and drives, but never pushes/takes/edits.
+// A base class of async<T>, so the handle conversion is free; it goes ONE way and is never created directly
+// (the make_async_* factories and both coroutine return types reject a const T by name).
+cc::shared_async<int const> view = a;   // implicit; cc::weak_async<int const> converts the same way
+cc::async_blocking_get(view);           // -> int: the copying getters strip the const (result can't hold one)
+
+// the writing half, on async<T> only. GOTCHA: needs NO CONCURRENT ACCESS — weaker than sole ownership (two
+// owners with their own happens-before are fine, so nothing checks the refcount), but readiness alone is NOT
+// enough: a node publishes once, so mutating while a dependent reads is a data race however ready it is.
+int* pm = a->try_mutable_value();   a->mutable_value() = 7;   // edit the payload in place
+auto taken = a->take_value();   auto err = a->take_error();   // MOVE out; requires has_value()/has_error()
+// Both take_* leave a moved-from HUSK the node still reports as ready, so other handles read that husk.
+// take_error is the sharper one: the loss is SILENT — later propagate_error() yields an empty message.
 
 // raw compute frame (perf-critical state machine): async_step_status(async_context<T, E>&) — resolves via ctx,
 // returns a status. Annotate -> cc::async_step_status and give T explicitly (make_async_lazy<int>). A frame
@@ -837,7 +852,7 @@ m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")
 // error — check dep->try_error() and decide (transform/ignore/propagate); the make_async_* sugar DOES.
 [step=0, dep=cc::shared_async<int>()](cc::async_context<int>& actx) mutable -> cc::async_step_status {
     if (step++ == 0) { dep = cc::make_async_lazy([]{ return 10; }); actx.require(dep); return actx.wait_for_dependencies(); }
-    return actx.resolve_to_value(*dep->value_ptr()); };   // or actx.success(...)
+    return actx.resolve_to_value(dep->value()); };   // or actx.success(...)
 actx.require(dep);              // -> bool ready (NEITHER subscribes NOR schedules — the poll loop owns both);
                                 //    else records a pending dep, return wait
 actx.resolve_to_value(v)/success(v);  actx.resolve_to_value_emplace(args...);  // emplace: build T in place (immovable ok)

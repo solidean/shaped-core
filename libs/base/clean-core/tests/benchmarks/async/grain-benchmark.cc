@@ -170,7 +170,7 @@ cc::shared_async<i64> async_reduce(range rg)
             }
             // by-value resolve: the sum is a temporary evaluated before the call, so it does not outlive the
             // frame that the resolve destroys
-            return actx.success(*l->value_ptr() + *r->value_ptr());
+            return actx.success(l->value() + r->value());
         });
 }
 
