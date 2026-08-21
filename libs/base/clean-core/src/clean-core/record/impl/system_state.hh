@@ -30,6 +30,11 @@ void register_thread_state(thread_state* s);
 
 /// Unlinks and frees a drained, dead thread state.
 /// Consumer-only.
+/// Clears a thread_state's pointer back into its owner's thread-local storage.
+/// Called from the thread-exit handshake: the state outlives the thread so its chunks stay drainable, and that pointer
+/// must not, because the storage it names goes away with the thread.
+void detach_thread_state_tls(thread_state* s);
+
 void reclaim_thread_state(thread_state* s);
 
 /// Calls `f` for every registered thread, alive or not, under the registry lock.

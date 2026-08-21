@@ -69,24 +69,35 @@ cc::atomic<double> g_cycles_per_second = 0;
 
 /// Measures the cycle counter against the steady clock.
 /// Short on purpose: it runs inside initialize(), and the sealed-chunk path never needs the result.
+/// The cycle rate, measured at most once per process.
+///
+/// Calibrating busy-waits for two milliseconds, and a process may initialize the recorder many times — a test binary
+/// hands the singleton to every test that drives it itself.
+/// The rate is a property of the machine rather than of an incarnation, so re-measuring it buys nothing and costs two
+/// milliseconds of a core every time.
 double measure_cycle_rate()
 {
-    if (!cc::has_cycle_counter())
-        return 0;
-
-    auto const t0 = cc::current_time_steady_secs();
-    auto const c0 = cc::current_cycles();
-
-    // A busy wait rather than a sleep: a couple of milliseconds of accuracy is worth more here than the core is.
-    while (cc::current_time_steady_secs() - t0 < 0.002)
+    static double const cached = []
     {
-    }
+        if (!cc::has_cycle_counter())
+            return 0.0;
 
-    auto const c1 = cc::current_cycles();
-    auto const t1 = cc::current_time_steady_secs();
+        auto const t0 = cc::current_time_steady_secs();
+        auto const c0 = cc::current_cycles();
 
-    auto const dt = t1 - t0;
-    return dt > 0 ? double(c1 - c0) / dt : 0;
+        // A busy wait rather than a sleep: a couple of milliseconds of accuracy is worth more here than the core is.
+        while (cc::current_time_steady_secs() - t0 < 0.002)
+        {
+        }
+
+        auto const c1 = cc::current_cycles();
+        auto const t1 = cc::current_time_steady_secs();
+
+        auto const dt = t1 - t0;
+        return dt > 0 ? double(c1 - c0) / dt : 0.0;
+    }();
+
+    return cached;
 }
 
 //
@@ -134,8 +145,12 @@ void dispatch(processing& p, cc::rec::chunk const& c, thread_state const& ts, u3
 }
 
 /// Walks one thread's chunk queue as far as it has published, dispatching what is new.
-void drain_thread(processing& p, thread_state& ts)
+/// Drains everything `ts` has published, and reports whether nothing will ever follow it.
+/// The second half is what lets a dead thread's state be reaped; a live thread always answers false.
+bool drain_thread(processing& p, thread_state& ts)
 {
+    auto const is_dead = !ts.is_alive.load(cc::memory_order_acquire);
+
     if (ts.consumer_state == nullptr)
         ts.consumer_state = new cc::rec::stream_state();
 
@@ -144,7 +159,7 @@ void drain_thread(processing& p, thread_state& ts)
         ts.consume_cursor = ts.queue_head.load(cc::memory_order_acquire);
         ts.consume_offset = 0;
         if (ts.consume_cursor == nullptr)
-            return;
+            return is_dead; // a thread that died without ever recording
     }
 
     for (;;)
@@ -169,18 +184,21 @@ void drain_thread(processing& p, thread_state& ts)
                 .bytes = cc::span<byte const>(c->data + ts.consume_offset, isize(committed - ts.consume_offset))};
             for (auto it = view.begin(); it != view.end(); ++it)
                 if (auto const e = *it; e.kind() == cc::rec::event_kind::ambient_changed)
-                    ts.consumer_state->ambient
-                        = reinterpret_cast<void*>(uintptr_t(e.field_as_u64("ambient").value_or(0)));
+                    ts.consumer_state->trace_id = e.field_as_u64("trace").value_or(0);
 
             ts.consume_offset = committed;
         }
 
         if (!c->is_sealed.load(cc::memory_order_acquire))
-            return;
+            return false;
 
         auto* const next = c->next_in_thread.load(cc::memory_order_acquire);
         if (next == nullptr)
-            return; // sealed but not yet linked: an exiting thread, or one between chunks
+        {
+            // Sealed and last in the chain.
+            // For a live thread that is "between chunks"; for a dead one it is the end of everything it will say.
+            return is_dead;
+        }
 
         ts.consume_cursor = next;
         ts.consume_offset = 0;
@@ -191,9 +209,14 @@ void drain_thread(processing& p, thread_state& ts)
 /// One full pass over every registered thread.
 /// Called with `g_processing` held, and never with the registry lock held — a listener that records would register a
 /// thread from inside the callback and deadlock on it.
+/// Reused across polls rather than allocated per poll: the actor runs a thousand times a second, and it has nothing
+/// else to do most of the time.
+cc::vector<thread_state*> g_drain_snapshot;
+
 void drain_all(processing& p)
 {
-    cc::vector<thread_state*> snapshot;
+    auto& snapshot = g_drain_snapshot;
+    snapshot.clear();
     g_registry.lock(
         [&](registry& r)
         {
@@ -202,8 +225,23 @@ void drain_all(processing& p)
                 snapshot.push_back(s);
         });
 
+    // Reaped here rather than left until shutdown.
+    // A thread that dies keeps its state so its last chunks stay drainable, and holding it forever would make the
+    // registry grow with every thread a process ever started — which the actor then walks, a thousand times a second.
     for (auto* s : snapshot)
-        drain_thread(p, *s);
+        if (drain_thread(p, *s))
+        {
+            for (auto* c = s->consume_cursor; c != nullptr;)
+            {
+                auto* const next = c->next_in_thread.load(cc::memory_order_acquire);
+                c->release_ref();
+                c = next;
+            }
+            s->consume_cursor = nullptr;
+            s->queue_head.store(nullptr, cc::memory_order_relaxed);
+            s->produce_tail = nullptr;
+            cc::rec::impl::reclaim_thread_state(s);
+        }
 
     for (isize i = 0; i < p.listeners.size(); ++i)
     {
@@ -299,6 +337,13 @@ void cc::rec::impl::for_each_thread_state(cc::function_ref<void(thread_state&)> 
 isize cc::rec::impl::thread_state_count()
 {
     return g_registry.lock([](registry const& r) { return r.count; });
+}
+
+void cc::rec::impl::detach_thread_state_tls(thread_state* s)
+{
+    // Under the registry lock, because shutdown reads `tls` while holding it and would otherwise race an exiting
+    // thread to a pointer that is about to name freed storage.
+    g_registry.lock([&](registry&) { s->tls = nullptr; });
 }
 
 void cc::rec::impl::reclaim_thread_state(thread_state* s)
@@ -451,10 +496,26 @@ cc::rec::listener_handle cc::rec::register_listener(cc::rec::listener& l)
     return g_processing.lock(
         [&](processing& p)
         {
+            // A cleared slot is reused rather than appended past.
+            // A registration per test is a normal workload, and growing forever would leave every chunk dispatch
+            // walking thousands of nulls — the generation is what keeps a stale handle from matching the reuser.
+            auto index = p.listeners.size();
+            for (isize i = 0; i < p.listeners.size(); ++i)
+                if (p.listeners[i].l == nullptr)
+                {
+                    index = i;
+                    break;
+                }
+
             rec::listener_handle h;
-            h._index = p.listeners.size();
+            h._index = index;
             h._generation = p.next_generation++;
-            p.listeners.push_back({.l = &l, .generation = h._generation});
+
+            if (index == p.listeners.size())
+                p.listeners.push_back({.l = &l, .generation = h._generation});
+            else
+                p.listeners[index] = {.l = &l, .generation = h._generation};
+
             return h;
         });
 }
