@@ -32,6 +32,7 @@ add_library(clean-core
     src/clean-core/platform/environment.cc
     src/clean-core/platform/file_path.cc
     src/clean-core/platform/stack_capture.cc
+    src/clean-core/platform/module_table.cc
     src/clean-core/platform/symbolize.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
@@ -121,6 +122,7 @@ target_sources(clean-core
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
     src/clean-core/platform/stack_capture.hh
+    src/clean-core/platform/module_table.hh
     src/clean-core/platform/symbolize.hh
     src/clean-core/platform/win32_sanitized.hh
     src/clean-core/platform/intrinsics.hh

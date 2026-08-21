@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/module_table.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/symbolize.hh>
 #include <clean-core/string/string.hh>
@@ -174,4 +175,92 @@ TEST("symbolize - a rendering always says something")
     info.file = "renderer.cc";
     info.line = 42;
     CHECK(info.to_string() == "render_frame at renderer.cc:42");
+}
+
+TEST("module table - this process's modules are enumerable and contain its own code")
+{
+    if (!cc::module_enumeration_available())
+        SKIP("no module enumeration on this platform");
+
+    auto const modules = cc::enumerate_loaded_modules();
+    REQUIRE(!modules.empty());
+
+    // The address of our own function must fall inside one of them, or the table does not describe this process.
+    auto const self = reinterpret_cast<u64>(&capture_here_for_symbolize_test);
+    auto found = false;
+    for (auto const& m : modules)
+        if (m.contains(self))
+        {
+            found = true;
+            CHECK(!m.path.empty());
+            CHECK(!m.name().empty());
+            CHECK(m.name().size() < m.path.size() + 1); // a name, not the install directory
+            CHECK(!m.identity.empty());                 // a build this exact, not merely this path
+        }
+
+    CHECK(found);
+}
+
+TEST("symbolize - a recorded module table resolves addresses this process did not produce")
+{
+    if (!cc::symbolizer::is_available() || !cc::module_enumeration_available() || !cc::stack_capture_available())
+        SKIP("no symbolization or no module enumeration on this platform");
+
+    void* frames[32] = {};
+    auto const count = capture_here_for_symbolize_test(cc::span<void*>(frames, 32));
+    REQUIRE(count > 0);
+
+    // Standing in for a recording that travelled: the SAME addresses, resolved only through the recorded table rather
+    // than through whatever this process happens to have loaded.
+    // It is the same modules here for want of a second machine, but the path is the foreign one — its own session,
+    // loaded at the recorded bases, never consulting this process.
+    auto const modules = cc::enumerate_loaded_modules();
+    cc::symbolizer foreign(modules);
+    CHECK(foreign.is_foreign());
+
+    cc::symbolizer local;
+    CHECK(!local.is_foreign());
+
+    auto agreed = 0;
+    auto with_module = 0;
+    for (isize i = 0; i < count; ++i)
+    {
+        auto const& f = foreign.resolve(frames[i]);
+        auto const& l = local.resolve(frames[i]);
+
+        if (!f.module.empty())
+            ++with_module;
+        if (f.has_function() && f.function == l.function)
+            ++agreed;
+    }
+
+    // A module for every frame comes from the TABLE alone, so it holds even where no debug info could be loaded.
+    CHECK(with_module == count);
+
+    if (build_has_symbols())
+        CHECK(agreed > 0); // and where there are symbols, the two sessions say the same thing
+}
+
+TEST("symbolize - a module table with no usable binaries still names the module")
+{
+    if (!cc::symbolizer::is_available())
+        SKIP("no symbolization on this platform");
+
+    // A recording from a machine whose binaries are not here: the paths resolve to nothing, and the table is all a
+    // reader has.
+    // Degrading to `module+offset` is the difference between a frame you can look up and a bare address.
+    cc::loaded_module const invented = {
+        .base = 0x4000'0000,
+        .size = 0x1000,
+        .path = "Z:/nowhere/ghost.exe",
+        .identity = "DEADBEEF1000",
+    };
+
+    cc::symbolizer sym(cc::span<cc::loaded_module const>(&invented, 1));
+
+    auto const& info = sym.resolve(reinterpret_cast<void const*>(u64(0x4000'0123)));
+    CHECK(!info.has_function());
+    CHECK(info.module == "ghost.exe");
+    CHECK(info.module_offset == 0x123);
+    CHECK(info.to_string() == "ghost.exe+0x123");
 }

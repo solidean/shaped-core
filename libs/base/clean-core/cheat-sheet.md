@@ -980,9 +980,17 @@ auto const merged = captured.spliced_samples();          // samples ride the SAM
 // No sampler without threads, or where a foreign thread's stack cannot be walked; is_sampling() says which.
 
 #include <clean-core/platform/symbolize.hh>  // addresses -> names, at ANALYSIS time and never on the hot path
-cc::symbolizer sym;                          // caches; NOT thread-safe (DbgHelp needs callers to serialize)
+cc::symbolizer sym;                          // this process; caches; NOT thread-safe (DbgHelp serializes on you)
+cc::symbolizer sym(rec.modules());           // a RECORDED table instead, in a debug-info session of its own
 sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:42", or "app.exe+0x1234", or <unknown>
-// Resolves against THIS process's modules. A recording from another run resolves to nothing and admits it.
+// The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
+// A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
+
+#include <clean-core/platform/module_table.hh>   // which binaries were mapped where
+cc::enumerate_loaded_modules();              // -> cc::vector<cc::loaded_module>{base, size, path, identity}
+loaded_module::identity                      // the exact BUILD (PE TimeDateStamp+SizeOfImage), not just the path
+loaded_module::contains(addr), .name()       // which module an address fell in; "app.exe", not its install dir
+// Serializing captures this for you; recording.modules() is empty when the recording is this process's own.
 
 CC_RECORD_MARK("fallback-taken");            // "did this code run" — the cheapest useful annotation
 CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES

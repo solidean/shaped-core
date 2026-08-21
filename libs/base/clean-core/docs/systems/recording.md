@@ -535,8 +535,13 @@ Emscripten has no walkable native stack and returns an empty capture; `cc::stack
 Capture writes addresses and never asks who they belong to, because asking costs orders of magnitude more than the event it would hang off.
 So the asking happens at analysis time, and the result is cached — a sampled profile is thousands of hits on a handful of addresses.
 
-It resolves against **this process's** loaded modules, which is right for a trace exported by the program that recorded it.
-A recording loaded from elsewhere mostly resolves to nothing and says so, because a different run has a different address layout.
+**Which modules it resolves against is the choice.**
+By default it is this process's own, which is right for a program exporting its own trace.
+Given a recorded module table it resolves against THAT instead, in a debug-info session of its own — see [recording-formats](recording-formats.md#the-module-table).
+That is what makes a recording from another run, or from a process that has since died, readable at all.
+
+A foreign table is worth having even when the binaries are not.
+Failing to load one costs the function and the line and still leaves the module and the offset, so a frame degrades to `app.exe+0x1234`.
 An unresolved frame keeps its address rather than acquiring a confident wrong name.
 
 **No binary format here is stable**, and none will be for a good while.

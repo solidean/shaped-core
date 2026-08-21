@@ -128,8 +128,10 @@ rules:
 
   - kind: allow-include
     value: <tlhelp32.h>
-    reason: the thread snapshot is the only way to find a thread the recorder was never told about
-    files: src/clean-core/record/sampling.cc
+    reason: the thread and module snapshots are the only way to find what the recorder was never told about
+    files:
+      - src/clean-core/record/sampling.cc
+      - src/clean-core/platform/module_table.cc
 
   - kind: allow-include
     value: <timeapi.h>

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/container/span.hh>
+#include <clean-core/platform/module_table.hh>
 #include <clean-core/string/string.hh>
 
 // Turning an address back into a name, which is the other half of cc::capture_stack.
@@ -9,10 +11,14 @@
 // asking costs orders of magnitude more than the event it would hang off.
 // This is where the asking happens — at analysis time, off the hot path, and never from a crash handler.
 //
-// **It resolves against THIS process's loaded modules.**
-// A recording made by another process, or by an earlier run under a different ASLR layout, mostly resolves to nothing
-// and reports it: the addresses simply are not in any module this process has loaded.
-// Symbolizing a foreign recording needs its module base table and its binaries, which is a separate mechanism.
+// **A symbolizer resolves against a set of modules, and which set is the choice.**
+// The default is this process's own, which is right for a program exporting its own trace.
+// Given a recorded module table it resolves against THAT instead, in a session of its own, which is what makes a
+// recording from another run — or from a process that has since died, which every crash dump is — readable at all.
+//
+// A foreign table is useful even when the binaries are missing.
+// Failing to load one costs the function and the line and still leaves the module and the offset, so a frame degrades
+// from a name to `app.exe+0x1234` rather than to nothing.
 
 namespace cc
 {
@@ -61,7 +67,17 @@ struct cc::symbol_info
 /// One symbolizer per thread, or one behind a lock.
 struct cc::symbolizer
 {
+    /// Resolves against this process's own modules.
     symbolizer();
+
+    /// Resolves against a RECORDED set of modules instead, in a session of its own.
+    ///
+    /// The addresses are then interpreted exactly as the recording process meant them, whatever this process happens
+    /// to have loaded and wherever it happens to have loaded it.
+    /// A module whose binary cannot be found still contributes its name and the offset into it.
+    explicit symbolizer(cc::span<cc::loaded_module const> modules);
+
+    ~symbolizer();
 
     symbolizer(symbolizer const&) = delete;
     symbolizer& operator=(symbolizer const&) = delete;
@@ -73,9 +89,19 @@ struct cc::symbolizer
     /// Whether this build can resolve anything at all.
     [[nodiscard]] static bool is_available();
 
-    /// How many distinct addresses have been looked up, and how many of those resolved to a function.
+    /// How many distinct addresses have been looked up.
     [[nodiscard]] isize cached_count() const { return _cache.size(); }
+
+    /// Whether this resolves against a recorded table rather than against this process.
+    [[nodiscard]] bool is_foreign() const { return !_modules.empty(); }
 
 private:
     cc::map<u64, cc::symbol_info> _cache;
+
+    /// The recorded table, empty for a symbolizer over this process.
+    cc::vector<cc::loaded_module> _modules;
+
+    /// The platform handle keying this symbolizer's own debug-info session.
+    /// Null for the process session, which is shared with the crash handler and never torn down.
+    void* _session = nullptr;
 };

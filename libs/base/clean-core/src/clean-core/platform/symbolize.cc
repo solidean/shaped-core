@@ -1,6 +1,7 @@
 #include "symbolize.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/atomic.hh>
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <clean-core/platform/win32_sanitized.hh>
@@ -72,6 +73,53 @@ cc::symbolizer::symbolizer()
 #endif
 }
 
+cc::symbolizer::symbolizer(cc::span<cc::loaded_module const> modules)
+{
+    _modules.push_back_range(modules);
+
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    if (_modules.empty())
+    {
+        ensure_symbol_handler();
+        return;
+    }
+
+    // A session of its own, keyed by a handle that is not a real process.
+    //
+    // DbgHelp keys everything on that handle and never dereferences it, which is what lets a foreign table be loaded
+    // at ITS bases without disturbing the process session the crash handler shares.
+    // A unique value per symbolizer, so two of them can be open at once.
+    static cc::atomic<u64> next_session = 1;
+    _session = reinterpret_cast<void*>(u64(0xCC5E5510u) << 32 | next_session.fetch_add(1, cc::memory_order_relaxed));
+
+    ::SymSetOptions(::SymGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+    if (::SymInitialize(HANDLE(_session), nullptr, FALSE) == 0)
+    {
+        _session = nullptr;
+        return;
+    }
+
+    for (auto& m : _modules)
+    {
+        // At the base the RECORDING used, not wherever this process would have put it.
+        // A module whose file is missing simply fails to load, and resolve still reports its name and the offset from
+        // the table itself.
+        ::SymLoadModuleEx(HANDLE(_session), nullptr, m.path.c_str_materialize(), nullptr, DWORD64(m.base),
+                          DWORD(m.size), nullptr, 0);
+    }
+#endif
+}
+
+cc::symbolizer::~symbolizer()
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    // Only a session this symbolizer opened.
+    // The process session belongs to the whole process and is deliberately never cleaned up.
+    if (_session != nullptr)
+        ::SymCleanup(HANDLE(_session));
+#endif
+}
+
 cc::symbol_info const& cc::symbolizer::resolve(void const* address)
 {
     auto const key = reinterpret_cast<u64>(address);
@@ -80,8 +128,20 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
 
     auto& out = _cache[key];
 
+    // From the recorded table, so a module still names the frame even when its binary is nowhere to be found.
+    // Filled first on purpose: whatever the debug info manages afterwards only ever improves on it.
+    for (auto const& m : _modules)
+        if (m.contains(key))
+        {
+            out.module = m.name();
+            out.module_offset = key - m.base;
+            break;
+        }
+
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
-    auto const process = ::GetCurrentProcess();
+    auto const process = _session != nullptr ? HANDLE(_session) : ::GetCurrentProcess();
+    if (is_foreign() && _session == nullptr)
+        return out; // the session could not be opened, so the table is all there is
 
     // The name is variable-length and lives past the end of the struct, which is why this is a byte buffer rather
     // than a SYMBOL_INFO.
@@ -110,15 +170,17 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
 
     // The module and the offset into it are what still locate a frame in a disassembly when there are no symbols at
     // all, which is exactly the case an optimized third-party module produces.
-    if (auto const base = ::SymGetModuleBase64(process, key); base != 0)
-    {
-        IMAGEHLP_MODULE64 info = {};
-        info.SizeOfStruct = sizeof(info);
-        if (::SymGetModuleInfo64(process, base, &info) != 0)
-            out.module = file_name_of(info.ImageName);
+    // Skipped for a foreign table, which already answered this and answered it from the recording.
+    if (!is_foreign())
+        if (auto const base = ::SymGetModuleBase64(process, key); base != 0)
+        {
+            IMAGEHLP_MODULE64 info = {};
+            info.SizeOfStruct = sizeof(info);
+            if (::SymGetModuleInfo64(process, base, &info) != 0)
+                out.module = file_name_of(info.ImageName);
 
-        out.module_offset = key - u64(base);
-    }
+            out.module_offset = key - u64(base);
+        }
 #endif
 
     return out;
