@@ -122,6 +122,11 @@ rules:
       - src/clean-core/platform/native.cc
 
   - kind: allow-include
+    value: <pthread.h>
+    reason: a thread's stack bounds are what a frame-chain walk validates against, and pthread is the only source
+    files: src/clean-core/platform/stack_capture.cc
+
+  - kind: allow-include
     value: <csignal>
     reason: the crash handler installs signal handlers, which is what it is
     files: src/clean-core/error/crash_handler.cc

@@ -117,4 +117,5 @@ That is what makes the constrained writer testable at all, rather than something
 
 - **Nexus does not install a dump yet.** It belongs with the rest of the nexus wiring, which waits on ambient filtering.
 - **A dump is not a minidump.** It carries what was recorded, not the machine state; `cc::install_crash_handler` still owns the stack traces.
-- **Stacktrace events carry no frames** until `cc::capture_stack` is implemented — see [TODO](../TODO.md).
+- **Stacktrace events carry return addresses, never names.**
+  Symbolizing them needs the module base table below plus the matching binaries, which is why analysis happens offline and a capture stays cheap.

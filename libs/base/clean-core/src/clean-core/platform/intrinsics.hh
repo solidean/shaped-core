@@ -47,6 +47,10 @@
 
 #if defined(CC_COMPILER_MSVC)
 
+// Architecture-independent, and the only way to name a stack address in the current frame under MSVC.
+extern "C" void* _AddressOfReturnAddress(void);
+#pragma intrinsic(_AddressOfReturnAddress)
+
 #if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
 extern "C" void _mm_pause(void);
 extern "C" unsigned __int64 __rdtsc(void);
@@ -140,6 +144,21 @@ CC_FORCE_INLINE unsigned long long read_cycles_and_core(unsigned int& core_out)
 #else
     core_out = 0;
     return 0;
+#endif
+}
+
+/// A stack address inside the CALLING frame, for comparing one frame's position against another's.
+///
+/// Deliberately not "the frame pointer": MSVC has no way to ask for one, so this is `_AddressOfReturnAddress` there
+/// and `__builtin_frame_address` elsewhere.
+/// The two differ by a word or so, which is why every consumer compares with >= rather than == — see
+/// cc::capture_stack's `stop_frame`.
+CC_FORCE_INLINE void* current_frame_address()
+{
+#if defined(CC_COMPILER_MSVC)
+    return _AddressOfReturnAddress();
+#else
+    return __builtin_frame_address(0);
 #endif
 }
 } // namespace cc::impl

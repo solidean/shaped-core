@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/platform/intrinsics.hh>
 #include <clean-core/record/record.hh>
 
 // CC_RECORD_SCOPE — a timed span on one thread, and the thing a flame graph is built out of.
@@ -40,6 +41,11 @@ struct scope_guard
         auto& w = t_writer;
         rec::record_event(begin_desc, w.scope_depth);
         ++w.scope_depth;
+
+        // The enclosing scope's frame is saved here rather than recomputed, so leaving restores it exactly even where
+        // this one was inlined into a caller that already had a scope open.
+        _enclosing_frame = w.scope_frame;
+        w.scope_frame = cc::impl::current_frame_address();
     }
 
     CC_FORCE_INLINE ~scope_guard()
@@ -48,6 +54,7 @@ struct scope_guard
             return;
 
         auto& w = t_writer;
+        w.scope_frame = _enclosing_frame;
         --w.scope_depth;
         rec::record_event(*_end, w.scope_depth);
     }
@@ -56,11 +63,26 @@ struct scope_guard
     scope_guard& operator=(scope_guard const&) = delete;
 
 private:
+    /// What w.scope_frame held before this scope, restored on the way out.
+    void* _enclosing_frame = nullptr;
+
     /// Null when the site was disabled at entry, which is also what keeps the pair balanced across a reconfiguration
     /// that lands mid-scope.
     rec::desc const* _end;
 };
 } // namespace cc::rec::impl
+
+namespace cc::rec
+{
+/// The stack frame that opened the innermost profiling scope on this thread, or null when none is open.
+///
+/// This is what a stack capture passes as its `stop_frame`: everything below that frame is already named by the scope
+/// stack, so capturing it again spends both time and payload on a fact the stream already carries.
+[[nodiscard]] CC_FORCE_INLINE void* current_scope_frame()
+{
+    return rec::impl::t_writer.scope_frame;
+}
+} // namespace cc::rec
 
 /// Defines the begin/end descriptor pair for one scope site.
 #define CC_REC_IMPL_SCOPE_DESCS(name_)                                                                  \

@@ -29,6 +29,13 @@ struct cc::rec::impl::writer_tls
     /// How many profiling scopes are open on this thread.
     u32 scope_depth;
 
+    /// The stack address of the frame that opened the innermost scope, or null when none is open.
+    ///
+    /// One store per scope enter, next to the depth it already touches, and it buys cc::capture_stack a place to stop:
+    /// everything below that frame is what the scope stack already names, so walking it again is bytes and time for a
+    /// fact the stream already has.
+    void* scope_frame;
+
     /// The listener layer this thread is currently recording under, plus one; 0 means ordinary code.
     /// See libs/base/clean-core/docs/systems/recording.md on re-entrancy.
     u16 layer_plus_one;

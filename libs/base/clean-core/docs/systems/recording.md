@@ -477,9 +477,20 @@ Async scopes and their ambient deltas are here, so attribution follows work acro
 nexus turns that into test assertions: `nx::test_recording()` hands a test what it recorded, and a failing test's recording is written out.
 [nexus/recording](../../../nexus/docs/recording.md) is that half.
 
-`cc::capture_stack` ([stack_capture.hh](../../src/clean-core/platform/stack_capture.hh)) is a real seam with a stub behind it.
-It returns an empty capture on every platform today, so a stacktrace-enriched event carries a frame count of zero rather than a wrong stack.
-Filling it in touches that one file.
+`cc::capture_stack` ([stack_capture.hh](../../src/clean-core/platform/stack_capture.hh)) captures return addresses, and never symbolizes.
+That is analysis, and it costs orders of magnitude more than the event it would hang off.
+
+**What it costs differs by an order of magnitude across platforms**, and stacktrace policy should follow that.
+Where a frame pointer is kept (`SC_FRAME_POINTERS`, so clang and GCC) the walk chases the chain at a few nanoseconds a frame.
+Windows has no frame-pointer ABI on x64 and MSVC cannot maintain one, so it unwinds from tables instead: correct, and roughly a microsecond for a deep stack.
+A stack on every error is affordable; a stack on every warning is not.
+
+A capture can also stop early, at `cc::rec::current_scope_frame()`.
+Everything below the frame that opened the innermost profiling scope is what the scope stack already names, so walking it again spends time and payload on a fact the stream carries.
+That matters most for sampling, where it shortens the stacks rather than just the walk.
+The scope guard stores that frame next to the depth it already touches, so the early-out costs one store per scope.
+
+Emscripten has no walkable native stack and returns an empty capture; `cc::stack_capture_available()` says which you are in.
 
 **No binary format here is stable**, and none will be for a good while.
 Durability comes from an exporter, not from the raw bytes.

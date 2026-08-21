@@ -46,7 +46,7 @@ void cc::rec::impl::log_apply_policy(cc::rec::desc const& d)
     if (d.dom->captures_stacktrace(d.lvl))
     {
         void* frames[max_captured_frames] = {};
-        auto const count = cc::capture_stack(cc::span<void*>(frames, max_captured_frames), 2);
+        auto const count = cc::capture_stack(cc::span<void*>(frames, max_captured_frames), 2).count;
 
         auto writer = rec::open_event(stacktrace_desc, 12 + count * isize(sizeof(void*)));
         if (writer.is_open())

@@ -64,6 +64,9 @@ Add entries as we discover them, and remove them as they land.
   `CC_RECORD` takes scalars, enums, pointers and text; `desc::fields` already describes multi-field payloads, and nothing has needed one yet.
 - **A static/interned tier for recorded text.**
   A literal already costs nothing when it is a site's NAME, and only a runtime string is copied — an interned handle could be stored as its id instead.
-- **The real `cc::capture_stack`.**
-  Frame-pointer walking for our own modules, addresses only, symbolized offline.
-  Until then a stacktrace-enriched event carries a frame count of zero.
+- **A `stop_frame` early-out on Windows.**
+  `cc::capture_stack` honours it by chasing the frame chain, and `RtlCaptureStackBackTrace` offers no per-frame hook, so a Windows caller passing one gets a full capture instead.
+  Getting it means hand-rolling the walk over `RtlVirtualUnwind`, which would also let a reused `UNWIND_HISTORY_TABLE` cut the per-frame lookup that makes the Windows path slow.
+- **Interning captured stacks.**
+  A sampling profiler at a kilohertz across twenty threads is megabytes a second of return addresses, most of them repeats.
+  A hash from stack to id, stored per event, is the fix; the early-out above shortens the stacks but does not deduplicate them.

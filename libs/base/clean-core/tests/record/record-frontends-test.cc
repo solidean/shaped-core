@@ -2,6 +2,7 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/console_listener.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/recording.hh>
@@ -378,4 +379,30 @@ REC_TEST("record/console - only log events reach the terminal, in timestamp orde
 
     // Two messages at or above warning; the info line and the marker are not the console's business.
     CHECK(console.printed_count() == 2);
+}
+
+REC_TEST("record/log - an error carries the stack it was logged from")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener rl;
+    {
+        scoped_listener const reg(rl);
+        CC_LOG_ERROR("something went wrong");
+        cc::rec::flush_blocking();
+    }
+    auto const r = rl.take();
+
+    // The domain captures a stack for errors, and cc::capture_stack is what fills it.
+    // A frame count of zero was the honest answer while that was a stub; it is a regression now.
+    isize frame_count = -1;
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (cc::string_view(e.desc->name) == "record.stacktrace")
+                frame_count = isize(e.field_as_u64("frame_count").value_or(0));
+        });
+
+    REQUIRE(frame_count >= 0); // the event itself must be there either way
+    CHECK((frame_count > 0) == cc::stack_capture_available());
 }
