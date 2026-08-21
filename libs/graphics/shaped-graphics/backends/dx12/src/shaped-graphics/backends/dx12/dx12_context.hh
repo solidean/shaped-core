@@ -170,6 +170,9 @@ public:
                                                                                   cc::span<sg::named_view const> views,
                                                                                   cc::span<sg::named_sampler const> samplers,
                                                                                   sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_staging_binding_group_handle> create_dx12_staging_binding_group(
+        dx12_binding_group_layout_handle layout,
+        sg::lifetime_scope scope);
 
     // Render-target / depth-stencil descriptors.
     // RTV/DSV are CPU-only — bound via the output-merger, not a descriptor table — so they get their own non-shader-visible heaps rather than a binding group.
@@ -246,6 +249,9 @@ public:
                                                                                 cc::span<sg::named_view const> views,
                                                                                 cc::span<sg::named_sampler const> samplers,
                                                                                 sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
+        sg::binding_group_layout_handle layout,
+        sg::lifetime_scope scope) override;
 
     // The swapchain uses note_device_removed_if_lost (below) to mark the context lost on a failed Present.
     friend class dx12_swapchain;

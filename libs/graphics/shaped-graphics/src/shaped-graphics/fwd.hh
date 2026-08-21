@@ -152,6 +152,7 @@ enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see resource/views.hh)
 struct raw_buffer_view;                 // erased buffer-view payload — one arm of raw_view (see resource/views.hh)
 struct raw_texture_view;                // erased texture-view payload — one arm of raw_view
+struct vacant_view;                     // a vacant array element (no view at all) — one arm of raw_view
 struct raw_tlas_view;                   // erased acceleration-structure-view payload — one arm of raw_view
 struct tlas_view;                       // the typed acceleration-structure view (see resource/views.hh)
 template <class T>
@@ -199,8 +200,14 @@ struct pipeline_layout_description; // {groups, static_samplers} — input to cr
 class compute_pipeline;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
-struct named_view;    // {name, raw_view} — input to create_binding_group
+struct bound_view;    // one raw_view (inline) or a vector of them — a named_view's element list
+struct named_view;    // {name, bound_view} — input to create_binding_group (one view per array element)
 struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
+
+// The mutable builder above the immutable group: set descriptors one at a time, snapshot an immutable binding_group out of it.
+// See binding/staging_binding_group.hh.
+class staging_binding_group;
+enum class binding_slot : u32; // opaque binding identity inside a staging_binding_group
 
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the
 // pipeline/primitive_topology.hh / pipeline/rasterization_state.hh / pipeline/blend_state.hh / pipeline/depth_stencil_state.hh /
@@ -321,11 +328,13 @@ using raster_pipeline_handle = std::shared_ptr<raster_pipeline const>; // immuta
 using raytracing_pipeline_handle = std::shared_ptr<raytracing_pipeline const>; // immutable DXR state object + shader ids
 using raytracing_shader_table_handle = std::shared_ptr<raytracing_shader_table const>; // immutable table over a pipeline
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
+// Mutable, unlike every other resource handle here: a staging group exists to be set, and snapshot() caches on it.
+using staging_binding_group_handle = std::shared_ptr<staging_binding_group>;
 using swapchain_handle = std::shared_ptr<swapchain>; // mutable: a swapchain is a per-frame driver (acquire/present)
 
 // Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,
-// pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). cc::async<T> cannot hold a const T
-// (its internal cc::optional<T> forbids it), so const arrives at the read side: an async's try_value()
+// pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). These are the producing cc::async<T>
+// rather than the read-only cc::async<T const>, so const arrives at the read side: an async's try_value()
 // yields a non-owning `T const*` into the node — hold the async handle below to keep it alive while you read
 // (a shareable projection back to a *_handle is a deferred follow-up).
 using async_compiled_shader = cc::shared_async<compiled_shader>;          // try_value() -> compiled_shader const*

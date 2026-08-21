@@ -86,10 +86,14 @@ namespace sg
 }
 
 /// Whether a bound view satisfies a binding of this type — its access and layout must match.
+/// The vacant marker satisfies every view kind: what a null descriptor looks like is the binding's to say,
+/// and whether a vacancy is *allowed* there (array elements only) is the group creation's check, not this one.
 [[nodiscard]] inline bool accepts(binding_type t, raw_view const& v)
 {
     if (is_sampler(t))
         return false; // samplers are bound as samplers, never as views
+    if (is_vacant(v))
+        return true;
     return access_of(v) == access_of(t) && shape_of(v) == shape_of(t);
 }
 
@@ -109,6 +113,15 @@ struct sg::binding
     /// For `uniform_buffer` bindings: the declared block size in bytes, used to validate a bound view's size.
     /// Absent for other kinds.
     cc::optional<isize> block_size;
+
+    /// For texture bindings: the shader-declared view dimension (`Texture2D` vs `TextureCube` vs ...); absent for other kinds.
+    /// Reflection fills it; hand-written array bindings must set it — it is what lets a backend synthesize a
+    /// dimension-correct null descriptor for a vacant element.
+    cc::optional<texture_view_dimension> texture_dimension;
+
+    /// Whether this is an array binding (count > 1): one descriptor per element, vacant elements as
+    /// `sg::vacant_view`, and access declared explicitly per dispatch rather than inferred.
+    [[nodiscard]] constexpr bool is_array() const { return count > 1; }
 };
 
 namespace sg

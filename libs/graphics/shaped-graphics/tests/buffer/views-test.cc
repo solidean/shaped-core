@@ -404,3 +404,24 @@ TEST("sg views - heterogeneous buffer: whole-buffer raw view + in-shader Load")
     // A typed (non-byte) recovery from a raw view is rejected: byte<->raw and typed<->structured must match.
     CHECK_ASSERTS(sg::as_readonly_buffer<particle>(rv));
 }
+
+TEST("sg views - views hash by identity")
+{
+    auto const buf_a = make_buffer(256, sg::buffer_usage::readonly_buffer);
+    auto const buf_b = make_buffer(256, sg::buffer_usage::readonly_buffer);
+
+    // Same buffer + same view fields hash equally; a different buffer, or any field that reaches the descriptor, changes the hash.
+    // Identity, never contents.
+    sg::raw_view const a1 = sg::buffer<particle>::from_raw(buf_a).as_readonly_buffer();
+    sg::raw_view const a2 = sg::buffer<particle>::from_raw(buf_a).as_readonly_buffer();
+    sg::raw_view const b = sg::buffer<particle>::from_raw(buf_b).as_readonly_buffer();
+    CHECK(cc::make_hash(a1) == cc::make_hash(a2));
+    CHECK(cc::make_hash(a1) != cc::make_hash(b));
+
+    // A different element type changes the stride, so the hash separates the two views of one buffer.
+    sg::raw_view const a_u32 = sg::buffer<u32>::from_raw(buf_a).as_readonly_buffer();
+    CHECK(cc::make_hash(a1) != cc::make_hash(a_u32));
+
+    // The vacant marker hashes as its own arm, distinct from any bound view.
+    CHECK(cc::make_hash(sg::raw_view(sg::vacant_view{})) != cc::make_hash(a1));
+}

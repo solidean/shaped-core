@@ -32,6 +32,7 @@ void add_binding(cc::byte_stream_builder& b, binding const& bnd)
     b.add_pod(bnd.count);
     b.add_pod(bnd.type);
     b.add_optional(bnd.block_size);
+    b.add_optional(bnd.texture_dimension);
 }
 } // namespace
 

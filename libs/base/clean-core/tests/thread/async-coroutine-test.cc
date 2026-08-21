@@ -163,6 +163,52 @@ TEST("async coroutine - async_yield reschedules and resumes")
 }
 
 // ============================================================================
+// read-only views as dependencies
+// ============================================================================
+
+// A coroutine PRODUCES its value, so it can never return a view — see the static_asserts on std::coroutine_traits.
+// Not compilable, pinned as prose:
+//   cc::shared_async<int const> bad_cold() { co_return 1; }
+//   cc::async_scheduled<int const> bad_eager() { co_return 1; }
+
+TEST("async coroutine - co_await over a read-only view")
+{
+    auto const src = cc::make_async_lazy([] { return 40; });
+    cc::shared_async<int const> const v = src;
+
+    auto const co = [](cc::shared_async<int const> dep) -> cc::shared_async<int>
+    {
+        auto const& x = co_await dep; // U deduces to int const, so this binds int const&
+        static_assert(std::is_same_v<decltype(x), int const&>);
+        co_return x + 2;
+    }(v);
+
+    CHECK(cc::async_blocking_get(co) == 42);
+}
+
+TEST("async coroutine - async_as_result over a read-only view strips the const")
+{
+    cc::shared_async<int const> const v = cc::make_async_from_value(7);
+
+    auto const co = [](cc::shared_async<int const> dep) -> cc::shared_async<int>
+    {
+        auto r = co_await cc::async_as_result(dep);
+        static_assert(std::is_same_v<decltype(r), cc::result<int, cc::async_error>>);
+        co_return r.has_value() ? r.value() : -1;
+    }(v);
+
+    CHECK(cc::async_blocking_get(co) == 7);
+}
+
+TEST("async coroutine - an eager coroutine's handle converts to a view")
+{
+    // async_scheduled carries its own operator to the view: reaching it through shared_async would be
+    // two user-defined conversions, which copy-initialization does not allow.
+    cc::shared_async<int const> const v = coro_eager(5);
+    CHECK(cc::async_blocking_get(v) == 5);
+}
+
+// ============================================================================
 // failure
 // ============================================================================
 

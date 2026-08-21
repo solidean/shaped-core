@@ -39,6 +39,36 @@ namespace
     }
 }
 
+/// Maps a texture binding's reflected SRV dimension onto sg's shader-facing view dimension.
+/// nullopt for the non-texture dimensions (buffer / unknown), which never reach this for a texture kind.
+[[nodiscard]] cc::optional<sg::texture_view_dimension> map_texture_dimension(D3D_SRV_DIMENSION d)
+{
+    using vd = sg::texture_view_dimension;
+    switch (d)
+    {
+    case D3D_SRV_DIMENSION_TEXTURE1D:
+        return vd::tex_1d;
+    case D3D_SRV_DIMENSION_TEXTURE1DARRAY:
+        return vd::tex_1d_array;
+    case D3D_SRV_DIMENSION_TEXTURE2D:
+        return vd::tex_2d;
+    case D3D_SRV_DIMENSION_TEXTURE2DARRAY:
+        return vd::tex_2d_array;
+    case D3D_SRV_DIMENSION_TEXTURE2DMS:
+        return vd::tex_2d_ms;
+    case D3D_SRV_DIMENSION_TEXTURE2DMSARRAY:
+        return vd::tex_2d_ms_array;
+    case D3D_SRV_DIMENSION_TEXTURE3D:
+        return vd::tex_3d;
+    case D3D_SRV_DIMENSION_TEXTURECUBE:
+        return vd::cube;
+    case D3D_SRV_DIMENSION_TEXTURECUBEARRAY:
+        return vd::cube_array;
+    default:
+        return {};
+    }
+}
+
 /// The bound-resource loop, shared by the monolithic (ID3D12ShaderReflection) and library
 /// (ID3D12FunctionReflection) paths — both expose GetResourceBindingDesc / GetConstantBufferByName.
 template <class ReflectionT>
@@ -66,6 +96,11 @@ template <class ReflectionT>
         b.index = bd.BindPoint;
         b.count = bd.BindCount;
         b.type = type.value();
+
+        // Texture bindings carry their shader-declared dimension, which is what lets a backend synthesize a
+        // dimension-correct null descriptor for a vacant array element.
+        if (b.type == sg::binding_type::readonly_texture || b.type == sg::binding_type::readwrite_texture)
+            b.texture_dimension = map_texture_dimension(bd.Dimension);
 
         if (bd.Type == D3D_SIT_CBUFFER)
         {

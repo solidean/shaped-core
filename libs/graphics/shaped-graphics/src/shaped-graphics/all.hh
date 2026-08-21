@@ -8,6 +8,7 @@
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/compute.hh>

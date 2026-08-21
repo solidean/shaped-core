@@ -217,7 +217,7 @@ TEST("async - dynamic dependency added during compute, removed once ready")
                 (void)actx.require(child);
                 return actx.wait_for_dependencies();
             default:
-                return actx.success(*child->value_ptr() + 5);
+                return actx.success(child->value() + 5);
             }
         });
 
@@ -235,7 +235,7 @@ TEST("async - already-ready dependency completes without parking")
         {
             bool const ready = actx.require(dep);
             CHECK(ready); // require on a ready dep returns true immediately
-            return actx.success(*dep->value_ptr() + 1);
+            return actx.success(dep->value() + 1);
         });
 
     CHECK(cc::async_blocking_get(p) == 8);
@@ -253,7 +253,7 @@ TEST("async - required cold dependency is driven to completion")
         {
             if (!actx.require(dep))
                 return actx.wait_for_dependencies();
-            return actx.success(*dep->value_ptr() + 1);
+            return actx.success(dep->value() + 1);
         });
 
     CHECK(cc::async_blocking_get(p) == 101);
@@ -331,7 +331,7 @@ TEST("async - a two-phase frame runs exactly twice (register deps, then compute)
                 (void)actx.require(child);
                 return actx.wait_for_dependencies();
             default:
-                return actx.success(*child->value_ptr());
+                return actx.success(child->value());
             }
         });
 
@@ -406,7 +406,7 @@ TEST("async - a frame dropped before it resolves still destroys its captures")
             {
                 if (!actx.require(ext))
                     return actx.wait_for_dependencies();
-                return actx.success(*ext->value_ptr());
+                return actx.success(ext->value());
             });
         p->schedule();
         sched.run_until([&] { return false; }); // p parks on ext, frame still sitting in the payload
@@ -426,7 +426,7 @@ TEST("async - a parked frame keeps its state in place across polls")
             ++polls;
             if (!actx.require(ext))
                 return actx.wait_for_dependencies();
-            return actx.success(polls * 100 + *ext->value_ptr());
+            return actx.success(polls * 100 + ext->value());
         });
 
     cc::singlethreaded_scheduler sched;
@@ -493,7 +493,7 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
         {
             if (!actx.require(ext))
                 return actx.wait_for_dependencies();
-            return actx.success(*ext->value_ptr() + 1);
+            return actx.success(ext->value() + 1);
         });
 
     p->schedule();
@@ -549,7 +549,7 @@ TEST("async - many dependents park on one node (inline + spill), all woken on co
             {
                 if (!actx.require(ext))
                     return actx.wait_for_dependencies();
-                return actx.success(*ext->value_ptr() + i);
+                return actx.success(ext->value() + i);
             }));
 
     for (auto const& d : deps)
@@ -581,7 +581,7 @@ TEST("async - a dependent that expires is pruned from a subscribed-to node")
             {
                 if (!actx.require(ext))
                     return actx.wait_for_dependencies();
-                return actx.success(*ext->value_ptr());
+                return actx.success(ext->value());
             });
         p->schedule();
         sched.run_until([&] { return false; }); // p parks + subscribes on ext
@@ -903,6 +903,155 @@ TEST("async - into_result after driving a graph")
     auto r = cc::into_result(cc::move(b));
     REQUIRE(r.has_value());
     CHECK(r.value() == 42);
+}
+
+// ============================================================================
+// async<T const> — the read-only view
+// ============================================================================
+
+// The view is the same node, so it must add no bytes and stay in the same size class.
+static_assert(sizeof(cc::async<int const>) == sizeof(cc::async<int>));
+static_assert(sizeof(cc::async<int const>) == 64, "the view is the node, not a wrapper around it");
+static_assert(alignof(cc::async<int const>) == alignof(cc::async<int>));
+
+// Conversion goes one way only, and the view keeps neither the producing nor the consuming half.
+static_assert(std::is_convertible_v<cc::shared_async<int>, cc::shared_async<int const>>);
+static_assert(!std::is_convertible_v<cc::shared_async<int const>, cc::shared_async<int>>);
+static_assert(std::is_base_of_v<cc::async<int const>, cc::async<int>>);
+
+// Not expressible as a nexus check, so pinned here as prose — each of these must FAIL to compile:
+//   view->push_value(1);          view->mutable_value();      view->try_mutable_value();
+//   view->take_value();           view->take_error();         cc::into_result(cc::move(view));
+//   cc::make_async_manual<int const>();                       cc::shared_async<int&> / <void>;
+//   cc::shared_async<int const> f() { co_return 1; }
+
+TEST("async - a shared_async converts to its read-only view")
+{
+    auto a = cc::make_async_from_value(7);
+
+    cc::shared_async<int const> v = a; // implicit: derived-to-base on the handle
+    REQUIRE(v != nullptr);
+    CHECK(v.get() == a.get()); // the same node, not a copy of it
+    REQUIRE(v->try_value() != nullptr);
+    CHECK(v->value() == 7);
+
+    // reading through the view is the const half of the same surface
+    static_assert(std::is_same_v<decltype(v->try_value()), int const*>);
+    static_assert(std::is_same_v<decltype(v->value()), int const&>);
+    static_assert(std::is_same_v<decltype(a->try_mutable_value()), int*>);
+}
+
+TEST("async - the view keeps the node alive and weak_async converts too")
+{
+    cc::weak_async<int const> w;
+    {
+        auto a = cc::make_async_from_value(11);
+        w = a; // weak_ptr's converting ctor, same as the strong one
+
+        auto v = cc::shared_async<int const>(a);
+        a = nullptr; // the view is now the only owner
+        CHECK(v->value() == 11);
+
+        auto locked = w.lock();
+        REQUIRE(locked != nullptr);
+        CHECK(locked->value() == 11);
+    }
+    CHECK(w.lock() == nullptr);
+}
+
+TEST("async - a view works as a dependency and as a driving root")
+{
+    auto a = cc::make_async_lazy([] { return 20; });
+    cc::shared_async<int const> v = a;
+
+    // the dependency deduces U = int const, and the frame still receives a plain int
+    auto b = cc::make_async_lazy([](int x) { return x + 22; }, v);
+    CHECK(cc::async_blocking_get(b) == 42);
+
+    // the copying getters strip the const, since cc::result cannot hold one
+    static_assert(std::is_same_v<decltype(cc::async_blocking_get(v)), int>);
+    static_assert(std::is_same_v<decltype(cc::try_async_blocking_get(v)), cc::result<int, cc::async_error>>);
+    CHECK(cc::async_blocking_get(v) == 20);
+
+    auto r = cc::try_async_blocking_get(v);
+    REQUIRE(r.has_value());
+    CHECK(r.value() == 20);
+}
+
+TEST("async - a view of a failed node still propagates its error")
+{
+    cc::shared_async<int const> v = cc::make_async_from_error<int>(cc::async_error::make_cancelled());
+
+    REQUIRE(v->has_error());
+    REQUIRE(v->try_error() != nullptr);
+    CHECK(v->propagate_error().is_cancelled());
+
+    auto r = cc::try_async_blocking_get(v);
+    REQUIRE(r.has_error());
+    CHECK(r.error().is_cancelled());
+}
+
+// ============================================================================
+// owner-side value access — mutable_value / take_value / take_error
+// ============================================================================
+
+TEST("async - mutable_value edits the payload in place")
+{
+    auto a = cc::make_async_from_value(cc::string("hello"));
+
+    a->mutable_value() += " world";
+    *a->try_mutable_value() += "!";
+
+    // one node, so an independent owner and the read-only view both observe the edit
+    auto b = a;
+    cc::shared_async<cc::string const> v = a;
+    a = nullptr; // b and v carry the node on their own now
+    CHECK(b->value() == "hello world!");
+    CHECK(v->value() == "hello world!");
+
+    // ...and an edit through b is visible through v, since there is only ever one payload
+    b->mutable_value() = "replaced";
+    CHECK(v->value() == "replaced");
+}
+
+TEST("async - mutable_value on a driven graph")
+{
+    auto a = cc::make_async_lazy([] { return 20; });
+    CHECK(cc::async_blocking_get(a) == 20);
+
+    a->mutable_value() = 42;
+    CHECK(*a->try_value() == 42);
+}
+
+TEST("async - take_value moves the value out and leaves a husk")
+{
+    auto a = cc::make_async_from_value(cc::string("a string long enough to have a heap buffer to steal"));
+    REQUIRE(a->has_value());
+
+    auto taken = a->take_value();
+    CHECK(taken == "a string long enough to have a heap buffer to steal");
+
+    // the node is STILL ready_value, now over a moved-from husk that teardown will destroy
+    CHECK(a->is_ready());
+    CHECK(a->has_value());
+    CHECK(a->value().empty());
+}
+
+TEST("async - take_error moves the error out")
+{
+    auto a = cc::make_async_from_error<int>(cc::async_error::make_cancelled());
+    REQUIRE(a->has_error());
+
+    auto taken = a->take_error();
+    CHECK(taken.is_cancelled());
+    CHECK(a->has_error()); // the state word is untouched — see take_error's note on the silent loss
+}
+
+TEST("async - take_value after driving a graph")
+{
+    auto a = cc::make_async_lazy([] { return cc::string("computed"); });
+    (void)cc::async_blocking_get(a);
+    CHECK(a->take_value() == "computed");
 }
 
 // ============================================================================

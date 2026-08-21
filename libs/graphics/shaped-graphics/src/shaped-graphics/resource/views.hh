@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>     // CC_ASSERT (access checks on the raw -> typed recovery)
+#include <clean-core/common/hash.hh>       // cc::make_hash (the arms' view-identity hidden friends)
 #include <clean-core/common/utility.hh>    // cc::move
 #include <clean-core/container/variant.hh> // cc::variant (raw_view is a sum over the per-resource payloads)
 #include <clean-core/error/optional.hh>    // cc::optional (try_as_* recovery)
@@ -137,6 +138,14 @@ struct sg::raw_buffer_view
     isize element_count = 0;                   ///< [structured] number of elements
     isize stride_in_bytes = 0;                 ///< [structured] element stride (= sizeof(T))
 
+    /// View-IDENTITY hash (the cc::make_hash protocol's hidden friend): the buffer by address, plus every
+    /// field that reaches the descriptor — never the buffer's contents.
+    [[nodiscard]] friend u64 hash(raw_buffer_view const& v)
+    {
+        return cc::make_hash(v.buffer.get(), v.access, v.shape, v.offset_in_bytes, v.size_in_bytes, v.element_count,
+                             v.stride_in_bytes);
+    }
+
     // Re-type this erased arm as a strongly-typed leaf of element `T`, which you supply — no element tag is stored, so `T` is your claim about the bytes.
     // Adds the layout check `buffer_view<T>` does, since it delegates there.
     // Member function templates, so the struct stays an aggregate and brace / designated init is unaffected.
@@ -154,6 +163,16 @@ struct sg::raw_buffer_view
     [[nodiscard]] auto try_as_uniform() const; // -> cc::optional<uniform_buffer_view<T>>
 };
 
+/// A vacant array element: no view at all, marked explicitly.
+/// The backend synthesizes a null descriptor for it from the *binding* alone — access and shape from
+/// `binding_type`, a texture's dimension from `binding.texture_dimension` — so it carries nothing.
+/// Only valid as an element of an array binding; a scalar binding must bind a resource.
+struct sg::vacant_view
+{
+    /// All vacancies are one value; the enclosing raw_view's hash separates the arm.
+    [[nodiscard]] friend u64 hash(vacant_view const&) { return 0; }
+};
+
 /// A texture view's erased payload: the sampled (SRV) or storage (UAV) descriptor a backend builds over a subresource range.
 /// Dimension and format are a reinterpretation the view chose, not the texture's shape.
 struct sg::raw_texture_view
@@ -165,6 +184,14 @@ struct sg::raw_texture_view
     subresource_range range;                       ///< the mip × array-slice × aspect sub-range the view exposes
     cc::start_end depth_slice_range
         = {.start = 0, .end = 0}; ///< [3D storage view] depth (W/Z) slice window; empty otherwise
+
+    /// View-IDENTITY hash (the cc::make_hash protocol's hidden friend): the texture by address, plus every
+    /// field that reaches the descriptor — never the texture's texels.
+    [[nodiscard]] friend u64 hash(raw_texture_view const& v)
+    {
+        return cc::make_hash(v.texture.get(), v.access, v.view_dimension, v.format, v.range, v.depth_slice_range.start,
+                             v.depth_slice_range.end);
+    }
 
     // Re-type this erased arm as a strongly-typed leaf of shape `Traits`, which you supply.
     // Adds a check that the runtime `view_dimension` matches `Traits::dimension`.
@@ -185,14 +212,24 @@ struct sg::raw_texture_view
 struct sg::raw_tlas_view
 {
     tlas_handle tlas; ///< the viewed top-level acceleration structure
+
+    /// View-IDENTITY hash: the TLAS by address (a null TLAS hashes as null).
+    [[nodiscard]] friend u64 hash(raw_tlas_view const& v) { return cc::make_hash(v.tlas.get()); }
 };
 
 namespace sg
 {
 
-/// The erased form every typed view converts into — a sum over the per-resource payloads.
+/// The erased form every typed view converts into — a sum over the per-resource payloads, plus the vacant marker.
 /// A backend `visit`s it, or reaches for one of the `try_as_*_view` arm accessors below, to build the native descriptor; `named_view` carries one.
-using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
+using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view>;
+
+/// Whether the erased view is the vacant marker — an array element deliberately left empty.
+/// Gate on this before access_of / shape_of, which have no answer for a vacant element.
+[[nodiscard]] inline bool is_vacant(raw_view const& v)
+{
+    return v.try_as<vacant_view>() != nullptr;
+}
 
 /// The buffer arm, or null when the erased view holds a different one.
 [[nodiscard]] inline raw_buffer_view const* try_as_buffer_view(raw_view const& v)
@@ -227,19 +264,31 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
 }
 
 /// The access class the erased view carries — the active arm's (a tlas is always acceleration_structure).
+/// A vacant element has none — it takes whatever the binding says — so gate on is_vacant() first.
 [[nodiscard]] inline view_class access_of(raw_view const& v)
 {
     return v.visit([](raw_buffer_view const& b) { return b.access; },  //
                    [](raw_texture_view const& t) { return t.access; }, //
-                   [](raw_tlas_view const&) { return view_class::acceleration_structure; });
+                   [](raw_tlas_view const&) { return view_class::acceleration_structure; },
+                   [](vacant_view const&)
+                   {
+                       CC_UNREACHABLE("a vacant element has no access class — gate on is_vacant() first");
+                       return view_class::uniform;
+                   });
 }
 
 /// The layout the erased view carries: the buffer arm's `shape`, `texture` for a texture arm, `acceleration_structure` for a tlas arm.
+/// A vacant element has none — it takes whatever the binding says — so gate on is_vacant() first.
 [[nodiscard]] inline view_shape shape_of(raw_view const& v)
 {
     return v.visit([](raw_buffer_view const& b) { return b.shape; },            //
                    [](raw_texture_view const&) { return view_shape::texture; }, //
-                   [](raw_tlas_view const&) { return view_shape::acceleration_structure; });
+                   [](raw_tlas_view const&) { return view_shape::acceleration_structure; },
+                   [](vacant_view const&)
+                   {
+                       CC_UNREACHABLE("a vacant element has no shape — gate on is_vacant() first");
+                       return view_shape::uniform_block;
+                   });
 }
 
 } // namespace sg

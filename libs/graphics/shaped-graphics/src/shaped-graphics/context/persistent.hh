@@ -226,6 +226,14 @@ public:
                                                                             cc::span<named_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 
+    /// Opens a staging_binding_group over `layout`: a mutable descriptor image that `set` updates one slot at a time and `snapshot` mints binding_groups from.
+    /// It starts fully vacant, so every scalar view binding must be set before the first snapshot.
+    /// Throws sg::binding_group_exception if the staging descriptors cannot be allocated.
+    [[nodiscard]] staging_binding_group_handle create_staging_binding_group(binding_group_layout_handle layout);
+
+    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
+        binding_group_layout_handle layout);
+
     // Pinned to its owning context: neither copyable nor movable.
     context_persistent_scope(context_persistent_scope const&) = delete;
     context_persistent_scope(context_persistent_scope&&) = delete;

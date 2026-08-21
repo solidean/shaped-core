@@ -739,7 +739,7 @@ void finish_async_test(async_test_state& state)
     // The graph's failure channel is a TEST failure, never an error we pass on — see execute_tests on why a test node must resolve to a value.
     if (state.root != nullptr)
     {
-        if (auto const* const err = state.root->error_ptr(); err != nullptr)
+        if (auto const* const err = state.root->try_error(); err != nullptr)
         {
             auto const what = err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string();
             ctx.errors.push_back(test_error{

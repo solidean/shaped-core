@@ -13,6 +13,20 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 
+/// One declare_array_buffer_access call, held until the next dispatch resolves it against the bound groups.
+struct sg::backend::dx12::dx12_array_buffer_declare
+{
+    cc::string name;
+    cc::vector<sg::array_buffer_access> elements;
+};
+
+/// One declare_array_texture_access call, the texture analogue of dx12_array_buffer_declare.
+struct sg::backend::dx12::dx12_array_texture_declare
+{
+    cc::string name;
+    cc::vector<sg::array_texture_access> elements;
+};
+
 /// DirectX 12 implementation of sg::command_list.
 /// Owns its allocator and graphics command list, and is handed out already recording.
 /// Buffer and texture transfers stage through the context's inline upload/download systems.
@@ -91,6 +105,11 @@ public:
     // One bound group per slot, indexed by `set` and sized to the layout's group count, whose views are declared at dispatch.
     dx12_pipeline_layout const* _bound_pipeline_layout = nullptr;
     cc::vector<dx12_binding_group const*> _bound_groups;
+
+    // Array-access declarations for the *next* dispatch (compute + ray tracing share them); cleared after it.
+    // Resolved against the bound groups' array_bindings — every bound array binding must be covered by one.
+    cc::vector<dx12_array_buffer_declare> _pending_array_buffer_declares;
+    cc::vector<dx12_array_texture_declare> _pending_array_texture_declares;
 
     // Textures this list has touched, so their per-list subresource slots are finalized at submit/drop.
     // A texture finalize can return revert barriers — transitions back to its entry layout on a non-final submit — emitted before Close.
@@ -232,4 +251,10 @@ private:
     // Declare the hazard accesses a draw consumes before flushing: each bound group's buffer/texture views, the bound vertex buffers, and when `indexed` the index buffer.
     // Called by raster_draw / raster_draw_indexed just before flush_barriers and the draw.
     void declare_raster_draw_barriers(bool indexed);
+
+    // Resolve the pending array-access declarations against the bound groups' array bindings and track each
+    // declared element's access, then clear the pending set.
+    // Asserts every bound array binding is covered by a declaration, and every declaration names a bound one.
+    // Called by compute_dispatch / raytracing_dispatch_rays alongside the scalar hazard declares.
+    void declare_array_accesses();
 };

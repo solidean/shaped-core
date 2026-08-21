@@ -51,6 +51,17 @@ struct cc::async_scheduled
     cc::shared_async<T, E> node;
 
     operator cc::shared_async<T, E>() const { return node; }
+
+    /// The read-only view, spelled out rather than left to the shared_ptr conversion.
+    /// Copy-initialization allows ONE user-defined conversion, and reaching the view through the operator above would need two.
+    /// Constrained because a const T collapses `T const` onto T, which would redeclare the operator above rather than add to it —
+    /// and that error would land before the coroutine_traits static_assert that explains the real problem.
+    operator cc::shared_async<T const, E>() const
+        requires(!std::is_const_v<T>)
+    {
+        return node;
+    }
+
     [[nodiscard]] cc::async<T, E>* operator->() const { return node.get(); }
     [[nodiscard]] explicit operator bool() const { return node != nullptr; }
 };
@@ -252,7 +263,7 @@ struct async_promise : async_promise_return<T, E, std::is_same_v<T, cc::unit>>
     /// Runs before initial_suspend, and the node is unshared until we return it, so nothing can poll a coroutine that is still inside its ramp.
     [[nodiscard]] auto get_return_object()
     {
-        auto node = cc::make_shared<cc::async<T, E>, impl::async_node_traits>();
+        auto node = impl::async_new_node<T, E>();
         this->node = node.get();
         node->set_frame(async_coro_frame<async_promise>(std::coroutine_handle<async_promise>::from_promise(*this)));
 
@@ -332,7 +343,7 @@ struct async_awaiter_value
 
     /// A reference INTO the dependency node's payload, so reading it copies nothing.
     /// It stays valid only while a handle keeps that node alive — binding `auto const&` to the result of awaiting a temporary dangles.
-    [[nodiscard]] U const& await_resume() const { return *(*dep)->value_ptr(); }
+    [[nodiscard]] U const& await_resume() const { return (*dep)->value(); }
 
 private:
     template <class P>
@@ -372,9 +383,11 @@ struct async_awaiter_settled
         {
             static_assert(std::is_copy_constructible_v<U>, "async_as_result copies the value out — use "
                                                            "cc::async_settled and read the node in place");
+            // const is stripped because cc::result cannot hold a const T; a read-only shared_async<X const> dependency is fine here, since this copies.
+            using result_t = cc::result<std::remove_const_t<U>, Ue>;
             if ((*dep)->has_error())
-                return cc::result<U, Ue>(cc::error((*dep)->propagate_error()));
-            return cc::result<U, Ue>(*(*dep)->value_ptr());
+                return result_t(cc::error((*dep)->propagate_error()));
+            return result_t((*dep)->value());
         }
     }
 };
@@ -611,10 +624,20 @@ template <size_t N>
 }
 } // namespace cc
 
+// The const-T guard belongs HERE rather than in async_promise: the promise's base async_promise_return holds a cc::optional<T>
+// and is instantiated by the base-clause, so an assert in the promise body would lose the race and the reader would get
+// cc::optional's diagnostic instead of this one.
+// A coroutine produces its value, which is exactly what a read-only view may not do — return shared_async<T, E> and let the
+// caller convert.
+
 /// A coroutine returning shared_async<T, E> is COLD, exactly like make_async_lazy: calling it runs nothing until something requires or schedules the node.
 template <class T, class E, class... Args>
 struct std::coroutine_traits<cc::shared_ptr<cc::async<T, E>, cc::impl::async_node_traits>, Args...>
 {
+    static_assert(!std::is_const_v<T>,
+                  "a coroutine cannot return shared_async<T const, E> — it PRODUCES the value; "
+                  "return shared_async<T, E>, which converts to the view");
+
     using promise_type = cc::impl::async_promise<T, E, false>;
 };
 
@@ -622,5 +645,9 @@ struct std::coroutine_traits<cc::shared_ptr<cc::async<T, E>, cc::impl::async_nod
 template <class T, class E, class... Args>
 struct std::coroutine_traits<cc::async_scheduled<T, E>, Args...>
 {
+    static_assert(!std::is_const_v<T>,
+                  "a coroutine cannot return async_scheduled<T const, E> — it PRODUCES the value; "
+                  "return async_scheduled<T, E>, which converts to the view");
+
     using promise_type = cc::impl::async_promise<T, E, true>;
 };
