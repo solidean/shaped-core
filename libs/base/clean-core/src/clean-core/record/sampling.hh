@@ -49,6 +49,14 @@ struct cc::rec::sampling_config
     /// Cheaper and much smaller, and loses nothing: the frames below are what the scope stack already names, and
     /// splicing puts them back.
     bool stop_at_scope = true;
+
+    /// Sample every OS thread in the process, not only the ones the recorder knows.
+    ///
+    /// A thread joins the recorder's set by recording something, so a thread that records nothing is invisible to it —
+    /// and that is exactly the thread a profiler is looking for.
+    /// Such a thread has no stream, so its samples carry frames and a native id but no anchor, and splicing leaves
+    /// them where they are.
+    bool include_unknown_threads = true;
 };
 
 namespace cc::rec
@@ -109,11 +117,16 @@ inline constexpr rec::field sample_fields[] = {
     {.name = "thread_index", .type = rec::type_code::u32_, .offset = 0, .size = 4},
     {.name = "chunk_offset", .type = rec::type_code::u32_, .offset = 4, .size = 4},
     {.name = "chunk_seq", .type = rec::type_code::u64_, .offset = 8, .size = 8},
-    {.name = "frames", .type = rec::type_code::u64_array, .offset = 16, .size = 4},
+    {.name = "native_tid", .type = rec::type_code::u64_, .offset = 16, .size = 8},
+    {.name = "frames", .type = rec::type_code::u64_array, .offset = 24, .size = 4},
 };
 
+/// What `thread_index` says when the sampled thread has no stream of its own.
+/// Its `native_tid` is then the only identity it has, and there is nothing to anchor into.
+inline constexpr u32 sample_unknown_thread = ~u32(0);
+
 /// Where a sample's frames start, past the fixed part and the array's own count.
-inline constexpr isize sample_frames_offset = 20;
+inline constexpr isize sample_frames_offset = 28;
 
 /// The descriptor every sample is written through.
 /// One site, because a sample has no source location worth naming — the frames ARE the location.

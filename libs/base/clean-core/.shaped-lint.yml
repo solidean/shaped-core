@@ -122,6 +122,16 @@ rules:
       - src/clean-core/platform/native.cc
 
   - kind: allow-include
+    value: <tlhelp32.h>
+    reason: the thread snapshot is the only way to find a thread the recorder was never told about
+    files: src/clean-core/record/sampling.cc
+
+  - kind: allow-include
+    value: <timeapi.h>
+    reason: timeBeginPeriod and timeEndPeriod live there, and <Windows.h> does not pull them in under LEAN_AND_MEAN
+    files: src/clean-core/thread/thread.cc
+
+  - kind: allow-include
     value: [<pthread.h>, <unistd.h>]
     reason: gettid and pthread_threadid_np are the only routes to the OS's own thread id
     files: src/clean-core/thread/thread.cc

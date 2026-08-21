@@ -1,5 +1,6 @@
 #include "sampling.hh"
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
@@ -22,6 +23,7 @@
 
 #if defined(_WIN32)
 #include <clean-core/platform/win32_sanitized.hh>
+#include <tlhelp32.h> // the thread snapshot, which <Windows.h> does not pull in under LEAN_AND_MEAN
 #endif
 
 using namespace cc::primitive_defines;
@@ -54,9 +56,10 @@ cc::atomic<u64> g_idle = 0;
 /// The anchor plus the frames, filled while the target is suspended and written once it is not.
 struct sample
 {
-    u32 thread_index = 0;
+    u32 thread_index = cc::rec::impl::sample_unknown_thread;
     u32 chunk_offset = 0;
     u64 chunk_seq = 0;
+    u64 native_tid = 0;
     cc::stack_capture_result capture;
 };
 
@@ -68,6 +71,23 @@ struct sample
     // Sampling the consumer is noise, and sampling it mid-dispatch is self-referential noise.
     return cc::string_view(ts.name) != actor_thread_name && cc::string_view(ts.name) != sampler_thread_name;
 }
+
+#if defined(_WIN32)
+/// Every OS thread the recorder already knows, collected in ONE pass under the registry lock.
+///
+/// Asking per thread instead would take the lock once per thread in the process, on a path that already costs a
+/// snapshot — and the sampler holding that lock repeatedly delays every thread trying to register.
+void collect_registered(cc::vector<u64>& out)
+{
+    out.clear();
+    cc::rec::impl::for_each_thread_state(
+        [&](cc::rec::impl::thread_state& ts)
+        {
+            if (ts.is_alive.load(cc::memory_order_acquire))
+                out.push_back(ts.native_tid);
+        });
+}
+#endif
 
 /// Reads where the target's stream had got to.
 /// Only meaningful while the target is suspended; a running thread's cursor moves under the read.
@@ -165,10 +185,63 @@ struct handle_cache
     }
 };
 
+/// Every thread in this process, refreshed occasionally rather than per tick.
+///
+/// A snapshot costs on the order of a millisecond, which is a whole tick at 1 kHz, so doing it per sample would spend
+/// most of the sampler's budget deciding whom to sample.
+struct os_thread_list
+{
+    cc::vector<u64> tids;
+
+private:
+    cc::vector<u64> _registered;
+
+public:
+    /// Keeps only the threads the recorder does NOT know, so a round-robin slot is never spent on a thread the
+    /// known half already covers.
+    void refresh(u64 exclude)
+    {
+        tids.clear();
+        collect_registered(_registered);
+
+        auto* const snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+
+        auto const self = ::GetCurrentProcessId();
+
+        THREADENTRY32 entry = {};
+        entry.dwSize = sizeof(entry);
+        if (::Thread32First(snap, &entry) != 0)
+            do
+            {
+                // The snapshot spans every process, and a thread that is not ours cannot be suspended anyway.
+                if (entry.th32OwnerProcessID != self)
+                    continue;
+                if (u64(entry.th32ThreadID) == exclude)
+                    continue; // suspending the sampler would suspend the thing doing the suspending
+                auto known = false;
+                for (auto const r : _registered)
+                    if (r == u64(entry.th32ThreadID))
+                    {
+                        known = true;
+                        break;
+                    }
+                if (known)
+                    continue;
+
+                tids.push_back(u64(entry.th32ThreadID));
+            } while (::Thread32Next(snap, &entry) != 0);
+
+        ::CloseHandle(snap);
+    }
+};
+
 /// Suspends `handle`, fills `out`, and resumes it.
 /// Everything between the suspend and the resume is a stack read into `frames`; nothing allocates and nothing locks.
+/// `ts` is null for a thread the recorder has never heard of, which then contributes frames and nothing else.
 [[nodiscard]] bool sample_suspended(void* handle,
-                                    cc::rec::impl::thread_state const& ts,
+                                    cc::rec::impl::thread_state const* ts,
                                     cc::span<void*> frames,
                                     bool stop_at_scope,
                                     sample& out)
@@ -182,11 +255,13 @@ struct handle_cache
         ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
         if (::GetThreadContext(HANDLE(handle), &ctx) != 0)
         {
-            read_anchor(ts, out);
-
             void const* stop = nullptr;
-            if (stop_at_scope && ts.tls != nullptr)
-                stop = ts.tls->scope_frame;
+            if (ts != nullptr)
+            {
+                read_anchor(*ts, out);
+                if (stop_at_scope)
+                    stop = ts->tls != nullptr ? ts->tls->scope_frame : nullptr;
+            }
 
             out.capture = cc::capture_stack_from_native_context(&ctx, frames, 0, stop);
             ok = out.capture.count > 0;
@@ -219,9 +294,10 @@ void write_sample(sample const& s, cc::span<void* const> frames)
     cc::memcpy(out.data() + 0, &s.thread_index, sizeof(s.thread_index));
     cc::memcpy(out.data() + 4, &s.chunk_offset, sizeof(s.chunk_offset));
     cc::memcpy(out.data() + 8, &s.chunk_seq, sizeof(s.chunk_seq));
+    cc::memcpy(out.data() + 16, &s.native_tid, sizeof(s.native_tid));
 
     auto const frame_count = u32(count);
-    cc::memcpy(out.data() + 16, &frame_count, sizeof(frame_count));
+    cc::memcpy(out.data() + 24, &frame_count, sizeof(frame_count));
     for (isize i = 0; i < count; ++i)
     {
         auto const address = reinterpret_cast<u64>(frames[i]);
@@ -251,6 +327,19 @@ void sampler_main()
 #if defined(_WIN32)
     handle_cache handles;
     precise_timer const timer;
+    os_thread_list os_threads;
+    auto const self_tid = cc::native_thread_id();
+    auto known_count = isize(1); // corrected by the first known-half tick
+
+    // Discovering unknown threads is rationed by WALL TIME, not by ticks, and never runs before the first interval.
+    //
+    // A thread snapshot enumerates every thread on the machine rather than just this process's, which measures in
+    // milliseconds — many ticks at a kilohertz.
+    // Doing it up front spends the whole sampling window of a short run on it, and doing it per N ticks halves the
+    // rate on a long one; so a short run simply covers the threads the recorder already knows, which are the ones it
+    // was told to care about anyway.
+    constexpr f64 refresh_interval_secs = 0.1;
+    auto next_refresh_at = cc::current_time_steady_secs() + refresh_interval_secs;
 #endif
 
     while (!g_stop.load(cc::memory_order_acquire))
@@ -268,22 +357,40 @@ void sampler_main()
         sample s;
         auto sampled = false;
 
-        isize total = 0;
 #if defined(_WIN32)
-        // Under the registry lock for the whole suspend: a thread_state is reaped once its owner dies and drains, and
-        // the target must not be freed between the pick and the read.
-        total = cc::rec::impl::with_nth_thread_state(cursor,
-                                                     [&](cc::rec::impl::thread_state& ts)
-                                                     {
-                                                         if (!is_sampleable(ts))
-                                                             return;
+        if (cfg.include_unknown_threads && cc::current_time_steady_secs() >= next_refresh_at)
+        {
+            os_threads.refresh(self_tid);
+            next_refresh_at = cc::current_time_steady_secs() + refresh_interval_secs;
+        }
 
-                                                         if (auto* const h = handles.get(ts.native_tid); h != nullptr)
-                                                             sampled
-                                                                 = sample_suspended(h, ts, frames, cfg.stop_at_scope, s);
-                                                     });
+        // One round-robin over both halves, so a thread with no stream competes for slots on equal terms.
+        // The two differ only in whether there is a stream to anchor into; the walk is the same.
+        auto const unknown_count = cfg.include_unknown_threads ? os_threads.tids.size() : isize(0);
+        auto const slot = known_count + unknown_count > 0 ? cursor % (known_count + unknown_count) : isize(0);
+
+        if (slot < known_count || unknown_count == 0)
+        {
+            known_count = cc::rec::impl::with_nth_thread_state(
+                slot,
+                [&](cc::rec::impl::thread_state& ts)
+                {
+                    if (!is_sampleable(ts))
+                        return;
+
+                    s.native_tid = ts.native_tid;
+                    if (auto* const h = handles.get(ts.native_tid); h != nullptr)
+                        sampled = sample_suspended(h, &ts, frames, cfg.stop_at_scope, s);
+                });
+        }
+        else
+        {
+            auto const tid = os_threads.tids[slot - known_count];
+            s.native_tid = tid;
+            if (auto* const h = handles.get(tid); h != nullptr)
+                sampled = sample_suspended(h, nullptr, frames, cfg.stop_at_scope, s);
+        }
 #endif
-        (void)total;
 
         ++cursor;
 
@@ -311,7 +418,7 @@ cc::rec::desc const& cc::rec::impl::sample_desc()
         .name = "record.sample",
         .dom = &cc::rec::g_system_domain,
         .fields = rec::impl::sample_fields,
-        .field_count = 4,
+        .field_count = u16(CC_ARRAY_COUNT_OF(rec::impl::sample_fields)),
         .fixed_payload_size = rec::desc::variable_payload,
     };
     return d;

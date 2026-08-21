@@ -221,3 +221,44 @@ REC_TEST("record/sampling - a scope shortens what a sample has to carry")
     // The frames below the scope are what the scope stack already names, so a sample inside one carries fewer.
     CHECK(deepest(bounded) < deepest(unbounded));
 }
+
+REC_TEST("record/sampling - threads the recorder never heard of are sampled too, without an anchor")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture(deterministic_config());
+
+    auto const unknown_count = [](cc::rec::recording const& r)
+    {
+        isize n = 0;
+        r.for_each_event(
+            [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+            {
+                if (e.kind() != cc::rec::event_kind::sample)
+                    return;
+                if (u32(e.field_as_u64("thread_index").value_or(0)) == cc::rec::impl::sample_unknown_thread)
+                    ++n;
+            });
+        return n;
+    };
+
+    // A process always has threads nobody recorded through — the CRT's, the debugger's, ours before they record.
+    // Those are exactly the threads a profiler is looking for, and the recorder cannot see them.
+    auto const with = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .include_unknown_threads = true});
+    CHECK(unknown_count(with) > 0);
+
+    // Every sample carries a native id, whether or not it carries an anchor.
+    isize with_tid = 0;
+    with.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() == cc::rec::event_kind::sample && e.field_as_u64("native_tid").value_or(0) != 0)
+                ++with_tid;
+        });
+    CHECK(with_tid == count_samples(with));
+
+    auto const without
+        = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .include_unknown_threads = false});
+    CHECK(unknown_count(without) == 0);
+}
