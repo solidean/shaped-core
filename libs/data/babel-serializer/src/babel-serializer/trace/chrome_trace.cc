@@ -200,7 +200,11 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
 
     // One symbolizer for the whole export, because the cache is what makes this affordable: a sampled profile is
     // thousands of hits on a handful of addresses, and each miss is a debug-info lookup.
-    cc::symbolizer symbols;
+    //
+    // Against the recording's OWN module table when it has one, which a loaded recording does — its addresses mean
+    // the process that recorded them, not this one, and resolving them against this process would be confident
+    // nonsense rather than an error.
+    auto symbols = recording.modules().empty() ? cc::symbolizer() : cc::symbolizer(recording.modules());
 
     /// Whether this event knows where it was recorded, which every descriptor carries.
     auto const has_source = [](cc::rec::event_view const& e)

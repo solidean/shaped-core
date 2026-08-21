@@ -4,10 +4,12 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/container/map.hh>
+#include <clean-core/platform/module_table.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/symbolize.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
+#include <clean-core/record/serialize.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/trace.hh>
 #include <clean-core/string/string.hh>
@@ -536,4 +538,59 @@ TRACE_TEST("chrome_trace - a counter's args stay numeric")
     }
 
     CHECK(found);
+}
+
+TRACE_TEST("chrome_trace - a recording read back from bytes still resolves its own frames")
+{
+    if (!cc::stack_capture_from_context_available() || !CC_HAS_THREADS || !cc::symbolizer::is_available()
+        || !cc::module_enumeration_available())
+        SKIP("this build cannot sample, symbolize, or enumerate modules");
+
+    rec_fixture const fixture;
+
+    auto const raw = capture_all(
+        [&]
+        {
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
+            CC_RECORD_MARK("work-begins");
+
+            auto const start = cc::current_time_steady_secs();
+            u64 volatile sink = 0;
+            while (cc::current_time_steady_secs() - start < 0.2)
+                for (int i = 0; i < 4096; ++i)
+                    sink = sink + u64(i);
+        });
+
+    REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
+
+    // Through bytes and back, which is the path a crash dump takes and the one where the addresses stop meaning
+    // anything on their own.
+    auto const bytes = cc::rec::serialize(raw.spliced_samples());
+    auto loaded = cc::rec::deserialize(bytes);
+    REQUIRE(loaded.has_value());
+    REQUIRE(!loaded.value().events().modules().empty());
+
+    auto const json = encode_to_string(loaded.value().events());
+    auto const doc = babel::json::read(json);
+    REQUIRE(doc.has_value());
+
+    auto sampled = 0;
+    auto located = 0;
+    auto const events = doc.value().root()["traceEvents"];
+    for (isize i = 0; i < events.size(); ++i)
+    {
+        auto const e = events[i];
+        if (e["ph"].as_string() != "B" || e["cat"].as_string() != "sampled")
+            continue;
+
+        ++sampled;
+        if (!e["args"]["module"].as_string().empty())
+            ++located;
+    }
+
+    REQUIRE(sampled > 0);
+
+    // A module for every frame, from the recording's own table rather than from whatever this process has loaded.
+    // That is what a dump from a machine you do not have needs, and all it needs.
+    CHECK(located == sampled);
 }
