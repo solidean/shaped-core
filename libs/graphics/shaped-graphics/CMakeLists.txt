@@ -47,6 +47,7 @@ add_library(shaped-graphics
     src/shaped-graphics/transfer/impl/transfer_scheduler.cc
     src/shaped-graphics/transfer/stream.cc
     src/shaped-graphics/transfer/stream_handle.cc
+    src/shaped-graphics/transfer/stream_source.cc
 )
 
 # Public headers live co-located in src/. FILE_SET models the public API explicitly.
@@ -67,6 +68,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/download.hh
     src/shaped-graphics/transfer/stream.hh
     src/shaped-graphics/transfer/stream_handle.hh
+    src/shaped-graphics/transfer/stream_source.hh
     src/shaped-graphics/context/uncached.hh
     src/shaped-graphics/context/cached.hh
     src/shaped-graphics/routine/reload_generation.hh

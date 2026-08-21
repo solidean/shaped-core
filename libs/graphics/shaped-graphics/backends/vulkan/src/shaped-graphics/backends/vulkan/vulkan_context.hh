@@ -212,6 +212,21 @@ public:
     {
         CC_UNREACHABLE("vulkan streaming texture upload is not implemented yet");
     }
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle,
+                                                                   std::unique_ptr<sg::stream_source>,
+                                                                   isize,
+                                                                   sg::stream_scope) override
+    {
+        CC_UNREACHABLE("vulkan source-driven streaming upload is not implemented yet");
+    }
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle,
+                                                                    std::unique_ptr<sg::stream_source>,
+                                                                    sg::subresource_index const&,
+                                                                    sg::texture_region const&,
+                                                                    sg::stream_scope) override
+    {
+        CC_UNREACHABLE("vulkan source-driven streaming texture upload is not implemented yet");
+    }
     [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle,
                                                                       isize,
                                                                       isize,

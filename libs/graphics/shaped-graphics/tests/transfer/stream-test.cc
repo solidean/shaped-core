@@ -1,6 +1,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
@@ -8,7 +9,12 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/resource/raw_buffer.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/resource/texture_descriptions.hh>
+#include <shaped-graphics/transfer/stream_source.hh>
 #include <shaped-graphics/types.hh>
+
+#include <atomic>
 
 using namespace cc::primitive_defines;
 
@@ -200,4 +206,185 @@ INVOCABLE_TEST("sg stream - streaming makes progress while async work saturates 
     auto const bytes = c.wait_for(back);
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[65535] == payload[65535]);
+}
+
+namespace
+{
+/// A source that hands its payload over in fixed-size pieces, always ready.
+/// The simplest thing above the resident default, and enough to pin that chunk offsets land where they say.
+class chunked_source final : public sg::stream_source
+{
+public:
+    chunked_source(cc::span<byte const> bytes, isize chunk_bytes) : _bytes(bytes), _chunk(chunk_bytes) {}
+
+    [[nodiscard]] sg::stream_poll try_next_chunk() override
+    {
+        if (_done == _bytes.size())
+            return {.status = sg::stream_source_status::done};
+        auto const n = cc::min(_chunk, _bytes.size() - _done);
+        auto const offset = _done;
+        _done += n;
+        return {.status = sg::stream_source_status::ready,
+                .chunk = {.data = cc::pinned_data<byte>::create_copy_of(_bytes.subspan(cc::offset_size{offset, n})),
+                          .offset = offset}};
+    }
+
+    [[nodiscard]] i64 total_size_hint() const override { return i64(_bytes.size()); }
+
+private:
+    cc::span<byte const> _bytes;
+    isize _chunk = 0;
+    isize _done = 0;
+};
+
+/// A source that withholds its payload until release() is called, then wakes the actor.
+/// This is the shape a real loader has, and what the waker exists for.
+class gated_source final : public sg::stream_source
+{
+public:
+    explicit gated_source(cc::span<byte const> bytes) : _bytes(bytes) {}
+
+    [[nodiscard]] sg::stream_poll try_next_chunk() override
+    {
+        if (!_open.load(std::memory_order_acquire))
+            return {.status = sg::stream_source_status::not_yet};
+        if (_handed_over)
+            return {.status = sg::stream_source_status::done};
+        _handed_over = true;
+        return {.status = sg::stream_source_status::ready,
+                .chunk = {.data = cc::pinned_data<byte>::create_copy_of(_bytes)}};
+    }
+
+    [[nodiscard]] i64 total_size_hint() const override { return i64(_bytes.size()); }
+    void set_waker(cc::unique_function<void()> waker) override { _waker = cc::move(waker); }
+
+    /// Called from the test thread, exactly as a loader would call it from its own.
+    void release()
+    {
+        _open.store(true, std::memory_order_release);
+        if (_waker)
+            _waker();
+    }
+
+private:
+    cc::span<byte const> _bytes;
+    std::atomic<bool> _open = false;
+    cc::unique_function<void()> _waker;
+    bool _handed_over = false;
+};
+
+/// A source that gives up, which is the only way out for one that cannot deliver what it promised.
+class failing_source final : public sg::stream_source
+{
+public:
+    [[nodiscard]] sg::stream_poll try_next_chunk() override { return {.status = sg::stream_source_status::failed}; }
+};
+} // namespace
+
+INVOCABLE_TEST("sg stream - a chunked source lands every chunk where it says", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto const src = pattern(9000, 31);
+    auto buf = c.persistent.create_raw_buffer(9000, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    // 700 is deliberately not a divisor of 9000, so the last chunk is short.
+    auto stream = c.stream.from_source_to_buffer(buf, std::make_unique<chunked_source>(cc::span<byte const>(src), 700));
+    REQUIRE(cc::try_async_blocking_get(stream.completion()).has_value());
+    CHECK(stream.is_complete());
+    CHECK(stream.progress().bytes_done == 9000);
+
+    auto const back = c.download.bytes_from_buffer(buf, 0, 9000);
+    auto const bytes = c.wait_for(back);
+    REQUIRE(bytes.has_value());
+    CHECK(bytes.value()[0] == src[0]);
+    CHECK(bytes.value()[699] == src[699]);   // end of the first chunk
+    CHECK(bytes.value()[700] == src[700]);   // start of the second
+    CHECK(bytes.value()[8999] == src[8999]); // the short tail
+}
+
+INVOCABLE_TEST("sg stream - a stalled source does not block other transfers", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto const gated_bytes = pattern(2048, 41);
+    auto const ready_bytes = pattern(2048, 43);
+
+    auto gated_buf = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto ready_buf = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(gated_buf != nullptr);
+    REQUIRE(ready_buf != nullptr);
+
+    auto source = std::make_unique<gated_source>(cc::span<byte const>(gated_bytes));
+    auto* const source_ptr = source.get();
+    auto blocked = c.stream.from_source_to_buffer(gated_buf, cc::move(source));
+
+    // The stalled transfer must be passed over rather than queueing everything behind it.
+    // That is the whole reason not_yet is a distinct answer instead of a blocking read.
+    auto ready = c.stream.bytes_to_buffer(ready_buf, cc::make_pinned_data(ready_bytes));
+    REQUIRE(cc::try_async_blocking_get(ready.completion()).has_value());
+    CHECK(!blocked.is_settled());
+
+    source_ptr->release(); // the waker is what turns this into progress rather than an indefinite wait
+    REQUIRE(cc::try_async_blocking_get(blocked.completion()).has_value());
+    CHECK(blocked.is_complete());
+
+    auto const back = c.download.bytes_from_buffer(gated_buf, 0, 2048);
+    auto const bytes = c.wait_for(back);
+    REQUIRE(bytes.has_value());
+    CHECK(bytes.value()[2047] == gated_bytes[2047]);
+}
+
+INVOCABLE_TEST("sg stream - a failing source settles the transfer on its error channel",
+               (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto stream = c.stream.from_source_to_buffer(buf, std::make_unique<failing_source>());
+
+    // Without a failed answer, a source that cannot deliver would sit in the queue forever, and anything chained
+    // onto its completion with it.
+    CHECK(!cc::try_async_blocking_get(stream.completion()).has_value());
+    CHECK(stream.is_settled());
+    CHECK(!stream.is_complete());
+}
+
+INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 64;
+    desc.height = 64;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    isize const row_bytes = 64 * 4;
+    auto const src = pattern(row_bytes * 64, 53);
+
+    // Eight rows at a time: a texture chunk must fall on row boundaries, a row being the smallest unit a copy can
+    // place.
+    auto stream = c.stream.from_source_to_texture(
+        tex, std::make_unique<chunked_source>(cc::span<byte const>(src), row_bytes * 8));
+    REQUIRE(cc::try_async_blocking_get(stream.completion()).has_value());
+    CHECK(stream.is_complete());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = c.wait_for(back);
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == src.size());
+    CHECK(bytes.value()[0] == src[0]);
+    CHECK(bytes.value()[row_bytes * 8] == src[row_bytes * 8]); // the second chunk's first row
+    CHECK(bytes.value()[src.size() - 1] == src[src.size() - 1]);
 }

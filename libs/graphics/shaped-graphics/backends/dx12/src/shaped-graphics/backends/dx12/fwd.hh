@@ -110,6 +110,8 @@ struct dx12_download_copy_job;
 // Async buffer upload on a dedicated copy queue (see dx12_upload_async.hh).
 class dx12_upload_async_system;
 struct dx12_async_upload_job;
+struct dx12_transfer_wake;
+class dx12_upload_waker;
 
 // Async buffer download on a dedicated copy queue (see dx12_download_async.hh).
 class dx12_download_async_system;

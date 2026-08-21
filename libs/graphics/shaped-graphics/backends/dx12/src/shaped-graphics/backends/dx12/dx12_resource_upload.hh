@@ -102,9 +102,26 @@ private:
 /// Layout barriers are the driver's job, so `prepare` is a no-op.
 struct sg::backend::dx12::dx12_texture_upload final : dx12_resource_upload
 {
+    /// `data` covers the whole region's tightly-packed bytes, starting at row 0.
     dx12_texture_upload(ID3D12Resource* dst, dx12_texture_footprint const& fp, cc::span<byte const> data)
-      : _dst(dst), _fp(fp), _data(data)
+      : dx12_texture_upload(dst, fp, data, 0)
     {
+    }
+
+    /// Row-window form: `data` covers only the rows `[first_row, first_row + data.size() / fp.row_bytes)` of the
+    /// region, while `fp` still describes the whole of it.
+    ///
+    /// A streaming source hands over its payload in pieces, and a piece has to be placed where it belongs rather
+    /// than at the region's start — but the slice/row arithmetic and the destination box are properties of the
+    /// whole region, so the footprint stays whole and only the cursor and the source window move.
+    /// Rows are the smallest unit a texture copy can place, which is why a chunk must fall on row boundaries.
+    dx12_texture_upload(ID3D12Resource* dst, dx12_texture_footprint const& fp, cc::span<byte const> data, isize first_row)
+      : _dst(dst), _fp(fp), _data(data), _first_row(first_row), _rows_done(first_row)
+    {
+        CC_ASSERT(fp.row_bytes > 0, "texture upload footprint has no rows");
+        CC_ASSERT(data.size() % fp.row_bytes == 0, "a texture stream chunk must be a whole number of rows");
+        CC_ASSERT(first_row >= 0 && total_rows() <= isize(fp.rows) * isize(fp.depth_slices),
+                  "a texture stream chunk runs past the end of its region");
     }
 
     [[nodiscard]] isize total_bytes() const override { return _fp.staged_size(); }
@@ -124,9 +141,12 @@ struct sg::backend::dx12::dx12_texture_upload final : dx12_resource_upload
         isize const waste = aligned - alloc.offset;
         if (waste >= alloc.size)
             return 0; // no room past the alignment — caller wraps / rolls the window
-        isize const max_rows = (alloc.size - waste) / _fp.padded_pitch;
+        isize max_rows = (alloc.size - waste) / _fp.padded_pitch;
         if (max_rows == 0)
             return 0; // window can't fit one padded row after alignment
+        // Never past this chunk's own end: the chunk picker reasons about the whole region and would happily run on
+        // into rows whose bytes this packer does not hold.
+        max_rows = cc::min(max_rows, total_rows() - _rows_done);
 
         int const slice = int(_rows_done / _fp.rows);
         int const row = int(_rows_done % _fp.rows);
@@ -137,7 +157,7 @@ struct sg::backend::dx12::dx12_texture_upload final : dx12_resource_upload
         // chunk's slices in both the source and the staging buffer, so one flat loop covers both shapes).
         byte* const base = alloc.base + aligned;
         for (isize i = 0; i < n; ++i)
-            cc::memcpy(base + i * _fp.padded_pitch, _data.data() + (_rows_done + i) * _fp.row_bytes,
+            cc::memcpy(base + i * _fp.padded_pitch, _data.data() + (_rows_done - _first_row + i) * _fp.row_bytes,
                        std::size_t(_fp.row_bytes));
 
         D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
@@ -167,11 +187,13 @@ struct sg::backend::dx12::dx12_texture_upload final : dx12_resource_upload
     }
 
 private:
-    [[nodiscard]] isize total_rows() const { return isize(_fp.rows) * isize(_fp.depth_slices); }
+    /// One past this packer's last row, in the region's flat row index — not the region's own end.
+    [[nodiscard]] isize total_rows() const { return _first_row + _data.size() / _fp.row_bytes; }
     [[nodiscard]] static isize align_up(isize v, isize a) { return (v + a - 1) / a * a; }
 
     ID3D12Resource* _dst = nullptr;
     dx12_texture_footprint _fp;
     cc::span<byte const> _data;
-    isize _rows_done = 0; // padded staging rows recorded so far (flat over slices)
+    isize _first_row = 0; // where `_data` starts in the region's flat row index
+    isize _rows_done = 0; // rows recorded so far, in that same flat index (so it starts at _first_row)
 };

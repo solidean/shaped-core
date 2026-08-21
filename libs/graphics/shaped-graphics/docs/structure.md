@@ -32,6 +32,12 @@ src/shaped-graphics/
   exceptions.hh                   [done]       typed sg exceptions (device_lost / allocation / pipeline_creation / swapchain_creation / binding_group)
   bytes_future.hh/.cc             [done]       bytes_future / data_future<T> / bytes_wait_gate — the result vocabulary every download shares
 
+  transfer/                                    # the streaming tier: bulk transfers with a handle instead of automatic sync
+    stream.hh/.cc                 [done]       the ctx.stream facade, scope validation, the ratio / aging knobs
+    stream_handle.hh/.cc          [done]       stream_upload_handle / stream_download_handle — priority, progress, cancel, promote
+    stream_source.hh/.cc          [done]       the lazy chunk sequence feeding an upload, plus the resident default
+    impl/transfer_scheduler.hh/.cc [done]      job selection: PWM window sharing, priority, aging, family ordering (GPU-free)
+
   barrier/                                     # the access-tracking substrate; shared vocabulary, per-backend emission
     resource_access.hh            [done]       access_flag(s) / pipeline_stage_flag(s) / texture_layout / access_barrier
     resource_access_state.hh      [done]       the three-timeline declare/flush state machine

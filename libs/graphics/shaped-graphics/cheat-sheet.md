@@ -119,6 +119,13 @@ ctx.stream.bytes_to_texture(tex, pinned, subresource={}, region={}, scope=resour
 ctx.stream.bytes_from_buffer(buf, offset, size, scope=resource)     // -> sg::stream_download_handle (needs copy_src)
 ctx.stream.data_from_buffer<T>(typed_buf, off_in_elements, count, scope=resource)     // -> same
 ctx.stream.bytes_from_texture(tex, subresource={}, region={}, scope=resource)         // -> sg::stream_download_handle
+ctx.stream.from_source_to_buffer(buf, std::unique_ptr<sg::stream_source>, offset=0, scope=resource)  // -> handle
+ctx.stream.from_source_to_texture(tex, source, subresource={}, region={}, scope=resource)             // -> handle
+// sg::stream_source: try_next_chunk() -> sg::stream_poll {status, chunk{pinned_data, offset}}
+//   status: ready | not_yet (passed over, NOT spun on) | done | failed (settles on the error channel)
+//   POLLED ON THE COPY ACTOR THREAD — must not block. set_waker(f): call f when a not_yet becomes answerable.
+//   total_size_hint() -> i64, < 0 = unknown. Texture chunk offsets must be ROW-aligned.
+sg::make_pinned_stream_source(pinned, offset=0)  // the default: one always-ready chunk (what bytes_to_* builds)
 ctx.stream.set_upload_ratio(f) / set_download_ratio(f)   // void — share of copied bytes streaming is OWED; default 0.1
 ctx.stream.set_upload_aging(f) / set_download_aging(f)   // void — priority += f * seconds_waiting; default 0 = off
 

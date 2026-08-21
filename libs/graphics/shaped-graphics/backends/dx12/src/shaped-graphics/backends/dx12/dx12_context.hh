@@ -349,6 +349,23 @@ public:
         return _upload_async.stream_texture(cc::move(texture), cc::move(data), subresource, region);
     }
 
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle buffer,
+                                                                   std::unique_ptr<sg::stream_source> source,
+                                                                   isize offset_in_bytes,
+                                                                   sg::stream_scope) override
+    {
+        return _upload_async.stream_source_buffer(cc::move(buffer), cc::move(source), offset_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle texture,
+                                                                    std::unique_ptr<sg::stream_source> source,
+                                                                    sg::subresource_index const& subresource,
+                                                                    sg::texture_region const& region,
+                                                                    sg::stream_scope) override
+    {
+        return _upload_async.stream_source_texture(cc::move(texture), cc::move(source), subresource, region);
+    }
+
     [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle buffer,
                                                                       isize offset_in_bytes,
                                                                       isize size_in_bytes,

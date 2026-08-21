@@ -6,6 +6,7 @@
 #include <shaped-graphics/resource/buffer.hh> // typed buffer<T> — the preferred overloads below take it
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
+#include <shaped-graphics/transfer/stream_source.hh>
 #include <shaped-graphics/types.hh>
 
 #include <type_traits>
@@ -62,6 +63,25 @@ public:
                                                         subresource_index const& subresource = {},
                                                         cc::optional<texture_region> region = {},
                                                         stream_scope scope = stream_scope::resource);
+
+    // Source-driven forms — the payload is produced as the transfer runs rather than handed over resident.
+    // This is what makes streaming a gigabyte not require a gigabyte in memory; see transfer/stream_source.hh for
+    // the seam's contract, of which "polled on the copy actor thread, must not block" is the load-bearing half.
+
+    /// Streams into `buffer` from `source`, whose chunk offsets are relative to `offset_in_bytes`.
+    /// A null source is a contract violation; an immediately-`done` one settles the handle with nothing transferred.
+    [[nodiscard]] stream_upload_handle from_source_to_buffer(raw_buffer_handle buffer,
+                                                             std::unique_ptr<stream_source> source,
+                                                             isize offset_in_bytes = 0,
+                                                             stream_scope scope = stream_scope::resource);
+
+    /// Streams into one region of `texture` from `source`.
+    /// Chunk offsets are into the region's tightly-packed bytes, and must fall on row boundaries.
+    [[nodiscard]] stream_upload_handle from_source_to_texture(raw_texture_handle texture,
+                                                              std::unique_ptr<stream_source> source,
+                                                              subresource_index const& subresource = {},
+                                                              cc::optional<texture_region> region = {},
+                                                              stream_scope scope = stream_scope::resource);
 
     // Downloads.
 public:

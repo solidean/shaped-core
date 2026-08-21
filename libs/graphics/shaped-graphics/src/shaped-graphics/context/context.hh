@@ -275,6 +275,21 @@ protected:
                                                                        texture_region const& region,
                                                                        stream_scope scope) = 0;
 
+    /// Streams into `buffer` from a chunk source rather than one resident payload.
+    /// The implementation polls the source on its copy actor thread and must never block on it: `not_yet` means
+    /// pass this transfer over and fill the window with other work.
+    [[nodiscard]] virtual stream_upload_handle stream_source_to_buffer(raw_buffer_handle buffer,
+                                                                       std::unique_ptr<stream_source> source,
+                                                                       isize offset_in_bytes,
+                                                                       stream_scope scope) = 0;
+
+    /// Streams into one region of `texture` from a chunk source; chunk offsets are row-aligned into the region.
+    [[nodiscard]] virtual stream_upload_handle stream_source_to_texture(raw_texture_handle texture,
+                                                                        std::unique_ptr<stream_source> source,
+                                                                        subresource_index const& subresource,
+                                                                        texture_region const& region,
+                                                                        stream_scope scope) = 0;
+
     /// Streams `size_in_bytes` from `buffer` back to the host at the streaming tier.
     [[nodiscard]] virtual stream_download_handle stream_bytes_from_buffer(raw_buffer_handle buffer,
                                                                           isize offset_in_bytes,

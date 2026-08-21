@@ -77,6 +77,37 @@ stream_upload_handle context_stream_scope::bytes_to_texture(raw_texture_handle t
     return _ctx.stream_bytes_to_texture(cc::move(texture), cc::move(data), subresource, box, scope);
 }
 
+stream_upload_handle context_stream_scope::from_source_to_buffer(raw_buffer_handle buffer,
+                                                                 std::unique_ptr<stream_source> source,
+                                                                 isize offset_in_bytes,
+                                                                 stream_scope scope)
+{
+    CC_ASSERT(buffer != nullptr, "stream upload target buffer is null");
+    CC_ASSERT(source != nullptr, "stream upload source is null");
+    CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes <= buffer->size_in_bytes(), "stream upload offset is out of the "
+                                                                                  "buffer's bounds");
+    assert_buffer_scope(buffer, scope);
+    return _ctx.stream_source_to_buffer(cc::move(buffer), cc::move(source), offset_in_bytes, scope);
+}
+
+stream_upload_handle context_stream_scope::from_source_to_texture(raw_texture_handle texture,
+                                                                  std::unique_ptr<stream_source> source,
+                                                                  subresource_index const& subresource,
+                                                                  cc::optional<texture_region> region,
+                                                                  stream_scope scope)
+{
+    CC_ASSERT(texture != nullptr, "stream upload target texture is null");
+    CC_ASSERT(source != nullptr, "stream upload source is null");
+    impl::assert_valid_subresource(texture, subresource);
+    texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
+    impl::assert_texture_region_in_bounds(texture, subresource, box);
+    assert_texture_scope(texture, scope);
+
+    if (box.is_empty())
+        return stream_upload_handle(make_settled_control());
+    return _ctx.stream_source_to_texture(cc::move(texture), cc::move(source), subresource, box, scope);
+}
+
 stream_download_handle context_stream_scope::bytes_from_buffer(raw_buffer_handle buffer,
                                                                isize offset_in_bytes,
                                                                isize size_in_bytes,

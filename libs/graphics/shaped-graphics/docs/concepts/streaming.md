@@ -109,13 +109,44 @@ Dropping a streaming handle therefore means cancel rather than "carry on unwatch
 It is a hint because a source need not know its own size up front.
 It is never the thing to build a completion test on — the handle and its completion node are.
 
+## Where the bytes come from
+
+The plain form takes one pinned blob, which is the "this upload is slow, do not hitch the frame" case and needs
+nothing more.
+A transfer that must not hold its whole payload resident wants the other form: `ctx.stream.from_source_to_buffer`
+and `from_source_to_texture` take a [`stream_source`](../../src/shaped-graphics/transfer/stream_source.hh), a lazy
+sequence of chunks the copy actor pulls from as windows open.
+
+The resident form is not a separate path — it builds a source of one always-ready chunk, so there is one
+implementation underneath and no second thing to keep correct.
+
+Two properties carry the design.
+
+**A poll must not block.**
+It runs on the copy actor thread, which stages every other transfer in the system, so a source that waits on a file
+read stalls all of them.
+`not_yet` is the answer for "my data is not back yet": the transfer is passed over and the window is filled with
+other work, costing it a window rather than costing the system a thread.
+
+**A poll has four answers, not two.**
+`not_yet` and `done` are genuinely different — conflating them either stalls a finished transfer or completes an
+unfinished one — and `failed` is the only way out for a source that cannot deliver what it promised.
+Without it a stalled transfer would sit in the queue forever, and everything chained onto its completion with it.
+
+A stalled source resumes when its **waker** fires, which the system installs on admission.
+Without it a stalled transfer would resume only when some other message happened to wake the actor: constantly in a
+busy system, never in a quiet one.
+The waker is safe to call from any thread at any point, including after the transfer ended and during shutdown.
+
+Chunk order is unconstrained, since each chunk carries its own offset and the streaming contract makes the
+destination unreadable until the handle settles.
+For a texture the offsets are into the region's tightly-packed bytes and must fall on **row** boundaries — a row is
+the smallest unit a texture copy can place, so a part-row chunk has nothing it could be copied into.
+
 ## Current simplifications (deferred)
 
 Not invariants — v1 shortcuts:
 
-- **The source is one pinned blob.**
-  A real pull source is a lazy sequence of `(pinned_data, target)` chunks the system polls without blocking.
-  That is the shape this is built toward, and what makes streaming a gigabyte not require a resident gigabyte.
 - **The destination sink is the pinned buffer.**
   A custom sink would let a streamed download land in a file or a decoder without a full CPU-side copy.
 - **No absolute bandwidth cap.**

@@ -62,12 +62,23 @@ struct active_upload
     std::shared_ptr<void const> keepalive;
     u64 sequence = 0; // actor-assigned submission order
     u64 family = 0;   // destination resource: same-family jobs must stay in sequence order
+
+    // Source-driven jobs only: the chunk sequence, and the pin keeping the CURRENT chunk's bytes alive while its
+    // packer reads them window by window.
+    std::unique_ptr<sg::stream_source> source;
+    cc::pinned_data<byte const> current_chunk;
+    ID3D12Resource* resource = nullptr; // the destination, kept alive by `keepalive`; each chunk builds a packer on it
+
+    // Set when the source answered `not_yet` this cycle, so the scheduler passes the job over instead of spinning
+    // on it.
+    // Cleared at the top of every cycle, which is what makes a wake re-poll.
+    bool stalled = false;
 };
 
 /// The async-upload copy actor: one thread that packs jobs into staging windows and submits copy work.
 /// All window / job / command-list state lives here and is touched only on the actor thread, so it needs no locks.
 /// It reaches the shared, immutable-after-init fields (staging buffer, fences, queue) via _sys.
-class dx12_upload_async_actor final : public cc::threaded_actor_impl<dx12_async_upload_job>
+class dx12_upload_async_actor final : public cc::threaded_actor_impl<dx12_async_upload_job, dx12_transfer_wake>
 {
 public:
     explicit dx12_upload_async_actor(dx12_upload_async_system& sys) : _sys(sys) {}
@@ -77,9 +88,17 @@ public:
 protected:
     void on_message(dx12_async_upload_job job) override { _pending.push_back(cc::move(job)); }
 
+    // A wake carries nothing: arriving at all is the signal, and the cycle it triggers re-polls every source.
+    void on_message(dx12_transfer_wake) override {}
+
     bool on_process() override
     {
         maybe_resize_staging(); // adopt a pending set_window_bytes now, while no window is open
+
+        // A fresh cycle re-polls every stalled source: this cycle exists because something changed, and the source
+        // is the only one who knows whether it was its own data arriving.
+        for (auto& a : _active)
+            a.stalled = false;
 
         admit_pending();
         pack_until_stalled();
@@ -128,6 +147,7 @@ private:
         for (auto& job : _pending)
         {
             active_upload a;
+            bool const source_driven = job.source != nullptr;
             if (job.is_texture)
             {
                 auto strong = job.texture_target.lock();
@@ -140,7 +160,9 @@ private:
                                                                                           "exceeds one staging "
                                                                                           "window");
                 a.family = u64(reinterpret_cast<u64>(strong->_resource.Get()));
-                a.packer = std::make_unique<dx12_texture_upload>(strong->_resource.Get(), job.footprint, job.src.span());
+                a.resource = strong->_resource.Get();
+                if (!source_driven)
+                    a.packer = std::make_unique<dx12_texture_upload>(a.resource, job.footprint, job.src.span());
                 a.keepalive = cc::move(strong);
             }
             else
@@ -152,10 +174,19 @@ private:
                     continue;
                 }
                 a.family = u64(reinterpret_cast<u64>(strong->_resource.Get()));
-                a.packer = std::make_unique<dx12_buffer_upload>(strong->_resource.Get(), job.dst_offset, job.src.span());
+                a.resource = strong->_resource.Get();
+                if (!source_driven)
+                    a.packer = std::make_unique<dx12_buffer_upload>(a.resource, job.dst_offset, job.src.span());
                 a.keepalive = cc::move(strong);
             }
             a.sequence = _next_sequence++;
+            a.source = cc::move(job.source);
+            if (a.source)
+            {
+                if (auto const hint = a.source->total_size_hint(); hint >= 0 && job.stream)
+                    job.stream->total_hint.store(hint, std::memory_order_relaxed);
+                a.source->set_waker([waker = _sys._waker] { waker->wake(); });
+            }
             a.job = cc::move(job);
             _active.push_back(cc::move(a));
         }
@@ -276,6 +307,9 @@ private:
             c.priority = a.job.stream->priority.load(std::memory_order_relaxed);
         }
 
+        if (a.stalled) // its source has nothing right now; fill the window with other work rather than spin
+            c.eligible = false;
+
         bool const pending_wait = u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
         if (pending_wait && _open_highest_finished > 0)
             c.eligible = false;
@@ -316,26 +350,115 @@ private:
             }
 
             isize const index = pick.value();
-            if (!pack_chunk(_active[index]))
+            if (_active[index].packer == nullptr && !pull_next_chunk(index))
+                continue; // stalled, finished or failed — all handled inside, so just re-pick
+
+            isize const chunk_index = pick.value();
+            if (!pack_chunk(_active[chunk_index]))
             {
                 CC_ASSERT(_window_used > 0, "an empty staging window could not fit a single chunk");
                 submit_window(); // window tail too small for the next aligned texture row → roll to a fresh one
                 continue;
             }
 
-            if (_active[index].packer->is_finished())
-                _active.remove_from_to(index, index + 1); // releases the pin + keepalive, on the actor thread
+            auto& packed = _active[chunk_index];
+            if (packed.packer->is_finished())
+            {
+                packed.packer = nullptr; // this chunk is recorded; ask the source for the next one
+                if (packed.source == nullptr)
+                    finish_job(chunk_index); // the resident-payload form has exactly one chunk
+            }
 
-            // Independent of whether that finished the job: a job ending exactly on the window boundary still
-            // leaves a full window, and the next pick would be handed a zero-byte allocation.
+            // Independent of whether that finished the job: one ending exactly on the window boundary still leaves
+            // a full window, and the next pick would be handed a zero-byte allocation.
             if (_window_used == _sys._window_bytes)
                 submit_window();
         }
 
-        // On a pristine window every active job is eligible, so the loop only ends once all of them are staged.
-        // If that ever stops holding, the jobs left here would never signal their completion values, and the first
-        // direct-queue list waiting on one would hang — so say it loudly rather than deadlocking in the dark.
-        CC_ASSERT(_active.empty(), "async upload actor stalled with jobs still unstaged");
+        // On a pristine window every job whose source can answer is eligible, so the loop only ends once each of
+        // them is staged.
+        // What may legitimately remain is a job waiting on its source: it resumes on the next cycle, which its
+        // waker starts.
+        // Anything else left here would never signal its completion value, and the first direct-queue list waiting on
+        // one would hang — so say it loudly rather than deadlocking in the dark.
+        for (auto const& a : _active)
+            CC_ASSERT(a.stalled, "async upload actor stalled with a job that is not waiting on its source");
+    }
+
+    // Asks a source-driven job's source for its next chunk and builds a packer for it.
+    // False when nothing was packed — the job stalled, finished or failed, each fully handled here.
+    //
+    // Polling happens here rather than in candidate_for because a poll CONSUMES a chunk: asking is not a read-only
+    // question, so it may only be asked of the job actually about to be served.
+    [[nodiscard]] bool pull_next_chunk(isize index)
+    {
+        auto& a = _active[index];
+        CC_ASSERT(a.source != nullptr, "only a source-driven job pulls chunks");
+
+        sg::stream_poll poll = a.source->try_next_chunk();
+        switch (poll.status)
+        {
+        case sg::stream_source_status::ready:
+            break;
+
+        case sg::stream_source_status::not_yet:
+            a.stalled = true; // passed over until the next cycle, which a wake or any other message starts
+            return false;
+
+        case sg::stream_source_status::done:
+            finish_job(index);
+            return false;
+
+        case sg::stream_source_status::failed:
+            fail_job(index);
+            return false;
+        }
+
+        // An empty `ready` chunk would make no progress and would be picked again immediately, so treat it as the
+        // stall it effectively is rather than looping on it.
+        if (poll.chunk.data.empty())
+        {
+            a.stalled = true;
+            return false;
+        }
+
+        // The pin has to outlive the packer, which reads the bytes window by window rather than all at once.
+        a.current_chunk = cc::move(poll.chunk.data);
+
+        if (a.job.is_texture)
+        {
+            auto const& fp = a.job.footprint;
+            CC_ASSERT(fp.row_bytes > 0, "texture stream footprint has no rows");
+            CC_ASSERT(poll.chunk.offset % fp.row_bytes == 0, "a texture stream chunk must start on a row boundary");
+            a.packer = std::make_unique<dx12_texture_upload>(a.resource, fp, a.current_chunk.span(),
+                                                             poll.chunk.offset / fp.row_bytes);
+        }
+        else
+        {
+            a.packer = std::make_unique<dx12_buffer_upload>(a.resource, a.job.dst_offset + poll.chunk.offset,
+                                                            a.current_chunk.span());
+        }
+        return true;
+    }
+
+    // Completes a job: folds its completion value, queues its settle behind the copy fence, and drops it.
+    void finish_job(isize index)
+    {
+        auto& a = _active[index];
+        if (a.job.stream)
+            queue_stream_settle(a.job);
+        else
+            fold_completion_value(a.job);
+        _active.remove_from_to(index, index + 1); // releases the pins + keepalive, on the actor thread
+    }
+
+    // Fails a job whose source gave up.
+    // Its already-recorded chunks still run; nothing further is served.
+    void fail_job(isize index)
+    {
+        auto& a = _active[index];
+        cancel_stream(a.job);
+        _active.remove_from_to(index, index + 1);
     }
 
     // Writes one chunk of `a` into the open window and records its copy.
@@ -365,14 +488,9 @@ private:
         if (u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
             _open_risky_job = a.sequence; // the window is now dedicated to it — see candidate_for
 
-        // The window holding the upload's last byte is the one whose completion satisfies the reader wait.
-        if (a.packer->is_finished())
-        {
-            if (a.job.stream)
-                queue_stream_settle(a.job);
-            else
-                fold_completion_value(a.job);
-        }
+        // Completing is NOT this function's business, even when the packer just finished: one packer covers one
+        // chunk, and a source-driven job has as many as its source cares to hand over.
+        // finish_job decides, and it is the caller who knows whether the source has more to say.
         return true;
     }
 
@@ -565,6 +683,7 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(isize window_bytes)
     if (_wait_event == nullptr)
         return cc::error("CreateEventW failed for the async upload wait event");
 
+    _waker = std::make_shared<dx12_upload_waker>(*this);
     _actor = cc::make_and_start_threaded_actor<dx12_upload_async_actor>(*this);
     return cc::unit{};
 }
@@ -634,11 +753,51 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     _actor->enqueue_message(cc::move(job));
 }
 
+namespace
+{
+/// The control block every streaming upload shares, with its completion node and its promotion hook installed.
+/// `on_promote` is what moves the reserved value onto the FORWARD stamp, which is the whole of what promotion means.
+template <class ResourceT>
+[[nodiscard]] std::shared_ptr<sg::impl::stream_control> make_stream_control(std::shared_ptr<ResourceT const> target,
+                                                                            u64 value,
+                                                                            i64 total_hint)
+{
+    auto control = std::make_shared<sg::impl::stream_control>();
+    control->completion = cc::make_async_manual<cc::unit>();
+    control->total_hint.store(total_hint, std::memory_order_relaxed);
+    // Weak: promoting a transfer whose destination is already gone must not resurrect it.
+    control->on_promote = [weak = std::weak_ptr<ResourceT const>(cc::move(target)), value]
+    {
+        if (auto const strong = weak.lock())
+            stamp_max(strong->_pending_async_upload_value, value);
+    };
+    return control;
+}
+} // namespace
+
 sg::stream_upload_handle dx12_upload_async_system::stream_buffer(sg::raw_buffer_handle buffer,
                                                                  cc::pinned_data<byte const> data,
                                                                  isize offset)
 {
+    // The resident form is one always-ready chunk, so it is the source seam's simplest case rather than a path of
+    // its own — everything below it is shared.
+    return stream_source_buffer(cc::move(buffer), sg::make_pinned_stream_source(cc::move(data)), offset);
+}
+
+sg::stream_upload_handle dx12_upload_async_system::stream_texture(sg::raw_texture_handle texture,
+                                                                  cc::pinned_data<byte const> data,
+                                                                  sg::subresource_index const& subresource,
+                                                                  sg::texture_region const& region)
+{
+    return stream_source_texture(cc::move(texture), sg::make_pinned_stream_source(cc::move(data)), subresource, region);
+}
+
+sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_buffer_handle buffer,
+                                                                        std::unique_ptr<sg::stream_source> source,
+                                                                        isize offset)
+{
     CC_ASSERT(buffer != nullptr, "stream upload target buffer is null");
+    CC_ASSERT(source != nullptr, "stream upload source is null");
     auto const* const dst = dynamic_cast<dx12_buffer const*>(buffer.get());
     CC_ASSERT(dst != nullptr, "buffer is not a dx12 buffer");
     CC_ASSERT(!dst->is_expired(), "stream upload target is a transient buffer used past its epoch (expired)");
@@ -653,36 +812,28 @@ sg::stream_upload_handle dx12_upload_async_system::stream_buffer(sg::raw_buffer_
     u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
     stamp_max(dst->_pending_stream_copy_value, value);
 
-    auto control = std::make_shared<sg::impl::stream_control>();
-    control->completion = cc::make_async_manual<cc::unit>();
-    control->total_hint.store(data.size(), std::memory_order_relaxed);
-    // promote_to_async: move this same value onto the forward stamp, so lists recorded afterwards do wait on it.
-    // Weak, because promoting a transfer whose destination is already gone must not resurrect it.
-    control->on_promote
-        = [target = std::weak_ptr<dx12_buffer const>(std::static_pointer_cast<dx12_buffer const>(buffer)), value]
-    {
-        if (auto const strong = target.lock())
-            stamp_max(strong->_pending_async_upload_value, value);
-    };
+    auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    auto control = make_stream_control(typed, value, source->total_size_hint());
 
     dx12_async_upload_job job;
-    job.buffer_target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.buffer_target = typed;
     job.dst_offset = offset;
-    job.src = cc::move(data);
     job.copy_fence_value = dx12_copy_fence_value(value);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.stream = control;
+    job.source = cc::move(source);
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_upload_handle(cc::move(control));
 }
 
-sg::stream_upload_handle dx12_upload_async_system::stream_texture(sg::raw_texture_handle texture,
-                                                                  cc::pinned_data<byte const> data,
-                                                                  sg::subresource_index const& subresource,
-                                                                  sg::texture_region const& region)
+sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw_texture_handle texture,
+                                                                         std::unique_ptr<sg::stream_source> source,
+                                                                         sg::subresource_index const& subresource,
+                                                                         sg::texture_region const& region)
 {
     CC_ASSERT(texture != nullptr, "stream upload target texture is null");
+    CC_ASSERT(source != nullptr, "stream upload source is null");
     auto const* const dst = dynamic_cast<dx12_texture const*>(texture.get());
     CC_ASSERT(dst != nullptr, "texture is not a dx12 texture");
     CC_ASSERT(!dst->is_expired(), "stream upload target is a transient texture used past its epoch (expired)");
@@ -692,32 +843,40 @@ sg::stream_upload_handle dx12_upload_async_system::stream_texture(sg::raw_textur
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
-    CC_ASSERT(data.size() == fp.tight_size(), "stream upload pixel data size does not match the copy region");
 
     u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
     stamp_max(dst->_pending_stream_copy_value, value);
 
-    auto control = std::make_shared<sg::impl::stream_control>();
-    control->completion = cc::make_async_manual<cc::unit>();
-    control->total_hint.store(data.size(), std::memory_order_relaxed);
-    control->on_promote
-        = [target = std::weak_ptr<dx12_texture const>(std::static_pointer_cast<dx12_texture const>(texture)), value]
-    {
-        if (auto const strong = target.lock())
-            stamp_max(strong->_pending_async_upload_value, value);
-    };
+    auto typed = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    auto control = make_stream_control(typed, value, source->total_size_hint());
 
     dx12_async_upload_job job;
-    job.texture_target = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.texture_target = typed;
     job.footprint = fp;
     job.is_texture = true;
-    job.src = cc::move(data);
     job.copy_fence_value = dx12_copy_fence_value(value);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.stream = control;
+    job.source = cc::move(source);
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_upload_handle(cc::move(control));
+}
+
+void dx12_upload_async_system::wake_actor()
+{
+    if (_actor)
+        _actor->enqueue_message(dx12_transfer_wake{});
+}
+
+void dx12_upload_waker::wake()
+{
+    _target.lock(
+        [](target& t)
+        {
+            if (t.system != nullptr)
+                t.system->wake_actor();
+        });
 }
 
 void dx12_upload_async_system::set_window_bytes(isize bytes)
@@ -729,6 +888,13 @@ void dx12_upload_async_system::set_window_bytes(isize bytes)
 
 void dx12_upload_async_system::shutdown()
 {
+    // Detach first: a source may hand its waker to a thread that fires long after the transfer ended, and after
+    // this returns such a wake finds nothing rather than an actor being destroyed under it.
+    if (_waker)
+    {
+        _waker->detach();
+        _waker = nullptr;
+    }
     if (_actor)
     {
         _actor->shutdown(); // drains queued copies; on_thread_shutdown waits for the copy queue to idle

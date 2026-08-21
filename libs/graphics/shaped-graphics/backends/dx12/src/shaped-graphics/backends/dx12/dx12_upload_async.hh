@@ -3,6 +3,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
@@ -11,6 +12,7 @@
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
+#include <shaped-graphics/transfer/stream_source.hh>
 
 #include <atomic>
 
@@ -34,10 +36,51 @@ struct sg::backend::dx12::dx12_async_upload_job
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
 
+    // Set only for a source-driven streaming upload; the payload is produced chunk by chunk as windows open
+    // rather than handed over resident, so `src` stays empty for these.
+    std::unique_ptr<sg::stream_source> source;
+
     // Set only for a STREAMING upload; null marks the job as the async tier.
     // Carries the priority and cancel flag the actor reads when picking, the progress counters it advances, and the
     // completion node it must settle exactly once — including on every cancellation path.
     std::shared_ptr<sg::impl::stream_control> stream;
+};
+
+/// A message carrying nothing: its only job is to wake the copy actor so it re-polls sources that said `not_yet`.
+/// Sources produce on their own threads, and nothing else would tell the actor that a stalled one can now answer.
+struct sg::backend::dx12::dx12_transfer_wake
+{
+};
+
+/// The wake channel handed to every stream source.
+///
+/// Shared and separately lockable so it can outlive the transfer that installed it: a source may hand its waker to
+/// an IO thread that fires long after, and shutdown nulls the target under this lock before the actor is destroyed,
+/// so a late wake finds nothing rather than a dangling actor.
+class sg::backend::dx12::dx12_upload_waker
+{
+public:
+    explicit dx12_upload_waker(dx12_upload_async_system& system)
+    {
+        _target.lock([&](target& t) { t.system = &system; });
+    }
+
+    /// Wake the actor, if it is still there.
+    /// Safe from any thread, any number of times, at any point in teardown.
+    void wake();
+
+    /// Called from shutdown, before the actor is torn down.
+    void detach()
+    {
+        _target.lock([](target& t) { t.system = nullptr; });
+    }
+
+private:
+    struct target
+    {
+        dx12_upload_async_system* system = nullptr;
+    };
+    cc::mutex<target> _target;
 };
 
 /// Async CPU→GPU streaming on a dedicated COPY queue, decoupled from epochs.
@@ -74,6 +117,22 @@ public:
                         cc::pinned_data<byte const> data,
                         sg::subresource_index const& subresource,
                         sg::texture_region const& region);
+
+    /// Records a source-driven streaming upload into `buffer`, chunk offsets relative to `offset`.
+    /// The actor polls `source` on its own thread as windows open, and passes the transfer over on `not_yet`.
+    [[nodiscard]] sg::stream_upload_handle stream_source_buffer(sg::raw_buffer_handle buffer,
+                                                                std::unique_ptr<sg::stream_source> source,
+                                                                isize offset);
+
+    /// Records a source-driven streaming upload into one region of `texture`.
+    /// Chunk offsets are into the region's tightly-packed bytes and must be row-aligned.
+    [[nodiscard]] sg::stream_upload_handle stream_source_texture(sg::raw_texture_handle texture,
+                                                                 std::unique_ptr<sg::stream_source> source,
+                                                                 sg::subresource_index const& subresource,
+                                                                 sg::texture_region const& region);
+
+    /// Enqueues a bare wake so the actor re-polls sources that reported `not_yet`; reached through dx12_upload_waker.
+    void wake_actor();
 
     /// Records a streaming upload of `data` into `buffer` at `offset`, returning its control handle.
     /// Unlike upload_buffer this does NOT stamp the forward reader value, so a later command list waits on nothing.
@@ -127,10 +186,14 @@ public:
     // It lives here rather than in the actor only because the actor type is file-local to the .cc.
     sg::impl::transfer_scheduler _scheduler;
 
+    // Handed to every stream source, and detached before the actor dies.
+    // Public alongside the other actor-facing members: the actor installs it on each source it admits.
+    std::shared_ptr<dx12_upload_waker> _waker;
+
 private:
     // Reserved on the caller thread (fetch_add) and handed out as dx12_copy_fence_value.
     // The actor's windows signal _completion_fence up to the highest finished value.
     std::atomic<u64> _next_copy_value = 0;
 
-    cc::unique_ptr<cc::threaded_actor<dx12_async_upload_job>> _actor;
+    cc::unique_ptr<cc::threaded_actor<dx12_async_upload_job, dx12_transfer_wake>> _actor;
 };
