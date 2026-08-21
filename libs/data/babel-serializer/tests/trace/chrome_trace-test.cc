@@ -3,6 +3,7 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
@@ -328,7 +329,7 @@ TRACE_TEST("chrome_trace - no samples means no sampled track")
     CHECK(!json.contains(R"("cat":"sampled")"));
 }
 
-TRACE_TEST("chrome_trace - sampled stacks become spans on a track of their own")
+TRACE_TEST("chrome_trace - sampled stacks become spans inside the scopes that were open")
 {
     if (!cc::stack_capture_from_context_available() || !CC_HAS_THREADS)
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
@@ -338,49 +339,60 @@ TRACE_TEST("chrome_trace - sampled stacks become spans on a track of their own")
     auto const raw = capture_all(
         [&]
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
 
             CC_RECORD_MARK("work-begins"); // joins this thread to the set the sampler knows
 
             auto const start = cc::current_time_steady_secs();
             u64 volatile sink = 0;
             while (cc::current_time_steady_secs() - start < 0.2)
+            {
+                CC_RECORD_SCOPE("sampled-region");
                 for (int i = 0; i < 4096; ++i)
                     sink = sink + u64(i);
+            }
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
 
-    // Splicing first is the realistic path: it moves each sample onto the thread it caught, so the exporter puts the
-    // sampled track beside that thread rather than beside the sampler.
+    // Splicing first is the realistic path: it moves each sample onto the thread it caught, so the exporter can nest
+    // it inside that thread's scopes rather than beside them.
     auto const r = raw.spliced_samples();
     auto const json = encode_to_string(r);
 
-    // A track of its own, because Chrome's B/E phases are one stack per tid and the recorded scopes own the real one.
-    CHECK(json.contains("(sampled)"));
     CHECK(json.contains(R"("cat":"sampled")"));
 
-    // Spans, not instants: every B the reconstruction opens is closed.
     auto const doc = babel::json::read(json);
     REQUIRE(doc.has_value());
 
-    auto opened = 0;
-    auto closed = 0;
+    // Every B is closed, on every track.
+    // An unbalanced reconstruction is one a viewer renders as nonsense rather than rejecting, which is why this is
+    // worth asserting rather than eyeballing.
+    cc::map<f64, int> depth_by_tid;
+    auto sampled_spans = 0;
     auto const events = doc.value().root()["traceEvents"];
     for (isize i = 0; i < events.size(); ++i)
     {
         auto const e = events[i];
         auto const phase = e["ph"].as_string();
-        auto const tid = e["tid"].as_double();
-        if (tid < (1 << 20))
+        if (phase != "B" && phase != "E")
             continue;
 
+        auto& depth = depth_by_tid[e["tid"].as_double()];
         if (phase == "B")
-            ++opened;
-        else if (phase == "E")
-            ++closed;
+        {
+            ++depth;
+            if (e["cat"].as_string() == "sampled")
+                ++sampled_spans;
+        }
+        else
+            --depth;
+
+        CHECK(depth >= 0); // an E with nothing open means the nesting is wrong
     }
 
-    CHECK(opened > 0);
-    CHECK(opened == closed);
+    for (auto const& [tid, depth] : depth_by_tid)
+        CHECK(depth == 0);
+
+    CHECK(sampled_spans > 0);
 }

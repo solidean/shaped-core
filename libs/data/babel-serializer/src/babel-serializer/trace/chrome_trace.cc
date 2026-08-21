@@ -6,6 +6,7 @@
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/recording.hh>
+#include <clean-core/record/sampling.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 
@@ -196,8 +197,66 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     // An accumulate carries a delta, but a counter track shows a level — so the running total is what gets emitted.
     cc::map<cc::string, f64> running_totals;
 
-    // Samples are collected rather than emitted inline: a span needs the NEXT sample to know where it ends.
-    cc::map<u32, cc::vector<sampled_stack>> samples_by_thread;
+    // Sampled frames are emitted INSIDE the scopes that were open, on the same track.
+    //
+    // That is the whole point of the combination: the scopes give the structure a human named, and the samples give
+    // what was happening inside them — so a viewer shows instrumentation depth with sampling stacked on top.
+    // Chrome builds one stack per tid from the time-ordered B/E, so the only rule is that a synthetic span opens and
+    // closes strictly between the boundaries of the scope it sits in.
+    cc::map<i32, cc::vector<u64>> open_sampled;
+
+    /// Ends every synthetic span on `tid`, deepest first.
+    /// Called before any real scope boundary, so a sampled span never straddles one.
+    auto const close_sampled = [&](i32 tid, f64 ts)
+    {
+        auto* const open = open_sampled.get_ptr(tid);
+        if (open == nullptr || open->empty())
+            return;
+
+        for (isize i = open->size() - 1; i >= 0; --i)
+        {
+            open_event();
+            out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, tid, ts);
+            out += '}';
+        }
+        open->clear();
+    };
+
+    /// Extends the spans this sample shares with the previous one, and opens the rest.
+    auto const apply_sample = [&](i32 tid, f64 ts, cc::span<u64 const> innermost_first)
+    {
+        auto& open = open_sampled[tid];
+
+        // A capture runs innermost first; a flame graph is drawn outermost first.
+        cc::vector<u64> stack;
+        stack.reserve(innermost_first.size());
+        for (isize i = innermost_first.size() - 1; i >= 0; --i)
+            stack.push_back(innermost_first[i]);
+
+        isize shared = 0;
+        while (shared < open.size() && shared < stack.size() && open[shared] == stack[shared])
+            ++shared;
+
+        for (isize i = open.size() - 1; i >= shared; --i)
+        {
+            open_event();
+            out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, tid, ts);
+            out += '}';
+        }
+
+        for (isize i = shared; i < stack.size(); ++i)
+        {
+            open_event();
+            out.appendf(R"("ph":"B","pid":{},"tid":{},"ts":{:.3f},"name":)", opts.process_id, tid, ts);
+            append_json_string(out, cc::format("0x{:x}", stack[i]));
+            out += R"(,"cat":"sampled"})";
+        }
+
+        open = cc::move(stack);
+    };
+
+    cc::set<i32> named_sample_tracks;
+    auto last_ts_us = 0.0;
 
     for (auto const& le : events)
     {
@@ -219,6 +278,8 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             append_json_string(out, e.domain()->name());
         };
 
+        last_ts_us = ts_us;
+
         if (kind == cc::rec::event_kind::sample)
         {
             if (!opts.include_samples)
@@ -227,9 +288,30 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             // The payload names the sampled thread, which is not this block's thread until the recording has been
             // spliced — so reading it here works either way.
             auto const owner = u32(e.field_as_u64("thread_index").value_or(u64(tid)));
-            samples_by_thread[owner].push_back({ts_us, e.field_as_u64_array("frames")});
+
+            // A thread the recorder never knew has no track of its own to nest into, so it gets one, named by the id
+            // the OS knows it as.
+            auto const sample_tid = owner == cc::rec::impl::sample_unknown_thread
+                                      ? opts.sampled_tid_offset + i32(e.field_as_u64("native_tid").value_or(0))
+                                      : i32(owner);
+
+            if (owner == cc::rec::impl::sample_unknown_thread && !named_sample_tracks.contains(sample_tid))
+            {
+                named_sample_tracks.insert(sample_tid);
+                open_event();
+                out.appendf(R"("ph":"M","name":"thread_name","pid":{},"tid":{},"args":{{"name":)", opts.process_id,
+                            sample_tid);
+                append_json_string(out, cc::format("os thread {} (sampled)", e.field_as_u64("native_tid").value_or(0)));
+                out += "}}";
+            }
+
+            apply_sample(sample_tid, ts_us, e.field_as_u64_array("frames"));
             continue;
         }
+
+        // A scope boundary is where a synthetic span must not straddle, so everything sampled closes first.
+        if (kind == cc::rec::event_kind::scope_begin || kind == cc::rec::event_kind::scope_end)
+            close_sampled(i32(tid), ts_us);
 
         switch (kind)
         {
@@ -347,65 +429,10 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
         }
     }
 
-    // Sampled stacks become spans on a track of their own, one span per frame that survives from one sample to the
-    // next.
-    // Consecutive samples sharing a prefix share its spans, which is what turns a pile of instants into a flame graph.
-    for (auto const& [owner, stacks] : samples_by_thread)
-    {
-        if (stacks.empty())
-            continue;
-
-        auto const sampled_tid = i32(owner) + opts.sampled_tid_offset;
-
-        {
-            open_event();
-            out.appendf(R"("ph":"M","name":"thread_name","pid":{},"tid":{},"args":{{"name":)", opts.process_id,
-                        sampled_tid);
-            append_json_string(out, cc::format("thread {} (sampled)", owner));
-            out += "}}";
-        }
-
-        cc::vector<u64> current;
-        auto last_ts = stacks.front().ts_us;
-
-        for (auto const& s : stacks)
-        {
-            // A capture runs innermost first; a flame graph is drawn outermost first.
-            cc::vector<u64> stack;
-            stack.reserve(s.frames.size());
-            for (isize i = s.frames.size() - 1; i >= 0; --i)
-                stack.push_back(s.frames[i]);
-
-            isize shared = 0;
-            while (shared < current.size() && shared < stack.size() && current[shared] == stack[shared])
-                ++shared;
-
-            for (isize i = current.size() - 1; i >= shared; --i)
-            {
-                open_event();
-                out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, sampled_tid, s.ts_us);
-                out += '}';
-            }
-
-            for (isize i = shared; i < stack.size(); ++i)
-            {
-                open_event();
-                out.appendf(R"("ph":"B","pid":{},"tid":{},"ts":{:.3f},"name":)", opts.process_id, sampled_tid, s.ts_us);
-                append_json_string(out, cc::format("0x{:x}", stack[i]));
-                out += R"(,"cat":"sampled"})";
-            }
-
-            current = cc::move(stack);
-            last_ts = s.ts_us;
-        }
-
-        for (isize i = current.size() - 1; i >= 0; --i)
-        {
-            open_event();
-            out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, sampled_tid, last_ts);
-            out += '}';
-        }
-    }
+    // Whatever is still open at the end closes at the last event's time.
+    for (auto const& [tid, open] : open_sampled)
+        if (!open.empty())
+            close_sampled(tid, last_ts_us);
 
     out += opts.pretty ? "\n],\n\"displayTimeUnit\": \"ms\"\n}\n" : R"(],"displayTimeUnit":"ms"})";
 

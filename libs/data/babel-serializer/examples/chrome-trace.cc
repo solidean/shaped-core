@@ -1,6 +1,7 @@
 #include <babel-serializer/trace/chrome_trace.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/recording.hh>
@@ -48,6 +49,36 @@ u64 grind(u64 seed, int rounds)
     return acc;
 }
 
+// Three levels of UNINSTRUMENTED call under each scope, which is what gives the sampler something to say.
+//
+// A scope names the work a person thought was worth naming; these are the frames nobody named, and they are the whole
+// reason to sample at all.
+// Without them a sample inside a scope is one address, because there is nothing between the scope and the work.
+//
+// Each one does something with the result rather than forwarding it, because `return f(x)` is a TAIL CALL: the
+// compiler turns it into a jump, no frame is pushed, and a sampler correctly reports a stack that is one level deep.
+// A wrapper that only forwards is invisible to a profiler.
+u64 volatile g_keep_frames = 0;
+
+CC_DONT_INLINE u64 inner_math(u64 seed, int rounds)
+{
+    auto const r = grind(seed, rounds);
+    g_keep_frames = r;
+    return r;
+}
+CC_DONT_INLINE u64 middle_transform(u64 seed, int rounds)
+{
+    auto const r = inner_math(seed, rounds);
+    g_keep_frames = r;
+    return r;
+}
+CC_DONT_INLINE u64 outer_prepare(u64 seed, int rounds)
+{
+    auto const r = middle_transform(seed, rounds);
+    g_keep_frames = r;
+    return r;
+}
+
 /// Stands in for a frame: nested scopes, a stat that moves, and a value worth correlating against the duration.
 void render_frame(int index)
 {
@@ -56,7 +87,7 @@ void render_frame(int index)
 
     {
         CC_RECORD_SCOPE("cull");
-        auto const visible = int(grind(u64(index) + 1, 200000 + index * 50000) % 4096);
+        auto const visible = int(outer_prepare(u64(index) + 1, 200000 + index * 50000) % 4096);
         CC_RECORD("visible_objects", visible);
         CC_RECORD_STAT("visible", cc::rec::unit_count, visible);
     }
@@ -67,26 +98,26 @@ void render_frame(int index)
             CC_RECORD_SCOPE("opaque");
             CC_RECORD_ACCUM("draw_calls", cc::rec::unit_count, 120);
             CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, 48 * 1024);
-            (void)grind(7, 250000);
+            (void)outer_prepare(7, 250000);
         }
         {
             CC_RECORD_SCOPE("transparent");
             CC_RECORD_ACCUM("draw_calls", cc::rec::unit_count, 18);
-            (void)grind(11, 80000);
+            (void)middle_transform(11, 80000);
 
             // Every third frame takes the slow path, which is exactly the kind of thing a marker makes findable.
             if (index % 3 == 0)
             {
                 CC_RECORD_MARK("sort-fallback");
                 CC_LOG_WARNING("transparent sort fell back on frame {}", index);
-                (void)grind(13, 300000);
+                (void)outer_prepare(13, 300000);
             }
         }
     }
 
     {
         CC_RECORD_SCOPE("present");
-        (void)grind(17, 60000);
+        (void)inner_math(17, 60000);
     }
 }
 } // namespace example_render
@@ -111,7 +142,7 @@ void load_assets()
         CC_RECORD("source", "meshes/tree.png");
         CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, 256 * 1024);
 
-        auto const checksum = example_render::grind(u64(i) * 31 + 5, 500000);
+        auto const checksum = example_render::outer_prepare(u64(i) * 31 + 5, 500000);
         CC_RECORD("checksum", checksum);
     }
 
@@ -142,7 +173,7 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
         cc::rec::sampling_scope const sampling({.rate_hz = 4000.0});
 
         auto loader = std::thread(example_assets::load_assets);
-        for (auto frame = 0; frame < 8; ++frame)
+        for (auto frame = 0; frame < 24; ++frame)
             example_render::render_frame(frame);
         loader.join();
 
@@ -167,8 +198,16 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     auto const stats = cc::rec::sampling_statistics();
     cc::println("  {} sample(s) taken, {} tick(s) found nothing to sample",
                 captured.count_of_kind(cc::rec::event_kind::sample), stats.idle);
-    cc::println("  (their stacks are short on purpose: a sample stops at the innermost open scope, so instrumented");
-    cc::println("   code samples down to a single address and the scope stack supplies the rest)");
+    isize deepest = 0;
+    captured.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() == cc::rec::event_kind::sample)
+                deepest = cc::max(deepest, e.field_as_u64_array("frames").size());
+        });
+    cc::println("  deepest sampled stack: {} frame(s)", deepest);
+    cc::println("  (a sample stops at the innermost open scope, so it carries only the frames NOBODY named —");
+    cc::println("   the exporter nests those inside that scope, so a viewer shows both depths at once)");
     cc::println("  the slow path was taken {} time(s)", captured.count("sort-fallback"));
 
     auto uploaded = 0.0;
@@ -189,7 +228,10 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     // And out to a file a viewer can open.
     //
 
-    auto const path = cc::format("{}/cc-record-example.json", cc::temp_directory_path());
+    // CC_TRACE_OUT overrides it, because an example runs with the build directory as its working directory and a
+    // relative path would land somewhere nobody looks.
+    auto const path = cc::environment_variable("CC_TRACE_OUT")
+                          .value_or(cc::format("{}/cc-record-example.json", cc::temp_directory_path()));
 
     auto opened = cc::file_write_stream_adapter::create(path);
     if (opened.has_error())

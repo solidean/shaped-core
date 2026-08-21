@@ -41,17 +41,19 @@ struct babel::chrome_trace::write_options
     bool include_stats = true;
     bool include_scopes = true;
 
-    /// Turn sampled stacks into scopes on a track of their own.
+    /// Turn sampled stacks into spans, nested inside the scopes that were open.
     ///
-    /// A sample is a stack at an instant, and a viewer draws spans — so consecutive samples sharing a frame become one
-    /// span over that frame, which is the usual flame-graph reconstruction.
-    /// The frames are ADDRESSES: nothing here symbolizes, so a span is named by its hexadecimal address.
+    /// A sample is a stack at an instant and a viewer draws spans, so consecutive samples sharing a frame become one
+    /// span over it — the usual flame-graph reconstruction.
+    /// They are emitted on the sampled thread's OWN track, inside its recorded scopes, which is the point of having
+    /// both: the scopes give the structure somebody named, and the samples give what was happening inside it.
+    /// The frames are ADDRESSES, because nothing here symbolizes; a span is named by its hexadecimal address.
     bool include_samples = true;
 
-    /// Where a thread's sampled track sits, as an offset from its own tid.
+    /// Where a track for an unrecorded thread sits.
     ///
-    /// A separate track rather than the thread's own, because Chrome's B/E phases are one stack per tid: interleaving
-    /// synthesized spans with recorded scopes would break the nesting of both.
+    /// A thread the recorder never knew has no track to nest into, so it gets one of its own, keyed by the id the OS
+    /// knows it as and offset clear of the recorded threads' indices.
     i32 sampled_tid_offset = 1 << 20;
 
     /// One event per line.
