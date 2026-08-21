@@ -400,7 +400,7 @@ REC_TEST("record/log - an error carries the stack it was logged from")
         [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
         {
             if (cc::string_view(e.desc->name) == "record.stacktrace")
-                frame_count = isize(e.field_as_u64("frame_count").value_or(0));
+                frame_count = e.field_as_u64_array("frames").size();
         });
 
     REQUIRE(frame_count >= 0); // the event itself must be there either way

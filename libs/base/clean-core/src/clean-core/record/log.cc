@@ -15,9 +15,15 @@ constexpr isize max_captured_frames = 64;
 ///
 /// Capture is orders of magnitude more expensive than the event it decorates, so the end time is recorded too.
 /// That makes the cost measured rather than modelled, exactly as the cold path's own accounting is.
+// The frames were always written; nothing DESCRIBED them, so no consumer could reach them — a crash dump's stacks
+// were unreadable through the event API for exactly that reason.
+//
+// The payload already has the u64_array shape by construction: a count where the field points, and the values right
+// after it.
+// So this describes bytes that were always there rather than changing any of them.
 constexpr cc::rec::field stacktrace_fields[] = {
     {.name = "capture_end_cycles", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
-    {.name = "frame_count", .type = cc::rec::type_code::u32_, .offset = 8, .size = 4},
+    {.name = "frames", .type = cc::rec::type_code::u64_array, .offset = 8, .size = 4},
 };
 
 constexpr cc::rec::desc stacktrace_desc = {
@@ -26,7 +32,7 @@ constexpr cc::rec::desc stacktrace_desc = {
     .name = "record.stacktrace",
     .dom = &cc::rec::g_system_domain,
     .fields = stacktrace_fields,
-    .field_count = 2,
+    .field_count = u16(CC_ARRAY_COUNT_OF(stacktrace_fields)),
     .fixed_payload_size = cc::rec::desc::variable_payload,
 };
 } // namespace
