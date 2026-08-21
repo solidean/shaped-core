@@ -206,7 +206,7 @@ Set `look_requires_button = false` once the caller has captured the cursor (`sr:
 ## Resources by id — the managers
 
 ```cpp
-sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials; bindless_config bindless }
+sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials } with per-manager budgets
 sv::mesh_manager::create(ctx, cfg)     // cfg = manager_config { resource_budget budget }; ctx must outlive it
 
 // What you hand a manager: an owning cc::pinned_data payload + the cc::hash128 that identifies it.

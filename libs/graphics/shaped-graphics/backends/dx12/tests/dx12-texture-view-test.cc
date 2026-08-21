@@ -39,7 +39,8 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
     {
         auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
         REQUIRE(tex != nullptr);
-        sg::binding const b = {.name = "Tex", .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
+        sg::binding const b
+            = {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
         auto layout = c.cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
@@ -53,7 +54,8 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
     {
         auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readonly_texture));
         REQUIRE(tex != nullptr);
-        sg::binding const b = {.name = "Tex", .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
+        sg::binding const b
+            = {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
         auto layout = c.cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
@@ -81,10 +83,13 @@ INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transiti
     shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 1, .z = 1};
     shader.bytecode = cc::make_pinned_data(
         cc::span<byte const>(reinterpret_cast<byte const*>(double_compute_dxil), isize(sizeof(double_compute_dxil))));
+    shader.bindings.push_back(sg::binding{.name = "Output",
+                                          .space = 0,
+                                          .index = 0,
+                                          .count = 1,
+                                          .type = sg::binding_type::readwrite_structured_buffer});
     shader.bindings.push_back(
-        sg::binding{.name = "Output", .index = 0, .count = 1, .type = sg::binding_type::readwrite_structured_buffer});
-    shader.bindings.push_back(
-        sg::binding{.name = "Tex", .index = 1, .count = 1, .type = sg::binding_type::readwrite_texture});
+        sg::binding{.name = "Tex", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_texture});
 
     auto buf = c.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
                                               sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);

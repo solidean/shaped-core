@@ -18,11 +18,21 @@
 /// When the array is full, every index not acquired this epoch is reclaimed at once; if every index was
 /// acquired this epoch, the working set exceeds the binding's count and acquire asserts.
 ///
-/// `lock()` refuses acquires until `unlock()`, which must come in the same epoch (both asserted) — it guards
-/// the window in which a snapshot is bound, and mints nothing.
+/// `lock()` refuses acquires until `unlock()`, which must come in the same epoch (both asserted), and mints
+/// nothing.
+/// What it guards is that an index minted after a snapshot was taken is not in that snapshot — the snapshot
+/// itself is immutable and a later mint cannot touch it.
 /// Taking the snapshot stays the group owner's job: lock every array over the group, call `group->snapshot()`,
 /// bind it, unlock.
 /// `lock_scoped()` is the RAII form.
+///
+/// TODO: this guard sits on the wrong class and is provisional.
+/// It belongs on the resource manager that owns the staging group and its arrays: the manager's `lock()`
+/// returns the snapshot, an epoch begins unlocked (acquire, set), then locks for the rest of the epoch, which
+/// makes "every index I acquired is valid for the work I am recording" structural rather than conventional.
+/// Landing with it, `acquire` splits into a transient handle (a typed enum, this epoch only) and a persistent
+/// one (refcounted, frees its slot), with eager eviction the default so a stale index fails immediately.
+/// Do not build on `lock` / `unlock` / `bindless_lock` as final.
 ///
 /// Access declaration stays the consumer's job: whoever binds the group declares the elements its dispatch
 /// reads via declare_array_*_access.
@@ -60,13 +70,21 @@ public:
 
     [[nodiscard]] bool is_locked() const { return _locked; }
 
+    /// Pinned in place: two arrays over one binding would mint conflicting descriptors from two tables, and
+    /// moving one out from under a live `bindless_lock` would have the lock unlock the moved-from object.
+    /// `for_binding` returns a prvalue, so no call site pays for this.
+    bindless_array(bindless_array const&) = delete;
+    bindless_array& operator=(bindless_array const&) = delete;
+    bindless_array(bindless_array&&) = delete;
+    bindless_array& operator=(bindless_array&&) = delete;
+
 private:
     bindless_array(context& ctx, staging_binding_group_handle group, binding_slot slot, u32 capacity);
 
     context& _ctx;
     staging_binding_group_handle _group;
     binding_slot _slot = binding_slot::invalid;
-    impl::slot_table _table;
+    impl::slot_table<raw_view> _table;
 
     bool _locked = false;
     epoch _lock_epoch = epoch::invalid;

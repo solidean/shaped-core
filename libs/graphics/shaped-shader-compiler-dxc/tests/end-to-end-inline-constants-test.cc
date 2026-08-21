@@ -74,6 +74,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias
     pld.groups = {group_layout};
     pld.inline_constants = sg::binding{
         .name = "Params",
+        .space = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::uniform_buffer,

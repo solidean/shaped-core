@@ -39,6 +39,7 @@ namespace
 [[nodiscard]] sg::binding texture_array_binding(u32 count)
 {
     return {.name = "Textures",
+            .space = 0,
             .index = 0,
             .count = count,
             .type = sg::binding_type::readonly_texture,
@@ -110,7 +111,8 @@ INVOCABLE_TEST("sg - buffer array binding accepts bound and vacant elements", (s
 {
     REQUIRE(ctx != nullptr);
 
-    sg::binding const b = {.name = "Buffers", .index = 0, .count = 4, .type = sg::binding_type::readonly_raw_buffer};
+    sg::binding const b
+        = {.name = "Buffers", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_raw_buffer};
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
 

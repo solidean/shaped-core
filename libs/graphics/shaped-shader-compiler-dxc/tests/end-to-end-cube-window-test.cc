@@ -215,6 +215,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
     sg::pipeline_layout_description pld;
     pld.inline_constants = sg::binding{
         .name = "Mvp",
+        .space = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::uniform_buffer,

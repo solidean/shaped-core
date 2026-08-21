@@ -1,26 +1,11 @@
 #include "bindless_array.hh"
 
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 
 using namespace cc::primitive_defines;
-
-namespace sg
-{
-namespace
-{
-// The slot key is the view's identity hash: resources participate by address, and the mapped entry holds
-// the handle alive, so a key's pointer cannot be reused by a new resource while the entry lives.
-[[nodiscard]] u64 key_of(raw_view const& v)
-{
-    return cc::make_hash(v);
-}
-
-} // namespace
-} // namespace sg
 
 sg::bindless_array sg::bindless_array::for_binding(context& ctx, staging_binding_group_handle group, cc::string_view name)
 {
@@ -44,10 +29,11 @@ u32 sg::bindless_array::acquire(raw_view const& view)
 {
     CC_ASSERT(!_locked, "no acquires while the bindless array is locked (unlock first)");
 
-    // The table resolves identity; every mint and reclaim is mirrored onto the staging group, which is what
-    // holds a mapped key's resource alive — so the key's raw pointer cannot be reused while the key is mapped.
-    auto const r = _table.acquire(key_of(view), _ctx.current_epoch(),
-                                  [&](u32 freed) { _group->unset_array_element(_slot, int(freed)); });
+    // The table keys on the view itself, so resources participate by address and a hash collision resolves to
+    // an inequality rather than a shared slot; the mapped entry holds the view, keeping that address valid.
+    // Every mint and reclaim is mirrored onto the staging group, which owns the descriptors.
+    auto const r
+        = _table.acquire(view, _ctx.current_epoch(), [&](u32 freed) { _group->unset_array_element(_slot, int(freed)); });
     if (r.inserted)
         _group->set_array_element(_slot, int(r.index), view);
     return r.index;

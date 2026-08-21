@@ -201,7 +201,7 @@ views                [in progress]  strongly-typed resource views; buffer + text
                                   scope; texel buffers deferred
 bindings             [in progress]  compiled_shader + binding vocab; binding_group_layout / pipeline_layout / group + compute_pipeline (dx12 real, vulkan stub).
                                   Bounded array bindings, staging_binding_group (the mutable builder behind a bindless table) and bindless_array over one of its
-                                  array bindings are in; unbounded arrays are not
+                                  array bindings are in; unbounded arrays are rejected at layout creation (WebGPU has none — see concepts/bindings.md)
 texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation, dx12 layout barriers,
                                   SRV/UAV + RTV/DSV views and host↔device copies done; device→device copies remain
 pipeline             [in progress]  compute + raster pipelines and the bind path (dx12 real, vulkan stub); shaders are

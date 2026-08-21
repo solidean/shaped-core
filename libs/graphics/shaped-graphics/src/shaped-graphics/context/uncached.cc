@@ -1,4 +1,6 @@
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/format.hh>                 // cc::format
+#include <shaped-graphics/binding/binding.hh>          // binding::count
 #include <shaped-graphics/compute/compute_pipeline.hh> // compute_pipeline_description::shader
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/uncached.hh>
@@ -23,6 +25,17 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
     cc::span<binding const> bindings,
     cc::span<named_sampler const> static_samplers)
 {
+    // Rejected here rather than per backend, so an unbounded array fails identically everywhere: WebGPU has no
+    // such thing, and sg holds the portable floor until it does.
+    // See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+    // An error rather than an assert — these bindings usually come from reflecting someone's shader, which
+    // makes an unbounded array content, not a contract violation.
+    for (auto const& b : bindings)
+        if (b.count == 0)
+            return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array (count 0), which sg does "
+                                        "not support — declare a bounded count and treat it as capacity",
+                                        b.name));
+
     return _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);
 }
 

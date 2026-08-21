@@ -32,6 +32,7 @@ sg::compiled_shader make_double_shader()
         cc::span<byte const>(reinterpret_cast<byte const*>(double_compute_dxil), isize(sizeof(double_compute_dxil))));
     shader.bindings.push_back(sg::binding{
         .name = "Output",
+        .space = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,

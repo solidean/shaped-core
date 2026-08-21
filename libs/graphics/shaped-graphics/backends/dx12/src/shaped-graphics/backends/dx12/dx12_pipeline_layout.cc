@@ -56,9 +56,10 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     for (auto const& bs : static_samplers)
     {
         CC_ASSERT(sg::is_sampler(bs.binding.type), "pipeline_layout static sampler binding must be a sampler");
+        CC_ASSERT(bs.binding.space.has_value(), "dx12 needs an explicit register space (absent != space 0)");
         for (int i = 0; i < int(bs.binding.count); ++i)
             static_sampler_descs.push_back(to_d3d12_static_sampler_desc(
-                bs.sampler, UINT(bs.binding.index) + UINT(i), bs.binding.space.value_or(0), D3D12_SHADER_VISIBILITY_ALL));
+                bs.sampler, UINT(bs.binding.index) + UINT(i), bs.binding.space.value(), D3D12_SHADER_VISIBILITY_ALL));
     }
 
     // Inline constants become a 32-bit-constants root parameter, appended last so the group slots' root-parameter indices above stay put.
@@ -67,6 +68,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     {
         auto const& ic = inline_constants.value();
         CC_ASSERT(ic.type == sg::binding_type::uniform_buffer, "inline_constants binding must be a uniform_buffer");
+        CC_ASSERT(ic.space.has_value(), "dx12 needs an explicit register space (absent != space 0)");
         CC_ASSERT(ic.block_size.has_value(), "inline_constants binding must have a block_size");
         CC_ASSERT(ic.block_size.value() > 0 && ic.block_size.value() % 4 == 0, "inline_constants block_size must be "
                                                                                "positive and a multiple of 4");
@@ -76,7 +78,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL; // compute uses ALL
         param.Constants.Num32BitValues = UINT(ic.block_size.value() / 4);
         param.Constants.ShaderRegister = ic.index;
-        param.Constants.RegisterSpace = ic.space.value_or(0);
+        param.Constants.RegisterSpace = ic.space.value();
         pl->inline_constants_root_param = int(params.size());
         pl->inline_constants_num_32bit = int(ic.block_size.value() / 4);
         params.push_back(param);

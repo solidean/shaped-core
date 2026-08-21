@@ -15,7 +15,7 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
   Then `readonly_texture`, `readwrite_texture`, `sampler`, `acceleration_structure`.
 - **`index` + `count`** — the address within the group, following SPIR-V (`binding`), WGSL (`@binding`) and Metal argument buffers.
   A D3D12 backend derives its `(register-type, register)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`.
-  `count == 0` is an unbounded array.
+  `count == 0` is an unbounded array, which sg rejects — see [Array bindings](#array-bindings) for why.
 - **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
   They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
 - **`block_size`** — a uniform block's declared byte size, used to validate a bound view's size.
@@ -32,7 +32,11 @@ So a `binding` carries whichever its language reflects, and neither is invented 
 
 - **DXC reflection fills `space`** — always, even for the default space 0 — and leaves `group_index` absent.
 - **SPIR-V reflection fills `group_index`**, as would any other language where the set is part of the binding.
-- **A hand-written binding fills what it means.** Absent `space` is space 0; absent `group_index` means the bind slot alone decides.
+- **A hand-written binding fills what it means.**
+  Absent `space` means "this shading language has no register spaces", which is not the same as space 0.
+  The structural layout hash writes a presence byte, so the two produce distinct `binding_group_layout` objects even with byte-identical root signatures, and `bind_group` compares layouts by pointer.
+  HLSL always has a space, so the dx12 backend requires one and asserts on absence; a hand-written binding for it says `.space = 0` explicitly.
+  Absent `group_index` means the bind slot alone decides.
 
 A declared group index then propagates, so that it cannot be declared and quietly ignored:
 
@@ -52,7 +56,15 @@ That equivalence is what lets a binding validate a bound view with no backend in
 ## Array bindings
 
 An array binding is a `binding` with `count > 1`: `count` consecutive descriptors under one name — `Texture2D Texs[4]` in HLSL, and the building block of a bindless table.
-`count == 0` (unbounded) remains unsupported; a bindless table declares a bounded count and treats it as capacity.
+`count == 0` (unbounded) is **rejected**: `try_create_binding_group_layout` returns an error naming the binding, on every backend alike.
+A bindless table declares a bounded count and treats it as capacity.
+
+The reason is WebGPU, which has no unbounded binding arrays, and sg is meant to stay ready for the day it does.
+So this is the portable floor the storage-buffer offset rules in [views.md](views.md) already use: fail loudly on the dx12 dev box rather than letting it surface later on the weaker backend.
+The shape stays conditional enough that full support later needs no redesign.
+It is an error rather than an assert because these bindings usually come from reflecting someone's shader, which makes an unbounded array content rather than a contract violation.
+See [error-handling.md](../../../../../docs/error-handling.md).
+The dx12 layout builder keeps its own assert as a backstop.
 
 Three rules distinguish an array binding from a scalar one:
 

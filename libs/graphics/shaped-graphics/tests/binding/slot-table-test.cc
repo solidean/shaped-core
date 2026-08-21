@@ -4,7 +4,8 @@
 
 using namespace cc::primitive_defines;
 
-// sg::impl::slot_table — one bindless array's key → element-index identity map.
+// sg::impl::slot_table — one bindless array's key → element-index identity map, here over plain u64 keys
+// (bindless_array instantiates it over sg::raw_view).
 // Pure CPU: the table holds no views, so no device is involved; the owner mirrors mints and reclaims onto
 // the staging group through acquire's `inserted` result and `on_reclaimed` hook, which is what these pin.
 
@@ -21,7 +22,7 @@ constexpr auto no_reclaim = [](u32) { CHECK(false); };
 
 TEST("sg slot_table - a re-acquired key keeps its slot and mints nothing")
 {
-    auto table = sg::impl::slot_table(4);
+    auto table = sg::impl::slot_table<u64>(4);
 
     auto const s0 = table.acquire(1, ep(0), no_reclaim);
     auto const s1 = table.acquire(2, ep(0), no_reclaim);
@@ -47,7 +48,7 @@ TEST("sg slot_table - a re-acquired key keeps its slot and mints nothing")
 
 TEST("sg slot_table - a full table clears every stale slot at once")
 {
-    auto table = sg::impl::slot_table(3);
+    auto table = sg::impl::slot_table<u64>(3);
     (void)table.acquire(1, ep(0), no_reclaim);
     (void)table.acquire(2, ep(0), no_reclaim);
     auto const s2 = table.acquire(3, ep(1), no_reclaim);
@@ -74,7 +75,7 @@ TEST("sg slot_table - a full table clears every stale slot at once")
 
 TEST("sg slot_table - a slot acquired this epoch is never reclaimed")
 {
-    auto table = sg::impl::slot_table(2);
+    auto table = sg::impl::slot_table<u64>(2);
     (void)table.acquire(1, ep(0), no_reclaim);
     (void)table.acquire(2, ep(1), no_reclaim);
 
@@ -88,7 +89,7 @@ TEST("sg slot_table - a slot acquired this epoch is never reclaimed")
 
 TEST("sg slot_table - a full table of current-epoch slots asserts")
 {
-    auto table = sg::impl::slot_table(2);
+    auto table = sg::impl::slot_table<u64>(2);
     (void)table.acquire(1, ep(0), no_reclaim);
     (void)table.acquire(2, ep(0), no_reclaim);
 

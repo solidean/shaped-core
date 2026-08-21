@@ -144,7 +144,7 @@ struct sv::scene_resources_config
 class sv::scene_resources
 {
 public:
-    /// Creates every manager on `ctx`, each budgeted / sized by its slice of `cfg`.
+    /// Creates all three managers on `ctx`, each budgeted by its slice of `cfg`.
     [[nodiscard]] static scene_resources create(sg::context& ctx, scene_resources_config const& cfg = {});
 
     /// Advance every budgeted manager to epoch `e`, running its idle + budget eviction first.

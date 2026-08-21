@@ -205,6 +205,7 @@ INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", 
 
     sg::binding const b = {
         .name = "Data",
+        .space = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,
@@ -227,6 +228,7 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
 
     sg::binding const b = {
         .name = "Data",
+        .space = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,

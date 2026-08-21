@@ -81,4 +81,8 @@ struct sg::subresource_range
         return cc::make_hash(r.mip_range.start, r.mip_range.end, r.array_range.start, r.array_range.end,
                              r.aspect_range.start, r.aspect_range.end);
     }
+
+    /// Structural equality over the same three ranges `hash` above folds — a hash map keyed on a range needs
+    /// the two to agree, and defaulting it is what keeps them agreeing as fields are added.
+    [[nodiscard]] friend bool operator==(subresource_range const&, subresource_range const&) = default;
 };

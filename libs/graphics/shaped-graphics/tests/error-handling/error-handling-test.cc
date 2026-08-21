@@ -194,6 +194,33 @@ INVOCABLE_TEST("sg error handling - advance rejects an epoch with open command l
     ctx->drop_command_list(cc::move(cmd)); // clean up so the context stays usable
 }
 
+INVOCABLE_TEST("sg error handling - an unbounded binding array is an error, not an assert",
+               (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // count 0 is HLSL's unbounded array, which WebGPU has no equivalent for, so sg rejects it on every backend
+    // alike (see libs/graphics/shaped-graphics/docs/concepts/bindings.md).
+    // Reflection is where these come from, which makes it content rather than a contract violation: the
+    // fallible core returns an error and the throwing default raises, neither asserts.
+    sg::binding const unbounded = {
+        .name = "Textures",
+        .space = 0,
+        .index = 0,
+        .count = 0,
+        .type = sg::binding_type::readonly_texture,
+        .texture_dimension = sg::texture_view_dimension::tex_2d,
+    };
+    auto const bindings = cc::span<sg::binding const>(&unbounded, 1);
+    CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_error());
+    CHECK_THROWS_AS(ctx->uncached.create_binding_group_layout(bindings), sg::pipeline_creation_exception);
+
+    // A bounded count of the same binding is what a bindless table declares, and builds.
+    auto bounded = unbounded;
+    bounded.count = 4;
+    CHECK(ctx->uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&bounded, 1)).has_value());
+}
+
 INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -201,6 +228,7 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
     // A one-entry layout expecting a read-write structured buffer named "Data".
     sg::binding const b = {
         .name = "Data",
+        .space = 0,
         .index = 0,
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,

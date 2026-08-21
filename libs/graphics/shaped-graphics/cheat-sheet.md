@@ -458,9 +458,10 @@ sg::binding_type            // uniform_buffer | read{only,write}_structured_buff
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
 sg::binding                 // { cc::string name; cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
-                            //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded (unsupported)
+                            //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded -> layout creation ERRORS (no WebGPU equivalent)
                             //   group_index = descriptor set / @group (SPIR-V) — PINS the bind slot: every bind_group asserts it matches
-                            //   space = HLSL register space (DXC reflection only) — a register-numbering namespace, never a bind slot; absent = 0
+                            //   space = HLSL register space (DXC reflection only) — a register-numbering namespace, never a bind slot
+                            //     absent = "no register spaces in this language", NOT space 0 (distinct layout hashes); dx12 REQUIRES one -> hand-written bindings say .space = 0
 sg::group_index_of(bindings) // -> cc::optional<u32>  the one group index they agree on (they must); what a group layout inherits
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)

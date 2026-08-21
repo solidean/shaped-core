@@ -215,6 +215,7 @@ class bindless_lock; // RAII lock over a bindless_array: no acquires for its lif
 
 namespace impl
 {
+template <class Key>
 class slot_table; // a bindless_array's key -> element-index map (binding/impl/slot_table.hh)
 } // namespace impl
 

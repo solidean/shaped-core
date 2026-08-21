@@ -98,13 +98,48 @@ INVOCABLE_TEST("sg - two bindless arrays over one group are independent", (sg::c
     auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
 
     // Each array indexes its own binding, so the first view of either lands at element 0.
-    CHECK(buffers.acquire(make_buffer(ctx)) == textures.acquire(make_texture(ctx).as_readonly_view()));
+    CHECK(buffers.acquire(make_buffer(ctx)) == 0);
+    CHECK(textures.acquire(make_texture(ctx).as_readonly_view()) == 0);
 
     // A lock covers the array it was taken on and nothing else.
     buffers.lock();
     CHECK(!textures.is_locked());
     CHECK(textures.acquire(make_texture(ctx).as_readonly_view()) == 1);
     buffers.unlock();
+
+    ctx->advance_epoch_and_wait_for_idle();
+}
+
+INVOCABLE_TEST("sg - a full bindless array clears the descriptors it reclaims", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // The seam only these cover: the stale sweep has to reach the group, or the table and the descriptors
+    // drift apart and the reused element still points at the resource it was reclaimed from.
+    auto group = make_group(ctx, 2);
+    REQUIRE(group != nullptr);
+    auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
+    (void)sg::bindless_array::for_binding(*ctx, group, "Buffers"); // so the group is fully wired
+
+    auto const a = make_texture(ctx);
+    auto const b = make_texture(ctx);
+    (void)textures.acquire(a.as_readonly_view());
+    (void)textures.acquire(b.as_readonly_view());
+    CHECK(textures.occupied_count() == 2);
+    auto const before = group->snapshot();
+
+    // Next epoch, a third view into a full array: both stale elements are cleared on the group, and the new
+    // view takes one of them.
+    ctx->advance_epoch_and_wait_for_idle();
+    auto const c = make_texture(ctx);
+    auto const c_index = textures.acquire(c.as_readonly_view());
+    CHECK(c_index < textures.capacity());
+    CHECK(textures.occupied_count() == 1);
+
+    // The unset_array_element calls left the group in a mintable state, and something did change.
+    auto const after = group->snapshot();
+    CHECK(after != nullptr);
+    CHECK(after.get() != before.get());
 
     ctx->advance_epoch_and_wait_for_idle();
 }

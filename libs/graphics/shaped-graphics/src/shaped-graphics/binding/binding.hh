@@ -117,7 +117,8 @@ struct sg::binding
 
     /// The HLSL register space this binding's `index` is numbered in — reflected by DXC, absent elsewhere.
     /// A namespace for register numbers only: it never constrains which slot the group is bound at.
-    /// Absent means space 0.
+    /// Absent means the shading language has no register spaces at all, which is NOT the same as space 0 —
+    /// the structural layout hash keeps them apart, so dx12 requires an explicit one and asserts on absence.
     cc::optional<u32> space;
 
     u32 index = 0; ///< binding within the group / @binding / HLSL register number

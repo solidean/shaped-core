@@ -174,10 +174,10 @@ void dx12_command_list::compute_bind_group(int group_index, sg::binding_group co
     auto const& gslot = _bound_pipeline_layout->groups[group_index];
     CC_ASSERT(dg->layout == gslot.layout, "binding_group's layout does not match the pipeline layout's slot");
     // A layout whose bindings name a descriptor set may only be bound at that one slot.
-    // value_or keeps the message's arguments valid in a release build, where CC_ASSERTF still evaluates them.
-    CC_ASSERTF(dg->layout->group_index().value_or(u32(group_index)) == u32(group_index),
+    auto const pinned = dg->layout->group_index();
+    CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),
                "binding_group is pinned to group index {} by its bindings and cannot be bound at slot {}",
-               dg->layout->group_index().value_or(0), group_index);
+               pinned.value_or(0), group_index);
 
     // Remember the bound group so its views' accesses are declared at dispatch, the point work runs.
     // The forward async-upload wait for each bound buffer is folded in there too, via track_buffer_access.

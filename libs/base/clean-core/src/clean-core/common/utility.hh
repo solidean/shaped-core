@@ -1069,6 +1069,9 @@ struct cc::offset_size
 {
     isize offset;
     isize size;
+
+    /// Field-wise equality; a friend declaration leaves the aggregate an aggregate.
+    [[nodiscard]] friend bool operator==(offset_size const&, offset_size const&) = default;
 };
 
 /// Named range argument: a half-open [start, end) index range, in container-index units (isize).
@@ -1080,6 +1083,9 @@ struct cc::start_end
 {
     isize start;
     isize end;
+
+    /// Field-wise equality; a friend declaration leaves the aggregate an aggregate.
+    [[nodiscard]] friend bool operator==(start_end const&, start_end const&) = default;
 };
 
 
