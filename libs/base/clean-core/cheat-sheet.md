@@ -503,8 +503,11 @@ cc::current_time_steady_secs();            // -> double; MONOTONIC, arbitrary ze
 cc::current_time_wall_secs();              // -> double; seconds since the Unix epoch, comparable across processes/runs
                                            //    the one to PERSIST (an expiry, a timestamp) — and it can step either way,
                                            //    so a difference of two readings is not a duration
-cc::has_cycle_counter();                   // -> constexpr bool; false on ARM and WASM
-cc::current_cycles();                      // -> u64 TSC on x86, 0 where there is none; inline, for a benchmark's inner loop
+cc::has_cycle_counter();                   // -> constexpr bool; true on x86 and ARM64, false on WASM
+cc::current_cycles();                      // -> u64; TSC on x86, CNTVCT_EL0 on ARM64, 0 on WASM; inline, for an inner loop
+// A tick is MUCH coarser on ARM64 — a fixed timer in the tens of MHz, ~42 ns on Apple silicon, not the core's clock.
+// Fine for a profiling scope, useless for a handful of instructions: loop rather than trust one pair of readings.
+// current_cycles_and_core's core id is x86-only; ARM64 always says core 0, which is not "the same core".
                                            //    constant-rate, so it tracks wall time rather than work done, and nothing
                                            //    here converts it to seconds (the rate needs calibration you do yourself)
 ```

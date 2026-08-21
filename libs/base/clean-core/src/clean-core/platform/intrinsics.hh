@@ -59,6 +59,12 @@ extern "C" unsigned __int64 __rdtscp(unsigned int*);
 #elif defined(CC_ARCH_ARM64) || defined(CC_ARCH_ARM32)
 extern "C" void __yield(void);
 #pragma intrinsic(__yield)
+#if defined(CC_ARCH_ARM64)
+// Reads an AArch64 system register by its encoded id; <intrin.h> spells the id with its ARM64_SYSREG macro, which
+// cc::impl::arm64_sysreg below reproduces rather than pulling the header in for one constant.
+extern "C" __int64 _ReadStatusReg(int);
+#pragma intrinsic(_ReadStatusReg)
+#endif
 #endif
 
 // Extended-precision arithmetic, for wide_arith.hh.
@@ -100,10 +106,30 @@ CC_FORCE_INLINE void cpu_pause()
 #endif
 }
 
+#if defined(CC_ARCH_ARM64) && defined(CC_COMPILER_MSVC)
+/// One AArch64 system register's id, in the encoding _ReadStatusReg takes.
+///
+/// Computed rather than written as the literal 24322, so it can be checked against the architecture manual's
+/// (op0, op1, CRn, CRm, op2) rather than trusted.
+/// This is exactly what <intrin.h>'s ARM64_SYSREG macro does, reproduced here to keep that header out.
+constexpr int arm64_sysreg(int op0, int op1, int crn, int crm, int op2)
+{
+    return ((op0 & 1) << 14) | ((op1 & 7) << 11) | ((crn & 15) << 7) | ((crm & 15) << 3) | (op2 & 7);
+}
+
+/// CNTVCT_EL0, the generic timer's virtual count register.
+constexpr int arm64_sysreg_cntvct = arm64_sysreg(3, 3, 14, 0, 2);
+#endif
+
 /// Whether this architecture has a cheap userspace cycle counter, i.e. whether read_cycles() means anything.
+///
+/// **A reference clock rather than a count of work done**, on both architectures that have one: x86's TSC is
+/// constant-rate on modern parts, and ARM64's CNTVCT_EL0 is a fixed-frequency timer by construction.
+/// So this says "there is a cheap monotonic tick", not "you can count cycles" — the rate has to be calibrated either
+/// way, and neither tells you anything about how busy the core was.
 constexpr bool has_cycle_counter()
 {
-#if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
+#if defined(CC_ARCH_X64) || defined(CC_ARCH_X86) || defined(CC_ARCH_ARM64)
     return true;
 #else
     return false;
@@ -112,6 +138,12 @@ constexpr bool has_cycle_counter()
 
 /// The raw timestamp counter, or 0 where there is none.
 /// cc::current_cycles (clean-core/common/time.hh) is the public spelling.
+///
+/// ARM64 reads CNTVCT_EL0, the generic timer's virtual counter.
+/// It is readable from EL0 on Linux, on macOS and on Windows alike — it is what each platform's own fast clock is
+/// built on — and it runs at a fixed frequency in the tens of megahertz rather than at the core's clock.
+/// **So a tick is coarser there**: roughly 42 ns on Apple silicon against a fraction of a nanosecond on x86, which is
+/// enough for a profiling scope and not enough to time a handful of instructions.
 CC_FORCE_INLINE unsigned long long read_cycles()
 {
 #if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
@@ -120,19 +152,27 @@ CC_FORCE_INLINE unsigned long long read_cycles()
 #else
     return __builtin_ia32_rdtsc();
 #endif
+#elif defined(CC_ARCH_ARM64)
+#if defined(CC_COMPILER_MSVC)
+    return static_cast<unsigned long long>(_ReadStatusReg(arm64_sysreg_cntvct));
 #else
-    // ARM's CNTVCT_EL0 is readable from userspace on Linux but not reliably elsewhere, and MSVC reaches
-    // it only through <intrin.h> constants.
-    // Not worth the header for a counter nothing measures on yet.
+    unsigned long long value = 0;
+    __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(value));
+    return value;
+#endif
+#else
     return 0;
 #endif
 }
 
-/// The timestamp counter plus the IA32_TSC_AUX word the OS puts the core id in, or 0 for both where there is none.
+/// The timestamp counter plus the IA32_TSC_AUX word the OS puts the core id in.
 /// cc::current_cycles_and_core (clean-core/common/time.hh) is the public spelling.
 ///
 /// RDTSCP costs roughly ten cycles more than RDTSC and waits for prior instructions to retire, which RDTSC does not.
 /// It still does not stop LATER instructions from being hoisted above it, so a reading is ordered on one side only.
+///
+/// **Only x86 carries a core id in the reading.** ARM64 has the counter but nothing beside it, so it reports core 0 —
+/// which is why a caller must not read "core 0" as "the same core" without checking has_cycle_counter's architecture.
 CC_FORCE_INLINE unsigned long long read_cycles_and_core(unsigned int& core_out)
 {
 #if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
@@ -143,7 +183,7 @@ CC_FORCE_INLINE unsigned long long read_cycles_and_core(unsigned int& core_out)
 #endif
 #else
     core_out = 0;
-    return 0;
+    return read_cycles();
 #endif
 }
 

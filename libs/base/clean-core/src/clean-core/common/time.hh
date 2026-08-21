@@ -30,7 +30,7 @@ namespace cc
 [[nodiscard]] double current_time_wall_secs();
 
 /// Whether current_cycles() returns a real reading on this architecture, known at compile time.
-/// False on ARM and WASM, where a caller must fall back to current_time_steady_secs().
+/// True on x86 and ARM64; false on WASM, where a caller must fall back to current_time_steady_secs().
 [[nodiscard]] constexpr bool has_cycle_counter()
 {
     return impl::has_cycle_counter();
@@ -38,9 +38,14 @@ namespace cc
 
 /// A monotonic cycle count, or 0 where the architecture has none (see has_cycle_counter).
 ///
-/// On x86 this is the TSC.
-/// It is constant-rate on modern CPUs, so it tracks wall-clock time rather than halted core cycles — a cheap reference clock, not a measure of work done.
+/// On x86 this is the TSC; on ARM64 it is CNTVCT_EL0, the generic timer's virtual counter.
+/// Both are constant-rate, so this tracks wall-clock time rather than halted core cycles — a cheap reference clock, not a measure of work done.
 /// Nothing here converts it to seconds, because the rate is not knowable without calibration the caller has to do.
+///
+/// **A tick is much coarser on ARM64**, where the timer runs in the tens of megahertz rather than at the core's clock —
+/// about 42 ns on Apple silicon.
+/// That is fine for a profiling scope and useless for timing a handful of instructions, so a microbenchmark measuring
+/// something that short has to loop rather than trust one pair of readings.
 ///
 /// Inline and header-only on purpose: a benchmark loop reads this twice per sample, and a call would be a
 /// meaningful share of what it is trying to measure.
@@ -49,11 +54,14 @@ namespace cc
     return u64(impl::read_cycles());
 }
 
-/// current_cycles() plus the core the reading was taken on, or 0 for both where the architecture has none.
+/// current_cycles() plus the core the reading was taken on, or core 0 where the architecture does not report one.
 ///
 /// The core id is the point: without pinning, a thread migrates, and a migration is the usual explanation for a step in
 /// otherwise steady per-iteration timings.
 /// It costs about ten cycles over current_cycles(), so a caller taking one per event should mean it.
+///
+/// **Only x86 reports one.** ARM64 has the counter and nothing beside it, so it always says core 0 — a reader must not
+/// take that as "the same core every time".
 ///
 /// **Neither reading is ordered against surrounding code on both sides.**
 /// This one waits for prior instructions to retire but does not stop later ones from being hoisted above it, so two
