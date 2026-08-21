@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/dx12/dx12_resource_download.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
+#include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 
 namespace sg::backend::dx12
 {
@@ -44,6 +45,20 @@ struct inflight_window
     cc::vector<download_mem_job> mem_jobs;
 };
 
+/// A readback the actor has resolved and is packing.
+///
+/// The packer carries the per-job cursor, so a read survives across windows AND across process cycles.
+/// That is what lets the actor pick a different job between chunks rather than draining each one to completion
+/// before it looks at the next, which is the whole basis of out-of-order selection.
+struct active_download
+{
+    dx12_async_download_job job;
+    std::unique_ptr<dx12_resource_download> packer;
+    std::shared_ptr<void const> keepalive; // the read source, held across the deferred CPU copies
+    u64 sequence = 0;                      // actor-assigned submission order
+    u64 family = 0;                        // source resource: same-family reads stay in sequence order
+};
+
 /// The async-download copy actor: one thread that packs readbacks into staging windows, submits them, and drains completed windows into their destinations.
 /// All window / job / command-list state lives here and is touched only on the actor thread, so it needs no locks.
 /// It reaches the shared, immutable-after-init fields (staging buffer, fences, queue) via _sys.
@@ -61,23 +76,18 @@ protected:
     {
         maybe_resize_staging(); // adopt a pending set_window_bytes now, while no window is open + FIFO drained
 
-        if (_pending.empty())
-            return false;
-
-        for (auto& job : _pending)
-            stage_job(job);
-        _pending.clear(); // staged reads moved their source into mem_jobs; cancelled ones drop it here
-        submit_window();  // flush the final partial window so its reads run
-        drain_all();      // wait + memcpy every in-flight window so all futures are ready before we sleep
-        return false;     // everything drained + delivered; sleep until the next message
+        admit_pending();
+        pack_until_stalled();
+        submit_window(); // flush the final partial window so its reads run
+        drain_all();     // wait + memcpy every in-flight window so all futures are ready before we sleep
+        return false;    // everything drained + delivered; sleep until the next message
     }
 
     void on_thread_shutdown() override
     {
         // Flush anything still buffered, then drain every window — that waits out the copy queue, so the staging buffer and command list/allocators are safe to release.
-        for (auto& job : _pending)
-            stage_job(job);
-        _pending.clear();
+        admit_pending();
+        pack_until_stalled();
         submit_window();
         drain_all();
     }
@@ -102,89 +112,162 @@ private:
         }
     }
 
-    // Resolves one readback's source (buffer or texture) and stages it.
+    // Resolves each arriving readback's source and gives it a resumable packer.
     // The source is held strong for the job's whole lifetime, so its storage survives the read without a deferred-deletion gate.
-    void stage_job(dx12_async_download_job& job)
+    void admit_pending()
     {
-        if (job.pin.expired())
+        for (auto& job : _pending)
         {
-            fold_cancelled_completion(job);
-            return;
+            if (job.pin.expired())
+            {
+                fold_cancelled_completion(job);
+                continue;
+            }
+
+            active_download a;
+            if (job.is_texture)
+            {
+                CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row "
+                                                                                          "exceeds one staging "
+                                                                                          "window");
+                a.family = u64(reinterpret_cast<u64>(job.texture_source->_resource.Get()));
+                a.packer = std::make_unique<dx12_texture_download>(job.texture_source->_resource.Get(), job.footprint,
+                                                                   job.dst);
+                a.keepalive = job.texture_source;
+            }
+            else
+            {
+                a.family = u64(reinterpret_cast<u64>(job.buffer_source->_resource.Get()));
+                a.packer = std::make_unique<dx12_buffer_download>(job.buffer_source->_resource.Get(), job.src_offset,
+                                                                  job.dst);
+                a.keepalive = job.buffer_source;
+            }
+            a.sequence = _next_sequence++;
+            a.job = cc::move(job);
+            _active.push_back(cc::move(a));
         }
-        if (job.is_texture)
-        {
-            CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row exceeds "
-                                                                                      "one staging window");
-            dx12_texture_download download(job.texture_source->_resource.Get(), job.footprint, job.dst);
-            stage_resource(download, job, job.texture_source);
-        }
-        else
-        {
-            dx12_buffer_download download(job.buffer_source->_resource.Get(), job.src_offset, job.dst);
-            stage_resource(download, job, job.buffer_source);
-        }
+        _pending.clear();
     }
 
-    // Packs one resource readback (buffer or texture) into staging windows, submitting each as it fills, and defers each chunk's CPU memcpy to drain.
-    // A read larger than a window spans several.
-    // A texture job self-aligns each window and returns 0 when a window tail can't fit its next aligned row, which rolls to a fresh window; buffers never return 0.
-    // `keepalive` holds the source alive across the deferred copies.
-    void stage_resource(dx12_resource_download& download,
-                        dx12_async_download_job& job,
-                        std::shared_ptr<void const> const& keepalive)
+    // How the scheduler sees one active readback against the currently open window.
+    //
+    // A window issues its cross-queue waits once, hoisted ahead of its reads (submit_window), so it must never both
+    // promise a completion V and carry a wait that could depend on V — the copy-actor deadlock.
+    // There are two such waits per read: the forward direct-queue token, and the upload completion value.
+    // The async upload a read waits on may itself reverse-wait on a direct writer that waits on this window's V.
+    //
+    // Two eligibility rules keep that true INDEPENDENT of the order reads are packed in:
+    //  - a read with either wait still pending may not join a window that has already finished a read;
+    //  - once such a read IS in the open window, no other read may join, so no other read's completion can land
+    //    beside its waits.
+    // A read's own completion is safe beside its own waits, since both were read before its value was reserved.
+    [[nodiscard]] sg::impl::transfer_candidate candidate_for(active_download const& a) const
     {
-        // A window issues its cross-queue waits once, hoisted ahead of its reads (submit_window).
-        // So it must never both promise a completion V and carry a wait that could depend on V — that self-referential pair is the copy-actor deadlock.
-        // Two such waits per read: the forward direct-queue token, and the upload completion value.
-        // The async upload this read waits on may itself reverse-wait on a direct writer that waits on this window's V.
-        // If the open window already finished a read and either wait is still pending, close it now, so this job's waits land in a fresh window pointing only at prior work.
+        sg::impl::transfer_candidate c;
+        c.flavor = sg::impl::transfer_flavor::async;
+        c.family = a.family;
+        c.sequence = a.sequence;
+
+        if (has_pending_wait(a.job) && _open_highest_finished > 0)
+            c.eligible = false;
+        if (_open_risky_job.has_value() && _open_risky_job.value() != a.sequence)
+            c.eligible = false;
+        return c;
+    }
+
+    [[nodiscard]] bool has_pending_wait(dx12_async_download_job const& job) const
+    {
         bool const forward_pending = u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
         bool const upload_pending
             = job.upload_wait_value != dx12_copy_fence_value::none
            && u64(job.upload_wait_value) > _sys._ctx._upload_async._completion_fence->GetCompletedValue();
-        if (_window_open && _open_highest_finished > 0 && (forward_pending || upload_pending))
-            submit_window();
+        return forward_pending || upload_pending;
+    }
 
-        while (!download.is_finished())
+    // Picks and packs one chunk at a time until nothing can make progress in any window.
+    // A read that cannot go is passed over rather than blocking the queue behind it.
+    void pack_until_stalled()
+    {
+        while (!_active.empty())
         {
             ensure_open_window();
-            isize const avail = _sys._window_bytes - _window_used;
-            isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
-            dx12_download_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
-            dx12_pending_copy chunk = download.execute_next_job(*_list.Get(), alloc);
-            if (chunk.bytes == 0) // window tail too small for the next aligned texture row → roll to a fresh window
+            _candidates.clear();
+            for (auto const& a : _active)
+                _candidates.push_back(candidate_for(a));
+
+            auto const pick = _sys._scheduler.pick_next(_candidates);
+            if (!pick.has_value())
             {
+                // Nothing fits THIS window; closing it clears both eligibility blocks.
+                // "Pristine" must mean no folded completion either, not just no bytes: a batch whose first reads
+                // were all cancelled folds their values into an otherwise empty window, and that alone blocks every
+                // pending-wait read.
+                // Stopping there would leave those reads unstaged and their completion values never signaled.
+                if (_window_used == 0 && _open_highest_finished == 0)
+                    break;
                 submit_window();
                 continue;
             }
-            _window_used += chunk.bytes;
 
-            // This chunk reads the source, so its window must first wait for the last direct-queue list that used it, and for any pending async upload to it.
-            // Max over the window; both fences are monotonic.
-            if (u64(job.wait_token) > _open_max_wait_token)
-                _open_max_wait_token = u64(job.wait_token);
-            if (u64(job.upload_wait_value) > _open_max_upload_wait)
-                _open_max_upload_wait = u64(job.upload_wait_value);
-
-            // The window holding the read's last byte is the one whose completion satisfies a later writer's reverse wait.
-            // Values are monotonic in enqueue order, so max keeps the window's value correct.
-            bool const last = download.is_finished();
-            if (last && job.completion_value != dx12_download_fence_value::none)
+            isize const index = pick.value();
+            if (!pack_chunk(_active[index]))
             {
-                u64 const v = u64(job.completion_value);
-                if (v > _open_highest_finished)
-                    _open_highest_finished = v;
+                CC_ASSERT(_window_used > 0, "an empty staging window could not fit a single chunk");
+                submit_window(); // window tail too small for the next aligned texture row → roll to a fresh one
+                continue;
             }
 
-            // Defer the CPU memcpy until this window's GPU read completes, at drain.
-            // Only the last chunk marks the future ready: windows drain in order, so every earlier chunk is copied by then.
-            _open_mem_jobs.push_back(download_mem_job{cc::move(chunk.deferred_cpu_copy), job.pin,
-                                                      last ? job.completion : cc::shared_async<cc::unit>(), keepalive});
+            if (_active[index].packer->is_finished())
+                _active.remove_from_to(index, index + 1);
 
-            if (_window_used == _sys._window_bytes) // full → submit now and roll to the next window
+            // Independent of whether that finished the read: one ending exactly on the window boundary still leaves
+            // a full window, and the next pick would be handed a zero-byte allocation.
+            if (_window_used == _sys._window_bytes)
                 submit_window();
         }
+
+        CC_ASSERT(_active.empty(), "async download actor stalled with reads still unstaged");
+    }
+
+    // Records one chunk of `a` into the open window and defers its CPU memcpy to drain.
+    // False when the window tail cannot fit the read's next aligned chunk; the caller rolls to a fresh window.
+    [[nodiscard]] bool pack_chunk(active_download& a)
+    {
+        isize const avail = _sys._window_bytes - _window_used;
+        isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
+        dx12_download_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
+
+        dx12_pending_copy chunk = a.packer->execute_next_job(*_list.Get(), alloc);
+        if (chunk.bytes == 0)
+            return false;
+        _window_used += chunk.bytes;
+        _window_async_bytes += chunk.bytes;
+
+        // This chunk reads the source, so its window must first wait for the last direct-queue list that used it, and for any pending async upload to it.
+        // Max over the window; both fences are monotonic.
+        if (u64(a.job.wait_token) > _open_max_wait_token)
+            _open_max_wait_token = u64(a.job.wait_token);
+        if (u64(a.job.upload_wait_value) > _open_max_upload_wait)
+            _open_max_upload_wait = u64(a.job.upload_wait_value);
+        if (has_pending_wait(a.job))
+            _open_risky_job = a.sequence; // the window is now dedicated to it — see candidate_for
+
+        // The window holding the read's last byte is the one whose completion satisfies a later writer's reverse wait.
+        // Values are monotonic in enqueue order, so max keeps the window's value correct.
+        bool const last = a.packer->is_finished();
+        if (last && a.job.completion_value != dx12_download_fence_value::none)
+        {
+            u64 const v = u64(a.job.completion_value);
+            if (v > _open_highest_finished)
+                _open_highest_finished = v;
+        }
+
+        // Defer the CPU memcpy until this window's GPU read completes, at drain.
+        // Only the last chunk settles the future: windows drain in order, so every earlier chunk is copied by then.
+        _open_mem_jobs.push_back(download_mem_job{cc::move(chunk.deferred_cpu_copy), a.job.pin,
+                                                  last ? a.job.completion : cc::shared_async<cc::unit>(), a.keepalive});
+        return true;
     }
 
     // Ensures a window is open with room to write.
@@ -227,7 +310,11 @@ private:
         _open_highest_finished = 0;
         _open_max_wait_token = 0;
         _open_max_upload_wait = 0;
+        _open_risky_job = {};
+        _window_async_bytes = 0;
+        _window_stream_bytes = 0;
         _open_mem_jobs.clear();
+        _sys._scheduler.begin_window();
         _window_open = true;
     }
 
@@ -275,6 +362,7 @@ private:
 
         _inflight.push_back(inflight_window{_current_window, cc::move(_open_mem_jobs)});
         _open_mem_jobs = {};
+        _sys._scheduler.on_window_submitted(_window_async_bytes, _window_stream_bytes);
         _window_open = false;
         ++_current_window;
     }
@@ -341,6 +429,7 @@ private:
         _sys._staging = cc::move(ring.value().resource);
         _sys._mapped = static_cast<byte*>(ring.value().mapped);
         _sys._window_bytes = desired;
+        _sys._scheduler.set_window_bytes(desired);
     }
 
     // Blocks the actor until the copy queue has finished `window` (index).
@@ -358,7 +447,10 @@ private:
 
     dx12_download_async_system& _sys;
 
-    cc::vector<dx12_async_download_job> _pending; // received this cycle, staged in on_process
+    cc::vector<dx12_async_download_job> _pending;         // received since the last cycle, resolved in admit_pending
+    cc::vector<active_download> _active;                  // resolved and mid-pack, until the last chunk is recorded
+    cc::vector<sg::impl::transfer_candidate> _candidates; // rebuilt per pick; a member only to reuse its storage
+    u64 _next_sequence = 0;
 
     u64 _current_window = 0;         // next window index to submit; slot = index % num_staging_windows
     u64 _last_signaled_download = 0; // highest value signaled on the download completion fence (monotonic)
@@ -374,6 +466,13 @@ private:
     u64 _open_max_wait_token = 0;                // highest direct-queue token the open window's reads must wait for
     u64 _open_max_upload_wait = 0;               // highest async-upload value the open window's reads must wait for
     cc::vector<download_mem_job> _open_mem_jobs; // memcpies accumulated for the open window
+
+    // The one read with a still-pending cross-queue wait in the open window, if any.
+    // While it is set the window admits nothing else, which is what keeps the acyclicity rule order-independent.
+    cc::optional<u64> _open_risky_job;
+
+    isize _window_async_bytes = 0; // what the open window has moved, per flavor, for the scheduler's deficit
+    isize _window_stream_bytes = 0;
 
     cc::vector<inflight_window> _inflight; // submitted, not-yet-drained windows (FIFO, oldest at the front)
 };
