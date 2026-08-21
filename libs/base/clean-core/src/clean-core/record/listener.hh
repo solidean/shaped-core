@@ -49,8 +49,9 @@ struct cc::rec::listener
 
     /// One block of one thread's events, in the order that thread wrote them.
     ///
-    /// Blocks from different threads arrive in no particular order relative to each other; wrap the listener in
-    /// cc::rec::ordered_listener when that matters.
+    /// **Blocks from different threads arrive in no particular order relative to each other.**
+    /// A consumer that needs a total order sorts by timestamp itself, the way console_listener does at batch end.
+    /// A consumer that wants samples placed where they were taken wraps itself in cc::rec::splicing_listener.
     virtual void on_chunk(rec::chunk_view const& view) = 0;
 
     /// Called after every batch the consumer drained, whether or not anything arrived.

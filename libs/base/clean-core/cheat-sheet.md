@@ -986,6 +986,13 @@ sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:
 // The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
 // A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
 
+#include <clean-core/record/splicing_listener.hh>  // samples placed where they were taken, LIVE
+cc::rec::splicing_listener splicer(my_listener);     // register THIS, not my_listener; it must outlive the splicer
+splicer.flush();                                     // after the final flush_blocking, or the last samples stay put
+// Everything is delayed by one batch; a sample that misses its target waits max_hold_batches, then goes out unplaced.
+// Unplaced is not lost — it keeps the position it was recorded at, exactly as an offline splice leaves it.
+// Measured: every ANCHORED sample gets placed live, matching recording::spliced_samples exactly.
+
 cc::rec::recording_listener bounded({.max_secs = 30, .max_bytes = 128 << 20});  // both are CAPS; first to bind wins
 cc::rec::recording_listener forensic({.guaranteed_secs = 20, .max_bytes = 64 << 20}); // 20s promised, cap gives way
 rec.trim(policy); rec.retained(policy); rec.total_bytes();  // in place / as a value / what is held

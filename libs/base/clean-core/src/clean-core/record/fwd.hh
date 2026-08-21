@@ -200,6 +200,8 @@ struct scope_span;
 struct trace_relation;
 struct decimation_options;
 struct retention_policy;
+struct splice_options;
+struct splicing_listener;
 
 namespace impl
 {

@@ -151,8 +151,34 @@ cc::rec::chunk_view cc::rec::recorded_block::view() const
 
 void cc::rec::recording::append(cc::rec::chunk_view const& view)
 {
-    if (view.source == nullptr || view.bytes.empty())
+    if (view.bytes.empty())
         return;
+
+    // A view with no chunk behind it is a SYNTHESIZED block — what a filter, a decimation or a live splice produces.
+    // Its bytes belong to whoever built it and are only guaranteed for this call, so retaining it means copying.
+    // Dropping it instead is the alternative, and it would lose a spliced stream silently.
+    if (view.source == nullptr)
+    {
+        cc::vector<byte> copy;
+        copy.push_back_range(view.bytes);
+
+        _blocks.push_back({
+            .owned = cc::make_pinned_data(cc::move(copy)).reinterpret_as<byte const>(),
+            .from = 0,
+            .to = u32(view.bytes.size()),
+            .thread_id = view.thread.id,
+            .thread_index = view.thread.index,
+            .thread_name = cc::string(view.thread.name),
+            .chunk_seq = view.chunk_seq,
+            .layer = view.layer,
+            .base_cycles = view.base_cycles,
+            .base_wall_secs = view.base_wall_secs,
+            .seal_cycles = view.seal_cycles,
+            .seal_wall_secs = view.seal_wall_secs,
+            .state_at_start = view.state_at_start,
+        });
+        return;
+    }
 
     auto* const c = const_cast<rec::chunk*>(view.source);
     auto const offset = u32(view.bytes.data() - c->data);

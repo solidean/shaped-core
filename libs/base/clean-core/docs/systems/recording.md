@@ -544,6 +544,32 @@ A foreign table is worth having even when the binaries are not.
 Failing to load one costs the function and the line and still leaves the module and the offset, so a frame degrades to `app.exe+0x1234`.
 An unresolved frame keeps its address rather than acquiring a confident wrong name.
 
+### Placing samples while the program runs
+
+A sample is written to the sampler's stream carrying an anchor into the sampled thread's, and [`recording::spliced_samples`](../../src/clean-core/record/recording.hh) moves it home.
+That works on a recording that is already complete.
+
+A live consumer has no such luxury: it sees blocks as they are drained, and a sample's target may not have arrived yet.
+[`cc::rec::splicing_listener`](../../src/clean-core/record/splicing_listener.hh) sits in front of one and trades a bounded delay for placement.
+
+```cpp
+cc::rec::splicing_listener splicer(my_listener);   // register THIS, not my_listener
+```
+
+Everything is forwarded at the end of the batch it arrived in; a sample whose target is missing is carried for `max_hold_batches` and then forwarded where it was recorded.
+**Giving up is not losing** — that is exactly what the offline splice does with a sample it cannot place, and it is why splicing twice is a no-op.
+
+Measured at 1 kHz over a burn loop, the live splicer places **every anchored sample**, matching the offline splice exactly at every hold setting:
+
+| hold batches | samples | anchored | placed live | placed offline |
+|---|---|---|---|---|
+| 1 | 1598 | 128 | 128 | 128 |
+| 4 | 1734 | 132 | 132 | 132 |
+| 8 | 1721 | 135 | 135 | 135 |
+
+The gap between `samples` and `anchored` is not a splicing failure.
+A sample of a thread the recorder never heard of has no stream to be anchored into, and with `include_unknown_threads` on most samples are those — see [sampling](#sampling).
+
 ### Keeping a bounded window
 
 A capture that runs for hours has to throw something away, and **which** thing depends entirely on what the capture is for.
