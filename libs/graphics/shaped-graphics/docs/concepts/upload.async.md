@@ -43,13 +43,23 @@ A command list submitted *before* the upload that uses the buffer must finish be
 Both waits point strictly **backward in the CPU submission order**, so *per operation* the dependency graph is acyclic — no deadlock — and the timeline is easy to reason about.
 Multiple async uploads to the **same** buffer compose correctly.
 They are processed in order, their copies stay in order on the transfer queue, and each waits on a token at least as high as the previous, so the last upload wins.
+That is an *ordering family* rather than a global order: jobs sharing a destination keep their submission order, and jobs that do not are free to overtake each other.
+So an upload blocked behind a slow command list is filled around instead of stalling every later copy behind it.
 
-**One scheduling rule keeps that acyclic at the window level.**
+**Two scheduling rules keep that acyclic at the window level.**
 The reverse wait is issued once per *window*, on the max token over its copies, hoisted ahead of the window's execute.
 So a window must never *both* signal a completion `V` *and* carry a reverse wait that transitively depends on `V`.
 The hoisted wait would then sit ahead of the very copy whose signal it needs, closing a cycle.
-The actor enforces this by **closing the open window before staging a job** whose reverse token is still pending on the direct queue, once the window has already finished an upload.
+
+- A job whose reverse token is still pending on the direct queue **may not join a window that has already finished an upload**.
+- Once such a job *is* in the open window, **no other job may join it**, so no other job's completion can land beside its wait.
+
+A job's own completion is safe beside its own wait: the token was read before the value was reserved, so nothing that token names can depend on that value.
 Each window's reverse wait then points only at prior, already-submitted windows or at already-complete tokens.
+
+The second rule is what makes the pair hold **independent of the order jobs are packed in**.
+While staging was strictly submission-ordered the first rule alone covered both directions, because the job that finishes was necessarily staged first.
+Out-of-order selection removed that guarantee, and needed the rule made explicit rather than inherited from the order.
 
 Over-waiting on a higher (monotonic) value is always safe, and neither stamp is ever reset — a stale value only ever yields a cheap already-satisfied wait.
 sg has **no per-resource state / access-tracking layer yet**, so this pair of per-buffer stamps is a deliberately minimal stand-in that the in-progress access-tracking layer should subsume.
@@ -97,9 +107,6 @@ Preserve these; the rest is tuning:
 Not invariants — v1 shortcuts:
 
 - **Persistent buffers only**, and **single-writer**: an async upload to a buffer concurrently used by an in-flight list is the caller's hazard to avoid.
-- **In-order copies (head-of-line blocking).**
-  Copies run strictly in submission order on the transfer queue, so a reverse wait on a slow command list stalls *all* later async copies behind it, not just the ones on that buffer.
-  Pulling blocked jobs out of order and filling around them is the deferred optimization, and it has to keep same-buffer uploads composing.
 - **Coarser than per-buffer state**: the stamps are single monotonic values per buffer, a down-payment on the per-resource state-tracking layer landing separately, which should replace them.
 - **No CPU-observable completion** — no `upload_token`, no future.
   Completion is expressed purely as the automatic GPU wait; a cheap poll on the completion fence could be exposed later if a "safe to reference now" signal is wanted.

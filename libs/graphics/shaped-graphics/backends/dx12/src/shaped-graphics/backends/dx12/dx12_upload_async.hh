@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 
 #include <atomic>
 
@@ -100,6 +101,11 @@ public:
     // A pending set_window_bytes request; the actor compares it to _window_bytes each process cycle and rebuilds staging when they differ.
     // Written by any thread, read by the actor.
     std::atomic<isize> _desired_window_bytes = 0;
+
+    // Which job fills the open window next, and how windows are shared between the async and streaming flavors.
+    // Actor-thread state like the window bookkeeping around it, so it needs no lock.
+    // It lives here rather than in the actor only because the actor type is file-local to the .cc.
+    sg::impl::transfer_scheduler _scheduler;
 
 private:
     // Reserved on the caller thread (fetch_add) and handed out as dx12_copy_fence_value.

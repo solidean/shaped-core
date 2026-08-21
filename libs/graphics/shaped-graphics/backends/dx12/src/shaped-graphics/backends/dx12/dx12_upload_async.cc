@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
+#include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 
 namespace sg::backend::dx12
 {
@@ -26,6 +27,23 @@ constexpr int num_staging_windows = 3;
 {
     return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
 }
+
+/// A job the actor has resolved and is packing.
+///
+/// The packer carries the per-job cursor, so a job survives across windows AND across process cycles.
+/// That is what lets the actor pick a different job between chunks rather than draining each one to completion
+/// before it looks at the next, which is the whole basis of out-of-order selection.
+///
+/// `keepalive` holds the destination strong for exactly as long as the packer names its raw `ID3D12Resource*`.
+/// The job's own handle is weak, so without it the storage could die mid-pack.
+struct active_upload
+{
+    dx12_async_upload_job job;
+    std::unique_ptr<dx12_resource_upload> packer;
+    std::shared_ptr<void const> keepalive;
+    u64 sequence = 0; // actor-assigned submission order
+    u64 family = 0;   // destination resource: same-family jobs must stay in sequence order
+};
 
 /// The async-upload copy actor: one thread that packs jobs into staging windows and submits copy work.
 /// All window / job / command-list state lives here and is touched only on the actor thread, so it needs no locks.
@@ -44,14 +62,10 @@ protected:
     {
         maybe_resize_staging(); // adopt a pending set_window_bytes now, while no window is open
 
-        if (_pending.empty())
-            return false;
-
-        for (auto& job : _pending)
-            stage_job(job);
-        _pending.clear(); // destroys jobs → releases pins + buffer handles; bytes are already staged
-        submit_window();  // flush the final partial window so its copies run
-        return false;     // everything drained + submitted; sleep until the next message
+        admit_pending();
+        pack_until_stalled();
+        submit_window(); // flush the final partial window so its copies run
+        return false;    // everything drained + submitted; sleep until the next message
     }
 
     void on_thread_shutdown() override
@@ -59,9 +73,8 @@ protected:
         // Flush anything still buffered, then wait for the copy queue to idle.
         // The staging buffer and the command list/allocators are only safe to release afterwards.
         // This queue is independent of the direct queue, which shutdown drains separately.
-        for (auto& job : _pending)
-            stage_job(job);
-        _pending.clear();
+        admit_pending();
+        pack_until_stalled();
         submit_window();
         if (_current_window > 0)
             wait_for_window(_current_window - 1); // the last submitted window
@@ -84,81 +97,159 @@ private:
         }
     }
 
-    // Resolves one upload's destination (buffer or texture) and stages it.
-    // The strong handle is held across the whole staging loop — memcpy and record — and released at return.
-    void stage_job(dx12_async_upload_job& job)
+    // Resolves each arriving job's destination and gives it a resumable packer.
+    // A destination already released skips the copy entirely — a 1 GiB upload to a dead buffer must not stage.
+    void admit_pending()
     {
-        if (job.is_texture)
+        for (auto& job : _pending)
         {
-            auto const strong = job.texture_target.lock();
-            if (!strong || !strong->_resource)
+            active_upload a;
+            if (job.is_texture)
             {
-                fold_dropped_completion(job);
-                return;
+                auto strong = job.texture_target.lock();
+                if (!strong || !strong->_resource)
+                {
+                    fold_dropped_completion(job);
+                    continue;
+                }
+                CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row "
+                                                                                          "exceeds one staging "
+                                                                                          "window");
+                a.family = u64(reinterpret_cast<u64>(strong->_resource.Get()));
+                a.packer = std::make_unique<dx12_texture_upload>(strong->_resource.Get(), job.footprint, job.src.span());
+                a.keepalive = cc::move(strong);
             }
-            CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row exceeds "
-                                                                                      "one staging window");
-            dx12_texture_upload upload(strong->_resource.Get(), job.footprint, job.src.span());
-            stage_resource(upload, job);
-        }
-        else
-        {
-            auto const strong = job.buffer_target.lock();
-            if (!strong || !strong->_resource)
+            else
             {
-                fold_dropped_completion(job);
-                return;
+                auto strong = job.buffer_target.lock();
+                if (!strong || !strong->_resource)
+                {
+                    fold_dropped_completion(job);
+                    continue;
+                }
+                a.family = u64(reinterpret_cast<u64>(strong->_resource.Get()));
+                a.packer = std::make_unique<dx12_buffer_upload>(strong->_resource.Get(), job.dst_offset, job.src.span());
+                a.keepalive = cc::move(strong);
             }
-            dx12_buffer_upload upload(strong->_resource.Get(), job.dst_offset, job.src.span());
-            stage_resource(upload, job);
+            a.sequence = _next_sequence++;
+            a.job = cc::move(job);
+            _active.push_back(cc::move(a));
         }
+        _pending.clear();
     }
 
-    // Packs one resource upload (buffer or texture) into staging windows, submitting each as it fills.
-    // An upload larger than a window spans several.
-    // A texture job self-aligns each window and returns 0 when a window tail can't fit its next aligned row, which rolls to a fresh window; buffers never return 0.
-    void stage_resource(dx12_resource_upload& upload, dx12_async_upload_job& job)
+    // How the scheduler sees one active job against the currently open window.
+    //
+    // A window issues its reverse-sync wait ONCE, hoisted to the front (submit_window), so it must never both
+    // promise a completion V and carry a reverse wait that could depend on V.
+    // The hoisted Wait would then sit ahead of the very copy whose signal it needs — the copy-actor deadlock.
+    //
+    // Two eligibility rules keep that true INDEPENDENT of the order jobs are packed in, which matters now that the
+    // order is no longer submission order:
+    //  - a job whose reverse token is still pending may not join a window that has already finished an upload;
+    //  - once such a job IS in the open window, no other job may join, so no other job's completion can land beside
+    //    its wait.
+    // A job's own completion is safe beside its own wait: the token was read before the value was reserved, so
+    // nothing that token names can depend on that value.
+    // Under the old strictly-FIFO staging the first rule alone covered both cases; it stops sufficing once jobs
+    // interleave, because the pending-wait job can now be packed BEFORE the one that finishes.
+    [[nodiscard]] sg::impl::transfer_candidate candidate_for(active_upload const& a) const
     {
-        // A window issues its reverse-sync wait once, hoisted to the front (submit_window).
-        // So it must never both promise a completion V and carry a reverse-wait that could depend on V.
-        // That self-referential pair is the copy-actor deadlock: the window's Wait sits ahead of the very copy whose signal the Wait transitively needs.
-        // If the open window already finished an upload and this job's reverse token is still pending on the direct queue, close the window now.
-        // This job's Wait then lands in a fresh window that can only point at prior, already-submitted windows.
-        if (_window_open && _open_highest_finished > 0
-            && u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
-            submit_window();
+        sg::impl::transfer_candidate c;
+        c.flavor = sg::impl::transfer_flavor::async;
+        c.family = a.family;
+        c.sequence = a.sequence;
 
-        while (!upload.is_finished())
+        bool const pending_wait = u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
+        if (pending_wait && _open_highest_finished > 0)
+            c.eligible = false;
+        if (_open_risky_job.has_value() && _open_risky_job.value() != a.sequence)
+            c.eligible = false;
+        return c;
+    }
+
+    // Picks and packs one chunk at a time until nothing can make progress in any window.
+    // A job that cannot go is passed over rather than blocking the queue behind it, which is what removes
+    // head-of-line blocking: one upload waiting on a slow command list no longer stalls every later one.
+    void pack_until_stalled()
+    {
+        while (!_active.empty())
         {
             ensure_open_window();
-            isize const avail = _sys._window_bytes - _window_used;
-            isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
-            dx12_upload_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
-            isize const consumed = upload.execute_next_job(*_list.Get(), alloc);
-            if (consumed == 0) // window tail too small for the next aligned texture row → roll to a fresh window
+            _candidates.clear();
+            for (auto const& a : _active)
+                _candidates.push_back(candidate_for(a));
+
+            auto const pick = _sys._scheduler.pick_next(_candidates);
+            if (!pick.has_value())
             {
+                // Nothing fits THIS window.
+                // Closing it clears both eligibility blocks, so a fresh one can take what this one could not.
+                //
+                // "Pristine" has to mean no folded completion either, not just no bytes.
+                // A batch whose first jobs were all dropped folds their values into an otherwise empty window, and
+                // that alone blocks every pending-wait job.
+                // Stopping there would leave those jobs unstaged and their completion values never signaled — a
+                // fence hole that hangs the direct queue waiting on it.
+                if (_window_used == 0 && _open_highest_finished == 0)
+                    break;
                 submit_window();
                 continue;
             }
-            _window_used += consumed;
 
-            // This chunk writes the destination, so its window must first wait for the last direct-queue list that used it.
-            // Max over the window; the submission fence is monotonic.
-            if (u64(job.wait_token) > _open_max_wait_token)
-                _open_max_wait_token = u64(job.wait_token);
-
-            // The window holding the upload's last byte is the one whose completion satisfies the reader wait.
-            if (upload.is_finished() && job.copy_fence_value != dx12_copy_fence_value::none)
+            isize const index = pick.value();
+            if (!pack_chunk(_active[index]))
             {
-                u64 const v = u64(job.copy_fence_value);
-                if (v > _open_highest_finished)
-                    _open_highest_finished = v;
+                CC_ASSERT(_window_used > 0, "an empty staging window could not fit a single chunk");
+                submit_window(); // window tail too small for the next aligned texture row → roll to a fresh one
+                continue;
             }
 
-            if (_window_used == _sys._window_bytes) // full → submit now and roll to the next window
+            if (_active[index].packer->is_finished())
+                _active.remove_from_to(index, index + 1); // releases the pin + keepalive, on the actor thread
+
+            // Independent of whether that finished the job: a job ending exactly on the window boundary still
+            // leaves a full window, and the next pick would be handed a zero-byte allocation.
+            if (_window_used == _sys._window_bytes)
                 submit_window();
         }
+
+        // On a pristine window every active job is eligible, so the loop only ends once all of them are staged.
+        // If that ever stops holding, the jobs left here would never signal their completion values, and the first
+        // direct-queue list waiting on one would hang — so say it loudly rather than deadlocking in the dark.
+        CC_ASSERT(_active.empty(), "async upload actor stalled with jobs still unstaged");
+    }
+
+    // Writes one chunk of `a` into the open window and records its copy.
+    // False when the window tail cannot fit the job's next aligned chunk; the caller rolls to a fresh window.
+    [[nodiscard]] bool pack_chunk(active_upload& a)
+    {
+        isize const avail = _sys._window_bytes - _window_used;
+        isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
+        dx12_upload_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
+
+        isize const consumed = a.packer->execute_next_job(*_list.Get(), alloc);
+        if (consumed == 0)
+            return false;
+        _window_used += consumed;
+        _window_async_bytes += consumed;
+
+        // This chunk writes the destination, so its window must first wait for the last direct-queue list that used it.
+        // Max over the window; the submission fence is monotonic.
+        if (u64(a.job.wait_token) > _open_max_wait_token)
+            _open_max_wait_token = u64(a.job.wait_token);
+        if (u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
+            _open_risky_job = a.sequence; // the window is now dedicated to it — see candidate_for
+
+        // The window holding the upload's last byte is the one whose completion satisfies the reader wait.
+        if (a.packer->is_finished() && a.job.copy_fence_value != dx12_copy_fence_value::none)
+        {
+            u64 const v = u64(a.job.copy_fence_value);
+            if (v > _open_highest_finished)
+                _open_highest_finished = v;
+        }
+        return true;
     }
 
     // Ensures a window is open with room to write.
@@ -201,6 +292,10 @@ private:
         _window_used = 0;
         _open_highest_finished = 0;
         _open_max_wait_token = 0;
+        _open_risky_job = {};
+        _window_async_bytes = 0;
+        _window_stream_bytes = 0;
+        _sys._scheduler.begin_window();
         _window_open = true;
     }
 
@@ -239,6 +334,7 @@ private:
             _last_signaled_copy = _open_highest_finished;
         }
 
+        _sys._scheduler.on_window_submitted(_window_async_bytes, _window_stream_bytes);
         _window_open = false;
         ++_current_window;
     }
@@ -268,6 +364,7 @@ private:
         _sys._staging = cc::move(ring.value().resource);
         _sys._mapped = static_cast<byte*>(ring.value().mapped);
         _sys._window_bytes = desired;
+        _sys._scheduler.set_window_bytes(desired);
     }
 
     // Blocks the actor until the copy queue has finished `window` (index).
@@ -285,7 +382,10 @@ private:
 
     dx12_upload_async_system& _sys;
 
-    cc::vector<dx12_async_upload_job> _pending; // received this cycle, staged in on_process
+    cc::vector<dx12_async_upload_job> _pending;           // received since the last cycle, resolved in admit_pending
+    cc::vector<active_upload> _active;                    // resolved and mid-pack, until the last chunk is recorded
+    cc::vector<sg::impl::transfer_candidate> _candidates; // rebuilt per pick; a member only to reuse its storage
+    u64 _next_sequence = 0;
 
     u64 _current_window = 0;     // next window index to submit; slot = index % num_staging_windows
     u64 _last_signaled_copy = 0; // highest value signaled on the completion fence (monotonic)
@@ -299,6 +399,13 @@ private:
     isize _window_used = 0;         // bytes written into the open window so far
     u64 _open_highest_finished = 0; // highest completion value of uploads finished in the open window
     u64 _open_max_wait_token = 0;   // highest direct-queue token the open window's copies must wait for
+
+    // The one job with a still-pending reverse wait in the open window, if any.
+    // While it is set the window admits nothing else, which is what keeps the acyclicity rule order-independent.
+    cc::optional<u64> _open_risky_job;
+
+    isize _window_async_bytes = 0; // what the open window has moved, per flavor, for the scheduler's deficit
+    isize _window_stream_bytes = 0;
 };
 } // namespace
 

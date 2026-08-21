@@ -44,6 +44,7 @@ add_library(shaped-graphics
     src/shaped-graphics/context/cached.cc
     src/shaped-graphics/memory/memory_heap.cc
     src/shaped-graphics/resource/impl/texture_copy_region.cc
+    src/shaped-graphics/transfer/impl/transfer_scheduler.cc
 )
 
 # Public headers live co-located in src/. FILE_SET models the public API explicitly.
@@ -177,6 +178,7 @@ if(SC_BUILD_TESTS)
         tests/texture/texture-test.cc
         tests/texture/texture-view-test.cc
         tests/transfer/bytes_future-test.cc
+        tests/transfer/transfer_scheduler-test.cc
         tests/binding/binding-test.cc
         tests/binding/layout_hash-test.cc
         tests/binding/shader_codec-test.cc
