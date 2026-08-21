@@ -139,6 +139,10 @@ TEST("test recording - --record buckets a test that never asked", no_scheduler)
     auto config = nx::test_schedule_config::create_from_args(2, argv);
     CHECK(config.record_all);
 
+    // --record buckets into the RUN's recorder, so it has nothing to do when the run was started without one.
+    if (!nx::test_recording().is_attached() && !cc::rec::is_initialized())
+        SKIP("the run has no recorder (--no-recording)");
+
     nx::test_registry reg;
     reg.add_declaration("inner-unasked", {},
                         []
