@@ -65,6 +65,22 @@ namespace cc
 /// Returns an empty capture on a platform with no walkable native stack (wasm), rather than a wrong one.
 [[nodiscard]] cc::stack_capture_result capture_stack(cc::span<void*> out, isize skip = 0, void const* stop_frame = nullptr);
 
+/// Captures a stack from a thread's saved machine context rather than from here.
+///
+/// This is what sampling needs: a thread is suspended, its context read, and its stack walked from outside.
+/// `native_context` is a `CONTEXT*` on Windows and null elsewhere, since no other platform walks a foreign thread
+/// this way — POSIX sampling runs the walk ON the target, from a signal handler, where plain capture_stack works.
+///
+/// **The target must not be running.** Walking a live thread's stack reads a chain that is being rewritten underneath.
+[[nodiscard]] cc::stack_capture_result capture_stack_from_native_context(void* native_context,
+                                                                         cc::span<void*> out,
+                                                                         isize skip = 0,
+                                                                         void const* stop_frame = nullptr);
+
+/// Whether a foreign thread's context can be walked at all.
+/// True only on Windows today, which is the only platform whose sampler runs outside the sampled thread.
+[[nodiscard]] bool stack_capture_from_context_available();
+
 /// Whether this build can walk a stack at all.
 /// Constant per platform, and false under Emscripten.
 [[nodiscard]] bool stack_capture_available();

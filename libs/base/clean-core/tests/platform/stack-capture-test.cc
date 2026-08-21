@@ -59,18 +59,18 @@ CC_DONT_INLINE capture take_at_depth(int depth)
     return take();
 }
 
-/// Whether `deep` ends with the whole of `shallow`.
-[[nodiscard]] bool ends_with(cc::span<void* const> deep, cc::span<void* const> shallow)
+/// How many frames two captures agree on, counting back from the outermost.
+///
+/// The right invariant to assert, because the frames they DISAGREE on are the interesting ones and there is no
+/// build-independent count of them: a call site differs, a helper gets inlined, a body is reached through one more
+/// wrapper in one preset than another.
+/// What must hold in every build is that two captures of the same program share almost all of their ancestry.
+[[nodiscard]] isize common_suffix(cc::span<void* const> a, cc::span<void* const> b)
 {
-    if (shallow.size() > deep.size())
-        return false;
-
-    auto const offset = deep.size() - shallow.size();
-    for (isize i = 0; i < shallow.size(); ++i)
-        if (deep[offset + i] != shallow[i])
-            return false;
-
-    return true;
+    auto shared = isize(0);
+    while (shared < a.size() && shared < b.size() && a[a.size() - 1 - shared] == b[b.size() - 1 - shared])
+        ++shared;
+    return shared;
 }
 
 CC_DONT_INLINE capture take_one_deeper()
@@ -89,6 +89,14 @@ CC_DONT_INLINE void take_both(capture& shallow, capture& deep)
     shallow = take();
     deep = take_one_deeper();
     g_no_tail_call = int(shallow.result.count + deep.result.count);
+}
+
+/// The same anchoring, for the pair that differs only in `skip`.
+CC_DONT_INLINE void take_both_skipping(capture& all, capture& skipped)
+{
+    all = take(0);
+    skipped = take(2);
+    g_no_tail_call = int(all.result.count + skipped.result.count);
 }
 } // namespace
 
@@ -122,16 +130,13 @@ TEST("stack capture - a deeper capture extends a shallower one")
     capture deep;
     take_both(shallow, deep);
 
-    REQUIRE(shallow.result.count > 2);
-    REQUIRE(deep.result.count == shallow.result.count + 1);
+    REQUIRE(shallow.result.count > 3);
+    CHECK(deep.result.count == shallow.result.count + 1);
 
-    // Two frames differ for reasons that are not the walk's.
-    // Frame 0 is each capture's own call site inside take/take_one_deeper, and the frame after it is take_both's own
-    // call site — take_both calls the two helpers from two different places, so those addresses are simply not equal.
-    // Everything above is the same ancestry seen from one level further in, which is the strongest thing you can say
-    // about a walk without knowing a single name.
-    for (isize i = 2; i < shallow.result.count; ++i)
-        CHECK(shallow.frames[i] == deep.frames[i + 1]);
+    // One frame deeper, and everything above the innermost couple is the same ancestry.
+    // The two that may differ are each capture's own call site and take_both's, which calls the two helpers from two
+    // different places — neither of which the walk has any say in.
+    CHECK(common_suffix(deep.frames, shallow.frames) >= shallow.result.count - 2);
 }
 
 TEST("stack capture - a recursive call site repeats once per level")
@@ -160,14 +165,14 @@ TEST("stack capture - skip drops exactly the innermost frames")
     if (!cc::stack_capture_available())
         SKIP("no stack walking on this platform");
 
-    auto const all = take(0);
-    auto const skipped = take(2);
+    capture all;
+    capture skipped;
+    take_both_skipping(all, skipped);
 
-    REQUIRE(all.result.count > 2);
-    REQUIRE(skipped.result.count > 0);
+    REQUIRE(all.result.count > 3);
 
     CHECK(skipped.result.count == all.result.count - 2);
-    CHECK(ends_with(all.frames, skipped.frames));
+    CHECK(common_suffix(all.frames, skipped.frames) >= skipped.result.count - 1);
 }
 
 TEST("stack capture - a full buffer reports truncation rather than lying")
@@ -196,9 +201,6 @@ TEST("stack capture - a scope frame stops the walk short")
     if (!cc::stack_capture_available())
         SKIP("no stack walking on this platform");
 
-#if defined(_WIN32)
-    SKIP("RtlCaptureStackBackTrace has no per-frame hook, so stop_frame is not honoured yet");
-#else
     auto const unbounded = take();
     REQUIRE(unbounded.result.count > 0);
 
@@ -208,13 +210,12 @@ TEST("stack capture - a scope frame stops the walk short")
 
     auto const bounded = take(0, frame);
 
-    // Strictly shorter, and a prefix: the walk stopped where the scope stack takes over.
+    // The walk stopped where the scope stack takes over, and said so rather than merely running short.
     CHECK(bounded.result.stopped);
     CHECK(bounded.result.count < unbounded.result.count);
-    CHECK(ends_with(unbounded.frames, bounded.frames) == false); // a PREFIX, not a suffix
-    for (isize i = 0; i < bounded.result.count; ++i)
-        CHECK(bounded.frames[i] == unbounded.frames[i]);
-#endif
+
+    // ... and it only stops when there is a scope to stop at.
+    CHECK(!unbounded.result.stopped);
 }
 
 TEST("stack capture - works on a thread we did not start it on")

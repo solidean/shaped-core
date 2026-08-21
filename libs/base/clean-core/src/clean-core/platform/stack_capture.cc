@@ -22,7 +22,112 @@ constexpr bool has_stack_capture = true;
 constexpr bool has_stack_capture = false;
 #endif
 
-#if !defined(__EMSCRIPTEN__) && !defined(_WIN32) && (defined(__linux__) || defined(__APPLE__))
+#if defined(_WIN32)
+
+/// Where execution is, and where the stack is, in a CONTEXT — spelled differently per architecture.
+[[nodiscard]] DWORD64& context_pc(CONTEXT& c)
+{
+#if defined(CC_ARCH_ARM64)
+    return c.Pc;
+#else
+    return c.Rip;
+#endif
+}
+
+[[nodiscard]] DWORD64& context_sp(CONTEXT& c)
+{
+#if defined(CC_ARCH_ARM64)
+    return c.Sp;
+#else
+    return c.Rsp;
+#endif
+}
+
+/// Unwinds `start` (or the caller's own context when null) one frame at a time.
+///
+/// Hand-rolled rather than RtlCaptureStackBackTrace for two reasons that both matter here.
+/// It offers a per-frame hook, which is what `stop_frame` needs; and it walks an arbitrary CONTEXT, which is what
+/// sampling a suspended thread needs — RtlCaptureStackBackTrace only ever walks its own caller.
+/// The history table is reused across frames, which is where most of the per-frame lookup cost goes.
+CC_DONT_INLINE cc::stack_capture_result capture_from_context(void* start,
+                                                             cc::span<void*> out,
+                                                             isize skip,
+                                                             void const* stop_frame)
+{
+    cc::stack_capture_result result;
+
+    // A foreign context's own PC is the most interesting frame it has — it is where that thread IS — while a
+    // self-capture's is inside capture_stack and never wanted.
+    auto const emit_start_pc = start != nullptr;
+
+    CONTEXT ctx;
+    if (start != nullptr)
+        ctx = *static_cast<CONTEXT const*>(start);
+    else
+        ::RtlCaptureContext(&ctx);
+
+    UNWIND_HISTORY_TABLE history = {};
+    auto const stop = reinterpret_cast<u64>(stop_frame);
+    auto remaining_skip = skip;
+
+    auto const take = [&](u64 pc)
+    {
+        if (remaining_skip > 0)
+        {
+            --remaining_skip;
+            return true;
+        }
+
+        if (result.count >= out.size())
+        {
+            result.truncated = true;
+            return false;
+        }
+
+        out[result.count++] = reinterpret_cast<void*>(pc);
+        return true;
+    };
+
+    if (emit_start_pc && context_pc(ctx) != 0 && !take(context_pc(ctx)))
+        return result;
+
+    // A capture is bounded work even when the chain is a lie, which is what keeps a crash handler from hanging.
+    constexpr isize max_frames = 512;
+
+    for (isize walked = 0; walked < max_frames; ++walked)
+    {
+        DWORD64 image_base = 0;
+        auto* const function = ::RtlLookupFunctionEntry(context_pc(ctx), &image_base, &history);
+        if (function == nullptr)
+        {
+            // A leaf with no unwind data: its return address is at the stack pointer, and there is nothing to unwind.
+            result.broken = true;
+            break;
+        }
+
+        PVOID handler_data = nullptr;
+        DWORD64 establisher_frame = 0;
+        ::RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context_pc(ctx), function, &ctx, &handler_data,
+                           &establisher_frame, nullptr);
+
+        auto const pc = context_pc(ctx);
+        if (pc == 0)
+            break; // the outermost frame of the thread
+
+        if (stop != 0 && u64(context_sp(ctx)) >= stop)
+        {
+            result.stopped = true;
+            break;
+        }
+
+        if (!take(pc))
+            break;
+    }
+
+    return result;
+}
+
+#elif !defined(__EMSCRIPTEN__) && (defined(__linux__) || defined(__APPLE__))
 
 /// One frame's worth of the chain, and the same layout on x86-64 and arm64.
 ///
@@ -40,8 +145,8 @@ struct frame
 /// stack is a corrupted or mid-prologue frame, and following it reads arbitrary memory.
 struct stack_bounds
 {
-    cc::uintptr low = 0;
-    cc::uintptr high = 0;
+    u64 low = 0;
+    u64 high = 0;
     bool known = false;
 };
 
@@ -60,7 +165,7 @@ stack_bounds const& current_stack_bounds()
     auto const size = pthread_get_stacksize_np(pthread_self());
     if (top != nullptr && size > 0)
     {
-        b.high = reinterpret_cast<cc::uintptr>(top);
+        b.high = reinterpret_cast<u64>(top);
         b.low = b.high - size;
     }
 #else
@@ -71,7 +176,7 @@ stack_bounds const& current_stack_bounds()
         size_t size = 0;
         if (pthread_attr_getstack(&attr, &addr, &size) == 0 && addr != nullptr)
         {
-            b.low = reinterpret_cast<cc::uintptr>(addr);
+            b.low = reinterpret_cast<u64>(addr);
             b.high = b.low + size;
         }
         pthread_attr_destroy(&attr);
@@ -88,9 +193,9 @@ stack_bounds const& current_stack_bounds()
 /// looking at a frame at all.
 [[nodiscard]] bool is_plausible(frame const* f, frame const* previous, stack_bounds const& b)
 {
-    auto const a = reinterpret_cast<cc::uintptr>(f);
+    auto const a = reinterpret_cast<u64>(f);
 
-    if (a <= reinterpret_cast<cc::uintptr>(previous))
+    if (a <= reinterpret_cast<u64>(previous))
         return false; // the stack grows down, so an enclosing frame is always higher
     if ((a & (alignof(void*) - 1)) != 0)
         return false;
@@ -101,6 +206,33 @@ stack_bounds const& current_stack_bounds()
 }
 #endif
 } // namespace
+
+bool cc::stack_capture_from_context_available()
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+cc::stack_capture_result cc::capture_stack_from_native_context(void* native_context,
+                                                               cc::span<void*> out,
+                                                               isize skip,
+                                                               void const* stop_frame)
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    if (native_context == nullptr || out.empty() || skip < 0)
+        return {};
+    return capture_from_context(native_context, out, skip, stop_frame);
+#else
+    (void)native_context;
+    (void)out;
+    (void)skip;
+    (void)stop_frame;
+    return {};
+#endif
+}
 
 bool cc::stack_capture_available()
 {
@@ -118,32 +250,14 @@ cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void
     return result;
 
 #elif defined(_WIN32)
-    // Table-driven, because x64 Windows has no frame-pointer ABI to chase.
-    //
-    // No early-out for stop_frame: RtlCaptureStackBackTrace offers no per-frame hook, so honouring it would mean
-    // hand-rolling the walk over RtlVirtualUnwind.
-    // That is the follow-up; today a Windows caller passing one gets a full capture rather than a wrong one.
-    (void)stop_frame;
-
-    // One extra so a stack deeper than `out` is distinguishable from one that exactly fills it.
-    auto const wanted = ULONG(cc::min(out.size() + 1, isize(0xFFFF)));
-    void* scratch[257];
-    auto const room = ULONG(cc::min(isize(wanted), isize(CC_ARRAY_COUNT_OF(scratch))));
-
-    auto const captured = ULONG(::RtlCaptureStackBackTrace(ULONG(skip + 1), room, scratch, nullptr));
-    auto const usable = isize(captured);
-
-    result.count = cc::min(usable, out.size());
-    result.truncated = usable > out.size();
-    for (isize i = 0; i < result.count; ++i)
-        out[i] = scratch[i];
-
-    return result;
+    // One extra, for this function's own frame: capture_from_context is deliberately not inlined, so the walk starts
+    // one level below the caller either way and frame 0 must still be the CALLER's call site.
+    return capture_from_context(nullptr, out, skip + 1, stop_frame);
 
 #else
     auto const& bounds = current_stack_bounds();
     auto const* f = static_cast<frame const*>(__builtin_frame_address(0));
-    auto const stop = reinterpret_cast<cc::uintptr>(stop_frame);
+    auto const stop = reinterpret_cast<u64>(stop_frame);
 
     // No implicit skip: this frame's RETURN address is the caller's call site, which is exactly frame 0.
     // Adding one here would quietly drop the caller and disagree with the Windows path by a frame.
@@ -158,7 +272,7 @@ cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void
             break;
         }
 
-        if (stop != 0 && reinterpret_cast<cc::uintptr>(f) >= stop)
+        if (stop != 0 && reinterpret_cast<u64>(f) >= stop)
         {
             result.stopped = true;
             break;
