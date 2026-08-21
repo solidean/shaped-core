@@ -91,12 +91,15 @@ Bucketing every test costs it 31%; bucketing the handful that ask costs it nothi
 It is the ~54 `REC_TEST`s that own the recorder: each hands the singleton over, so each pays a `shutdown` plus an `initialize`, and an `initialize` pre-faults its ready chunks.
 Only a binary with recorder-owning tests sees it.
 
-Three switches, and they are different:
+Four switches, and they are different:
 
 * **`nx::config::recorded`** on one test — bucket it, so `nx::test_recording()` can answer and a failure keeps the evidence.
+* **`--record`** on the run — bucket **every** test, whatever its own config says.
+  A debug flag: it costs the whole suite the right-hand column above, and nothing releases a bucket until its test passes.
+  Retention is deliberately unbounded — you asked for the whole recording, so you get the whole recording — which is why this is normally paired with a filter.
 * **`nx::config::owns_recorder`** on one test — hand the whole singleton over, for a test that drives `cc::rec::initialize` itself.
 * **`--no-recording`** on the run — no recorder at all, so no console logger and no dumps either.
-  For timing the tests themselves.
+  It wins over `--record`, since there is no recorder left to bucket into.
 
 ---
 
@@ -105,8 +108,10 @@ Three switches, and they are different:
 A passing test's events are dropped the moment it ends, which is what returns their chunks to the pool.
 A failing test's are kept and written to `test-recording-<name>.ccrec` beside the run's JUnit XML, if one was asked for.
 
-Only for a test that opted in, since only those have a bucket.
-A test that fails without one is not left with nothing, though.
+Only for a test that had a bucket — one that opted in, or any test at all under `--record`.
+That is what `--record` is for: chasing a failure you did not anticipate, usually as `--record <filter>` once you know which test to watch.
+
+A test that fails without a bucket is not left with nothing, though.
 The ambient deltas are in the stream either way, so a crash dump or a whole-run capture still carries the attribution — [systems/recording](../../clean-core/docs/systems/recording.md) has that half.
 
 They are written **at the end of the run**, not when the test fails.

@@ -128,3 +128,32 @@ TEST("test recording - a nested test is its own bucket only if it opted in", no_
     // That is the honest answer rather than a gap: the work really did run under this test.
     CHECK(rec.all().count("inner-plain-mark") == 1);
 }
+
+TEST("test recording - --record buckets a test that never asked", no_scheduler)
+{
+    // The flag is a run-level override of the per-test default, so this drives the real CLI path rather than setting
+    // the field by hand.
+    char a0[] = "nexus-test";
+    char a1[] = "--record";
+    char* argv[] = {a0, a1};
+    auto config = nx::test_schedule_config::create_from_args(2, argv);
+    CHECK(config.record_all);
+
+    nx::test_registry reg;
+    reg.add_declaration("inner-unasked", {},
+                        []
+                        {
+                            // No nx::config::recorded on this one, and it still gets a bucket.
+                            auto inner = nx::test_recording();
+                            CHECK(inner.is_attached());
+
+                            CC_RECORD_MARK("forced-mark");
+                            inner.sync();
+                            CHECK(inner.all().count("forced-mark") == 1);
+                        });
+
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(exec.count_failed_checks() == 0);
+}

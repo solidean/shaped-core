@@ -786,7 +786,7 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
 
         auto const& decl = *state.execution->instance.declaration;
 
-        state.record_trace = nx::impl::new_test_trace(decl.test_config.recorded);
+        state.record_trace = nx::impl::new_test_trace(decl.test_config.recorded || state.config->record_all);
         nx::impl::open_test_bucket(state.record_trace, decl.name);
 
         // Beneath the test's own link, so the handle taken below keeps both alive — a link's parent reference is
@@ -1241,7 +1241,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
     // Installing the context as the ambient is what makes a check find this test, from this thread or any other.
     // The scope closes before test_execute_end, so nothing can look the context up while it is being destroyed.
     auto leaked_async_work = false;
-    auto const record_trace = nx::impl::new_test_trace(decl.test_config.recorded);
+    auto const record_trace = nx::impl::new_test_trace(decl.test_config.recorded || config.record_all);
     nx::impl::open_test_bucket(record_trace, decl.name);
     {
         // Under the test's own ambient link, so every event this test records — on any worker — carries the id that

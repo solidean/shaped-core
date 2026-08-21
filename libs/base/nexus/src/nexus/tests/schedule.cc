@@ -130,7 +130,14 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
             config.verbose = true;
             continue;
         }
+        // Record everything: bucket every test, whatever its own config says.
+        else if (arg == "--record")
+        {
+            config.record_all = true;
+            continue;
+        }
         // No recording: leave cc::rec down for the whole run.
+        // Wins over --record, since there is no recorder for it to bucket into.
         else if (arg == "--no-recording")
         {
             config.no_recording = true;

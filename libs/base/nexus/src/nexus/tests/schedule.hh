@@ -59,6 +59,13 @@ struct nx::test_schedule_config
     bool report_catch2_xml_results = false;
     bool verbose = false;
 
+    // Bucket EVERY test, not just the ones asking for nx::config::recorded.
+    //
+    // A debug flag, and normally paired with a filter: bucketing the whole suite costs the worst binary in this repo
+    // about a third of its wall time, and nothing releases a bucket until its test passes.
+    // Retention is deliberately unbounded — you asked for the whole recording, so you get the whole recording.
+    bool record_all = false;
+
     // Skip the run's cc::rec recorder entirely — no per-test buckets, no console listener, no dumps.
     // Recording costs a run roughly a quarter to a third of its wall time (see libs/base/nexus/docs/recording.md), which is
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.

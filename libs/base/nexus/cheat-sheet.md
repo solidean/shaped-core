@@ -287,7 +287,8 @@ TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test driv
 - Every `nx::run` installs the console logger, so `CC_LOG_*` prints from tests and examples with zero source changes.
 - A **failing** test's recording is written next to the JUnit XML at the end of the run; a passing one's is dropped.
 - Opting in is what keeps it free: bucketing EVERY test costs the worst binary in this repo 31%, the handful that ask ~0%.
-- `--no-recording` turns the run's recorder off entirely (console logger and dumps included).
+- `--record` buckets EVERY test and dumps each failing one — a debug flag, normally with a filter, retention unbounded.
+- `--no-recording` turns the run's recorder off entirely (console logger and dumps included), and wins over `--record`.
 
 [docs/recording.md](docs/recording.md) has the mechanism and the measurements.
 
