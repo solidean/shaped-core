@@ -258,6 +258,12 @@ target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3 zstd lz4)
 find_package(Threads REQUIRED)
 target_link_libraries(clean-core PUBLIC Threads::Threads)
 
+# timeBeginPeriod / timeEndPeriod (cc::scoped_scheduler_tick) live in winmm, which is not part of the default
+# Windows link set. Private: nothing in our headers names it.
+if(WIN32)
+    target_link_libraries(clean-core PRIVATE winmm)
+endif()
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(clean-core
     PUBLIC
@@ -281,6 +287,7 @@ target_compile_definitions(clean-core
     $<$<CONFIG:Release>:CC_RELEASE>
     $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
     $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
+    $<$<BOOL:${SC_FRAME_POINTERS}>:CC_FRAME_POINTERS>
 )
 
 # Detect and link the correct library for std::stacktrace support.

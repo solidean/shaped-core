@@ -12,6 +12,29 @@
 
 using namespace cc::primitive_defines;
 
+// Chasing needs a frame pointer that is the head of a CHAIN, and Windows keeps one that is not.
+//
+// The x64 ABIs disagree about what a frame pointer means.
+// SysV and AAPCS store {enclosing frame, return address} at it, which is a linked list.
+// Win64 sets it to `rsp + offset` with the offset in the unwind info, so the words there are whatever the frame
+// happens to hold — measured, and they are not a chain.
+// So `/Oy-` under clang-cl buys a frame pointer and no chain to walk, and Windows unwinds from tables whatever the
+// compiler.
+#if defined(__EMSCRIPTEN__) || defined(_WIN32)
+#define CC_CAN_CHASE_FRAME_POINTERS 0
+#elif defined(CC_FRAME_POINTERS) && (defined(__clang__) || defined(__GNUC__)) \
+    && (defined(__linux__) || defined(__APPLE__))
+#define CC_CAN_CHASE_FRAME_POINTERS 1
+#else
+#define CC_CAN_CHASE_FRAME_POINTERS 0
+#endif
+
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#define CC_CAN_UNWIND_TABLES 1
+#else
+#define CC_CAN_UNWIND_TABLES 0
+#endif
+
 namespace
 {
 #if defined(__EMSCRIPTEN__)
@@ -127,7 +150,9 @@ CC_DONT_INLINE cc::stack_capture_result capture_from_context(void* start,
     return result;
 }
 
-#elif !defined(__EMSCRIPTEN__) && (defined(__linux__) || defined(__APPLE__))
+#endif // _WIN32
+
+#if CC_CAN_CHASE_FRAME_POINTERS
 
 /// One frame's worth of the chain, and the same layout on x86-64 and arm64.
 ///
@@ -160,7 +185,13 @@ stack_bounds const& current_stack_bounds()
 
     b.known = true; // a failed query is cached too, so it is asked exactly once per thread
 
-#if defined(__APPLE__)
+#if defined(_WIN32)
+    ULONG_PTR low = 0;
+    ULONG_PTR high = 0;
+    ::GetCurrentThreadStackLimits(&low, &high);
+    b.low = u64(low);
+    b.high = u64(high);
+#elif defined(__APPLE__)
     auto* const top = pthread_get_stackaddr_np(pthread_self()); // the HIGH end on Apple, unlike Linux
     auto const size = pthread_get_stacksize_np(pthread_self());
     if (top != nullptr && size > 0)
@@ -207,63 +238,47 @@ stack_bounds const& current_stack_bounds()
 #endif
 } // namespace
 
-bool cc::stack_capture_from_context_available()
+namespace
 {
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
-    return true;
-#else
-    return false;
-#endif
-}
-
-cc::stack_capture_result cc::capture_stack_from_native_context(void* native_context,
-                                                               cc::span<void*> out,
-                                                               isize skip,
-                                                               void const* stop_frame)
-{
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
-    if (native_context == nullptr || out.empty() || skip < 0)
-        return {};
-    return capture_from_context(native_context, out, skip, stop_frame);
-#else
-    (void)native_context;
-    (void)out;
-    (void)skip;
-    (void)stop_frame;
-    return {};
-#endif
-}
-
-bool cc::stack_capture_available()
-{
-    return has_stack_capture;
-}
-
-cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void const* stop_frame)
+#if CC_CAN_CHASE_FRAME_POINTERS
+/// Chases the frame chain from `start_frame`, optionally emitting `start_pc` first.
+///
+/// `start_pc` is what a sampled context contributes and a self-capture does not have: for a foreign thread the
+/// program counter is where it IS, and the chain only ever yields return addresses.
+cc::stack_capture_result chase_chain(frame const* start_frame,
+                                     void* start_pc,
+                                     cc::span<void*> out,
+                                     isize skip,
+                                     void const* stop_frame)
 {
     cc::stack_capture_result result;
-    if (out.empty() || skip < 0)
-        return result;
 
-#if defined(__EMSCRIPTEN__)
-    (void)stop_frame;
-    return result;
-
-#elif defined(_WIN32)
-    // One extra, for this function's own frame: capture_from_context is deliberately not inlined, so the walk starts
-    // one level below the caller either way and frame 0 must still be the CALLER's call site.
-    return capture_from_context(nullptr, out, skip + 1, stop_frame);
-
-#else
     auto const& bounds = current_stack_bounds();
-    auto const* f = static_cast<frame const*>(__builtin_frame_address(0));
     auto const stop = reinterpret_cast<u64>(stop_frame);
-
-    // No implicit skip: this frame's RETURN address is the caller's call site, which is exactly frame 0.
-    // Adding one here would quietly drop the caller and disagree with the Windows path by a frame.
     auto remaining_skip = skip;
 
+    auto const take = [&](void* pc)
+    {
+        if (remaining_skip > 0)
+        {
+            --remaining_skip;
+            return true;
+        }
+        if (result.count >= out.size())
+        {
+            result.truncated = true;
+            return false;
+        }
+        out[result.count++] = pc;
+        return true;
+    };
+
+    if (start_pc != nullptr && !take(start_pc))
+        return result;
+
     frame const* previous = nullptr;
+    auto const* f = start_frame;
+
     while (f != nullptr)
     {
         if (!is_plausible(f, previous, bounds))
@@ -282,20 +297,107 @@ cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void
         if (ra == nullptr)
             break; // the outermost frame of a thread, which parks a null there
 
-        if (remaining_skip > 0)
-            --remaining_skip;
-        else if (result.count < out.size())
-            out[result.count++] = ra;
-        else
-        {
-            result.truncated = true;
+        if (!take(ra))
             break;
-        }
 
         previous = f;
         f = f->enclosing;
     }
 
     return result;
+}
+#endif
+
+/// Which walk `automatic` means here.
+/// Chasing where the build keeps a frame pointer, because it is an order of magnitude cheaper; tables otherwise.
+[[nodiscard]] cc::stack_walk resolve(cc::stack_walk walk)
+{
+    if (walk != cc::stack_walk::automatic)
+        return walk;
+
+#if CC_CAN_CHASE_FRAME_POINTERS
+    return cc::stack_walk::frame_pointers;
+#elif CC_CAN_UNWIND_TABLES
+    return cc::stack_walk::unwind_tables;
+#else
+    return cc::stack_walk::automatic;
+#endif
+}
+} // namespace
+
+bool cc::stack_walk_available(cc::stack_walk walk)
+{
+    switch (walk)
+    {
+    case cc::stack_walk::automatic:
+        return has_stack_capture;
+    case cc::stack_walk::frame_pointers:
+        return CC_CAN_CHASE_FRAME_POINTERS != 0;
+    case cc::stack_walk::unwind_tables:
+        return CC_CAN_UNWIND_TABLES != 0;
+    }
+    return false;
+}
+
+bool cc::stack_capture_from_context_available()
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+cc::stack_capture_result cc::capture_stack_from_native_context(void* native_context,
+                                                               cc::span<void*> out,
+                                                               isize skip,
+                                                               void const* stop_frame,
+                                                               cc::stack_walk walk)
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    if (native_context == nullptr || out.empty() || skip < 0)
+        return {};
+
+    auto const* const ctx = static_cast<CONTEXT const*>(native_context);
+
+    (void)ctx;
+    (void)walk;
+    return capture_from_context(native_context, out, skip, stop_frame);
+#else
+    (void)native_context;
+    (void)out;
+    (void)skip;
+    (void)stop_frame;
+    (void)walk;
+    return {};
+#endif
+}
+
+bool cc::stack_capture_available()
+{
+    return has_stack_capture;
+}
+
+cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void const* stop_frame, cc::stack_walk /*walk*/)
+{
+    if (out.empty() || skip < 0)
+        return {};
+
+#if CC_CAN_CHASE_FRAME_POINTERS
+    if (resolve(walk) == cc::stack_walk::frame_pointers)
+    {
+        // This frame's own return address is the caller's call site, which is exactly frame 0 — no implicit skip.
+        return chase_chain(static_cast<frame const*>(__builtin_frame_address(0)), nullptr, out, skip, stop_frame);
+    }
+#endif
+
+#if CC_CAN_UNWIND_TABLES
+    // One extra, for this function's own frame: capture_from_context is deliberately not inlined, so the walk starts
+    // one level below the caller either way and frame 0 must still be the CALLER's call site.
+    return capture_from_context(nullptr, out, skip + 1, stop_frame);
+#else
+    (void)stop_frame;
+    (void)walk;
+    return {};
 #endif
 }

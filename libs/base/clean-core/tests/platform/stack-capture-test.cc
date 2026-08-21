@@ -91,6 +91,37 @@ CC_DONT_INLINE void take_both(capture& shallow, capture& deep)
     g_no_tail_call = int(shallow.result.count + deep.result.count);
 }
 
+/// How many leading frames two captures agree on.
+///
+/// A prefix rather than a suffix here, because the two walkers can legitimately reach different DEPTHS — the chain
+/// ends where a frame pointer stops being kept — so their outermost frames are not comparable.
+[[nodiscard]] isize common_prefix(cc::span<void* const> a, cc::span<void* const> b)
+{
+    auto shared = isize(0);
+    while (shared < a.size() && shared < b.size() && a[shared] == b[shared])
+        ++shared;
+    return shared;
+}
+
+[[nodiscard]] isize common_suffix_of_prefixes(cc::span<void* const> a, cc::span<void* const> b)
+{
+    return common_prefix(a, b);
+}
+
+/// Takes one capture with each walker, from one frame so they are comparable.
+CC_DONT_INLINE void take_both_walks(capture& chased, capture& unwound)
+{
+    chased.frames.resize_to_constructed(max_frames, nullptr);
+    chased.result = cc::capture_stack(cc::span<void*>(chased.frames), 0, nullptr, cc::stack_walk::frame_pointers);
+    chased.frames.resize_down_to(chased.result.count);
+
+    unwound.frames.resize_to_constructed(max_frames, nullptr);
+    unwound.result = cc::capture_stack(cc::span<void*>(unwound.frames), 0, nullptr, cc::stack_walk::unwind_tables);
+    unwound.frames.resize_down_to(unwound.result.count);
+
+    g_no_tail_call = int(chased.result.count + unwound.result.count);
+}
+
 /// The same anchoring, for the pair that differs only in `skip`.
 CC_DONT_INLINE void take_both_skipping(capture& all, capture& skipped)
 {
@@ -237,4 +268,21 @@ TEST("stack capture - works on a thread we did not start it on")
 
     CHECK(count > 0);
     CHECK(!broken);
+}
+
+TEST("stack capture - the available walk matches the platform")
+{
+    // Exactly one mechanism per platform, and the enum reports which rather than leaving a caller to guess what a
+    // capture costs — an order of magnitude separates them.
+    auto const chase = cc::stack_walk_available(cc::stack_walk::frame_pointers);
+    auto const tables = cc::stack_walk_available(cc::stack_walk::unwind_tables);
+
+    CHECK(cc::stack_walk_available(cc::stack_walk::automatic) == cc::stack_capture_available());
+    CHECK(!(chase && tables)); // no platform has both
+
+#if defined(_WIN32)
+    // Win64's frame pointer is rsp+offset, not the head of a chain, so there is nothing to chase whatever the compiler.
+    CHECK(tables);
+    CHECK(!chase);
+#endif
 }

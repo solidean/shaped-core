@@ -22,7 +22,30 @@
 namespace cc
 {
 struct stack_capture_result;
+enum class stack_walk : u8;
 } // namespace cc
+
+/// How to get from one frame to the next.
+///
+/// Two mechanisms with an order of magnitude between them, and no platform offers both.
+///
+/// Chasing needs a frame pointer that heads a CHAIN, which is a SysV and AAPCS property: Win64 sets its frame pointer
+/// to `rsp + offset`, so `/Oy-` there buys a frame pointer with nothing to walk.
+/// Naming the choice anyway is what lets `stack_walk_available` report the truth per platform rather than leaving a
+/// caller to guess what a capture cost.
+enum class cc::stack_walk : cc::u8
+{
+    /// Chase the chain where this build keeps one, and unwind from tables otherwise.
+    automatic = 0,
+
+    /// Chase the frame-pointer chain: a few nanoseconds a frame, and it stops where the chain does — at code built
+    /// without one, which on Windows means the moment a walk leaves our own modules.
+    frame_pointers,
+
+    /// Unwind from tables: correct through anything with unwind data, and roughly a microsecond for a deep stack.
+    /// Unavailable off Windows, where a capture then reports nothing rather than something wrong.
+    unwind_tables,
+};
 
 /// What a capture managed, beyond the frames themselves.
 ///
@@ -63,7 +86,10 @@ namespace cc
 /// innermost open scope does not already name.
 ///
 /// Returns an empty capture on a platform with no walkable native stack (wasm), rather than a wrong one.
-[[nodiscard]] cc::stack_capture_result capture_stack(cc::span<void*> out, isize skip = 0, void const* stop_frame = nullptr);
+[[nodiscard]] cc::stack_capture_result capture_stack(cc::span<void*> out,
+                                                     isize skip = 0,
+                                                     void const* stop_frame = nullptr,
+                                                     cc::stack_walk walk = cc::stack_walk::automatic);
 
 /// Captures a stack from a thread's saved machine context rather than from here.
 ///
@@ -75,7 +101,12 @@ namespace cc
 [[nodiscard]] cc::stack_capture_result capture_stack_from_native_context(void* native_context,
                                                                          cc::span<void*> out,
                                                                          isize skip = 0,
-                                                                         void const* stop_frame = nullptr);
+                                                                         void const* stop_frame = nullptr,
+                                                                         cc::stack_walk walk = cc::stack_walk::automatic);
+
+/// Whether `walk` is a real option in this build.
+/// `automatic` is always available where any walk is.
+[[nodiscard]] bool stack_walk_available(cc::stack_walk walk);
 
 /// Whether a foreign thread's context can be walked at all.
 /// True only on Windows today, which is the only platform whose sampler runs outside the sampled thread.
