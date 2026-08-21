@@ -5,6 +5,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/platform/stack_capture.hh>
+#include <clean-core/platform/symbolize.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
@@ -395,4 +396,65 @@ TRACE_TEST("chrome_trace - sampled stacks become spans inside the scopes that we
         CHECK(depth == 0);
 
     CHECK(sampled_spans > 0);
+}
+
+TRACE_TEST("chrome_trace - sampled frames carry names and source locations")
+{
+    if (!cc::stack_capture_from_context_available() || !CC_HAS_THREADS || !cc::symbolizer::is_available())
+        SKIP("this build cannot sample or cannot symbolize");
+
+    rec_fixture const fixture;
+
+    auto const raw = capture_all(
+        [&]
+        {
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
+            CC_RECORD_MARK("work-begins");
+
+            auto const start = cc::current_time_steady_secs();
+            u64 volatile sink = 0;
+            while (cc::current_time_steady_secs() - start < 0.2)
+                for (int i = 0; i < 4096; ++i)
+                    sink = sink + u64(i);
+        });
+
+    REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
+    auto const json = encode_to_string(raw.spliced_samples());
+
+    auto const doc = babel::json::read(json);
+    REQUIRE(doc.has_value());
+
+    // A resolved frame is named and carries where it came from; an unresolved one keeps its address rather than
+    // acquiring a confident wrong name, so both shapes are legitimate and only "no address at all" is a bug.
+    auto sampled = 0;
+    auto named = 0;
+    auto with_address = 0;
+    auto const events = doc.value().root()["traceEvents"];
+    for (isize i = 0; i < events.size(); ++i)
+    {
+        auto const e = events[i];
+        if (e["ph"].as_string() != "B" || e["cat"].as_string() != "sampled")
+            continue;
+
+        ++sampled;
+        if (!e["name"].as_string().starts_with("0x"))
+            ++named;
+        if (!e["args"]["address"].as_string().empty())
+            ++with_address;
+    }
+
+    REQUIRE(sampled > 0);
+
+    // The address survives symbolization, always: a name can then be checked, and an unresolved frame still points
+    // somewhere.
+    // `named` is asserted only where the build has symbols — a release preset ships without debug info, and resolving
+    // nothing is the correct answer there rather than a failure.
+    CHECK(with_address == sampled);
+    if (cc::symbolizer().resolve(reinterpret_cast<void const*>(&babel::chrome_trace::encode)).has_function())
+        CHECK(named > 0);
+
+    // Turning it off gets the addresses back, unchanged.
+    auto const bare = encode_to_string(raw.spliced_samples(), {.symbolize_samples = false});
+    CHECK(bare.contains(R"("cat":"sampled")"));
+    CHECK(!bare.contains(R"("source":)"));
 }

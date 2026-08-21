@@ -50,6 +50,17 @@ struct babel::chrome_trace::write_options
     /// The frames are ADDRESSES, because nothing here symbolizes; a span is named by its hexadecimal address.
     bool include_samples = true;
 
+    /// Resolve sampled addresses to function names and source locations.
+    ///
+    /// **Against THIS process's loaded modules**, so it is right for a trace exported by the program that recorded it
+    /// and mostly resolves to nothing for a recording loaded from elsewhere — a different run has a different address
+    /// layout, so the addresses are in no module this process knows.
+    /// An unresolved frame keeps its hexadecimal name rather than acquiring a confident wrong one.
+    ///
+    /// Costs a debug-info lookup per DISTINCT address, which is a millisecond each and cached; a trace with a few
+    /// hundred distinct frames takes a moment to write and is worth it.
+    bool symbolize_samples = true;
+
     /// Where a track for an unrecorded thread sits.
     ///
     /// A thread the recorder never knew has no track to nest into, so it gets one of its own, keyed by the id the OS

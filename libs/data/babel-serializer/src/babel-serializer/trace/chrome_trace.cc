@@ -3,6 +3,7 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
+#include <clean-core/platform/symbolize.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/recording.hh>
@@ -197,6 +198,10 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     // An accumulate carries a delta, but a counter track shows a level — so the running total is what gets emitted.
     cc::map<cc::string, f64> running_totals;
 
+    // One symbolizer for the whole export, because the cache is what makes this affordable: a sampled profile is
+    // thousands of hits on a handful of addresses, and each miss is a debug-info lookup.
+    cc::symbolizer symbols;
+
     // Sampled frames are emitted INSIDE the scopes that were open, on the same track.
     //
     // That is the whole point of the combination: the scopes give the structure a human named, and the samples give
@@ -248,8 +253,34 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
         {
             open_event();
             out.appendf(R"("ph":"B","pid":{},"tid":{},"ts":{:.3f},"name":)", opts.process_id, tid, ts);
+
+            auto const& info
+                = opts.symbolize_samples ? symbols.resolve(reinterpret_cast<void const*>(stack[i])) : cc::symbol_info{};
+
+            // The address stays the name when nothing resolved — a hex frame a reader can look up beats a confident
+            // wrong one, and it is what a recording from another process gets.
+            if (info.has_function())
+                append_json_string(out, info.function);
+            else
+                append_json_string(out, cc::format("0x{:x}", stack[i]));
+
+            out += R"(,"cat":"sampled")";
+
+            // The source location goes in args rather than the name: a viewer groups spans BY name, and a name
+            // carrying a line number would split one function into a span per line.
+            out += R"(,"args":{"address":)";
             append_json_string(out, cc::format("0x{:x}", stack[i]));
-            out += R"(,"cat":"sampled"})";
+            if (info.has_line())
+            {
+                out += R"(,"source":)";
+                append_json_string(out, cc::format("{}:{}", info.file, info.line));
+            }
+            if (!info.module.empty())
+            {
+                out += R"(,"module":)";
+                append_json_string(out, info.module);
+            }
+            out += "}}";
         }
 
         open = cc::move(stack);
