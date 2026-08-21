@@ -129,6 +129,34 @@ using namespace cc::primitive_defines;
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "example.assets");
 
+// This lane's own uninstrumented chain, so a sampled frame here is named for the work THIS thread is doing.
+//
+// It used to reach straight into example_render's helpers, and the trace was correct and unreadable for it: real
+// `example_render::inner_math` spans nested inside `decode_texture`, which looks exactly like a misattribution and is
+// not one.
+// The lesson generalizes past this example — a shared leaf makes a sampled profile ambiguous about WHY it was reached,
+// and the scope stack around it is what disambiguates.
+u64 volatile g_keep_frames = 0;
+
+CC_DONT_INLINE u64 checksum_block(u64 seed, int rounds)
+{
+    auto const r = example_render::grind(seed, rounds);
+    g_keep_frames = r;
+    return r;
+}
+CC_DONT_INLINE u64 inflate_block(u64 seed, int rounds)
+{
+    auto const r = checksum_block(seed, rounds);
+    g_keep_frames = r;
+    return r;
+}
+CC_DONT_INLINE u64 decode_pixels(u64 seed, int rounds)
+{
+    auto const r = inflate_block(seed, rounds);
+    g_keep_frames = r;
+    return r;
+}
+
 /// A second thread, so the trace has more than one lane and the ordering across them is visible.
 void load_assets()
 {
@@ -142,7 +170,7 @@ void load_assets()
         CC_RECORD("source", "meshes/tree.png");
         CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, 256 * 1024);
 
-        auto const checksum = example_render::outer_prepare(u64(i) * 31 + 5, 500000);
+        auto const checksum = decode_pixels(u64(i) * 31 + 5, 500000);
         CC_RECORD("checksum", checksum);
     }
 
