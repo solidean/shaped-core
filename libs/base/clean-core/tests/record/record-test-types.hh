@@ -4,7 +4,9 @@
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/listener.hh>
 #include <clean-core/record/overhead.hh>
+#include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
@@ -55,6 +57,27 @@ inline cc::rec::config deterministic_config()
     return cfg;
 }
 
+/// A recording's event sequence, block by block, as something two recordings can be compared on.
+///
+/// Counts are a weak assertion for anything that MOVES events: a transform that relocates every sample to the end
+/// preserves every count there is and still changed the answer.
+/// The layout is what a reader sees, so it is what a test that cares about placement has to pin.
+/// One string rather than a list, so a CHECK can simply compare them and print both when they differ.
+inline cc::string event_layout(cc::rec::recording const& r)
+{
+    cc::string out;
+    for (auto const& b : r.blocks())
+    {
+        out += "|";
+        auto const v = b.view();
+        for (auto it = v.begin(); it != v.end(); ++it)
+        {
+            auto const e = *it;
+            out += cc::format("{}@{};", int(e.kind()), e.cycles);
+        }
+    }
+    return out;
+}
 } // namespace cc_rec_test
 
 /// Collects every event it is offered, so a test can assert on what actually reached a listener.

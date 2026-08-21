@@ -8,7 +8,6 @@
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
-#include <clean-core/record/stack_table.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 
@@ -207,10 +206,6 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     // nonsense rather than an error.
     auto symbols = recording.modules().empty() ? cc::symbolizer() : cc::symbolizer(recording.modules());
 
-    // Built once for the whole export: a sample carries either addresses or an id, and this is what makes which one
-    // the sampler chose invisible below.
-    cc::rec::stack_table const stacks(recording);
-
     /// Whether this event knows where it was recorded, which every descriptor carries.
     auto const has_source = [](cc::rec::event_view const& e)
     { return e.desc != nullptr && e.desc->site.file != nullptr && e.desc->site.file[0] != char(0); };
@@ -372,7 +367,7 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
                 out += "}}";
             }
 
-            apply_sample(sample_tid, ts_us, stacks.frames_of(e));
+            apply_sample(sample_tid, ts_us, e.field_as_u64_array("frames"));
             continue;
         }
 

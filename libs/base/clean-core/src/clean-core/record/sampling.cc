@@ -2,7 +2,6 @@
 
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
-#include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/platform/stack_capture.hh>
@@ -293,125 +292,15 @@ public:
 }
 #endif
 
-/// The sampler's stack cache, and the ids it has handed out.
-///
-/// Sampler-thread-only, so no lock: every sample is written from the one thread that owns this.
-struct intern_state
-{
-    /// Hash of a stack to the id it was given.
-    cc::map<u64, u64> ids;
-
-    /// The frames behind each id, kept so a hash collision can be DETECTED rather than assumed away.
-    cc::map<u64, cc::vector<u64>> stacks;
-
-    u64 next_id = 1;
-};
-intern_state g_intern;
-
-/// The most distinct stacks to keep ids for.
-///
-/// A cap rather than a growth policy, because the table is the sampler's own memory and a pathological workload —
-/// deep stacks that never repeat — would otherwise grow it without bound while interning nothing useful.
-constexpr isize intern_capacity = 1 << 16;
-
-[[nodiscard]] u64 hash_frames(cc::span<void* const> frames)
-{
-    // FNV-1a over the addresses.
-    // Cheap and good enough because a collision is DETECTED below rather than trusted.
-    u64 h = 1469598103934665603u;
-    for (auto const* const f : frames)
-    {
-        auto const v = reinterpret_cast<u64>(f);
-        for (isize b = 0; b < 8; ++b)
-        {
-            h ^= (v >> (b * 8)) & 0xFF;
-            h *= 1099511628211u;
-        }
-    }
-    return h;
-}
-
-/// Writes an interned stack out under its id, so the id means something to a consumer.
-void write_stack_definition(u64 id, cc::span<void* const> frames)
-{
-    auto const& d = cc::rec::impl::stack_definition_desc();
-    auto const payload_bytes = cc::rec::impl::stack_definition_frames_offset + frames.size() * isize(sizeof(u64));
-
-    auto writer = cc::rec::open_event(d, payload_bytes);
-    if (!writer.is_open())
-        return;
-
-    auto const out = writer.payload();
-    if (out.size() < payload_bytes)
-        return;
-
-    cc::memcpy(out.data() + 0, &id, sizeof(id));
-
-    auto const frame_count = u32(frames.size());
-    cc::memcpy(out.data() + 8, &frame_count, sizeof(frame_count));
-    for (isize i = 0; i < frames.size(); ++i)
-    {
-        auto const address = reinterpret_cast<u64>(frames[i]);
-        cc::memcpy(out.data() + cc::rec::impl::stack_definition_frames_offset + i * isize(sizeof(u64)), &address,
-                   sizeof(address));
-    }
-
-    writer.commit(payload_bytes);
-}
-
-/// The id for this stack, defining it first if it is new, or 0 to write the frames inline after all.
-///
-/// Zero on a hash collision as well as on a full table: falling back to inline is always correct, and a wrong id
-/// would attribute one stack to another.
-[[nodiscard]] u64 intern_stack(cc::span<void* const> frames)
-{
-    auto const h = hash_frames(frames);
-
-    if (auto* const known = g_intern.ids.get_ptr(h); known != nullptr)
-    {
-        auto const& stored = g_intern.stacks[*known];
-        if (stored.size() != frames.size())
-            return 0;
-        for (isize i = 0; i < frames.size(); ++i)
-            if (stored[i] != reinterpret_cast<u64>(frames[i]))
-                return 0;
-
-        return *known;
-    }
-
-    if (g_intern.ids.size() >= intern_capacity)
-        return 0;
-
-    auto const id = g_intern.next_id++;
-    g_intern.ids[h] = id;
-
-    auto& stored = g_intern.stacks[id];
-    stored.reserve(frames.size());
-    for (auto const* const f : frames)
-        stored.push_back(reinterpret_cast<u64>(f));
-
-    // Before the sample that uses it, so a consumer reading in order never meets an id it cannot resolve.
-    write_stack_definition(id, frames);
-    return id;
-}
-
 /// Writes one sample into the sampler's own stream.
-void write_sample(sample const& s, cc::span<void* const> frames, isize intern_min_frames)
+void write_sample(sample const& s, cc::span<void* const> frames)
 {
     auto const& d = cc::rec::impl::sample_desc();
     if (!cc::rec::is_recording(d))
         return;
 
     auto const count = s.capture.count;
-
-    // An interned sample carries ONE entry — the id — in the same array the addresses would have gone in, so the
-    // layout does not grow by a byte for the samples that are not worth interning.
-    auto const interned = intern_min_frames > 0 && count >= intern_min_frames
-                            ? intern_stack(frames.subspan({.offset = 0, .size = count}))
-                            : u64(0);
-
-    auto const written_count = interned != 0 ? isize(1) : count;
-    auto const payload_bytes = cc::rec::impl::sample_frames_offset + written_count * isize(sizeof(u64));
+    auto const payload_bytes = cc::rec::impl::sample_frames_offset + count * isize(sizeof(u64));
 
     auto writer = cc::rec::open_event(d, payload_bytes);
     if (!writer.is_open())
@@ -426,19 +315,15 @@ void write_sample(sample const& s, cc::span<void* const> frames, isize intern_mi
     cc::memcpy(out.data() + 8, &s.chunk_seq, sizeof(s.chunk_seq));
     cc::memcpy(out.data() + 16, &s.native_tid, sizeof(s.native_tid));
 
-    auto const frame_count = u32(written_count);
+    auto const frame_count = u32(count);
     cc::memcpy(out.data() + 24, &frame_count, sizeof(frame_count));
-    for (isize i = 0; i < written_count; ++i)
+    for (isize i = 0; i < count; ++i)
     {
-        auto const address = interned != 0 ? interned : reinterpret_cast<u64>(frames[i]);
+        auto const address = reinterpret_cast<u64>(frames[i]);
         cc::memcpy(out.data() + cc::rec::impl::sample_frames_offset + i * isize(sizeof(u64)), &address, sizeof(address));
     }
 
-    auto flags = s.capture.truncated ? cc::rec::impl::flag_truncated : cc::rec::impl::flag_none;
-    if (interned != 0)
-        flags |= cc::rec::impl::flag_interned_stack;
-
-    writer.commit(payload_bytes, flags);
+    writer.commit(payload_bytes, s.capture.truncated ? cc::rec::impl::flag_truncated : cc::rec::impl::flag_none);
 }
 
 #if CC_HAS_THREADS
@@ -524,6 +409,11 @@ void sampler_main()
                 s = sample{};
                 auto took = false;
 
+                // Whether this slot named a thread worth sampling at all.
+                // Without it a slot that landed on the actor — or on a thread that has since died — would be
+                // indistinguishable from one whose suspend or walk failed, and only the second is a symptom.
+                auto attempted = false;
+
                 if (slot < known_count || unknown_count == 0)
                 {
                     known_count = cc::rec::impl::with_nth_thread_state(
@@ -533,6 +423,7 @@ void sampler_main()
                             if (!is_sampleable(ts))
                                 return;
 
+                            attempted = true;
                             s.native_tid = ts.native_tid;
                             if (auto* const h = handles.get(ts.native_tid); h != nullptr)
                                 took = sample_suspended(h, &ts, frames, cfg.stop_at_scope, s);
@@ -541,6 +432,7 @@ void sampler_main()
                 else
                 {
                     auto const tid = os_threads.tids[slot - known_count];
+                    attempted = true;
                     s.native_tid = tid;
                     if (auto* const h = handles.get(tid); h != nullptr)
                         took = sample_suspended(h, nullptr, frames, cfg.stop_at_scope, s);
@@ -550,9 +442,11 @@ void sampler_main()
                 {
                     // Inside the tick scope, so the sample and its cost stay together until splicing moves the sample
                     // onto the thread it caught.
-                    write_sample(s, frames, cfg.intern_min_frames);
+                    write_sample(s, frames);
                     g_taken.fetch_add(1, cc::memory_order_relaxed);
                 }
+                else if (attempted)
+                    g_failed.fetch_add(1, cc::memory_order_relaxed);
                 else
                     g_idle.fetch_add(1, cc::memory_order_relaxed);
             }
@@ -568,20 +462,6 @@ void sampler_main()
 }
 #endif
 } // namespace
-
-cc::rec::desc const& cc::rec::impl::stack_definition_desc()
-{
-    static constexpr rec::desc d = {
-        .kind = rec::event_kind::stack_definition,
-        .enable_bit = rec::enable_bit_of(rec::category::profiling),
-        .name = "record.stack",
-        .dom = &cc::rec::g_system_domain,
-        .fields = rec::impl::stack_definition_fields,
-        .field_count = u16(CC_ARRAY_COUNT_OF(rec::impl::stack_definition_fields)),
-        .fixed_payload_size = rec::desc::variable_payload,
-    };
-    return d;
-}
 
 cc::rec::desc const& cc::rec::impl::sample_desc()
 {
@@ -612,12 +492,6 @@ void cc::rec::start_sampling(cc::rec::sampling_config const& cfg)
     rec::stop_sampling();
 
     g_config.lock([&](cc::rec::sampling_config& c) { c = cfg; });
-
-    // Ids are only meaningful within one run, so a new run starts a new numbering rather than inheriting stacks that
-    // nothing in this recording defines.
-    g_intern.ids.clear();
-    g_intern.stacks.clear();
-    g_intern.next_id = 1;
 
     g_taken.store(0, cc::memory_order_relaxed);
     g_failed.store(0, cc::memory_order_relaxed);

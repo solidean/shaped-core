@@ -990,7 +990,7 @@ cc::rec::sampling_scope const s({.rate_hz = 1000.0});    // or start_sampling / 
 // threads_per_tick = 1 restores a fixed budget split across threads. The sampler logs its own ticks as scopes.
 auto const merged = captured.spliced_samples();          // samples ride the SAMPLER's stream until you splice them
 // A sample carries an ANCHOR (which thread, how far its stream had committed), not a copy of that thread's state —
-// so splicing recovers the trace, the ambient context AND the open scopes, none of which an id could give you.
+// so a reader replaying that thread in order reaches the sample with its trace and open scopes already in hand.
 // It stops at the innermost open scope, so a sample inside instrumented code is often one address. That is the point.
 // No sampler without threads, or where a foreign thread's stack cannot be walked; is_sampling() says which.
 
@@ -1001,7 +1001,7 @@ sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:
 // The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
 // A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
 
-cc::rec::reconfigure_sampling(cfg);          // LIVE: takes effect next tick, no stop/restart, keeps the intern table
+cc::rec::reconfigure_sampling(cfg);          // LIVE: takes effect next tick, no stop/restart, loses no samples
 cc::rec::current_sampling_config();          // what it is running with now — drive a UI checkbox off this
 cc::rec::sampling_override const o({...});   // apply a config for a scope, restored on exit
 // include_unknown_threads is OFF by default: it walks every OS thread per tick, and measured at 1 kHz over 0.5s
@@ -1021,11 +1021,9 @@ rec.trim(policy); rec.retained(policy); rec.total_bytes();  // in place / as a v
 // Every limit is off at zero, so a default policy keeps everything. max_secs outranks guaranteed_secs.
 // Block-granular: a block is what a chunk ref keeps alive, so the bound is approximate by one chunk.
 
-#include <clean-core/record/stack_table.hh>   // resolves a captured stack, interned or not
-cc::rec::stack_table const stacks(rec);              // ONE scan; build it once per analysis, never per event
-stacks.frames_of(event);                             // -> cc::vector<u64>, whichever shape the sample used
-// ALWAYS go through this rather than reading the "frames" field: an interned sample stores ONE id there.
-// {.intern_min_frames = 4} on sampling_config; 0 never interns. Ids are per sampling run, not across recordings.
+event.field_as_u64_array("frames");          // a sample's or a stacktrace's addresses, always written out in full
+// No interning: a stack is written inline every time, so a block means the same thing however it was captured and
+// however much retention has since evicted around it.
 
 #include <clean-core/record/hot_functions.hh> // where the time went, without a viewer
 auto const hot = cc::rec::hot_functions(rec);        // symbolizes and folds every sampled stack by function
@@ -1043,6 +1041,12 @@ loaded_module::contains(addr), .name()       // which module an address fell in;
 
 CC_RECORD_MARK("fallback-taken");            // "did this code run" — the cheapest useful annotation
 CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES
+CC_RECORD("asset", "meshes/tree.obj");       // a LITERAL (char const[N]) is stored as its address, bytes stay in .rodata
+CC_RECORD_NAMED(counter.name(), n);          // a name only known at runtime; value must be fixed-size
+// The const is the tier: `char const[N]` = literal, stored by address and REQUIRED to outlive the process.
+// `char[N]` — the snprintf-into-a-local shape — is non-const, so it is copied inline and needs no lifetime thought.
+// A `char const buf[32]` local is misuse: nothing reads the payload at the site, so the address is read long after.
+// Prefer CC_RECORD: a static name costs the stream nothing, a runtime one is copied into every event.
 CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless
 CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a DELTA to add up
 // units: unit_count, unit_bytes, unit_seconds, unit_ratio, unit_hertz — or define your own cc::rec::unit
@@ -1086,6 +1090,10 @@ e.name(); e.kind(); e.level(); e.domain(); e.cycles; e.core; e.site();
 e.field_as_double("bytes"); e.field_as_int("count"); e.field_as_text("path"); // empty when absent or wrong type
 e.field_as_u64("trace");                   // the LOSSLESS reader an opaque 64-bit id needs (double stops at 2^53)
 e.field_as_u64_array("members"); e.relation();  // u64_array fields, and a relation event's type
+e.field_as_desc("scope0");                 // -> desc const*, for desc_ref fields; null when the slot names nothing
+// Every chunk opens with an event_kind::stream_state preamble: the trace, scope_depth, named_scopes, scope0..scope2.
+// Producer-written, because an open scope CANNOT be derived — a long-lived one opens once, and a ring buffer or a
+// crash dump's tail has outlived its scope_begin. named_scopes < scope_depth means "deeper, but unnamed here".
 chunk.wall_secs_of(e.cycles);              // exact on a sealed chunk; uses cycles_per_second on a live one
 ```
 

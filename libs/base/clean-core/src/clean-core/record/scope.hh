@@ -40,6 +40,10 @@ struct scope_guard
 
         auto& w = t_writer;
         rec::record_event(begin_desc, w.scope_depth);
+
+        // Remembered for the next chunk's preamble, and only for the outermost few — see writer_tls.
+        if (w.scope_depth < rec::impl::named_scope_capacity)
+            w.scope_descs[w.scope_depth] = &begin_desc;
         ++w.scope_depth;
 
         // The enclosing scope's frame is saved here rather than recomputed, so leaving restores it exactly even where
@@ -110,17 +114,19 @@ namespace cc::rec
 /// Opens a scope without a matching block, for a span whose ends are in different functions.
 /// The caller owes a CC_RECORD_SCOPE_END on the same thread, and an unbalanced pair produces a wrong trace rather than
 /// a diagnostic — prefer CC_RECORD_SCOPE wherever the span fits a block.
-#define CC_RECORD_SCOPE_BEGIN(name_)                                                                      \
-    do                                                                                                    \
-    {                                                                                                     \
-        CC_REC_DEFINE_DESC(cc_rec_site_desc_, ::cc::rec::event_kind::scope_begin, ::cc::rec::level::info, \
-                           ::cc::rec::enable_bit_of(::cc::rec::category::profiling), (name_), nullptr,    \
-                           ::cc::rec::impl::scope_fields, 1, 4);                                          \
-        if (::cc::rec::is_recording(cc_rec_site_desc_))                                                   \
-        {                                                                                                 \
-            ::cc::rec::record_event(cc_rec_site_desc_, ::cc::rec::impl::t_writer.scope_depth);            \
-            ++::cc::rec::impl::t_writer.scope_depth;                                                      \
-        }                                                                                                 \
+#define CC_RECORD_SCOPE_BEGIN(name_)                                                                               \
+    do                                                                                                             \
+    {                                                                                                              \
+        CC_REC_DEFINE_DESC(cc_rec_site_desc_, ::cc::rec::event_kind::scope_begin, ::cc::rec::level::info,          \
+                           ::cc::rec::enable_bit_of(::cc::rec::category::profiling), (name_), nullptr,             \
+                           ::cc::rec::impl::scope_fields, 1, 4);                                                   \
+        if (::cc::rec::is_recording(cc_rec_site_desc_))                                                            \
+        {                                                                                                          \
+            ::cc::rec::record_event(cc_rec_site_desc_, ::cc::rec::impl::t_writer.scope_depth);                     \
+            if (::cc::rec::impl::t_writer.scope_depth < ::cc::rec::impl::named_scope_capacity)                     \
+                ::cc::rec::impl::t_writer.scope_descs[::cc::rec::impl::t_writer.scope_depth] = &cc_rec_site_desc_; \
+            ++::cc::rec::impl::t_writer.scope_depth;                                                               \
+        }                                                                                                          \
     } while (false)
 
 /// Closes the scope CC_RECORD_SCOPE_BEGIN opened.

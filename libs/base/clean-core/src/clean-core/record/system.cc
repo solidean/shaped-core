@@ -115,7 +115,6 @@ void dispatch(processing& p, cc::rec::chunk const& c, thread_state const& ts, u3
     auto const view = cc::rec::chunk_view{
         .source = &c,
         .thread = info_of(ts),
-        .state_at_start = c.state_at_start,
         .bytes = cc::span<byte const>(c.data + from, isize(to - from)),
         .chunk_seq = c.seq,
         .layer = c.layer,
@@ -151,9 +150,6 @@ bool drain_thread(processing& p, thread_state& ts)
 {
     auto const is_dead = !ts.is_alive.load(cc::memory_order_acquire);
 
-    if (ts.consumer_state == nullptr)
-        ts.consumer_state = new cc::rec::stream_state();
-
     if (ts.consume_cursor == nullptr)
     {
         ts.consume_cursor = ts.queue_head.load(cc::memory_order_acquire);
@@ -166,26 +162,11 @@ bool drain_thread(processing& p, thread_state& ts)
     {
         auto* const c = ts.consume_cursor;
 
-        // The state preamble is written HERE, by the consumer, because the consumer already knows it.
-        // A producer-written one would be a variable-size tax on every rotation for information it would have to
-        // reconstruct anyway.
-        if (c->state_at_start == nullptr)
-            c->state_at_start = new cc::rec::stream_state(*ts.consumer_state);
-
+        // Nothing to stamp: the chunk's own first event is its preamble, written by the producer at rotation.
         auto const committed = c->committed.load(cc::memory_order_acquire);
         if (committed > ts.consume_offset)
         {
             dispatch(p, *c, ts, ts.consume_offset, committed);
-
-            // Carry the stream state past what was just dispatched, so the NEXT chunk's preamble is right.
-            // This is the whole reason the preamble is consumer-written: the producer would have to reconstruct
-            // what the consumer already knows.
-            auto const view = cc::rec::chunk_view{
-                .bytes = cc::span<byte const>(c->data + ts.consume_offset, isize(committed - ts.consume_offset))};
-            for (auto it = view.begin(); it != view.end(); ++it)
-                if (auto const e = *it; e.kind() == cc::rec::event_kind::ambient_changed)
-                    ts.consumer_state->trace_id = e.field_as_u64("trace").value_or(0);
-
             ts.consume_offset = committed;
         }
 
@@ -334,6 +315,16 @@ void cc::rec::impl::for_each_thread_state(cc::function_ref<void(thread_state&)> 
         });
 }
 
+bool cc::rec::impl::try_for_each_thread_state(cc::function_ref<void(thread_state&)> f)
+{
+    return g_registry.try_lock(
+        [&](registry& r)
+        {
+            for (auto* s = r.head; s != nullptr; s = s->registry_next)
+                f(*s);
+        });
+}
+
 isize cc::rec::impl::thread_state_count()
 {
     return g_registry.lock([](registry const& r) { return r.count; });
@@ -384,7 +375,6 @@ void cc::rec::impl::reclaim_thread_state(thread_state* s)
             }
         });
 
-    delete s->consumer_state;
     delete s;
 }
 

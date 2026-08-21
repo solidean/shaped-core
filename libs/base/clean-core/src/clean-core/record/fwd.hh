@@ -25,8 +25,8 @@ enum class trace_id : u64;
 } // namespace cc::rec
 
 /// What an event IS.
-/// The producer-written kinds come first; everything from stream_state on is written by the consumer or by the
-/// system itself, never by a user macro.
+/// The producer-written kinds come first; everything from stream_state on is written by the recorder itself rather
+/// than by a user macro.
 enum class cc::rec::event_kind : cc::u8
 {
     invalid = 0,
@@ -50,15 +50,16 @@ enum class cc::rec::event_kind : cc::u8
     /// Written to the SAMPLER's stream, never the sampled thread's — see record/sampling.hh.
     sample,
 
-    stream_state,   ///< the consumer-written preamble that makes a chunk independently decodable
+    /// The preamble every chunk opens with: the trace in effect, and the scopes already open.
+    ///
+    /// Written by the PRODUCER, at rotation, because none of it can be derived later.
+    /// A long-lived scope opens once and never re-opens, so a window that outlived its `scope_begin` — a ring buffer,
+    /// a crash dump's tail, a decimated capture — has no other way to know it is inside one.
+    stream_state,
     gap,            ///< events were dropped; carries how many, over what span, and how many bytes
     chunk_acquired, ///< the cold path ran, and how long it took
     late_event,     ///< an event surfaced below an ordered listener's emitted watermark
     dropped_span,   ///< a listener decimated a time span away, and knows it
-
-    /// One interned stack: an id, and the addresses it stands for.
-    /// Written once per distinct stack, so it is NOT a sample and must never be counted as one.
-    stack_definition,
 
     count,
 };
@@ -109,6 +110,13 @@ enum class cc::rec::type_code : cc::u8
     inline_text,  ///< a u32 length followed by that many bytes, inline in the payload
     pinned_bytes, ///< the bytes live behind a pin; the payload holds the pin index and the span
     u64_array,    ///< a u32 count at the field's offset, then that many u64s starting four bytes later
+
+    /// A `rec::desc const*` stored in eight bytes, naming another recording site.
+    ///
+    /// The one payload type that is a POINTER INTO THIS BINARY and still survives a file: serializing rewrites it into
+    /// the descriptor table's index and loading rewrites it back, exactly as an event header's own descriptor is.
+    /// Anything else pointing at process memory has to be copied into the payload instead.
+    desc_ref,
 
     count,
 };
@@ -177,7 +185,6 @@ struct config;
 struct crash_dump_options;
 struct overhead_model;
 struct system_stats;
-struct stream_state;
 struct thread_info;
 
 struct event_writer;

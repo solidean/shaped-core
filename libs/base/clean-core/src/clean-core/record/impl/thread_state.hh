@@ -42,11 +42,6 @@ public:
     rec::chunk* consume_cursor = nullptr;
     u32 consume_offset = 0;
 
-    /// The stream state the consumer has carried forward to `consume_offset`.
-    /// Copied into each chunk's state_at_start the first time the consumer touches it, which is what makes a chunk
-    /// independently decodable without the producer writing a preamble.
-    rec::stream_state* consumer_state = nullptr;
-
     // liveness
 public:
     /// False once the thread has exited; the state is reclaimed only after the actor has drained past it.

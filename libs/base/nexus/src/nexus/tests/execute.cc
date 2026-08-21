@@ -679,6 +679,12 @@ struct async_test_state
 
     // The trace this test's recording is bucketed under, minted alongside the ambient link above.
     cc::rec::trace_id record_trace = cc::rec::trace_id::none;
+
+    // Held for the whole test rather than for one poll, unlike its counterpart in the synchronous path.
+    // An async body spans many polls and the recorder has to stay handed over across all of them, so this outlives the
+    // frame that made it and comes back in finish_async_test.
+    // Null for every test that did not ask, which is nearly all of them.
+    cc::unique_ptr<nx::impl::recorder_handover_scope> record_handover;
 };
 
 /// Run an ASYNC_TEST body to its return under `ctx`, and take the graph it handed back.
@@ -770,6 +776,9 @@ void finish_async_test(async_test_state& state)
 
     test_execute_end(cc::move(state.ctx), leaked);
 
+    // The run's recorder comes back BEFORE the bucket is closed against it, which is the order the synchronous path
+    // gets from scoping alone.
+    state.record_handover = {};
     nx::impl::close_test_bucket(state.record_trace, state.execution->is_considered_failing());
 }
 
@@ -792,6 +801,9 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         // Beneath the test's own link, so the handle taken below keeps both alive — a link's parent reference is
         // strong, so capturing the head captures the chain.
         cc::rec::impl::trace_link_scope const record_link(state.record_trace);
+
+        if (decl.test_config.owns_recorder)
+            state.record_handover = cc::make_unique<nx::impl::recorder_handover_scope>(true);
 
         // The link this test is known by.
         // Pushed and popped inside this one poll, which is the only shape async_ambient_scope allows, and kept alive past it by `ambient`.

@@ -57,9 +57,11 @@ It reaches **clang and GCC only**, as `-fno-omit-frame-pointer` (or `/Oy-` under
 MSVC cannot maintain a frame pointer on x64 at all — `/Oy` is x86-only — which is why Windows captures with `RtlCaptureStackBackTrace` and does not care about this knob.
 So the capture cost is genuinely asymmetric across tier 1, and stacktrace policy should account for it rather than assume one number.
 
-Turning it `OFF` costs nothing but the walk.
-Every platform still captures, Windows is unchanged, and clang/GCC fall back to whatever the chain happens to be — which is why it is a knob rather than a hard requirement.
-Expect roughly 0.5-2% and one register on x86-64, and next to nothing on arm64, where macOS mandates the chain anyway.
+**Turning it `OFF` costs clang and GCC the capture itself, not merely its speed.**
+There is no table-driven fallback off Windows, so the walk chases a chain that is no longer maintained, fails its validation and reports `broken` after a frame or two.
+Windows is unaffected either way, since it never used the chain.
+So `OFF` means "this build does not capture stacks on clang or GCC" — which is a real choice for a shipping target that wants the register back, and never a free one.
+Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to nothing on arm64, where macOS mandates the chain anyway.
 
 ## Threading (`SC_THREADS`)
 

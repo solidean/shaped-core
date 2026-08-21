@@ -41,6 +41,39 @@ constexpr cc::rec::desc gap_desc = {
     .fixed_payload_size = sizeof(gap_payload),
 };
 
+/// The preamble every chunk opens with.
+///
+/// Fixed-size on purpose, so a rotation costs the same whatever the thread was doing.
+/// `scope_depth` is the real depth and `named_scopes` is how many of the three below are filled, so a reader that
+/// finds depth 7 and two names knows exactly what it does and does not know.
+constexpr cc::rec::field stream_state_fields[] = {
+    {.name = "trace", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
+    {.name = "scope_depth", .type = cc::rec::type_code::u32_, .offset = 8, .size = 4},
+    {.name = "named_scopes", .type = cc::rec::type_code::u32_, .offset = 12, .size = 4},
+    {.name = "scope0", .type = cc::rec::type_code::desc_ref, .offset = 16, .size = 8},
+    {.name = "scope1", .type = cc::rec::type_code::desc_ref, .offset = 24, .size = 8},
+    {.name = "scope2", .type = cc::rec::type_code::desc_ref, .offset = 32, .size = 8},
+};
+
+struct stream_state_payload
+{
+    u64 trace = 0;
+    u32 scope_depth = 0;
+    u32 named_scopes = 0;
+    cc::rec::desc const* scopes[cc::rec::impl::named_scope_capacity] = {};
+};
+static_assert(sizeof(stream_state_payload) == 40, "the preamble layout is what stream_state_fields describes");
+
+constexpr cc::rec::desc stream_state_desc = {
+    .kind = cc::rec::event_kind::stream_state,
+    .enable_bit = cc::rec::enable_bit_of(cc::rec::category::logging),
+    .name = "record.stream_state",
+    .dom = &cc::rec::g_system_domain,
+    .fields = stream_state_fields,
+    .field_count = 6,
+    .fixed_payload_size = sizeof(stream_state_payload),
+};
+
 constexpr cc::rec::field acquired_fields[] = {
     {.name = "cold_path_cycles", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
     {.name = "chunk_seq", .type = cc::rec::type_code::u64_, .offset = 8, .size = 8},
@@ -168,8 +201,23 @@ bool cc::rec::impl::writer_rotate(isize needed)
     w.end = fresh->data + fresh->capacity;
     w.retry_at_cycles = 0;
 
-    // A fresh chunk starts from no known state, so the next ambient write is unconditional.
-    w.last_trace = 0;
+    // The preamble goes first, always, so every chunk is independently decodable from its own first event.
+    //
+    // Written by the PRODUCER, because none of this can be recovered later.
+    // The trace could be — a consumer reading in order carries it forward — but an open scope cannot: a long-lived
+    // scope opens once, and a window that outlived its `scope_begin` has nothing else to learn from.
+    // Forty bytes against a megabyte of chunk is the whole price.
+    //
+    // `last_trace` is deliberately NOT reset here: the preamble states the trace, so the next ambient delta is only
+    // written if the trace actually changes.
+    auto preamble = stream_state_payload{
+        .trace = w.last_trace,
+        .scope_depth = w.scope_depth,
+        .named_scopes = cc::min(w.scope_depth, rec::impl::named_scope_capacity),
+    };
+    for (u32 i = 0; i < preamble.named_scopes; ++i)
+        preamble.scopes[i] = w.scope_descs[i];
+    write_bookkeeping(stream_state_desc, &preamble, isize(sizeof(preamble)), cold_begin);
 
     if (w.state->dropped_events > 0)
     {

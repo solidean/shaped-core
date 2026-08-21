@@ -25,24 +25,6 @@ struct cc::rec::thread_info
     cc::string_view name;
 };
 
-/// The stream state as of some point in a thread's event stream.
-///
-/// Ambient context, the open profiling scopes and the current trace id are stream STATE rather than per-event fields:
-/// the producer emits a delta only when one changes, and the consumer carries the running value forward.
-/// That is what keeps them off the hot path — see libs/base/clean-core/docs/systems/recording.md.
-struct cc::rec::stream_state
-{
-    /// The cc::async ambient chain head in effect, or null.
-    /// Opaque here; cc::async_ambient_lookup_in reads it.
-    void* ambient = nullptr;
-
-    /// The trace id in effect, or 0.
-    u64 trace_id = 0;
-
-    /// The profiling scopes open at this point, outermost first.
-    cc::vector<rec::desc const*> open_scopes;
-};
-
 /// One decoded event, borrowing the bytes it came from.
 struct cc::rec::event_view
 {
@@ -56,7 +38,12 @@ struct cc::rec::event_view
 public:
     [[nodiscard]] rec::event_kind kind() const { return desc->kind; }
     [[nodiscard]] rec::level level() const { return desc->lvl; }
-    [[nodiscard]] cc::string_view name() const { return desc->name; }
+    /// The site's name: the descriptor's, or the payload's for a CC_RECORD_NAMED site.
+    ///
+    /// The dynamic case is why this is not a plain member read — a site whose name is only known at runtime leaves the
+    /// descriptor's empty and carries the name in its payload, and every query keyed on a name has to see the same
+    /// answer either way.
+    [[nodiscard]] cc::string_view name() const;
     [[nodiscard]] rec::domain const* domain() const { return desc->dom; }
     [[nodiscard]] rec::unit const* quantity() const { return desc->quantity; }
     [[nodiscard]] rec::source_ref const& site() const { return desc->site; }
@@ -67,10 +54,6 @@ public:
 
     /// True when the payload was cut short because the chunk ran out.
     [[nodiscard]] bool is_truncated() const { return (flags & rec::impl::flag_truncated) != 0; }
-
-    /// Whether the frames array holds a stack ID rather than the addresses themselves.
-    /// Resolving it needs the rest of the recording, which is what `rec::stack_table` is for.
-    [[nodiscard]] bool has_interned_stack() const { return (flags & rec::impl::flag_interned_stack) != 0; }
 
     // generic field access, so a consumer that has never heard of the payload can still read it
 public:
@@ -95,6 +78,13 @@ public:
     /// Empty when there is no such field or it is not an array; an array that IS empty is not a case the format can
     /// produce, since a writer with nothing to say writes no event.
     [[nodiscard]] cc::vector<u64> field_as_u64_array(cc::string_view field_name) const;
+
+    /// The named field as another site's descriptor, for `desc_ref` fields.
+    ///
+    /// Null when there is no such field, when it is not a descriptor reference, or when it names nothing — which is
+    /// what a chunk preamble's unused scope slots hold.
+    /// Valid for as long as the recording is: on a loaded one it points into that `loaded_recording`'s own table.
+    [[nodiscard]] rec::desc const* field_as_desc(cc::string_view field_name) const;
 
     /// What a trace_relation site's edge means, or null for every other kind.
     [[nodiscard]] rec::relation_type const* relation() const
@@ -135,12 +125,16 @@ private:
 /// A block of one thread's events, with everything needed to interpret them.
 ///
 /// This is what a listener is handed, and what a recording is made of.
-/// `state_at_start` is null only for a chunk the consumer never reached — the tail of a crash dump.
+///
+/// **The stream state is not a field here — it is the chunk's first EVENT.**
+/// Every chunk opens with an `event_kind::stream_state` naming the trace and the scopes that were already open, so a
+/// block is decodable from its own bytes with nothing carried in alongside it.
+/// A block that is a later SLICE of a chunk does not repeat it, so a reader that slices carries the value forward the
+/// way it carries any other state.
 struct cc::rec::chunk_view
 {
     rec::chunk const* source = nullptr;
     rec::thread_info thread;
-    rec::stream_state const* state_at_start = nullptr;
     cc::span<byte const> bytes;
 
     /// Where this block sits in its thread's sequence, so a hole between two blocks is detectable.

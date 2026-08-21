@@ -7,7 +7,6 @@
 #include <clean-core/record/hot_functions.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
-#include <clean-core/record/stack_table.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -228,13 +227,12 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     auto const stats = cc::rec::sampling_statistics();
     cc::println("  {} sample(s) taken, {} tick(s) found nothing to sample",
                 captured.count_of_kind(cc::rec::event_kind::sample), stats.idle);
-    cc::rec::stack_table const sampled_stacks(captured);
     isize deepest = 0;
     captured.for_each_event(
         [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
         {
             if (e.kind() == cc::rec::event_kind::sample)
-                deepest = cc::max(deepest, sampled_stacks.frames_of(e).size());
+                deepest = cc::max(deepest, e.field_as_u64_array("frames").size());
         });
     cc::println("  deepest sampled stack: {} frame(s)", deepest);
     cc::println("  (a sample stops at the innermost open scope, so it carries only the frames NOBODY named —");

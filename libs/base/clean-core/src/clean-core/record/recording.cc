@@ -88,7 +88,6 @@ struct block_builder
             .base_wall_secs = _template->base_wall_secs,
             .seal_cycles = _template->seal_cycles,
             .seal_wall_secs = _template->seal_wall_secs,
-            .state_at_start = _template->state_at_start,
         };
 
         _bytes = {};
@@ -138,7 +137,6 @@ cc::rec::chunk_view cc::rec::recorded_block::view() const
     return {
         .source = source.get(),
         .thread = {.id = thread_id, .index = thread_index, .name = thread_name},
-        .state_at_start = state_at_start,
         .bytes = bytes(),
         .chunk_seq = chunk_seq,
         .layer = layer,
@@ -175,7 +173,6 @@ void cc::rec::recording::append(cc::rec::chunk_view const& view)
             .base_wall_secs = view.base_wall_secs,
             .seal_cycles = view.seal_cycles,
             .seal_wall_secs = view.seal_wall_secs,
-            .state_at_start = view.state_at_start,
         });
         return;
     }
@@ -196,7 +193,6 @@ void cc::rec::recording::append(cc::rec::chunk_view const& view)
         .base_wall_secs = view.base_wall_secs,
         .seal_cycles = view.seal_cycles,
         .seal_wall_secs = view.seal_wall_secs,
-        .state_at_start = view.state_at_start,
     });
 }
 
@@ -395,9 +391,17 @@ struct anchored_sample
 cc::rec::recording cc::rec::recording::spliced_samples() const
 {
     // Collect first, because a sample has to be matched against a block that may come before or after it.
+    //
+    // **Only out of a chunk-backed block.**
+    // A sample sitting in a synthesized one was put there by an earlier splice — offline or by splicing_listener — and
+    // lifting it out again would take it away from the position that splice worked out for it.
+    // That is what makes splicing idempotent in POSITION rather than merely in count.
     cc::vector<anchored_sample> samples;
     for (auto const& b : _blocks)
     {
+        if (!b.source)
+            continue;
+
         auto const v = b.view();
         for (auto it = v.begin(); it != v.end(); ++it)
         {
@@ -421,21 +425,30 @@ cc::rec::recording cc::rec::recording::spliced_samples() const
 
     for (auto const& b : _blocks)
     {
-        // A synthesized block has no chunk identity, so nothing can be anchored into it.
-        auto const splices_here = bool(b.source);
+        // A synthesized block has no chunk identity, so nothing can be anchored into it — and whatever it already
+        // carries is where a previous splice decided it goes.
+        // It passes through untouched, which is the other half of idempotence.
+        // A synthesized block has no chunk identity, so nothing can be anchored into it — and whatever it already
+        // carries is where a previous splice decided it goes.
+        // It passes through untouched, which is what keeps a MIXED recording — live-spliced blocks alongside fresh
+        // chunk-backed ones — idempotent rather than only a wholly-spliced one.
+        if (!b.source)
+        {
+            out._blocks.push_back(b);
+            continue;
+        }
 
         // Which samples land in this block, in the order they land.
         cc::vector<isize> incoming;
-        if (splices_here)
-            for (isize i = 0; i < samples.size(); ++i)
-            {
-                auto& s = samples[i];
-                if (s.placed || s.thread_index != b.thread_index || s.chunk_seq != b.chunk_seq)
-                    continue;
-                if (s.chunk_offset < b.from || s.chunk_offset > b.to)
-                    continue;
-                incoming.push_back(i);
-            }
+        for (isize i = 0; i < samples.size(); ++i)
+        {
+            auto& s = samples[i];
+            if (s.placed || s.thread_index != b.thread_index || s.chunk_seq != b.chunk_seq)
+                continue;
+            if (s.chunk_offset < b.from || s.chunk_offset > b.to)
+                continue;
+            incoming.push_back(i);
+        }
 
         cc::sort(incoming, [&](isize a, isize c) { return samples[a].chunk_offset < samples[c].chunk_offset; });
 
@@ -488,8 +501,9 @@ cc::rec::recording cc::rec::recording::spliced_samples() const
             out._blocks.push_back(builder.take());
     }
 
-    // A sample nobody could place — its bytes were dropped, or never captured — keeps its original home rather than
-    // vanishing, which is also what makes splicing twice a no-op.
+    // A sample nobody could place — its bytes were dropped, or simply never captured — is kept rather than dropped.
+    // It comes back on its recording thread's own lane instead of the thread it caught, which is the honest answer:
+    // where it was taken is the only position this recording can still justify.
     cc::vector<isize> unplaced;
     for (isize i = 0; i < samples.size(); ++i)
         if (!samples[i].placed)
@@ -498,6 +512,10 @@ cc::rec::recording cc::rec::recording::spliced_samples() const
     if (!unplaced.empty())
         for (auto const& b : _blocks)
         {
+            // Synthesized blocks went out whole above, samples included, so re-adding from one would duplicate.
+            if (!b.source)
+                continue;
+
             auto const v = b.view();
             auto builder = block_builder(b);
 
@@ -524,9 +542,11 @@ cc::rec::recording cc::rec::recording::spliced_samples() const
 
 cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
 {
-    // Trace membership is carried forward per thread from the ambient deltas, because a thread publishes a delta
-    // rather than tagging events.
-    // A recording that does not contain the delta therefore attributes nothing, which is the honest answer.
+    // Trace membership is carried forward per thread, because a thread publishes a delta rather than tagging events.
+    //
+    // Two kinds set it: a chunk's preamble, which states the trace outright, and an ambient delta, which changes it.
+    // The preamble is why a capture that starts mid-trace still attributes — before it existed, a recording missing
+    // the original delta attributed nothing at all.
     cc::map<cc::thread_id, rec::trace_id> current;
 
     return filtered(
@@ -534,12 +554,12 @@ cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
         {
             auto& running = current[v.thread.id];
 
-            if (e.kind() == rec::event_kind::ambient_changed)
+            if (e.kind() == rec::event_kind::ambient_changed || e.kind() == rec::event_kind::stream_state)
             {
                 // Read as a raw u64: a trace id is opaque, and a double would quietly lose everything past 2^53.
                 running = rec::trace_id(e.field_as_u64("trace").value_or(0));
 
-                // The delta belongs to the context it names, so entering a trace is visible inside it.
+                // Either belongs to the context it names, so entering a trace is visible inside it.
                 return running == id;
             }
 

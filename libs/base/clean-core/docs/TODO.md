@@ -62,11 +62,17 @@ Add entries as we discover them, and remove them as they land.
   An index would be a hash from descriptor to event offsets plus a sorted timestamp array, built on first query and cached on the recording.
 - **A richer value codec.**
   `CC_RECORD` takes scalars, enums, pointers and text; `desc::fields` already describes multi-field payloads, and nothing has needed one yet.
-- **A static/interned tier for recorded text.**
-  A literal already costs nothing when it is a site's NAME, and only a runtime string is copied — an interned handle could be stored as its id instead.
+- **An interned tier for recorded text.**
+  The static tier landed: a literal VALUE is stored as its address (`type_code::cstring`), and only a runtime string is copied.
+  What is left is `cc::interned_string`, whose 8-byte handle would give a runtime string the same cost as a literal with no lifetime rule attached.
+  It is also what would let `CC_RECORD_NAMED` take a runtime string value, since the handle is fixed-size.
 - **Sampling above the OS timer's ceiling.**
   A high-resolution waitable timer floors near half a millisecond on Windows — about 1.9 kHz — and going faster means sleeping short and spinning the remainder, which burns a core for the privilege.
   Worth it only for a short, deliberate capture, so it wants to be an explicit mode rather than a rate that quietly starts spinning.
+- **A stack dictionary that retention understands.**
+  Samples write their frames out in full, so a kilohertz across many uninstrumented threads is megabytes a second of repeated return addresses.
+  A sampler-local intern table was tried and removed: definitions are written once at the front of a capture, and a bounded ring evicts oldest-first, so the ring outlives the stacks it refers to.
+  Whatever replaces it has to be a property of the stream rather than of the sampler — a dictionary retention keeps, or re-emits, so that any surviving window is self-contained.
 - **A POSIX sampler.**
   Windows suspends a thread and walks it from outside; POSIX has no equivalent.
   There it wants `SIGPROF` via `timer_create`, plus a handler that walks its own stack and hands the frames and the anchor to the sampler thread.

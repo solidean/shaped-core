@@ -8,7 +8,6 @@
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
-#include <clean-core/record/stack_table.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
@@ -188,6 +187,11 @@ REC_TEST("record/sampling - splicing twice changes nothing")
     // Idempotence is what makes this safe to run in a pipeline that may already have run it.
     CHECK(count_samples(twice) == count_samples(once));
     CHECK(twice.event_count() == once.event_count());
+
+    // On the LAYOUT, not on the counts.
+    // Splicing a second time used to strip every sample back out and re-append it in a trailing block, which moved
+    // each one out of the scope it had been placed inside while leaving every count identical.
+    CHECK(event_layout(twice) == event_layout(once));
 }
 
 REC_TEST("record/sampling - a scope shortens what a sample has to carry")
@@ -197,18 +201,14 @@ REC_TEST("record/sampling - a scope shortens what a sample has to carry")
 
     rec_fixture const fixture(deterministic_config());
 
-    // Through the table, because a deep stack is interned and its frames field then holds one id.
-    // Reading the field directly would measure the encoding rather than the depth.
     auto const deepest = [&](cc::rec::recording const& r)
     {
-        cc::rec::stack_table const stacks(r);
-
         isize longest = 0;
         r.for_each_event(
             [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
             {
                 if (e.kind() == cc::rec::event_kind::sample)
-                    longest = cc::max(longest, stacks.frames_of(e).size());
+                    longest = cc::max(longest, e.field_as_u64_array("frames").size());
             });
         return longest;
     };
@@ -378,8 +378,8 @@ REC_TEST("record/sampling - the configuration can change while the sampler runs"
 
             {
                 // What a checkbox in a profiler window does, and what a test narrows with.
-                // The sampler must not have to be stopped for this: stopping it would throw away the interned stacks
-                // whose ids are already in the stream.
+                // The sampler must not have to be stopped for this: a stop-and-restart would lose every sample taken
+                // between the two, which is exactly the stretch somebody turning a knob is looking at.
                 cc::rec::sampling_override const all_threads({.rate_hz = 500.0, .include_unknown_threads = true});
                 CHECK(cc::rec::current_sampling_config().include_unknown_threads);
 

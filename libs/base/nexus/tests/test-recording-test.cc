@@ -2,6 +2,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/trace.hh>
+#include <nexus/async-test.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
@@ -160,4 +161,43 @@ TEST("test recording - --record buckets a test that never asked", no_scheduler)
     auto exec = nx::execute_tests(schedule, config);
     CHECK(exec.count_failed_tests() == 0);
     CHECK(exec.count_failed_checks() == 0);
+}
+
+// nx::config::owns_recorder hands the cc::rec singleton to the test, and the handover has to reach BOTH ways a test
+// body is driven — the straight-line one and the coroutine one.
+// It reached only the first, so an ASYNC_TEST asking for the recorder was handed one that was still running, and the
+// initialize() it then made asserted.
+
+// No --no-recording guard on either, deliberately: with a run recorder the handover has torn it down, and without one
+// there was never anything up, so "no recorder is initialized right now" is the same assertion both ways.
+// A guard here would have to ask whether the run HAD a recorder, and the handover has already erased the evidence.
+
+TEST("test recording - owns_recorder hands a sync test the whole singleton",
+     nx::config::exclusive(),
+     nx::config::owns_recorder)
+{
+    // The run's recorder is gone for the duration, which is what makes initialize() legal here.
+    CHECK(!cc::rec::is_initialized());
+
+    cc::rec::initialize();
+    CHECK(cc::rec::is_initialized());
+    cc::rec::shutdown();
+}
+
+ASYNC_TEST("test recording - owns_recorder hands an async test the whole singleton",
+           nx::config::exclusive(),
+           nx::config::owns_recorder)
+{
+    return cc::make_async_lazy<cc::unit>(
+        [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
+        {
+            // The same contract as the sync test above, and the one that used to be silently skipped.
+            CHECK(!cc::rec::is_initialized());
+
+            cc::rec::initialize();
+            CHECK(cc::rec::is_initialized());
+            cc::rec::shutdown();
+
+            return actx.resolve_to_value(cc::unit{});
+        });
 }

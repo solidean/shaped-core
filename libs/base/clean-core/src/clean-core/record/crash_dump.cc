@@ -41,6 +41,20 @@ struct installed_dump
 
 installed_dump g_dump;
 
+/// The stack buffer a pointer-carrying payload is patched through.
+/// The events that need it are small — a preamble is forty bytes, a literal value sixteen — and one that somehow
+/// exceeded this is dropped rather than written with process addresses in it.
+constexpr isize pointer_scratch_bytes = 256;
+
+/// Whether any of `d`'s fields holds a pointer into this process, and so needs patching on the way out.
+[[nodiscard]] bool has_payload_pointers(cc::rec::desc const& d)
+{
+    for (isize f = 0; f < isize(d.field_count); ++f)
+        if (d.fields[f].type == cc::rec::type_code::desc_ref || d.fields[f].type == cc::rec::type_code::cstring)
+            return true;
+    return false;
+}
+
 /// Writes `bytes` in full, looping over short writes.
 bool write_all(cc::impl::native_file& file, cc::span<byte const> bytes)
 {
@@ -73,7 +87,6 @@ void for_each_published_block(cc::rec::impl::thread_state const& ts, cc::functio
         auto const view = cc::rec::chunk_view{
             .source = c,
             .thread = info,
-            .state_at_start = nullptr,
             .bytes = cc::span<byte const>(c->data, isize(committed)),
             .chunk_seq = c->seq,
             .layer = c->layer,
@@ -104,8 +117,12 @@ bool write_dump()
     // The table is what makes a dump's addresses mean anything once the process is gone.
     builder.add_modules(g_dump.modules);
 
+    // try_ rather than the blocking walk, for the same reason nothing here allocates.
+    // The thread registry is a process-wide lock, and a thread that crashed inside registration or reclamation is
+    // still holding it — so waiting would hang the dump exactly where a dump is most wanted.
+    // Coming back empty-handed names the problem; hanging names nothing.
     isize event_bytes = 0;
-    cc::rec::impl::for_each_thread_state(
+    auto const walked = cc::rec::impl::try_for_each_thread_state(
         [&](cc::rec::impl::thread_state& ts)
         {
             for_each_published_block(ts,
@@ -119,6 +136,8 @@ bool write_dump()
                                          return true;
                                      });
         });
+    if (!walked)
+        return false;
 
     auto const parts = builder.finish();
 
@@ -129,11 +148,14 @@ bool write_dump()
 
     auto const header_bytes
         = cc::span<byte const>(reinterpret_cast<byte const*>(&parts.header), isize(sizeof(parts.header)));
+    // Every section finish() laid out, in the order it laid them out.
+    // The relation table was missing here, which was invisible for as long as no dump contained a relation event and
+    // silently shifted every section after `units` the moment one did.
     if (!write_all(file.value(), header_bytes) || !write_all(file.value(), parts.strings)
         || !write_all(file.value(), parts.domains) || !write_all(file.value(), parts.units)
-        || !write_all(file.value(), parts.fields) || !write_all(file.value(), parts.descs)
-        || !write_all(file.value(), parts.threads) || !write_all(file.value(), parts.modules)
-        || !write_all(file.value(), parts.blocks))
+        || !write_all(file.value(), parts.relations) || !write_all(file.value(), parts.fields)
+        || !write_all(file.value(), parts.descs) || !write_all(file.value(), parts.threads)
+        || !write_all(file.value(), parts.modules) || !write_all(file.value(), parts.blocks))
         return false;
 
     // The event bytes go out straight from the chunks, with the descriptor pointer in each header rewritten into its
@@ -151,7 +173,8 @@ bool write_dump()
             cc::memcpy(&header, source.data + offset, sizeof(header));
 
             auto const payload = isize(header.payload_size);
-            auto const index = builder.desc_index_of_pointer(header.desc);
+            auto const* const original = header.desc;
+            auto const index = builder.desc_index_of_pointer(original);
             header.desc = reinterpret_cast<cc::rec::desc const*>(uintptr_t(index));
 
             if (!write_all(file.value(),
@@ -159,7 +182,24 @@ bool write_dump()
                 return false;
 
             auto const rest = cc::rec::impl::event_bytes_for(payload) - isize(sizeof(header));
-            if (rest > 0 && !write_all(file.value(), cc::span<byte const>(source.data + offset + sizeof(header), rest)))
+            auto const* const payload_bytes = source.data + offset + sizeof(header);
+
+            // A payload carrying descriptor references cannot go out verbatim: those are pointers into this binary,
+            // and the file speaks in table indices.
+            // Patched through a fixed stack buffer rather than in place — the chunk belongs to a thread that may still
+            // be running — and only for the events that have one, which is the preamble and nothing else so far.
+            if (rest > 0 && has_payload_pointers(*original))
+            {
+                byte scratch[pointer_scratch_bytes] = {};
+                if (rest > isize(sizeof(scratch)))
+                    return false;
+
+                cc::memcpy(scratch, payload_bytes, size_t(rest));
+                builder.rewrite_payload_pointers(*original, cc::span<byte>(scratch, payload));
+                if (!write_all(file.value(), cc::span<byte const>(scratch, rest)))
+                    return false;
+            }
+            else if (rest > 0 && !write_all(file.value(), cc::span<byte const>(payload_bytes, rest)))
                 return false;
 
             offset += isize(sizeof(header)) + rest;

@@ -287,6 +287,37 @@ i64 cc::rec::impl::dump_builder::desc_index_of_pointer(rec::desc const* d) const
     return -1;
 }
 
+void cc::rec::impl::dump_builder::rewrite_payload_pointers(rec::desc const& d, cc::span<byte> payload)
+{
+    for (isize f = 0; f < isize(d.field_count); ++f)
+    {
+        auto const& field = d.fields[f];
+        if (isize(field.offset) + isize(sizeof(u64)) > payload.size())
+            continue;
+
+        if (field.type == rec::type_code::desc_ref)
+        {
+            rec::desc const* target = nullptr;
+            cc::memcpy(&target, payload.data() + field.offset, sizeof(target));
+
+            // A null slot stays null, and so does one whose target never made it into the table — a reader treats both
+            // as "not named here", which is exactly what a preamble with fewer scopes than depth already means.
+            auto const written = u64(target != nullptr ? desc_index_of_pointer(target) : i64(-1));
+            cc::memcpy(payload.data() + field.offset, &written, sizeof(written));
+        }
+        else if (field.type == rec::type_code::cstring)
+        {
+            char const* text = nullptr;
+            cc::memcpy(&text, payload.data() + field.offset, sizeof(text));
+
+            // Into the string table, where the descriptors' own names already live, so a literal recorded a thousand
+            // times costs the file one copy.
+            auto const written = text != nullptr ? _intern_string(cc::string_view(text)) : serialized_str{};
+            cc::memcpy(payload.data() + field.offset, &written, sizeof(written));
+        }
+    }
+}
+
 void cc::rec::impl::dump_builder::add_modules(cc::span<cc::loaded_module const> modules)
 {
     for (auto const& m : modules)
@@ -326,8 +357,38 @@ bool cc::rec::impl::dump_builder::add_block(rec::chunk_view const& view)
     // An overflow here abandons the block rather than writing a dangling index.
     for (auto it = view.begin(); it != view.end(); ++it)
     {
-        if (_intern_desc((*it).desc) < 0)
+        auto const e = *it;
+        if (_intern_desc(e.desc) < 0)
             return false;
+
+        // Whatever a payload names by POINTER has to make it into a table too, alongside the event's own descriptor.
+        // A chunk's preamble names the scopes that were open, and those sites may have no event of their own anywhere
+        // in this dump — the whole point of the preamble is that their `scope_begin` is gone.
+        for (isize f = 0; f < isize(e.desc->field_count); ++f)
+        {
+            auto const& field = e.desc->fields[f];
+            if (isize(field.offset) + isize(sizeof(u64)) > e.payload.size())
+                continue;
+
+            if (field.type == rec::type_code::desc_ref)
+            {
+                rec::desc const* target = nullptr;
+                cc::memcpy(&target, e.payload.data() + field.offset, sizeof(target));
+                if (target != nullptr && _intern_desc(target) < 0)
+                    return false;
+            }
+            else if (field.type == rec::type_code::cstring)
+            {
+                char const* text = nullptr;
+                cc::memcpy(&text, e.payload.data() + field.offset, sizeof(text));
+                if (text != nullptr)
+                {
+                    _intern_string(cc::string_view(text));
+                    if (_overflowed)
+                        return false;
+                }
+            }
+        }
     }
 
     if (_overflowed || thread_index < 0)

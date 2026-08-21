@@ -106,7 +106,6 @@ cc::rec::chunk* cc::rec::chunk_pool::acquire(rec::impl::thread_state* owner, u64
             c->owner = owner;
             c->seq = seq;
             c->layer = layer;
-            c->state_at_start = nullptr;
             c->seal_cycles = 0;
             c->seal_wall_secs = 0;
             c->base_cycles = cc::current_cycles();
@@ -128,10 +127,6 @@ void cc::rec::chunk_pool::recycle(rec::chunk* c)
 
     c->release_pins();
     c->owner = nullptr;
-
-    // The consumer allocated the preamble; the chunk outlived every reader, so this is where it goes.
-    delete c->state_at_start;
-    c->state_at_start = nullptr;
 
     _state.lock([&](state& s) { s.ready.push_back(c); });
 }

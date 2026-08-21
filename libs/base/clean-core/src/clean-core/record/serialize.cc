@@ -115,7 +115,13 @@ cc::vector<byte> cc::rec::serialize(cc::rec::recording const& r)
             {
                 auto* const header = reinterpret_cast<impl::event_header*>(out.data() + at + offset);
                 auto const payload = isize(header->payload_size);
-                auto const index = builder.desc_index_of_pointer(header->desc);
+                auto const* const original = header->desc;
+                auto const index = builder.desc_index_of_pointer(original);
+
+                // The payload's own descriptor references go first: they are read through `original`, which the line
+                // below overwrites.
+                builder.rewrite_payload_pointers(
+                    *original, cc::span<byte>(out.data() + at + offset + isize(sizeof(*header)), payload));
 
                 header->desc = reinterpret_cast<rec::desc const*>(uintptr_t(index));
                 offset += impl::event_bytes_for(payload);
@@ -316,6 +322,9 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
     if (h.total_event_bytes > 0)
         cc::memcpy(events.data(), file.data() + h.offset_events, size_t(h.total_event_bytes));
 
+    // Measured by the validating walk below, then used to size the payload string arena exactly once.
+    isize payload_string_bytes = 0;
+
     for (u32 b = 0; b < h.block_count; ++b)
     {
         auto const& sb = s_blocks[b];
@@ -341,7 +350,88 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
                 return cc::error("recording is malformed: an event payload runs past its block");
 
             header->desc = out._descs.data() + index;
+
+            // The payload's own descriptor references, patched the same way and against the same table.
+            // Validated rather than trusted: an index from a file names whatever it likes, and a preamble that points
+            // at nothing reads as an unnamed scope, which the format already has a meaning for.
+            //
+            // A `cstring` slot is left alone for now and measured instead: its bytes need an arena of their own, and
+            // that arena's size is exactly what this walk is working out.
+            auto const& d = out._descs[isize(index)];
+            for (isize f = 0; f < isize(d.field_count); ++f)
+            {
+                auto const& field = d.fields[f];
+                if (isize(field.offset) + isize(sizeof(u64)) > isize(header->payload_size))
+                    continue;
+
+                auto* const slot = events.data() + at + offset + isize(sizeof(impl::event_header)) + field.offset;
+
+                if (field.type == rec::type_code::desc_ref)
+                {
+                    u64 referenced = 0;
+                    cc::memcpy(&referenced, slot, sizeof(referenced));
+
+                    rec::desc const* target = referenced < h.desc_count ? out._descs.data() + referenced : nullptr;
+                    cc::memcpy(slot, &target, sizeof(target));
+                }
+                else if (field.type == rec::type_code::cstring)
+                {
+                    impl::serialized_str str = {};
+                    cc::memcpy(&str, slot, sizeof(str));
+
+                    if (u64(str.offset) + str.length <= h.string_bytes)
+                        payload_string_bytes += isize(str.length) + 1;
+                }
+            }
+
             offset += total;
+        }
+    }
+
+    // Now that the walk has both validated the stream and measured it, the payload arena can be sized exactly once —
+    // the same discipline as `_strings`, and for the same reason: the slots below hold pointers into it.
+    out._payload_strings.resize_to_uninitialized(payload_string_bytes + 1);
+    isize payload_string_at = 0;
+
+    for (u32 b = 0; b < h.block_count; ++b)
+    {
+        auto const& sb = s_blocks[b];
+        auto const at = isize(sb.event_offset - h.offset_events);
+
+        isize offset = 0;
+        while (offset < isize(sb.event_bytes))
+        {
+            auto* const header = reinterpret_cast<impl::event_header*>(events.data() + at + offset);
+            auto const& d = *header->desc;
+
+            for (isize f = 0; f < isize(d.field_count); ++f)
+            {
+                auto const& field = d.fields[f];
+                if (field.type != rec::type_code::cstring)
+                    continue;
+                if (isize(field.offset) + isize(sizeof(u64)) > isize(header->payload_size))
+                    continue;
+
+                auto* const slot = events.data() + at + offset + isize(sizeof(impl::event_header)) + field.offset;
+
+                impl::serialized_str str = {};
+                cc::memcpy(&str, slot, sizeof(str));
+
+                auto* const text = out._payload_strings.data() + payload_string_at;
+                if (u64(str.offset) + str.length <= h.string_bytes)
+                {
+                    for (u32 i = 0; i < str.length; ++i)
+                        out._payload_strings[payload_string_at++] = s_strings[str.offset + i];
+                    out._payload_strings[payload_string_at++] = '\0';
+                }
+
+                // A slot the file could not justify becomes the empty string rather than an address.
+                char const* const written
+                    = u64(str.offset) + str.length <= h.string_bytes ? text : out._payload_strings.data();
+                cc::memcpy(slot, &written, sizeof(written));
+            }
+
+            offset += impl::event_bytes_for(isize(header->payload_size));
         }
     }
 
@@ -375,10 +465,6 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
             .base_wall_secs = sb.base_wall_secs,
             .seal_cycles = sb.seal_cycles,
             .seal_wall_secs = sb.seal_wall_secs,
-            // The stream state is not serialized: it is derived, and a loaded recording has no live producer to
-            // derive it from.
-            // See libs/base/clean-core/docs/systems/recording-formats.md.
-            .state_at_start = nullptr,
         });
     }
 

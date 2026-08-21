@@ -10,6 +10,7 @@
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/serialize.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/record/trace.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
@@ -390,4 +391,131 @@ REC_TEST("record/serialize - a loaded recording symbolizes its own stacks")
     // Every frame resolves at least to a module and an offset, which comes from the TABLE rather than from anything
     // this process has loaded — the whole point of carrying it.
     CHECK(with_module == frames);
+}
+
+// A chunk's preamble is the one payload holding a POINTER into this binary — a `desc_ref` naming an open scope's site.
+// Both writers have to rewrite it into a table index and the loader has to rewrite it back, exactly as an event's own
+// descriptor is, or a loaded preamble would name whatever happens to live at that address.
+// These are what pin that, one per writer, since serialize() patches in place and the crash dump streams.
+
+namespace
+{
+/// The deepest scope name any chunk preamble in `r` claims was already open, or empty.
+[[nodiscard]] cc::string outermost_named_scope(cc::rec::recording const& r)
+{
+    cc::string found;
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() != cc::rec::event_kind::stream_state)
+                return;
+            if (e.field_as_u64("named_scopes").value_or(0) == 0)
+                return;
+
+            auto const* const outer = e.field_as_desc("scope0");
+            if (outer != nullptr)
+                found = cc::string(cc::string_view(outer->name));
+        });
+    return found;
+}
+
+/// Rotates several chunks with a scope open, so at least one preamble names it.
+void fill_chunks_inside_a_scope()
+{
+    CC_RECORD_SCOPE("long-lived-frame");
+    for (isize i = 0; i < 8000; ++i)
+        CC_RECORD_MARK("filler");
+}
+} // namespace
+
+REC_TEST("record/serialize - a preamble's open scope survives the round trip")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const live = capture([] { fill_chunks_inside_a_scope(); });
+    REQUIRE(outermost_named_scope(live) == "long-lived-frame");
+
+    auto const bytes = cc::rec::serialize(live);
+    auto loaded = cc::rec::deserialize(bytes);
+    REQUIRE(loaded.has_value());
+
+    // Resolved against the LOADED recording's own descriptor table, since the process that gave the pointer meaning
+    // is exactly what a round trip is meant to survive without.
+    CHECK(outermost_named_scope(loaded.value().events()) == "long-lived-frame");
+}
+
+REC_TEST("record/crash - a preamble's open scope survives the dump's streaming writer")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const path = cc::temp_file_path("cc-record-crash-preamble", ".ccrec");
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+
+    fill_chunks_inside_a_scope();
+    REQUIRE(cc::rec::write_crash_dump_now());
+
+    auto loaded = cc::rec::load_recording(path);
+    REQUIRE(loaded.has_value());
+
+    // The dump writes each event's bytes straight out rather than copying the block, so its patching is a separate
+    // path from serialize()'s and needs its own assertion.
+    CHECK(outermost_named_scope(loaded.value().events()) == "long-lived-frame");
+
+    CHECK(cc::remove_file(path));
+}
+
+REC_TEST("record/serialize - a literal value survives the round trip as text")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const live = capture(
+        []
+        {
+            CC_RECORD("asset", "meshes/tree.obj");
+            CC_RECORD("runtime", cc::string("built at runtime"));
+        });
+
+    auto const bytes = cc::rec::serialize(live);
+    auto loaded = cc::rec::deserialize(bytes);
+    REQUIRE(loaded.has_value());
+
+    // The literal was written as an ADDRESS, which means nothing in the loading process — so the writer had to route
+    // it through the string table and the loader had to give it an arena of its own.
+    // Reading the pointer back verbatim would `strlen` a dead address, which is why this asserts on the text.
+    auto const& r = loaded.value().events();
+    CHECK(r.first_text("asset").value() == "meshes/tree.obj");
+    CHECK(r.first_text("runtime").value() == "built at runtime");
+}
+
+REC_TEST("record/crash - a dump carrying a relation is not shifted by its own table")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const path = cc::temp_file_path("cc-record-crash-relation", ".ccrec");
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+
+    // The relation table sits between the units and the fields in the layout finish() computes.
+    // The dump writer used to skip it, so every section after `units` landed short by however many bytes it held —
+    // invisible while no dump contained a relation, and a corrupt file the moment one did.
+    auto const parent = cc::rec::new_trace_id();
+    auto const child = cc::rec::new_trace_id();
+    CC_RECORD_RELATION(cc::rec::relation_parent_of, parent, child);
+    CC_RECORD_MARK("after-the-relation");
+
+    REQUIRE(cc::rec::write_crash_dump_now());
+
+    auto loaded = cc::rec::load_recording(path);
+    REQUIRE(loaded.has_value());
+
+    auto const& r = loaded.value().events();
+    CHECK(r.count("after-the-relation") == 1);
+
+    auto const relations = r.trace_relations();
+    REQUIRE(relations.size() == 1);
+    CHECK(cc::string_view(relations[0].type->name) == "parent_of");
+    CHECK(relations[0].subject() == parent);
+    REQUIRE(relations[0].objects().size() == 1);
+    CHECK(relations[0].objects()[0] == child);
+
+    CHECK(cc::remove_file(path));
 }

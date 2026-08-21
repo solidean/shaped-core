@@ -14,6 +14,20 @@
 // path naturally.
 // That is where registration happens, and it costs the call site nothing.
 
+namespace cc::rec::impl
+{
+/// How many open scopes a chunk's preamble names.
+///
+/// Three rather than all of them, because a preamble must be a FIXED size — it is written from the cold path into a
+/// chunk that was just claimed, and a variable-length one would make every rotation's cost depend on how deep the
+/// thread happened to be.
+/// Three covers what a bounded capture actually loses: the long-lived frame or worker scopes, which open once and are
+/// evicted long before the window a reader is looking at.
+/// Anything deeper is short-lived enough that its own `scope_begin` is almost certainly still in the window, and a
+/// reader that has the depth can render the rest as unnamed.
+inline constexpr u32 named_scope_capacity = 3;
+} // namespace cc::rec::impl
+
 /// One thread's write cursor.
 struct cc::rec::impl::writer_tls
 {
@@ -28,6 +42,13 @@ struct cc::rec::impl::writer_tls
 
     /// How many profiling scopes are open on this thread.
     u32 scope_depth;
+
+    /// The outermost open scopes, for the next chunk's preamble to name.
+    ///
+    /// Written only while `scope_depth < named_scope_capacity`, so an inner loop's scopes cost one predictable branch
+    /// and nothing else.
+    /// Never cleared on the way out: `scope_depth` bounds what is ever read back.
+    rec::desc const* scope_descs[rec::impl::named_scope_capacity];
 
     /// The stack address of the frame that opened the innermost scope, or null when none is open.
     ///

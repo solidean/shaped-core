@@ -28,17 +28,24 @@ extern cc::atomic<u64> g_drop_retry_cycles;
 /// Takes the registry lock; called once per recording thread.
 void register_thread_state(thread_state* s);
 
-/// Unlinks and frees a drained, dead thread state.
-/// Consumer-only.
 /// Clears a thread_state's pointer back into its owner's thread-local storage.
 /// Called from the thread-exit handshake: the state outlives the thread so its chunks stay drainable, and that pointer
 /// must not, because the storage it names goes away with the thread.
 void detach_thread_state_tls(thread_state* s);
 
+/// Unlinks and frees a drained, dead thread state.
+/// Consumer-only.
 void reclaim_thread_state(thread_state* s);
 
 /// Calls `f` for every registered thread, alive or not, under the registry lock.
 void for_each_thread_state(cc::function_ref<void(thread_state&)> f);
+
+/// The same, but gives up instead of blocking when the registry is busy; false means `f` never ran.
+///
+/// **For the crash handler, which must not block on a lock a dead thread may be holding.**
+/// A thread that crashed inside registration or reclamation still holds this one, and a dump that waited for it would
+/// hang exactly where a dump is most wanted — so failing to write is the better answer, and it names the reason.
+[[nodiscard]] bool try_for_each_thread_state(cc::function_ref<void(thread_state&)> f);
 
 /// Runs `f` on one registered thread state, chosen as `n` modulo however many there are, and reports that count.
 ///

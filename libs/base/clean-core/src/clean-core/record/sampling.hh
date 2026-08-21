@@ -13,9 +13,9 @@
 // A suspended thread may be mid-event or mid-rotation holding the pool lock, so writing into its stream from outside
 // would corrupt it or deadlock against it.
 // Instead each sample carries an ANCHOR — the sampled thread, and how far its stream had committed — which is enough
-// to put the sample back exactly where it belongs, along with everything the consumer had carried to that point: the
-// trace, the ambient context, and the open scopes.
-// `cc::rec::splice_samples` (recording.hh) is what does the putting back.
+// to put the sample back exactly where it belongs, so a reader replaying that thread's stream in order reaches it with
+// the trace and the open scopes already in hand.
+// `cc::rec::recording::spliced_samples` (recording.hh) is what does the putting back.
 //
 // **Off by default, and it perturbs what it measures far more than instrumentation does.**
 // Suspending a thread costs microseconds, so the rate is a budget across all threads rather than a per-thread rate.
@@ -76,28 +76,15 @@ struct cc::rec::sampling_config
     /// core to 7.4%.
     /// Turn it on when you are hunting a thread that records nothing, which is exactly what it is for.
     bool include_unknown_threads = false;
-
-    /// Intern a stack rather than writing it out, from this many frames up.
-    /// Zero never interns.
-    ///
-    /// A kilohertz across twenty threads is megabytes a second of return addresses, and nearly all of them repeat —
-    /// the same stack, sampled again a millisecond later.
-    /// Interning writes each distinct stack ONCE, as its own event, and every sample after that carries an id.
-    ///
-    /// **The threshold is why this is not simply on.**
-    /// With `stop_at_scope` an instrumented stack is often one or two frames, and an id is no smaller than the frames
-    /// it replaces; only a deep stack — an uninstrumented thread, a recursive descent — actually pays.
-    isize intern_min_frames = 4;
 };
 
 namespace cc::rec
 {
-/// Starts sampling every recording thread, round-robin.
+/// Starts sampling, round-robin over every thread the configuration covers.
 ///
-/// **Only threads the recorder already knows about**, which a thread joins by recording anything at all — a log line,
-/// a scope, or the ambient delta an async worker writes on its own.
-/// A thread that has never recorded is invisible here, which is the limitation to know: enumerating the process's OS
-/// threads instead would cover it, and is in the TODO.
+/// By default that is the threads the recorder already knows about, which a thread joins by recording anything at all —
+/// a log line, a scope, or the ambient delta an async worker writes on its own.
+/// `include_unknown_threads` widens it to every OS thread in the process, at the cost documented on that field.
 ///
 /// Requires an initialized recorder, and does nothing where a foreign thread's stack cannot be walked
 /// (`cc::stack_capture_from_context_available`).
@@ -111,8 +98,8 @@ void stop_sampling();
 
 /// Replaces the configuration of a RUNNING sampler, in effect from its next tick.
 ///
-/// Everything is live, including the rate: nothing here needs the sampler stopped, and stopping it would throw away
-/// the interned stack table along with the ids already written into the stream.
+/// Everything is live, including the rate: nothing here needs the sampler stopped, so a rate can be turned up around a
+/// suspicious stretch without losing the samples already taken.
 /// The intended callers are a checkbox in a profiler UI and a test narrowing what it samples.
 ///
 /// Does nothing useful before `start_sampling`, which replaces the configuration wholesale.
@@ -177,12 +164,8 @@ namespace cc::rec::impl
 {
 /// The layout of a sample: who was sampled, where their stream had got to, and the frames.
 ///
-/// The anchor is a POSITION rather than a copy of the state at that position, which is what lets a consumer recover
-/// the trace, the ambient context and the open scope stack — all of which it already carries while replaying.
-///
-/// **The frames array is not always frames.**
-/// A sample whose stack was interned carries `flag_interned_stack` and exactly one entry, which is the stack id.
-/// `rec::stack_table` resolves either shape, and is what a consumer should go through rather than reading the field.
+/// The anchor is a POSITION rather than a copy of the state at that position, which is what lets a consumer recover the
+/// trace and the open scope stack — both of which it already carries while replaying that thread in order.
 inline constexpr rec::field sample_fields[] = {
     {.name = "thread_index", .type = rec::type_code::u32_, .offset = 0, .size = 4},
     {.name = "chunk_offset", .type = rec::type_code::u32_, .offset = 4, .size = 4},
@@ -197,21 +180,6 @@ inline constexpr u32 sample_unknown_thread = ~u32(0);
 
 /// Where a sample's frames start, past the fixed part and the array's own count.
 inline constexpr isize sample_frames_offset = 28;
-
-/// One interned stack: the id, and the addresses it stands for.
-///
-/// Always written BEFORE the first sample that refers to it, so a consumer reading the stream in order never meets an
-/// id it cannot resolve.
-inline constexpr rec::field stack_definition_fields[] = {
-    {.name = "id", .type = rec::type_code::u64_, .offset = 0, .size = 8},
-    {.name = "frames", .type = rec::type_code::u64_array, .offset = 8, .size = 4},
-};
-
-/// Where an interned stack's frames start, past the id and the array's own count.
-inline constexpr isize stack_definition_frames_offset = 12;
-
-/// The descriptor an interned stack is defined through.
-[[nodiscard]] rec::desc const& stack_definition_desc();
 
 /// The descriptor every sample is written through.
 /// One site, because a sample has no source location worth naming — the frames ARE the location.

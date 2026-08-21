@@ -181,6 +181,31 @@ cc::optional<u64> cc::rec::event_view::field_as_u64(cc::string_view field_name) 
     }
 }
 
+cc::string_view cc::rec::event_view::name() const
+{
+    // The overwhelmingly common case first, and it is a load and a branch: a static name is never empty.
+    if (desc->name != nullptr && desc->name[0] != char(0))
+        return desc->name;
+
+    if (auto const dynamic = field_as_text("name"); dynamic.has_value())
+        return dynamic.value();
+
+    return {};
+}
+
+cc::rec::desc const* cc::rec::event_view::field_as_desc(cc::string_view field_name) const
+{
+    auto const* const f = find_field(*this, field_name);
+    if (f == nullptr || f->type != rec::type_code::desc_ref)
+        return nullptr;
+
+    rec::desc const* target = nullptr;
+    if (!read_raw(payload, *f, target))
+        return nullptr;
+
+    return target;
+}
+
 cc::vector<u64> cc::rec::event_view::field_as_u64_array(cc::string_view field_name) const
 {
     cc::vector<u64> out;

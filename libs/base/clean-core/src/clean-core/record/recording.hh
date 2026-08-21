@@ -88,11 +88,6 @@ struct cc::rec::decimation_options
     bool report_dropped = true;
 };
 
-/// One captured block: the bytes, plus everything needed to rebuild the view over them.
-///
-/// A block either BORROWS a live chunk — the capture case, which copies nothing — or owns a buffer of its own, which
-/// is what filtering produces since the events it keeps are no longer contiguous.
-/// Exactly one of `source` and `owned` is set.
 /// What a bounded capture is allowed to keep.
 ///
 /// A long-running capture has to throw something away, and which thing depends entirely on what the capture is FOR.
@@ -128,6 +123,11 @@ struct cc::rec::retention_policy
     [[nodiscard]] bool keeps_everything() const { return guaranteed_secs <= 0 && max_secs <= 0 && max_bytes <= 0; }
 };
 
+/// One captured block: the bytes, plus everything needed to rebuild the view over them.
+///
+/// A block either BORROWS a live chunk — the capture case, which copies nothing — or owns a buffer of its own, which
+/// is what filtering produces since the events it keeps are no longer contiguous.
+/// Exactly one of `source` and `owned` is set.
 struct cc::rec::recorded_block
 {
     /// Keeps the bytes alive.
@@ -153,9 +153,6 @@ struct cc::rec::recorded_block
     f64 base_wall_secs = 0;
     u64 seal_cycles = 0;
     f64 seal_wall_secs = 0;
-
-    /// The stream state at the start of the SOURCE CHUNK, which is this block's own only when `from` is zero.
-    rec::stream_state const* state_at_start = nullptr;
 
     /// The bytes this block covers, wherever they live.
     [[nodiscard]] cc::span<byte const> bytes() const;
@@ -270,7 +267,11 @@ public:
     ///
     /// A sample whose anchor names bytes this recording does not contain — dropped under an overflow policy, or simply
     /// not captured — stays where it was rather than being discarded.
-    /// Splicing an already-spliced recording is therefore a no-op rather than a duplication.
+    ///
+    /// **Idempotent in position, not merely in count.**
+    /// Splicing lifts samples only out of chunk-backed blocks; a synthesized block is where a previous splice — offline
+    /// or `splicing_listener`'s — already put them, so it passes through untouched.
+    /// That is what makes this safe to run in a pipeline that may have run it already.
     [[nodiscard]] rec::recording spliced_samples() const;
 
     // queries

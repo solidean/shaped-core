@@ -14,6 +14,15 @@
 // The worst a live thread costs the dump is its newest event, which is a far better trade than the deadlock risk of
 // suspending threads that may hold the loader lock.
 //
+// **Nor does the dump ever wait on a lock**, for the same reason it never allocates: a thread that crashed holding the
+// recorder's thread registry would hang a dump that waited for it.
+// The walk is a try-lock, and failing it means no dump rather than a hang.
+//
+// What the dump does NOT do yet is stop the consumer, so the actor may be recycling a chunk while the dump reads the
+// queue behind it — a race that turns a rare crash into a rarer second one.
+// Stopping the actor from a handler is its own hazard (it means joining a thread that may itself be stuck), so this is
+// deliberately left until that is designed rather than papered over.
+//
 // The result is an ordinary recording file — the same format cc::rec::serialize writes — so it loads through
 // cc::rec::load_recording like any other, and needs no separate reader.
 

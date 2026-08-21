@@ -208,6 +208,11 @@ REC_TEST("record/splicing - splicing an already-spliced stream changes nothing")
     auto const twice = once.spliced_samples();
     CHECK(samples_in(twice) == samples_in(once));
     CHECK(twice.event_count() == once.event_count());
+
+    // The layout, because that is what "already spliced" is about: an offline splice run over a LIVE-spliced recording
+    // must leave every sample the listener placed exactly where the listener placed it.
+    CHECK(event_layout(twice) == event_layout(once));
+    CHECK(samples_among_other_events(twice) == samples_among_other_events(once));
 }
 
 REC_TEST("record/splicing - a stream with no samples passes straight through")

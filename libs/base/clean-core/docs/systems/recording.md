@@ -171,7 +171,7 @@ A suspended thread may be mid-event, or mid-rotation holding the pool lock, so w
 Each sample instead carries an **anchor** — which thread it caught, and how far that thread's stream had committed — and `recording::spliced_samples()` puts it back there.
 
 The anchor is a POSITION rather than a copy of the state at that position, and that is what makes it worth more than a trace id would be.
-A consumer replaying the anchored thread already carries the trace, the ambient context and the open scope stack, so all of it is in hand when the sample arrives.
+A reader replaying the anchored thread in order reaches the sample with the trace and the open scope stack already in hand — from that chunk's preamble, and from the scope events since.
 The scope stack is the half that matters: a sample stops at `current_scope_frame()`, and the frames below it are exactly what that stack names.
 
 So a sample taken inside instrumented code is **short on purpose** — often a single address — and splicing supplies the rest.
@@ -206,7 +206,29 @@ A marker is the cheapest useful annotation there is, and the one to reach for in
 
 `CC_RECORD` takes scalars, enums, pointers and text.
 An enum collapses onto its underlying type and a pointer onto an opaque address, so a consumer reads a number without knowing the type.
-Anything convertible to a `cc::string_view` — a `char const*` included — is recorded as its **bytes**, never as an address.
+
+Text has two tiers, and **the const is what picks between them**:
+
+| written as | stored as | why |
+|---|---|---|
+| `char const[N]` — a string literal | its address (`type_code::cstring`) | the bytes are in the binary and outlive everything |
+| `char[N]`, `char const*`, `cc::string_view`, `cc::string` | its bytes (`type_code::inline_text`) | nobody promised to keep the memory |
+
+The split lands where it should without anyone thinking about it: a buffer you formatted into has to be non-const to have been written, so it is copied.
+A reader sees no difference — `first_text` and `field_as_text` return the same string either way — so the tier is an encoding decision and never one a caller has to track.
+
+**A literal's bytes must outlive the process**, because the event carries only their address.
+Nothing reads the payload at the recording site: the actor drains the chunk later, a capture holds it for as long as it lives, and serializing walks it later still.
+So a `char const buf[32]` local is a garbage read at every one of those points, whatever it was NUL-terminated with — pass `cc::string_view(buf)` to copy it instead.
+That case is misuse rather than something the type system catches, which is the price of the split.
+
+A `cstring` is the second payload field that holds a pointer into this binary.
+So serializing routes it through the string table and loading gives it an arena of its own — the same treatment `desc_ref` gets, for the same reason.
+
+`CC_RECORD_NAMED(name, value)` is the form for a name only known until runtime, and it is the exception rather than the tool.
+A static name costs the stream nothing because it lives in the descriptor; a runtime one is copied into every event, and a query keyed on it reads the payload rather than comparing a pointer.
+Its value must be fixed-size — a scalar, an enum, a pointer or a literal — because a field's offset is a constant, so at most one variable-length field can exist and it has to be last.
+`event_view::name()` returns whichever the site has, so every name-keyed query works on both without knowing which it got.
 
 The two stat kinds are not interchangeable, and picking the wrong one produces a plausible graph of the wrong thing.
 A snapshot is the current reading of something that exists whether or not you look; summing snapshots is meaningless.
@@ -309,17 +331,38 @@ A half-full listener chunk sitting in the ordinary queue would stall everything 
 
 ---
 
-## Consumer-written state
+## The chunk preamble
 
-Ambient context, the open profiling scopes and the current trace id are stream **state**, not per-event fields.
-A producer emits a delta only when one changes, at the four sites in `cc::async` that install or adopt an ambient context, and the consumer carries the running value forward.
+The current trace id is stream **state**, not a per-event field.
+A thread emits a delta only when it changes, at the four sites in `cc::async` that install or adopt an ambient context, and a reader carries the running value forward.
 
 Each chunk still has to be independently decodable, or ring capture and crash dumps could not start reading in the middle.
-**That preamble is written by the consumer, not the producer.**
-The actor sees a thread's chunks in order, so it already knows the state at every boundary, and deriving it there costs the producer nothing.
-A producer-written preamble would be a variable-size tax on every rotation, for information the consumer would reconstruct anyway.
+So **every chunk opens with an `event_kind::stream_state` event**, written by the producer at rotation.
 
-`chunk_view::state_at_start` is null only for a chunk the consumer never reached, which is the tail of a crash dump.
+It is the producer's rather than the consumer's because **an open scope cannot be derived**.
+A trace could be — a consumer reading a thread in order has seen every delta — but a long-lived scope opens *once*.
+Imagine one or two frame or worker scopes per thread, opened at startup and never re-opened.
+A window that outlived their `scope_begin` — a ring buffer, a decimated capture, the tail of a crash dump — has nothing left to learn from, and would render everything inside them at the wrong depth.
+
+The preamble is a fixed forty bytes, which is what keeps a rotation's cost independent of how deep the thread happens to be:
+
+| field | meaning |
+|---|---|
+| `trace` | the trace id in effect |
+| `scope_depth` | how many scopes are open, in full |
+| `named_scopes` | how many of the three slots below are filled |
+| `scope0`–`scope2` | the **outermost** open scopes, as `type_code::desc_ref` |
+
+The two counts are deliberately separate.
+A preamble reporting depth 7 with 2 names says exactly what it does and does not know, so a reader nests correctly and renders the rest unnamed rather than guessing.
+Three slots covers the long-lived frames a bounded capture actually loses; anything deeper is short-lived enough that its own `scope_begin` is almost certainly still inside the window.
+
+Outermost rather than innermost for the same reason: the outer frames are the ones that opened long ago and were evicted.
+
+**`desc_ref` is the one payload field that is a pointer into this binary.**
+Serializing rewrites it into a descriptor-table index and loading rewrites it back, exactly as an event header's own descriptor is.
+So a preamble read out of a `.ccrec` names the scope against that file's own table.
+Read one with `event_view::field_as_desc`, never by reinterpreting the bytes.
 
 ---
 
@@ -547,7 +590,7 @@ An unresolved frame keeps its address rather than acquiring a confident wrong na
 ### Changing what the sampler does, while it does it
 
 The whole `sampling_config` is re-read once per tick, so `cc::rec::reconfigure_sampling` takes effect within one interval and nothing needs the sampler stopped.
-That matters beyond convenience: stopping it would throw away the interned stack table, whose ids are already in the stream.
+That matters beyond convenience: a stop-and-restart loses every sample in the gap, which is exactly the stretch somebody turning a knob is looking at.
 
 ```cpp
 cc::rec::reconfigure_sampling({.rate_hz = 2000.0});                  // a slider in a profiler window
@@ -615,16 +658,14 @@ Every limit is off at zero, so a default policy keeps everything and an ordinary
 **Retention is block-granular**, so a bound is approximate by up to one chunk.
 A block is the unit a chunk reference keeps alive, and evicting anything smaller would free no memory at all.
 
-**A repeated stack is written once.**
-A kilohertz across twenty threads is megabytes a second of return addresses and nearly all of them repeat, so a deep stack is written once as its own event and the samples after it carry an id.
-Measured on a deep burn loop it roughly halves the sampled bytes, with five to seven distinct stacks behind a thousand samples.
+**Every stack is written out in full, and a sample is self-contained.**
+Interning them — writing each distinct stack once and having later samples carry an id — was tried and removed, because it does not compose with retention.
+A definition is written once at the front of a capture, and a bounded ring evicts oldest-first, so a forensic ring would keep samples whose stacks it had already thrown away.
+The size it saved does not pay for that.
+`stop_at_scope` leaves an instrumented stack at one or two frames, where an id is no smaller than the frames it replaces, so only a deep uninstrumented stack ever benefited.
 
-The threshold (`intern_min_frames`, 4 by default) is why this is not simply always on.
-With `stop_at_scope` an instrumented stack is often one or two frames, and an id is no smaller than the frames it would replace.
-
-**A consumer must go through [`cc::rec::stack_table`](../../src/clean-core/record/stack_table.hh)** rather than reading the frames field.
-Which shape a sample used is the sampler's decision and not the reader's.
-Ids mean something only within the recording that defines them.
+If sampled bytes do become the constraint, the shape to reach for is a stream-level dictionary that retention understands — not a sampler-local table.
+That is the open TODO entry; there is no reader-side indirection to keep working around until then.
 
 **`cc::rec::hot_functions`** ([hot_functions.hh](../../src/clean-core/record/hot_functions.hh)) is the reduction that makes all of this usable without a viewer.
 It symbolizes every captured stack and folds them by function, into self time and inclusive time.

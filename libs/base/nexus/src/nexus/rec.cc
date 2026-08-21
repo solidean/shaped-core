@@ -29,9 +29,9 @@ struct bucket
 
 /// Where one thread's slicing had got to when the last block for it ended.
 ///
-/// A chunk is dispatched in SLICES as the producer commits more of it, and `state_at_start` describes the start of the
-/// CHUNK rather than the start of the slice.
-/// So only the first slice of a chunk can be seeded from it, and every later one continues from here.
+/// A chunk is dispatched in SLICES as the producer commits more of it, and the preamble naming the trace is the first
+/// event of the FIRST slice only.
+/// So a later slice has nothing to seed from and continues from here.
 struct thread_cursor
 {
     u64 chunk_seq = ~u64(0);
@@ -67,9 +67,10 @@ struct bucketing_listener final : cc::rec::listener
                 auto& cursor = t.by_thread[view.thread.index];
                 if (cursor.chunk_seq != view.chunk_seq)
                 {
-                    // A chunk this listener has not seen before, so its preamble is the state at this slice's start.
+                    // A chunk this listener has not seen before; its preamble is the first event below and is what
+                    // sets `running`, so there is nothing to seed from out of band.
                     cursor.chunk_seq = view.chunk_seq;
-                    cursor.running = view.state_at_start != nullptr ? view.state_at_start->trace_id : u64(0);
+                    cursor.running = 0;
                 }
 
                 auto running = cursor.running;
@@ -77,7 +78,10 @@ struct bucketing_listener final : cc::rec::listener
                 for (auto it = view.begin(); it != view.end(); ++it)
                 {
                     auto const e = *it;
-                    if (e.kind() != cc::rec::event_kind::ambient_changed)
+
+                    // The preamble states the trace outright and an ambient delta changes it — both name the context
+                    // that follows them, so both cut at the same place.
+                    if (e.kind() != cc::rec::event_kind::ambient_changed && e.kind() != cc::rec::event_kind::stream_state)
                         continue;
 
                     auto const next = e.field_as_u64("trace").value_or(0);

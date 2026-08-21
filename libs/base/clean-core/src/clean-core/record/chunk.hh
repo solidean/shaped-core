@@ -77,16 +77,6 @@ public:
     rec::impl::thread_state* owner = nullptr;
     rec::chunk_pool* pool = nullptr;
 
-    // consumer-owned
-public:
-    /// The stream state as of this chunk's first byte, stamped by the actor the first time it touches the chunk.
-    ///
-    /// **Written by the CONSUMER, deliberately.** The actor sees a thread's chunks in order, so it already knows the
-    /// ambient context, the open scopes and the trace id at every boundary — and deriving it there costs the producer
-    /// nothing, where a producer-written preamble would be a variable-size tax on every rotation.
-    /// Null on a chunk the actor never reached, which is the tail of a crash dump.
-    rec::stream_state* state_at_start = nullptr;
-
     // lifetime
 public:
     void retain() { refs.fetch_add(1, cc::memory_order_relaxed); }

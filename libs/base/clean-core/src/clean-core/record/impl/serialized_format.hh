@@ -253,6 +253,16 @@ struct dump_builder
     /// This is what a writer rewrites into each event's descriptor slot.
     [[nodiscard]] i64 desc_index_of_pointer(rec::desc const* d) const;
 
+    /// Rewrites every payload field that holds a POINTER into this process, so the bytes mean something in a file.
+    ///
+    /// `desc_ref` becomes a descriptor-table index, `cstring` becomes a `serialized_str` into the string table — both
+    /// eight bytes, so the event stream stays byte-for-byte the size it was.
+    ///
+    /// **Call with the event's ORIGINAL descriptor, before its own slot is overwritten** — the layout comes from `d`,
+    /// so patching the header first would leave nothing to read the field list off.
+    /// A no-op for the overwhelming majority of events, which have no such field.
+    void rewrite_payload_pointers(rec::desc const& d, cc::span<byte> payload);
+
 private:
     /// Copies `s` into the string arena once per distinct source pointer.
     serialized_str _intern_string(cc::string_view s);

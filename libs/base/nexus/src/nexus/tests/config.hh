@@ -74,7 +74,8 @@ struct nx::config::cfg
     bool recorded = false;
 
     // This test drives cc::rec::initialize / shutdown itself, so the run hands its own recorder over for the duration.
-    // Only meaningful with `exclusive`, since a torn-down recorder is torn down for every thread at once.
+    // Requires an untagged `exclusive()` and forbids `recorded`; the schedule asserts on both rather than trusting the
+    // order the config objects were spelled in.
     bool owns_recorder = false;
 };
 
@@ -99,15 +100,14 @@ constexpr struct
 } recorded;
 
 // This test owns the cc::rec singleton: the run shuts its recorder down before the body and re-initializes after.
-// Bucketing is meaningless alongside it, since there is no run recorder to bucket into.
-// Combine with `exclusive` — a recorder torn down on one thread is torn down for every thread.
+//
+// **Requires an untagged `exclusive()`**, since a recorder torn down on one thread is torn down for every thread —
+// a tagged exclusive only holds off fellow tag holders, which is not enough.
+// It also forbids `recorded`: there is no run recorder left to bucket into.
+// Both are asserted when the schedule is built, so neither depends on the order these are spelled in.
 constexpr struct
 {
-    void apply(cfg& result) const
-    {
-        result.owns_recorder = true;
-        result.recorded = false;
-    }
+    void apply(cfg& result) const { result.owns_recorder = true; }
 } owns_recorder;
 
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.

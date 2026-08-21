@@ -49,10 +49,13 @@ Everything a consumer needs to interpret an event without having heard of the co
 | per block: the chunk sequence, layer, and both (cycles, wall) pairs | so a cycle count still maps to a time |
 | the measured cycle rate | so a duration in cycles becomes one in seconds |
 
-Two things do not travel.
+The stream state travels too, because it is an ordinary event rather than something alongside the stream.
+Every chunk opens with an `event_kind::stream_state` naming the trace and the scopes already open, so it is written and read like any other event — see [recording.md](recording.md#the-chunk-preamble).
 
-**The stream state** — the ambient context and open scopes a chunk started under — is *derived*, and a loaded recording has no live producer to derive it from.
-`chunk_view::state_at_start` is null on every loaded block.
+Its `desc_ref` fields are the one exception to "the event stream is byte-identical to the live one".
+A `desc_ref` holds a `rec::desc const*`, which means nothing outside the process that wrote it.
+So it is rewritten into a descriptor-table index on the way out and back into a pointer on the way in — the same treatment an event header's own descriptor gets.
+That is why both writers patch payloads rather than only headers.
 
 **Pinned payloads** are process-local by definition.
 Nothing produces one yet; when something does, this is where the decision goes.

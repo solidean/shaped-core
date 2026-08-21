@@ -1,5 +1,6 @@
 #include "record-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/record.hh>
@@ -366,4 +367,205 @@ REC_TEST("record - stats report what the system is doing")
     }
 
     CHECK(cc::rec::stats().registered_listeners == 0);
+}
+
+// The chunk preamble.
+//
+// This is the one piece of stream state a consumer genuinely cannot derive.
+// A trace can be carried forward from the ambient deltas, but a long-lived scope opens ONCE: a window that outlived
+// its `scope_begin` — a ring buffer, a crash dump's tail, a decimated capture — has nothing else to learn from.
+// So the producer states it at every rotation, and these pin that it does.
+
+REC_TEST("record/stream - a chunk's preamble names the scopes that were already open")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        {
+            CC_RECORD_SCOPE("outer-frame");
+
+            // Enough to rotate the 64 KB chunk several times, so later chunks open with the scope already running.
+            for (isize i = 0; i < 8000; ++i)
+                CC_RECORD_MARK("filler");
+
+            cc::rec::flush_blocking();
+        }
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    isize preambles = 0;
+    isize inside_the_scope = 0;
+    rec.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() != cc::rec::event_kind::stream_state)
+                return;
+
+            ++preambles;
+            if (e.field_as_u64("scope_depth").value_or(0) == 0)
+                return;
+
+            ++inside_the_scope;
+
+            // The depth alone would let a reader nest correctly; the name is what makes the frame identifiable.
+            CHECK(e.field_as_u64("named_scopes").value_or(0) >= 1);
+
+            auto const* const outer = e.field_as_desc("scope0");
+            REQUIRE(outer != nullptr);
+            CHECK(cc::string_view(outer->name) == "outer-frame");
+        });
+
+    CHECK(preambles > 0);
+
+    // The point of the exercise: at least one chunk began while the scope was open and says so on its own.
+    CHECK(inside_the_scope > 0);
+}
+
+REC_TEST("record/stream - a preamble reports a depth it could not name in full")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        // Five deep against a preamble that names three, which is the case the two fields exist to tell apart.
+        // A block each, because CC_RECORD_SCOPE declares fixed-name locals and two in one block collide.
+        {
+            CC_RECORD_SCOPE("depth-1");
+            {
+                CC_RECORD_SCOPE("depth-2");
+                {
+                    CC_RECORD_SCOPE("depth-3");
+                    {
+                        CC_RECORD_SCOPE("depth-4");
+                        {
+                            CC_RECORD_SCOPE("depth-5");
+
+                            for (isize i = 0; i < 8000; ++i)
+                                CC_RECORD_MARK("filler");
+
+                            cc::rec::flush_blocking();
+                        }
+                    }
+                }
+            }
+        }
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    auto deepest = u64(0);
+    rec.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() != cc::rec::event_kind::stream_state)
+                return;
+
+            auto const depth = e.field_as_u64("scope_depth").value_or(0);
+            auto const named = e.field_as_u64("named_scopes").value_or(0);
+            deepest = cc::max(deepest, depth);
+
+            // Never claims more names than it has, and never more than the fixed slot count.
+            CHECK(named <= depth);
+            CHECK(named <= 3);
+
+            // The names it does carry are the OUTERMOST, which are the ones a bounded capture loses first.
+            if (named >= 1)
+                CHECK(cc::string_view(e.field_as_desc("scope0")->name) == "depth-1");
+            if (named >= 3)
+                CHECK(cc::string_view(e.field_as_desc("scope2")->name) == "depth-3");
+        });
+
+    CHECK(deepest == 5);
+}
+
+// The value codec's three tiers.
+//
+// A string LITERAL is stored as its address, because its bytes are in the binary and outlive everything.
+// A runtime string is copied, because a pointer to it would name memory nobody promised to keep.
+// The const on `char const[N]` is what tells them apart, which is why a buffer you formatted into lands on the safe
+// side without anyone thinking about it.
+
+REC_TEST("record/value - a literal costs the stream its address, a runtime string its bytes")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        CC_RECORD("literal", "a string literal");
+
+        // Non-const, so it is copied: this is the snprintf-into-a-local shape, and storing its address would name a
+        // frame that is gone before anything reads the event.
+        char buffer[32] = {};
+        cc::memcpy(buffer, "from a buffer", 14);
+        CC_RECORD("buffered", buffer);
+
+        auto const runtime = cc::string("built at runtime");
+        CC_RECORD("runtime", runtime);
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    // All three read back identically — the tier is an encoding decision, never a difference the reader sees.
+    CHECK(rec.first_text("literal").value() == "a string literal");
+    CHECK(rec.first_text("buffered").value() == "from a buffer");
+    CHECK(rec.first_text("runtime").value() == "built at runtime");
+
+    // ... but the encodings differ, which is the whole point.
+    auto const type_of = [&](cc::string_view name)
+    {
+        auto found = cc::rec::type_code::none;
+        rec.for_each_event(
+            [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+            {
+                if (e.name() != name || e.fields().empty())
+                    return;
+                found = e.fields()[0].type;
+            });
+        return found;
+    };
+
+    CHECK(type_of("literal") == cc::rec::type_code::cstring);
+    CHECK(type_of("buffered") == cc::rec::type_code::inline_text);
+    CHECK(type_of("runtime") == cc::rec::type_code::inline_text);
+}
+
+REC_TEST("record/value - a runtime name reads back like a static one")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        auto const names = cc::vector<cc::string>{"queue.alpha", "queue.beta"};
+        for (isize i = 0; i < names.size(); ++i)
+            CC_RECORD_NAMED(names[i], i32(10 + i));
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    // Every name-keyed query goes through event_view::name(), so a dynamic name is invisible to callers.
+    CHECK(rec.count("queue.alpha") == 1);
+    CHECK(rec.count("queue.beta") == 1);
+    CHECK(rec.contains("queue.alpha"));
+
+    CHECK(rec.first_value("queue.alpha").value() == 10.0);
+    CHECK(rec.first_value("queue.beta").value() == 11.0);
+
+    // A site with no name of its own is still one site, which is what a runtime name costs: two events, one descriptor.
+    CHECK(rec.count_of_kind(cc::rec::event_kind::value) == 2);
 }
