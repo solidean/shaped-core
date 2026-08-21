@@ -236,26 +236,8 @@ It never evicts this frame's working set; `begin_frame` in its header states tha
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
 A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
 
-## The bindless group — sv::bindless_manager
-
-```cpp
-sv::bindless_manager::create(ctx, cfg)  // named ctor; cfg = bindless_config { u32 buffer_count, texture_{1d,2d,3d,cube}_count (each >= 2);
-                                        //   cc::string {buffers,textures_{1d,2d,3d,cube}}_binding }  — capacities AND binding names are config
-manager.config()                        // -> bindless_config const& — read the names back for declare_array_*_access
-manager.acquire(readonly_buffer_view<byte>)  // -> bindless_buffer_slot      compile-time readonly; same view -> same slot, O(1), no reupload
-manager.acquire(readonly_texture_view<sg::tv_1d / tv_2d / tv_3d / tv_cube>)  // -> the category's slot newtype
-manager.layout()                        // -> binding_group_layout_handle — one slot of the consumer's pipeline layout (lazy)
-manager.lock()                          // -> binding_group_handle — the staging group's snapshot: minted ONLY if a descriptor changed, else the SAME handle; locks (no acquires)
-manager.unlock(group)                   // must get the served group back (pointer identity), in the SAME epoch — both asserted
-manager.lock_scoped()                   // -> sv::bindless_lock — RAII form: carries .group(), unlocks at scope exit; move-only
-sv::bindless_buffer_slot / bindless_texture_{1d,2d,3d,cube}_slot  // enum class : u32; ::invalid; u32(slot) is what a shader consumes
-```
-
-One readonly `sg::binding_group` of five bounded arrays, one register space per category (`space1..space5`, index 0).
-Slots are valid ONLY for the epoch they were acquired in — re-acquire the working set every epoch; a full table clears EVERY slot not acquired this epoch (the mint recreates the group anyway).
-The descriptors live in one sg::staging_binding_group; `impl::slot_table` per category maps view-identity keys to element indices, and an unchanged epoch serves the cached snapshot untouched.
-Access declaration is the CONSUMER's job — declare the elements a dispatch reads via `cmd.*.declare_array_*_access` with the binding names above.
-Writable views are never bindless; they stay ordinary bindings in another group.
+Bindless tables are `sg::bindless_array` over a staging binding group the caller owns — see the shaped-graphics cheat sheet.
+sv holds no bindless type of its own.
 
 ## Rendering — the view_renderer + routines
 

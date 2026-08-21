@@ -1,10 +1,10 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
-#include <shaped-viewer/resources/impl/slot_table.hh>
+#include <shaped-graphics/binding/impl/slot_table.hh>
 
 using namespace cc::primitive_defines;
 
-// sv::impl::slot_table — one bindless category's key → element-index identity map.
+// sg::impl::slot_table — one bindless array's key → element-index identity map.
 // Pure CPU: the table holds no views, so no device is involved; the owner mirrors mints and reclaims onto
 // the staging group through acquire's `inserted` result and `on_reclaimed` hook, which is what these pin.
 
@@ -19,9 +19,9 @@ namespace
 constexpr auto no_reclaim = [](u32) { CHECK(false); };
 } // namespace
 
-TEST("sv slot_table - a re-acquired key keeps its slot and mints nothing")
+TEST("sg slot_table - a re-acquired key keeps its slot and mints nothing")
 {
-    auto table = sv::impl::slot_table(4);
+    auto table = sg::impl::slot_table(4);
 
     auto const s0 = table.acquire(1, ep(0), no_reclaim);
     auto const s1 = table.acquire(2, ep(0), no_reclaim);
@@ -45,9 +45,9 @@ TEST("sv slot_table - a re-acquired key keeps its slot and mints nothing")
     CHECK(table.occupied_count() == 3);
 }
 
-TEST("sv slot_table - a full table clears every stale slot at once")
+TEST("sg slot_table - a full table clears every stale slot at once")
 {
-    auto table = sv::impl::slot_table(3);
+    auto table = sg::impl::slot_table(3);
     (void)table.acquire(1, ep(0), no_reclaim);
     (void)table.acquire(2, ep(0), no_reclaim);
     auto const s2 = table.acquire(3, ep(1), no_reclaim);
@@ -72,9 +72,9 @@ TEST("sv slot_table - a full table clears every stale slot at once")
     CHECK_ASSERTS(table.acquire(2, ep(1), no_reclaim));
 }
 
-TEST("sv slot_table - a slot acquired this epoch is never reclaimed")
+TEST("sg slot_table - a slot acquired this epoch is never reclaimed")
 {
-    auto table = sv::impl::slot_table(2);
+    auto table = sg::impl::slot_table(2);
     (void)table.acquire(1, ep(0), no_reclaim);
     (void)table.acquire(2, ep(1), no_reclaim);
 
@@ -86,9 +86,9 @@ TEST("sv slot_table - a slot acquired this epoch is never reclaimed")
     CHECK(s3.index != s2.index);
 }
 
-TEST("sv slot_table - a full table of current-epoch slots asserts")
+TEST("sg slot_table - a full table of current-epoch slots asserts")
 {
-    auto table = sv::impl::slot_table(2);
+    auto table = sg::impl::slot_table(2);
     (void)table.acquire(1, ep(0), no_reclaim);
     (void)table.acquire(2, ep(0), no_reclaim);
 

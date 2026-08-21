@@ -535,6 +535,18 @@ sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle c
                                       //   even if that is nothing: unset_array, or an empty range, answers it. array elements themselves may stay vacant
                                       // NOT thread-safe (snapshot() mutates); a taken snapshot is independent — later sets never touch it
                                       // dx12: sets write a private non-shader-visible heap; a dirty snapshot is ONE CopyDescriptorsSimple, a clean one is free
+// sg::bindless_array — a NON-OWNING bindless view over ONE array binding of a staging group: view identity -> element index. Owns no descriptor, mints nothing.
+#include <shaped-graphics/binding/bindless_array.hh>
+sg::bindless_array::for_binding(ctx, sbg, name)  // -> bindless_array (by value); asserts the binding exists and is an ARRAY; CLEARS it (which also counts as setting it)
+arr.acquire(raw_view)       // -> u32 element index — same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor
+                            //   an index is valid ONLY for the epoch it was acquired in — re-acquire the working set every epoch
+                            //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
+arr.slot() / capacity() / occupied_count()  // -> binding_slot / u32 / u32 (capacity IS the binding's count)
+arr.lock() / unlock()       // void — refuses acquires until unlock, which must come in the SAME epoch (both asserted); mints NOTHING
+arr.lock_scoped()           // -> sg::bindless_lock — RAII form, unlocks at scope exit; move-only (a moved-from lock is disarmed)
+                            // the SNAPSHOT stays yours: lock every array over the group, sbg->snapshot(), bind, unlock
+                            // several arrays over different bindings of one group are independent; access declaration is the CONSUMER's (declare_array_*_access)
+
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size + bound pipeline layout)
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)

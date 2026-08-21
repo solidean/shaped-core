@@ -209,6 +209,15 @@ struct named_sampler; // {name, sampler} — static sampler (group layout) / dyn
 class staging_binding_group;
 enum class binding_slot : u32; // defined below — declared here so the definition can be written qualified
 
+// A non-owning bindless view over ONE array binding of a staging_binding_group (see binding/bindless_array.hh).
+class bindless_array;
+class bindless_lock; // RAII lock over a bindless_array: no acquires for its lifetime
+
+namespace impl
+{
+class slot_table; // a bindless_array's key -> element-index map (binding/impl/slot_table.hh)
+} // namespace impl
+
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the
 // pipeline/primitive_topology.hh / pipeline/rasterization_state.hh / pipeline/blend_state.hh / pipeline/depth_stencil_state.hh /
 // pipeline/vertex_input.hh state headers). All value types unless noted.

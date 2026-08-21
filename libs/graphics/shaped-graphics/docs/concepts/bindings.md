@@ -115,6 +115,25 @@ A dirty `snapshot` allocates a persistent range in the shader-visible heap and f
 That single driver-side descriptor copy, in place of a `Create*View` per slot, is what makes a large table affordable to re-snapshot.
 A clean `snapshot` does nothing at all.
 
+## Filling a bindless table: bindless_array
+
+A staging group makes a big table cheap to *change*; what a bindless renderer still needs is the mapping from a view to the element index its shader indexes with.
+[`bindless_array`](../../src/shaped-graphics/binding/bindless_array.hh) is that mapping, over exactly one array binding: `bindless_array::for_binding(ctx, group, "Textures")`.
+
+It is non-owning, and deliberately small.
+The layout, the group, how many tables there are and what they are called all stay with the caller.
+One array touches nothing but its own binding, so several arrays over one group are independent.
+
+- **`acquire(view)` returns the element index**, minting one on a miss and writing exactly one staging descriptor.
+  Identity is the view's hash, so re-acquiring the same view is O(1), returns the same index and touches no descriptor.
+  An unchanged working set therefore never dirties the group, and its snapshot is the cached one.
+- **An index is valid only for the epoch it was acquired in.**
+  Re-acquire the working set every epoch.
+  When the array is full, every index not acquired this epoch is reclaimed at once — the mint dirties the group and forces a snapshot anyway, so there is nothing to save by evicting less.
+  If every index was acquired this epoch, the working set exceeds the binding's count and `acquire` asserts.
+- **`lock()` refuses acquires until `unlock()`**, in the same epoch, and mints nothing.
+  It guards the window in which a snapshot is bound; taking that snapshot stays the group owner's job.
+
 ## Samplers: not views
 
 A `sampler` binding (`is_sampler(binding_type)`) has no view: a sampler carries no memory and no `(access, shape)`, so `accepts` rejects any view for it.
@@ -197,5 +216,6 @@ Texel/typed buffers (`Buffer<T>` / `RWBuffer<T>`) and append/consume/counter buf
 
 - [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
 - [staging_binding_group.hh](../../src/shaped-graphics/binding/staging_binding_group.hh) — the mutable builder and its `binding_slot` addressing.
+- [bindless_array.hh](../../src/shaped-graphics/binding/bindless_array.hh) — view identity → element index over one array binding.
 - [compiled_shader.hh](../../src/shaped-graphics/binding/compiled_shader.hh) — the shader data model.
 - [views](views.md) — the bound half: `raw_view` and the typed views that convert to it.

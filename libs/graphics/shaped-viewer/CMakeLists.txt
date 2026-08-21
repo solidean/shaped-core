@@ -27,7 +27,6 @@ add_library(shaped-viewer
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/resources/resource_managers.cc
-    src/shaped-viewer/resources/bindless_manager.cc
     src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
@@ -76,8 +75,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/impl/view_state.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
-    src/shaped-viewer/resources/impl/slot_table.hh
-    src/shaped-viewer/resources/bindless_manager.hh
     src/shaped-viewer/rendering/frame_constants.hh
     src/shaped-viewer/rendering/raytrace_routine.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
@@ -150,7 +147,6 @@ if(SC_BUILD_TESTS)
         tests/vocabulary-test.cc
         tests/lru-pool-test.cc
         tests/keyed-cache-test.cc
-        tests/slot-table-test.cc
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
@@ -168,7 +164,6 @@ if(SC_BUILD_TESTS)
     # Both compile only where those exist; each SKIPs at runtime when the device reports no ray tracing.
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-viewer-test PRIVATE
-            tests/bindless-manager-test.cc
             tests/raytraced-view-test.cc
             tests/pathtraced-view-test.cc
             tests/view-renderer-test.cc

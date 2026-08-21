@@ -4,10 +4,9 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-viewer/fwd.hh>
 
-/// A fixed-capacity table of bindless slots for one resource category — the key → element-index identity
-/// map behind one array binding of the manager's staging_binding_group (see resources/bindless_manager.hh).
+/// A fixed-capacity table of bindless slots — the key → element-index identity map behind one array binding
+/// of a staging_binding_group (see binding/bindless_array.hh).
 ///
 /// `acquire` is keyed by view identity: re-acquiring the same view returns the same slot, so an unchanged
 /// working set never touches a descriptor.
@@ -22,7 +21,7 @@
 /// The owner keeps the two in step through acquire's contract: mirror every `inserted` result and every
 /// `on_reclaimed` call onto the group, which is also what keeps a key's raw pointer from being reused while
 /// the key is mapped.
-class sv::impl::slot_table
+class sg::impl::slot_table
 {
 public:
     /// `capacity` slots, all free; must be > 0.
@@ -47,7 +46,7 @@ public:
     /// A hit re-stamps the slot's epoch; nothing else changes.
     /// A miss takes a free slot; a full table first reclaims every slot not acquired in epoch `e`, calling
     /// `on_reclaimed(u32 slot)` for each so the owner clears its descriptor, and asserts that freed at least one.
-    [[nodiscard]] acquired acquire(u64 key, sg::epoch e, auto&& on_reclaimed)
+    [[nodiscard]] acquired acquire(u64 key, epoch e, auto&& on_reclaimed)
     {
         if (auto const* slot = _by_key.get_ptr(key))
         {
@@ -58,8 +57,7 @@ public:
         if (_free.empty())
             _reclaim_stale(e, on_reclaimed);
 
-        auto const slot = _free.back();
-        _free.pop_back();
+        auto const slot = _free.pop_back();
 
         _entries[slot] = {.key = key, .last_acquired = e, .occupied = true};
         _by_key[key] = slot;
@@ -75,13 +73,13 @@ private:
     struct entry
     {
         u64 key = 0;
-        sg::epoch last_acquired = sg::epoch::invalid;
+        epoch last_acquired = epoch::invalid;
         bool occupied = false;
     };
 
     /// Frees every occupied slot not acquired in epoch `e`; slots acquired in `e` are never victims.
     /// Each freed slot's key is erased with it, so a stale key can never resolve to a later occupant.
-    void _reclaim_stale(sg::epoch e, auto&& on_reclaimed)
+    void _reclaim_stale(epoch e, auto&& on_reclaimed)
     {
         for (isize i = 0; i < _entries.size(); ++i)
         {
