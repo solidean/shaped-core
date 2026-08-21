@@ -41,17 +41,21 @@ sg::async_compute_pipeline  // std::shared_ptr<cc::async<compute_pipeline_handle
 // these are async<T>, not the read-only async<T const>, so const lands at the read side (try_value yields the const *_handle).
 ```
 
-## bytes_future / bytes_waiter — download results
+## bytes_future — download results
 
 ```cpp
 #include <shaped-graphics/bytes_future.hh>
-sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, waiter}
+sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, completion}
 f.is_valid()                        // bool — backed by a real download (vs default-constructed)
-f.is_ready()                        // bool — NON-BLOCKING poll; true once the actor copied the bytes back
-f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt until ready)
+f.is_ready()                        // bool — NON-BLOCKING poll; true once SETTLED, by delivery OR by cancellation
+f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt unless delivered)
+f.completion()                      // -> cc::shared_async<cc::unit const> — depend on it to chain WITHOUT blocking
 sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
-sg::bytes_waiter                    // abstract poll handle a backend subclasses; sg::ready_bytes_waiter = ready-on-construction
+sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already settled (empty / synchronous downloads)
+sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
 // to BLOCK until a download is delivered, use ctx.wait_for(future) (see epochs) — the future has no blocking wait
+// cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
+// sg REQUIRES an installed ambient async scheduler (cc::install_default_async_scheduler, or a nexus run's)
 ```
 
 ## Enums

@@ -31,13 +31,13 @@ constexpr int num_staging_windows = 3;
 struct download_mem_job
 {
     cc::unique_function<void()> deferred_cpu_copy;
-    std::weak_ptr<void const> pin;                      // future's pin; expired == caller cancelled the copy
-    std::shared_ptr<dx12_async_download_waiter> waiter; // set only on a job's last chunk; marks the future ready
-    std::shared_ptr<void const> source_keepalive;       // holds the source (buffer or texture) alive across the read
+    std::weak_ptr<void const> pin;                // future's pin; expired == caller cancelled the copy
+    cc::shared_async<cc::unit> completion;        // set only on a job's last chunk; settles the future
+    std::shared_ptr<void const> source_keepalive; // holds the source (buffer or texture) alive across the read
 };
 
 // A submitted-but-not-yet-drained window.
-// Its GPU read completes when the window fence reaches window_index + 1; its memcpies then run in order and their waiters are marked ready.
+// Its GPU read completes when the window fence reaches window_index + 1; its memcpies then run in order and their futures settle.
 struct inflight_window
 {
     u64 window_index = 0;
@@ -88,6 +88,11 @@ private:
     // An empty window still submits and signals, keeping the fence monotonic and gap-free.
     void fold_cancelled_completion(dx12_async_download_job& job)
     {
+        // The future itself is gone, but a completion() handed out earlier can outlive it — and a manual node nobody
+        // pushes parks its dependents forever, so cancellation has to be said out loud.
+        if (job.completion)
+            job.completion->push_error(cc::async_error::make_cancelled());
+
         if (job.completion_value != dx12_download_fence_value::none)
         {
             ensure_open_window();
@@ -174,8 +179,8 @@ private:
 
             // Defer the CPU memcpy until this window's GPU read completes, at drain.
             // Only the last chunk marks the future ready: windows drain in order, so every earlier chunk is copied by then.
-            _open_mem_jobs.push_back(
-                download_mem_job{cc::move(chunk.deferred_cpu_copy), job.pin, last ? job.waiter : nullptr, keepalive});
+            _open_mem_jobs.push_back(download_mem_job{cc::move(chunk.deferred_cpu_copy), job.pin,
+                                                      last ? job.completion : cc::shared_async<cc::unit>(), keepalive});
 
             if (_window_used == _sys._window_bytes) // full → submit now and roll to the next window
                 submit_window();
@@ -288,7 +293,7 @@ private:
             drain_front();
     }
 
-    // Drains the oldest in-flight window: waits for its GPU read, runs its memcpies in order (skipping any whose future was dropped), and marks each last-chunk waiter ready.
+    // Drains the oldest in-flight window: waits for its GPU read, runs its memcpies in order (skipping any whose future was dropped), and settles each last-chunk future.
     void drain_front()
     {
         inflight_window w = cc::move(_inflight[0]);
@@ -297,10 +302,18 @@ private:
         wait_for_window(w.window_index);
         for (auto& mj : w.mem_jobs)
         {
-            if (auto const alive = mj.pin.lock()) // future still wants the data?
+            bool const wanted = mj.pin.lock() != nullptr; // future still wants the data?
+            if (wanted)
                 mj.deferred_cpu_copy();
-            if (mj.waiter)
-                mj.waiter->mark_ready();
+            if (mj.completion)
+            {
+                // A destination dropped mid-flight is a cancellation, not a delivery: the bytes were never written.
+                // Settling it either way is mandatory — a manual node nobody ever pushes parks its dependents forever.
+                if (wanted)
+                    mj.completion->push_value(cc::unit{});
+                else
+                    mj.completion->push_error(cc::async_error::make_cancelled());
+            }
         }
     }
 
@@ -413,7 +426,7 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
 
     // zero-size read: already-ready, empty future (no staging, no actor work).
     if (size == 0)
-        return sg::bytes_future(cc::pinned_data<byte const>(), std::make_shared<sg::ready_bytes_waiter>());
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
 
     CC_ASSERT(src->_resource, "async download source buffer has no storage");
     CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "async download source buffer must have "
@@ -428,7 +441,7 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     // Destination the read bytes land in; the pinned_data keeps it alive until the copy runs (or cancels).
     auto dst = cc::pinned_data<byte>::create_uninitialized(size);
     cc::span<byte> const dst_span = dst.span();
-    auto waiter = std::make_shared<dx12_async_download_waiter>();
+    auto completion = cc::make_async_manual<cc::unit>();
 
     // Reserve this read's completion value and stamp the buffer *before* enqueuing, so a later direct-queue list that writes the buffer already sees a value to wait on.
     u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -448,14 +461,14 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     job.size = size;
     job.dst = dst_span;
     job.pin = std::weak_ptr<void const>(dst.pin()); // weak: dropping the future cancels the copy
-    job.waiter = waiter;
+    job.completion = completion;
     job.completion_value = dx12_download_fence_value(value);
     // Forward sync: defer the read behind the last direct-queue list that used the buffer, so it reads committed bytes and never races an earlier-submitted writer.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_copy_fence_value(upload_wait); // 0 == none: no pending async upload
     _actor->enqueue_message(cc::move(job));
 
-    return sg::bytes_future(cc::move(dst), cc::move(waiter));
+    return sg::bytes_future(cc::move(dst), cc::move(completion));
 }
 
 sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_handle texture,
@@ -478,7 +491,7 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(fp.tight_size());
     cc::span<byte> const dst_span = dst.span();
-    auto waiter = std::make_shared<dx12_async_download_waiter>();
+    auto completion = cc::make_async_manual<cc::unit>();
 
     u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
     u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
@@ -495,13 +508,13 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     job.is_texture = true;
     job.dst = dst_span;
     job.pin = std::weak_ptr<void const>(dst.pin());
-    job.waiter = waiter;
+    job.completion = completion;
     job.completion_value = dx12_download_fence_value(value);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_copy_fence_value(upload_wait);
     _actor->enqueue_message(cc::move(job));
 
-    return sg::bytes_future(cc::move(dst), cc::move(waiter));
+    return sg::bytes_future(cc::move(dst), cc::move(completion));
 }
 
 void dx12_download_async_system::set_window_bytes(isize bytes)

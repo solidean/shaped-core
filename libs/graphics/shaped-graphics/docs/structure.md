@@ -30,7 +30,7 @@ Where a folder is named after a type, that type's header repeats the folder name
 src/shaped-graphics/
   fwd.hh / all.hh / types.hh      [done]       fwd decls + *_handle typedefs; umbrella; the small vocabulary enums
   exceptions.hh                   [done]       typed sg exceptions (device_lost / allocation / pipeline_creation / swapchain_creation / binding_group)
-  bytes_future.hh/.cc             [done]       bytes_waiter / bytes_future / data_future<T> — the result vocabulary every download shares
+  bytes_future.hh/.cc             [done]       bytes_future / data_future<T> / bytes_wait_gate — the result vocabulary every download shares
 
   barrier/                                     # the access-tracking substrate; shared vocabulary, per-backend emission
     resource_access.hh            [done]       access_flag(s) / pipeline_stage_flag(s) / texture_layout / access_barrier

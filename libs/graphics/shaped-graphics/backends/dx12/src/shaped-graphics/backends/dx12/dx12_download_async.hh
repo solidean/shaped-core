@@ -14,19 +14,6 @@
 
 #include <atomic>
 
-/// bytes_waiter for an async download: ready once the copy actor has memcpy'd the readback bytes into the destination.
-/// There is no "submitted" gate, unlike the inline path — an async download is always handed to the actor.
-/// The actor drains every window before it sleeps, so a blocking wait always makes progress.
-class sg::backend::dx12::dx12_async_download_waiter final : public sg::bytes_waiter
-{
-public:
-    [[nodiscard]] bool wait() override
-    {
-        _is_ready.wait(false, std::memory_order_acquire); // blocks until mark_ready() stores true
-        return true;
-    }
-};
-
 /// One async download handed to the copy actor.
 /// `buffer_source` / `texture_source` is held **strong** for the job's whole lifetime, so its storage stays alive across the copy-queue read.
 /// No deferred-deletion gate is needed as a result.
@@ -44,9 +31,9 @@ struct sg::backend::dx12::dx12_async_download_job
     bool is_texture = false;                            // discriminant: texture read vs buffer read
     isize src_offset = 0;
     isize size = 0;
-    cc::span<byte> dst;                                 // destination bytes (valid while `pin` is)
-    std::weak_ptr<void const> pin;                      // future's pin; expired == caller cancelled
-    std::shared_ptr<dx12_async_download_waiter> waiter; // marked ready after the memcpy
+    cc::span<byte> dst;                    // destination bytes (valid while `pin` is)
+    std::weak_ptr<void const> pin;         // future's pin; expired == caller cancelled
+    cc::shared_async<cc::unit> completion; // settled after the memcpy, or with a cancelled error
     dx12_download_fence_value completion_value = dx12_download_fence_value::none; // reverse-sync value for this read
     sg::submission_token wait_token = sg::submission_token::invalid; // defer the read until this token completes
     // Forward cross-queue sync vs a pending async upload to the same buffer.

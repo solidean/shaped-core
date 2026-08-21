@@ -104,8 +104,7 @@ struct texture_cube_array_ms_description;
 enum class pixel_format : u16;     // texel format (see resource/pixel_format.hh)
 enum class texture_usage : u32;    // one texture usage; a set of them is texture_usages (see types.hh)
 enum class texture_dimension : u8; // 1D / 2D / 3D (see resource/raw_texture.hh)
-class bytes_waiter;
-class ready_bytes_waiter; // the already-satisfied waiter (see bytes_future.hh)
+class bytes_wait_gate;             // deadlock guard on a blocking wait (see bytes_future.hh)
 class bytes_future;
 template <class T>
 class data_future;

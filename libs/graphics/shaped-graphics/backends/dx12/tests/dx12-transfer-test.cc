@@ -321,7 +321,10 @@ INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads", (dx1
     auto cancelled = dropped->download.bytes_from_buffer(buf, 0, 256);
     c.drop_command_list(cc::move(dropped));
 
-    CHECK(!cancelled.is_ready());
+    // Cancellation SETTLES the future rather than leaving it forever pending, so a polling caller learns of it
+    // without blocking — the drop pushed cc::async_error::make_cancelled() on its completion.
+    CHECK(cancelled.is_ready());
+    CHECK(!cancelled.try_get_bytes().has_value());
     CHECK(!c.wait_for(cancelled).has_value()); // cancelled: fails, does not block
 
     c.advance_epoch_and_wait_for_idle(); // reclaims the dropped list's ring span with its epoch

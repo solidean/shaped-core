@@ -5,7 +5,7 @@
 **Async download** streams GPU→CPU buffer readback on a **dedicated transfer (copy) queue**, off the frame path.
 `ctx.download.bytes_from_buffer` hands the read to a background [`cc::threaded_actor`](threading.md) and returns a [`bytes_future`](../../src/shaped-graphics/bytes_future.hh) immediately.
 The actor records a copy from the source into a persistently-mapped **readback** staging buffer on the transfer queue.
-It then memcpys the staged bytes into the caller's destination and marks the future ready.
+It then memcpys the staged bytes into the caller's destination and settles the future.
 It is the context-level mirror of the inline [`cmd.download`](download.inline.md).
 `cmd.download` records into a command list and is delivered once that list runs; `ctx.download` is decoupled from any list or epoch.
 
@@ -66,7 +66,7 @@ That post-GPU step is what a download's `bytes_future` becomes ready on.
 
 The staging buffer is triple-buffered into fixed **windows** ([three](upload.async.md), same as upload), so GPU read and CPU memcpy overlap.
 But because the memcpy must run *after* the window's GPU read, each submitted window is kept **in flight** until it is **drained**.
-To drain a window the actor waits on that window's staging fence, memcpys its chunks into their destinations, and marks their waiters ready.
+To drain a window the actor waits on that window's staging fence, memcpys its chunks into their destinations, and settles their futures.
 It drains a window:
 
 - **before reusing its slot** — a slot is reused three submissions later, and reuse must wait not only for the GPU read but for the CPU memcpy too.
@@ -77,7 +77,8 @@ It drains a window:
 During bulk streaming this pipelines to depth three: one window read by the GPU, one just submitted, one filled by the CPU.
 When the inbox drains it flushes.
 A read **larger than one window** packs across successive windows.
-The window holding the read's last byte carries the completion value and the waiter, and because windows drain in order the earlier chunks are already copied by the time that waiter is marked ready.
+The window holding the read's last byte carries the completion value and the future's completion node.
+Because windows drain in order, the earlier chunks are already copied by the time that node is settled.
 
 Two fences on the transfer queue, both signaled per window:
 - the **staging fence** — every window, gating window reuse and thus drain ordering;
@@ -155,8 +156,8 @@ Not invariants — v1 shortcuts:
   That path in [`dx12_download_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc) also enforces the window-level acyclicity rule.
 - The readback recorder is `dx12_buffer_download` in [`dx12_resource_download.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_download.hh).
   It is shared with inline download, and made **resumable** so a read larger than a window chunks across calls.
-  The waiter is `dx12_async_download_waiter`, a `bytes_waiter` that simply blocks on its ready flag.
-  It has no "submitted" gate, unlike the inline path, because an async download is always handed to the actor.
+  Completion is a `cc::make_async_manual<cc::unit>` node the actor pushes after the memcpy, or pushes `make_cancelled()` on when the destination was dropped.
+  It carries no `bytes_wait_gate`, unlike the inline path, because an async download is always handed to the actor and never waits on its caller.
 - The public facade is [`download.hh`](../../src/shaped-graphics/context/download.hh), reached as `ctx.download` — see [context](context.md).
   It also carries the inline readback ring's `set_budget`.
 

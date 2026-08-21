@@ -1,7 +1,7 @@
 // dx12_download_inline_system: the inline READBACK ring buffer plus the actor that performs deferred CPU copies.
 // A download records the GPU readback copy at record time.
 // At submit the deferred copies are stamped with the list's submission token and enqueued on a cc::threaded_actor.
-// The actor blocks on the submission fence, memcpys the readback bytes into the destination, marks the waiter ready, and releases the epoch's outstanding-copy count.
+// The actor blocks on the submission fence, memcpys the readback bytes into the destination, settles the future's completion async, and releases the epoch's outstanding-copy count.
 // It skips the memcpy when the future was already dropped.
 // Ring space is reclaimed at EPOCH granularity, never per submission: each epoch carries an outstanding-copy counter, and its whole span frees only once that counter hits zero.
 // Why that coarsening is load-bearing under concurrent recording: libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
@@ -40,11 +40,19 @@ protected:
         {
         }
 
-        _sys.wait_for_submission(job.token);   // block until the recording list has run on the GPU
-        if (auto const alive = job.pin.lock()) // future still wants the data?
+        _sys.wait_for_submission(job.token);           // block until the recording list has run on the GPU
+        bool const wanted = job.pin.lock() != nullptr; // future still wants the data?
+        if (wanted)
             job.deferred_cpu_copy();
-        if (job.waiter)
-            job.waiter->mark_ready();
+        if (job.completion)
+        {
+            // A destination dropped mid-flight is a cancellation, not a delivery — the bytes were never written, so
+            // anything still holding completion() must see that rather than a success it cannot act on.
+            if (wanted)
+                job.completion->push_value(cc::unit{});
+            else
+                job.completion->push_error(cc::async_error::make_cancelled());
+        }
         _sys.on_copy_done(job.epoch_copies); // release this download's hold on its epoch's ring span
     }
 
@@ -153,20 +161,21 @@ sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list
 {
     isize const tight = fp.tight_size();
     if (tight == 0)
-        return sg::bytes_future(cc::pinned_data<byte const>(), std::make_shared<sg::ready_bytes_waiter>());
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
 
     CC_ASSERT(_mapped != nullptr, "download system used before initialization");
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(tight);
     cc::span<byte> const dst_span = dst.span();
-    auto waiter = std::make_shared<dx12_download_waiter>();
+    auto completion = cc::make_async_manual<cc::unit>();
+    auto gate = std::make_shared<sg::bytes_wait_gate>();
 
     dx12_texture_download download(src, fp, dst_span);
 
     // Reserve the whole region once, plus slack for the self-alignment (512) and the one padded row a seam wrap pushes past the boundary.
     // Then walk the reserved span in to-seam windows; dx12_texture_upload owns the self-align contract dx12_texture_download mirrors.
     // Each chunk is its own deferred un-pad copy, and a window too small for an aligned row yields an empty copy we skip.
-    // Only the last real chunk carries the waiter.
+    // Only the last real chunk settles the future.
     isize const total = download.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
     CC_ASSERT(total <= _capacity, "an inline texture readback (with staging slack) exceeds the readback ring capacity");
 
@@ -190,12 +199,16 @@ sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list
         dx12_download_copy_job job;
         job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
         job.pin = std::weak_ptr<void const>(dst.pin());
-        job.waiter = download.is_finished() ? waiter : nullptr;
+        if (download.is_finished()) // only the last chunk settles the future
+        {
+            job.completion = completion;
+            job.gate = gate;
+        }
         job.epoch_copies = span.epoch_copies;
         cmd._pending_downloads.push_back(cc::move(job));
     }
 
-    return sg::bytes_future(cc::move(dst), cc::move(waiter));
+    return sg::bytes_future(cc::move(dst), cc::move(completion), cc::move(gate));
 }
 
 sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list& cmd,
@@ -204,21 +217,22 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
                                                               isize size)
 {
     if (size == 0)
-        return sg::bytes_future(cc::pinned_data<byte const>(), std::make_shared<sg::ready_bytes_waiter>());
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
 
     CC_ASSERT(_mapped != nullptr, "download system used before initialization");
 
     // Destination the readback bytes land in; the pinned_data keeps it alive until the copy runs (or cancels).
     auto dst = cc::pinned_data<byte>::create_uninitialized(size);
     cc::span<byte> const dst_span = dst.span();
-    auto waiter = std::make_shared<dx12_download_waiter>();
+    auto completion = cc::make_async_manual<cc::unit>();
+    auto gate = std::make_shared<sg::bytes_wait_gate>();
 
     dx12_buffer_download download(src, offset, dst_span);
     download.prepare(cmd);
 
     // Reserve the whole read once (the span may wrap the seam), then walk it with to-seam windows.
     // Each chunk gets its own deferred memcpy and its own epoch-copy count.
-    // Only the last chunk carries the waiter, so the future becomes ready once every chunk has drained — the actor copies in enqueue order.
+    // Only the last chunk settles the future, so it becomes ready once every chunk has drained — the actor copies in enqueue order.
     span_reservation const span = reserve_span(size);
     u64 cursor = span.start;
     while (!download.is_finished())
@@ -234,12 +248,16 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
         dx12_download_copy_job job;
         job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
         job.pin = std::weak_ptr<void const>(dst.pin());
-        job.waiter = download.is_finished() ? waiter : nullptr;
+        if (download.is_finished()) // only the last chunk settles the future
+        {
+            job.completion = completion;
+            job.gate = gate;
+        }
         job.epoch_copies = span.epoch_copies;
         cmd._pending_downloads.push_back(cc::move(job));
     }
 
-    return sg::bytes_future(cc::move(dst), cc::move(waiter));
+    return sg::bytes_future(cc::move(dst), cc::move(completion), cc::move(gate));
 }
 
 void dx12_download_inline_system::enqueue_submitted(sg::submission_token token, cc::vector<dx12_download_copy_job>& jobs)
@@ -247,8 +265,8 @@ void dx12_download_inline_system::enqueue_submitted(sg::submission_token token, 
     for (auto& job : jobs)
     {
         job.token = token;
-        if (job.waiter)
-            job.waiter->submitted.store(true, std::memory_order_release);
+        if (job.gate)
+            job.gate->mark_submitted();
         _actor->enqueue_message(cc::move(job));
     }
     jobs.clear();
@@ -262,8 +280,8 @@ void dx12_download_inline_system::discard_unsubmitted(cc::vector<dx12_download_c
     bool released = false;
     for (auto& job : jobs)
     {
-        if (job.waiter)
-            job.waiter->mark_cancelled();
+        if (job.completion)
+            job.completion->push_error(cc::async_error::make_cancelled());
         if (job.epoch_copies)
         {
             job.epoch_copies->fetch_sub(1, std::memory_order_acq_rel);
