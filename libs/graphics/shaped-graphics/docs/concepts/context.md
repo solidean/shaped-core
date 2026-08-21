@@ -34,6 +34,7 @@ Creation is grouped into scopes that name the *lifetime* or the *transfer direct
 | `ctx.transient` | per-frame scratch buffers, textures and binding groups | the next `advance_epoch` — using one past its epoch asserts |
 | `ctx.upload` | *no resources* — streams host bytes into a buffer or texture | n/a ([async upload](upload.async.md)) |
 | `ctx.download` | *no resources* — streams device bytes back, returning a future | n/a ([async download](download.async.md)) |
+| `ctx.stream` | *no resources* — bulk transfers with a control handle instead of automatic sync | n/a ([streaming](streaming.md)) |
 | `ctx.uncached` | binding-group layouts, pipeline layouts, every pipeline kind, shader tables — freshly built every call | refcount |
 | `ctx.cached` | layouts plus compute and raytracing pipelines, deduplicated get-or-create | refcount ([caches](caches.md)) |
 

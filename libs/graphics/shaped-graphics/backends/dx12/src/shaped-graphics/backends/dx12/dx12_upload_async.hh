@@ -10,6 +10,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
+#include <shaped-graphics/transfer/stream_handle.hh>
 
 #include <atomic>
 
@@ -32,6 +33,11 @@ struct sg::backend::dx12::dx12_async_upload_job
     dx12_copy_fence_value copy_fence_value = dx12_copy_fence_value::none; // completion value for this upload
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
+
+    // Set only for a STREAMING upload; null marks the job as the async tier.
+    // Carries the priority and cancel flag the actor reads when picking, the progress counters it advances, and the
+    // completion node it must settle exactly once — including on every cancellation path.
+    std::shared_ptr<sg::impl::stream_control> stream;
 };
 
 /// Async CPU→GPU streaming on a dedicated COPY queue, decoupled from epochs.
@@ -68,6 +74,20 @@ public:
                         cc::pinned_data<byte const> data,
                         sg::subresource_index const& subresource,
                         sg::texture_region const& region);
+
+    /// Records a streaming upload of `data` into `buffer` at `offset`, returning its control handle.
+    /// Unlike upload_buffer this does NOT stamp the forward reader value, so a later command list waits on nothing.
+    /// It stamps the streaming lifetime value instead, which only deferred deletion reads.
+    [[nodiscard]] sg::stream_upload_handle stream_buffer(sg::raw_buffer_handle buffer,
+                                                         cc::pinned_data<byte const> data,
+                                                         isize offset);
+
+    /// Records a streaming upload of tightly-packed `data` into one region of `texture`.
+    /// Same tier and same stamping rules as stream_buffer.
+    [[nodiscard]] sg::stream_upload_handle stream_texture(sg::raw_texture_handle texture,
+                                                          cc::pinned_data<byte const> data,
+                                                          sg::subresource_index const& subresource,
+                                                          sg::texture_region const& region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows.
     /// It drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`.

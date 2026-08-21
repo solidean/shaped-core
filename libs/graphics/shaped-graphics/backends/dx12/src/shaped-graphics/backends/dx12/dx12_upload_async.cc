@@ -28,6 +28,25 @@ constexpr int num_staging_windows = 3;
     return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
 }
 
+// Raise `slot` to `value`, never lower it.
+// Every cross-queue stamp is monotonic and never reset, so a racing higher value simply wins and a stale one yields a
+// cheap already-satisfied wait.
+void stamp_max(std::atomic<u64>& slot, u64 value)
+{
+    u64 prev = slot.load(std::memory_order_relaxed);
+    while (prev < value && !slot.compare_exchange_weak(prev, value, std::memory_order_release, std::memory_order_relaxed))
+    {
+        // CAS retries; `prev` is refreshed with the current value each time.
+    }
+}
+
+/// A finished streaming upload waiting only for the GPU to run its copies before it may report complete.
+struct pending_settle
+{
+    u64 value = 0; // the completion-fence value the copy signals
+    std::shared_ptr<sg::impl::stream_control> control;
+};
+
 /// A job the actor has resolved and is packing.
 ///
 /// The packer carries the per-job cursor, so a job survives across windows AND across process cycles.
@@ -65,6 +84,7 @@ protected:
         admit_pending();
         pack_until_stalled();
         submit_window(); // flush the final partial window so its copies run
+        drain_settles(); // then let every finished stream report, once its copy has actually run
         return false;    // everything drained + submitted; sleep until the next message
     }
 
@@ -75,7 +95,15 @@ protected:
         // This queue is independent of the direct queue, which shutdown drains separately.
         admit_pending();
         pack_until_stalled();
+
+        // Anything still active at shutdown is cancelled rather than abandoned: a handle waiting on a node nobody
+        // will ever push would hang the process it is trying to tear down.
+        for (auto& a : _active)
+            cancel_stream(a.job);
+        _active.clear();
+
         submit_window();
+        drain_settles();
         if (_current_window > 0)
             wait_for_window(_current_window - 1); // the last submitted window
     }
@@ -88,13 +116,9 @@ private:
     // An empty window still submits and signals, keeping the completion fence monotonic and gap-free.
     void fold_dropped_completion(dx12_async_upload_job& job)
     {
-        if (job.copy_fence_value != dx12_copy_fence_value::none)
-        {
-            ensure_open_window();
-            u64 const v = u64(job.copy_fence_value);
-            if (v > _open_highest_finished)
-                _open_highest_finished = v;
-        }
+        // A streaming job also has to say so out loud: its handle, or a completion() taken from it, may still be
+        // waiting, and a manual node nobody pushes never wakes its dependents.
+        cancel_stream(job);
     }
 
     // Resolves each arriving job's destination and gives it a resumable packer.
@@ -138,6 +162,94 @@ private:
         _pending.clear();
     }
 
+    // Folds a job's completion value into the open window.
+    // Mandatory on every exit path, delivered or not: the fence is monotonic, and both the deferred-deletion gate
+    // and any forward reader stamped with the value wait on it, so a hole would hang them.
+    void fold_completion_value(dx12_async_upload_job const& job)
+    {
+        if (job.copy_fence_value == dx12_copy_fence_value::none)
+            return;
+        ensure_open_window();
+        u64 const v = u64(job.copy_fence_value);
+        if (v > _open_highest_finished)
+            _open_highest_finished = v;
+    }
+
+    // Fails a streaming job's completion node, exactly once.
+    // Saying it out loud is mandatory: a manual async nobody pushes parks its dependents for the process's lifetime.
+    void cancel_stream(dx12_async_upload_job& job)
+    {
+        if (job.stream)
+        {
+            job.stream->completion->push_error(cc::async_error::make_cancelled());
+            job.stream = nullptr;
+        }
+        fold_completion_value(job);
+    }
+
+    // Queues a finished streaming job to settle once the GPU has actually run its copies.
+    //
+    // Recording the last chunk is NOT completion.
+    // The handle's whole promise is that once it reports complete, a command list touching the streamed extent
+    // may be submitted — and that is only true after the copy has run.
+    // Settling at record time reads as working and silently hands back a half-written buffer, which is exactly what
+    // the round-trip test caught.
+    // Async uploads have no such step because their completion is a GPU-side fence wait rather than a CPU signal.
+    void queue_stream_settle(dx12_async_upload_job& job)
+    {
+        fold_completion_value(job);
+        if (job.stream)
+        {
+            _pending_settles.push_back(pending_settle{u64(job.copy_fence_value), cc::move(job.stream)});
+            job.stream = nullptr;
+        }
+    }
+
+    // Waits out the copy queue for every queued settle, then completes them.
+    // Called once at the end of a cycle, so the cost is one fence wait per cycle rather than per job, and only when
+    // streaming work actually finished in it.
+    void drain_settles()
+    {
+        if (_pending_settles.empty())
+            return;
+
+        u64 highest = 0;
+        for (auto const& p : _pending_settles)
+            if (p.value > highest)
+                highest = p.value;
+        wait_for_copy_value(highest);
+
+        for (auto& p : _pending_settles)
+            p.control->completion->push_value(cc::unit{});
+        _pending_settles.clear();
+    }
+
+    // Blocks the actor until the completion fence has reached `value` — i.e. the window carrying that copy has run.
+    void wait_for_copy_value(u64 value)
+    {
+        if (value == 0 || _sys._completion_fence->GetCompletedValue() >= value)
+            return;
+        HRESULT const hr = _sys._completion_fence->SetEventOnCompletion(value, _sys._wait_event);
+        CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion (completion) failed");
+        WaitForSingleObject(_sys._wait_event, INFINITE);
+    }
+
+    // Drops every active streaming job whose handle has cancelled it.
+    // Cancellation is a flag rather than queue surgery: the job simply stops being picked, and is reaped here when
+    // the actor next looks.
+    // Chunks already recorded still run — their staging bytes are committed.
+    void reap_cancelled()
+    {
+        for (isize i = _active.size() - 1; i >= 0; --i)
+        {
+            auto& a = _active[i];
+            if (a.job.stream == nullptr || !a.job.stream->cancelled.load(std::memory_order_relaxed))
+                continue;
+            cancel_stream(a.job);
+            _active.remove_from_to(i, i + 1);
+        }
+    }
+
     // How the scheduler sees one active job against the currently open window.
     //
     // A window issues its reverse-sync wait ONCE, hoisted to the front (submit_window), so it must never both
@@ -156,9 +268,13 @@ private:
     [[nodiscard]] sg::impl::transfer_candidate candidate_for(active_upload const& a) const
     {
         sg::impl::transfer_candidate c;
-        c.flavor = sg::impl::transfer_flavor::async;
         c.family = a.family;
         c.sequence = a.sequence;
+        if (a.job.stream)
+        {
+            c.flavor = sg::impl::transfer_flavor::streaming;
+            c.priority = a.job.stream->priority.load(std::memory_order_relaxed);
+        }
 
         bool const pending_wait = u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
         if (pending_wait && _open_highest_finished > 0)
@@ -173,6 +289,7 @@ private:
     // head-of-line blocking: one upload waiting on a slow command list no longer stalls every later one.
     void pack_until_stalled()
     {
+        reap_cancelled();
         while (!_active.empty())
         {
             ensure_open_window();
@@ -233,7 +350,13 @@ private:
         if (consumed == 0)
             return false;
         _window_used += consumed;
-        _window_async_bytes += consumed;
+        if (a.job.stream)
+        {
+            _window_stream_bytes += consumed;
+            a.job.stream->bytes_done.fetch_add(consumed, std::memory_order_relaxed);
+        }
+        else
+            _window_async_bytes += consumed;
 
         // This chunk writes the destination, so its window must first wait for the last direct-queue list that used it.
         // Max over the window; the submission fence is monotonic.
@@ -243,11 +366,12 @@ private:
             _open_risky_job = a.sequence; // the window is now dedicated to it — see candidate_for
 
         // The window holding the upload's last byte is the one whose completion satisfies the reader wait.
-        if (a.packer->is_finished() && a.job.copy_fence_value != dx12_copy_fence_value::none)
+        if (a.packer->is_finished())
         {
-            u64 const v = u64(a.job.copy_fence_value);
-            if (v > _open_highest_finished)
-                _open_highest_finished = v;
+            if (a.job.stream)
+                queue_stream_settle(a.job);
+            else
+                fold_completion_value(a.job);
         }
         return true;
     }
@@ -386,6 +510,7 @@ private:
     cc::vector<active_upload> _active;                    // resolved and mid-pack, until the last chunk is recorded
     cc::vector<sg::impl::transfer_candidate> _candidates; // rebuilt per pick; a member only to reuse its storage
     u64 _next_sequence = 0;
+    cc::vector<pending_settle> _pending_settles; // finished streams, waiting on the copy fence
 
     u64 _current_window = 0;     // next window index to submit; slot = index % num_staging_windows
     u64 _last_signaled_copy = 0; // highest value signaled on the completion fence (monotonic)
@@ -461,13 +586,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
 
     // Reserve this upload's completion value and stamp the destination *before* enqueuing, so any command list reading the buffer after this call already sees a value to wait on.
     u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
-    u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
-    while (prev < value
-           && !dst->_pending_async_upload_value.compare_exchange_weak(prev, value, std::memory_order_release,
-                                                                      std::memory_order_relaxed))
-    {
-        // CAS retries; `prev` is refreshed with the current value each time.
-    }
+    stamp_max(dst->_pending_async_upload_value, value);
 
     dx12_async_upload_job job;
     // Weak ref, not strong: a caller may drop its last handle before the actor stages this.
@@ -502,13 +621,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
 
     // Reserve this upload's completion value and stamp the destination before enqueuing, so a later command list reading the texture already sees a value to wait on.
     u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
-    u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
-    while (prev < value
-           && !dst->_pending_async_upload_value.compare_exchange_weak(prev, value, std::memory_order_release,
-                                                                      std::memory_order_relaxed))
-    {
-        // CAS retries; `prev` refreshed each time.
-    }
+    stamp_max(dst->_pending_async_upload_value, value);
 
     dx12_async_upload_job job;
     job.texture_target = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
@@ -519,6 +632,92 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     // Reverse sync: defer the copy behind the last direct-queue list that used this texture.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
+}
+
+sg::stream_upload_handle dx12_upload_async_system::stream_buffer(sg::raw_buffer_handle buffer,
+                                                                 cc::pinned_data<byte const> data,
+                                                                 isize offset)
+{
+    CC_ASSERT(buffer != nullptr, "stream upload target buffer is null");
+    auto const* const dst = dynamic_cast<dx12_buffer const*>(buffer.get());
+    CC_ASSERT(dst != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(!dst->is_expired(), "stream upload target is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(dst->_resource, "stream upload target buffer has no storage");
+    CC_ASSERT(dst->usage().has(sg::buffer_usage::copy_dst), "stream upload target buffer must have "
+                                                            "buffer_usage::copy_dst");
+    CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
+
+    // Reserve a completion value and stamp the STREAMING slot only.
+    // Deferred deletion reads it, so the storage outlives the copy; command-list access tracking does not, so no
+    // later reader inherits a wait — which is the whole difference between the two tiers.
+    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    stamp_max(dst->_pending_stream_copy_value, value);
+
+    auto control = std::make_shared<sg::impl::stream_control>();
+    control->completion = cc::make_async_manual<cc::unit>();
+    control->total_hint.store(data.size(), std::memory_order_relaxed);
+    // promote_to_async: move this same value onto the forward stamp, so lists recorded afterwards do wait on it.
+    // Weak, because promoting a transfer whose destination is already gone must not resurrect it.
+    control->on_promote
+        = [target = std::weak_ptr<dx12_buffer const>(std::static_pointer_cast<dx12_buffer const>(buffer)), value]
+    {
+        if (auto const strong = target.lock())
+            stamp_max(strong->_pending_async_upload_value, value);
+    };
+
+    dx12_async_upload_job job;
+    job.buffer_target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.dst_offset = offset;
+    job.src = cc::move(data);
+    job.copy_fence_value = dx12_copy_fence_value(value);
+    job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.stream = control;
+    _actor->enqueue_message(cc::move(job));
+
+    return sg::stream_upload_handle(cc::move(control));
+}
+
+sg::stream_upload_handle dx12_upload_async_system::stream_texture(sg::raw_texture_handle texture,
+                                                                  cc::pinned_data<byte const> data,
+                                                                  sg::subresource_index const& subresource,
+                                                                  sg::texture_region const& region)
+{
+    CC_ASSERT(texture != nullptr, "stream upload target texture is null");
+    auto const* const dst = dynamic_cast<dx12_texture const*>(texture.get());
+    CC_ASSERT(dst != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!dst->is_expired(), "stream upload target is a transient texture used past its epoch (expired)");
+    CC_ASSERT(dst->_resource, "stream upload target texture has no storage");
+    CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "stream upload target texture must have "
+                                                             "texture_usage::copy_dst");
+    CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
+    CC_ASSERT(data.size() == fp.tight_size(), "stream upload pixel data size does not match the copy region");
+
+    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    stamp_max(dst->_pending_stream_copy_value, value);
+
+    auto control = std::make_shared<sg::impl::stream_control>();
+    control->completion = cc::make_async_manual<cc::unit>();
+    control->total_hint.store(data.size(), std::memory_order_relaxed);
+    control->on_promote
+        = [target = std::weak_ptr<dx12_texture const>(std::static_pointer_cast<dx12_texture const>(texture)), value]
+    {
+        if (auto const strong = target.lock())
+            stamp_max(strong->_pending_async_upload_value, value);
+    };
+
+    dx12_async_upload_job job;
+    job.texture_target = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.footprint = fp;
+    job.is_texture = true;
+    job.src = cc::move(data);
+    job.copy_fence_value = dx12_copy_fence_value(value);
+    job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.stream = control;
+    _actor->enqueue_message(cc::move(job));
+
+    return sg::stream_upload_handle(cc::move(control));
 }
 
 void dx12_upload_async_system::set_window_bytes(isize bytes)

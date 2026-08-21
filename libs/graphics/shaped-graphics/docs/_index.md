@@ -60,6 +60,7 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue (`ctx.upload`), off the frame path, with automatic per-resource sync so later lists auto-wait.
 - [inline download](concepts/download.inline.md) — asynchronous GPU→CPU readback through a READBACK ring buffer drained by an actor, with epoch-granular space reclaim and drop-to-cancel futures.
 - [async download](concepts/download.async.md) — bulk GPU→CPU readback on a dedicated copy queue (`ctx.download`), off the frame path, with automatic per-resource sync in both directions.
+- [streaming](concepts/streaming.md) — the weaker transfer tier (`ctx.stream`): no automatic sync, and a handle instead — priority, progress, cancellation and a `cc::async` completion.
 - [GPU queries](concepts/queries.md) — `cmd.query.record_gpu_timestamp`: pooled query heaps leased per list, one batched readback per heap at submit, and the poll-after-submit `gpu_timestamp` result.
 
 ## Conventions

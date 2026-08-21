@@ -329,6 +329,53 @@ public:
         return _download_async.download_texture(cc::move(texture), subresource, region);
     }
 
+    // Reached through ctx.stream — the same copy queues and the same windows, at the weaker tier.
+    // These deliberately do NOT stamp the forward reader value, so a streamed extent costs a later command list
+    // nothing; the streaming lifetime stamp keeps the storage alive without buying that wait.
+    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_buffer(sg::raw_buffer_handle buffer,
+                                                                  cc::pinned_data<byte const> data,
+                                                                  isize offset_in_bytes,
+                                                                  sg::stream_scope) override
+    {
+        return _upload_async.stream_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_texture(sg::raw_texture_handle texture,
+                                                                   cc::pinned_data<byte const> data,
+                                                                   sg::subresource_index const& subresource,
+                                                                   sg::texture_region const& region,
+                                                                   sg::stream_scope) override
+    {
+        return _upload_async.stream_texture(cc::move(texture), cc::move(data), subresource, region);
+    }
+
+    [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                                      isize offset_in_bytes,
+                                                                      isize size_in_bytes,
+                                                                      sg::stream_scope) override
+    {
+        return _download_async.stream_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
+    }
+
+    [[nodiscard]] sg::stream_download_handle stream_bytes_from_texture(sg::raw_texture_handle texture,
+                                                                       sg::subresource_index const& subresource,
+                                                                       sg::texture_region const& region,
+                                                                       sg::stream_scope) override
+    {
+        return _download_async.stream_texture(cc::move(texture), subresource, region);
+    }
+
+    // The scope is consumed entirely by the sg layer's static check against the resource's usage flags, so the
+    // backend never needs it — dx12 already tracks state per subresource, and the one case that is not free is
+    // handled at creation by ALLOW_SIMULTANEOUS_ACCESS rather than per transfer.
+    void set_stream_upload_ratio(float ratio) override { _upload_async._scheduler.set_stream_ratio(ratio); }
+    void set_stream_download_ratio(float ratio) override { _download_async._scheduler.set_stream_ratio(ratio); }
+    void set_stream_upload_aging(float per_second) override { _upload_async._scheduler.set_aging_factor(per_second); }
+    void set_stream_download_aging(float per_second) override
+    {
+        _download_async._scheduler.set_aging_factor(per_second);
+    }
+
     // Runtime transfer-resource resizing, reached via ctx.upload / ctx.download.
     // Each records a pending change on the owning system, applied at a later safe point — see the systems and advance_epoch.
     void set_async_upload_window_bytes(isize bytes) override { _upload_async.set_window_bytes(bytes); }

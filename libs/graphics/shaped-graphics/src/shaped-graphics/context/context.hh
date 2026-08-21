@@ -20,6 +20,7 @@
 #include <shaped-graphics/present/swapchain.hh>
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/routine/routine_registry.hh>
+#include <shaped-graphics/transfer/stream.hh>
 #include <shaped-graphics/types.hh>
 
 /// Mutable entry point to a graphics backend: the factory for command lists and GPU resources.
@@ -68,6 +69,10 @@ public:
 
     /// Async device→host readback off the frame path: `ctx.download.bytes_from_buffer(...)`.
     context_download_scope download;
+
+    /// Bulk transfers that may take a while, with priority / progress / cancellation: `ctx.stream.to_buffer(...)`.
+    /// The weaker sibling of upload / download: no automatic command-list synchronization, a handle instead.
+    context_stream_scope stream;
 
     /// Raw, uncached layout / pipeline factory: `ctx.uncached.create_binding_group_layout(...)` — prefer `ctx.cached`.
     context_uncached_scope uncached;
@@ -202,6 +207,7 @@ protected:
     friend class context_transient_scope;
     friend class context_upload_scope;
     friend class context_download_scope;
+    friend class context_stream_scope;
     friend class context_uncached_scope;
     friend class context_cached_scope;
 
@@ -242,6 +248,55 @@ protected:
     [[nodiscard]] virtual bytes_future async_download_bytes_from_texture(raw_texture_handle texture,
                                                                          subresource_index const& subresource,
                                                                          texture_region const& region) = 0;
+
+    // Streaming transfers, reached via ctx.stream — the weaker tier.
+    //
+    // The implementation must NOT give these the automatic command-list synchronization the async pair carries: the
+    // whole point is that a streamed extent costs a later reader nothing.
+    // Keeping the destination's storage alive across the copy is still required, and must not go through the same
+    // stamp, or the reader wait comes back with it.
+    //
+    // Every teardown path must settle the handle's completion node, cancellation included.
+    // A manual async node nobody ever pushes parks its dependents for the process's lifetime.
+    //
+    // The sg layer has already resolved regions, bounds-checked, rejected empty work and validated `scope` against
+    // the resource's usage flags, so a backend receives only real transfers.
+
+    /// Streams `data` into `buffer` at `offset_in_bytes` on the copy queue, at the streaming tier.
+    [[nodiscard]] virtual stream_upload_handle stream_bytes_to_buffer(raw_buffer_handle buffer,
+                                                                      cc::pinned_data<byte const> data,
+                                                                      isize offset_in_bytes,
+                                                                      stream_scope scope) = 0;
+
+    /// Streams tightly-packed `data` into one region of `texture` at the streaming tier.
+    [[nodiscard]] virtual stream_upload_handle stream_bytes_to_texture(raw_texture_handle texture,
+                                                                       cc::pinned_data<byte const> data,
+                                                                       subresource_index const& subresource,
+                                                                       texture_region const& region,
+                                                                       stream_scope scope) = 0;
+
+    /// Streams `size_in_bytes` from `buffer` back to the host at the streaming tier.
+    [[nodiscard]] virtual stream_download_handle stream_bytes_from_buffer(raw_buffer_handle buffer,
+                                                                          isize offset_in_bytes,
+                                                                          isize size_in_bytes,
+                                                                          stream_scope scope) = 0;
+
+    /// Streams one region of `texture` back to the host at the streaming tier.
+    [[nodiscard]] virtual stream_download_handle stream_bytes_from_texture(raw_texture_handle texture,
+                                                                           subresource_index const& subresource,
+                                                                           texture_region const& region,
+                                                                           stream_scope scope) = 0;
+
+    // Streaming scheduling knobs, reached via ctx.stream.
+    // Defaults are no-ops so a backend without a streaming tier simply ignores them.
+
+    /// Share of copied bytes streaming is owed, per direction (see ctx.stream.set_upload_ratio).
+    virtual void set_stream_upload_ratio(float ratio) { (void)ratio; }
+    virtual void set_stream_download_ratio(float ratio) { (void)ratio; }
+
+    /// Priority gained per second waiting, per direction (see ctx.stream.set_upload_aging).
+    virtual void set_stream_upload_aging(float per_second) { (void)per_second; }
+    virtual void set_stream_download_aging(float per_second) { (void)per_second; }
 
     // Runtime transfer-resource resizing, reached via ctx.upload / ctx.download.
     // Each records a pending change applied at a later safe point — an epoch boundary, or the copy actor between windows — never synchronously here.

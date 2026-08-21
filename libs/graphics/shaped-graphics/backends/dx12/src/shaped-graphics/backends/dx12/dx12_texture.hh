@@ -60,6 +60,14 @@ public:
     mutable std::atomic<u64> _last_used_submission_token = 0;   // reverse: an async copy defers behind it
     mutable std::atomic<u64> _pending_async_download_value = 0; // forward: a later writer waits at submit
 
+    // Lifetime-only twin of _pending_async_upload_value, for STREAMING transfers.
+    // Deliberately separate: the async stamp does double duty as the forward reader wait, and streaming must not
+    // buy the deferred-deletion gate at the price of making every later reader wait on it.
+    // Deferred deletion gates on the max of the two; command-list access tracking reads only the async one.
+    // promote_to_async() is what moves a streaming transfer's value onto the async stamp as well.
+    mutable std::atomic<u64> _pending_stream_copy_value = 0;
+
+
     // Per-command-list subresource access tracking.
     // Mutable: a texture's shape is fixed, but its tracked GPU state changes as lists record against it.
     // Guarded because concurrent lists may record the same texture.

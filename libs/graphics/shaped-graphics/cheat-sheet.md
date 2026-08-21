@@ -110,6 +110,27 @@ ctx.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_fut
 ctx.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer
 ctx.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — ASYNC read one texture (sub)region back (needs copy_src), tightly packed
 ctx.download.set_async_window_size(bytes)          // void — resize the async readback staging window (x3 buffered); copy actor adopts it between windows; dx12 default 16 MiB
+
+// ctx.stream — the WEAKER tier (see docs/concepts/streaming.md). No automatic sync: the streamed extent is YOURS
+// ALONE until the handle settles, and a list touching it must be SUBMITTED after you observed that.
+ctx.stream.bytes_to_buffer(buf, pinned, offset=0, scope=resource)   // -> sg::stream_upload_handle (needs copy_dst)
+ctx.stream.data_to_buffer(typed_buf, pinned, off_in_elements=0, scope=resource) // -> same; T from buffer<T>
+ctx.stream.bytes_to_texture(tex, pinned, subresource={}, region={}, scope=resource)   // -> sg::stream_upload_handle
+ctx.stream.bytes_from_buffer(buf, offset, size, scope=resource)     // -> sg::stream_download_handle (needs copy_src)
+ctx.stream.data_from_buffer<T>(typed_buf, off_in_elements, count, scope=resource)     // -> same
+ctx.stream.bytes_from_texture(tex, subresource={}, region={}, scope=resource)         // -> sg::stream_download_handle
+ctx.stream.set_upload_ratio(f) / set_download_ratio(f)   // void — share of copied bytes streaming is OWED; default 0.1
+ctx.stream.set_upload_aging(f) / set_download_aging(f)   // void — priority += f * seconds_waiting; default 0 = off
+
+h.completion()          // -> cc::shared_async<cc::unit const> — THE completion signal; chain off it without blocking
+h.is_settled() / h.is_complete()  // bool — settled (delivered OR cancelled) / actually delivered
+h.progress()            // -> sg::stream_progress {i64 bytes_done; cc::optional<i64> total_hint}  (hint, never a test)
+h.set_priority(i32) / h.priority()  // reordered against other streams; takes effect within ~one window; any thread
+h.cancel()              // stops it being served; recorded chunks still run. DROPPING THE HANDLE CANCELS TOO
+h.promote_to_async()    // ADDITIVE: keeps the handle, and gains the automatic waits — the clean prewarm upgrade
+dl.future()             // stream_download_handle only -> sg::bytes_future, independent of the handle's lifetime
+// sg::stream_scope::resource (free everywhere) | subresource (texture_usage::allow_subresource_stream)
+//                  | region (buffer_usage/texture_usage::allow_region_stream — NOT free: see the doc)
 ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); dx12 default 16 MiB
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in); throws sg::device_lost_exception on device loss
 ctx.submit_command_list_and_present(sc, std::move(cmd)) // -> submission_token — THE present path: folds the swapchain back-buffer's present-layout transition into cmd, submits, then presents (see swapchain)

@@ -12,6 +12,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
+#include <shaped-graphics/transfer/stream_handle.hh>
 
 #include <atomic>
 
@@ -40,6 +41,10 @@ struct sg::backend::dx12::dx12_async_download_job
     // Forward cross-queue sync vs a pending async upload to the same buffer.
     // The read waits on the upload completion fence for this value, so it observes the upload — the two copy queues are independent.
     dx12_copy_fence_value upload_wait_value = dx12_copy_fence_value::none;
+
+    // Set only for a STREAMING readback; null marks the job as the async tier.
+    // Carries the priority and cancel flag the actor reads when picking, plus the completion node it must settle.
+    std::shared_ptr<sg::impl::stream_control> stream;
 };
 
 /// Async GPU→CPU readback on the dedicated COPY queue, decoupled from epochs.
@@ -77,6 +82,16 @@ public:
     [[nodiscard]] sg::bytes_future download_texture(sg::raw_texture_handle texture,
                                                     sg::subresource_index const& subresource,
                                                     sg::texture_region const& region);
+
+    /// Records a streaming readback of [offset, offset+size) from `buffer`, returning its control handle.
+    /// Unlike download_buffer this does NOT stamp the reverse value, so a later command list that writes the buffer
+    /// waits on nothing — the streamed extent is the caller's to keep clear until the handle settles.
+    [[nodiscard]] sg::stream_download_handle stream_buffer(sg::raw_buffer_handle buffer, isize offset, isize size);
+
+    /// Records a streaming readback of one texture region, under stream_buffer's rules.
+    [[nodiscard]] sg::stream_download_handle stream_texture(sg::raw_texture_handle texture,
+                                                            sg::subresource_index const& subresource,
+                                                            sg::texture_region const& region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows.
     /// It drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`.

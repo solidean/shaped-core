@@ -27,6 +27,12 @@ enum class lifetime_scope;
 enum class epoch : u64;
 enum class submission_token : u64;
 
+enum class stream_scope : u8; // how much of a resource one streaming transfer claims (see types.hh)
+class context_stream_scope;   // the ctx.stream facade (see transfer/stream.hh)
+class stream_upload_handle;   // control handle for one streaming upload (see transfer/stream_handle.hh)
+class stream_download_handle; // …and for one streaming download
+struct stream_progress;       // value type — bytes done plus an optional total hint
+
 class context;
 struct adapter_info; // which GPU a context runs on (see context/adapter_info.hh)
 class context_persistent_scope;

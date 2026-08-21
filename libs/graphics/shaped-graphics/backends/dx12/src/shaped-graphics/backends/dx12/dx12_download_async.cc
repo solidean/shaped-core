@@ -88,6 +88,13 @@ protected:
         // Flush anything still buffered, then drain every window — that waits out the copy queue, so the staging buffer and command list/allocators are safe to release.
         admit_pending();
         pack_until_stalled();
+
+        // Anything still active at shutdown is cancelled rather than abandoned: a future or handle waiting on a node
+        // nobody will ever push would hang the very teardown trying to finish.
+        for (auto& a : _active)
+            fold_cancelled_completion(a.job);
+        _active.clear();
+
         submit_window();
         drain_all();
     }
@@ -149,6 +156,22 @@ private:
         _pending.clear();
     }
 
+    // Drops every active streaming read whose handle has cancelled it.
+    // Cancellation is a flag rather than queue surgery: the read stops being picked and is reaped when the actor
+    // next looks.
+    // Chunks already recorded still run, since their staging bytes are committed.
+    void reap_cancelled()
+    {
+        for (isize i = _active.size() - 1; i >= 0; --i)
+        {
+            auto& a = _active[i];
+            if (a.job.stream == nullptr || !a.job.stream->cancelled.load(std::memory_order_relaxed))
+                continue;
+            fold_cancelled_completion(a.job); // settles the shared node, so the future fails rather than hanging
+            _active.remove_from_to(i, i + 1);
+        }
+    }
+
     // How the scheduler sees one active readback against the currently open window.
     //
     // A window issues its cross-queue waits once, hoisted ahead of its reads (submit_window), so it must never both
@@ -164,9 +187,13 @@ private:
     [[nodiscard]] sg::impl::transfer_candidate candidate_for(active_download const& a) const
     {
         sg::impl::transfer_candidate c;
-        c.flavor = sg::impl::transfer_flavor::async;
         c.family = a.family;
         c.sequence = a.sequence;
+        if (a.job.stream)
+        {
+            c.flavor = sg::impl::transfer_flavor::streaming;
+            c.priority = a.job.stream->priority.load(std::memory_order_relaxed);
+        }
 
         if (has_pending_wait(a.job) && _open_highest_finished > 0)
             c.eligible = false;
@@ -188,6 +215,7 @@ private:
     // A read that cannot go is passed over rather than blocking the queue behind it.
     void pack_until_stalled()
     {
+        reap_cancelled();
         while (!_active.empty())
         {
             ensure_open_window();
@@ -242,7 +270,13 @@ private:
         if (chunk.bytes == 0)
             return false;
         _window_used += chunk.bytes;
-        _window_async_bytes += chunk.bytes;
+        if (a.job.stream)
+        {
+            _window_stream_bytes += chunk.bytes;
+            a.job.stream->bytes_done.fetch_add(chunk.bytes, std::memory_order_relaxed);
+        }
+        else
+            _window_async_bytes += chunk.bytes;
 
         // This chunk reads the source, so its window must first wait for the last direct-queue list that used it, and for any pending async upload to it.
         // Max over the window; both fences are monotonic.
@@ -614,6 +648,94 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     _actor->enqueue_message(cc::move(job));
 
     return sg::bytes_future(cc::move(dst), cc::move(completion));
+}
+
+namespace
+{
+/// The half a streaming readback shares with its async twin: destination, pin, control block.
+/// Kept together so the two entry points below differ only in what they read from.
+struct stream_download_setup
+{
+    cc::pinned_data<byte> dst;
+    std::shared_ptr<sg::impl::stream_control> control;
+};
+
+[[nodiscard]] stream_download_setup make_stream_download_setup(isize size)
+{
+    stream_download_setup setup;
+    setup.dst = cc::pinned_data<byte>::create_uninitialized(size);
+    setup.control = std::make_shared<sg::impl::stream_control>();
+    setup.control->completion = cc::make_async_manual<cc::unit>();
+    setup.control->total_hint.store(size, std::memory_order_relaxed);
+    return setup;
+}
+} // namespace
+
+sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buffer_handle buffer, isize offset, isize size)
+{
+    CC_ASSERT(buffer != nullptr, "stream download source buffer is null");
+    auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
+    CC_ASSERT(src != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(!src->is_expired(), "stream download source is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(src->_resource, "stream download source buffer has no storage");
+    CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "stream download source buffer must have "
+                                                            "buffer_usage::copy_src");
+    CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
+
+    auto setup = make_stream_download_setup(size);
+    cc::span<byte> const dst_span = setup.dst.span();
+
+    dx12_async_download_job job;
+    job.buffer_source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.src_offset = offset;
+    job.size = size;
+    job.dst = dst_span;
+    job.pin = std::weak_ptr<void const>(setup.dst.pin());
+    job.stream = setup.control;
+    // One node serves both the future and the handle, so the drain path already settles them together.
+    job.completion = setup.control->completion;
+    // No completion_value: a streaming read stamps nothing, so a later writer inherits no wait.
+    // Keeping the extent clear until the handle settles is the caller's half of the streaming contract.
+    // The forward waits stay, since reading bytes an earlier list has not finished writing would just be wrong.
+    job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
+    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    _actor->enqueue_message(cc::move(job));
+
+    return sg::stream_download_handle(cc::move(setup.control),
+                                      sg::bytes_future(cc::move(setup.dst), setup.control->completion));
+}
+
+sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_texture_handle texture,
+                                                                      sg::subresource_index const& subresource,
+                                                                      sg::texture_region const& region)
+{
+    CC_ASSERT(texture != nullptr, "stream download source texture is null");
+    auto const* const src = dynamic_cast<dx12_texture const*>(texture.get());
+    CC_ASSERT(src != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!src->is_expired(), "stream download source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(src->_resource, "stream download source texture has no storage");
+    CC_ASSERT(src->usage().has(sg::texture_usage::copy_src), "stream download source texture must have "
+                                                             "texture_usage::copy_src");
+    CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
+    auto setup = make_stream_download_setup(fp.tight_size());
+    cc::span<byte> const dst_span = setup.dst.span();
+
+    dx12_async_download_job job;
+    job.texture_source = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.footprint = fp;
+    job.is_texture = true;
+    job.dst = dst_span;
+    job.pin = std::weak_ptr<void const>(setup.dst.pin());
+    job.stream = setup.control;
+    job.completion = setup.control->completion;
+    job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
+    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    _actor->enqueue_message(cc::move(job));
+
+    return sg::stream_download_handle(cc::move(setup.control),
+                                      sg::bytes_future(cc::move(setup.dst), setup.control->completion));
 }
 
 void dx12_download_async_system::set_window_bytes(isize bytes)

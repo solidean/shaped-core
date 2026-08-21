@@ -56,6 +56,12 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
     if (d.usage.has(sg::texture_usage::depth_stencil))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    // Only stream_scope::region needs this: state is already tracked per subresource, so streaming a whole mip while
+    // another is sampled costs nothing.
+    // It is not free — it rules out depth/stencil and MSAA and can disable metadata compression — so it follows the
+    // narrow flag only, never allow_subresource_stream.
+    if (d.usage.has(sg::texture_usage::allow_region_stream))
+        desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
 
     return desc;
 }
@@ -83,7 +89,8 @@ void dx12_texture::release_storage() const
         expiring.finalizers = cc::move(_finalizers);
         // Hold the storage until any in-flight async copy queue upload that references it has finished,
         // even past the direct-queue epoch retire (mirrors dx12_buffer).
-        expiring.copy_wait = dx12_copy_fence_value(_pending_async_upload_value.load(std::memory_order_acquire));
+        expiring.copy_wait = dx12_copy_fence_value(cc::max(_pending_async_upload_value.load(std::memory_order_acquire),
+                                                           _pending_stream_copy_value.load(std::memory_order_acquire)));
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }
 }
