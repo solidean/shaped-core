@@ -27,7 +27,10 @@ That is also why the dynamic check, when it lands, belongs at submit: a record-t
 
 **"Reports complete" means the copy has run**, not that the last chunk was recorded.
 For an upload those are different moments, and the difference is a half-written buffer.
-So a finished streaming upload waits on the copy fence before it settles, which async upload never needs because its completion is a GPU-side wait rather than a CPU signal.
+So a finished streaming upload settles only once its copy fence has reached its value, which async upload never needs because its completion is a GPU-side wait rather than a CPU signal.
+
+The actor does not *block* on that fence: it settles whatever the fence has already passed at the top of each cycle, and arms a fence event to wake itself for the rest.
+Blocking would stall every other transfer in the system behind one stream's copy, and the stream gains nothing from being told a cycle earlier.
 
 **"The extent"** is what `stream_scope` names, and it is checked.
 `resource` claims the whole thing, `subresource` one mip or slice, `region` a byte range or a box inside one subresource.
@@ -87,6 +90,9 @@ Preserve these; the rest is tuning:
 
    A completion value is still **reserved** and still folded into its window, in both directions.
    That is what `promote_to_async` has to hand out: promotion stamps the resource with that already-reserved value, and a value the fence never reaches would hang the very list it was given to.
+
+   The value is reserved on the **resource's own completion timeline**, never a shared counter — see [async upload](upload.async.md).
+   Streaming is what makes that unavoidable: a stream picked ahead of an older async transfer finishes first, and on one shared timeline its completion would report that older transfer done.
 2. **Every teardown path settles the completion node.**
    Cancellation, a dropped handle, a dropped destination, context shutdown — all of them push `cc::async_error::make_cancelled()`.
    A manual async node nobody pushes parks its dependents for the process's lifetime, so silence is the one unacceptable outcome.

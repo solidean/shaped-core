@@ -118,8 +118,9 @@ using texture_usages = cc::flags<texture_usage>;
 ///
 /// The streaming contract is that the claimed extent is **yours alone** between the call and the moment the handle
 /// reports complete: any command list touching it must be *submitted* after you observed that.
-/// Declaring the scope is what lets the claim be checked — statically against the resource's usage flags, and
-/// dynamically against what command lists actually touch.
+/// Declaring the scope is what lets the claim be checked statically, against the resource's usage flags.
+/// Checking it dynamically — against what command lists actually touch — is future work: it needs a per-resource
+/// record consulted at submit, and for `region` an interval set that only a dev build could afford.
 ///
 /// Narrower is not automatically better.
 /// `resource` is free on every backend and is the right choice for the common case of streaming into something

@@ -6,6 +6,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
@@ -32,7 +33,7 @@ struct sg::backend::dx12::dx12_async_upload_job
     bool is_texture = false;                          // discriminant: texture copy vs buffer copy
     isize dst_offset = 0;                             // destination byte offset (buffer copies)
     cc::pinned_data<byte const> src;                  // source bytes + their pin
-    dx12_copy_fence_value copy_fence_value = dx12_copy_fence_value::none; // completion value for this upload
+    dx12_group_value completion; // this upload's completion value, on the destination's upload timeline
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
 
@@ -134,6 +135,12 @@ public:
     /// Enqueues a bare wake so the actor re-polls sources that reported `not_yet`; reached through dx12_upload_waker.
     void wake_actor();
 
+    /// Whether the copy actor runs on the caller rather than its own thread (SC_THREADS=OFF, or a platform without
+    /// threads).
+    /// The actor asks because deferring work to a later cycle is only meaningful when a later cycle is coming: driven
+    /// by the pump registry, cycles happen while someone blocks and stop as soon as the actor reports itself idle.
+    [[nodiscard]] bool actor_is_unthreaded() const { return _actor != nullptr && _actor->is_unthreaded(); }
+
     /// Records a streaming upload of `data` into `buffer` at `offset`, returning its control handle.
     /// Unlike upload_buffer this does NOT stamp the forward reader value, so a later command list waits on nothing.
     /// It stamps the streaming lifetime value instead, which only deferred deletion reads.
@@ -157,7 +164,6 @@ public:
     /// Then releases the copy queue and unmaps + releases the staging buffer.
     void shutdown();
 
-    /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
     // Set in initialize, then touched only by the copy actor, which reads them lock-free.
     // _staging / _mapped / _window_bytes are also rebuilt by the actor when a set_window_bytes is applied.
     dx12_context& _ctx;
@@ -169,13 +175,19 @@ public:
     byte* _mapped = nullptr;
     isize _window_bytes = 0;
     ComPtr<ID3D12Fence> _window_fence; // per-window monotonic timeline: window reuse + one window's copy done
-    // Async-upload completion fence, owned here and upload-only.
-    // Signaled by the copy queue up to the highest finished upload value each window.
-    // A later direct-queue list that reads the buffer waits on it at submit, so it observes the copy.
-    // Read externally by dx12_command_list (forward wait), dx12_epoch (reclaim gate), and the download system.
-    // Created in initialize; empty until then.
-    ComPtr<ID3D12Fence> _completion_fence;
+    // Completion is NOT one fence here: each destination resource carries its own upload timeline, and a window
+    // signals every timeline whose transfer it finished.
+    // A single fence with highest-finished-value semantics was correct only while staging was strictly in order;
+    // out-of-order selection makes it report a low-numbered job done the moment a higher-numbered one finishes.
+    // See dx12_completion_group.hh.
     HANDLE _wait_event = nullptr; // actor-thread wait on the window fence
+
+    // Auto-reset event the completion fence signals when a finished stream's copy has run, plus its registered wait.
+    // The wait's callback only wakes the actor: settling belongs on the actor thread, where the queue lives.
+    // Unregistered before anything else in shutdown, with INVALID_HANDLE_VALUE, so no callback can be in flight past
+    // that point.
+    HANDLE _settle_event = nullptr;
+    HANDLE _settle_wait = nullptr;
 
     // A pending set_window_bytes request; the actor compares it to _window_bytes each process cycle and rebuilds staging when they differ.
     // Written by any thread, read by the actor.
@@ -191,9 +203,5 @@ public:
     std::shared_ptr<dx12_upload_waker> _waker;
 
 private:
-    // Reserved on the caller thread (fetch_add) and handed out as dx12_copy_fence_value.
-    // The actor's windows signal _completion_fence up to the highest finished value.
-    std::atomic<u64> _next_copy_value = 0;
-
     cc::unique_ptr<cc::threaded_actor<dx12_async_upload_job, dx12_transfer_wake>> _actor;
 };

@@ -229,6 +229,10 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (config.enable_debug_layer)
         ctx->_message_callback_cookie = register_debug_callback(ctx->_device.Get(), ctx.get());
 
+    // Completion timelines first: every copyable resource takes its groups from this pool at construction, so it
+    // has to be live before anything can be created.
+    ctx->_group_pool.initialize(ctx->_device.Get());
+
     // Bring up the inline transfer ring buffers; each system creates + maps its own heap (colocated
     // with its logic) off the now-populated device.
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));

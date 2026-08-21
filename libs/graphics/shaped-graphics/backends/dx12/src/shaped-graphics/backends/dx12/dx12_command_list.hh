@@ -136,17 +136,18 @@ public:
     cc::fixed_vector<dx12_buffer_handle, sg::max_vertex_buffers> _bound_vertex_buffers;
     dx12_buffer_handle _bound_index_buffer;
 
-    // Highest async-upload completion value any resource this list touches is waiting on; `none` means there was none.
-    // At submit the direct queue waits on the copy fence for this value, so the list sees the async writes.
+    // The async-upload completions this list must observe: one entry per distinct timeline, at the highest value
+    // that timeline owes it.
+    // A LIST rather than a single value because completion timelines are per resource — collapsing them to one max
+    // would be comparing values from unrelated fences, which is exactly the bug out-of-order selection introduced.
+    // At submit the direct queue issues one Wait per entry, so the list sees every async write it touches.
     // Maintained by track_buffer_access / track_texture_access.
     // The reverse stamp — defer a later async upload behind this list — is applied to the touched sets at submit.
-    dx12_copy_fence_value _required_copy_wait = dx12_copy_fence_value::none;
+    cc::vector<dx12_group_value> _required_copy_waits;
 
-    // Highest async-download completion value any resource this list WRITES is waiting on; `none` means there was none.
-    // At submit the direct queue waits on the download fence for this value, so the write never overwrites bytes an async readback is still reading.
+    // The async-download completions any resource this list WRITES must observe, same shape and same reason.
     // Only writes fold in, since two reads never conflict.
-    // Maintained by track_buffer_access / track_texture_access.
-    dx12_download_fence_value _required_download_wait = dx12_download_fence_value::none;
+    cc::vector<dx12_group_value> _required_download_waits;
 
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.

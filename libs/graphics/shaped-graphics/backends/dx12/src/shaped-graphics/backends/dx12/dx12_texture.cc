@@ -66,6 +66,15 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
     return desc;
 }
 
+void dx12_texture::acquire_completion_groups()
+{
+    // Mirrors dx12_buffer: a texture that can never be copied needs no timeline.
+    if (usage().has(sg::texture_usage::copy_dst))
+        _upload_group = _ctx._group_pool.acquire();
+    if (usage().has(sg::texture_usage::copy_src))
+        _download_group = _ctx._group_pool.acquire();
+}
+
 void dx12_texture::release_storage() const
 {
     // Borrowed (swapchain) storage: DXGI owns the resource and the swapchain already waited for the GPU, so
@@ -89,8 +98,9 @@ void dx12_texture::release_storage() const
         expiring.finalizers = cc::move(_finalizers);
         // Hold the storage until any in-flight async copy queue upload that references it has finished,
         // even past the direct-queue epoch retire (mirrors dx12_buffer).
-        expiring.copy_wait = dx12_copy_fence_value(cc::max(_pending_async_upload_value.load(std::memory_order_acquire),
-                                                           _pending_stream_copy_value.load(std::memory_order_acquire)));
+        expiring.copy_wait
+            = dx12_group_value{_upload_group, cc::max(_pending_async_upload_value.load(std::memory_order_acquire),
+                                                      _pending_stream_copy_value.load(std::memory_order_acquire))};
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }
 }

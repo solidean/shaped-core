@@ -38,11 +38,16 @@ public:
         _resource(cc::move(resource)),
         _heap(cc::move(heap))
     {
+        acquire_completion_groups();
     }
 
     // Deferred deletion: hands the GPU handle + finalizers to the context, freed once the owning epoch retires.
     // Freeing here would race the GPU still reading it.
     ~dx12_buffer() override;
+
+    /// Takes this buffer's completion timelines from the context's pool, per its usage flags.
+    /// Out of line because dx12_context is incomplete in this header.
+    void acquire_completion_groups();
 
     /// The buffer's GPU virtual address; 0 for an empty, size-0 buffer, whose _resource is null.
     /// Used by the raytracing build path, which references vertices / scratch / result by address.
@@ -50,6 +55,14 @@ public:
     {
         return _resource ? _resource->GetGPUVirtualAddress() : D3D12_GPU_VIRTUAL_ADDRESS(0);
     }
+
+
+    // The completion timelines this resource's transfers run on — one per direction, fixed for its lifetime.
+    // Acquired at construction (out of line, since the context is incomplete here) and only where the usage flags
+    // say a transfer is even possible, so a resource that can never be copied costs no fence.
+    // Immutable after construction, which is what lets the record path read them with no lock.
+    dx12_completion_group_handle _upload_group;
+    dx12_completion_group_handle _download_group;
 
     dx12_context& _ctx;                       // creating context — outlives this buffer
     sg::epoch _creation_epoch;                // epoch this buffer was created in (identity / diagnostics)

@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
@@ -491,6 +492,10 @@ public:
     // Extra systems — owned by value, constructed with *this.
     // The command-allocator pool recycles command allocators (epoch-gated) and command lists per queue.
     dx12_command_allocator_pool _cmd_pool;
+
+    // Hands every copyable resource its per-direction completion timelines, and takes them back when it dies.
+    // Brought up before any resource can be created and torn down after the last one is gone.
+    dx12_completion_group_pool _group_pool;
 
     // Inline host↔device transfer over UPLOAD / READBACK ring buffers on the direct queue.
     // Initialized in create_dx12_context: ring buffers mapped, download actor started.

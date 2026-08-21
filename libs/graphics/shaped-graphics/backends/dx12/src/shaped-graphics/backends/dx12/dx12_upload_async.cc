@@ -41,11 +41,29 @@ void stamp_max(std::atomic<u64>& slot, u64 value)
     }
 }
 
+// Fires on a thread-pool thread once the completion fence reaches a value a queued settle is waiting on.
+// It does nothing but wake the actor — _pending_settles is actor-thread state, and settling from here would race it.
+// Routed through the waker rather than the system directly, since that is the one entry point already safe at any
+// point in teardown.
+void CALLBACK on_settle_fence_signaled(PVOID context, BOOLEAN /*timed_out*/)
+{
+    static_cast<dx12_upload_waker*>(context)->wake();
+}
+
 /// A finished streaming upload waiting only for the GPU to run its copies before it may report complete.
 struct pending_settle
 {
-    u64 value = 0; // the completion-fence value the copy signals
+    dx12_group_value completion; // the value, on the destination's own timeline, that the copy signals
     std::shared_ptr<sg::impl::stream_control> control;
+};
+
+/// The highest completion value the open window finished on one timeline.
+/// A window may finish transfers to several destinations, and each has to be signaled on its own fence — one
+/// Signal per entry after the window executes.
+struct open_completion
+{
+    dx12_completion_group_handle group;
+    u64 value = 0;
 };
 
 /// A job the actor has resolved and is packing.
@@ -101,6 +119,8 @@ protected:
     {
         maybe_resize_staging(); // adopt a pending set_window_bytes now, while no window is open
 
+        drain_ready_settles(); // whatever the GPU finished while this actor slept
+
         // A fresh cycle re-polls every stalled source: this cycle exists because something changed, and the source
         // is the only one who knows whether it was its own data arriving.
         for (auto& a : _active)
@@ -108,9 +128,19 @@ protected:
 
         admit_pending();
         pack_until_stalled();
-        submit_window(); // flush the final partial window so its copies run
-        drain_settles(); // then let every finished stream report, once its copy has actually run
-        return false;    // everything drained + submitted; sleep until the next message
+        submit_window();       // flush the final partial window so its copies run
+        drain_ready_settles(); // and anything this cycle's copies have already covered
+
+        // Unthreaded, no later cycle is promised: the pump registry sweeps only while an actor reports work, and it
+        // is about to be told there is none.
+        // So finish the job here — the caller is already blocking, and with no actor thread there is no other
+        // transfer for the wait to starve.
+        if (_sys.actor_is_unthreaded())
+            drain_settles_blocking();
+        else
+            arm_settle_wake(); // threaded: a fence event is the only thing that will wake us for the rest
+
+        return false; // everything staged + submitted; sleep until a message or that event
     }
 
     void on_thread_shutdown() override
@@ -128,7 +158,7 @@ protected:
         _active.clear();
 
         submit_window();
-        drain_settles();
+        drain_settles_blocking();
         if (_current_window > 0)
             wait_for_window(_current_window - 1); // the last submitted window
     }
@@ -195,7 +225,11 @@ private:
             {
                 if (auto const hint = a.source->total_size_hint(); hint >= 0 && job.stream)
                     job.stream->total_hint.store(hint, std::memory_order_relaxed);
-                a.source->set_waker([waker = _sys._waker] { waker->wake(); });
+                // Null once shutdown has detached it, and shutdown detaches BEFORE draining the actor — so a job
+                // admitted on the shutdown path gets no waker rather than one that dereferences null.
+                // It needs none: nothing after this point will open another window for it.
+                if (_sys._waker != nullptr)
+                    a.source->set_waker([waker = _sys._waker] { waker->wake(); });
             }
             a.job = cc::move(job);
             _active.push_back(cc::move(a));
@@ -208,12 +242,17 @@ private:
     // and any forward reader stamped with the value wait on it, so a hole would hang them.
     void fold_completion_value(dx12_async_upload_job const& job)
     {
-        if (job.copy_fence_value == dx12_copy_fence_value::none)
+        if (!job.completion.is_pending())
             return;
         ensure_open_window();
-        u64 const v = u64(job.copy_fence_value);
-        if (v > _open_highest_finished)
-            _open_highest_finished = v;
+        for (auto& f : _open_finished)
+            if (f.group == job.completion.group)
+            {
+                if (job.completion.value > f.value)
+                    f.value = job.completion.value;
+                return;
+            }
+        _open_finished.push_back(open_completion{job.completion.group, job.completion.value});
     }
 
     // Fails a streaming job's completion node, exactly once.
@@ -241,36 +280,73 @@ private:
         fold_completion_value(job);
         if (job.stream)
         {
-            _pending_settles.push_back(pending_settle{u64(job.copy_fence_value), cc::move(job.stream)});
+            _pending_settles.push_back(pending_settle{job.completion, cc::move(job.stream)});
             job.stream = nullptr;
         }
     }
 
-    // Waits out the copy queue for every queued settle, then completes them.
-    // Called once at the end of a cycle, so the cost is one fence wait per cycle rather than per job, and only when
-    // streaming work actually finished in it.
-    void drain_settles()
+    // Settles every finished stream whose copy the GPU has actually run, and leaves the rest queued.
+    //
+    // Deliberately does NOT block.
+    // This actor stages every other transfer in the system, so sitting on a fence here would stall all of them
+    // behind one stream's copy — and the stream has nothing to gain from being told a cycle earlier.
+    // What a settle does need is a wake once its value lands, which arm_settle_wake provides.
+    void drain_ready_settles()
     {
         if (_pending_settles.empty())
             return;
 
-        u64 highest = 0;
-        for (auto const& p : _pending_settles)
-            if (p.value > highest)
-                highest = p.value;
-        wait_for_copy_value(highest);
-
+        cc::vector<pending_settle> still_pending;
         for (auto& p : _pending_settles)
-            p.control->completion->push_value(cc::unit{});
-        _pending_settles.clear();
+        {
+            if (p.completion.has_reached())
+                p.control->completion->push_value(cc::unit{});
+            else
+                still_pending.push_back(cc::move(p));
+        }
+        _pending_settles = cc::move(still_pending);
     }
 
-    // Blocks the actor until the completion fence has reached `value` — i.e. the window carrying that copy has run.
-    void wait_for_copy_value(u64 value)
+    // Asks the completion fence to signal this system's settle event once it reaches the highest value a queued
+    // settle is waiting on; the event's registered wait then wakes the actor.
+    //
+    // Without it a stream settles only when some unrelated message happens to arrive — constantly in a busy system,
+    // and never in a quiet one, which is exactly the case where a caller is blocked on its completion.
+    // Re-armed every cycle rather than tracked, since an already-passed value is settled above and never reaches here.
+    void arm_settle_wake()
     {
-        if (value == 0 || _sys._completion_fence->GetCompletedValue() >= value)
+        if (_pending_settles.empty() || _sys._settle_event == nullptr)
             return;
-        HRESULT const hr = _sys._completion_fence->SetEventOnCompletion(value, _sys._wait_event);
+
+        // One registration per timeline still owed: any of them signaling wakes the actor, which re-drains and
+        // re-arms whatever is left.
+        for (auto const& p : _pending_settles)
+        {
+            HRESULT const hr = p.completion.group->fence->SetEventOnCompletion(p.completion.value, _sys._settle_event);
+            CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion (stream settle) failed");
+        }
+    }
+
+    // Teardown's blocking twin: nothing may be left unsettled once the actor stops, and a handle waiting on a node
+    // nobody will ever push would hang the very shutdown trying to finish.
+    // Blocking is right here and only here — this path already waits the copy queue out anyway.
+    void drain_settles_blocking()
+    {
+        if (_pending_settles.empty())
+            return;
+
+        for (auto const& p : _pending_settles)
+            wait_for_group_value(p.completion);
+        drain_ready_settles();
+    }
+
+    // Blocks the actor until `v`'s timeline has reached it — i.e. the window carrying that copy has run.
+    // Teardown only; the steady-state path never blocks here (see drain_ready_settles).
+    void wait_for_group_value(dx12_group_value const& v)
+    {
+        if (v.has_reached())
+            return;
+        HRESULT const hr = v.group->fence->SetEventOnCompletion(v.value, _sys._wait_event);
         CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion (completion) failed");
         WaitForSingleObject(_sys._wait_event, INFINITE);
     }
@@ -323,7 +399,7 @@ private:
             c.eligible = false;
 
         bool const pending_wait = u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
-        if (pending_wait && _open_highest_finished > 0)
+        if (pending_wait && !_open_finished.empty())
             c.eligible = false;
         if (_open_risky_job.has_value() && _open_risky_job.value() != a.sequence)
             c.eligible = false;
@@ -355,7 +431,7 @@ private:
                 // that alone blocks every pending-wait job.
                 // Stopping there would leave those jobs unstaged and their completion values never signaled — a
                 // fence hole that hangs the direct queue waiting on it.
-                if (_window_used == 0 && _open_highest_finished == 0)
+                if (_window_used == 0 && _open_finished.empty())
                     break;
                 submit_window();
                 continue;
@@ -389,12 +465,29 @@ private:
 
         // On a pristine window every job whose source can answer is eligible, so the loop only ends once each of
         // them is staged.
-        // What may legitimately remain is a job waiting on its source: it resumes on the next cycle, which its
-        // waker starts.
+        // What may legitimately remain is a job waiting on a source — its own, or that of an earlier job in its
+        // family, which family order holds it behind.
+        // Both resume on the cycle that source's waker starts.
         // Anything else left here would never signal its completion value, and the first direct-queue list waiting on
         // one would hang — so say it loudly rather than deadlocking in the dark.
         for (auto const& a : _active)
-            CC_ASSERT(a.stalled, "async upload actor stalled with a job that is not waiting on its source");
+            CC_ASSERT(waits_on_a_source(a), "async upload actor stalled with a job no source is holding up");
+    }
+
+    // Whether `a` may legitimately still be active once nothing more can be packed.
+    //
+    // Its own source having nothing is the obvious case.
+    // The other one is a job held by FAMILY ORDER behind a stalled job to the same destination — an async upload
+    // queued after a streaming one to the same buffer is the ordinary way to get there, and it is not a fault: both
+    // write that buffer, so the order between them is exactly what must be kept.
+    [[nodiscard]] bool waits_on_a_source(active_upload const& a) const
+    {
+        if (a.stalled)
+            return true;
+        for (auto const& other : _active)
+            if (other.stalled && other.family == a.family && other.sequence < a.sequence)
+                return true;
+        return false;
     }
 
     // Asks a source-driven job's source for its next chunk and builds a packer for it.
@@ -544,7 +637,7 @@ private:
         }
 
         _window_used = 0;
-        _open_highest_finished = 0;
+        _open_finished.clear();
         _open_max_wait_token = 0;
         _open_risky_job = {};
         _window_async_bytes = 0;
@@ -580,13 +673,17 @@ private:
         HRESULT const hs = _sys._copy_queue->Signal(_sys._window_fence.Get(), _current_window + 1);
         CC_ASSERT(SUCCEEDED(hs), "ID3D12CommandQueue::Signal (staging window) failed");
 
-        // Completion fence is monotonic: only signal when this window finished a later upload than any prior one.
-        // Windows carrying only a mid-upload chunk finish nothing and skip it.
-        if (_open_highest_finished > _last_signaled_copy)
+        // One Signal per timeline this window finished an upload on, each monotonic on its own fence.
+        // A window carrying only mid-upload chunks finishes nothing and signals nothing.
+        // Signaling the max PER TIMELINE is exact because the scheduler keeps same-destination jobs in sequence
+        // order, so within a group completion order is reservation order.
+        for (auto const& f : _open_finished)
         {
-            HRESULT const hcf = _sys._copy_queue->Signal(_sys._completion_fence.Get(), _open_highest_finished);
+            if (f.value <= f.group->last_signaled)
+                continue;
+            HRESULT const hcf = _sys._copy_queue->Signal(f.group->fence.Get(), f.value);
             CC_ASSERT(SUCCEEDED(hcf), "ID3D12CommandQueue::Signal (completion) failed");
-            _last_signaled_copy = _open_highest_finished;
+            f.group->last_signaled = f.value;
         }
 
         _sys._scheduler.on_window_submitted(_window_async_bytes, _window_stream_bytes);
@@ -643,8 +740,7 @@ private:
     u64 _next_sequence = 0;
     cc::vector<pending_settle> _pending_settles; // finished streams, waiting on the copy fence
 
-    u64 _current_window = 0;     // next window index to submit; slot = index % num_staging_windows
-    u64 _last_signaled_copy = 0; // highest value signaled on the completion fence (monotonic)
+    u64 _current_window = 0; // next window index to submit; slot = index % num_staging_windows
 
     // One command list reused across every window; one allocator per window slot, reset when the window three back has completed.
     // Owned here rather than in the epoch-gated pool, since the copy queue does not observe epoch semantics.
@@ -652,9 +748,12 @@ private:
     ComPtr<ID3D12CommandAllocator> _allocators[num_staging_windows];
 
     bool _window_open = false;
-    isize _window_used = 0;         // bytes written into the open window so far
-    u64 _open_highest_finished = 0; // highest completion value of uploads finished in the open window
-    u64 _open_max_wait_token = 0;   // highest direct-queue token the open window's copies must wait for
+    isize _window_used = 0;       // bytes written into the open window so far
+    u64 _open_max_wait_token = 0; // highest direct-queue token the open window's copies must wait for
+
+    // Per-timeline highest completion value the open window finished; empty means it finished nothing, which is
+    // also the question the acyclicity guard asks — see candidate_for.
+    cc::vector<open_completion> _open_finished;
 
     // The one job with a still-pending reverse wait in the open window, if any.
     // While it is set the window admits nothing else, which is what keeps the acyclicity rule order-independent.
@@ -685,19 +784,28 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(isize window_bytes)
     _mapped = static_cast<byte*>(staging.value().mapped);
     _window_bytes = window_bytes;
     _desired_window_bytes.store(window_bytes, std::memory_order_relaxed); // no resize pending yet
+    // The only other place that tells the scheduler is maybe_resize_staging, which a context that never resizes
+    // never reaches — and without a window size its deficit bound is inert.
+    _scheduler.set_window_bytes(window_bytes);
 
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_window_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async upload window) failed");
-
-    // Upload completion fence: signaled by this copy queue when a window's copy has run, and a later direct-queue reader waits on it at submit (see dx12_command_list).
-    if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_completion_fence)); FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateFence (async upload completion) failed");
 
     _wait_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (_wait_event == nullptr)
         return cc::error("CreateEventW failed for the async upload wait event");
 
     _waker = std::make_shared<dx12_upload_waker>(*this);
+
+    // The settle event is how a finished stream learns its copy has run without the actor blocking on the fence.
+    // Registered after the waker exists, because the wait's callback dereferences it.
+    _settle_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (_settle_event == nullptr)
+        return cc::error("CreateEventW failed for the stream settle event");
+    if (!RegisterWaitForSingleObject(&_settle_wait, _settle_event, &on_settle_fence_signaled, _waker.get(), INFINITE,
+                                     WT_EXECUTEDEFAULT))
+        return cc::error("RegisterWaitForSingleObject failed for the stream settle event");
+
     _actor = cc::make_and_start_threaded_actor<dx12_upload_async_actor>(*this);
     return cc::unit{};
 }
@@ -717,8 +825,11 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
                                                             "buffer_usage::copy_dst");
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
-    // Reserve this upload's completion value and stamp the destination *before* enqueuing, so any command list reading the buffer after this call already sees a value to wait on.
-    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    // Reserve this upload's completion value on the BUFFER's own timeline and stamp it *before* enqueuing, so any
+    // command list reading the buffer after this call already sees a value to wait on.
+    // Per-destination is what keeps the value meaningful once jobs finish out of order — see dx12_completion_group.hh.
+    CC_ASSERT(dst->_upload_group != nullptr, "an async upload target must have been created with copy_dst");
+    u64 const value = dst->_upload_group->reserve();
     stamp_max(dst->_pending_async_upload_value, value);
 
     dx12_async_upload_job job;
@@ -728,7 +839,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
     job.buffer_target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer)); // dst already dynamic_cast-verified
     job.dst_offset = offset;
     job.src = cc::move(data);
-    job.copy_fence_value = dx12_copy_fence_value(value);
+    job.completion = dx12_group_value{dst->_upload_group, value};
     // Reverse sync: defer this copy behind the last direct-queue list that used the buffer, so it never overwrites bytes an earlier-submitted list still reads.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
@@ -752,8 +863,9 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
     CC_ASSERT(data.size() == fp.tight_size(), "async upload pixel data size does not match the copy region");
 
-    // Reserve this upload's completion value and stamp the destination before enqueuing, so a later command list reading the texture already sees a value to wait on.
-    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    // Reserve on the TEXTURE's own timeline and stamp before enqueuing — see upload_buffer.
+    CC_ASSERT(dst->_upload_group != nullptr, "an async upload target must have been created with copy_dst");
+    u64 const value = dst->_upload_group->reserve();
     stamp_max(dst->_pending_async_upload_value, value);
 
     dx12_async_upload_job job;
@@ -761,7 +873,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     job.footprint = fp;
     job.is_texture = true;
     job.src = cc::move(data);
-    job.copy_fence_value = dx12_copy_fence_value(value);
+    job.completion = dx12_group_value{dst->_upload_group, value};
     // Reverse sync: defer the copy behind the last direct-queue list that used this texture.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
@@ -823,7 +935,8 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_
     // Reserve a completion value and stamp the STREAMING slot only.
     // Deferred deletion reads it, so the storage outlives the copy; command-list access tracking does not, so no
     // later reader inherits a wait — which is the whole difference between the two tiers.
-    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(dst->_upload_group != nullptr, "a stream upload target must have been created with copy_dst");
+    u64 const value = dst->_upload_group->reserve();
     stamp_max(dst->_pending_stream_copy_value, value);
 
     auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
@@ -832,7 +945,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_
     dx12_async_upload_job job;
     job.buffer_target = typed;
     job.dst_offset = offset;
-    job.copy_fence_value = dx12_copy_fence_value(value);
+    job.completion = dx12_group_value{dst->_upload_group, value};
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.stream = control;
     job.source = cc::move(source);
@@ -858,7 +971,8 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
 
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
 
-    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(dst->_upload_group != nullptr, "a stream upload target must have been created with copy_dst");
+    u64 const value = dst->_upload_group->reserve();
     stamp_max(dst->_pending_stream_copy_value, value);
 
     auto typed = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
@@ -868,7 +982,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
     job.texture_target = typed;
     job.footprint = fp;
     job.is_texture = true;
-    job.copy_fence_value = dx12_copy_fence_value(value);
+    job.completion = dx12_group_value{dst->_upload_group, value};
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.stream = control;
     job.source = cc::move(source);
@@ -902,7 +1016,15 @@ void dx12_upload_async_system::set_window_bytes(isize bytes)
 
 void dx12_upload_async_system::shutdown()
 {
-    // Detach first: a source may hand its waker to a thread that fires long after the transfer ended, and after
+    // Unregister before anything else: INVALID_HANDLE_VALUE waits out any callback already running, so past this
+    // line nothing can dereference the waker the wait was given.
+    if (_settle_wait != nullptr)
+    {
+        UnregisterWaitEx(_settle_wait, INVALID_HANDLE_VALUE);
+        _settle_wait = nullptr;
+    }
+
+    // Detach next: a source may hand its waker to a thread that fires long after the transfer ended, and after
     // this returns such a wake finds nothing rather than an actor being destroyed under it.
     if (_waker)
     {
@@ -921,12 +1043,16 @@ void dx12_upload_async_system::shutdown()
     }
     _mapped = nullptr;
     _window_fence.Reset();
-    _completion_fence.Reset();
     _copy_queue.Reset();
     if (_wait_event)
     {
         CloseHandle(_wait_event);
         _wait_event = nullptr;
+    }
+    if (_settle_event)
+    {
+        CloseHandle(_settle_event);
+        _settle_event = nullptr;
     }
 }
 } // namespace sg::backend::dx12

@@ -71,7 +71,7 @@ public:
     /// Async device→host readback off the frame path: `ctx.download.bytes_from_buffer(...)`.
     context_download_scope download;
 
-    /// Bulk transfers that may take a while, with priority / progress / cancellation: `ctx.stream.to_buffer(...)`.
+    /// Bulk transfers that may take a while, with priority / progress / cancellation: `ctx.stream.bytes_to_buffer(...)`.
     /// The weaker sibling of upload / download: no automatic command-list synchronization, a handle instead.
     context_stream_scope stream;
 

@@ -54,7 +54,6 @@ struct sg::backend::dx12::dx12_resource_download
                                                              dx12_download_allocation const& alloc) = 0;
 };
 
-/// Buffer download: CopyBufferRegion from `src` into the readback window, then a deferred memcpy into `dst`.
 /// Where a readback's chunks go when the caller supplied a sink instead of taking a resident destination.
 ///
 /// Shared, because each chunk's deferred copy runs later — at drain — and any one of them may be the one that fails.
@@ -77,6 +76,7 @@ struct sg::backend::dx12::dx12_download_sink
     }
 };
 
+/// Buffer download: CopyBufferRegion from `src` into the readback window, then a deferred memcpy into `dst`.
 /// Resumable — each execute_next_job reads as much as the window holds and yields that chunk's deferred copy.
 /// A read larger than the window therefore splits across successive calls.
 /// `dst` must outlive every deferred copy; the future's pin is what keeps it alive.

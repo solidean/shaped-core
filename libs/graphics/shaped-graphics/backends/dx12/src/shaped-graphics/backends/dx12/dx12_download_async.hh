@@ -6,6 +6,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/bytes_future.hh>
@@ -37,11 +38,11 @@ struct sg::backend::dx12::dx12_async_download_job
     cc::span<byte> dst;                    // destination bytes (valid while `pin` is)
     std::weak_ptr<void const> pin;         // future's pin; expired == caller cancelled
     cc::shared_async<cc::unit> completion; // settled after the memcpy, or with a cancelled error
-    dx12_download_fence_value completion_value = dx12_download_fence_value::none; // reverse-sync value for this read
+    dx12_group_value completion_value;     // reverse-sync value for this read, on the source's download timeline
     sg::submission_token wait_token = sg::submission_token::invalid; // defer the read until this token completes
     // Forward cross-queue sync vs a pending async upload to the same buffer.
     // The read waits on the upload completion fence for this value, so it observes the upload — the two copy queues are independent.
-    dx12_copy_fence_value upload_wait_value = dx12_copy_fence_value::none;
+    dx12_group_value upload_wait_value;
 
     // Set only for a sink-driven readback; the bytes are handed over chunk by chunk instead of landing in `dst`.
     std::shared_ptr<dx12_download_sink> sink;
@@ -130,12 +131,9 @@ public:
     byte* _mapped = nullptr;
     isize _window_bytes = 0;
     ComPtr<ID3D12Fence> _window_fence; // per-window monotonic timeline: window reuse + one window's read done
-    // Async-download completion fence, owned here and download-only.
-    // Signaled by the copy queue up to the highest finished read value each window.
-    // A later direct-queue list that WRITES the buffer waits on it at submit, so it never overwrites bytes the read is still reading.
-    // Read externally only by dx12_command_list (reverse wait).
-    // Created in initialize; empty until then.
-    ComPtr<ID3D12Fence> _completion_fence;
+    // Completion is per SOURCE rather than per system: each resource carries its own download timeline, and a
+    // window signals every timeline whose read it finished.
+    // See dx12_completion_group.hh for why one shared fence stopped being correct.
     HANDLE _wait_event = nullptr; // actor-thread wait on the window fence
 
     // A pending set_window_bytes request; the actor compares it to _window_bytes each process cycle and rebuilds staging when they differ.
@@ -148,9 +146,5 @@ public:
     sg::impl::transfer_scheduler _scheduler;
 
 private:
-    // Reserved on the caller thread (fetch_add) and handed out as dx12_download_fence_value.
-    // The actor's windows signal _completion_fence up to the highest finished read value.
-    std::atomic<u64> _next_download_value = 0;
-
     cc::unique_ptr<cc::threaded_actor<dx12_async_download_job>> _actor;
 };

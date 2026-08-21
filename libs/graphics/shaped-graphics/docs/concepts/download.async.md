@@ -32,7 +32,7 @@ Each direction is a **cross-queue GPU wait** rather than a CPU stall, and it reu
 
 **Forward — the read also waits on a pending async upload.**
 An async *upload* to the same buffer runs on a **separate** transfer queue (see below), so it is not covered by the submission-fence wait.
-The download reads the buffer's pending-async-upload value when recorded and carries it, and the window holding the read **waits on the upload completion fence** for that value before executing.
+The download reads the buffer's pending-async-upload value when recorded and carries it, and the window holding the read **waits on that buffer's upload timeline** for the value before executing.
 That is a clean cross-queue GPU wait, so `submit-upload → async-download` of the same buffer just works with no CPU stall.
 
 **Reverse — a later writer waits on the read.** A command list that **writes** the buffer after the download must not overwrite the bytes while the transfer queue is still reading them.
@@ -40,8 +40,8 @@ That is a clean cross-queue GPU wait, so `submit-upload → async-download` of t
 - The download reserves a **completion value** on a monotonic counter and **stamps it onto the buffer** (atomic max) before the actor runs.
   Any writer recorded afterwards therefore sees a value to wait on.
 - Every op that **writes** a buffer while recording folds that buffer's download value into the list's required wait — **only writes**, since two reads never conflict.
-- At **submit**, the main queue is told to **wait on the transfer queue's completion fence** for that value before executing the list.
-  The transfer queue signals that fence once the window holding the read has completed, so the write lands strictly after the read.
+- At **submit**, the main queue is told to **wait on that buffer's download timeline** for the value before executing the list.
+  The transfer queue signals it once the window holding the read has completed, so the write lands strictly after the read.
 
 Both waits point strictly **backward in the CPU submission order**, so *per operation* the dependency graph is acyclic — no deadlock.
 Multiple async downloads of the **same** buffer are independent reads; two reads never conflict, so they need no ordering against each other.
@@ -84,9 +84,13 @@ A read **larger than one window** packs across successive windows.
 The window holding the read's last byte carries the completion value and the future's completion node.
 Because windows drain in order, the earlier chunks are already copied by the time that node is settled.
 
-Two fences on the transfer queue, both signaled per window:
-- the **staging fence** — every window, gating window reuse and thus drain ordering;
-- the **completion fence** — signaled up to the *highest finished read value* in that window, skipped when a window carries only a mid-read chunk, and what a later writer's reverse wait blocks on.
+Two kinds of fence on the transfer queue, both signaled per window:
+- the **staging fence** — one per system, signaled every window, gating window reuse and thus drain ordering;
+- a **completion timeline per source resource** — signaled up to the *highest value that resource finished* in the window, and what a later writer's reverse wait blocks on.
+  A window carrying only mid-read chunks finishes nothing and signals nothing.
+
+Completion is per resource rather than per system, for the reason [async upload](upload.async.md) gives.
+Reads select out of order, so a shared counter would report an older read finished the moment a newer one did.
 
 ## Why the source is held strong (and the future's pin weak)
 
@@ -99,7 +103,7 @@ The **destination** is held **weak** — a `weak_ptr` on the future's pin — so
 
 - If the pin has expired by the time the actor reaches the job (**stage time**), the read is skipped entirely — no `CopyBufferRegion`, no forward wait.
   A large read to an abandoned future therefore never touches the GPU.
-  But the job's **completion value is still folded** into a window so the completion fence reaches it, because a later writer stamped with that value must not hang.
+  But the job's **completion value is still folded** into a window so its timeline reaches it, because a later writer stamped with that value must not hang.
   That is exactly async upload's dropped-target rule: a cancelled job still signals its value, and only the copy is skipped.
 - If the pin expires **after** the read was recorded (**drain time**), the memcpy is skipped and the staged bytes are simply not copied out.
 
@@ -135,13 +139,13 @@ Not invariants — v1 shortcuts:
   The transfer queue is the system's **own** `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`_copy_queue`).
   It is separate from the upload system's — see "Why upload and download own separate transfer queues".
   The staging buffer is a persistently-mapped `D3D12_HEAP_TYPE_READBACK` committed buffer of `window_bytes * 3`, and the read is `ID3D12GraphicsCommandList::CopyBufferRegion`.
-  The **staging fence** is the system's own `_window_fence`; the **completion fence** is its own `_completion_fence`, download-only.
-- The **copy queue + download completion fence** are created in the system's `initialize`.
+  The **staging fence** is the system's own `_window_fence`; completion rides the per-resource timelines above, so the system owns no completion fence of its own.
+- The **copy queue** is created in the system's `initialize`.
   They are torn down — actor drained, copy queue idled — in the system's `shutdown`.
   That is called from [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`.
   The system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one `ID3D12CommandAllocator` per window slot, cycled on the window fence.
   Deliberately **not** the shared epoch-gated pool.
-- The **forward wait vs a pending async upload** is `_copy_queue->Wait(_upload_async._completion_fence, ...)`.
+- The **forward wait vs a pending async upload** is one `_copy_queue->Wait(group->fence, value)` per source's upload timeline.
   It is hoisted per window in `submit_window`, on the max `_pending_async_upload_value` over that window's reads.
   The acyclicity guard extends to it: once the open window has finished a read, the actor closes it before staging a read whose pending-upload value is still unsatisfied.
   The fuzz op in `tests/transfer/transfer-fuzz-test.cc` covers the interleaving this protects.
@@ -152,7 +156,7 @@ Not invariants — v1 shortcuts:
   The reverse one is a `dx12_download_fence_value`, distinct from the epoch / submission / async-upload fences.
   `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds the reverse value into `_required_download_wait`.
   It does so **only for write accesses** (`sg::is_unordered_write`), since two reads never conflict.
-  The reverse wait is `_queue->Wait(_download_async._completion_fence, ...)` at command-list submit.
+  The reverse wait is one `_queue->Wait(group->fence, value)` per download timeline, at command-list submit.
   The forward wait is `_copy_queue->Wait(_submission_fence, ...)`, issued before a window's reads.
   That path in [`dx12_download_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc) also enforces the window-level acyclicity rule.
 - The readback recorder is `dx12_buffer_download` in [`dx12_resource_download.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_download.hh).

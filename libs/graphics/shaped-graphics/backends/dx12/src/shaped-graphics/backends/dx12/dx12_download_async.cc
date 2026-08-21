@@ -47,6 +47,13 @@ struct inflight_window
     cc::vector<download_mem_job> mem_jobs;
 };
 
+/// The highest completion value the open window finished on one timeline; mirrors the upload actor's twin.
+struct open_completion
+{
+    dx12_completion_group_handle group;
+    u64 value = 0;
+};
+
 /// A readback the actor has resolved and is packing.
 ///
 /// The packer carries the per-job cursor, so a read survives across windows AND across process cycles.
@@ -117,13 +124,25 @@ private:
         if (job.completion)
             job.completion->push_error(cc::async_error::make_cancelled());
 
-        if (job.completion_value != dx12_download_fence_value::none)
-        {
-            ensure_open_window();
-            u64 const v = u64(job.completion_value);
-            if (v > _open_highest_finished)
-                _open_highest_finished = v;
-        }
+        fold_completion_value(job);
+    }
+
+    // Folds a read's completion value into the open window, on its source's own timeline.
+    // Mandatory on every exit path: a promoted read hands that value to a later writer, and a value the fence never
+    // reaches would hang it.
+    void fold_completion_value(dx12_async_download_job const& job)
+    {
+        if (!job.completion_value.is_pending())
+            return;
+        ensure_open_window();
+        for (auto& f : _open_finished)
+            if (f.group == job.completion_value.group)
+            {
+                if (job.completion_value.value > f.value)
+                    f.value = job.completion_value.value;
+                return;
+            }
+        _open_finished.push_back(open_completion{job.completion_value.group, job.completion_value.value});
     }
 
     // Resolves each arriving readback's source and gives it a resumable packer.
@@ -217,7 +236,7 @@ private:
 
         c.age_seconds = float(_window_opened_at - a.admitted_at);
 
-        if (has_pending_wait(a.job) && _open_highest_finished > 0)
+        if (has_pending_wait(a.job) && !_open_finished.empty())
             c.eligible = false;
         if (_open_risky_job.has_value() && _open_risky_job.value() != a.sequence)
             c.eligible = false;
@@ -227,10 +246,7 @@ private:
     [[nodiscard]] bool has_pending_wait(dx12_async_download_job const& job) const
     {
         bool const forward_pending = u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
-        bool const upload_pending
-            = job.upload_wait_value != dx12_copy_fence_value::none
-           && u64(job.upload_wait_value) > _sys._ctx._upload_async._completion_fence->GetCompletedValue();
-        return forward_pending || upload_pending;
+        return forward_pending || !job.upload_wait_value.has_reached();
     }
 
     // Picks and packs one chunk at a time until nothing can make progress in any window.
@@ -254,7 +270,7 @@ private:
                 // were all cancelled folds their values into an otherwise empty window, and that alone blocks every
                 // pending-wait read.
                 // Stopping there would leave those reads unstaged and their completion values never signaled.
-                if (_window_used == 0 && _open_highest_finished == 0)
+                if (_window_used == 0 && _open_finished.empty())
                     break;
                 submit_window();
                 continue;
@@ -304,20 +320,15 @@ private:
         // Max over the window; both fences are monotonic.
         if (u64(a.job.wait_token) > _open_max_wait_token)
             _open_max_wait_token = u64(a.job.wait_token);
-        if (u64(a.job.upload_wait_value) > _open_max_upload_wait)
-            _open_max_upload_wait = u64(a.job.upload_wait_value);
+        fold_open_upload_wait(a.job.upload_wait_value);
         if (has_pending_wait(a.job))
             _open_risky_job = a.sequence; // the window is now dedicated to it — see candidate_for
 
         // The window holding the read's last byte is the one whose completion satisfies a later writer's reverse wait.
-        // Values are monotonic in enqueue order, so max keeps the window's value correct.
+        // Max PER TIMELINE, which is exact because the scheduler keeps same-source reads in sequence order.
         bool const last = a.packer->is_finished();
-        if (last && a.job.completion_value != dx12_download_fence_value::none)
-        {
-            u64 const v = u64(a.job.completion_value);
-            if (v > _open_highest_finished)
-                _open_highest_finished = v;
-        }
+        if (last)
+            fold_completion_value(a.job);
 
         // Defer the CPU memcpy until this window's GPU read completes, at drain.
         // Only the last chunk settles the future: windows drain in order, so every earlier chunk is copied by then.
@@ -364,9 +375,9 @@ private:
         }
 
         _window_used = 0;
-        _open_highest_finished = 0;
+        _open_finished.clear();
         _open_max_wait_token = 0;
-        _open_max_upload_wait = 0;
+        _open_upload_waits.clear();
         _open_risky_job = {};
         _window_async_bytes = 0;
         _window_stream_bytes = 0;
@@ -394,11 +405,13 @@ private:
         if (_open_max_wait_token > 0)
             _sys._copy_queue->Wait(_sys._ctx._submission_fence.Get(), _open_max_wait_token);
 
-        // Forward cross-queue sync vs a pending async upload: hold this queue until the upload completion fence reaches the highest upload value the window's reads must observe.
+        // Forward cross-queue sync vs a pending async upload: hold this queue until each source's upload timeline
+        // reaches the value this window's reads must observe.
+        // One Wait per timeline, because an upload value only means anything against the resource that reserved it.
         // A read then never races an in-flight upload to the same buffer.
-        // The acyclicity guard above keeps this hoisted wait from ever preceding a read whose completion the upload transitively depends on.
-        if (_open_max_upload_wait > 0)
-            _sys._copy_queue->Wait(_sys._ctx._upload_async._completion_fence.Get(), _open_max_upload_wait);
+        // The acyclicity guard above keeps these hoisted waits from ever preceding a read whose completion the upload transitively depends on.
+        for (auto const& w : _open_upload_waits)
+            _sys._copy_queue->Wait(w.group->fence.Get(), w.value);
 
         ID3D12CommandList* lists[] = {_list.Get()};
         _sys._copy_queue->ExecuteCommandLists(1, lists);
@@ -409,13 +422,15 @@ private:
         HRESULT const hs = _sys._copy_queue->Signal(_sys._window_fence.Get(), _current_window + 1);
         CC_ASSERT(SUCCEEDED(hs), "ID3D12CommandQueue::Signal (download window) failed");
 
-        // Completion fence is monotonic: only signal when this window finished a later read than any prior one.
-        // Windows carrying only a mid-read chunk finish nothing and skip it.
-        if (_open_highest_finished > _last_signaled_download)
+        // One Signal per timeline this window finished a read on, each monotonic on its own fence.
+        // Windows carrying only a mid-read chunk finish nothing and signal nothing.
+        for (auto const& f : _open_finished)
         {
-            HRESULT const hcf = _sys._copy_queue->Signal(_sys._completion_fence.Get(), _open_highest_finished);
+            if (f.value <= f.group->last_signaled)
+                continue;
+            HRESULT const hcf = _sys._copy_queue->Signal(f.group->fence.Get(), f.value);
             CC_ASSERT(SUCCEEDED(hcf), "ID3D12CommandQueue::Signal (download completion) failed");
-            _last_signaled_download = _open_highest_finished;
+            f.group->last_signaled = f.value;
         }
 
         _inflight.push_back(inflight_window{_current_window, cc::move(_open_mem_jobs)});
@@ -515,8 +530,7 @@ private:
     cc::vector<sg::impl::transfer_candidate> _candidates; // rebuilt per pick; a member only to reuse its storage
     u64 _next_sequence = 0;
 
-    u64 _current_window = 0;         // next window index to submit; slot = index % num_staging_windows
-    u64 _last_signaled_download = 0; // highest value signaled on the download completion fence (monotonic)
+    u64 _current_window = 0; // next window index to submit; slot = index % num_staging_windows
 
     // One command list reused across every window; one allocator per window slot, reset when the window three back has drained.
     // Owned here rather than in the epoch-gated pool, since the copy queue does not observe epoch semantics.
@@ -525,10 +539,26 @@ private:
 
     bool _window_open = false;
     isize _window_used = 0;                      // bytes read into the open window so far
-    u64 _open_highest_finished = 0;              // highest completion value of reads finished in the open window
     u64 _open_max_wait_token = 0;                // highest direct-queue token the open window's reads must wait for
-    u64 _open_max_upload_wait = 0;               // highest async-upload value the open window's reads must wait for
     cc::vector<download_mem_job> _open_mem_jobs; // memcpies accumulated for the open window
+
+    // Per-timeline highest completion value the open window finished; empty means it finished nothing, which is also
+    // what the acyclicity guard asks.
+    cc::vector<open_completion> _open_finished;
+
+    // The upload timelines the open window's reads must observe before they run, at the highest value each owes.
+    cc::vector<dx12_group_value> _open_upload_waits;
+
+    // Raises the entry sharing `w`'s timeline, or adds one; unrelated timelines cannot be merged into a single max.
+    void fold_open_upload_wait(dx12_group_value const& w)
+    {
+        if (!w.is_pending())
+            return;
+        for (auto& existing : _open_upload_waits)
+            if (existing.try_raise_to(w))
+                return;
+        _open_upload_waits.push_back(w);
+    }
 
     // The one read with a still-pending cross-queue wait in the open window, if any.
     // While it is set the window admits nothing else, which is what keeps the acyclicity rule order-independent.
@@ -561,13 +591,11 @@ cc::result<cc::unit> dx12_download_async_system::initialize(isize window_bytes)
     _mapped = static_cast<byte*>(staging.value().mapped);
     _window_bytes = window_bytes;
     _desired_window_bytes.store(window_bytes, std::memory_order_relaxed); // no resize pending yet
+    // See the upload twin: the resize path is not the only path, so the bound has to be established here.
+    _scheduler.set_window_bytes(window_bytes);
 
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_window_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async download window) failed");
-
-    // Download completion fence: signaled by this copy queue when a window's read has finished, and a later direct-queue writer waits on it at submit (see dx12_command_list).
-    if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_completion_fence)); FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateFence (async download completion) failed");
 
     _wait_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (_wait_event == nullptr)
@@ -607,7 +635,8 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     auto completion = cc::make_async_manual<cc::unit>();
 
     // Reserve this read's completion value and stamp the buffer *before* enqueuing, so a later direct-queue list that writes the buffer already sees a value to wait on.
-    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
+    u64 const value = src->_download_group->reserve();
     u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
     while (prev < value
            && !src->_pending_async_download_value.compare_exchange_weak(prev, value, std::memory_order_release,
@@ -625,10 +654,11 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     job.dst = dst_span;
     job.pin = std::weak_ptr<void const>(dst.pin()); // weak: dropping the future cancels the copy
     job.completion = completion;
-    job.completion_value = dx12_download_fence_value(value);
+    job.completion_value = dx12_group_value{src->_download_group, value};
     // Forward sync: defer the read behind the last direct-queue list that used the buffer, so it reads committed bytes and never races an earlier-submitted writer.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value = dx12_copy_fence_value(upload_wait); // 0 == none: no pending async upload
+    // A null upload group means the source can never have been an upload target, so nothing to observe.
+    job.upload_wait_value = dx12_group_value{src->_upload_group, upload_wait};
     _actor->enqueue_message(cc::move(job));
 
     return sg::bytes_future(cc::move(dst), cc::move(completion));
@@ -656,7 +686,8 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     cc::span<byte> const dst_span = dst.span();
     auto completion = cc::make_async_manual<cc::unit>();
 
-    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
+    u64 const value = src->_download_group->reserve();
     u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
     while (prev < value
            && !src->_pending_async_download_value.compare_exchange_weak(prev, value, std::memory_order_release,
@@ -672,9 +703,9 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     job.dst = dst_span;
     job.pin = std::weak_ptr<void const>(dst.pin());
     job.completion = completion;
-    job.completion_value = dx12_download_fence_value(value);
+    job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value = dx12_copy_fence_value(upload_wait);
+    job.upload_wait_value = dx12_group_value{src->_upload_group, upload_wait};
     _actor->enqueue_message(cc::move(job));
 
     return sg::bytes_future(cc::move(dst), cc::move(completion));
@@ -727,7 +758,8 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
     // A value is RESERVED but not stamped: nothing waits on a streamed read until promote_to_async says so.
     // It is still folded into the window when the read finishes, so the fence reaches it — otherwise a promotion
     // would hand a later writer a value the fence never gets to, and hang it.
-    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
+    u64 const value = src->_download_group->reserve();
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(size);
     cc::span<byte> const dst_span = dst.span();
@@ -743,10 +775,11 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
     job.stream = control;
     // One node serves both the future and the handle, so the drain path already settles them together.
     job.completion = control->completion;
-    job.completion_value = dx12_download_fence_value(value);
+    job.completion_value = dx12_group_value{src->_download_group, value};
     // The forward waits stay, since reading bytes an earlier list has not finished writing would just be wrong.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    job.upload_wait_value
+        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_download_handle(cc::move(control), sg::bytes_future(cc::move(dst), control->completion));
@@ -766,7 +799,8 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
-    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
+    u64 const value = src->_download_group->reserve();
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(fp.tight_size());
     cc::span<byte> const dst_span = dst.span();
@@ -781,9 +815,10 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
     job.pin = std::weak_ptr<void const>(dst.pin());
     job.stream = control;
     job.completion = control->completion;
-    job.completion_value = dx12_download_fence_value(value);
+    job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    job.upload_wait_value
+        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_download_handle(cc::move(control), sg::bytes_future(cc::move(dst), control->completion));
@@ -803,7 +838,8 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
                                                             "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
-    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
+    u64 const value = src->_download_group->reserve();
 
     auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
     auto control = make_stream_control(typed, value, size);
@@ -815,9 +851,10 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
     job.sink = std::make_shared<dx12_download_sink>(cc::move(sink));
     job.stream = control;
     job.completion = control->completion;
-    job.completion_value = dx12_download_fence_value(value);
+    job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    job.upload_wait_value
+        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
     _actor->enqueue_message(cc::move(job));
 
     // No bytes_future: the sink IS the delivery channel, and handing back an empty future beside it would only
@@ -841,7 +878,8 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
-    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
+    u64 const value = src->_download_group->reserve();
 
     auto typed = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
     auto control = make_stream_control(typed, value, fp.tight_size());
@@ -853,9 +891,10 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
     job.sink = std::make_shared<dx12_download_sink>(cc::move(sink));
     job.stream = control;
     job.completion = control->completion;
-    job.completion_value = dx12_download_fence_value(value);
+    job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value = dx12_copy_fence_value(src->_pending_async_upload_value.load(std::memory_order_acquire));
+    job.upload_wait_value
+        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_download_handle(cc::move(control), sg::bytes_future());
@@ -882,7 +921,6 @@ void dx12_download_async_system::shutdown()
     }
     _mapped = nullptr;
     _window_fence.Reset();
-    _completion_fence.Reset();
     _copy_queue.Reset();
     if (_wait_event)
     {

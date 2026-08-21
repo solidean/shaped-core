@@ -54,6 +54,10 @@ void dx12_context::shutdown()
     _cmd_pool.shutdown();
     _query_system.shutdown();
 
+    // After the leftover sweep above, so any group a still-expiring resource held has already been released.
+    // Groups outliving this simply destroy their fences instead of returning to a list that is gone.
+    _group_pool.shutdown();
+
     _submission_fence.Reset();
     _epoch_fence.Reset();
 

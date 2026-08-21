@@ -78,6 +78,7 @@ TEST("sg transfer_scheduler - an ineligible head blocks only its own family")
 TEST("sg transfer_scheduler - streaming picks highest priority, then oldest")
 {
     transfer_scheduler s;
+    s.set_window_bytes(1000);
     s.set_stream_ratio(1.0f);
     s.on_window_submitted(0, 0); // nothing moved, so streaming is owed nothing yet
     s.begin_window();
@@ -217,4 +218,18 @@ TEST("sg transfer_scheduler - aging needs a real age to act on")
     auto const with_age = aging.pick_next(aged);
     REQUIRE(with_age.has_value());
     CHECK(aged[with_age.value()].priority == 0);
+}
+
+TEST("sg transfer_scheduler - the window size is a precondition, not a nicety")
+{
+    // An unset window size does not misbehave visibly — it silently drops the deficit bound, so a long async-only
+    // stretch banks credit it then spends all at once.
+    // That is a starvation bug an actor can ship without noticing, which is why it asserts rather than defaults.
+    transfer_scheduler unwired;
+    CHECK_ASSERTS(unwired.on_window_submitted(1000, 0));
+
+    transfer_scheduler wired;
+    wired.set_window_bytes(1000);
+    wired.on_window_submitted(1000, 0);
+    CHECK(wired.stream_deficit_bytes() == 100);
 }

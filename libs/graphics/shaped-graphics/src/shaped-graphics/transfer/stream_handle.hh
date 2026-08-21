@@ -67,8 +67,21 @@ public:
 
     ~stream_handle_base() { cancel(); }
 
-    stream_handle_base(stream_handle_base&&) noexcept = default;
-    stream_handle_base& operator=(stream_handle_base&&) noexcept = default;
+    stream_handle_base(stream_handle_base&& rhs) noexcept : _control(cc::move(rhs._control)) {}
+
+    /// Assigning over a live handle cancels what it was holding.
+    /// A defaulted move would release that control silently, which is the one way to lose a transfer's last observer
+    /// without cancelling it — and reassigning one handle across a loop is the ordinary way to hit it.
+    stream_handle_base& operator=(stream_handle_base&& rhs) noexcept
+    {
+        if (this != &rhs)
+        {
+            cancel();
+            _control = cc::move(rhs._control);
+        }
+        return *this;
+    }
+
     stream_handle_base(stream_handle_base const&) = delete;
     stream_handle_base& operator=(stream_handle_base const&) = delete;
 
@@ -135,7 +148,7 @@ protected:
 };
 } // namespace sg::impl
 
-/// Control handle for one streaming upload, from `ctx.stream.to_buffer` / `to_texture`.
+/// Control handle for one streaming upload, from `ctx.stream.bytes_to_buffer` / `bytes_to_texture`.
 /// Dropping it cancels the upload.
 class sg::stream_upload_handle final : public sg::impl::stream_handle_base
 {
@@ -143,7 +156,7 @@ public:
     using stream_handle_base::stream_handle_base;
 };
 
-/// Control handle for one streaming download, from `ctx.stream.from_buffer` / `from_texture`.
+/// Control handle for one streaming download, from `ctx.stream.bytes_from_buffer` / `bytes_from_texture`.
 /// Dropping it cancels the download.
 /// It also carries the `bytes_future` the bytes land in, so the zero-copy paths are the same ones an async download
 /// already uses.

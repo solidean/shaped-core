@@ -124,7 +124,9 @@ struct sg::backend::dx12::dx12_texture_upload final : dx12_resource_upload
                   "a texture stream chunk runs past the end of its region");
     }
 
-    [[nodiscard]] isize total_bytes() const override { return _fp.staged_size(); }
+    /// Staging bytes THIS packer needs, which is its own row window rather than the whole region.
+    /// `_fp` still describes the region, so `staged_size()` would over-report for a chunk.
+    [[nodiscard]] isize total_bytes() const override { return (total_rows() - _first_row) * _fp.padded_pitch; }
     void prepare(dx12_command_list&) override {}
     [[nodiscard]] bool is_finished() const override { return _rows_done >= total_rows(); }
 

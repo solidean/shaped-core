@@ -66,12 +66,12 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/transient.hh
     src/shaped-graphics/context/upload.hh
     src/shaped-graphics/context/download.hh
+    src/shaped-graphics/context/uncached.hh
+    src/shaped-graphics/context/cached.hh
     src/shaped-graphics/transfer/stream.hh
     src/shaped-graphics/transfer/stream_handle.hh
     src/shaped-graphics/transfer/stream_sink.hh
     src/shaped-graphics/transfer/stream_source.hh
-    src/shaped-graphics/context/uncached.hh
-    src/shaped-graphics/context/cached.hh
     src/shaped-graphics/routine/reload_generation.hh
     src/shaped-graphics/routine/render_routine.hh
     src/shaped-graphics/routine/render_routine_base.hh
@@ -185,6 +185,7 @@ if(SC_BUILD_TESTS)
         tests/texture/texture-test.cc
         tests/texture/texture-view-test.cc
         tests/transfer/bytes_future-test.cc
+        tests/transfer/stream_handle-test.cc
         tests/transfer/transfer_scheduler-test.cc
         tests/binding/binding-test.cc
         tests/binding/layout_hash-test.cc

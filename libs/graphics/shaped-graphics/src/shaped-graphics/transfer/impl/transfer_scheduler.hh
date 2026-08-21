@@ -59,6 +59,8 @@ public:
     void set_aging_factor(float per_second);
 
     /// The window size the deficit is bounded against; a long idle stretch must not bank unlimited credit.
+    /// Must be set before the first `on_window_submitted`, which asserts on it — an unset size silently
+    /// disables the bound, which is a starvation bug rather than a missing nicety.
     void set_window_bytes(isize bytes);
 
     [[nodiscard]] float stream_ratio() const { return _stream_ratio; }

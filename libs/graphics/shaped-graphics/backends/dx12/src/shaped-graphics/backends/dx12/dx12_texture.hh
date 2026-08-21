@@ -36,11 +36,24 @@ public:
         _borrowed(borrowed),
         _access(subresource_extent_of(desc))
     {
+        acquire_completion_groups();
     }
+
+    /// Takes this texture's completion timelines from the context's pool, per its usage flags.
+    /// Out of line because dx12_context is incomplete in this header.
+    void acquire_completion_groups();
 
     // Deferred deletion: hands the GPU handle + finalizers to the context, freed once the owning epoch retires.
     // Freeing here would race the GPU still reading it.
     ~dx12_texture() override;
+
+
+    // The completion timelines this resource's transfers run on — one per direction, fixed for its lifetime.
+    // Acquired at construction (out of line, since the context is incomplete here) and only where the usage flags
+    // say a transfer is even possible, so a resource that can never be copied costs no fence.
+    // Immutable after construction, which is what lets the record path read them with no lock.
+    dx12_completion_group_handle _upload_group;
+    dx12_completion_group_handle _download_group;
 
     dx12_context& _ctx;                       // creating context — outlives this texture
     sg::epoch _creation_epoch;                // epoch this texture was created in (identity / diagnostics)
@@ -66,7 +79,6 @@ public:
     // Deferred deletion gates on the max of the two; command-list access tracking reads only the async one.
     // promote_to_async() is what moves a streaming transfer's value onto the async stamp as well.
     mutable std::atomic<u64> _pending_stream_copy_value = 0;
-
 
     // Per-command-list subresource access tracking.
     // Mutable: a texture's shape is fixed, but its tracked GPU state changes as lists record against it.

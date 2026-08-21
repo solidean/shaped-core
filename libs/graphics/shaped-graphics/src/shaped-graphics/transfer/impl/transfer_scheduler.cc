@@ -33,13 +33,15 @@ void transfer_scheduler::on_window_submitted(isize async_bytes, isize stream_byt
 {
     CC_ASSERT(async_bytes >= 0 && stream_bytes >= 0, "window byte counts must be non-negative");
 
+    CC_ASSERT(_window_bytes > 0, "set_window_bytes must be called before the first window is submitted — the "
+                                 "deficit bound depends on it, and without it credit accumulates unbounded");
+
     isize const total = async_bytes + stream_bytes;
     _stream_deficit += isize(double(_stream_ratio) * double(total)) - stream_bytes;
 
     // A long stretch with no streaming work must not bank credit it would then spend all at once.
     // One window's worth is the natural bound: enough to guarantee the next window, never more.
-    if (_window_bytes > 0)
-        _stream_deficit = cc::clamp(_stream_deficit, -_window_bytes, _window_bytes);
+    _stream_deficit = cc::clamp(_stream_deficit, -_window_bytes, _window_bytes);
 }
 
 cc::optional<isize> transfer_scheduler::pick_next(cc::span<transfer_candidate const> candidates) const

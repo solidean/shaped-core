@@ -339,6 +339,49 @@ INVOCABLE_TEST("sg stream - a stalled source does not block other transfers", (s
     CHECK(bytes.value()[2047] == gated_bytes[2047]);
 }
 
+INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is only delayed, not a fault",
+               (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // Same destination, so the two share an ordering family and the async upload must stay behind the stream.
+    // That is correct — they both write the buffer — but it means the actor can legitimately reach "nothing to pack"
+    // holding a job that is not itself waiting on a source, only behind one that is.
+    auto const streamed = pattern(2048, 51);
+    auto const overwrite = pattern(2048, 53);
+
+    auto buf = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto source = std::make_unique<gated_source>(cc::span<byte const>(streamed));
+    auto* const source_ptr = source.get();
+    auto blocked = c.stream.from_source_to_buffer(buf, cc::move(source));
+
+    c.upload.bytes_to_buffer(buf, cc::make_pinned_data(overwrite));
+
+    // Drive the actor through a whole cycle while the source is still gated, which is the state that matters:
+    // waiting on an unrelated transfer is what makes that deterministic rather than a race the test usually wins.
+    auto other = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_dst);
+    REQUIRE(other != nullptr);
+    auto unrelated = c.stream.bytes_to_buffer(other, cc::make_pinned_data(pattern(2048, 55)));
+    REQUIRE(cc::try_async_blocking_get(unrelated.completion()).has_value());
+
+    // Nothing may be observable yet: the stream has no bytes, and the upload is behind it.
+    CHECK(!blocked.is_settled());
+
+    source_ptr->release();
+    REQUIRE(cc::try_async_blocking_get(blocked.completion()).has_value());
+    CHECK(blocked.is_complete());
+
+    // The family order is what makes the outcome well-defined: the later upload wins.
+    auto const back = c.download.bytes_from_buffer(buf, 0, 2048);
+    auto const bytes = c.wait_for(back);
+    REQUIRE(bytes.has_value());
+    CHECK(bytes.value()[0] == overwrite[0]);
+    CHECK(bytes.value()[2047] == overwrite[2047]);
+}
+
 INVOCABLE_TEST("sg stream - a failing source settles the transfer on its error channel",
                (sg::context_handle const& handle))
 {

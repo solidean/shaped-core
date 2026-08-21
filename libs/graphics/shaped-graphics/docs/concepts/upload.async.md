@@ -29,8 +29,8 @@ Each direction is a **cross-queue GPU wait**, never a CPU stall, and both ride o
   Any reader recorded afterwards therefore sees a value to wait on.
 - Every op that reads a buffer while recording folds that buffer's completion value into the list's required wait.
   That covers uploads, downloads, buffer copies, and a buffer bound into a binding group.
-- At **submit**, the main queue is told to **wait on the transfer queue's completion fence** for that value before executing the list.
-  One wait per list covers every buffer it reads.
+- At **submit**, the main queue is told to **wait on each resource's completion timeline** for the value it owes, before executing the list.
+  One wait per distinct timeline the list touches — see the completion section below for why they cannot collapse into one.
 
 **Reverse — the copy waits on an earlier user.**
 A command list submitted *before* the upload that uses the buffer must finish before the copy overwrites it, or the copy races an in-flight reader or writer.
@@ -84,9 +84,19 @@ With fewer windows the actor would stall on the window it just handed the GPU, a
 An upload **larger than one window** simply **packs across successive windows**.
 Each window copies its slice, and the window holding the upload's last byte is the one whose completion satisfies the reader wait.
 
-Two fences on the transfer queue, both signaled per window:
-- the **staging fence** — every window, gating window reuse and thus reclaim;
-- the **completion fence** — signaled up to the *highest finished upload value* in that window, skipped when a window carries only a mid-upload chunk, and what the main queue waits on.
+Two kinds of fence on the transfer queue, both signaled per window:
+- the **staging fence** — one per system, signaled every window, gating window reuse and thus reclaim;
+- a **completion timeline per destination resource** — signaled up to the *highest value that resource finished* in the window, and what the main queue waits on.
+  A window carrying only mid-upload chunks finishes nothing and signals nothing.
+
+**Completion is per resource, not per system**, and that follows directly from out-of-order selection.
+"Signal the highest value I finished" is only exact where completion order matches reservation order.
+That is guaranteed inside a family and deliberately broken across families — overtaking an unrelated blocked upload is the point.
+One shared counter therefore reports a low-numbered upload complete the moment any higher-numbered one finishes.
+A reader then stops waiting for a copy that has not run.
+So the **timeline is the family**: [`dx12_completion_group`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_completion_group.hh), one per resource per direction.
+Groups come from a pool and are recycled when the resource dies, so the fence count tracks the copyable resources alive rather than every resource ever made.
+A value is meaningless without the timeline it was reserved on, so every stamp and every wait carries both.
 
 Finished upload jobs, and their pins, are destroyed on the actor thread.
 That is off the submission path, so releasing a large pin never stalls a latency-sensitive thread.
@@ -101,6 +111,9 @@ Preserve these; the rest is tuning:
    No future, no manual barrier; waits point backward in submission order, so the graph is acyclic.
 2. **The source pin outlives the memcpy into staging**, and the job is then destroyed on the actor thread — the caller may free its bytes as soon as the call returns.
 3. **Triple-buffered windows keep CPU and GPU overlapped** — a window is reused only after enough others have been submitted that its copy is, almost always, already done.
+4. **A completion value only means anything on its own timeline.**
+   Out-of-order selection is exactly what makes a shared one wrong, so the two must change together.
+   Any future scheduling that lets jobs overtake *within* a family has to split the timeline the same way.
 
 ## Current simplifications (deferred)
 
@@ -109,7 +122,7 @@ Not invariants — v1 shortcuts:
 - **Persistent buffers only**, and **single-writer**: an async upload to a buffer concurrently used by an in-flight list is the caller's hazard to avoid.
 - **Coarser than per-buffer state**: the stamps are single monotonic values per buffer, a down-payment on the per-resource state-tracking layer landing separately, which should replace them.
 - **No CPU-observable completion** — no `upload_token`, no future.
-  Completion is expressed purely as the automatic GPU wait; a cheap poll on the completion fence could be exposed later if a "safe to reference now" signal is wanted.
+  Completion is expressed purely as the automatic GPU wait; a cheap poll on the resource's timeline could be exposed later if a "safe to reference now" signal is wanted.
 - **A future streaming system** can claim the unused tail of a partially-filled window instead of submitting it early, which v1 does not need.
 
 ## dx12 implementation
@@ -120,17 +133,18 @@ Not invariants — v1 shortcuts:
   The transfer queue is the system's **own** `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`_copy_queue`).
   It is separate from the download system's, so their windows never FIFO-block each other — see [async download](download.async.md).
   The staging buffer is a persistently-mapped `D3D12_HEAP_TYPE_UPLOAD` committed buffer of `window_bytes * 3`, and the copy is `ID3D12GraphicsCommandList::CopyBufferRegion`.
-  The **staging fence** is the system's own `_window_fence`; the **completion fence** is its own `_completion_fence`, upload-only.
-- The **copy queue + completion fence** are created in the system's `initialize`, alongside the staging buffer.
+  The **staging fence** is the system's own `_window_fence`; completion rides the per-resource timelines above, so the system owns no completion fence of its own.
+- The **copy queue** is created in the system's `initialize`, alongside the staging buffer.
+  The completion timelines come from the context's `dx12_completion_group_pool`, brought up before any resource can be created.
   They are torn down — actor drained, copy queue idled — in the system's `shutdown`.
   That is called from [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`.
   The system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one `ID3D12CommandAllocator` per window slot, cycled on the window fence.
   Deliberately **not** the shared epoch-gated `dx12_command_allocator_pool`, which is for resources that observe epoch semantics.
-- The per-resource stamps live on `dx12_buffer`: `_pending_async_upload_value` (forward) and `_last_used_submission_token` (reverse).
-  The forward one is a `dx12_copy_fence_value`, distinct from the epoch and submission fences.
-  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) reads it into `_required_copy_wait`.
+- The per-resource stamps live on `dx12_buffer`: `_pending_async_upload_value` (forward) and `_last_used_submission_token` (reverse), plus the `_upload_group` the forward value is counted on.
+  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds the pair into `_required_copy_waits`.
+  That is a list rather than one value, since waits on different timelines cannot be merged into a single maximum.
   It also records the buffer, so submit stamps the reverse one with the list's token.
-  The forward wait is `_queue->Wait(_upload_async._completion_fence, ...)` at command-list submit.
+  The forward wait is one `_queue->Wait(group->fence, value)` per distinct timeline at command-list submit.
   The reverse wait is `_copy_queue->Wait(_submission_fence, ...)`, issued before a window's copies.
   `stage_job` in [`dx12_upload_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_async.cc) enforces the window-level acyclicity rule.
   Once the open window has finished an upload, it closes that window before staging a job whose reverse token is still pending.
