@@ -46,6 +46,9 @@ constexpr cc::rec::relation_type relation_reads_from = {
 
 REC_TEST("record/trace - ids are unique, cheap and need no registry")
 {
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and this test needs a second one");
+
     rec_fixture const fixture(deterministic_config());
 
     auto const a = cc::rec::new_trace_id();
@@ -133,6 +136,9 @@ REC_TEST("record/trace - a trace can carry an id that came from somewhere else")
 
 REC_TEST("record/trace - a trace spans threads, since an id is just a value")
 {
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and this test needs a second one");
+
     rec_fixture const fixture(deterministic_config());
 
     auto const id = cc::rec::new_trace_id();

@@ -62,6 +62,27 @@ extern cc::atomic<bool> g_capture_core_id;
     return isize(sizeof(event_header)) + padded_payload(payload_size);
 }
 
+/// Forces a raw reading up to the next unused tick, so a thread's stream is STRICTLY increasing.
+///
+/// **The stream's order is worth more than a faithful reading**, and two events sharing a timestamp cost real
+/// information: a scope that opens and closes within one tick has no duration, a scope pair that ties with the pair it
+/// encloses cannot be nested, and `in_cycle_range` between two adjacent events is empty.
+/// This also clamps the inversion `current_cycles` documents — two readings around a very short span can come back out
+/// of order, and a max() makes that impossible to observe.
+///
+/// **It manufactures time when events outrun the clock.** A burst arriving faster than the counter ticks gets one tick
+/// per event whatever it really took, so a scope wrapping many events reads long by up to one tick each.
+/// That is sub-nanosecond on x86, a nanosecond on WASM, and about 42 ns on Apple silicon — proportional to the
+/// platform's resolution, self-correcting at the first gap, and only reached when the recorder's own cost already
+/// dominates what is being measured.
+[[nodiscard]] CC_FORCE_INLINE u64 monotonic_stamp(u64 raw)
+{
+    auto& w = t_writer;
+    auto const stamped = raw > w.last_cycles ? raw : w.last_cycles + 1;
+    w.last_cycles = stamped;
+    return stamped;
+}
+
 /// The timestamp an event is stamped with, and the core it was taken on when the policy asks for one.
 [[nodiscard]] CC_FORCE_INLINE u64 record_timestamp(u16& core_out)
 {
@@ -70,10 +91,10 @@ extern cc::atomic<bool> g_capture_core_id;
         u32 core = 0;
         auto const cycles = cc::current_cycles_and_core(core);
         core_out = u16(core);
-        return cycles;
+        return monotonic_stamp(cycles);
     }
     core_out = 0;
-    return cc::current_cycles();
+    return monotonic_stamp(cc::current_cycles());
 }
 
 /// The cold path: seal, rotate, register, or give up.

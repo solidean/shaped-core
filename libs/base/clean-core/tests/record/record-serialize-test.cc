@@ -153,6 +153,9 @@ REC_TEST("record/serialize - a loaded recording is a recording: it filters, deci
 
 REC_TEST("record/serialize - several threads' streams survive together")
 {
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and this test needs a second one");
+
     rec_fixture const fixture(deterministic_config());
 
     cc::rec::recording_listener rl;

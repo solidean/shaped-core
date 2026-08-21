@@ -92,6 +92,9 @@ REC_TEST("record/query - a filtered recording outlives the chunks it came from")
 
 REC_TEST("record/query - narrowing by thread keeps only what this thread wrote")
 {
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and this test needs a second one");
+
     rec_fixture const fixture(deterministic_config());
 
     cc::rec::recording_listener rl;

@@ -111,13 +111,18 @@ struct thread_exit_sentinel
 thread_local thread_exit_sentinel tl_exit_sentinel;
 
 /// Writes one event straight at the cursor with no gating and no rotation; the space must already be there.
+///
+/// Through the same monotonic stamp as an ordinary event: the cold path reads the clock once and writes several events
+/// from that one reading, so without it a chunk's preamble, its gap and its acquisition would all share a timestamp —
+/// and the first real event after them could tie with the lot.
 void write_bookkeeping(cc::rec::desc const& d, void const* payload, isize payload_size, u64 cycles)
 {
     auto& w = t_writer;
     if (w.cur + cc::rec::impl::event_bytes_for(payload_size) > w.end)
         return;
 
-    cc::rec::impl::write_event_at(d, cycles, 0, cc::rec::impl::flag_none, payload, payload_size);
+    cc::rec::impl::write_event_at(d, cc::rec::impl::monotonic_stamp(cycles), 0, cc::rec::impl::flag_none, payload,
+                                  payload_size);
 }
 
 /// Drops everything this thread remembers about a previous incarnation of the system.

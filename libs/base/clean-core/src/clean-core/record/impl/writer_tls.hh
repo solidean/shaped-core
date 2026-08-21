@@ -35,6 +35,11 @@ struct cc::rec::impl::writer_tls
     byte* end;
     rec::chunk* current;
 
+    /// The last timestamp this thread stamped an event with.
+    ///
+    /// The stream is strictly increasing per thread, and this is what makes it so — see impl::monotonic_stamp.
+    u64 last_cycles;
+
     /// The trace id this thread last published an ambient delta for.
     /// Compared against the live one to turn ambient context into a state delta rather than a per-event field.
     /// An id rather than the chain head, because an ADDRESS is unique only while its link lives.

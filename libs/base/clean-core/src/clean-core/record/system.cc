@@ -79,9 +79,9 @@ double measure_cycle_rate()
 {
     static double const cached = []
     {
-        if (!cc::has_cycle_counter())
-            return 0.0;
-
+        // No has_cycle_counter() gate: that asks whether the tick is CHEAP, and cc::current_cycles() is monotonic on
+        // every platform now — including the ones where it is a call.
+        // Gating on it here is what left every WASM event stamped 0 and every duration meaningless.
         auto const t0 = cc::current_time_steady_secs();
         auto const c0 = cc::current_cycles();
 

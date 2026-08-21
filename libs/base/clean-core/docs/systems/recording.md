@@ -62,8 +62,22 @@ The cold path writes bookkeeping events of its own, so a reading taken ahead of 
 A thread's stream would then go backwards at every rotation.
 
 **`RDTSCP` rather than `RDTSC`**, for the core it was taken on — about ten cycles, and the usual explanation for a step in otherwise steady timings.
-Neither instruction is ordered against surrounding code on both sides, so **timestamps within a thread are non-decreasing only after clamping**.
-Two readings around a very short span can come back inverted, and a consumer computing a duration must take the max with zero.
+
+**A thread's timestamps STRICTLY increase**, which is a guarantee the recorder makes rather than one the hardware gives.
+Every reading goes through a per-thread monotonic stamp — `max(reading, last + 1)` — so neither a tie nor an inversion is observable.
+
+Both failure modes are real without it.
+The counter is not ordered against surrounding code on both sides, so two readings around a very short span can come back inverted.
+And a tick is coarse enough on some platforms that a tight loop ties outright: about 42 ns on Apple silicon, where several events land inside one.
+
+A tied stream costs real information rather than precision.
+A scope that opens and closes within a tick has no duration, a scope pair tying with the pair it encloses cannot be nested, and `in_cycle_range` between two adjacent events is empty.
+
+**The cost is that time is manufactured when events outrun the clock.**
+A burst arriving faster than the counter ticks gets one tick per event whatever it really took, so a scope wrapping many of them reads long by up to one tick each.
+That is proportional to the platform's resolution, self-correcting at the first gap, and only reached where the recorder's own cost already dominates what is being measured.
+
+Across threads there is no such guarantee: two threads can stamp the same tick, and a query that orders across them breaks the tie by capture order.
 
 **The write cursor is a trivially-destructible, constant-initialized POD.**
 A `thread_local` with a non-trivial destructor emits a one-time-initialization guard check on *every* access under MSVC and clang-cl, which would roughly double the cost of a site.

@@ -1312,8 +1312,10 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
 - **A recording site's name must be a compile-time constant.**
   It lives in the site's `static constexpr` descriptor, which is what keeps a site free of a guard variable — so a helper taking a runtime `char const*` does not compile.
-- **`cc::rec` timestamps are non-decreasing within a thread only after clamping.**
-  `RDTSCP` is not ordered against surrounding code on both sides, so two readings around a very short span can come back inverted; take the max with zero when computing a duration.
+- **`cc::rec` timestamps STRICTLY increase within a thread**, and that is a guarantee rather than a happy accident.
+  Every event goes through a per-thread monotonic stamp, so a tie or an inversion is impossible to observe — which is what makes scopes nest and `in_cycle_range` mean something.
+  The cost is that a burst arriving faster than the counter ticks gets one tick per event whatever it really took: sub-nanosecond on x86, ~42 ns on Apple silicon.
+  Across threads there is no such guarantee — two threads can share a tick, and queries break that tie by capture order.
 - **A serialized recording carries no format stability guarantee** and will not for a good while.
   A reader refuses a version it does not know rather than misreading it; durability comes from an exporter, not from these bytes.
 - **A recording is process-local.** Events point at descriptors, and descriptors are static objects in this binary — nothing about one survives a save or a wire.

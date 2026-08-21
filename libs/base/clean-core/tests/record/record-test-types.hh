@@ -57,6 +57,16 @@ inline cc::rec::config deterministic_config()
     return cfg;
 }
 
+/// Whether this build can spawn a second thread at all.
+///
+/// `SC_THREADS=OFF` is a real configuration rather than a formality: under Emscripten without pthreads a `std::thread`
+/// constructor THROWS ("Not supported"), which surfaces as an uncaught exception rather than as a failed check.
+/// So a test that needs a second thread says so and skips, the same way the sampler tests do.
+[[nodiscard]] constexpr bool threads_available()
+{
+    return CC_HAS_THREADS != 0;
+}
+
 /// A recording's event sequence, block by block, as something two recordings can be compared on.
 ///
 /// Counts are a weak assertion for anything that MOVES events: a transform that relocates every sample to the end

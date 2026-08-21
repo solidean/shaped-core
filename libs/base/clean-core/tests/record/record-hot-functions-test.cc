@@ -27,6 +27,15 @@ namespace
     return cc::stack_capture_from_context_available() && CC_HAS_THREADS;
 }
 
+/// Whether a captured stack has any frames in it at all.
+///
+/// These fold STACKTRACE events rather than sampler samples, so they need no sampler — but they do need a walkable
+/// native stack, and wasm has none: a capture there comes back empty by construction rather than by failing.
+[[nodiscard]] bool can_capture_stacks()
+{
+    return cc::stack_capture_available();
+}
+
 [[nodiscard]] bool build_has_symbols()
 {
     if (!cc::symbolizer::is_available())
@@ -133,6 +142,9 @@ REC_TEST("record/hot - every sample lands in exactly one self bucket")
 
 REC_TEST("record/hot - inclusive counts never exceed the sample count, recursion included")
 {
+    if (!can_capture_stacks())
+        SKIP("this build cannot walk a native stack, so nothing folds a stacktrace event");
+
     rec_fixture const fixture(deterministic_config());
 
     auto const r = capture([] { recurse_then_log(6); }, false);
@@ -158,6 +170,9 @@ REC_TEST("record/hot - inclusive counts never exceed the sample count, recursion
 
 REC_TEST("record/hot - stacktrace events are folded in only when asked for")
 {
+    if (!can_capture_stacks())
+        SKIP("this build cannot walk a native stack, so nothing folds a stacktrace event");
+
     rec_fixture const fixture(deterministic_config());
 
     auto const r = capture([] { recurse_then_log(3); }, false);
@@ -170,6 +185,9 @@ REC_TEST("record/hot - stacktrace events are folded in only when asked for")
 
 REC_TEST("record/hot - the order is the same twice, and sorted by self time")
 {
+    if (!can_capture_stacks())
+        SKIP("this build cannot walk a native stack, so nothing folds a stacktrace event");
+
     rec_fixture const fixture(deterministic_config());
 
     auto const r = capture([] { recurse_then_log(5); }, false);
@@ -190,6 +208,9 @@ REC_TEST("record/hot - the order is the same twice, and sorted by self time")
 
 REC_TEST("record/hot - min_self_ratio drops the tail and nothing else")
 {
+    if (!can_capture_stacks())
+        SKIP("this build cannot walk a native stack, so nothing folds a stacktrace event");
+
     rec_fixture const fixture(deterministic_config());
 
     auto const r = capture([] { recurse_then_log(5); }, false);

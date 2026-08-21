@@ -298,6 +298,9 @@ REC_TEST("record - a listener may record, and only lower layers see it")
 
 REC_TEST("record - events from a thread that has exited still arrive")
 {
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and this test needs a second one");
+
     rec_fixture const fixture(deterministic_config());
 
     collector c;
@@ -663,4 +666,46 @@ REC_TEST("record/pin - a chunk takes more pins than its array holds")
         });
 
     CHECK(readable == 500);
+}
+
+REC_TEST("record/stream - a thread's timestamps strictly increase, however coarse its clock")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        // A tight loop is the case that ties: on a platform whose counter ticks every 42 ns, several of these land
+        // within one tick, and a tied stream has no nesting and no durations.
+        for (isize i = 0; i < 2000; ++i)
+            CC_RECORD_MARK("tick");
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    // Per BLOCK, since a block is one thread's stream and that is what the guarantee is about.
+    isize compared = 0;
+    for (auto const& b : rec.blocks())
+    {
+        auto const v = b.view();
+        auto previous = u64(0);
+        auto first = true;
+
+        for (auto it = v.begin(); it != v.end(); ++it)
+        {
+            auto const cycles = (*it).cycles;
+            if (!first)
+            {
+                CHECK(cycles > previous);
+                ++compared;
+            }
+            previous = cycles;
+            first = false;
+        }
+    }
+
+    CHECK(compared > 1000);
 }

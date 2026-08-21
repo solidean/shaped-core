@@ -106,15 +106,32 @@ struct located_event
 {
     cc::rec::chunk_view view;
     cc::rec::event_view event;
+
+    /// Where this event sat in capture order, which is what breaks a timestamp tie.
+    isize index = 0;
 };
 
 /// Every event in a recording, in timestamp order.
 /// Blocks arrive per thread, so anything comparing across threads has to sort first.
+///
+/// **Capture order breaks a tie, because a tie is normal rather than exotic.**
+/// `cc::sort` is deterministic but not stable, and a tick is coarse enough on some platforms that adjacent events
+/// routinely share one — 42 ns on Apple silicon against a scope that took 20.
+/// Without the tiebreaker a scope's begin could sort after the begin it encloses, and the pairing below would nest
+/// them the wrong way round from data that was never ambiguous: within a thread the stream IS the order.
 cc::vector<located_event> sorted_events(cc::rec::recording const& r)
 {
     cc::vector<located_event> all;
-    r.for_each_event([&](cc::rec::chunk_view const& v, cc::rec::event_view const& e) { all.push_back({v, e}); });
-    cc::sort(all, [](located_event const& a, located_event const& b) { return a.event.cycles < b.event.cycles; });
+    r.for_each_event([&](cc::rec::chunk_view const& v, cc::rec::event_view const& e)
+                     { all.push_back({v, e, all.size()}); });
+
+    cc::sort(all,
+             [](located_event const& a, located_event const& b)
+             {
+                 if (a.event.cycles != b.event.cycles)
+                     return a.event.cycles < b.event.cycles;
+                 return a.index < b.index;
+             });
     return all;
 }
 } // namespace
@@ -784,7 +801,15 @@ cc::vector<cc::rec::scope_span> cc::rec::recording::scopes() const
             .is_open = true,
         });
 
-    cc::sort(out, [](rec::scope_span const& a, rec::scope_span const& b) { return a.begin_cycles < b.begin_cycles; });
+    // Depth breaks a tie, for the same reason capture order breaks one in sorted_events: two scopes opening within one
+    // tick are not ambiguous — the outer one is the shallower one.
+    cc::sort(out,
+             [](rec::scope_span const& a, rec::scope_span const& b)
+             {
+                 if (a.begin_cycles != b.begin_cycles)
+                     return a.begin_cycles < b.begin_cycles;
+                 return a.depth < b.depth;
+             });
     return out;
 }
 

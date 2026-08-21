@@ -38,7 +38,8 @@ struct cc::rec::scope_span
 
     [[nodiscard]] cc::string_view name() const { return desc->name; }
 
-    /// Clamped at zero, because two cycle readings around a very short span can come back inverted.
+    /// Clamped at zero as a belt-and-braces measure: a live recording's stamps strictly increase, but a DESERIALIZED one
+    /// carries whatever its file said, and a file is not something to trust arithmetic to.
     [[nodiscard]] u64 duration_cycles() const { return end_cycles > begin_cycles ? end_cycles - begin_cycles : 0; }
 
     /// The duration in seconds, or 0 without a calibrated cycle counter.
