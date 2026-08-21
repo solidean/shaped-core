@@ -28,6 +28,11 @@ constexpr isize module_capacity = 512;
 /// Four strings per descriptor is the worst case: name, unit or relation spellings, file and function.
 constexpr isize string_key_capacity = desc_capacity * 4;
 
+/// How many distinct pinned payloads one dump records.
+/// The table costs 24 bytes each and holds only addresses, so this is generous rather than tuned; overflowing it means
+/// the events past that point are dropped rather than written pointing at nothing.
+constexpr isize blob_capacity = 4096;
+
 /// Below this the fixed tables alone do not fit, so there is nothing to build into.
 constexpr isize min_arena_bytes = 1 << 20;
 
@@ -62,6 +67,7 @@ cc::rec::impl::dump_builder::dump_builder(cc::span<byte> arena) : _arena(arena)
     _descs = reinterpret_cast<serialized_desc*>(_alloc(_desc_capacity * isize(sizeof(serialized_desc)), 8));
     _threads = reinterpret_cast<serialized_thread*>(_alloc(_thread_capacity * isize(sizeof(serialized_thread)), 8));
     _modules = reinterpret_cast<serialized_module*>(_alloc(_module_capacity * isize(sizeof(serialized_module)), 8));
+    _blobs = reinterpret_cast<blob_source*>(_alloc(blob_capacity * isize(sizeof(blob_source)), 8));
 
     _domain_keys = reinterpret_cast<void const**>(_alloc(_domain_capacity * isize(sizeof(void*)), 8));
     _unit_keys = reinterpret_cast<void const**>(_alloc(_unit_capacity * isize(sizeof(void*)), 8));
@@ -287,6 +293,24 @@ i64 cc::rec::impl::dump_builder::desc_index_of_pointer(rec::desc const* d) const
     return -1;
 }
 
+i64 cc::rec::impl::dump_builder::_intern_blob(byte const* data, u64 size)
+{
+    for (isize i = 0; i < _blobs_used; ++i)
+        if (_blobs[i].data == data && _blobs[i].size == size)
+            return i64(_blobs[i].offset);
+
+    if (_blobs_used >= blob_capacity)
+    {
+        _overflowed = true;
+        return -1;
+    }
+
+    auto const offset = _blob_bytes;
+    _blobs[_blobs_used++] = {.data = data, .size = size, .offset = offset};
+    _blob_bytes += size;
+    return i64(offset);
+}
+
 void cc::rec::impl::dump_builder::rewrite_payload_pointers(rec::desc const& d, cc::span<byte> payload)
 {
     for (isize f = 0; f < isize(d.field_count); ++f)
@@ -313,6 +337,21 @@ void cc::rec::impl::dump_builder::rewrite_payload_pointers(rec::desc const& d, c
             // Into the string table, where the descriptors' own names already live, so a literal recorded a thousand
             // times costs the file one copy.
             auto const written = text != nullptr ? _intern_string(cc::string_view(text)) : serialized_str{};
+            cc::memcpy(payload.data() + field.offset, &written, sizeof(written));
+        }
+        else if (field.type == rec::type_code::pinned_bytes)
+        {
+            // The size lives in the next eight bytes, which is what the pinned layout declares — the address alone
+            // says nothing about how much to copy.
+            byte const* data = nullptr;
+            u64 size = 0;
+            cc::memcpy(&data, payload.data() + field.offset, sizeof(data));
+            if (isize(field.offset) + 16 > payload.size())
+                continue;
+            cc::memcpy(&size, payload.data() + field.offset + 8, sizeof(size));
+
+            auto const offset = data != nullptr && size > 0 ? _intern_blob(data, size) : i64(0);
+            auto const written = u64(offset < 0 ? 0 : offset);
             cc::memcpy(payload.data() + field.offset, &written, sizeof(written));
         }
     }
@@ -387,6 +426,19 @@ bool cc::rec::impl::dump_builder::add_block(rec::chunk_view const& view)
                     if (_overflowed)
                         return false;
                 }
+            }
+            else if (field.type == rec::type_code::pinned_bytes)
+            {
+                if (isize(field.offset) + 16 > e.payload.size())
+                    continue;
+
+                byte const* data = nullptr;
+                u64 size = 0;
+                cc::memcpy(&data, e.payload.data() + field.offset, sizeof(data));
+                cc::memcpy(&size, e.payload.data() + field.offset + 8, sizeof(size));
+
+                if (data != nullptr && size > 0 && _intern_blob(data, size) < 0)
+                    return false;
             }
         }
     }
@@ -463,6 +515,11 @@ cc::rec::impl::dump_builder::dump_parts cc::rec::impl::dump_builder::finish()
         .offset_modules = u64(modules_at),
         .offset_blocks = u64(blocks_at),
         .offset_events = u64(events_at),
+
+        // After the events, because it is the one section with no bound on its size — so a reader that only wants the
+        // stream never has to seek past it.
+        .offset_blobs = u64(events_at) + total_event_bytes,
+        .blob_bytes = _blob_bytes,
     };
     for (isize i = 0; i < 8; ++i)
         parts.header.magic[i] = serialized_magic[i];

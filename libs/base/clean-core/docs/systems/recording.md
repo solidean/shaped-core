@@ -225,6 +225,26 @@ That case is misuse rather than something the type system catches, which is the 
 A `cstring` is the second payload field that holds a pointer into this binary.
 So serializing routes it through the string table and loading gives it an arena of its own — the same treatment `desc_ref` gets, for the same reason.
 
+### Recording bytes by pin
+
+`CC_RECORD_PINNED("frame.depth", pinned)` writes an address and a size, and hands the chunk a reference that keeps the bytes alive.
+So a megabyte of mesh or framebuffer data costs the stream sixteen bytes, and a test or a debugger gets the real thing rather than a summary somebody remembered to write.
+
+**Opt-in per type, through `cc::rec::pinnable_traits`.**
+Pinning is a promise about lifetime and immutability that only a type's author can make, so nothing is pinnable by accident.
+`cc::pinned_data<T>` is pinnable out of the box, which is the whole point of that type.
+
+**The bytes must not change while any recording holding them is alive.**
+Nothing copies them, so a mutation after the fact rewrites history instead of being recorded as a second value.
+
+A chunk's pin array holds 64, and that is not a limit.
+A full array moves into a heap block, the block becomes a single pin, and 63 slots come free — repeatable without bound, which is why releasing one walks a chain rather than a flat list.
+`try_add_pin` therefore allocates, and is only ever reached from a site that asked to pin something.
+
+Serializing copies the pinned bytes into a **blob section**, last in the file because it is the only section with no bound on its size.
+The payload's address becomes an offset into it, and loading turns that back into a pointer at the loaded recording's own copy.
+Read one through `event_view::field_as_bytes`, which reads the same on a live recording and a loaded one.
+
 `CC_RECORD_NAMED(name, value)` is the form for a name only known until runtime, and it is the exception rather than the tool.
 A static name costs the stream nothing because it lives in the descriptor; a runtime one is copied into every event, and a query keyed on it reads the payload rather than comparing a pointer.
 Its value must be fixed-size — a scalar, an enum, a pointer or a literal — because a field's offset is a constant, so at most one variable-length field can exist and it has to be last.

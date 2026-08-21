@@ -1043,6 +1043,13 @@ CC_RECORD_MARK("fallback-taken");            // "did this code run" — the chea
 CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES
 CC_RECORD("asset", "meshes/tree.obj");       // a LITERAL (char const[N]) is stored as its address, bytes stay in .rodata
 CC_RECORD_NAMED(counter.name(), n);          // a name only known at runtime; value must be fixed-size
+
+#include <clean-core/record/pinned_value.hh>  // bytes kept alive rather than copied
+CC_RECORD_PINNED("frame.depth", pinned);     // a cc::pinned_data<T>: the event is an address + a size, 16 bytes
+e.field_as_bytes("value");                   // -> span<byte const>; the originals live, the file's copy loaded
+// Opt a type in with cc::rec::pinnable_traits; pinned_data<T> already is. The bytes must NOT change while any
+// recording holding them is alive — nothing copies them, so a mutation rewrites history.
+// The 64-slot pin array is not a limit: a full one spills into a heap block that becomes a single pin.
 // The const is the tier: `char const[N]` = literal, stored by address and REQUIRED to outlive the process.
 // `char[N]` — the snprintf-into-a-local shape — is non-const, so it is copied inline and needs no lifetime thought.
 // A `char const buf[32]` local is misuse: nothing reads the payload at the site, so the address is read long after.

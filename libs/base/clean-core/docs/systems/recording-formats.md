@@ -57,8 +57,13 @@ A `desc_ref` holds a `rec::desc const*`, which means nothing outside the process
 So it is rewritten into a descriptor-table index on the way out and back into a pointer on the way in — the same treatment an event header's own descriptor gets.
 That is why both writers patch payloads rather than only headers.
 
-**Pinned payloads** are process-local by definition.
-Nothing produces one yet; when something does, this is where the decision goes.
+**Pinned payloads** travel in a blob section of their own, last in the file.
+A `type_code::pinned_bytes` field holds an address live and an offset into that section once written, so the event stream stays byte-for-byte the size it was while the bytes themselves come along.
+Last rather than beside the other tables because it is the only section with no bound on its size — a reader that only wants the event stream never has to seek past it.
+
+Both writers stream those bytes straight from behind their pins rather than through the builder's arena.
+Same reason the events go out from the chunks: the arena is a fixed reservation, and pinned data is exactly what would not fit in one.
+The blob table is deduplicated by address and size, so two events recording the same pinned data cost the file one copy.
 
 `cc::rec::source_ref` exists for this reason and not for a stylistic one.
 `cc::source_location` has no constructor, so a loader could never rebuild one, and a recording that had been through a file would lose the field that says where it came from.

@@ -13,8 +13,8 @@
 
 /// One thing a chunk keeps alive on behalf of an event that points into it.
 ///
-/// Uniform across everything that can be pinned — a cc::shared_ptr's control block, a cc::pinned_data's owner, a
-/// cc::async_ambient_link — so the chunk never learns what it is holding.
+/// Uniform across everything that can be pinned — a `cc::pinned_data`'s owner above all — so the chunk never learns
+/// what it is holding.
 /// The pinned object must be immutable for as long as the chunk lives; that is the pinning caller's promise.
 struct cc::rec::pin
 {
@@ -29,8 +29,11 @@ struct cc::rec::pin
 /// So a consumer reading a LIVE chunk can never see a torn event — the worst it sees is one event's worth of lag.
 struct cc::rec::chunk
 {
-    /// How many pins one chunk can hold before it is sealed early.
-    /// Pins come from cc::async ambient changes and pinned value payloads, both of which are rare relative to events.
+    /// How many pins fit in the chunk header before one slot is spent on a spill block.
+    ///
+    /// Not a limit: a full array is moved into a heap block, and the block itself becomes a single pin — so 63 slots
+    /// come free and the trick repeats without bound.
+    /// Sixty-four is what makes that rare rather than what caps it.
     static constexpr isize pin_capacity = 64;
 
     /// The layer value of a chunk written by ordinary code rather than from inside a listener.
@@ -94,8 +97,11 @@ public:
         return cc::span<byte const>(data, isize(committed.load(cc::memory_order_acquire)));
     }
 
-    /// Adds a pin, or returns false when the chunk is full — in which case the caller seals and rotates.
-    /// Owner-only.
+    /// Adds a pin, spilling the array into a heap block first when it is full.
+    ///
+    /// Owner-only, and returns false only when that block could not be allocated — at which point the caller records
+    /// the value inline instead of by pin.
+    /// **This can allocate**, which is why it is only ever reached from a site that asked to pin something.
     bool try_add_pin(rec::pin p);
 
     /// The pins filled so far, safe to read alongside a live chunk.

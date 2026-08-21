@@ -47,11 +47,18 @@ installed_dump g_dump;
 constexpr isize pointer_scratch_bytes = 256;
 
 /// Whether any of `d`'s fields holds a pointer into this process, and so needs patching on the way out.
+///
+/// Every type that rewrite_payload_pointers handles has to be listed here, or the slot goes out verbatim and a loader
+/// reads a live address as a table index.
 [[nodiscard]] bool has_payload_pointers(cc::rec::desc const& d)
 {
     for (isize f = 0; f < isize(d.field_count); ++f)
-        if (d.fields[f].type == cc::rec::type_code::desc_ref || d.fields[f].type == cc::rec::type_code::cstring)
+    {
+        auto const type = d.fields[f].type;
+        if (type == cc::rec::type_code::desc_ref || type == cc::rec::type_code::cstring
+            || type == cc::rec::type_code::pinned_bytes)
             return true;
+    }
     return false;
 }
 
@@ -204,6 +211,15 @@ bool write_dump()
 
             offset += isize(sizeof(header)) + rest;
         }
+    }
+
+    // The pinned payloads last, straight from behind their pins — the same order finish() laid out, and the same
+    // reason the events go out from the chunks rather than through a copy.
+    for (isize i = 0; i < builder.blob_count(); ++i)
+    {
+        auto const blob = builder.blob_at(i);
+        if (!write_all(file.value(), cc::span<byte const>(blob.data, isize(blob.size))))
+            return false;
     }
 
     return true;

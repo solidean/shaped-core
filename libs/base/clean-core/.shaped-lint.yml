@@ -122,6 +122,16 @@ rules:
       - src/clean-core/platform/native.cc
 
   - kind: allow-include
+    value: <new>
+    reason: std::nothrow, so a chunk whose pin array spilled and could not allocate falls back to recording the value inline instead of throwing from a recording site
+    files: src/clean-core/record/chunk.cc
+
+  - kind: allow-include
+    value: <memory>
+    reason: a pin holds a cc::pinned_data's owner, which IS a std::shared_ptr<void const> — cc::shared_ptr supports neither the type erasure nor the aliasing that owner needs, which is why pinned_data.hh uses std:: too
+    files: src/clean-core/record/pinned_value.cc
+
+  - kind: allow-include
     value: <dbghelp.h>
     reason: SymFromAddr and SymGetLineFromAddr64 are the only route from an address to a name on Windows
     files: src/clean-core/platform/symbolize.cc

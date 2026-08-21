@@ -2,11 +2,13 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/platform/module_table.hh>
 #include <clean-core/platform/symbolize.hh>
 #include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/domain.hh>
+#include <clean-core/record/pinned_value.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/serialize.hh>
 #include <clean-core/record/system.hh>
@@ -517,5 +519,87 @@ REC_TEST("record/crash - a dump carrying a relation is not shifted by its own ta
     REQUIRE(relations[0].objects().size() == 1);
     CHECK(relations[0].objects()[0] == child);
 
+    CHECK(cc::remove_file(path));
+}
+
+REC_TEST("record/serialize - pinned bytes travel in the file's blob section")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const live = capture(
+        []
+        {
+            auto payload = cc::vector<byte>();
+            payload.resize_to_constructed(2048, byte(0x5A));
+            payload[0] = byte(0x11);
+            payload[2047] = byte(0x22);
+
+            auto const pinned = cc::make_pinned_data(cc::move(payload)).reinterpret_as<byte const>();
+            CC_RECORD_PINNED("frame.depth", pinned);
+        });
+
+    auto const bytes = cc::rec::serialize(live);
+    auto loaded = cc::rec::deserialize(bytes);
+    REQUIRE(loaded.has_value());
+
+    // A live recording's payload holds the caller's ADDRESS, which means nothing here — so the writer copied the bytes
+    // into a section of its own and the loader pointed the slot at its copy.
+    isize seen = 0;
+    loaded.value().events().for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.name() != "frame.depth")
+                return;
+
+            ++seen;
+            auto const got = e.field_as_bytes("value");
+            REQUIRE(got.size() == 2048);
+            CHECK(got[0] == byte(0x11));
+            CHECK(got[2047] == byte(0x22));
+            CHECK(got[1000] == byte(0x5A));
+        });
+
+    CHECK(seen == 1);
+
+    // The file has to be at least the blob it carries, which is what says the bytes really travelled.
+    CHECK(bytes.size() > 2048);
+}
+
+REC_TEST("record/crash - pinned bytes survive the dump's streaming writer")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const path = cc::temp_file_path("cc-record-crash-pinned", ".ccrec");
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+
+    {
+        auto payload = cc::vector<byte>();
+        payload.resize_to_constructed(512, byte(0x7E));
+
+        auto const pinned = cc::make_pinned_data(cc::move(payload)).reinterpret_as<byte const>();
+        CC_RECORD_PINNED("dumped.buffer", pinned);
+
+        // Still pinned when the dump runs, which is what it reads the bytes through.
+        REQUIRE(cc::rec::write_crash_dump_now());
+    }
+
+    auto loaded = cc::rec::load_recording(path);
+    REQUIRE(loaded.has_value());
+
+    isize seen = 0;
+    loaded.value().events().for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.name() != "dumped.buffer")
+                return;
+
+            ++seen;
+            auto const got = e.field_as_bytes("value");
+            REQUIRE(got.size() == 512);
+            CHECK(got[0] == byte(0x7E));
+            CHECK(got[511] == byte(0x7E));
+        });
+
+    CHECK(seen == 1);
     CHECK(cc::remove_file(path));
 }

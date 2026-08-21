@@ -1,8 +1,10 @@
 #include "record-test-types.hh"
 
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/domain.hh>
+#include <clean-core/record/pinned_value.hh>
 #include <clean-core/record/record.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
@@ -568,4 +570,97 @@ REC_TEST("record/value - a runtime name reads back like a static one")
 
     // A site with no name of its own is still one site, which is what a runtime name costs: two events, one descriptor.
     CHECK(rec.count_of_kind(cc::rec::event_kind::value) == 2);
+}
+
+// Recording bytes BY PIN.
+//
+// The chunk holds a reference to the caller's storage instead of copying it, so a megabyte costs the stream sixteen
+// bytes and the recording still hands back the real thing.
+// What the chunk keeps alive is what these assert on: the bytes have to survive the owner going away.
+
+REC_TEST("record/pin - pinned bytes cost the stream an address and outlive their owner")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        {
+            auto payload = cc::vector<byte>();
+            payload.resize_to_constructed(4096, byte(0xAB));
+            payload[0] = byte(0x01);
+            payload[4095] = byte(0x02);
+
+            auto const pinned = cc::make_pinned_data(cc::move(payload)).reinterpret_as<byte const>();
+            CC_RECORD_PINNED("frame.depth", pinned);
+
+            cc::rec::flush_blocking();
+        }
+        // The pinned_data is gone here, and the chunk's pin is the only thing keeping the bytes alive.
+    }
+
+    auto const rec = capture.take();
+
+    isize seen = 0;
+    rec.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.name() != "frame.depth")
+                return;
+
+            ++seen;
+            auto const bytes = e.field_as_bytes("value");
+            REQUIRE(bytes.size() == 4096);
+            CHECK(bytes[0] == byte(0x01));
+            CHECK(bytes[4095] == byte(0x02));
+            CHECK(bytes[100] == byte(0xAB));
+        });
+
+    CHECK(seen == 1);
+
+    // Sixteen bytes of payload, whatever the pinned data weighed.
+    CHECK(rec.total_bytes() < 4096);
+}
+
+REC_TEST("record/pin - a chunk takes more pins than its array holds")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        // Well past the 64-slot header array, so the spill path runs several times over.
+        // Each spill moves the full array into a heap block and makes the block one pin, so the slots come back.
+        constexpr isize pin_count = 500;
+        for (isize i = 0; i < pin_count; ++i)
+        {
+            auto payload = cc::vector<byte>();
+            payload.resize_to_constructed(8, byte(i & 0xFF));
+
+            auto const pinned = cc::make_pinned_data(cc::move(payload)).reinterpret_as<byte const>();
+            CC_RECORD_PINNED("spilled", pinned);
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    // Every one of them still readable, which is what says the spill chain kept its references rather than dropping
+    // the ones it moved.
+    isize readable = 0;
+    rec.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.name() != "spilled")
+                return;
+
+            auto const bytes = e.field_as_bytes("value");
+            if (bytes.size() == 8 && bytes[0] == byte(readable & 0xFF))
+                ++readable;
+        });
+
+    CHECK(readable == 500);
 }

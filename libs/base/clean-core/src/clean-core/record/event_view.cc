@@ -193,6 +193,26 @@ cc::string_view cc::rec::event_view::name() const
     return {};
 }
 
+cc::span<byte const> cc::rec::event_view::field_as_bytes(cc::string_view field_name) const
+{
+    auto const* const f = find_field(*this, field_name);
+    if (f == nullptr || f->type != rec::type_code::pinned_bytes)
+        return {};
+
+    byte const* data = nullptr;
+    if (!read_raw(payload, *f, data) || data == nullptr)
+        return {};
+
+    // The size sits in the next eight bytes, which is what the pinned layout declares.
+    // Read through the field list rather than assumed, so a payload that says something else reads as empty.
+    u64 size = 0;
+    auto const size_field = rec::field{.name = "", .type = rec::type_code::u64_, .offset = u16(f->offset + 8), .size = 8};
+    if (!read_raw(payload, size_field, size))
+        return {};
+
+    return cc::span<byte const>(data, isize(size));
+}
+
 cc::rec::desc const* cc::rec::event_view::field_as_desc(cc::string_view field_name) const
 {
     auto const* const f = find_field(*this, field_name);

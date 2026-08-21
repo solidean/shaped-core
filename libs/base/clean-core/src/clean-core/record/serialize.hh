@@ -59,6 +59,11 @@ private:
     // Separate because its size is only known after the event stream has been walked and validated, and growing
     // `_strings` at that point would dangle every descriptor pointer already handed out.
     cc::vector<char> _payload_strings;
+
+    // The bytes behind every `type_code::pinned_bytes` payload, which the file carries in a section of its own.
+    // A live recording's pins point at the caller's storage; a loaded one points in here, and `field_as_bytes` reads
+    // the same way either way.
+    cc::vector<byte> _blobs;
     cc::vector<rec::field> _fields;
     cc::vector<rec::unit> _units;
     cc::vector<rec::relation_type> _relations;
@@ -74,7 +79,7 @@ namespace cc::rec
 {
 /// The format version these bytes are written at.
 /// A reader refuses anything else rather than guessing.
-inline constexpr u32 serialized_version = 3;
+inline constexpr u32 serialized_version = 4;
 
 /// Writes `r` to a self-contained buffer.
 [[nodiscard]] cc::vector<byte> serialize(rec::recording const& r);

@@ -45,6 +45,7 @@ add_library(clean-core
     src/clean-core/record/event_view.cc
     src/clean-core/record/system.cc
     src/clean-core/record/recording.cc
+    src/clean-core/record/pinned_value.cc
     src/clean-core/record/value.cc
     src/clean-core/record/log.cc
     src/clean-core/record/console_listener.cc
@@ -208,6 +209,7 @@ target_sources(clean-core
     src/clean-core/record/system.hh
     src/clean-core/record/record.hh
     src/clean-core/record/recording.hh
+    src/clean-core/record/pinned_value.hh
     src/clean-core/record/value.hh
     src/clean-core/record/stat.hh
     src/clean-core/record/log.hh

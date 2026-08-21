@@ -128,6 +128,15 @@ cc::vector<byte> cc::rec::serialize(cc::rec::recording const& r)
             }
         }
 
+        // The pinned payloads last, straight from behind their pins.
+        // They are copied HERE rather than into the arena, because pinned data is the one thing in a recording with no
+        // bound on its size and the arena is a reservation.
+        for (isize i = 0; i < builder.blob_count(); ++i)
+        {
+            auto const blob = builder.blob_at(i);
+            append(out, cc::span<byte const>(blob.data, isize(blob.size)));
+        }
+
         return out;
     }
 
@@ -186,7 +195,7 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
         || !in_bounds(h.offset_threads, h.thread_count, sizeof(serialized_thread))
         || !in_bounds(h.offset_modules, h.module_count, sizeof(serialized_module))
         || !in_bounds(h.offset_blocks, h.block_count, sizeof(serialized_block))
-        || !in_bounds(h.offset_events, h.total_event_bytes, 1))
+        || !in_bounds(h.offset_events, h.total_event_bytes, 1) || !in_bounds(h.offset_blobs, h.blob_bytes, 1))
         return cc::error("recording is malformed: a table runs past the end of the file");
 
     auto const* const s_domains = reinterpret_cast<serialized_domain const*>(file.data() + h.offset_domains);
@@ -393,6 +402,11 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
     out._payload_strings.resize_to_uninitialized(payload_string_bytes + 1);
     isize payload_string_at = 0;
 
+    // The pinned bytes come over whole, so a loaded recording owns what a live one only borrowed.
+    out._blobs.resize_to_uninitialized(isize(h.blob_bytes));
+    if (h.blob_bytes > 0)
+        cc::memcpy(out._blobs.data(), file.data() + h.offset_blobs, size_t(h.blob_bytes));
+
     for (u32 b = 0; b < h.block_count; ++b)
     {
         auto const& sb = s_blocks[b];
@@ -407,12 +421,31 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
             for (isize f = 0; f < isize(d.field_count); ++f)
             {
                 auto const& field = d.fields[f];
-                if (field.type != rec::type_code::cstring)
-                    continue;
                 if (isize(field.offset) + isize(sizeof(u64)) > isize(header->payload_size))
                     continue;
 
                 auto* const slot = events.data() + at + offset + isize(sizeof(impl::event_header)) + field.offset;
+
+                if (field.type == rec::type_code::pinned_bytes)
+                {
+                    if (isize(field.offset) + 16 > isize(header->payload_size))
+                        continue;
+
+                    u64 blob_offset = 0;
+                    u64 size = 0;
+                    cc::memcpy(&blob_offset, slot, sizeof(blob_offset));
+                    cc::memcpy(&size, slot + 8, sizeof(size));
+
+                    // A slot the file cannot justify becomes null, which `field_as_bytes` already reads as empty.
+                    byte const* data = nullptr;
+                    if (size > 0 && blob_offset + size <= h.blob_bytes)
+                        data = out._blobs.data() + blob_offset;
+                    cc::memcpy(slot, &data, sizeof(data));
+                    continue;
+                }
+
+                if (field.type != rec::type_code::cstring)
+                    continue;
 
                 impl::serialized_str str = {};
                 cc::memcpy(&str, slot, sizeof(str));

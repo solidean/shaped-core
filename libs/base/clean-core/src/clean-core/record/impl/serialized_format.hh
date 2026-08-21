@@ -163,6 +163,13 @@ struct serialized_header
     u64 offset_modules = 0;
     u64 offset_blocks = 0;
     u64 offset_events = 0;
+
+    /// The pinned bytes, last in the file because they are the only unbounded section.
+    ///
+    /// A `pinned_bytes` payload holds an ADDRESS live and an offset into here once written, which is what lets the
+    /// event stream stay byte-for-byte the size it was while the bytes themselves travel.
+    u64 offset_blobs = 0;
+    u64 blob_bytes = 0;
 };
 
 // A layout change that does not bump the version is the one mistake this format makes easy.
@@ -175,7 +182,7 @@ static_assert(sizeof(serialized_desc) == 64);
 static_assert(sizeof(serialized_thread) == 24);
 static_assert(sizeof(serialized_module) == 32);
 static_assert(sizeof(serialized_block) == 64);
-static_assert(sizeof(serialized_header) == 160);
+static_assert(sizeof(serialized_header) == 176);
 
 /// The eight bytes a reader checks before anything else.
 inline constexpr char serialized_magic[8] = {'C', 'C', 'R', 'E', 'C', 'O', 'R', 'D'};
@@ -202,6 +209,18 @@ struct dump_builder
     {
         byte const* data = nullptr;
         u32 size = 0;
+    };
+
+    /// One pinned payload's bytes, still behind their pin.
+    ///
+    /// The builder holds the ADDRESS rather than a copy, for the same reason a block does: the arena is a fixed
+    /// reservation and pinned data is the one thing in a recording with no bound on its size.
+    /// A writer streams these straight from the pin, so a hundred megabytes of them costs the arena sixteen bytes.
+    struct blob_source
+    {
+        byte const* data = nullptr;
+        u64 size = 0;
+        u64 offset = 0; ///< where it lands in the blob section
     };
 
     /// The finished file, as the pieces to write in order.
@@ -249,6 +268,11 @@ struct dump_builder
     /// Valid only after finish().
     [[nodiscard]] block_source block_at(isize i) const { return _block_sources[i]; }
 
+    /// The pinned payloads, in the order they occupy the blob section.
+    /// A writer emits these last, after every block's events, straight from the addresses they name.
+    [[nodiscard]] isize blob_count() const { return _blobs_used; }
+    [[nodiscard]] blob_source blob_at(isize i) const { return _blobs[i]; }
+
     /// The table index a descriptor was interned at, or -1.
     /// This is what a writer rewrites into each event's descriptor slot.
     [[nodiscard]] i64 desc_index_of_pointer(rec::desc const* d) const;
@@ -273,6 +297,10 @@ private:
     i32 _intern_relation(rec::relation_type const* t);
     i32 _intern_desc(rec::desc const* d);
     i32 _intern_thread(rec::thread_info const& t);
+
+    /// Reserves a blob's place in the section, keyed by its address and size; -1 on overflow.
+    /// Deduplicated, so two events recording the same pinned data cost the file one copy.
+    i64 _intern_blob(byte const* data, u64 size);
 
     /// Bumps `_used` and hands back zeroed, aligned space; null on overflow.
     byte* _alloc(isize bytes, isize alignment);
@@ -299,6 +327,7 @@ private:
     serialized_module* _modules = nullptr;
     serialized_block* _blocks = nullptr;
     block_source* _block_sources = nullptr;
+    blob_source* _blobs = nullptr;
 
     isize _domains_used = 0;
     isize _units_used = 0;
@@ -308,6 +337,8 @@ private:
     isize _threads_used = 0;
     isize _modules_used = 0;
     isize _blocks_used = 0;
+    isize _blobs_used = 0;
+    u64 _blob_bytes = 0;
 
     isize _domain_capacity = 0;
     isize _unit_capacity = 0;

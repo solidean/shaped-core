@@ -105,11 +105,16 @@ enum class cc::rec::type_code : cc::u8
     u64_,
     f32_,
     f64_,
-    pointer,      ///< an opaque address, printed as hex and never dereferenced
-    cstring,      ///< a char const* with static lifetime, stored as the pointer
-    inline_text,  ///< a u32 length followed by that many bytes, inline in the payload
-    pinned_bytes, ///< the bytes live behind a pin; the payload holds the pin index and the span
-    u64_array,    ///< a u32 count at the field's offset, then that many u64s starting four bytes later
+    pointer,     ///< an opaque address, printed as hex and never dereferenced
+    cstring,     ///< a char const* with static lifetime, stored as the pointer
+    inline_text, ///< a u32 length followed by that many bytes, inline in the payload
+    /// Bytes the chunk keeps alive rather than copies: the payload holds an address and a size.
+    ///
+    /// **Only dereferenceable while the recording that owns the chunk is alive**, which is what the pin buys.
+    /// Serializing copies the bytes into a blob section, so a loaded recording's pointer names its own storage — read
+    /// one through `event_view::field_as_bytes` rather than by casting the address.
+    pinned_bytes,
+    u64_array, ///< a u32 count at the field's offset, then that many u64s starting four bytes later
 
     /// A `rec::desc const*` stored in eight bytes, naming another recording site.
     ///
@@ -177,6 +182,11 @@ struct relation_type;
 struct desc;
 
 struct pin;
+
+/// Opts a type in to being recorded by pin rather than by copy; see record/pinned_value.hh.
+template <class T>
+struct pinnable_traits;
+
 struct chunk;
 struct chunk_ref;
 struct chunk_pool;

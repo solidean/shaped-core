@@ -79,6 +79,14 @@ public:
     /// produce, since a writer with nothing to say writes no event.
     [[nodiscard]] cc::vector<u64> field_as_u64_array(cc::string_view field_name) const;
 
+    /// The named field as the bytes behind a pin, for `pinned_bytes` fields.
+    ///
+    /// **Borrowed, never copied.** On a live recording these are the original bytes, kept alive by the chunk's pin; on
+    /// a loaded one they are the file's own copy.
+    /// Either way they are valid for exactly as long as the recording is, and empty when the field is absent, is not
+    /// pinned, or was recorded with nothing in it.
+    [[nodiscard]] cc::span<byte const> field_as_bytes(cc::string_view field_name) const;
+
     /// The named field as another site's descriptor, for `desc_ref` fields.
     ///
     /// Null when there is no such field, when it is not a descriptor reference, or when it names nothing — which is
