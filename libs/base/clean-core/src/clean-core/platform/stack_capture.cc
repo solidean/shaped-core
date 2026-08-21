@@ -378,10 +378,14 @@ bool cc::stack_capture_available()
     return has_stack_capture;
 }
 
-cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void const* stop_frame, cc::stack_walk /*walk*/)
+cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void const* stop_frame, cc::stack_walk walk)
 {
     if (out.empty() || skip < 0)
         return {};
+
+    // Named here rather than left unnamed in the signature: only the chasing path reads it, and Windows compiles
+    // neither that path nor the fallback below — so the parameter is genuinely unused there and nowhere else.
+    (void)walk;
 
 #if CC_CAN_CHASE_FRAME_POINTERS
     if (resolve(walk) == cc::stack_walk::frame_pointers)

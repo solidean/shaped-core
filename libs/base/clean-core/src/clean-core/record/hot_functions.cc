@@ -81,7 +81,11 @@ cc::rec::hot_report cc::rec::hot_functions(rec::recording const& r, rec::hot_opt
 
     // Against the recording's own table where it has one, so a recording that travelled reports the names ITS binaries
     // had rather than whatever this process happens to have loaded at those addresses.
-    auto symbols = r.modules().empty() ? cc::symbolizer() : cc::symbolizer(r.modules());
+    // One construction rather than a ternary over two: an empty module span already MEANS "this process's own", so the
+    // span constructor covers both cases.
+    // A ternary would also need cc::symbolizer to be copyable or movable, which it deliberately is not — it owns a
+    // debug-info session.
+    auto symbols = cc::symbolizer(r.modules());
 
     cc::map<cc::string, accumulator> by_function;
 

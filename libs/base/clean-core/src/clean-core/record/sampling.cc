@@ -340,9 +340,10 @@ void sampler_main()
     frames.resize_to_constructed(cc::max(cfg.max_frames, isize(1)), nullptr);
 
     cc::random rng(0x5A11u);
-    isize cursor = 0; // where the round-robin got to, so no thread is starved by registration order
 
 #if defined(_WIN32)
+    isize cursor = 0; // where the round-robin got to, so no thread is starved by registration order
+
     handle_cache handles;
     precise_timer const timer;
     os_thread_list os_threads;
@@ -451,9 +452,11 @@ void sampler_main()
                     g_idle.fetch_add(1, cc::memory_order_relaxed);
             }
         }
-#endif
 
+        // Inside the guard, with the `per_tick` it advances by: every target this loop knows about is Windows-only,
+        // and off Windows the tick body does nothing to advance past.
         cursor += per_tick > 0 ? per_tick : 1;
+#endif
     }
 
 #if defined(_WIN32)

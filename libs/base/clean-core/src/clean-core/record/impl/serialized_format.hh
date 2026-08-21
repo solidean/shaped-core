@@ -190,13 +190,11 @@ inline constexpr char serialized_magic[8] = {'C', 'C', 'R', 'E', 'C', 'O', 'R', 
 /// Set when the writer hit its byte cap and stopped early.
 inline constexpr u32 serialized_flag_truncated = 1 << 0;
 
-/// **In the file, an event header's `desc` slot holds a descriptor INDEX rather than a pointer.**
-/// The rest of the event stream is byte-identical to the live one, so a reader copies the bytes and patches that one
-/// word per event — no re-encoding, and no second decoder to keep in step with the first.
-[[nodiscard]] constexpr u64 desc_index_of(rec::desc const* const* slot)
-{
-    return u64(reinterpret_cast<uintptr_t>(*slot));
-}
+// **In the file, an event header's `desc` slot holds a descriptor INDEX rather than a pointer.**
+// The rest of the event stream is byte-identical to the live one, so a reader copies the bytes and patches that one
+// word per event — no re-encoding, and no second decoder to keep in step with the first.
+// The same goes for the payload fields that hold pointers; `dump_builder::rewrite_payload_pointers` is where both
+// directions of that live.
 
 /// Builds the tables for one dump into a caller-supplied arena, allocating nothing.
 ///

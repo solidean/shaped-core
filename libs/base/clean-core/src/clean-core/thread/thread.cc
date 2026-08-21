@@ -142,8 +142,13 @@ void cc::mark_current_thread_as_main()
 
 // Declared here (not via <windows.h>) to keep this TU light, mirroring how assert.cc imports IsDebuggerPresent.
 // char16_t and Windows wchar_t are both 16-bit, so the wide buffer maps directly.
-extern "C" __declspec(dllimport) void* __stdcall GetCurrentThread() noexcept;
-extern "C" __declspec(dllimport) long __stdcall SetThreadDescription(void*, wchar_t const*) noexcept;
+//
+// **Deliberately without `noexcept`**, matching how the platform declares them.
+// Since C++17 an exception specification is part of a function's type, so a `noexcept` here is a REDECLARATION
+// conflict rather than extra information wherever something else in the TU has already declared them — which VS2026's
+// standard library does and VS2022's did not.
+extern "C" __declspec(dllimport) void* __stdcall GetCurrentThread();
+extern "C" __declspec(dllimport) long __stdcall SetThreadDescription(void*, wchar_t const*);
 
 void cc::set_current_thread_name(string_view name)
 {

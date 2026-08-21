@@ -204,7 +204,9 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     // Against the recording's OWN module table when it has one, which a loaded recording does — its addresses mean
     // the process that recorded them, not this one, and resolving them against this process would be confident
     // nonsense rather than an error.
-    auto symbols = recording.modules().empty() ? cc::symbolizer() : cc::symbolizer(recording.modules());
+    // One construction rather than a ternary: an empty module span already MEANS "this process's own", and a ternary
+    // would need cc::symbolizer to be copyable or movable, which it deliberately is not.
+    auto symbols = cc::symbolizer(recording.modules());
 
     /// Whether this event knows where it was recorded, which every descriptor carries.
     auto const has_source = [](cc::rec::event_view const& e)

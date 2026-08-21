@@ -37,6 +37,11 @@ cc::rec::recording capture(cc::function_ref<void()> body)
 }
 
 /// Records a workload that touches every part of the format: a scope, a stat with a unit, a value, text and a log.
+///
+/// Passed to `capture` as `&record_everything` rather than by name: a cc::function_ref stores its callable as a
+/// `void*`, and a function NAME binds as a function lvalue whose address is a function pointer — which clang refuses
+/// to put in a `void*` and MSVC accepts as an extension.
+/// A pointer VARIABLE has an object address, so taking it explicitly is what makes the call portable.
 void record_everything()
 {
     CC_RECORD_SCOPE("outer");
@@ -53,7 +58,7 @@ REC_TEST("record/serialize - a recording survives a round trip through bytes")
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto const original = capture(record_everything);
+    auto const original = capture(&record_everything);
     REQUIRE(original.event_count() > 0);
 
     auto const bytes = cc::rec::serialize(original);
@@ -83,7 +88,7 @@ REC_TEST("record/serialize - the descriptor's whole context comes back, not just
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto const bytes = cc::rec::serialize(capture(record_everything));
+    auto const bytes = cc::rec::serialize(capture(&record_everything));
     auto loaded = cc::rec::deserialize(bytes);
     REQUIRE(loaded.has_value());
 
@@ -129,7 +134,7 @@ REC_TEST("record/serialize - a loaded recording is a recording: it filters, deci
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto const bytes = cc::rec::serialize(capture(record_everything));
+    auto const bytes = cc::rec::serialize(capture(&record_everything));
     auto loaded = cc::rec::deserialize(bytes);
     REQUIRE(loaded.has_value());
 
@@ -196,7 +201,7 @@ REC_TEST("record/serialize - a file round-trips")
     rec_fixture const fixture(deterministic_config());
 
     auto const path = cc::temp_file_path("cc-record-serialize", ".ccrec");
-    auto const original = capture(record_everything);
+    auto const original = capture(&record_everything);
 
     REQUIRE(cc::rec::save_recording(original, path).has_value());
 
@@ -216,7 +221,7 @@ REC_TEST("record/serialize - garbage is refused rather than misread")
     // Too short for a header.
     CHECK(cc::rec::deserialize(cc::span<byte const>()).has_error());
 
-    auto const good = cc::rec::serialize(capture(record_everything));
+    auto const good = cc::rec::serialize(capture(&record_everything));
     REQUIRE(good.size() > 200);
 
     // Wrong magic.
