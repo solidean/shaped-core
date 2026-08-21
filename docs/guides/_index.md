@@ -31,5 +31,7 @@ Task-oriented how-tos for working in shaped-core.
   colocated per-library sheets live (start with clean-core and nexus).
 - [postmortem.md](postmortem.md) — the end-of-session friction review behind the `/postmortem`
   skill: where momentum was lost, not a bug report.
+- [reviewing-prs.md](reviewing-prs.md) — what we look for when reviewing a PR, ranked by what it costs to get wrong, and the tradeoffs that have no absolute answer.
+  The living half of the `reviewing-a-pr` skill, written from actual reviews.
 
 > Place new guides here with kebab-case names.
