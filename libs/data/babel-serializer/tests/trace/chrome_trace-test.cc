@@ -453,8 +453,87 @@ TRACE_TEST("chrome_trace - sampled frames carry names and source locations")
     if (cc::symbolizer().resolve(reinterpret_cast<void const*>(&babel::chrome_trace::encode)).has_function())
         CHECK(named > 0);
 
-    // Turning it off gets the addresses back, unchanged.
-    auto const bare = encode_to_string(raw.spliced_samples(), {.symbolize_samples = false});
-    CHECK(bare.contains(R"("cat":"sampled")"));
-    CHECK(!bare.contains(R"("source":)"));
+    // Turning it off gets the addresses back.
+    // Checked per SPAN rather than over the whole document, because scopes carry a source of their own.
+    auto const bare_doc = babel::json::read(encode_to_string(raw.spliced_samples(), {.symbolize_samples = false}));
+    REQUIRE(bare_doc.has_value());
+
+    auto bare_sampled = 0;
+    auto const bare_events = bare_doc.value().root()["traceEvents"];
+    for (isize i = 0; i < bare_events.size(); ++i)
+    {
+        auto const e = bare_events[i];
+        if (e["ph"].as_string() != "B" || e["cat"].as_string() != "sampled")
+            continue;
+
+        ++bare_sampled;
+        CHECK(e["name"].as_string().starts_with("0x"));
+        CHECK(!e["args"]["source"].is_valid());
+    }
+
+    CHECK(bare_sampled > 0);
+}
+
+TRACE_TEST("chrome_trace - a scope says where it was recorded")
+{
+    rec_fixture const fixture;
+
+    auto const r = capture([] { CC_RECORD_SCOPE("located-scope"); });
+    auto const json = encode_to_string(r);
+
+    auto const doc = babel::json::read(json);
+    REQUIRE(doc.has_value());
+
+    // Every descriptor carries its site, and a scope that does not report it makes a reader hunt for the code by name.
+    auto found = false;
+    auto const events = doc.value().root()["traceEvents"];
+    for (isize i = 0; i < events.size(); ++i)
+    {
+        auto const e = events[i];
+        if (e["ph"].as_string() != "B" || e["name"].as_string() != "located-scope")
+            continue;
+
+        auto const source = e["args"]["source"].as_string();
+        CHECK(source.contains("chrome_trace-test.cc"));
+        CHECK(source.contains(":")); // path and line, not just a path
+
+        // The whole path, so it can be opened rather than guessed at — two same-named files in different directories
+        // are otherwise indistinguishable.
+        CHECK(source.size() > cc::string_view("chrome_trace-test.cc").size() + 4);
+        found = true;
+    }
+
+    CHECK(found);
+}
+
+TRACE_TEST("chrome_trace - a counter's args stay numeric")
+{
+    rec_fixture const fixture;
+
+    auto const r = capture([] { CC_RECORD_STAT("queue_depth", cc::rec::unit_count, 7); });
+    auto const json = encode_to_string(r);
+
+    auto const doc = babel::json::read(json);
+    REQUIRE(doc.has_value());
+
+    // A counter's args ARE its data series, so a source string among them would corrupt the plot rather than
+    // annotate it.
+    // That is why the source goes on scopes and instants and deliberately not here.
+    auto found = false;
+    auto const events = doc.value().root()["traceEvents"];
+    for (isize i = 0; i < events.size(); ++i)
+    {
+        auto const e = events[i];
+        if (e["ph"].as_string() != "C")
+            continue;
+
+        found = true;
+
+        // A MISSING key is an invalid ref rather than a null one, which is the distinction that matters here: the
+        // source must not be there at all, not be there holding null.
+        CHECK(!e["args"]["source"].is_valid());
+        CHECK(e["args"]["value"].is_number());
+    }
+
+    CHECK(found);
 }

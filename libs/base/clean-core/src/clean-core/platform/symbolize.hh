@@ -30,6 +30,7 @@ struct cc::symbol_info
     /// Empty when the address is in no module this process knows, or in one with no symbols.
     cc::string function;
 
+    /// The full path as the debug info records it, so it can be opened rather than guessed at.
     cc::string file;
 
     /// The module's file name rather than its path — `app.exe`, not where it was installed from.

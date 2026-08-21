@@ -202,6 +202,33 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     // thousands of hits on a handful of addresses, and each miss is a debug-info lookup.
     cc::symbolizer symbols;
 
+    /// Whether this event knows where it was recorded, which every descriptor carries.
+    auto const has_source = [](cc::rec::event_view const& e)
+    { return e.desc != nullptr && e.desc->site.file != nullptr && e.desc->site.file[0] != char(0); };
+
+    /// The `"source": "path:line"` pair, without the args object around it.
+    ///
+    /// In args rather than in the name, for the same reason a sampled frame's location is: a viewer groups spans BY
+    /// name, so a name carrying a line number would split one scope into a span per line.
+    /// The path is whole rather than a file name, because a reader following a profile wants to open the file, and
+    /// two `renderer.cc` in different directories are otherwise indistinguishable.
+    auto const append_source_pair = [&](cc::rec::event_view const& e)
+    {
+        out += R"("source":)";
+        append_json_string(out, cc::format("{}:{}", e.desc->site.file, e.desc->site.line));
+    };
+
+    /// The same, as its own args object, for an event that has no other args.
+    auto const append_source_args = [&](cc::rec::event_view const& e)
+    {
+        if (!has_source(e))
+            return;
+
+        out += R"(,"args":{)";
+        append_source_pair(e);
+        out += '}';
+    };
+
     // Sampled frames are emitted INSIDE the scopes that were open, on the same track.
     //
     // That is the whole point of the combination: the scopes give the structure a human named, and the samples give
@@ -350,6 +377,7 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             if (!opts.include_scopes)
                 continue;
             common("B");
+            append_source_args(e);
             out += '}';
             break;
 
@@ -391,8 +419,8 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             common("i");
             out += R"(,"s":"t","args":{"level":)";
             append_json_string(out, level_name(e.level()));
-            out += R"(,"site":)";
-            append_json_string(out, cc::format("{}:{}", e.site().file, e.site().line));
+            out += ',';
+            append_source_pair(e); // one key across every kind, so a reader learns it once
             out += "}}";
             break;
         }
@@ -417,10 +445,17 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
 
             // Whatever the payload declares, rendered generically — a viewer shows it without the exporter having
             // heard of the type.
-            if (auto const fields = e.fields(); !fields.empty())
+            // A counter's args are its data series, so a string among them would corrupt the plot — which is why
+            // the source goes on instants and scopes and deliberately not on stat events.
+            if (auto const fields = e.fields(); !fields.empty() || has_source(e))
             {
                 out += R"(,"args":{)";
                 auto first_field = true;
+                if (has_source(e))
+                {
+                    append_source_pair(e);
+                    first_field = false;
+                }
                 for (auto const& f : fields)
                 {
                     if (!first_field)

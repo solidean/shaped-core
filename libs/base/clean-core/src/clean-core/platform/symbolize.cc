@@ -14,7 +14,8 @@ namespace
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 constexpr bool has_symbolization = true;
 
-/// The file name of a path, so a module reads as `app.exe` rather than wherever it was installed from.
+/// The file name of a path, so a MODULE reads as `app.exe` rather than wherever it was installed from.
+/// Source paths deliberately keep theirs — see resolve.
 [[nodiscard]] cc::string_view file_name_of(char const* path)
 {
     cc::string_view const s = path != nullptr ? path : "";
@@ -101,7 +102,9 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
     DWORD line_displacement = 0;
     if (::SymGetLineFromAddr64(process, key, &line_displacement, &line) != 0)
     {
-        out.file = file_name_of(line.FileName);
+        // The whole path, not just the file name: a reader following a profile wants to open the file, and two
+        // `renderer.cc` in different directories are otherwise indistinguishable.
+        out.file = line.FileName != nullptr ? cc::string_view(line.FileName) : cc::string_view();
         out.line = i32(line.LineNumber);
     }
 
