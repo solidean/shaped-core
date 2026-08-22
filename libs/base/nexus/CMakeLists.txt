@@ -4,6 +4,19 @@ project(nexus LANGUAGES CXX)
 # Define the library and its sources
 add_library(nexus
     src/nexus/run.cc
+    src/nexus/args/builder.cc
+    src/nexus/args/diagnostic.cc
+    src/nexus/args/value.cc
+    src/nexus/args/validation.cc
+    src/nexus/args/tokenize.cc
+    src/nexus/args/ambient.cc
+    src/nexus/args/impl/os_args.cc
+    src/nexus/args/impl/describe.cc
+    src/nexus/args/completion.cc
+    src/nexus/args/impl/help_render.cc
+    src/nexus/args/impl/parse_engine.cc
+    src/nexus/args/impl/setup_check.cc
+    src/nexus/args/impl/suggest.cc
     src/nexus/rec.cc
     src/nexus/test.cc
     src/nexus/guide.cc
@@ -40,6 +53,20 @@ target_sources(nexus
     FILES
     src/nexus/fwd.hh
     src/nexus/run.hh
+    src/nexus/args/args.hh
+    src/nexus/args/builder.hh
+    src/nexus/args/diagnostic.hh
+    src/nexus/args/fwd.hh
+    src/nexus/args/options.hh
+    src/nexus/args/parse_args.hh
+    src/nexus/args/value.hh
+    src/nexus/args/validation.hh
+    src/nexus/args/tokenize.hh
+    src/nexus/args/ambient.hh
+    src/nexus/args/completion.hh
+    # Not public API, but builder.hh includes both, so a consumer that gets builder.hh needs them too.
+    src/nexus/args/impl/binding.hh
+    src/nexus/args/impl/command.hh
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
@@ -123,7 +150,20 @@ sc_target_pch(nexus CC)
 if(SC_BUILD_TESTS)
     add_executable(nexus-test
         tests/main.cc
+        tests/args-grammar-test.cc
+        tests/args-value-test.cc
+        tests/args-diagnostic-test.cc
+        tests/args-setup-test.cc
+        tests/args-help-test.cc
+        tests/args-validation-test.cc
+        tests/args-commands-test.cc
+        tests/args-struct-test.cc
+        tests/args-tokenize-test.cc
+        tests/args-ambient-test.cc
+        tests/args-completion-test.cc
         tests/test-api-test.cc
+        tests/test-cli-test.cc
+        tests/test-test-args-test.cc
         tests/test-check-test.cc
         tests/test-recording-test.cc
         tests/test-check-render-test.cc
@@ -155,3 +195,7 @@ if(SC_BUILD_TESTS)
     # Browser test runner (Emscripten only): nexus-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(nexus-test)
 endif()
+
+# The examples corpus: nexus has owned the mechanism since sc_add_example landed, and now uses it too.
+# A no-op when SC_BUILD_EXAMPLES is off, which sc_add_single_file_examples handles for us.
+add_subdirectory(examples)

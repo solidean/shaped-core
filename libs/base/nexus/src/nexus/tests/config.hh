@@ -62,6 +62,12 @@ struct nx::config::cfg
 
     bool main_thread = false; // the body must run on the process main thread; orthogonal to `scheduler`
 
+    // A command line for this test, reachable from its body through nx::test_args().
+    // A `char const*` for the same reason exclusion_tags is an array of them: cfg stays trivially copyable,
+    // and config.hh stays the light header every test TU includes.
+    // nullptr means none was declared, which is distinct from `""` — an explicitly empty line.
+    char const* test_args = nullptr;
+
     // Tags whose holders must never run at the same time, compared by content.
     // `exclusion_tag_count` counts what was ASKED for, so it may exceed the array and execute_tests reports the overflow rather than dropping it silently.
     char const* exclusion_tags[max_exclusion_tags] = {};
@@ -81,6 +87,27 @@ struct nx::config::cfg
 
 namespace nx::config
 {
+
+// A command line this test receives, as it would be typed.
+//
+// Tokenized once when the schedule is built, by the same rules a response file uses, and reachable from the
+// body through nx::test_args().
+// The point is an EXAMPLE that demonstrates something without the reader having to type anything:
+//
+//     EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose"))
+//
+// `--test-args` on the command line REPLACES this rather than adding to it: merging two argument lines is a
+// semantic swamp, and replacement is the one rule that stays predictable.
+constexpr auto args(char const* command_line)
+{
+    struct item
+    {
+        char const* value;
+        void apply(cfg& c) const { c.test_args = value; }
+    };
+
+    return item{command_line};
+}
 
 // Orthogonal to buckets: a disabled test is skipped by a sweep of any bucket.
 // It runs only when named exactly, or under a bulk "run disabled too" request.

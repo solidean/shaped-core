@@ -43,10 +43,13 @@ struct scl::options
 namespace scl
 {
 
+/// The error is a plain message rather than a cc::any_error: a mistyped flag is expected input, not an
+/// exceptional condition, and it wants neither a heap allocation nor a source location in its report.
+///
 /// Parse argv (including argv[0], which is ignored).
 /// `--` stops flag parsing; every later argument is a file, even one starting with `-`.
 /// Fails on an unknown `--flag` or, after parsing, on no input files.
-cc::result<options> parse_options(cc::span<char const* const> args);
+cc::result<options, cc::string> parse_options(cc::span<char const* const> args);
 
 /// The --help / usage text.
 cc::string_view usage_text();
@@ -77,7 +80,7 @@ namespace scl
 
 /// Parse the arguments AFTER the `prose apply` verb — `args` holds nothing to skip.
 /// Fails on an unknown flag, a missing plan path, or more than one.
-cc::result<prose_apply_options> parse_prose_apply_options(cc::span<char const* const> args);
+cc::result<prose_apply_options, cc::string> parse_prose_apply_options(cc::span<char const* const> args);
 
 /// The `prose apply` usage text.
 cc::string_view prose_apply_usage_text();
@@ -103,7 +106,7 @@ namespace scl
 
 /// Parse the arguments AFTER the `prose stats` verb — `args` holds nothing to skip.
 /// Fails on an unknown flag or on no input files.
-cc::result<prose_stats_options> parse_prose_stats_options(cc::span<char const* const> args);
+cc::result<prose_stats_options, cc::string> parse_prose_stats_options(cc::span<char const* const> args);
 
 /// The `prose stats` usage text.
 cc::string_view prose_stats_usage_text();
@@ -135,7 +138,7 @@ namespace scl
 {
 
 /// Parse the arguments AFTER the `bless-includes` verb — `args` holds nothing to skip.
-cc::result<bless_includes_options> parse_bless_includes_options(cc::span<char const* const> args);
+cc::result<bless_includes_options, cc::string> parse_bless_includes_options(cc::span<char const* const> args);
 
 /// The `bless-includes` usage text.
 cc::string_view bless_includes_usage_text();

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/from_string.hh>
 #include <stdio.h>
 
 #include <cstdlib>
@@ -11,6 +12,14 @@
 #include <io.h>
 #else
 #include <unistd.h>
+#endif
+
+// Emscripten and WASI have a stdout but no window to measure, so they fall through to "unknown".
+#if !defined(CC_OS_WINDOWS) && !defined(CC_OS_EMSCRIPTEN) && !defined(CC_OS_WASI)
+#define CC_IMPL_HAS_TIOCGWINSZ 1
+#include <sys/ioctl.h>
+#else
+#define CC_IMPL_HAS_TIOCGWINSZ 0
 #endif
 
 namespace cc::console
@@ -136,6 +145,38 @@ void configure(color_mode mode)
 bool color_enabled()
 {
     return g_enabled;
+}
+
+cc::optional<int> terminal_width()
+{
+    // An explicit COLUMNS beats the real terminal, which is what lets a caller pin the width with no terminal at all.
+    if (auto const* const columns = std::getenv("COLUMNS"))
+    {
+        if (auto const width = cc::from_string<int>(columns); width.has_value() && width.value() > 0)
+            return width;
+    }
+
+#ifdef CC_OS_WINDOWS
+    auto* const handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+        return cc::nullopt;
+
+    CONSOLE_SCREEN_BUFFER_INFO info = {};
+    if (!GetConsoleScreenBufferInfo(handle, &info))
+        return cc::nullopt;
+
+    // The window, not the buffer: a console's buffer is usually far taller and sometimes wider than what is on screen.
+    auto const width = int(info.srWindow.Right) - int(info.srWindow.Left) + 1;
+    return width > 0 ? cc::optional<int>(width) : cc::nullopt;
+#elif CC_IMPL_HAS_TIOCGWINSZ
+    struct winsize ws = {};
+    if (ioctl(fileno(stdout), TIOCGWINSZ, &ws) != 0)
+        return cc::nullopt;
+
+    return ws.ws_col > 0 ? cc::optional<int>(int(ws.ws_col)) : cc::nullopt;
+#else
+    return cc::nullopt;
+#endif
 }
 
 cc::string colorize(color c, cc::string_view text, bool enabled)

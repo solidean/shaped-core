@@ -18,6 +18,23 @@ struct nx::test_instance
     // Every matched alias fragment sharing a driver is grouped into one instance's scope set, so the driver body runs exactly once however many of its aliases matched.
     // Aliases are pure filters, not additive schedule entries.
     cc::vector<cc::vector<cc::string>> section_scopes;
+
+    // What nx::test_args() answers inside this test's body.
+    // Tokenized once here rather than per query, and carried per instance because tests run concurrently.
+    // The run's --test-args replaces whatever nx::config::args declared; see test_schedule::create.
+    cc::vector<cc::string> args;
+
+    // Views over THIS object's `args`, which is what nx::test_args() hands back.
+    //
+    // Rebuilt by whoever owns the final instance, never carried across a copy: cc::string's small-string
+    // optimization puts a short argument's bytes inside the string object, so a copied view would quietly
+    // go on pointing at the source instance's storage and outlive it.
+    // rebuild_arg_views is the one way to fill this, and execute_tests calls it on the copy it runs.
+    cc::vector<cc::string_view> arg_views;
+
+    /// Point `arg_views` at this instance's own `args`.
+    /// Must run after `args` has stopped growing, and again after any copy or move.
+    void rebuild_arg_views();
 };
 
 // How the positional filters are read.
@@ -55,6 +72,17 @@ struct nx::test_schedule_config
     // A test asking for own_pool(n) names its own width instead, and is unaffected.
     int jobs = 1;
 
+    // The command line did not parse, and nx::run reports it and exits rather than running a subset.
+    // Running "most of" what was asked for is the one outcome a mistyped flag must never produce.
+    bool parse_failed = false;
+
+    // -h or --help was given, so nx::run prints cli_help_text() and exits 0 without running anything.
+    //
+    // Answered by the PARSER rather than by scanning argv, which is the only reading that knows where the
+    // command line stops being nexus's: `--test-args "--help"` and everything past a bare `--` belong to the
+    // test, and a scan would print this help instead of handing them over.
+    bool help_requested = false;
+
     bool is_catch2_xml_discovery = false;
     bool report_catch2_xml_results = false;
     bool verbose = false;
@@ -78,6 +106,13 @@ struct nx::test_schedule_config
     // When non-empty, run() writes a perf-metrics JSON sidecar to this path, additionally to the console output.
     // Set via --perf-json <file>; nx::guide records the metrics.
     cc::string perf_json_file;
+
+    // The arguments the selected test itself receives, reachable from its body through nx::test_args().
+    // Set via --test-args "<line>", or by everything after a bare --.
+    // Tokenized once here, by the same rules a response file uses.
+    // test_schedule::create copies this onto every selected instance, replacing whatever nx::config::args
+    // declared.
+    cc::vector<cc::string> test_args;
 
     // When non-empty, run() writes a JSON test listing to this path ("-" means stdout) and exits without running anything.
     // Set via --list-tests-json <file>.
@@ -122,6 +157,10 @@ struct nx::test_schedule_config
     void resolve_filter_mode(test_registry const& registry);
 
     static test_schedule_config create_from_args(int argc, char** argv);
+
+    /// The --help page, generated from the same declaration create_from_args parses with.
+    /// Shared rather than hand-written, so help cannot describe a flag the parser does not have.
+    [[nodiscard]] static cc::string cli_help_text();
 };
 
 struct nx::test_schedule

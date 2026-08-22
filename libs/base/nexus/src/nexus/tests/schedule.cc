@@ -2,10 +2,12 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/glob.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/thread.hh>
+#include <nexus/args/args.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 
 #include <string_view> // std::string_view: streams a cc::string into std::ostream
@@ -18,6 +20,26 @@ namespace
 std::string_view as_sv(cc::string_view s)
 {
     return std::string_view(s.data(), size_t(s.size()));
+}
+
+// Catch2's own escaping rule: a backslash makes the NEXT character literal, whatever it is.
+// So `\[tag\]` is the name `[tag]`, and `\\` is one backslash.
+//
+// Catch2's TestSpecParser does exactly this rather than special-casing brackets, and a filter that
+// round-trips through an IDE has to mean the same thing on both sides.
+// A trailing lone backslash has nothing to escape and stays as typed.
+cc::string unescape_catch2(cc::string_view text)
+{
+    auto out = cc::string();
+    for (isize i = 0; i < text.size(); ++i)
+    {
+        if (text[i] == '\\' && i + 1 < text.size())
+            ++i;
+
+        out += text[i];
+    }
+
+    return out;
 }
 
 // Decimal, no sign, no whitespace; -1 for anything else, including an empty view.
@@ -99,199 +121,210 @@ bool same_path(cc::span<cc::string const> a, cc::span<cc::string const> b)
 }
 } // namespace
 
+namespace
+{
+// The Catch2 compat flags are about which arguments were SEEN, not what they were set to: the values of
+// --reporter, --verbosity and --durations are consumed and deliberately ignored.
+struct cli_state
+{
+    bool has_list_tests = false;
+    bool has_xml_reporter = false;
+    bool explicit_bucket = false;
+
+    cc::vector<cc::string> positionals;
+    cc::vector<cc::string_view> unknown;
+    cc::vector<cc::string_view> passthrough;
+    cc::string test_args_line;
+    bool help = false;
+};
+
+// The whole CLI, in one place.
+// Shared by the parse and by --help, so the two cannot describe different programs — which is exactly what
+// the hand-written help block this replaced had drifted into.
+nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
+{
+    using nx::filter_mode;
+    namespace config_ns = nx::config;
+
+    auto args = nx::args({
+        .name = "nexus",
+        .description = "Unified test, fuzz, benchmark, and app runner for modern C++",
+
+        // Load-bearing: C++ TestMate identifies a Catch2-compatible binary by running --help and scanning
+        // its output for this version string.
+        // Changing or dropping it silently stops an IDE from discovering any test in this binary.
+        // libs/base/nexus/docs/catch2-runner-compat.md is the contract.
+        .help = "Compatible with Catch2 v3.11.0 in some args",
+    });
+
+    // Anything unrecognized is a filter, which is what nexus has always done, and what lets a test whose
+    // name begins with a dash be selected at all.
+    args.allow_unknown(state.unknown);
+    args.no_auto_completion();
+
+    args.positional("FILTER", state.positionals,
+                    {.desc = "run only tests whose name contains this, or whose source file matches it"});
+
+    // Declared rather than left to the built-ins, because the harness decides to print and exit — but the
+    // PARSER is what recognizes them, so `--` and --test-args can carry a --help through to the test.
+    args.action({"h"}, [&state] { state.help = true; }, "show this help and exit");
+    args.action({"help"}, [&state] { state.help = true; }, "show this help and exit");
+
+    args.arg({"v"}, config.verbose, "print the schedule before running it");
+    args.arg({"c"}, config.section_filters, {.desc = "run only sections matching this name", .metavar = "NAME"});
+
+    args.arg({"j", "jobs"}, config.jobs,
+             {.desc = "how many tests may run at once; 0 means one per hardware thread",
+              .metavar = "N",
+              .validate = nx::arg::at_least(0)});
+
+    args.group("selection");
+    args.action(
+        {"manual"},
+        [&]
+        {
+            config.selected_bucket = config_ns::test_bucket::manual;
+            state.explicit_bucket = true;
+        },
+        "sweep the manual bucket instead of the normal one");
+    args.action(
+        {"guide-benchmarks"},
+        [&]
+        {
+            config.selected_bucket = config_ns::test_bucket::guide_benchmark;
+            state.explicit_bucket = true;
+        },
+        "sweep the guide-benchmark bucket");
+    args.action(
+        {"examples"},
+        [&]
+        {
+            config.selected_bucket = config_ns::test_bucket::example;
+            state.explicit_bucket = true;
+        },
+        "sweep the example bucket");
+    args.action(
+        {"match-files"}, [&config] { config.mode = filter_mode::file; }, "read the filters as globs over source files");
+    args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
+
+    args.group("recording");
+    args.arg({"record"}, config.record_all, "bucket every test's cc::rec events, whatever its own config says");
+    args.arg({"no-recording"}, config.no_recording, "leave cc::rec down for the whole run");
+
+    args.group("reports");
+    args.arg({"junit-xml"}, config.junit_xml_file, {.desc = "also write a JUnit XML report here", .metavar = "FILE"});
+    args.arg({"perf-json"}, config.perf_json_file, {.desc = "also write nx::guide metrics here", .metavar = "FILE"});
+    args.arg({"list-tests-json"}, config.list_tests_json_file,
+             {.desc = "write a JSON listing of every test here (- for stdout) and exit", .metavar = "FILE"});
+
+    args.group("arguments for the test itself");
+    args.arg(
+        {"test-args"}, state.test_args_line,
+        {.desc = "a command line for the selected test, reachable from it through nx::test_args()", .metavar = "LINE"});
+    args.rest(state.passthrough, "ARGS", "the same, for everything after a bare --");
+
+    args.group("Catch2 compatibility");
+    args.action(
+        {"list-tests"}, [&state] { state.has_list_tests = true; },
+        "with --reporter, emit the XML listing an IDE discovers through");
+    args.value_action({"reporter"}, [&state](cc::string_view) { state.has_xml_reporter = true; },
+                      {.desc = "which reporter to use; the value is accepted and ignored", .metavar = "TYPE"});
+    args.value_action({"verbosity"}, [](cc::string_view) {}, {.desc = "accepted and ignored", .metavar = "LEVEL"});
+    args.value_action({"durations"}, [](cc::string_view) {}, {.desc = "accepted and ignored", .metavar = "YES/NO"});
+
+    // Errors print themselves, as nx::args does everywhere else.
+    // Only --help stays the harness's: nx::run intercepts it, because exiting is its call rather than ours.
+    args.no_auto_help();
+    return args;
+}
+} // namespace
+
+namespace
+{
+/// The argument line this instance's body will see.
+///
+/// The run's --test-args wins over whatever nx::config::args declared, because replacement is the only
+/// merge rule for two command lines that stays predictable.
+/// It applies to EVERY selected test, which is worth knowing when a run selects more than one.
+cc::vector<cc::string> args_for(nx::test_declaration const& decl, nx::test_schedule_config const& config)
+{
+    if (!config.test_args.empty())
+        return config.test_args;
+
+    if (decl.test_config.test_args == nullptr)
+        return {};
+
+    return nx::args_tokenize(decl.test_config.test_args);
+}
+} // namespace
+
 nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, char** argv)
 {
-    test_schedule_config config;
+    auto config = test_schedule_config();
 
     // A real run uses every core unless --jobs says otherwise, which is the opposite of the struct's own default.
     // A suite that only passes one test at a time is hiding something, and the place to find that out is the ordinary run.
     // A hand-built config keeps schedule order, because a test that builds a schedule is usually asserting about it.
     config.jobs = 0;
 
-    // Track Catch2 compatibility flags for XML discovery mode
-    bool has_verbosity = false;
-    bool has_list_tests = false;
-    bool has_xml_reporter = false;
-    bool has_durations = false;
+    auto state = cli_state();
+    auto args = build_cli(config, state);
+    config.parse_failed = !args.parse(argc, argv).ok();
 
-    // Set by --manual / --guide-benchmarks / --examples.
-    // With a bucket chosen explicitly, an exact filter narrows within that bucket rather than crossing into another.
-    bool explicit_bucket = false;
+    // Unrecognized tokens rejoin the filters, which is where they always went.
+    for (auto const& token : state.unknown)
+        state.positionals.push_back(cc::string(token));
 
-    // Parse command line arguments
-    for (int i = 1; i < argc; ++i)
+    // One filter argument may carry several, comma-separated, which is the Catch2 convention.
+    // Empty pieces are dropped: a filter that matches everything is never what a stray comma meant.
+    for (auto const& value : state.positionals)
     {
-        cc::string_view const arg = argv[i];
-
-        // Check for simple verbose flag
-        if (arg == "-v")
-        {
-            config.verbose = true;
-            continue;
-        }
-        // Record everything: bucket every test, whatever its own config says.
-        else if (arg == "--record")
-        {
-            config.record_all = true;
-            continue;
-        }
-        // No recording: leave cc::rec down for the whole run.
-        // Wins over --record, since there is no recorder for it to bucket into.
-        else if (arg == "--no-recording")
-        {
-            config.no_recording = true;
-            continue;
-        }
-        // Manual mode: select the manual bucket, so wildcard filters can select among manual tests (e.g.
-        // `--manual bench` runs every manual test whose name contains "bench"). Disabled tests stay out.
-        else if (arg == "--manual")
-        {
-            config.selected_bucket = config::test_bucket::manual;
-            explicit_bucket = true;
-            continue;
-        }
-        // Guide-benchmark mode: select the guide_benchmark bucket (the tests that report metrics via nx::guide).
-        else if (arg == "--guide-benchmarks")
-        {
-            config.selected_bucket = config::test_bucket::guide_benchmark;
-            explicit_bucket = true;
-            continue;
-        }
-        // Example mode: select the example bucket (the EXAMPLE declarations demonstrating an API in practice).
-        else if (arg == "--examples")
-        {
-            config.selected_bucket = config::test_bucket::example;
-            explicit_bucket = true;
-            continue;
-        }
-        // Read the filters as file globs over the tests' source files, skipping name matching entirely.
-        else if (arg == "--match-files")
-        {
-            config.mode = filter_mode::file;
-            continue;
-        }
-        // Read the filters as test names only, without the file-glob fallback.
-        else if (arg == "--match-names")
-        {
-            config.mode = filter_mode::name;
-            continue;
-        }
-        // Upper bound on concurrently running tests: `--jobs N`, `-j N` or `-jN`; 0 means hardware concurrency.
-        // A bad or missing count leaves the default rather than failing the run — a mistyped -j should not look like a green suite.
-        else if (arg == "--jobs" || arg == "-j" || arg.starts_with("-j"))
-        {
-            auto count = -1;
-            if (arg == "--jobs" || arg == "-j")
-            {
-                if (i + 1 < argc)
-                    count = parse_count(argv[++i]);
-            }
-            else
-                count = parse_count(arg.subview(2));
-
-            // 0 is stored as-is: execute_tests resolves it to hardware concurrency, so the field means the same thing however it was set.
-            if (count >= 0)
-                config.jobs = count;
-            else
-                cc::eprintln("nexus: ignoring `{}`: expected a job count", arg);
-            continue;
-        }
-        // Check for section filter flag
-        else if (arg == "-c")
-        {
-            // Get the next argument as section name
-            if (i + 1 < argc)
-            {
-                ++i;
-                config.section_filters.emplace_back(argv[i]);
-            }
-            continue;
-        }
-        // Check for Catch2 compatibility flags (don't add to filters)
-        else if (arg == "--verbosity")
-        {
-            has_verbosity = true;
-            // Skip the next argument (verbosity level)
-            if (i + 1 < argc)
-                ++i;
-            continue;
-        }
-        else if (arg == "--list-tests")
-        {
-            has_list_tests = true;
-            continue;
-        }
-        else if (arg == "--reporter")
-        {
-            has_xml_reporter = true;
-            // Skip the next argument (reporter type)
-            if (i + 1 < argc)
-                ++i;
-            continue;
-        }
-        else if (arg == "--durations")
-        {
-            has_durations = true;
-            // Skip the next argument (durations value)
-            if (i + 1 < argc)
-                ++i;
-            continue;
-        }
-        // JUnit XML report file (consumed here so the path is not misread as a filter)
-        else if (arg == "--junit-xml")
-        {
-            if (i + 1 < argc)
-                config.junit_xml_file = argv[++i];
-            continue;
-        }
-        // Perf-metrics JSON sidecar (consumed here so the path is not misread as a filter)
-        else if (arg == "--perf-json")
-        {
-            if (i + 1 < argc)
-                config.perf_json_file = argv[++i];
-            continue;
-        }
-        // JSON test listing (consumed here so the path is not misread as a filter). The rest of the args still
-        // parse normally, so the listing reflects exactly the filters/bucket a real run would use.
-        else if (arg == "--list-tests-json")
-        {
-            if (i + 1 < argc)
-                config.list_tests_json_file = argv[++i];
-            continue;
-        }
-
-        // Regular filter argument - split by comma for Catch2 compatibility
-        isize start = 0;
-        for (isize end = arg.find(','); end >= 0; end = arg.find(',', start))
+        auto const arg = cc::string_view(value);
+        auto start = isize(0);
+        for (auto end = arg.find(','); end >= 0; end = arg.find(',', start))
         {
             if (auto const filter = arg.subview({.start = start, .end = end}); !filter.empty())
                 config.filters.emplace_back(filter);
+
             start = end + 1;
         }
+
         if (auto const filter = arg.subview(start); !filter.empty())
             config.filters.emplace_back(filter);
     }
 
-    // Enable Catch2 XML discovery mode if all three flags are present
-    config.is_catch2_xml_discovery = has_list_tests && has_xml_reporter;
+    // Everything after -- arrives already split; --test-args carries one string that still needs tokenizing.
+    for (auto const& token : state.passthrough)
+        config.test_args.push_back(cc::string(token));
 
-    // Enable Catch2 XML results reporting if durations + xml reporter (and not list tests)
-    config.report_catch2_xml_results = has_xml_reporter && !has_list_tests;
+    for (auto& token : nx::args_tokenize(state.test_args_line))
+        config.test_args.push_back(cc::move(token));
 
-    // Normalize filters for Catch2 compatibility (postprocess)
+    config.help_requested = state.help;
+
+    config.is_catch2_xml_discovery = state.has_list_tests && state.has_xml_reporter;
+    config.report_catch2_xml_results = state.has_xml_reporter && !state.has_list_tests;
+
     if (config.is_catch2_xml_discovery || config.report_catch2_xml_results)
     {
         for (auto& filter : config.filters)
-        {
-            // Catch2 escapes square brackets as \[; undo that.
-            filter.replace_all("\\[", "[");
-        }
+            filter = unescape_catch2(filter);
     }
 
     // Without an explicit bucket flag, a filter may reach a test in another bucket; is_eligible decides that per test, on an exact name.
-    config.allow_cross_bucket_naming = !explicit_bucket;
+    config.allow_cross_bucket_naming = !state.explicit_bucket;
 
     return config;
+}
+
+cc::string nx::test_schedule_config::cli_help_text()
+{
+    // A throwaway config, because help describes the declaration rather than any particular parse.
+    auto config = test_schedule_config();
+    auto state = cli_state();
+    auto args = build_cli(config, state);
+
+    return args.help_text({.color = cc::console::color_enabled(), .width = cc::console::terminal_width().value_or(100)});
 }
 
 bool nx::test_schedule_config::filter_matches(test_declaration const& decl) const
@@ -419,6 +452,7 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         schedule.instances.push_back(test_instance{
             .declaration = &decl,
             .registry = &registry,
+            .args = args_for(decl, config),
         });
     }
 
@@ -468,7 +502,9 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
                 }
             if (scoped == nullptr)
             {
-                schedule.instances.push_back(test_instance{.declaration = frag.driver, .registry = &registry});
+                schedule.instances.push_back(test_instance{.declaration = frag.driver,
+                                                           .registry = &registry,
+                                                           .args = args_for(*frag.driver, config)});
                 scoped = &schedule.instances.back();
             }
 
@@ -484,7 +520,21 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         }
     }
 
+    // Views last, once `args` has stopped growing and the instance vector has stopped reallocating.
+    // Taken any earlier they would point into a moved-from buffer, and cc::string's small-string
+    // optimization makes that the kind of dangling nothing reports.
+    for (auto& instance : schedule.instances)
+        instance.rebuild_arg_views();
+
     return schedule;
+}
+
+void nx::test_instance::rebuild_arg_views()
+{
+    arg_views.clear();
+    arg_views.reserve(args.size());
+    for (auto const& arg : args)
+        arg_views.push_back(arg);
 }
 
 void nx::test_schedule::print() const
