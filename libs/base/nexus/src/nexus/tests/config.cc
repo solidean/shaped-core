@@ -16,6 +16,10 @@ void nx::impl::apply_config_item(config::cfg& result, config::cfg const& rhs)
         result.scheduler_threads = rhs.scheduler_threads;
     }
 
+    // Overrides rather than accumulating: two argument lines cannot be merged into one that means anything.
+    if (rhs.test_args != nullptr)
+        result.test_args = rhs.test_args;
+
     // A flag, so it accumulates like exclusive_global rather than overriding: a config asking for it wins.
     result.main_thread |= rhs.main_thread;
 

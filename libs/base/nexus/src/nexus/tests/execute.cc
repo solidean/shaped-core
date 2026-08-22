@@ -17,6 +17,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <nexus/args/ambient.hh>
 #include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/impl/rec_session.hh>
@@ -974,6 +975,22 @@ nx::test_registry const* nx::impl::active_registry()
     if (ctx == nullptr || ctx->execution == nullptr)
         return nullptr;
     return ctx->execution->instance.registry;
+}
+
+cc::optional<cc::span<cc::string_view const>> nx::impl::current_test_args()
+{
+    // Read off the running instance through the ambient chain, exactly as active_registry is, and for the
+    // same reason: tests run concurrently, so "the current test" cannot live in a thread-local, and a
+    // dispatched invocable has to inherit the arguments of the test that drove it.
+    auto const* const ctx = current_context();
+    if (ctx == nullptr || ctx->execution == nullptr)
+        return cc::nullopt;
+
+    auto const& instance = ctx->execution->instance;
+    if (!instance.has_declared_args)
+        return cc::nullopt;
+
+    return cc::span<cc::string_view const>(instance.arg_views);
 }
 
 bool nx::impl::is_declaration_active(nx::test_declaration const* decl)

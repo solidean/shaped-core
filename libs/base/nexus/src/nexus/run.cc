@@ -64,7 +64,25 @@ void print_failing(nx::test_execution const& exec, cc::string const& prefix)
     }
 
     if (exec.root.is_considered_failing && decl != nullptr)
+    {
         cc::eprintln("  {} at {}:{}", label, decl->location.file_name(), decl->location.line());
+
+        // What it ran WITH, when that is not simply nothing: a parametrized example that failed is not
+        // reproducible from its name alone.
+        if (!exec.instance.args.empty())
+        {
+            auto line = cc::string();
+            for (auto const& arg : exec.instance.args)
+            {
+                if (!line.empty())
+                    line += " ";
+
+                line += arg;
+            }
+
+            cc::eprintln("    with args: {}", line);
+        }
+    }
 
     for (auto const& child : exec.nested)
         print_failing(child, label);

@@ -40,6 +40,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--background", action="store_true",
                    help="Ask the example not to steal focus: its windows appear without being activated. "
                         "Sets SC_REQUEST_BACKGROUND=1, which sr::window_system reads (sr::background_request_env_var).")
+    p.add_argument("--test-args", metavar="LINE",
+                   help="A command line for the example itself, reachable from its body through "
+                        "nx::current_args(). Forwarded as one string and tokenized by the runner, so the "
+                        "example's own flags never collide with dev.py's. Replaces whatever the example "
+                        "declared with nx::config::args.")
     p.add_argument("match", nargs="?",
                    help="Example name, or a substring of one. Must select exactly one; omit to list them all.")
     # Everything dev.py does not recognize is forwarded verbatim to the example, collected into args.runner_args.
@@ -53,6 +58,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     program_args = list(args.runner_args or [])
     if program_args and program_args[0] == "--":
         program_args = program_args[1:]
+
+    # One string, tokenized by the runner, so the example's own flags never have to survive dev.py's
+    # argument handling — and never collide with the --examples the launch below already passes.
+    if args.test_args is not None:
+        program_args = ["--test-args", args.test_args, *program_args]
 
     wanted = ctx.resolve_target_names(preset, args.target, args.emsdk_path) if args.target else None
 

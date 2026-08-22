@@ -70,10 +70,15 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
         bool const invocable = decl.is_invocable();
         bool const eligible = !invocable && config.would_run(decl);
 
+        // A declared argument line is part of what a test IS, so a listing that omitted it could not explain
+        // why a parametrized example behaved the way it did.
+        // Empty when none was declared.
         out.appendf("    {{\"name\": \"{}\", \"file\": \"{}\", \"line\": {}, \"bucket\": \"{}\", \"enabled\": {}, "
-                    "\"seed\": {}, \"invocable\": {}, \"filter_matches\": {}, \"eligible\": {}}}",
+                    "\"seed\": {}, \"invocable\": {}, \"args\": \"{}\", \"filter_matches\": {}, \"eligible\": {}}}",
                     json_escape(decl.name), json_escape(decl.location.file_name()), decl.location.line(),
-                    bucket_name(tc.bucket), tc.enabled, tc.seed, invocable, config.filter_matches(decl), eligible);
+                    bucket_name(tc.bucket), tc.enabled, tc.seed, invocable,
+                    json_escape(tc.test_args != nullptr ? cc::string_view(tc.test_args) : cc::string_view()),
+                    config.filter_matches(decl), eligible);
     }
     out += first ? "]\n" : "\n  ]\n";
 

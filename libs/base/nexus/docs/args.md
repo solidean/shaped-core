@@ -32,7 +32,7 @@ The grammar below, both ways of binding — to locals and to an options struct �
 Plus ambient arguments, response files and shell completion.
 Around them: error accumulation with did-you-mean, `-h` / `--help` / `--version`, groups, sections, examples, environment fallbacks, and setup validation.
 
-Still to land: per-test arguments, so a test or example can receive a command line of its own.
+Everything the library set out to do is in place.
 
 ---
 
@@ -310,7 +310,7 @@ What this process was invoked with, answerable from anywhere:
 ```cpp
 #include <nexus/args/ambient.hh>   // light: no parser comes with it
 
-nx::current_args();    // the running test's arguments inside a test, otherwise the process's
+nx::current_args();    // the running test's declared arguments inside one, otherwise the process's
 nx::process_args();    // always the process's
 nx::program_path();    // argv[0]
 nx::program_name();    // its basename, without a directory or .exe
@@ -319,6 +319,35 @@ nx::program_name();    // its basename, without a directory or .exe
 `nx::run` records argv, so a nexus binary answers exactly.
 A binary that never went through the harness falls back to the OS — `__argv` on Windows, `/proc/self/cmdline` on Linux and Android, `_NSGetArgv` on Apple.
 A platform with no answer, Emscripten included, yields an **empty list rather than an assertion**: a debug helper must never be why a program dies.
+
+### A test's own arguments
+
+A test or example can be given a command line, which is what makes an `EXAMPLE` demonstrate something without the reader typing anything:
+
+```cpp
+EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose"))
+{
+    auto options = build_options();
+    auto args = nx::args({.name = "mytool build"});
+    nx::declare_args(args, options);
+
+    if (auto const r = args.parse(nx::current_args()); r.should_exit())
+        return;
+
+    // ... demonstrate with options
+}
+```
+
+Run it with something else via `uv run dev.py example mytool/build --test-args "--jobs 1"`, or `dev.py test <name> --test-args "..."`.
+The CLI form **replaces** the declared line rather than adding to it — two argument lines cannot be merged into one that means anything — and it applies to every test the run selects.
+
+Three rules worth knowing:
+
+* A test that declares **nothing** falls through to the process's own arguments, which is what keeps a helper written for a tool working when it is called from inside a test.
+* A test that declares an **empty** line (`nx::config::args("")`) sees exactly nothing.
+  Not the same thing: an example run by `dev.py example` would otherwise be handed the harness's own `--examples` flag to parse.
+* The arguments are read off the running instance through nexus's ambient chain rather than a thread-local.
+  So they are correct on a pool worker, and a dispatched invocable inherits the arguments of the test that drove it.
 
 ### The undeclared accessors
 

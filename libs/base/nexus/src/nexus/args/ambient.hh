@@ -85,8 +85,14 @@ namespace nx::impl
 /// running one.
 void set_process_args(int argc, char const* const* argv);
 
-/// The arguments the running test was given, or empty outside a test.
-/// Installed by the scheduler; declared here so ambient.cc can ask without depending on the test machinery.
-[[nodiscard]] cc::span<cc::string_view const> current_test_args();
+/// The arguments the running test DECLARED, or nothing when there is no test scope, or it declared none.
+///
+/// An optional rather than a possibly-empty span, because the two cases differ: a test that declared an
+/// empty line means "no arguments", while a test that declared nothing falls through to the process's own.
+/// Getting that wrong would hand an example the harness's own --examples flag to parse.
+///
+/// Defined in execute.cc, which already owns the ambient chain this reads — declared here so the light
+/// ambient header can offer one answer without dragging the test machinery in with it.
+[[nodiscard]] cc::optional<cc::span<cc::string_view const>> current_test_args();
 
 } // namespace nx::impl

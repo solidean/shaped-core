@@ -121,14 +121,6 @@ void nx::impl::set_process_args(int argc, char const* const* argv)
     slot.captured = true;
 }
 
-cc::span<cc::string_view const> nx::impl::current_test_args()
-{
-    // Per-test arguments are not wired up yet, so there is nothing to inherit and every caller sees the
-    // process's own.
-    // The seam is here so nothing outside the scheduler has to change when they land.
-    return {};
-}
-
 cc::span<cc::string_view const> nx::process_args()
 {
     return effective_slot().views;
@@ -136,8 +128,11 @@ cc::span<cc::string_view const> nx::process_args()
 
 cc::span<cc::string_view const> nx::current_args()
 {
-    if (auto const test = impl::current_test_args(); !test.empty())
-        return test;
+    // A test that declared a line gets exactly that line, empty included.
+    // Only a test that declared nothing falls through, which is what keeps a helper written for a tool
+    // working when it is called from inside one.
+    if (auto const test = impl::current_test_args(); test.has_value())
+        return test.value();
 
     return process_args();
 }

@@ -160,6 +160,7 @@ if(SC_BUILD_TESTS)
         tests/args-completion-test.cc
         tests/test-api-test.cc
         tests/test-cli-test.cc
+        tests/test-test-args-test.cc
         tests/test-check-test.cc
         tests/test-recording-test.cc
         tests/test-check-render-test.cc

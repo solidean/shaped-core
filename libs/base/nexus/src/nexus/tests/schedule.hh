@@ -18,6 +18,21 @@ struct nx::test_instance
     // Every matched alias fragment sharing a driver is grouped into one instance's scope set, so the driver body runs exactly once however many of its aliases matched.
     // Aliases are pure filters, not additive schedule entries.
     cc::vector<cc::vector<cc::string>> section_scopes;
+
+    // What nx::current_args() answers inside this test's body.
+    // Tokenized once here rather than per query, and carried per instance because tests run concurrently.
+    // The run's --test-args replaces whatever nx::config::args declared; see test_schedule::create.
+    cc::vector<cc::string> args;
+
+    // Whether a line was DECLARED, as distinct from whether it has any tokens.
+    // `nx::config::args("")` means "run me with no arguments" and must not fall through to the process's
+    // own — an example run by `dev.py example` would otherwise see --examples and try to parse it.
+    bool has_declared_args = false;
+
+    // Views over `args`, which is what nx::current_args() hands back.
+    // Built once by test_schedule::create, after `args` has stopped growing — a view taken earlier would
+    // point into a reallocated buffer, and cc::string's small-string optimization makes that silent.
+    cc::vector<cc::string_view> arg_views;
 };
 
 // How the positional filters are read.

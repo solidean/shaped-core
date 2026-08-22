@@ -226,6 +226,33 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
 }
 } // namespace
 
+namespace
+{
+/// The argument line this instance's body will see.
+///
+/// The run's --test-args wins over whatever nx::config::args declared, because replacement is the only
+/// merge rule for two command lines that stays predictable.
+/// It applies to EVERY selected test, which is worth knowing when a run selects more than one.
+struct declared_args
+{
+    cc::vector<cc::string> tokens;
+    bool declared = false;
+};
+
+declared_args args_for(nx::test_declaration const& decl, nx::test_schedule_config const& config)
+{
+    if (!config.test_args.empty())
+        return {.tokens = config.test_args, .declared = true};
+
+    if (decl.test_config.test_args == nullptr)
+        return {};
+
+    // An explicitly empty line is still a declaration: it means "no arguments", not "whatever the process
+    // was given".
+    return {.tokens = nx::args_tokenize(decl.test_config.test_args), .declared = true};
+}
+} // namespace
+
 nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, char** argv)
 {
     auto config = test_schedule_config();
@@ -412,9 +439,12 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         if (!config.would_run(decl))
             continue;
 
+        auto declared = args_for(decl, config);
         schedule.instances.push_back(test_instance{
             .declaration = &decl,
             .registry = &registry,
+            .args = cc::move(declared.tokens),
+            .has_declared_args = declared.declared,
         });
     }
 
@@ -464,7 +494,11 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
                 }
             if (scoped == nullptr)
             {
-                schedule.instances.push_back(test_instance{.declaration = frag.driver, .registry = &registry});
+                auto declared = args_for(*frag.driver, config);
+                schedule.instances.push_back(test_instance{.declaration = frag.driver,
+                                                           .registry = &registry,
+                                                           .args = cc::move(declared.tokens),
+                                                           .has_declared_args = declared.declared});
                 scoped = &schedule.instances.back();
             }
 
@@ -478,6 +512,16 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
             if (!already)
                 scoped->section_scopes.push_back(frag.section_path);
         }
+    }
+
+    // Views last, once `args` has stopped growing and the instance vector has stopped reallocating.
+    // Taken any earlier they would point into a moved-from buffer, and cc::string's small-string
+    // optimization makes that the kind of dangling nothing reports.
+    for (auto& instance : schedule.instances)
+    {
+        instance.arg_views.reserve(instance.args.size());
+        for (auto const& arg : instance.args)
+            instance.arg_views.push_back(arg);
     }
 
     return schedule;

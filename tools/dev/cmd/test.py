@@ -33,6 +33,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "runner_args: an unrecognized '--jobs N' leaves N as a bare token, which the test_name "
                         "positional then swallows, and the run silently filters instead of narrowing its width. "
                         "A low count is what reproduces a small CI runner's scheduling on a wide dev machine.")
+    p.add_argument("--test-args", metavar="LINE",
+                   help="A command line for the selected test itself, reachable from its body through "
+                        "nx::current_args(). Forwarded to the runner as one string and tokenized there, "
+                        "which is why it survives dev.py's own '--' handling. It replaces whatever the test "
+                        "declared with nx::config::args, and applies to every test the run selects.")
     p.add_argument("--repeat", type=int, default=1, metavar="N",
                    help="Run the selection up to N times, stopping at the first failing iteration "
                         "(default: 1). For chasing a flake: the build and discovery happen once, and "
@@ -65,6 +70,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # Prepended, so an explicit `-- --jobs 4` after it still wins by being parsed later.
     if args.jobs is not None:
         runner_args = ["--jobs", str(args.jobs), *runner_args]
+
+    # One string, deliberately: the runner tokenizes it, so the test's own flags never have to survive
+    # dev.py's argument handling — which strips a leading `--` and would otherwise eat the separator.
+    if args.test_args is not None:
+        runner_args = ["--test-args", args.test_args, *runner_args]
 
     # Optionally build first (incremental — fast when nothing changed).
     if not args.no_build:
