@@ -146,6 +146,34 @@ TEST("from_string - bool is true/false only")
     }
 }
 
+TEST("from_string - char is exactly one character")
+{
+    CHECK(parses_to<char>("a", 'a'));
+    CHECK(parses_to<char>("7", '7'));
+    CHECK(parses_to<char>(" ", ' '));
+
+    // Not a number, and not a string either: to_string(char) writes the character itself, so this reads it back.
+    CHECK(rejects<char>(""));
+    CHECK(rejects<char>("ab"));
+}
+
+TEST("from_string - byte is the 0xAF spelling to_string writes")
+{
+    CHECK(parses_to<byte>("0x00", byte(0)));
+    CHECK(parses_to<byte>("0x0F", byte(15)));
+    CHECK(parses_to<byte>("0xAF", byte(0xAF)));
+    CHECK(parses_to<byte>("0xFF", byte(0xFF)));
+
+    // Uppercase only, and both digits always: the strictness IS the contract, since anything else would
+    // accept a spelling to_string never produces.
+    CHECK(rejects<byte>("0xaf"));
+    CHECK(rejects<byte>("0xF"));
+    CHECK(rejects<byte>("AF"));
+    CHECK(rejects<byte>("0XAF"));
+    CHECK(rejects<byte>("0xAFF"));
+    CHECK(rejects<byte>("0xG0"));
+}
+
 TEST("from_string - out parameter is untouched on failure")
 {
     auto value = 7;
@@ -174,4 +202,10 @@ TEST("from_string - round-trips whatever to_string wrote")
 
     CHECK(parses_to<bool>(cc::to_string(true), true));
     CHECK(parses_to<bool>(cc::to_string(false), false));
+
+    CHECK(parses_to<char>(cc::to_string('q'), 'q'));
+
+    // Every byte, since that overload's whole job is to undo one specific four-character spelling.
+    for (auto v = 0; v < 256; ++v)
+        CHECK(parses_to<byte>(cc::to_string(byte(v)), byte(v)));
 }

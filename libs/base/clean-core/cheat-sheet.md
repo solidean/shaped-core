@@ -343,10 +343,11 @@ cc::glob_matches(pat, path, cc::glob_option::normalize | cc::glob_option::ignore
 // Normalize once yourself when one side is reused across many comparisons; the option redoes both sides per call.
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
-#include <clean-core/string/from_string.hh>      // the inverse, for bool/ints/floats only
+#include <clean-core/string/from_string.hh>      // the inverse, for bool/char/byte/ints/floats
 cc::from_string<int>("42")                       // -> cc::optional<int>; cc::nullopt on any rejection
 cc::from_string(sv, value)                       // -> bool; the out-param form, leaves `value` alone on failure
-// Accepts exactly what to_string produces and nothing else: no leading '+', no whitespace, no "0x", bool is true/false.
+// Accepts exactly what to_string produces and nothing else: no leading '+', no whitespace, no "0x" on a number,
+// bool is true/false, byte is the uppercase "0xAF" form. Pointers and strings have no inverse, on purpose.
 // The whole view must parse, so "12abc" and "12 " fail; a value the type cannot hold fails rather than wrapping.
 #include <clean-core/string/to_debug_string.hh>  // cc::to_debug_string(v, cfg = {}) -> diagnostics string
 // to_debug_string: quotes strings/chars, prints pointers as ptr(0xHEX), recurses into ranges [..] and tuples (..).

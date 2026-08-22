@@ -9,6 +9,17 @@
 
 namespace
 {
+/// One uppercase hex digit as its value, or -1.
+/// Uppercase only, because cc::to_string(byte) writes uppercase and this is its exact inverse.
+int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'A' && c <= 'F')
+        return 10 + (c - 'A');
+    return -1;
+}
+
 template <class T>
 bool parse_through_from_chars(cc::string_view s, T& out)
 {
@@ -35,6 +46,29 @@ bool cc::from_string(string_view s, bool& out)
     if (s == "false")
         return out = false, true;
     return false;
+}
+
+bool cc::from_string(string_view s, char& out)
+{
+    if (s.size() != 1)
+        return false;
+
+    out = s[0];
+    return true;
+}
+
+bool cc::from_string(string_view s, byte& out)
+{
+    if (s.size() != 4 || s[0] != '0' || s[1] != 'x')
+        return false;
+
+    auto const high = hex_digit(s[2]);
+    auto const low = hex_digit(s[3]);
+    if (high < 0 || low < 0)
+        return false;
+
+    out = byte(high * 16 + low);
+    return true;
 }
 
 bool cc::from_string(string_view s, signed char& out)

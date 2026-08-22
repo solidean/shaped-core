@@ -12,34 +12,6 @@
 // Each usage text below is GENERATED from the declaration it documents, so a flag cannot be described
 // without being parsed, or parsed without being described.
 
-/// `--color auto|always|never`, so the mode is a value type rather than three hand-compared strings.
-/// Publishing `values()` is what puts the accepted set in help and in a completion script.
-template <>
-struct nx::custom::arg_value_trait<cc::console::color_mode>
-{
-    static bool parse(cc::string_view token, cc::console::color_mode& out, cc::string& error)
-    {
-        if (token == "auto")
-            return out = cc::console::color_mode::automatic, true;
-        if (token == "always")
-            return out = cc::console::color_mode::always, true;
-        if (token == "never")
-            return out = cc::console::color_mode::never, true;
-
-        error = "expected auto, always or never";
-        return false;
-    }
-
-    static cc::string_view type_name() { return "MODE"; }
-
-    static void values(cc::vector<cc::string>& out)
-    {
-        out.push_back("auto");
-        out.push_back("always");
-        out.push_back("never");
-    }
-};
-
 namespace scl
 {
 namespace
@@ -309,7 +281,8 @@ cc::string_view usage_text()
         auto opts = options();
         auto trailing = cc::vector<cc::string_view>();
         auto args = build_lint_cli(opts, trailing);
-        return args.help_text({.width = cc::console::terminal_width().value_or(100)});
+        return args.help_text(
+            {.color = cc::console::color_enabled(), .width = cc::console::terminal_width().value_or(100)});
     }();
 
     return text;

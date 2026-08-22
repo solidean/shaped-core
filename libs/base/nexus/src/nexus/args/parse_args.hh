@@ -35,11 +35,37 @@
 //   1. a `nx::custom::args_trait<T>` specialization — the override tier, checked first, for a type you do
 //      not own or cannot change
 //   2. a static member `T::declare_args(nx::args_builder&, T&)` — the tier for a type you do own
+//
+// The two spell the function differently on purpose: `declare` on the trait, `declare_args` on the type.
+// A type that provides both is served by the trait, which is what makes the override tier an override.
 // =========================================================================================================
 
 namespace nx::custom
 {
-/// The primary template is intentionally incomplete: specialize it to adapt a type you cannot change.
+/// How one options struct declares itself, for a type you cannot put a `declare_args` member on.
+///
+/// The primary template is intentionally incomplete: a specialization is what opts a type in, and one
+/// static member is the whole protocol.
+///
+///     template <>
+///     struct nx::custom::args_trait<third_party::config>
+///     {
+///         static void declare(nx::args_builder& args, third_party::config& self)
+///         {
+///             args.info({.name = "mytool"});
+///             args.arg({"j", "jobs"}, self.jobs, "how many jobs to run at once");
+///         }
+///     };
+///
+/// `self` is default-constructed before this runs, so its member initializers ARE the defaults — the same
+/// rule as a local's initializer on the by-reference path.
+/// Everything the builder offers is in scope here: groups, validation, subcommands, sections.
+///
+/// PROVISIONAL.
+/// This tier exists because the by-value path needed a way in for a type it does not own, and it has one
+/// caller's worth of use behind it.
+/// The shape may still change — a `declare` taking the value by pointer, or a non-static form — so prefer
+/// the intrusive `T::declare_args` wherever the type is yours.
 template <class T>
 struct args_trait;
 } // namespace nx::custom

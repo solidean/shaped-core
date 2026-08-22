@@ -510,3 +510,61 @@ TEST("args grammar - the span overload skips nothing")
     REQUIRE(values.size() == 2);
     CHECK(values[0] == "first");
 }
+
+TEST("args grammar - what allow_unknown does with the token after an unknown option")
+{
+    SECTION("by default the value goes on as a positional")
+    {
+        auto positionals = cc::vector<cc::string>();
+        auto unknown = cc::vector<cc::string_view>();
+        auto args = make_args();
+        args.positional("FILTER", positionals, {.desc = "what to run"});
+        args.allow_unknown(unknown);
+
+        // What a runner wants: every stray word is a filter, so nothing may be quietly swallowed.
+        CHECK(parse(args, {"--mystery", "value"}).ok());
+        REQUIRE(unknown.size() == 1);
+        CHECK(unknown[0] == "--mystery");
+        REQUIRE(positionals.size() == 1);
+        CHECK(positionals[0] == "value");
+    }
+
+    SECTION("asked for, the value stays with the flag")
+    {
+        auto positionals = cc::vector<cc::string>();
+        auto unknown = cc::vector<cc::string_view>();
+        auto args = make_args();
+        args.positional("FILTER", positionals, {.desc = "what to run"});
+        args.allow_unknown(unknown, true);
+
+        // What a wrapper wants: the two are forwarded onward together or the command line loses its meaning.
+        CHECK(parse(args, {"--mystery", "value"}).ok());
+        REQUIRE(unknown.size() == 2);
+        CHECK(unknown[0] == "--mystery");
+        CHECK(unknown[1] == "value");
+        CHECK(positionals.empty());
+    }
+
+    SECTION("a following token that looks like an option is never taken as a value")
+    {
+        auto unknown = cc::vector<cc::string_view>();
+        auto args = make_args();
+        args.allow_unknown(unknown, true);
+
+        CHECK(parse(args, {"--mystery", "--other"}).ok());
+        REQUIRE(unknown.size() == 2);
+        CHECK(unknown[0] == "--mystery");
+        CHECK(unknown[1] == "--other");
+    }
+
+    SECTION("and neither is an unknown short option's")
+    {
+        auto unknown = cc::vector<cc::string_view>();
+        auto args = make_args();
+        args.allow_unknown(unknown, true);
+
+        CHECK(parse(args, {"-z", "value"}).ok());
+        REQUIRE(unknown.size() == 2);
+        CHECK(unknown[1] == "value");
+    }
+}

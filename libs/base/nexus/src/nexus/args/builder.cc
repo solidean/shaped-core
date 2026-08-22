@@ -81,10 +81,6 @@ void nx::args_builder::configure_positional(impl::binding& b, cc::string_view me
     b.canonical = b.metavar;
     b.min_count = opts.min_count;
     b.max_count = opts.max_count;
-
-    // A fixed positional is required unless it was given a default, which the variable's own value is.
-    if (!b.accumulates && opts.required)
-        b.required = true;
 }
 
 nx::args_builder& nx::args_builder::add_option(impl::binding b)
@@ -294,7 +290,13 @@ bool nx::args_builder::was_given(cc::string_view name) const
 
 nx::args_builder& nx::args_builder::require(cc::string_view description, cc::unique_function<bool()> predicate)
 {
-    _document_validators.push_back({.description = cc::string(description), .check = cc::move(predicate)});
+    // The caller's predicate reads the variables IT bound, so it needs no builder; the wrapper is only what
+    // keeps every stored rule the same shape.
+    _document_validators.push_back({
+        .description = cc::string(description),
+        .check = [p = cc::move(predicate)](args_builder const&) { return p(); },
+    });
+
     return *this;
 }
 
@@ -310,13 +312,13 @@ nx::args_builder& nx::args_builder::requires_all(cc::string_view name, cc::span<
     _document_validators.push_back({
         .description = description,
         .check =
-            [this, owned_name = cc::move(owned_name), owned_required = cc::move(owned_required)]
+            [owned_name = cc::move(owned_name), owned_required = cc::move(owned_required)](args_builder const& b)
         {
-            if (!was_given(owned_name))
+            if (!b.was_given(owned_name))
                 return true;
 
             for (auto const& r : owned_required)
-                if (!was_given(r))
+                if (!b.was_given(r))
                     return false;
 
             return true;
@@ -335,11 +337,11 @@ nx::args_builder& nx::args_builder::mutually_exclusive(cc::span<cc::string_view 
     _document_validators.push_back({
         .description = cc::format("at most one of {} may be given", join_names(names, ", ")),
         .check =
-            [this, owned = cc::move(owned)]
+            [owned = cc::move(owned)](args_builder const& b)
         {
             auto given = isize(0);
             for (auto const& n : owned)
-                if (was_given(n))
+                if (b.was_given(n))
                     ++given;
 
             return given <= 1;
@@ -358,10 +360,10 @@ nx::args_builder& nx::args_builder::at_least_one_of(cc::span<cc::string_view con
     _document_validators.push_back({
         .description = cc::format("at least one of {} is required", join_names(names, ", ")),
         .check =
-            [this, owned = cc::move(owned)]
+            [owned = cc::move(owned)](args_builder const& b)
         {
             for (auto const& n : owned)
-                if (was_given(n))
+                if (b.was_given(n))
                     return true;
 
             return false;
@@ -371,9 +373,10 @@ nx::args_builder& nx::args_builder::at_least_one_of(cc::span<cc::string_view con
     return *this;
 }
 
-nx::args_builder& nx::args_builder::allow_unknown(cc::vector<cc::string_view>& target)
+nx::args_builder& nx::args_builder::allow_unknown(cc::vector<cc::string_view>& target, bool unknown_takes_value)
 {
     _unknown_target = &target;
+    _unknown_takes_value = unknown_takes_value;
     return *this;
 }
 
@@ -447,7 +450,7 @@ nx::args_result nx::args_builder::parse(cc::span<cc::string_view const> tokens)
     return impl::parse_engine::run(*this, tokens);
 }
 
-nx::args_result nx::args_builder::validate_setup() const
+nx::args_result nx::args_builder::validate_setup()
 {
     return impl::setup_checker::run(*this);
 }

@@ -141,3 +141,79 @@ TEST("args setup - a setup error renders as internal, not as a usage complaint")
     CHECK(text.contains("internal error"));
     CHECK(!text.contains("did you mean"));
 }
+
+TEST("args setup - a default command that is not declared")
+{
+    auto args = make_args();
+    args.command({"build"}, "build it", [](nx::args_builder&) {});
+    args.default_command("biuld");
+
+    // The old failure mode was silence: no command ran, no diagnostic, and the parse reported success.
+    check_is_setup_error(args.validate_setup());
+    check_is_setup_error(args.parse({}));
+}
+
+TEST("args setup - a default command that is a delegate")
+{
+    auto args = make_args();
+    args.delegate({"external"}, "somebody else's parser", [](cc::span<cc::string_view const>) { return 0; });
+    args.default_command("external");
+
+    check_is_setup_error(args.validate_setup());
+}
+
+TEST("args setup - the root and its default command may not claim the same name")
+{
+    auto root_jobs = 1;
+    auto sub_jobs = 1;
+
+    auto args = make_args();
+    args.arg({"j", "jobs"}, root_jobs, "how many, at the root");
+    args.command({"build"}, "build it",
+                 [&](nx::args_builder& sub) { sub.arg({"j", "jobs"}, sub_jobs, "how many, in the command"); });
+    args.default_command("build");
+
+    // An unnamed invocation hands the tail to the command, so -j would mean two different variables
+    // depending on where the root's walk happened to stop.
+    check_is_setup_error(args.validate_setup());
+}
+
+TEST("args setup - a name shared with a command that is NOT the default is fine")
+{
+    auto root_jobs = 1;
+    auto sub_jobs = 1;
+
+    auto args = make_args();
+    args.arg({"j", "jobs"}, root_jobs, "how many, at the root");
+    args.command({"build"}, "build it",
+                 [&](nx::args_builder& sub) { sub.arg({"j", "jobs"}, sub_jobs, "how many, in the command"); });
+
+    // Nothing is ambiguous while the command has to be spelled out: `t build -j 8` says which level it means.
+    CHECK(args.validate_setup().ok());
+    CHECK(args.parse({"build", "-j", "8"}).ok());
+    CHECK(sub_jobs == 8);
+    CHECK(root_jobs == 1);
+}
+
+TEST("args setup - global() on something that is not a named option")
+{
+    auto files = cc::vector<cc::string>();
+    auto args = make_args();
+    args.positional("FILES", files, {.desc = "inputs"});
+    args.global();
+
+    // There is no depth for a positional to be reachable at, so the call meant nothing and silently did
+    // nothing, which is exactly the kind of declaration that should not survive a parse.
+    check_is_setup_error(args.validate_setup());
+}
+
+TEST("args setup - an env fallback on a binding with nothing to parse into")
+{
+    auto ran = false;
+    auto args = make_args();
+    args.action({"go"}, [&ran] { ran = true; }, {.desc = "do it", .env = "T_GO"});
+
+    // An action has no parse thunk, so the env value would have been read and dropped.
+    check_is_setup_error(args.validate_setup());
+    CHECK(!ran);
+}

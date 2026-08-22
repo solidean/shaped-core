@@ -126,21 +126,19 @@ int nx::run(int argc, char** argv)
     cc::install_crash_handler();
     cc::add_crash_context_hook(&nx::impl::report_running_test);
 
-    // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks.
-    // Still handled here rather than inside create_from_args, because the harness owns exiting.
-    // The "Compatible with Catch2" line it carries is what makes C++ TestMate recognize this binary at all.
-    for (auto i = 1; i < argc; ++i)
-    {
-        auto const arg = cc::string_view(argv[i]);
-        if (arg == "--help" || arg == "-h")
-        {
-            cc::println(test_schedule_config::cli_help_text());
-            return 0;
-        }
-    }
-
     // Create schedule config from command line arguments
     auto config = test_schedule_config::create_from_args(argc, argv);
+
+    // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks,
+    // and the PARSE is what says it was asked for.
+    // Scanning argv instead would claim a --help that belongs to the test — one carried by --test-args, or
+    // sitting past a bare --.
+    // The "Compatible with Catch2" line it carries is what makes C++ TestMate recognize this binary at all.
+    if (config.help_requested)
+    {
+        cc::println(test_schedule_config::cli_help_text());
+        return 0;
+    }
 
     // A command line that did not parse stops here: the parse already reported what was wrong, and running
     // the subset it managed to understand is the one outcome a mistyped flag must never produce.

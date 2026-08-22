@@ -263,11 +263,14 @@ if (auto const r = args.parse(argc, argv); r.should_exit())    // --help is neit
 // Options:   .desc .help .metavar .group .env .default_text .required .negatable .hidden .deprecated
 //            .make_default .validate .min_count .max_count .complete
 // Builder:   .group(t) (mode setter) .section(t,x) .example(c,d) .document_env(n,d) .rest(v)
-//            .allow_unknown(v) .stop_at_first_positional() .enable_response_files() .no_auto_print()
-//            .exact_long_names() .usage_exit_code(n) .full_help_on_error()
+//            .allow_unknown(v[, takes_value]) .stop_at_first_positional() .enable_response_files()
+//            .no_auto_print() .exact_long_names() .usage_exit_code(n) .full_help_on_error()
+//            .validate_setup() — NOT const: checking a default_command means declaring it
 // Commands:  .command({"build","b"}, desc, declare_fn)   // declared LAZILY, only when needed
 //            .delegate(names, desc, fn)  .global()  .default_command(n)
 //            args.selected_command() / .command_path() / .is_command("remote add")
+//   default_command gets the tokens THIS level could not account for, and sees the root's options too;
+//   a name claimed by both the root and the default command is a setup error.
 // Validate:  nx::arg::in_range(lo,hi) at_least at_most one_of non_empty satisfies(desc,pred), composed with &&
 //            args.mutually_exclusive({...}) .at_least_one_of({...}) .requires_all(n,{...}) .require(desc,pred)
 // Struct:    static void T::declare_args(nx::args_builder&, T&)   -> nx::parse_args<T>(argc, argv)
@@ -294,11 +297,13 @@ EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose")) { /* nx::test_ar
 
 ```bash
 mytool --completion bash    # also zsh, fish, powershell — generated from the same declaration
+                            # completes option names, command names and a type's values(); .complete overrides
 mytool @response.rsp        # after .enable_response_files(); @@x is a literal @x
 ```
 
 Gotchas: `-j=8` is rejected for short options (`-j8` or `-j 8`); a bool takes a value only as `--flag=x`;
 `--` with no `.rest(...)` declared is an error rather than a silent drop; there is no abbreviation, only did-you-mean.
+`.env` is held to `.validate` like a typed value is, and a bound `in_range` the argument's type cannot hold asserts at declaration.
 [docs/args.md](docs/args.md) is the full reference and carries the grammar as a spec.
 
 ## Fuzz testing (`nx::fuzz`)

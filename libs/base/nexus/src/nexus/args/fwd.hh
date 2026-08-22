@@ -20,7 +20,7 @@ struct arg_validator; // one rule over one value, carrying the text that describ
 struct document_validator; // one rule over the whole command line (args/validation.hh)
 
 template <class T>
-class parsed; // the by-value counterpart of args_result, carrying the struct it filled (args/args.hh)
+class parsed; // the by-value counterpart of args_result, carrying the struct it filled (args/parse_args.hh)
 
 struct arg_source;         // where a token came from, which splicing makes worth recording (args/diagnostic.hh)
 struct args_splice_result; // what a response-file splice concluded (args/tokenize.hh)
@@ -44,7 +44,7 @@ template <class T>
 struct arg_value_trait; // how one value type is parsed and described (args/value.hh)
 
 template <class T>
-struct args_trait; // how one options struct declares itself (args/args.hh)
+struct args_trait; // how one options struct declares itself (args/parse_args.hh)
 } // namespace nx::custom
 
 namespace nx::impl

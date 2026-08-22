@@ -64,6 +64,9 @@ target_sources(nexus
     src/nexus/args/tokenize.hh
     src/nexus/args/ambient.hh
     src/nexus/args/completion.hh
+    # Not public API, but builder.hh includes both, so a consumer that gets builder.hh needs them too.
+    src/nexus/args/impl/binding.hh
+    src/nexus/args/impl/command.hh
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh

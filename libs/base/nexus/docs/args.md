@@ -109,6 +109,12 @@ A `--` with nothing declared to receive it is an **error**: silently dropping wh
 An unknown argument is an error by default, carrying a suggestion when something is close enough.
 `.allow_unknown(target)` collects them instead, for a wrapper that forwards them onward.
 
+What happens to the token *after* an unknown option is genuinely ambiguous: nobody declared the flag, so nothing knows whether it takes a value.
+`.allow_unknown(target, unknown_takes_value)` is where you say which reading you want.
+Left false, `--mystery value` collects only `--mystery` and `value` goes on as a positional: what a runner wants, where every stray word is a filter.
+Set true, a following token that does not itself start with `-` is collected too: what a wrapper wants, where the flag and its value have to stay together.
+A token that does look like an option is never taken as a value either way.
+
 `-force` — a long name typed with one dash — is diagnosed as exactly that, once, rather than as four complaints about `-o`, `-r`, `-c` and `-e`.
 This only applies when the token does not also read as a real cluster, so a deliberate `-abc` still clusters.
 
@@ -131,6 +137,7 @@ if (auto const r = args.parse(argc, argv); r.should_exit())
 |---|---|---|
 | `success` | true | — |
 | `help_requested`, `version_requested` | false | 0 |
+| `completion_requested` | false | 0 |
 | `usage_error` | false | 1, or `.usage_exit_code(n)` |
 | `setup_error` | false | 70 |
 
@@ -144,13 +151,15 @@ Assert on the kind; leave the wording free to improve.
 
 ## Setup errors are the program's fault
 
-A duplicate short name, a negatable non-bool, two variadic positionals: these are declaration bugs, not typing mistakes.
+A duplicate short name, a negatable non-bool, two variadic positionals, a `default_command` naming something that was never declared: these are declaration bugs, not typing mistakes.
 
 They are reported as `diagnostic_kind::setup_error`, with no suggestion, no usage line, and their own exit code, so nobody files a bug against their own command line.
 
 The check runs inside **every** parse, in every preset — deliberately not behind `CC_ASSERT`, because a shipped release binary is exactly where this must not silently do the wrong thing.
 
-Call `args.validate_setup()` from your own test suite, which is where it is cheapest to notice:
+`validate_setup` is not const: checking a `default_command` means declaring it, since a deferred subtree has no names to compare against until it is forced.
+
+Call it from your own test suite, which is where it is cheapest to notice:
 
 ```cpp
 TEST("mytool - the CLI declaration is sound")
@@ -232,6 +241,12 @@ Other pieces:
 * `.global()` applies to the argument declared just before it, and makes it reachable at any depth.
   A child's own option of the same name still wins.
 * `.default_command("build")` runs one when none is named; otherwise a level with commands requires one.
+  It receives **the tokens this level could not account for**, starting at the first one — an empty list only when the whole line was consumed here.
+  So `app -j 8` reaches the command that declares `-j`, and `app -- --raw` hands the separator and its tail over as well.
+  Its own level and the root's are both in scope while it stands in, rather than only what `global()` marked.
+  That is what makes an unnamed invocation mean the same thing as a spelled-out one.
+  The price is a **setup error when the root and the default command claim the same name**: which level such a token means would otherwise depend on where the root's walk happened to stop.
+  Spelling the command out is always the way past it, and a name shared with a command that is *not* the default is fine.
 * `help <command>` works as an alias for `<command> --help`, unless `.no_auto_help_command()`.
 * Commands and positionals cannot share a level — a bare word would be ambiguous — and that is a setup error.
 
@@ -263,6 +278,9 @@ renders as `-j, --jobs INT  how many [default: 4] (must be in [1, 256])`, and re
 `nx::arg::` provides `in_range`, `at_least`, `at_most`, `one_of`, `non_empty` and `satisfies(description, predicate)`.
 Compose with `&&`.
 
+A bound the argument's own type cannot represent **asserts** at declaration: `in_range(1, 256)` on an `i8` would enforce `1 <= v <= 0` while help went on advertising 256.
+That is a contract violation rather than a usage error — the bound is the program's own text — so it is a `CC_ASSERT` and not a diagnostic.
+
 A factory does not need to know the bound type: it returns a spec that becomes an `arg_validator<T>` where the argument is declared, which is the only place `T` is known.
 
 **Value rules run per occurrence**, right after conversion, so the complaint quotes the token that broke it rather than reporting the variable's final value.
@@ -291,6 +309,8 @@ All of them are **skipped when anything earlier already failed**: a rule read ov
 * `.section(title, text)`, `.example(command_line, desc)` and `.document_env(name, desc)` add the rest.
 * `.env("VAR")` on an argument is the other environment feature: that one is actually read as a fallback, with precedence command line, then environment, then default.
   It shows as `[env: VAR]`.
+  The value is held to the argument's `.validate` rule exactly as a typed one is: a rule that only bound what was typed would leave the variable holding something the declaration says is impossible.
+  Only a binding that parses into a variable can have one; on an `action` or a `value_action` it is a setup error rather than a value read and dropped.
 
 Width and colour are parameters, never sniffed from the process:
 
@@ -389,7 +409,7 @@ Expansion **stops at a bare `--`**: past it the tokens belong to whoever receive
 
 ### The tokenizer
 
-`nx::args_tokenize` is shared by response files and, later, per-test arguments, so all of them agree.
+`nx::args_tokenize` is shared by response files, the nexus runner's `--test-args`, and the line a test declares with `nx::config::args`, so all of them agree.
 The rules are **ours and identical on every platform** — a response file written on Linux has to mean the same thing on Windows, and reproducing cmd.exe is not a goal:
 
 * whitespace separates; `"..."` and `'...'` group, and may sit mid-token
@@ -411,8 +431,12 @@ Generated from the same declaration as everything else, so it cannot describe a 
 This is where deferred subcommands pay the other way round: generating a script **forces every subtree**, because it has to know about commands this run will never touch.
 A delegate contributes only its name.
 
-The scripts complete option names, command names and enumerated values, and leave paths to the shell's own file completion.
-Deliberately not clever — a completion script that tries to be a second parser goes stale the moment the real one changes.
+The scripts complete option names, command names, and the closed value set a type publishes through `values()`.
+So `--color <TAB>` offers `auto always never`, read off the same declaration the help page is built from.
+`.complete` overrides that per argument: `files` and `directories` hand the value to the shell's own path completion, and `none` offers nothing even for a type that publishes a set.
+
+bash gets one function per command and a dispatch into it, so `app build <TAB>` reaches the build level rather than the root's option list.
+Deliberately not clever beyond that — a completion script that tries to be a second parser goes stale the moment the real one changes.
 
 `.no_auto_completion()` turns the flag off.
 
@@ -436,7 +460,7 @@ struct nx::custom::arg_value_trait<mode>
 
     static cc::string_view type_name() { return "MODE"; }
 
-    // Optional: drives "[one of: fast, slow]" in help, and completion later.
+    // Optional: drives "[one of: fast, slow]" in help, and the value list in a completion script.
     static void values(cc::vector<cc::string>& out) { out.push_back("fast"); out.push_back("slow"); }
 };
 ```

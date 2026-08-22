@@ -16,7 +16,7 @@
 // The grammar, in full:
 //   - tokens are separated by whitespace
 //   - "..." and '...' group, and may sit in the middle of a token
-//   - inside double quotes, \" \\ \n \t \r are escapes; everything else after a backslash is itself
+//   - inside double quotes, \" \\ \n \t \r \0 are escapes; everything else after a backslash is itself
 //   - inside single quotes nothing is an escape, so a Windows path survives being pasted in
 //   - a '#' where a token would start runs to the end of the line
 //

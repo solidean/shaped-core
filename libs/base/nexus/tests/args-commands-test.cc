@@ -278,3 +278,142 @@ TEST("args commands - the usage line advertises that one is expected")
 
     CHECK(args.usage_line() == "usage: t <command>");
 }
+
+TEST("args commands - a default command receives the tokens nobody could account for")
+{
+    auto jobs = 1;
+    auto args = make_args();
+    args.command({"build"}, "build it", [&](nx::args_builder& sub) { sub.arg({"j", "jobs"}, jobs, "how many"); });
+    args.default_command("build");
+
+    SECTION("an empty command line still runs it")
+    {
+        CHECK(args.parse({}).ok());
+        CHECK(args.selected_command() == "build");
+        CHECK(jobs == 1);
+    }
+
+    SECTION("its own options reach it, which is what makes the feature usable at all")
+    {
+        // Dispatching the default command with NOTHING is what this used to do, and it made -j unknown at a
+        // level that does not declare it.
+        CHECK(args.parse({"-j", "8"}).ok());
+        CHECK(args.selected_command() == "build");
+        CHECK(jobs == 8);
+    }
+
+    SECTION("so do its positionals")
+    {
+        auto target = cc::string();
+        auto other = make_args();
+        other.command({"build"}, "build it",
+                      [&](nx::args_builder& sub) { sub.positional("TARGET", target, {.desc = "what to build"}); });
+        other.default_command("build");
+
+        CHECK(other.parse({"nexus"}).ok());
+        CHECK(target == "nexus");
+    }
+
+    SECTION("spelling it out means the same thing")
+    {
+        CHECK(args.parse({"build", "-j", "8"}).ok());
+        CHECK(args.selected_command() == "build");
+        CHECK(jobs == 8);
+    }
+}
+
+TEST("args commands - a default command sees the root's options too, an explicit one only its globals")
+{
+    auto verbose = false;
+    auto jobs = 1;
+
+    auto args = make_args();
+    args.arg({"v", "verbose"}, verbose, "print more"); // deliberately NOT global()
+    args.command({"build"}, "build it", [&](nx::args_builder& sub) { sub.arg({"j", "jobs"}, jobs, "how many"); });
+    args.default_command("build");
+
+    SECTION("unnamed, so the whole root declaration is in play")
+    {
+        // Safe only because the setup check rejects a name both levels claim: nothing here can mean two
+        // things, so there is no competition to resolve.
+        CHECK(args.parse({"-j", "8", "--verbose"}).ok());
+        CHECK(jobs == 8);
+        CHECK(verbose);
+    }
+
+    SECTION("named outright, so only global() crosses the boundary")
+    {
+        verbose = false;
+        auto const r = args.parse({"build", "--verbose"});
+        CHECK(!r.ok());
+        CHECK(!verbose);
+        REQUIRE(r.has_diagnostics());
+        CHECK(r.diagnostics()[0].kind == nx::diagnostic_kind::unknown_option);
+    }
+}
+
+TEST("args commands - a default command receives the tail after a bare --")
+{
+    auto rest = cc::vector<cc::string_view>();
+    auto args = make_args();
+    args.command({"run"}, "run it", [&](nx::args_builder& sub) { sub.rest(rest, "ARGS", "for the program"); });
+    args.default_command("run");
+
+    // The separator belongs to the command nobody named, so it travels with the tail rather than being
+    // rejected by a level that declares nothing to receive it.
+    CHECK(args.parse({"--", "--raw", "-x"}).ok());
+    REQUIRE(rest.size() == 2);
+    CHECK(rest[0] == "--raw");
+    CHECK(rest[1] == "-x");
+}
+
+TEST("args commands - a subcommand inherits the whole behaviour block, not a chosen few")
+{
+    auto jobs = 1;
+    auto args = nx::args({.name = "t", .version = "1.0"});
+    args.no_auto_print();
+    args.no_auto_help();
+    args.no_auto_version();
+    args.command({"build"}, "build it", [&](nx::args_builder& sub) { sub.arg({"j", "jobs"}, jobs, "how many"); });
+
+    // A program that turned the built-in help off owns exiting at EVERY depth.
+    // Inheriting an enumerated subset is how `t build --help` ends up printing a page the program said it
+    // would print itself.
+    auto const help = args.parse({"build", "--help"});
+    CHECK(help.outcome() != nx::args_outcome::help_requested);
+    CHECK(help.outcome() == nx::args_outcome::usage_error);
+
+    auto const version = args.parse({"build", "--version"});
+    CHECK(version.outcome() != nx::args_outcome::version_requested);
+}
+
+TEST("args commands - a builder survives being moved after it is declared")
+{
+    auto jobs = 1;
+    auto quiet = false;
+    auto loud = false;
+
+    // The house pattern is a factory that returns the declaration, so a move happens between declaring and
+    // parsing.
+    // Anything holding the builder's address — a cross-argument rule, a subcommand's parent link — has to
+    // survive it.
+    auto const build = [&]
+    {
+        auto args = make_args();
+        args.arg({"q", "quiet"}, quiet, "say less");
+        args.arg({"l", "loud"}, loud, "say more");
+        args.global();
+        args.command({"build"}, "build it", [&](nx::args_builder& sub) { sub.arg({"j", "jobs"}, jobs, "how many"); });
+        return args;
+    };
+
+    auto args = build();
+    auto moved = cc::move(args);
+
+    // The subcommand's parent link is what a move leaves behind, and a global option is what reads it.
+    CHECK(moved.parse({"build", "-j", "8", "--loud"}).ok());
+    CHECK(jobs == 8);
+    CHECK(loud);
+    CHECK(moved.selected_command() == "build");
+    CHECK(!quiet);
+}

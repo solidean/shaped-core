@@ -17,6 +17,13 @@ namespace nx::impl
 {
 struct setup_checker
 {
-    static args_result run(args_builder const& builder);
+    /// Takes the builder MUTABLY because checking a `default_command` means declaring it: the whole point of
+    /// that check is to compare the root's names against the command's, and a deferred subtree has none
+    /// until it is forced.
+    static args_result run(args_builder& builder);
+
+private:
+    /// The `default_command` half, which needs the command declared before it can compare anything.
+    static void check_default_command(args_builder& builder, args_result& result);
 };
 } // namespace nx::impl

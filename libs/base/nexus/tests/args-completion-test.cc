@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/args/args.hh>
 #include <nexus/args/impl/describe.hh> // the dump is internal, but it is what completion is built on
@@ -194,4 +195,95 @@ TEST("args completion - --completion is answered by the parse")
         auto const r = other.parse({"--completion", "bash"});
         CHECK(r.outcome() == nx::args_outcome::usage_error);
     }
+}
+
+TEST("args completion - the values a type publishes reach every shell")
+{
+    // The dump has always carried them; for a while none of the four emitters read the field, so help said
+    // "one of: fast, slow" and completion offered nothing.
+    auto mode = cc::string();
+    auto jobs = 4;
+
+    auto args = nx::args({.name = "mytool"});
+    args.no_auto_print();
+    args.arg({"j", "jobs"}, jobs, "how many");
+    args.arg({"m", "mode"}, mode, "how to run");
+
+    // A closed set the TYPE publishes, which is what `values()` on an arg_value_trait means.
+    auto color = cc::console::color_mode::automatic;
+    args.arg({"c", "color"}, color, "when to colorize");
+
+    SECTION("bash offers them once the option has been typed")
+    {
+        auto const script = nx::generate_completion(args, nx::completion_shell::bash);
+        CHECK(script.contains("case \"$prev\""));
+        CHECK(script.contains("-c|--color)"));
+        CHECK(script.contains("auto always never"));
+    }
+
+    SECTION("zsh puts them in the spec's action")
+    {
+        auto const script = nx::generate_completion(args, nx::completion_shell::zsh);
+        CHECK(script.contains("(auto always never)"));
+    }
+
+    SECTION("fish lists them on the option")
+    {
+        auto const script = nx::generate_completion(args, nx::completion_shell::fish);
+        CHECK(script.contains("-a 'auto always never'"));
+    }
+
+    SECTION("powershell keys them by every spelling")
+    {
+        auto const script = nx::generate_completion(args, nx::completion_shell::powershell);
+        CHECK(script.contains("$valuesFor"));
+        CHECK(script.contains("'--color' = @('auto', 'always', 'never')"));
+        CHECK(script.contains("'-c' = @('auto', 'always', 'never')"));
+    }
+
+    SECTION("an option with no published set contributes no value rule")
+    {
+        auto const script = nx::generate_completion(args, nx::completion_shell::bash);
+        CHECK(!script.contains("-j|--jobs)"));
+    }
+}
+
+TEST("args completion - complete_hint overrides what a value completes to")
+{
+    auto path = cc::string();
+    auto dir = cc::string();
+    auto color = cc::console::color_mode::automatic;
+
+    auto args = nx::args({.name = "mytool"});
+    args.no_auto_print();
+    args.arg({"f", "file"}, path, {.desc = "where to write", .complete = nx::complete_hint::files});
+    args.arg({"d", "dir"}, dir, {.desc = "where to look", .complete = nx::complete_hint::directories});
+    args.arg({"c", "color"}, color, {.desc = "when to colorize", .complete = nx::complete_hint::none});
+
+    auto const script = nx::generate_completion(args, nx::completion_shell::bash);
+    CHECK(script.contains("compgen -f"));
+    CHECK(script.contains("compgen -d"));
+
+    // `none` means none, even for a type that publishes a set.
+    CHECK(!script.contains("auto always never"));
+}
+
+TEST("args completion - bash gets one function per command, and the root dispatches to them")
+{
+    auto jobs = 4;
+    auto args = nx::args({.name = "mytool"});
+    args.no_auto_print();
+    args.command({"build"}, "build it", [&](nx::args_builder& sub) { sub.arg({"j", "jobs"}, jobs, "how many"); });
+    args.command({"remote"}, "remotes",
+                 [](nx::args_builder& sub) { sub.command({"add"}, "add one", [](nx::args_builder&) {}); });
+
+    auto const script = nx::generate_completion(args, nx::completion_shell::bash);
+
+    CHECK(script.contains("_mytool_complete()"));
+    CHECK(script.contains("_mytool_build_complete()"));
+    CHECK(script.contains("_mytool_remote_add_complete()"));
+
+    // The dispatch is what makes `mytool build <TAB>` reach the build level rather than the root's options.
+    CHECK(script.contains("build) _mytool_build_complete; return;;"));
+    CHECK(script.contains("complete -F _mytool_complete mytool"));
 }

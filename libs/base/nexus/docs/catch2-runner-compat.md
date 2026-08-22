@@ -27,7 +27,8 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 
 * **Unknown arguments are captured, not rejected**, via `allow_unknown`.
   That is what keeps "any other arg is a filter" true, and what lets a test whose name begins with a dash be selected at all.
-* **`--jobs` is bound through an action rather than to an int**, so a bad count still warns and keeps the default instead of failing the run — which is what it has always done.
+* **`--jobs` is bound to the int, with `nx::arg::at_least(0)` on it**, so a bad count now FAILS the run.
+  It used to warn and carry on at the default, which meant a mistyped width ran the whole suite green at a concurrency nobody asked for.
 
 | Flag | Nexus behavior |
 |---|---|
@@ -48,7 +49,7 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 | `--match-names` | Reads the filters as test names only, without the file fallback. Not a Catch2 flag |
 | `--test-args <line>` | A command line for the selected test, tokenized by the [nx::args rules](args.md#the-tokenizer). Not a Catch2 flag |
 | `--` | The same, for everything after it, already split. Not a Catch2 flag |
-| `-h` / `--help` | Prints the generated help and exits 0. Intercepted by `nx::run` before the parser sees it |
+| `-h` / `--help` | Prints the generated help and exits 0. The parse is what recognizes them, so one past a bare `--`, or inside `--test-args`, belongs to the test instead |
 | Any other arg | Treated as a filter (see below) |
 
 ### Filters

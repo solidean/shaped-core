@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/args/fwd.hh>
@@ -59,6 +60,9 @@ namespace nx::impl
 // The shared parsers behind the built-in traits, defined in value.cc so binding an int instantiates nothing.
 bool parse_bool_value(cc::string_view token, bool& out, cc::string& error);
 void bool_values(cc::vector<cc::string>& out);
+
+bool parse_color_mode_value(cc::string_view token, cc::console::color_mode& out, cc::string& error);
+void color_mode_values(cc::vector<cc::string>& out);
 
 bool parse_signed_value(cc::string_view token, i64& out, cc::string& error, i64 min, i64 max);
 bool parse_unsigned_value(cc::string_view token, u64& out, cc::string& error, u64 max);
@@ -174,4 +178,21 @@ struct nx::custom::arg_value_trait<cc::string_view>
         return true;
     }
     static cc::string_view type_name() { return "STRING"; }
+};
+
+/// `--color auto|always|never`, so the mode is a value type rather than three hand-compared strings.
+///
+/// Here rather than in each tool that wants it: a specialization for a clean-core type, written privately in
+/// two different .cc files, is an ODR violation waiting for the two to disagree.
+/// nexus is the lowest library that knows both `cc::console::color_mode` and this trait, so it is the one
+/// place the specialization can live once.
+template <>
+struct nx::custom::arg_value_trait<cc::console::color_mode>
+{
+    static bool parse(cc::string_view token, cc::console::color_mode& out, cc::string& error)
+    {
+        return nx::impl::parse_color_mode_value(token, out, error);
+    }
+    static cc::string_view type_name() { return "MODE"; }
+    static void values(cc::vector<cc::string>& out) { nx::impl::color_mode_values(out); }
 };

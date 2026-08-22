@@ -246,17 +246,33 @@ void apply_fallbacks(bindings_t& bindings, parse_state& state)
         {
             if (auto const value = cc::environment_variable(b.env); value.has_value())
             {
-                auto error = cc::string();
-                if (b.parse_fn != nullptr && !b.parse_fn(b.target, value.value(), error))
+                auto const complain = [&](nx::diagnostic_kind kind, cc::string_view reason)
                 {
-                    auto const reason = error.empty() ? cc::string("the value was not accepted") : error;
                     state.result.add_diagnostic({
-                        .kind = nx::diagnostic_kind::invalid_value,
+                        .kind = kind,
                         .source = {.origin = nx::arg_origin::environment, .name = b.env},
                         .token = value.value(),
                         .arg_name = b.canonical,
-                        .message = cc::format("invalid value '{}' for {}: {}", value.value(), b.canonical, reason),
+                        .message = cc::format("invalid value '{}' for {} (from {}): {}", value.value(), b.canonical,
+                                              b.env, reason),
                     });
+                };
+
+                auto error = cc::string();
+                if (b.parse_fn != nullptr && !b.parse_fn(b.target, value.value(), error))
+                    complain(nx::diagnostic_kind::invalid_value,
+                             error.empty() ? cc::string_view("the value was not accepted") : cc::string_view(error));
+
+                // The rule applies wherever the value came from.
+                // An env fallback that skipped it would let JOBS=0 through while --jobs 0 is rejected,
+                // leaving the variable holding something the declaration says is impossible.
+                else if (b.validate.is_valid())
+                {
+                    auto rule_error = cc::string();
+                    if (!b.validate(b.target, rule_error))
+                        complain(nx::diagnostic_kind::failed_validation, rule_error.empty()
+                                                                             ? cc::string_view(b.validator_description)
+                                                                             : cc::string_view(rule_error));
                 }
 
                 continue;
@@ -314,8 +330,12 @@ nx::impl::binding* nx::impl::parse_engine::find_long(args_builder& builder, cc::
     if (auto* const own = find_long_in(builder._bindings, name, normalize, false); own != nullptr)
         return own;
 
-    for (auto* up = builder._parent; up != nullptr; up = up->_parent)
-        if (auto* const inherited = find_long_in(up->_bindings, name, normalize, true); inherited != nullptr)
+    // `globals_only` is false for exactly one hop: the level we came from stands in for a default command,
+    // so its parent's whole declaration is in play.
+    // Everything else inherits only what `global()` marked.
+    for (auto *down = &builder, *up = builder._parent; up != nullptr; down = up, up = up->_parent)
+        if (auto* const inherited = find_long_in(up->_bindings, name, normalize, !down->_inherits_parent_options);
+            inherited != nullptr)
             return inherited;
 
     return nullptr;
@@ -326,8 +346,8 @@ nx::impl::binding* nx::impl::parse_engine::find_short(args_builder& builder, cha
     if (auto* const own = find_short_in(builder._bindings, c, false); own != nullptr)
         return own;
 
-    for (auto* up = builder._parent; up != nullptr; up = up->_parent)
-        if (auto* const inherited = find_short_in(up->_bindings, c, true); inherited != nullptr)
+    for (auto *down = &builder, *up = builder._parent; up != nullptr; down = up, up = up->_parent)
+        if (auto* const inherited = find_short_in(up->_bindings, c, !down->_inherits_parent_options); inherited != nullptr)
             return inherited;
 
     return nullptr;
@@ -353,8 +373,8 @@ cc::vector<cc::string> nx::impl::parse_engine::suggestion_space(args_builder& bu
     };
 
     collect(builder._bindings, false);
-    for (auto* up = builder._parent; up != nullptr; up = up->_parent)
-        collect(up->_bindings, true);
+    for (auto *down = &builder, *up = builder._parent; up != nullptr; down = up, up = up->_parent)
+        collect(up->_bindings, !down->_inherits_parent_options);
 
     return out;
 }
@@ -377,8 +397,17 @@ nx::args_builder& nx::impl::parse_engine::force_declare(args_builder& builder, c
     if (!node.declared)
     {
         auto child = cc::make_unique<args_builder>(app_info{.name = node.canonical, .description = node.desc});
-        child->_parent = &builder;
+
+        // The whole behaviour block, not a chosen few: a program that turned the built-in help off owns
+        // exiting at every depth, and an enumerated subset is how `app cmd --help` ends up printing a help
+        // page the program said it would print itself.
         child->_auto_print = builder._auto_print;
+        child->_auto_help = builder._auto_help;
+        child->_auto_version = builder._auto_version;
+        child->_auto_completion = builder._auto_completion;
+        child->_auto_help_command = builder._auto_help_command;
+        child->_full_help_on_error = builder._full_help_on_error;
+        child->_stop_at_first_positional = builder._stop_at_first_positional;
         child->_normalize_underscores = builder._normalize_underscores;
         child->_usage_exit_code = builder._usage_exit_code;
 
@@ -390,7 +419,13 @@ nx::args_builder& nx::impl::parse_engine::force_declare(args_builder& builder, c
         node.declared = true;
     }
 
-    return *builder._subtrees[node.subtree];
+    // Re-pointed on every fetch rather than only at declaration: `builder` is movable, and this is the one
+    // pointer a move leaves behind.
+    // Every route to a child runs through here, so the chain is refreshed on the way down and no
+    // hand-written move constructor has to keep up with the member list.
+    auto& child = *builder._subtrees[node.subtree];
+    child._parent = &builder;
+    return child;
 }
 
 nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::string_view const> tokens)
@@ -472,6 +507,23 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
     auto const normalize = builder._normalize_underscores;
     auto options_ended = false;
 
+    // Where the walk gave up and handed the rest of the line to the default command, or -1.
+    //
+    // A default command dispatched with NOTHING is unusable: `app -j 8` would have to report -j as unknown,
+    // because -j belongs to the command nobody named.
+    // So the first token this level cannot account for ends the root's walk instead, and everything from
+    // there is the command's.
+    // What makes that safe rather than a guess is the setup check: a name claimed by both levels is
+    // rejected at declaration, so no token can mean two things.
+    auto deferred_from = isize(-1);
+    auto const defers_to_default = !builder._default_command.empty() && builder._unknown_target == nullptr;
+
+    // The token after an unknown option, when the caller said an unknown one takes a value.
+    // Only a token that does not itself look like an option: nobody declared this flag, so this is the one
+    // guess available, and it is opt-in for exactly that reason.
+    auto const unknown_value_follows = [&](isize index)
+    { return builder._unknown_takes_value && index + 1 < count && !owned[index + 1].starts_with('-'); };
+
     for (auto i = isize(0); i < count; ++i)
     {
         auto const token = owned[i];
@@ -488,6 +540,13 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
 
             if (rest_binding != nullptr)
                 *static_cast<cc::vector<cc::string_view>*>(rest_binding->target) = builder._raw;
+            else if (defers_to_default)
+            {
+                // The separator belongs to the command that was never named, so it travels with the tail
+                // rather than being rejected by a level that declares nothing to receive it.
+                builder._raw.clear();
+                deferred_from = i;
+            }
             else
                 state.add(diagnostic_kind::unexpected_separator, i, token, {},
                           "'--' was given but this program declares nothing to receive what follows it");
@@ -549,7 +608,16 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
                 if (builder._unknown_target != nullptr)
                 {
                     builder._unknown_target->push_back(token);
+                    if (unknown_value_follows(i))
+                        builder._unknown_target->push_back(owned[++i]);
+
                     continue;
+                }
+
+                if (defers_to_default)
+                {
+                    deferred_from = i;
+                    break;
                 }
 
                 auto const space = suggestion_space(builder, true);
@@ -639,7 +707,11 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
             if (!cluster_fully_resolves(builder, token) && find_long(builder, token.subview(1), normalize) != nullptr)
             {
                 if (builder._unknown_target != nullptr)
+                {
                     builder._unknown_target->push_back(token);
+                    if (unknown_value_follows(i))
+                        builder._unknown_target->push_back(owned[++i]);
+                }
                 else
                     state.add(diagnostic_kind::unknown_option, i, token, {},
                               cc::format("'{}' is not a cluster of short options", token),
@@ -658,6 +730,15 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
                     if (builder._unknown_target != nullptr)
                     {
                         builder._unknown_target->push_back(token);
+                        if (unknown_value_follows(i))
+                            builder._unknown_target->push_back(owned[++i]);
+
+                        break;
+                    }
+
+                    if (defers_to_default)
+                    {
+                        deferred_from = i;
                         break;
                     }
 
@@ -721,6 +802,9 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
                 break;
             }
 
+            if (deferred_from >= 0)
+                break;
+
             continue;
         }
 
@@ -749,6 +833,12 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
             auto* const node = find_command(builder, token);
             if (node == nullptr)
             {
+                if (defers_to_default)
+                {
+                    deferred_from = i;
+                    break;
+                }
+
                 auto candidates = cc::vector<cc::string>();
                 for (auto const& c : builder._commands)
                     for (auto const& n : c.names)
@@ -771,6 +861,7 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
             }
 
             auto& child = force_declare(builder, *node);
+            child._inherits_parent_options = false; // named outright, so only `global()` crosses the boundary
             auto child_result = run(child, tail);
 
             builder._command_path.push_back(node->canonical);
@@ -822,13 +913,23 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
     {
         if (!builder._default_command.empty())
         {
-            if (auto* const node = find_command(builder, builder._default_command); node != nullptr)
-            {
-                auto& child = force_declare(builder, *node);
-                auto child_result = run(child, {});
-                builder._command_path.push_back(node->canonical);
-                return child_result;
-            }
+            // Guaranteed to resolve: validate_setup ran first and rejects a default command this program
+            // does not declare, which is why there is no silent do-nothing branch left here.
+            auto* const node = find_command(builder, builder._default_command);
+            auto& child = force_declare(builder, *node);
+            child._inherits_parent_options = true;
+
+            auto tail = cc::vector<cc::string_view>();
+            for (auto j = deferred_from < 0 ? count : deferred_from; j < count; ++j)
+                tail.push_back(owned[j]);
+
+            auto child_result = run(child, tail);
+
+            builder._command_path.push_back(node->canonical);
+            for (auto const& part : child._command_path)
+                builder._command_path.push_back(part);
+
+            return child_result;
         }
         else
             state.add(diagnostic_kind::unknown_command, -1, {}, {}, "a command is required");
@@ -843,7 +944,7 @@ nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
     {
         for (auto const& rule : builder._document_validators)
         {
-            if (rule.check.is_valid() && !rule.check())
+            if (rule.check.is_valid() && !rule.check(builder))
                 state.add(diagnostic_kind::failed_validation, -1, {}, {}, cc::string(rule.description));
         }
     }

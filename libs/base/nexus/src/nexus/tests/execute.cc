@@ -1496,6 +1496,11 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                   "an ASYNC_TEST cannot use no_scheduler: nothing would drive the graph it returns");
         auto& execution = result.executions[i];
         execution.instance = instance;
+
+        // After the copy, never before: arg_views would otherwise point into the SCHEDULE's strings, which
+        // is a live view into a different object for as long as the run lasts.
+        execution.instance.rebuild_arg_views();
+
         if (execution.instance.registry == nullptr)
             execution.instance.registry = schedule.registry; // a hand-built schedule may only name the registry once
 

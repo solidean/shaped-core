@@ -10,8 +10,9 @@
 // =========================================================================================================
 // One declared argument, with its type erased.
 //
-// Stateless thunks are function pointers rather than cc::unique_function: nearly all of them are, and a
-// binding is copied around enough that the difference is worth having.
+// Stateless thunks are function pointers rather than cc::unique_function: nearly all of them are, and one
+// indirect call beats an allocation and a virtual dispatch for something a parse touches per token.
+// The unique_functions below are what make a binding move-only, which is also why nothing copies one.
 //
 // Everything that references a binding does so by INDEX into the builder's vector, never by pointer — the
 // vector reallocates on the next declaration, and a stored pointer would dangle silently.

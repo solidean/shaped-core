@@ -2,15 +2,20 @@
 
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/string/to_string.hh> // cc::byte, whose spelling this mirrors
 
 // =========================================================================================================
 // cc::from_string — one built-in value parsed back out of text.
 //
 // The inverse of cc::to_string, and deliberately no more than that: it accepts exactly what to_string
 // produces and rejects everything else.
-// So there is no leading '+', no surrounding whitespace, no thousands separator, no hex or octal prefix,
-// and bool is "true"/"false" only.
+// So there is no leading '+', no surrounding whitespace, no thousands separator, no hex or octal prefix on
+// a number, bool is "true"/"false" only, and cc::byte is the two UPPERCASE hex digits to_string emits.
 // A caller wanting friendlier input — "yes", "0x1f", " 42 " — trims and dispatches itself.
+//
+// Two of to_string's overloads have no inverse here, on purpose.
+// A pointer is not something to reconstitute from text, and a string parsed out of a string is the identity
+// nobody needs to call.
 //
 // The whole view must be consumed: "12abc" and "12 " fail rather than yielding 12.
 // A value the type cannot hold fails too, so 300 does not become 44 in a signed char.
@@ -28,6 +33,12 @@ namespace cc
 {
 // true/false, exactly — case-sensitive
 [[nodiscard]] bool from_string(string_view s, bool& out);
+
+// exactly one character, whichever it is
+[[nodiscard]] bool from_string(string_view s, char& out);
+
+// "0xAF": the 0x prefix and two uppercase hex digits, exactly as cc::to_string(byte) writes it
+[[nodiscard]] bool from_string(string_view s, byte& out);
 
 // integer types
 // note: does not use the sized versions because this style is _complete_ for users

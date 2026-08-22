@@ -71,6 +71,32 @@ void nx::impl::bool_values(cc::vector<cc::string>& out)
         out.push_back(cc::string(spelling));
 }
 
+namespace
+{
+constexpr cc::string_view color_mode_spellings[] = {"auto", "always", "never"};
+} // namespace
+
+bool nx::impl::parse_color_mode_value(cc::string_view token, cc::console::color_mode& out, cc::string& error)
+{
+    // "auto" rather than "automatic": the CLI spelling is the short one everybody types, and the enumerator
+    // name is not part of the contract.
+    if (token == "auto")
+        return out = cc::console::color_mode::automatic, true;
+    if (token == "always")
+        return out = cc::console::color_mode::always, true;
+    if (token == "never")
+        return out = cc::console::color_mode::never, true;
+
+    error = "expected auto, always or never";
+    return false;
+}
+
+void nx::impl::color_mode_values(cc::vector<cc::string>& out)
+{
+    for (auto const& spelling : color_mode_spellings)
+        out.push_back(cc::string(spelling));
+}
+
 bool nx::impl::parse_signed_value(cc::string_view token, i64& out, cc::string& error, i64 min, i64 max)
 {
     auto const value = cc::from_string<i64>(token);

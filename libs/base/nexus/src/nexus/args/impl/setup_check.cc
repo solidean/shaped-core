@@ -2,6 +2,7 @@
 
 #include <clean-core/string/format.hh>
 #include <nexus/args/builder.hh>
+#include <nexus/args/impl/parse_engine.hh>
 
 namespace
 {
@@ -15,9 +16,59 @@ nx::args_diagnostic setup_error(cc::string message, cc::string arg_name = {})
         .message = cc::move(message),
     };
 }
+
 } // namespace
 
-nx::args_result nx::impl::setup_checker::run(args_builder const& builder)
+// A default command is dispatched with the tokens the root did not consume, so both levels see the same line
+// and a name claimed by both would resolve differently depending on where the walk happened to stop.
+// Checking it means declaring the command, which is why this whole pass takes the builder mutably.
+void nx::impl::setup_checker::check_default_command(args_builder& builder, args_result& result)
+{
+    if (builder._default_command.empty())
+        return;
+
+    auto* const node = parse_engine::find_command(builder, builder._default_command);
+    if (node == nullptr)
+    {
+        result.add_diagnostic(setup_error(
+            cc::format("the default command '{}' is not one of this program's commands", builder._default_command)));
+        return;
+    }
+
+    if (node->is_delegate())
+    {
+        result.add_diagnostic(setup_error(cc::format("the default command '{}' is a delegate, which has no declaration "
+                                                     "to run against an empty command line",
+                                                     builder._default_command)));
+        return;
+    }
+
+    auto const& child = parse_engine::force_declare(builder, *node);
+
+    for (auto const& mine : builder._bindings)
+    {
+        if (mine.kind != binding_kind::option)
+            continue;
+
+        for (auto const& theirs : child._bindings)
+        {
+            if (theirs.kind != binding_kind::option)
+                continue;
+
+            for (auto const& a : mine.names)
+                for (auto const& b : theirs.names)
+                    if (a.is_short == b.is_short && a.text == b.text)
+                        result.add_diagnostic(setup_error(
+                            cc::format("{} is claimed by both this program and its default command '{}', so which one "
+                                       "an unnamed invocation means is undecidable — spell the command out, or rename "
+                                       "one of them",
+                                       a.display(), builder._default_command),
+                            mine.canonical));
+        }
+    }
+}
+
+nx::args_result nx::impl::setup_checker::run(args_builder& builder)
 {
     auto result = args_result();
 
@@ -27,6 +78,22 @@ nx::args_result nx::impl::setup_checker::run(args_builder const& builder)
     for (auto i = isize(0); i < builder._bindings.size(); ++i)
     {
         auto const& b = builder._bindings[i];
+
+        // Neither of these depends on the kind, so both are asked before the kind splits the checks up.
+        if (b.is_global && b.kind != binding_kind::option)
+            result.add_diagnostic(setup_error(cc::format("'{}' is marked global but is not a named option, so there is "
+                                                         "no depth for it to be "
+                                                         "reachable at",
+                                                         b.canonical),
+                                              b.canonical));
+
+        // An env fallback is read through the binding's parse thunk, which an action, a value_action and a
+        // rest binding all lack — so declaring one there would silently do nothing.
+        if (!b.env.empty() && b.parse_fn == nullptr)
+            result.add_diagnostic(setup_error(cc::format("'{}' names the environment variable {} but has nothing to "
+                                                         "parse a value into",
+                                                         b.canonical, b.env),
+                                              b.canonical));
 
         if (b.kind == binding_kind::rest)
         {
@@ -102,6 +169,8 @@ nx::args_result nx::impl::setup_checker::run(args_builder const& builder)
                 for (auto const& b : builder._commands[j].names)
                     if (a.text == b.text)
                         result.add_diagnostic(setup_error(cc::format("two commands both claim '{}'", a.text)));
+
+    check_default_command(builder, result);
 
     if (variadic_positionals > 1)
         result.add_diagnostic(setup_error("more than one variadic positional was declared, so how to split the values "

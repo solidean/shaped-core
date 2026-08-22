@@ -136,6 +136,7 @@ struct cli_state
     cc::vector<cc::string_view> unknown;
     cc::vector<cc::string_view> passthrough;
     cc::string test_args_line;
+    bool help = false;
 };
 
 // The whole CLI, in one place.
@@ -165,10 +166,10 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.positional("FILTER", state.positionals,
                     {.desc = "run only tests whose name contains this, or whose source file matches it"});
 
-    // Documented rather than left to the built-ins, because nx::run intercepts both before this parser ever
-    // sees them — it is the harness that decides to print and exit.
-    args.action({"h"}, [] {}, "show this help and exit");
-    args.action({"help"}, [] {}, "show this help and exit");
+    // Declared rather than left to the built-ins, because the harness decides to print and exit — but the
+    // PARSER is what recognizes them, so `--` and --test-args can carry a --help through to the test.
+    args.action({"h"}, [&state] { state.help = true; }, "show this help and exit");
+    args.action({"help"}, [&state] { state.help = true; }, "show this help and exit");
 
     args.arg({"v"}, config.verbose, "print the schedule before running it");
     args.arg({"c"}, config.section_filters, {.desc = "run only sections matching this name", .metavar = "NAME"});
@@ -299,6 +300,8 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
 
     for (auto& token : nx::args_tokenize(state.test_args_line))
         config.test_args.push_back(cc::move(token));
+
+    config.help_requested = state.help;
 
     config.is_catch2_xml_discovery = state.has_list_tests && state.has_xml_reporter;
     config.report_catch2_xml_results = state.has_xml_reporter && !state.has_list_tests;
@@ -515,13 +518,17 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
     // Taken any earlier they would point into a moved-from buffer, and cc::string's small-string
     // optimization makes that the kind of dangling nothing reports.
     for (auto& instance : schedule.instances)
-    {
-        instance.arg_views.reserve(instance.args.size());
-        for (auto const& arg : instance.args)
-            instance.arg_views.push_back(arg);
-    }
+        instance.rebuild_arg_views();
 
     return schedule;
+}
+
+void nx::test_instance::rebuild_arg_views()
+{
+    arg_views.clear();
+    arg_views.reserve(args.size());
+    for (auto const& arg : args)
+        arg_views.push_back(arg);
 }
 
 void nx::test_schedule::print() const

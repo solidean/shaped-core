@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
@@ -48,14 +49,27 @@ struct nx::arg_validator
 };
 
 /// One rule over the whole command line, evaluated after every argument has been bound.
+///
+/// The rule is HANDED the builder rather than capturing it: a lambda holding `this` would dangle the moment
+/// the builder moved, and building a command line in a factory that returns one is the house pattern.
 struct nx::document_validator
 {
     cc::string description;
-    cc::unique_function<bool()> check;
+    cc::unique_function<bool(args_builder const&)> check;
 };
 
 namespace nx::arg::impl
 {
+/// A bound that the argument's own type cannot represent makes the rule silently unsatisfiable — an i8
+/// argument with `in_range(1, 256)` would enforce `1 <= v <= 0` while help still advertises 256.
+/// A contract violation, so it asserts: the declaration is the program's own text, not the user's.
+template <class T, class Bound>
+void check_bound_fits(Bound const& bound)
+{
+    if constexpr (requires { bool(T(bound) == bound); })
+        CC_ASSERT(T(bound) == bound, "nx::arg: this bound cannot be represented in the argument's type");
+}
+
 /// The lazy half of the design: a factory returns a spec, and the spec becomes an `arg_validator<T>` only
 /// once `T` is known — which is where the argument is declared, not where the factory was called.
 /// Without it, `nx::arg::in_range(1, 256)` would have to guess whether it bounds an int or a float.
@@ -110,6 +124,9 @@ struct in_range_spec : validator_spec<in_range_spec<Lo, Hi>>
     template <class T>
     [[nodiscard]] nx::arg_validator<T> make() const
     {
+        check_bound_fits<T>(lo);
+        check_bound_fits<T>(hi);
+
         return {
             .description = cc::format("must be in [{}, {}]", lo, hi),
             .check = [lo = lo, hi = hi](T const& v, cc::string&) { return !(v < T(lo)) && !(T(hi) < v); },
@@ -125,6 +142,8 @@ struct at_least_spec : validator_spec<at_least_spec<Bound>>
     template <class T>
     [[nodiscard]] nx::arg_validator<T> make() const
     {
+        check_bound_fits<T>(bound);
+
         return {
             .description = cc::format("must be at least {}", bound),
             .check = [bound = bound](T const& v, cc::string&) { return !(v < T(bound)); },
@@ -140,6 +159,8 @@ struct at_most_spec : validator_spec<at_most_spec<Bound>>
     template <class T>
     [[nodiscard]] nx::arg_validator<T> make() const
     {
+        check_bound_fits<T>(bound);
+
         return {
             .description = cc::format("must be at most {}", bound),
             .check = [bound = bound](T const& v, cc::string&) { return !(T(bound) < v); },

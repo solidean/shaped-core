@@ -234,7 +234,14 @@ public:
     args_builder& at_least_one_of(cc::span<cc::string_view const> names);
 
     /// Collect unrecognized tokens instead of failing on them — for a wrapper that forwards them onward.
-    args_builder& allow_unknown(cc::vector<cc::string_view>& target);
+    ///
+    /// `unknown_takes_value` decides what happens to the token AFTER an unknown option, which is genuinely
+    /// ambiguous: nobody declared `--mystery`, so nothing knows whether it takes a value.
+    /// Left false, `--mystery value` collects only `--mystery` and `value` goes on as a positional, which is
+    /// what a runner wants when every stray word is a filter.
+    /// Set true, a following token that does not itself start with `-` is collected too, which is what a
+    /// wrapper forwarding a command line onward wants — there the flag and its value must stay together.
+    args_builder& allow_unknown(cc::vector<cc::string_view>& target, bool unknown_takes_value = false);
 
     /// Expand `@file` tokens into the tokens that file contains, before parsing.
     ///
@@ -280,7 +287,10 @@ public:
     /// Check the DECLARATION for contradictions — duplicate names, two variadic positionals, and so on.
     /// Runs inside every parse as well, in every preset, because a shipped binary must catch it too.
     /// Worth calling directly from a program's own test suite, which is the place it should be caught.
-    [[nodiscard]] args_result validate_setup() const;
+    ///
+    /// Not const, because a `default_command` can only be checked against the root by declaring it, and
+    /// declaring a subtree is a mutation.
+    [[nodiscard]] args_result validate_setup();
 
     // =====================================================================================================
     // Results and rendering
@@ -341,10 +351,20 @@ private:
     /// Set when this builder is a subcommand's, so a `global()` option declared above is still reachable.
     /// A pointer rather than copied bindings, because a binding owns move-only thunks and, more to the
     /// point, must keep writing the SAME variable the parent bound.
+    ///
+    /// Re-pointed by force_declare on EVERY fetch, not only the first: a builder is movable, and this is the
+    /// one pointer a move would leave behind.
+    /// Every path to a child goes through force_declare, so refreshing it there keeps the chain correct
+    /// without a hand-written move constructor that a new member could silently fall out of.
     args_builder* _parent = nullptr;
 
+    /// True while this builder is standing in for a `default_command`: the tokens were typed without naming
+    /// it, so the root's own options must resolve here too, not only the ones marked `global()`.
+    /// Safe precisely because a name claimed by both levels is a setup error.
+    bool _inherits_parent_options = false;
+
     cc::vector<impl::command_node> _commands;
-    cc::vector<cc::unique_ptr<args_builder>> _subtrees; // owned by the ROOT, indexed by command_node::subtree
+    cc::vector<cc::unique_ptr<args_builder>> _subtrees; // owned by this level, indexed by command_node::subtree
     cc::vector<cc::string> _command_path;
     cc::string _default_command;
     bool _auto_help_command = true;
@@ -361,6 +381,7 @@ private:
     cc::vector<cc::string_view> _tokens;
     cc::vector<cc::string_view> _raw;
     cc::vector<cc::string_view>* _unknown_target = nullptr;
+    bool _unknown_takes_value = false;
 
     bool _stop_at_first_positional = false;
     bool _response_files = false;

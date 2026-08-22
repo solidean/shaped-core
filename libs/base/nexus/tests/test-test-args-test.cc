@@ -144,3 +144,49 @@ TEST("test args - the views a body reads point at the instance's own storage")
     for (auto i = isize(0); i < instance.args.size(); ++i)
         CHECK(instance.arg_views[i] == cc::string_view(instance.args[i]));
 }
+
+// --- where the harness's command line stops being the harness's ----------------------------------------
+
+TEST("test args - a --help past the separator belongs to the test, not to nexus")
+{
+    // nx::run used to scan the whole argv for --help, so this printed nexus's own help page and exited
+    // before the test ran at all.
+    // The PARSE is the only reading that knows where the tail begins.
+    auto const config = parse({"--", "--help", "--version"});
+
+    CHECK(!config.help_requested);
+    CHECK(!config.parse_failed);
+    REQUIRE(config.test_args.size() == 2);
+    CHECK(config.test_args[0] == "--help");
+    CHECK(config.test_args[1] == "--version");
+}
+
+TEST("test args - a --help inside --test-args belongs to the test too")
+{
+    auto const config = parse({"--test-args", "--help -h"});
+
+    CHECK(!config.help_requested);
+    REQUIRE(config.test_args.size() == 2);
+    CHECK(config.test_args[0] == "--help");
+    CHECK(config.test_args[1] == "-h");
+}
+
+TEST("test args - a --help of the harness's own is still the harness's")
+{
+    for (auto const* const spelling : {"--help", "-h"})
+    {
+        auto const config = parse({spelling});
+        CHECK(config.help_requested);
+        CHECK(!config.parse_failed);
+    }
+}
+
+TEST("test args - the filters are untouched by a tail meant for the test")
+{
+    auto const config = parse({"my-test", "--", "--help"});
+
+    REQUIRE(config.filters.size() == 1);
+    CHECK(config.filters[0] == "my-test");
+    CHECK(!config.help_requested);
+    REQUIRE(config.test_args.size() == 1);
+}
