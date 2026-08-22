@@ -146,12 +146,16 @@ cc::string_view nx::program_name()
             start = i + 1;
 
     auto name = path.subview(start);
-    if (name.size() > 4)
-    {
-        auto const tail = name.subview(name.size() - 4);
-        if (tail == ".exe" || tail == ".EXE")
-            name = name.subview({.start = 0, .end = name.size() - 4});
-    }
+
+    // A packaging suffix is how the platform ships the program, not part of what it is called: the same
+    // target is `nexus-test` on Linux, `nexus-test.exe` on Windows and `nexus-test.js` under Emscripten.
+    // Stripping it is what lets one JUnit report be compared against another's.
+    for (auto const suffix : {cc::string_view(".exe"), cc::string_view(".EXE"), cc::string_view(".js")})
+        if (name.size() > suffix.size() && name.subview(name.size() - suffix.size()) == suffix)
+        {
+            name = name.subview({.start = 0, .end = name.size() - suffix.size()});
+            break;
+        }
 
     return name;
 }

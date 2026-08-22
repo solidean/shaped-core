@@ -284,7 +284,7 @@ if (auto const r = args.parse(argc, argv); r.should_exit())    // --help is neit
 #include <nexus/args/ambient.hh>          // light: no parser comes with it
 nx::test_args();                          // the running test's declared args; empty if it declared none
 nx::process_args();                       // the process's own — no fallback between the two, ask by name
-nx::program_name();                       // basename of argv[0], no directory, no .exe
+nx::program_name();                       // basename of argv[0], no directory, no .exe / .js
 nx::has_arg("--trace") / nx::get_arg<int>("budget")   // DEBUG only, over PROCESS args: guesses, never fails
 ```
 

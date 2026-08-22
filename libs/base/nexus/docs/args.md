@@ -333,7 +333,7 @@ What this process was invoked with, answerable from anywhere:
 nx::test_args();       // the running test's declared arguments, empty when it declared none
 nx::process_args();    // the process's own
 nx::program_path();    // argv[0]
-nx::program_name();    // its basename, without a directory or .exe
+nx::program_name();    // its basename, without a directory or the platform's suffix (.exe, .js)
 ```
 
 **Two sources, two names, and no fallback between them.**

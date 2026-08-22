@@ -34,7 +34,10 @@ namespace nx
 /// argv[0], or empty when the platform cannot say.
 [[nodiscard]] cc::string_view program_path();
 
-/// The basename of `program_path()`, without a directory or a trailing `.exe`.
+/// The basename of `program_path()`, without a directory and without the suffix the platform packages it
+/// with — `.exe` on Windows, `.js` under Emscripten.
+/// So one target answers the same everywhere, which is what makes a JUnit suite name comparable across a
+/// CI matrix.
 [[nodiscard]] cc::string_view program_name();
 
 // =========================================================================================================

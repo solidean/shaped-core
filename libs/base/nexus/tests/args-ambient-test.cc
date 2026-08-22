@@ -18,10 +18,12 @@ TEST("args ambient - the program is identified, or honestly not")
     CHECK(!nx::program_path().empty());
     CHECK(nx::program_name() == "nexus-test");
 
-    // The basename, with no directory and no .exe, whatever the platform spells it as.
+    // The basename, with no directory and no packaging suffix, whatever the platform spells it as — which
+    // is why the expectation above can be one literal on all of them.
     CHECK(!nx::program_name().contains('/'));
     CHECK(!nx::program_name().contains('\\'));
     CHECK(!nx::program_name().contains(".exe"));
+    CHECK(!nx::program_name().contains(".js"));
 }
 
 TEST("args ambient - argv[0] is not one of the arguments")
