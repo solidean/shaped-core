@@ -29,6 +29,9 @@ extern cc::atomic<int> g_probe_park_store;
 extern cc::atomic<int> g_probe_wake_skip;
 extern cc::atomic<int> g_probe_found_ready;
 extern cc::atomic<int> g_probe_polls;
+extern cc::atomic<cc::u64> g_probe_park_tls;
+extern cc::atomic<cc::u64> g_probe_park_slot;
+extern cc::atomic<cc::u64> g_probe_last_installed;
 } // namespace cc::impl
 
 namespace
@@ -343,10 +346,9 @@ REC_TEST("record/async-scope - PROBE arm")
                     //   ambient null      -> nothing was installed on the resuming thread
                     //   ambient non-null, scope null -> a DIFFERENT chain was installed (the entry context)
                     //   ambient equal     -> the fix held
-                    *out = cc::format("in[tid={} amb={} scope={}] out[tid={} amb={} scope={}] same_amb={}",
-                                      u64(tid_in), amb_in != nullptr, s_in != nullptr ? s_in->name : "<null>",
-                                      u64(tid_out), amb_out != nullptr, s_out != nullptr ? s_out->name : "<null>",
-                                      amb_in == amb_out);
+                    *out = cc::format("in[tid={} amb={:#x} scope={}] out[tid={} amb={:#x} scope={}]",
+                                      u64(tid_in), u64(amb_in), s_in != nullptr ? s_in->name : "<null>",
+                                      u64(tid_out), u64(amb_out), s_out != nullptr ? s_out->name : "<null>");
                     co_return 7;
                 }(gate, &report);
 
@@ -376,6 +378,10 @@ REC_TEST("record/async-scope - PROBE arm")
                     cc::impl::g_probe_wake_skip.load(cc::memory_order_relaxed),
                     cc::impl::g_probe_found_ready.load(cc::memory_order_relaxed),
                     cc::impl::g_probe_polls.load(cc::memory_order_relaxed));
+        cc::println("      park_tls={:#x} park_slot={:#x} last_installed={:#x}",
+                    cc::impl::g_probe_park_tls.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_park_slot.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_last_installed.load(cc::memory_order_relaxed));
     }
     CHECK(true);
 }

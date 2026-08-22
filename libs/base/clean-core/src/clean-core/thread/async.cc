@@ -17,6 +17,9 @@ cc::atomic<int> g_probe_park_store = {0};
 cc::atomic<int> g_probe_wake_skip = {0};
 cc::atomic<int> g_probe_found_ready = {0};
 cc::atomic<int> g_probe_polls = {0};
+cc::atomic<cc::u64> g_probe_park_tls = {0};      // what the park stored
+cc::atomic<cc::u64> g_probe_park_slot = {0};     // the node slot it stored into, after the store
+cc::atomic<cc::u64> g_probe_last_installed = {0};// what the most recent poll installed
 } // namespace cc::impl
 
 using namespace cc::primitive_defines;
@@ -838,6 +841,8 @@ void cc::async_node_base::poll()
     // That is the eager depth-first drive: a dependency polled inline belongs to the subtree driving it, and a 512-node chain pays ONE install rather than 512.
     impl::g_probe_polls.fetch_add(1, cc::memory_order_relaxed);
     void* const installed = ambient();
+    if (installed != nullptr)
+        impl::g_probe_last_installed.store(u64(installed), cc::memory_order_relaxed);
     impl::async_ambient_poll_scope const ambient_scope(installed);
 
     async_context_base ctx;
@@ -904,7 +909,9 @@ void cc::async_node_base::poll()
                     // popping a link the thread no longer has installed.
                     // Where the body opened none the two are the same word, and async_ambient_store early-outs on that.
                     impl::g_probe_park_store.fetch_add(1, cc::memory_order_relaxed);
+                    impl::g_probe_park_tls.store(u64(impl::async_tls().ambient), cc::memory_order_relaxed);
                     impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+                    impl::g_probe_park_slot.store(u64(ambient()), cc::memory_order_relaxed);
 
                     store_state(async_node_state::blocked);
                     parked = true;
