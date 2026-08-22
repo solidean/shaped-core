@@ -492,6 +492,7 @@ if(SC_BUILD_TESTS)
 
         tests/record/record-test.cc
         tests/record/record-domain-test.cc
+        tests/record/record-console-test.cc
         tests/record/record-frontends-test.cc
         tests/record/record-query-test.cc
         tests/record/record-serialize-test.cc

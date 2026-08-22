@@ -125,7 +125,17 @@ private:
 };
 
 bucketing_listener g_bucketing;
-cc::rec::console_listener g_console;
+
+/// Elapsed rather than wall-clock time, and no source locations.
+///
+/// A test run's question is "how far into the run", not "what time is it": the run is seconds long and its output is
+/// read next to the failure it explains.
+/// Passing options explicitly also keeps `CC_LOG_TIME` and friends out of a suite's output, so a developer who set
+/// them for an application does not silently change what the test binaries print.
+cc::rec::console_listener g_console({
+    .min_level = cc::rec::level::info,
+    .time = cc::rec::console_time::elapsed,
+});
 
 /// Failing tests' recordings, already serialized, waiting for a directory to be written into.
 ///

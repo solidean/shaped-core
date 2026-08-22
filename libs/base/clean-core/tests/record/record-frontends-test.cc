@@ -366,7 +366,7 @@ REC_TEST("record/console - only log events reach the terminal, in timestamp orde
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto console = cc::rec::console_listener({.min_level = cc::rec::level::warning, .show_time = false});
+    auto console = cc::rec::console_listener({.min_level = cc::rec::level::warning, .time = cc::rec::console_time::none});
     {
         scoped_listener const reg(console);
 

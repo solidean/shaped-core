@@ -413,6 +413,8 @@ struct sentinel;
 struct offset_size;
 struct start_end;
 
+struct calendar_time; // one wall-clock instant, split into the fields a person reads (common/time.hh)
+
 
 //
 // Recording

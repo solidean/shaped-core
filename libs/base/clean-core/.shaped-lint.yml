@@ -25,6 +25,11 @@ rules:
       - src/clean-core/thread/threaded_actor.hh
 
   - kind: allow-include
+    value: <ctime>
+    reason: localtime_s / localtime_r are the only portable route to a LOCAL calendar breakdown, and <chrono>'s zoned_time wants a tzdb
+    files: src/clean-core/common/time.cc
+
+  - kind: allow-include
     value: <chrono>
     reason: cc::current_time_steady_secs replaces it repo-wide; <chrono> is the standard library's most expensive header on MSVC (1.16 s, 148 files, via <format> and <xutility>) so it must never reach a header — see docs/notes/build-times.md. thread.cc is the one other .cc that needs it: std::this_thread::sleep_for takes a duration, and there is no portable way to spell one without <chrono>
     files: [src/clean-core/common/time.cc, src/clean-core/thread/thread.cc]

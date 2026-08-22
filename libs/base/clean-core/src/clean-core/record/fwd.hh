@@ -212,6 +212,7 @@ struct listener;
 struct listener_handle;
 struct console_listener;
 struct console_options;
+enum class console_time; // which clock a console line is stamped with (record/console_listener.hh)
 template <class Derived>
 struct event_listener;
 
