@@ -87,6 +87,12 @@ inline constexpr u32 serialized_version = 4;
 /// serialize, then write to a file.
 [[nodiscard]] cc::result<cc::unit> save_recording(rec::recording const& r, cc::string_view path);
 
+/// Write bytes that `serialize` already produced.
+///
+/// The split exists for a caller that must serialize EARLY and write late: a recording holds chunk references, so it
+/// cannot outlive the recorder that owns the pool, while the file it belongs in may not be known until afterwards.
+[[nodiscard]] cc::result<cc::unit> save_serialized_recording(cc::span<byte const> bytes, cc::string_view path);
+
 /// Rebuilds a recording from bytes, owning everything its events point at.
 [[nodiscard]] cc::result<rec::loaded_recording> deserialize(cc::span<byte const> bytes);
 

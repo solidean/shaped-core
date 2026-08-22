@@ -114,11 +114,15 @@ That is what `--record` is for: chasing a failure you did not anticipate, usuall
 A test that fails without a bucket is not left with nothing, though.
 The ambient deltas are in the stream either way, so a crash dump or a whole-run capture still carries the attribution — [systems/recording](../../clean-core/docs/systems/recording.md) has that half.
 
+A test configured `owns_recorder` ends the run's recorder mid-suite, and every failing test's recording is serialized at that moment rather than dropped.
+A recording holds chunk references and cannot outlive the pool, so the BYTES are what carry across the handover — without that, one such test anywhere in a binary means no dump is ever written for it.
+
 They are written **at the end of the run**, not when the test fails.
 A test finishing does not mean its events are drained, since the actor is a millisecond behind.
 Flushing per test would be a process-wide drain thousands of times over, for a file nobody reads until the run is over.
 
 Load one with `cc::rec::load_recording`; [systems/recording-formats](../../clean-core/docs/systems/recording-formats.md) is the format.
+CI uploads them inside `ci-logs.zip` — [docs/guides/ci.md](../../../../docs/guides/ci.md) — which is what makes a runner-only failure diagnosable.
 
 ---
 

@@ -145,8 +145,11 @@ cc::vector<byte> cc::rec::serialize(cc::rec::recording const& r)
 
 cc::result<cc::unit> cc::rec::save_recording(cc::rec::recording const& r, cc::string_view path)
 {
-    auto const bytes = rec::serialize(r);
+    return rec::save_serialized_recording(rec::serialize(r), path);
+}
 
+cc::result<cc::unit> cc::rec::save_serialized_recording(cc::span<byte const> bytes, cc::string_view path)
+{
     auto file = cc::impl::native_file::open(path, cc::impl::file_mode::write_truncate);
     CC_RETURN_IF_ERROR(file);
 

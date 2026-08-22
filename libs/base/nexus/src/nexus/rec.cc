@@ -121,6 +121,14 @@ private:
 bucketing_listener g_bucketing;
 cc::rec::console_listener g_console;
 
+/// Failing tests' recordings, already serialized, waiting for a directory to be written into.
+///
+/// A recording holds CHUNK REFERENCES, so it cannot survive the `shutdown()` that ends a run — and a test configured
+/// `owns_recorder` ends the run's recorder mid-suite, with no log directory to write to yet.
+/// Serializing at that moment and keeping the BYTES is what stops a handover from destroying the evidence of every
+/// test that had already failed; without it a suite containing one such test can never produce a dump.
+cc::vector<cc::pair<cc::string, cc::vector<byte>>> g_pending_dumps;
+
 cc::rec::listener_handle g_bucketing_handle;
 cc::rec::listener_handle g_console_handle;
 bool g_active = false;
@@ -167,6 +175,8 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
 
     // Scoped, and emphatically so: a recording holds CHUNK REFERENCES, and releasing one after shutdown() has deleted
     // the pool is a use-after-free with nothing between it and a corrupted heap.
+    // Serializing here rather than at the write is the same constraint one step earlier — the bytes outlive the pool,
+    // the recording cannot, and a handover reaches this point with nowhere to write yet.
     {
         cc::vector<cc::pair<cc::string_view, cc::rec::recording>> dumps;
         g_buckets.lock(
@@ -178,13 +188,19 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
                 t.by_trace.clear();
             });
 
-        if (!log_dir.empty())
-            for (auto const& [name, r] : dumps)
-            {
-                auto const path = cc::format("{}/test-recording-{}.ccrec", log_dir, sanitized(name));
-                if (auto const written = cc::rec::save_recording(r, path); !written.has_value())
-                    cc::eprintln("nexus: could not write the recording for `{}': {}", name, written.error().to_string());
-            }
+        for (auto const& [name, r] : dumps)
+            g_pending_dumps.push_back({cc::string(name), cc::rec::serialize(r)});
+    }
+
+    if (!log_dir.empty())
+    {
+        for (auto const& [name, bytes] : g_pending_dumps)
+        {
+            auto const path = cc::format("{}/test-recording-{}.ccrec", log_dir, sanitized(name));
+            if (auto const written = cc::rec::save_serialized_recording(bytes, path); !written.has_value())
+                cc::eprintln("nexus: could not write the recording for `{}': {}", name, written.error().to_string());
+        }
+        g_pending_dumps.clear();
     }
 
     cc::rec::unregister_listener(g_bucketing_handle);

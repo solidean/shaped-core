@@ -62,6 +62,9 @@ Each job therefore uploads a `<platform>-diagnostics` artifact — always, even 
   Produced by the global `dev.py --collect-logs`, which fires on exit regardless of pass or fail.
   It is set on *both* the build and test steps so either failure mode is covered.
   The logs under `build/<preset>/run-logs/` accumulate across configure → build → test, so the test step's archive is a strict superset of the build step's.
+  It also carries the `*.ccrec` recordings nexus writes for a failing `nx::config::recorded` test — see [nexus/docs/recording.md](../../libs/base/nexus/docs/recording.md).
+  That is how a failure reproducible only on a remote runner gets diagnosed rather than guessed at: the test's own event stream comes back with the run.
+  Load one with `cc::rec::load_recording`; the events a test logged also print through the console listener, so `run-logs/` alone often answers the question.
   And when the build fails the test step is skipped, leaving the build step's archive — the one with the failure logs — as the uploaded artifact.
 
 To use them locally, download the artifact into `build/.tmp/<name>/` and point `build_diag` / `test_diag` **straight at the archive**.

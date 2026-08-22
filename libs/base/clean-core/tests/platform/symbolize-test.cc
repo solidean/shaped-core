@@ -1,7 +1,9 @@
+#include <clean-core/common/log.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/module_table.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/symbolize.hh>
+#include <clean-core/record/value.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
@@ -102,7 +104,7 @@ TEST("symbolize - a captured frame resolves to a source location")
     CHECK(with_line > 0);
 }
 
-TEST("symbolize - this test's own name is in its own stack")
+TEST("symbolize - this test's own name is in its own stack", nx::config::recorded)
 {
     if (!build_has_symbols() || !cc::stack_capture_available())
         SKIP("this build has no symbols");
@@ -113,12 +115,25 @@ TEST("symbolize - this test's own name is in its own stack")
 
     cc::symbolizer sym;
 
+    // Recorded, not just asserted.
+    // A walk that comes back without the helper is a claim about frames nobody can see from the check alone, and this
+    // has failed on arm64 CI — a machine no one attaches a debugger to.
+    // `nx::config::recorded` means a failure writes the whole stream to `test-recording-*.ccrec` beside the JUnit XML,
+    // and CI uploads it, so the next red run explains itself instead of needing another guess.
+    CC_RECORD("frames_walked", count);
+    CC_RECORD("helper_address", reinterpret_cast<void const*>(&capture_here_for_symbolize_test));
+
     // The helper is CC_DONT_INLINE, so it has a frame, and its name is unusual enough that finding it proves the
     // resolution is real rather than plausible-looking.
     auto found = false;
     for (isize i = 0; i < count; ++i)
-        if (sym.resolve(frames[i]).function.contains("capture_here_for_symbolize_test"))
+    {
+        auto const& info = sym.resolve(frames[i]);
+        CC_LOG_INFO("frame {}: {} -> {}", i, frames[i], info.to_string());
+
+        if (info.function.contains("capture_here_for_symbolize_test"))
             found = true;
+    }
 
     CHECK(found);
 }

@@ -1174,6 +1174,8 @@ Persisting one, and the crash dump (see [systems/recording-formats](docs/systems
 #include <clean-core/record/serialize.hh>
 cc::rec::serialize(rec);                   // -> cc::vector<byte>, self-describing; NO stability guarantee
 cc::rec::save_recording(rec, path);        // -> cc::result<cc::unit>
+cc::rec::save_serialized_recording(bytes, path); // write bytes serialize() already made — for serialize-early/write-late,
+                                           // since a recording holds chunk refs and cannot outlive the recorder
 auto loaded = cc::rec::load_recording(path);  // -> cc::result<loaded_recording>; OWNS what its events point at
 loaded.value().events();                   // -> recording const&; algebra + queries work identically
 loaded.value().is_truncated(); loaded.value().cycles_per_second(); loaded.value().dumped_at_wall_secs();
