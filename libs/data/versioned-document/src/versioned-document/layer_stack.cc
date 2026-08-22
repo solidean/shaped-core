@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 
 using namespace cc::primitive_defines;
 
@@ -199,6 +200,9 @@ void vdoc::layer_stack::impl_discard_pending_changes()
 
 void vdoc::layer_stack::rebuild(parse_policy const& policy, parse_report& report, change_summary& out_changes)
 {
+    // The full-rebuild path, which is what an incremental apply falls back to — worth telling apart in a trace.
+    CC_RECORD_SCOPE("vdoc.layer_stack.rebuild");
+
     out_changes.clear();
 
     impl_materialize({});
@@ -248,6 +252,8 @@ void vdoc::layer_stack::apply(parse_policy const& policy,
                               layered_apply_options options,
                               layered_apply_stats* stats)
 {
+    CC_RECORD_SCOPE("vdoc.layer_stack.apply");
+
     out_changes.clear();
     if (stats != nullptr)
         *stats = {};

@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/store.hh>
 
@@ -22,6 +23,9 @@ namespace
 
 cc::result<recovery_result> apply_recovery(store_writer& writer, recovery_job const& job)
 {
+    // The untrusted boundary: every op here was verified before it got this far, and that verification is the cost.
+    CC_RECORD_SCOPE("vdoc.file.recovery");
+
     if (job.ops.empty() && job.demoted_snapshots.empty())
         return outcome_of(job); // nothing to write performs no I/O at all
 

@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/store.hh>
 
@@ -10,6 +11,8 @@ namespace vdoc::file::impl
 {
 cc::result<reclaim_result> apply_reclaim(store_writer& writer, reclaim_job const& job)
 {
+    CC_RECORD_SCOPE("vdoc.file.reclaim");
+
     if (job.removed_assets.empty() && job.removed_blobs.empty())
         return reclaim_result{}; // nothing to collect performs no I/O at all
 
