@@ -406,3 +406,75 @@ REC_TEST("record/log - an error carries the stack it was logged from")
     REQUIRE(frame_count >= 0); // the event itself must be there either way
     CHECK((frame_count > 0) == cc::stack_capture_available());
 }
+
+REC_TEST("record/scope - CC_RECORD_SCOPE_IF opens only when its condition holds")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        {
+            CC_RECORD_SCOPE_IF(true, "taken");
+        }
+        {
+            CC_RECORD_SCOPE_IF(false, "skipped");
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    CHECK(c.count_named("taken") == 2); // one begin, one end
+    CHECK(c.count_named("skipped") == 0);
+}
+
+REC_TEST("record/scope - a scope that opened still closes, whatever the condition would say later")
+{
+    // The condition is read once, at entry.
+    // A guard that re-read it on the way out could close a scope it never opened, or leave one open forever — and
+    // an unbalanced pair is a wrong flame graph rather than a diagnostic.
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        auto still_true = true;
+        {
+            CC_RECORD_SCOPE_IF(still_true, "closes-anyway");
+            still_true = false;
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    CHECK(c.count_named("closes-anyway") == 2);
+}
+
+REC_TEST("record/scope - a conditional scope nests inside an unconditional one")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        {
+            CC_RECORD_SCOPE("outer");
+            {
+                CC_RECORD_SCOPE_IF(false, "inner-skipped");
+                {
+                    CC_RECORD_SCOPE("inner-kept");
+                }
+            }
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    // A skipped scope must not consume a depth level, or everything under it is re-nested one step too deep.
+    CHECK(c.count_named("outer") == 2);
+    CHECK(c.count_named("inner-skipped") == 0);
+    CHECK(c.count_named("inner-kept") == 2);
+}
