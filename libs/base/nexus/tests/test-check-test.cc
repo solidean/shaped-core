@@ -1290,12 +1290,10 @@ TEST("check - a test stops after too many failed checks", no_scheduler)
 
     CHECK(exec.count_failed_tests() == 1);
 
-    // Far fewer than the 500 it would have reported, and bounded rather than merely smaller.
-    CHECK(exec.count_failed_checks() < 100);
-    CHECK(reached < 100);
-
-    // The body really did stop: the loop never reached its last iteration.
-    CHECK(reached < 500);
+    // The cap itself, not merely "fewer than 500": the thirtieth failure is the one that throws, so thirty are
+    // reported and the body never completes the iteration that raised it.
+    CHECK(exec.count_failed_checks() == 30);
+    CHECK(reached == 29);
 }
 
 TEST("check - the cap is a whole-test budget, not a per-section one", no_scheduler)
@@ -1325,7 +1323,7 @@ TEST("check - the cap is a whole-test budget, not a per-section one", no_schedul
     auto exec = nx::execute_tests(schedule, {});
 
     CHECK(exec.count_failed_tests() == 1);
-    CHECK(exec.count_failed_checks() < 100);
+    CHECK(exec.count_failed_checks() == 30);
 
     // The second section never ran: hitting the cap ends the test, not just the pass that hit it.
     CHECK(sections_entered == 1);

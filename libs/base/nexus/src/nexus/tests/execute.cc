@@ -1174,6 +1174,13 @@ void nx::impl::report_check_result(check_result result)
     // Counted on the side, and never allowed near the section tree.
     if (!is_own_test_body(&ctx))
     {
+        // Recorded before the divert, so an off-thread failure reaches the test's `.ccrec` like any other.
+        // The failure CAP is deliberately not applied here: it ends a test by throwing, and a throw on a pool worker
+        // would take the worker rather than the test.
+        if (!result.passed && result.op != cmp_op::skip && is_outermost_execution())
+            CC_LOG_ERROR("check failed off-thread: {} — {} at {}:{}", result.expr, render_expanded(result),
+                         result.location.file_name(), result.location.line());
+
         report_off_thread_check_result(ctx, cc::move(result));
         return;
     }
