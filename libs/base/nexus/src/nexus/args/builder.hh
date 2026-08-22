@@ -236,12 +236,22 @@ public:
     /// Collect unrecognized tokens instead of failing on them — for a wrapper that forwards them onward.
     args_builder& allow_unknown(cc::vector<cc::string_view>& target);
 
+    /// Expand `@file` tokens into the tokens that file contains, before parsing.
+    ///
+    /// Opt-in rather than automatic: a program that takes user-supplied filenames would otherwise gain a
+    /// file-read primitive nobody asked it for.
+    /// `@@rest` is a literal `@rest`, and expansion stops at a bare `--`.
+    args_builder& enable_response_files(int max_depth = 8);
+
     /// Treat the first positional as the end of options, leaving the tail untouched.
     args_builder& stop_at_first_positional();
 
     /// Do not read `--help` / `-h` or `--version` unless they were declared explicitly.
     args_builder& no_auto_help();
     args_builder& no_auto_version();
+
+    /// Do not answer `--completion <shell>` with a generated completion script.
+    args_builder& no_auto_completion();
 
     /// Do not print help or diagnostics from `parse` — the caller renders them itself.
     /// What a test wants, so that asserting on output does not mean capturing stdout.
@@ -346,8 +356,11 @@ private:
     cc::vector<cc::string_view>* _unknown_target = nullptr;
 
     bool _stop_at_first_positional = false;
+    bool _response_files = false;
+    int _response_file_depth = 8;
     bool _auto_help = true;
     bool _auto_version = true;
+    bool _auto_completion = true;
     bool _auto_print = true;
     bool _full_help_on_error = false;
     bool _normalize_underscores = true;
@@ -361,6 +374,7 @@ private:
     friend struct impl::parse_engine;
     friend struct impl::help_renderer;
     friend struct impl::setup_checker;
+    friend struct impl::describer;
 };
 
 namespace nx

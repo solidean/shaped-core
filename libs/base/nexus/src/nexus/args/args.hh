@@ -1,9 +1,12 @@
 #pragma once
 
+#include <nexus/args/ambient.hh>
 #include <nexus/args/builder.hh>
+#include <nexus/args/completion.hh>
 #include <nexus/args/diagnostic.hh>
 #include <nexus/args/options.hh>
 #include <nexus/args/parse_args.hh>
+#include <nexus/args/tokenize.hh>
 #include <nexus/args/validation.hh>
 #include <nexus/args/value.hh>
 

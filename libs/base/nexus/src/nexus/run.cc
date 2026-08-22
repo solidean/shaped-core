@@ -8,6 +8,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/thread.hh>
+#include <nexus/args/ambient.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
@@ -35,24 +36,13 @@ void print_help()
               "For more information, see the nexus documentation.\n");
 }
 
-// Derives a JUnit suite name from argv[0]: the basename without a directory or a
-// trailing .exe extension (e.g. "build/bin/nexus-test.exe" -> "nexus-test").
-cc::string program_name(char const* argv0)
+// The JUnit suite name.
+// nx::program_name does the basename-and-strip-.exe work against the argv nx::run captured, and "nexus"
+// stands in on a platform that could not say what we are called.
+cc::string suite_name()
 {
-    cc::string_view name = argv0 != nullptr ? argv0 : "nexus";
-
-    // strip the directory (cc::string_view has no find_last_of, so rfind each separator)
-    if (auto const slash = cc::max(name.rfind('/'), name.rfind('\\')); slash >= 0)
-        name = name.subview(slash + 1);
-
-    if (name.size() > 4)
-    {
-        auto const ext = name.subview(name.size() - 4);
-        if (ext == ".exe" || ext == ".EXE")
-            name = name.subview({.offset = 0, .size = name.size() - 4});
-    }
-
-    return cc::string(name);
+    auto const name = nx::program_name();
+    return name.empty() ? cc::string("nexus") : cc::string(name);
 }
 
 // Writes a report file whole, replacing any existing content.
@@ -122,6 +112,10 @@ int nx::run(int argc, char** argv)
     // Before anything else can start a thread: a test asking for nx::main_thread means THIS one.
     cc::mark_current_thread_as_main();
 
+    // Record the command line so nx::current_args can answer from anywhere, including a library deep in a
+    // call stack that has no argv of its own.
+    nx::impl::set_process_args(argc, argv);
+
     // Install a crash handler so a fatal fault in a test prints the offending test and a
     // stacktrace instead of a bare non-zero exit code.
     cc::install_crash_handler();
@@ -160,7 +154,7 @@ int nx::run(int argc, char** argv)
     // It always succeeds, even when nothing is eligible — the caller decides what an empty match means.
     if (!config.list_tests_json_file.empty())
     {
-        auto const json = write_test_listing_json(program_name(argv[0]), config, registry);
+        auto const json = write_test_listing_json(suite_name(), config, registry);
         if (config.list_tests_json_file == "-")
             cc::print(json);
         else if (auto const written = write_report_file(config.list_tests_json_file, json); !written.has_value())
@@ -222,7 +216,7 @@ int nx::run(int argc, char** argv)
     // This is additive: the console output below still runs, whatever the reporting mode.
     if (!config.junit_xml_file.empty())
     {
-        auto const written = write_report_file(config.junit_xml_file, write_junit_xml(program_name(argv[0]), execution));
+        auto const written = write_report_file(config.junit_xml_file, write_junit_xml(suite_name(), execution));
         if (!written.has_value())
             cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
                          written.error().to_string());
@@ -231,7 +225,7 @@ int nx::run(int argc, char** argv)
     // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::guide). Also additive.
     if (!config.perf_json_file.empty())
     {
-        auto const written = write_report_file(config.perf_json_file, write_perf_json(program_name(argv[0]), execution));
+        auto const written = write_report_file(config.perf_json_file, write_perf_json(suite_name(), execution));
         if (!written.has_value())
             cc::eprintln("Error: could not write perf JSON file: {}: {}", config.perf_json_file,
                          written.error().to_string());

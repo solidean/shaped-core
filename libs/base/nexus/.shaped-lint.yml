@@ -21,6 +21,16 @@ rules:
     reason: the perf_event_open syscall wrapper for the Linux hardware counters
     files: src/nexus/bench/impl/hardware_counters_linux.cc
 
+  - kind: allow-include
+    value: <crt_externs.h>
+    reason: _NSGetArgv is the only route to this process's argv on Apple platforms
+    files: src/nexus/args/impl/os_args.cc
+
+  - kind: allow-include
+    value: <cstdlib>
+    reason: the CRT's __argc / __argv, which is what Windows has instead of /proc/self/cmdline
+    files: src/nexus/args/impl/os_args.cc
+
   # =========================================================================================================
   # Waiting on a cc:: replacement — see docs/stdlib-migration.md
   # =========================================================================================================

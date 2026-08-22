@@ -378,6 +378,13 @@ nx::args_builder& nx::args_builder::allow_unknown(cc::vector<cc::string_view>& t
     return *this;
 }
 
+nx::args_builder& nx::args_builder::enable_response_files(int max_depth)
+{
+    _response_files = true;
+    _response_file_depth = max_depth;
+    return *this;
+}
+
 nx::args_builder& nx::args_builder::stop_at_first_positional()
 {
     _stop_at_first_positional = true;
@@ -393,6 +400,12 @@ nx::args_builder& nx::args_builder::no_auto_help()
 nx::args_builder& nx::args_builder::no_auto_version()
 {
     _auto_version = false;
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::no_auto_completion()
+{
+    _auto_completion = false;
     return *this;
 }
 

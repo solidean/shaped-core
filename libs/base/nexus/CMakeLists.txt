@@ -8,6 +8,11 @@ add_library(nexus
     src/nexus/args/diagnostic.cc
     src/nexus/args/value.cc
     src/nexus/args/validation.cc
+    src/nexus/args/tokenize.cc
+    src/nexus/args/ambient.cc
+    src/nexus/args/impl/os_args.cc
+    src/nexus/args/impl/describe.cc
+    src/nexus/args/completion.cc
     src/nexus/args/impl/help_render.cc
     src/nexus/args/impl/parse_engine.cc
     src/nexus/args/impl/setup_check.cc
@@ -56,6 +61,9 @@ target_sources(nexus
     src/nexus/args/parse_args.hh
     src/nexus/args/value.hh
     src/nexus/args/validation.hh
+    src/nexus/args/tokenize.hh
+    src/nexus/args/ambient.hh
+    src/nexus/args/completion.hh
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
@@ -147,6 +155,9 @@ if(SC_BUILD_TESTS)
         tests/args-validation-test.cc
         tests/args-commands-test.cc
         tests/args-struct-test.cc
+        tests/args-tokenize-test.cc
+        tests/args-ambient-test.cc
+        tests/args-completion-test.cc
         tests/test-api-test.cc
         tests/test-check-test.cc
         tests/test-recording-test.cc

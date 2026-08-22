@@ -6,7 +6,9 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/args/builder.hh>
+#include <nexus/args/completion.hh>
 #include <nexus/args/impl/suggest.hh>
+#include <nexus/args/tokenize.hh>
 
 // The walk is one pass, left to right, accumulating diagnostics rather than stopping at the first.
 // Positional VALUES are collected during the pass and assigned afterwards, because a variadic positional
@@ -88,6 +90,8 @@ struct parse_state
     bool help_requested = false;
     bool short_help_requested = false;
     bool version_requested = false;
+    bool completion_requested = false;
+    nx::completion_shell completion = nx::completion_shell::bash;
 
     void add(nx::diagnostic_kind kind,
              isize index,
@@ -400,6 +404,32 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
         return setup;
     }
 
+    // Splicing happens BEFORE anything is owned or walked, so the rest of the engine never has to know
+    // whether a token was typed or came out of a file.
+    auto spliced = cc::vector<cc::string>();
+    auto splice_errors = cc::vector<cc::string>();
+    if (builder._response_files)
+    {
+        auto result = args_splice_response_files(tokens, builder._response_file_depth);
+        spliced = cc::move(result.tokens);
+        splice_errors = cc::move(result.errors);
+
+        auto views = cc::vector<cc::string_view>();
+        for (auto const& t : spliced)
+            views.push_back(t);
+
+        // Re-entering with the expanded list keeps one code path for the walk itself.
+        auto expanded = run_expanded(builder, views, splice_errors);
+        return expanded;
+    }
+
+    return run_expanded(builder, tokens, splice_errors);
+}
+
+nx::args_result nx::impl::parse_engine::run_expanded(args_builder& builder,
+                                                     cc::span<cc::string_view const> tokens,
+                                                     cc::span<cc::string const> splice_errors)
+{
     // Own every token, so a bound cc::string_view outlives the caller's argv.
     // Reserved exactly once: a reallocation partway through would leave earlier views pointing at freed memory.
     builder._token_storage.clear();
@@ -427,6 +457,16 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
     builder._command_path.clear();
 
     auto state = parse_state();
+
+    // A response file that could not be read is reported before anything else: expanding to nothing
+    // silently is exactly how a build ends up missing half its flags with no sign of why.
+    for (auto const& message : splice_errors)
+        state.result.add_diagnostic({
+            .kind = diagnostic_kind::invalid_value,
+            .source = {.origin = arg_origin::response_file},
+            .message = cc::string(message),
+        });
+
     auto const& owned = builder._tokens;
     auto const count = owned.size();
     auto const normalize = builder._normalize_underscores;
@@ -475,6 +515,24 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
                 && find_long(builder, "version", normalize) == nullptr)
             {
                 state.version_requested = true;
+                break;
+            }
+
+            if (builder._auto_completion && name == "completion" && find_long(builder, "completion", normalize) == nullptr)
+            {
+                auto const shell_name = has_value ? inline_value : (i + 1 < count ? owned[i + 1] : cc::string_view());
+                auto const shell = completion_shell_from_name(shell_name);
+
+                if (!shell.has_value())
+                {
+                    state.add(diagnostic_kind::invalid_value, i, shell_name, "--completion",
+                              cc::format("unknown shell '{}' for --completion: expected bash, zsh, fish or powershell",
+                                         shell_name));
+                    break;
+                }
+
+                state.completion_requested = true;
+                state.completion = shell.value();
                 break;
             }
 
@@ -741,6 +799,14 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
             cc::println(state.help_requested ? builder.help_text(render) : builder.short_help_text(render));
 
         return args_result(args_outcome::help_requested, 0);
+    }
+
+    if (state.completion_requested)
+    {
+        if (builder._auto_print)
+            cc::print(generate_completion(builder, state.completion));
+
+        return args_result(args_outcome::completion_requested, 0);
     }
 
     if (state.version_requested)

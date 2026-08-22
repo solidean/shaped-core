@@ -17,6 +17,12 @@ struct parse_engine
 {
     static args_result run(args_builder& builder, cc::span<cc::string_view const> tokens);
 
+    /// The walk itself, over tokens that have already had any response files spliced in.
+    /// Split out so expansion happens exactly once and the grammar never has to know about it.
+    static args_result run_expanded(args_builder& builder,
+                                    cc::span<cc::string_view const> tokens,
+                                    cc::span<cc::string const> splice_errors);
+
     /// Name lookup, walking up through enclosing builders for anything marked `global()`.
     /// A subcommand's own options win over an inherited one of the same name.
     static binding* find_long(args_builder& builder, cc::string_view name, bool normalize);

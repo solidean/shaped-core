@@ -22,12 +22,14 @@ struct document_validator; // one rule over the whole command line (args/validat
 template <class T>
 class parsed; // the by-value counterpart of args_result, carrying the struct it filled (args/args.hh)
 
-struct arg_source; // where a token came from, which splicing makes worth recording (args/diagnostic.hh)
+struct arg_source;         // where a token came from, which splicing makes worth recording (args/diagnostic.hh)
+struct args_splice_result; // what a response-file splice concluded (args/tokenize.hh)
 
-enum class diagnostic_kind; // which way a command line was wrong (args/diagnostic.hh)
-enum class arg_origin;      // which source a token came from (args/diagnostic.hh)
-enum class args_outcome;    // what a parse concluded, beyond pass or fail (args/diagnostic.hh)
-enum class complete_hint;   // what a shell should offer for an argument's value (args/options.hh)
+enum class diagnostic_kind;  // which way a command line was wrong (args/diagnostic.hh)
+enum class arg_origin;       // which source a token came from (args/diagnostic.hh)
+enum class args_outcome;     // what a parse concluded, beyond pass or fail (args/diagnostic.hh)
+enum class complete_hint;    // what a shell should offer for an argument's value (args/options.hh)
+enum class completion_shell; // which shell a completion script is emitted for (args/completion.hh)
 
 } // namespace nx
 
@@ -53,4 +55,5 @@ struct common_options; // the T-independent half of arg_options (args/impl/bindi
 struct parse_engine;   // the token grammar (args/impl/parse_engine.hh)
 struct help_renderer;  // the help page (args/impl/help_render.hh)
 struct setup_checker;  // what a declaration must satisfy (args/impl/setup_check.hh)
+struct describer;      // the declaration, flattened into data (args/impl/describe.hh)
 } // namespace nx::impl

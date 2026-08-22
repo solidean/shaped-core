@@ -29,9 +29,10 @@ int main(int argc, char** argv)
 ## What is here today
 
 The grammar below, both ways of binding — to locals and to an options struct — subcommands, and validation.
+Plus ambient arguments, response files and shell completion.
 Around them: error accumulation with did-you-mean, `-h` / `--help` / `--version`, groups, sections, examples, environment fallbacks, and setup validation.
 
-Still to land, in this order: ambient args, response files, and completion generation.
+Still to land: per-test arguments, so a test or example can receive a command line of its own.
 
 ---
 
@@ -299,6 +300,89 @@ args.help_text({.color = false, .width = 100});
 
 That is what makes help golden-testable, and `print_help()` is the one-liner that fills them in from `cc::console` for real use.
 `.no_auto_print()` stops `parse` printing anything at all.
+
+---
+
+## Ambient arguments
+
+What this process was invoked with, answerable from anywhere:
+
+```cpp
+#include <nexus/args/ambient.hh>   // light: no parser comes with it
+
+nx::current_args();    // the running test's arguments inside a test, otherwise the process's
+nx::process_args();    // always the process's
+nx::program_path();    // argv[0]
+nx::program_name();    // its basename, without a directory or .exe
+```
+
+`nx::run` records argv, so a nexus binary answers exactly.
+A binary that never went through the harness falls back to the OS — `__argv` on Windows, `/proc/self/cmdline` on Linux and Android, `_NSGetArgv` on Apple.
+A platform with no answer, Emscripten included, yields an **empty list rather than an assertion**: a debug helper must never be why a program dies.
+
+### The undeclared accessors
+
+```cpp
+if (nx::has_arg("--trace-allocations")) { ... }
+auto const budget = nx::get_arg<int>("alloc-budget").value_or(1000);
+```
+
+A debug convenience and no more.
+These read a command line **nobody declared**, so they cannot know whether `--foo bar` is a flag with a value or a flag followed by a positional — they guess, and they never fail.
+
+* `--name=value` is unambiguous; `--name value` is taken when the next token does not itself start with `-`.
+* A name may be written `verbose`, `--verbose` or `-v`; all three mean the same lookup.
+* Everything after a bare `--` is ignored, so an argument being passed to another program cannot switch on a debug path in this one.
+* Absent and unparseable are not distinguished: a debug helper that explained itself would invite being depended on.
+
+Worth saying out loud: outside a test these read the whole process command line, so `nx::has_arg("jobs")` in a library is true whenever `dev.py test -j8` ran.
+
+---
+
+## Response files
+
+```cpp
+args.enable_response_files();   // opt-in
+```
+
+`@path` is replaced by the tokens in that file, recursively, using the [tokenizer grammar](#the-tokenizer).
+`@@rest` is a literal `@rest`.
+
+**Opt-in rather than automatic**, because a program that takes user-supplied filenames would otherwise gain a file-read primitive nobody asked it for.
+
+A file that cannot be read is an **error**, not an empty expansion — a build quietly missing half its flags is the failure this avoids.
+So is a chain deeper than the cap, which is what stops a file that names itself from hanging.
+
+Expansion **stops at a bare `--`**: past it the tokens belong to whoever receives the tail, and rewriting them would change what that program is handed.
+
+### The tokenizer
+
+`nx::args_tokenize` is shared by response files and, later, per-test arguments, so all of them agree.
+The rules are **ours and identical on every platform** — a response file written on Linux has to mean the same thing on Windows, and reproducing cmd.exe is not a goal:
+
+* whitespace separates; `"..."` and `'...'` group, and may sit mid-token
+* inside double quotes, a backslash escapes the next character, and the usual `n`, `t` and `r` become newline, tab and carriage return
+* inside single quotes nothing is an escape, so a Windows path survives being pasted in
+* `#` where a token would start runs to end of line; inside a token it is an ordinary character
+* `""` is a real, empty token
+
+---
+
+## Shell completion
+
+```
+mytool --completion bash    # also zsh, fish, powershell
+```
+
+Generated from the same declaration as everything else, so it cannot describe a flag the program does not have.
+
+This is where deferred subcommands pay the other way round: generating a script **forces every subtree**, because it has to know about commands this run will never touch.
+A delegate contributes only its name.
+
+The scripts complete option names, command names and enumerated values, and leave paths to the shell's own file completion.
+Deliberately not clever — a completion script that tries to be a second parser goes stale the moment the real one changes.
+
+`.no_auto_completion()` turns the flag off.
 
 ---
 
