@@ -79,6 +79,12 @@ struct nx::test_schedule_config
     // Set via --perf-json <file>; nx::guide records the metrics.
     cc::string perf_json_file;
 
+    // The arguments the selected test itself receives, reachable from its body through nx::current_args().
+    // Set via --test-args "<line>", or by everything after a bare --.
+    // Tokenized once here, by the same rules a response file uses.
+    // Recorded but not yet delivered: wiring it through the scheduler is a separate change.
+    cc::vector<cc::string> test_args;
+
     // When non-empty, run() writes a JSON test listing to this path ("-" means stdout) and exits without running anything.
     // Set via --list-tests-json <file>.
     // The listing reports every registered test plus whether it would_run() under the rest of the parsed args, so a caller can pre-select binaries.
@@ -122,6 +128,10 @@ struct nx::test_schedule_config
     void resolve_filter_mode(test_registry const& registry);
 
     static test_schedule_config create_from_args(int argc, char** argv);
+
+    /// The --help page, generated from the same declaration create_from_args parses with.
+    /// Shared rather than hand-written, so help cannot describe a flag the parser does not have.
+    [[nodiscard]] static cc::string cli_help_text();
 };
 
 struct nx::test_schedule

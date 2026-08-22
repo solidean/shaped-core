@@ -23,19 +23,6 @@
 
 namespace
 {
-// The "Compatible with Catch2" line is what makes the C++ TestMate IDE extension recognize the binary.
-void print_help()
-{
-    cc::print("nexus - Unified test, fuzz, benchmark, and app runner for modern C++\n"
-              "\n"
-              "Compatible with Catch2 v3.11.0 in some args\n"
-              "\n"
-              "Usage:\n"
-              "  <test-executable> [options]\n"
-              "\n"
-              "For more information, see the nexus documentation.\n");
-}
-
 // The JUnit suite name.
 // nx::program_name does the basename-and-strip-.exe work against the argv nx::run captured, and "nexus"
 // stands in on a platform that could not say what we are called.
@@ -121,11 +108,17 @@ int nx::run(int argc, char** argv)
     cc::install_crash_handler();
     cc::add_crash_context_hook(&nx::impl::report_running_test);
 
-    // Handle --help flag
-    if (argc == 2 && cc::string_view(argv[1]) == "--help")
+    // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks.
+    // Still handled here rather than inside create_from_args, because the harness owns exiting.
+    // The "Compatible with Catch2" line it carries is what makes C++ TestMate recognize this binary at all.
+    for (auto i = 1; i < argc; ++i)
     {
-        print_help();
-        return 0;
+        auto const arg = cc::string_view(argv[i]);
+        if (arg == "--help" || arg == "-h")
+        {
+            cc::println(test_schedule_config::cli_help_text());
+            return 0;
+        }
     }
 
     // Create schedule config from command line arguments

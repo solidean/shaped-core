@@ -15,11 +15,19 @@ Nexus prints:
 Compatible with Catch2 v3.11.0 in some args
 ```
 
-([run.cc, `print_help`](../src/nexus/run.cc)) — the hook every mode below hangs off.
+It reaches the output as the `help` text of the CLI declaration in [schedule.cc](../src/nexus/tests/schedule.cc).
+[test-cli-test.cc](../tests/test-cli-test.cc) pins that it is still there, because this is the hook every mode below hangs off.
 
 ## CLI flags
 
-Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc](../src/nexus/tests/schedule.cc)).
+Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc](../src/nexus/tests/schedule.cc)), declared with [nx::args](args.md).
+`--help` is generated from that same declaration, so the two cannot describe different programs.
+
+Two properties of the declaration are load-bearing for this compatibility layer:
+
+* **Unknown arguments are captured, not rejected**, via `allow_unknown`.
+  That is what keeps "any other arg is a filter" true, and what lets a test whose name begins with a dash be selected at all.
+* **`--jobs` is bound through an action rather than to an int**, so a bad count still warns and keeps the default instead of failing the run — which is what it has always done.
 
 | Flag | Nexus behavior |
 |---|---|
@@ -38,6 +46,9 @@ Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc](../
 | `--list-tests-json <file>` | Writes a JSON listing of every registered test (with eligibility under the other args) to `<file>` — `-` means stdout — then exits 0 without running anything. Used by `dev.py test` to pre-select binaries. Not a Catch2 flag |
 | `--match-files` | Reads the filters as globs over the tests' source files, skipping name matching. Not a Catch2 flag |
 | `--match-names` | Reads the filters as test names only, without the file fallback. Not a Catch2 flag |
+| `--test-args <line>` | A command line for the selected test, tokenized by the [nx::args rules](args.md#the-tokenizer). Not a Catch2 flag |
+| `--` | The same, for everything after it, already split. Not a Catch2 flag |
+| `-h` / `--help` | Prints the generated help and exits 0. Intercepted by `nx::run` before the parser sees it |
 | Any other arg | Treated as a filter (see below) |
 
 ### Filters
@@ -96,6 +107,7 @@ The disabled gate works the same way — exact name, or the bulk `run_disabled_t
 Both live in `test_schedule_config::is_eligible`, shared by `would_run` and the alias expansion, so an alias reaches a manual driver only when the *alias* is named exactly.
 
 In the Catch2 XML compat modes, filter strings are also unescaped: `\[` becomes `[`.
+Only the opening bracket — Catch2 escapes `[` because it opens tag syntax, and a `\]` is left as typed.
 Catch2 uses `\[` to escape square brackets in tag-filter syntax; nexus has no tags, so it strips the backslash and the literal `[` can still match a test name.
 
 `*` has no special meaning **to name matching**: names are plain substrings, so `bench*` matches a literal `*`.
