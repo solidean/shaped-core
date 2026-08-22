@@ -4,6 +4,13 @@ project(nexus LANGUAGES CXX)
 # Define the library and its sources
 add_library(nexus
     src/nexus/run.cc
+    src/nexus/args/builder.cc
+    src/nexus/args/diagnostic.cc
+    src/nexus/args/value.cc
+    src/nexus/args/impl/help_render.cc
+    src/nexus/args/impl/parse_engine.cc
+    src/nexus/args/impl/setup_check.cc
+    src/nexus/args/impl/suggest.cc
     src/nexus/rec.cc
     src/nexus/test.cc
     src/nexus/guide.cc
@@ -40,6 +47,12 @@ target_sources(nexus
     FILES
     src/nexus/fwd.hh
     src/nexus/run.hh
+    src/nexus/args/args.hh
+    src/nexus/args/builder.hh
+    src/nexus/args/diagnostic.hh
+    src/nexus/args/fwd.hh
+    src/nexus/args/options.hh
+    src/nexus/args/value.hh
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
@@ -123,6 +136,11 @@ sc_target_pch(nexus CC)
 if(SC_BUILD_TESTS)
     add_executable(nexus-test
         tests/main.cc
+        tests/args-grammar-test.cc
+        tests/args-value-test.cc
+        tests/args-diagnostic-test.cc
+        tests/args-setup-test.cc
+        tests/args-help-test.cc
         tests/test-api-test.cc
         tests/test-check-test.cc
         tests/test-recording-test.cc

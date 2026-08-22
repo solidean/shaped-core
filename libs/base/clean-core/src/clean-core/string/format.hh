@@ -30,9 +30,17 @@
 
 namespace cc
 {
-//
-// API
-//
+/// True when cc::format can render a `T`, by any of the three tiers format_one dispatches over: a
+/// cc::custom::formatter<T> specialization, a built-in the standard grammar covers, or a member to_string().
+///
+/// The predicate exists because the failure is otherwise a static_assert deep inside the backend, which a
+/// `requires` expression cannot see — so generic code that wants to format a value only when it can has no way to ask.
+/// Anything optionally rendering a user's type wants this rather than `requires { format(v); }`.
+template <class T>
+concept formattable = requires { sizeof(cc::custom::formatter<std::remove_cvref_t<T>>); }
+                   || cc::impl::builtin_formattable<std::remove_cvref_t<T>> || requires(T const& v) {
+                          { v.to_string() } -> std::convertible_to<cc::string_view>;
+                      };
 
 } // namespace cc
 
