@@ -34,6 +34,7 @@ extern cc::atomic<cc::u64> g_probe_park_slot;
 extern cc::atomic<cc::u64> g_probe_last_installed;
 extern cc::atomic<cc::u64> g_probe_installed_incl_null;
 extern cc::atomic<cc::u64> g_probe_tls_before_invoke;
+extern cc::atomic<int> g_probe_ambient_scope_dtors;
 } // namespace cc::impl
 
 namespace
@@ -334,6 +335,7 @@ REC_TEST("record/async-scope - PROBE arm")
                 {
                     CC_RECORD_ASYNC_SCOPE("opened-inside");
 
+                    auto const dtors_in = cc::impl::g_probe_ambient_scope_dtors.load(cc::memory_order_relaxed);
                     auto const* const s_in = cc::rec::current_async_scope();
                     auto* const amb_in = cc::async_current_ambient();
                     auto const tid_in = cc::current_thread_id();
@@ -348,9 +350,14 @@ REC_TEST("record/async-scope - PROBE arm")
                     //   ambient null      -> nothing was installed on the resuming thread
                     //   ambient non-null, scope null -> a DIFFERENT chain was installed (the entry context)
                     //   ambient equal     -> the fix held
-                    *out = cc::format("in[tid={} amb={:#x} scope={}] out[tid={} amb={:#x} scope={}]",
+                    auto const dtors_out = cc::impl::g_probe_ambient_scope_dtors.load(cc::memory_order_relaxed);
+
+                    // dtors_out > dtors_in means an ambient scope was POPPED across the suspend — and the only one
+                    // live here is this body's own.
+                    *out = cc::format("in[tid={} amb={:#x} scope={}] out[tid={} amb={:#x} scope={}] dtors {}->{}",
                                       u64(tid_in), u64(amb_in), s_in != nullptr ? s_in->name : "<null>",
-                                      u64(tid_out), u64(amb_out), s_out != nullptr ? s_out->name : "<null>");
+                                      u64(tid_out), u64(amb_out), s_out != nullptr ? s_out->name : "<null>",
+                                      dtors_in, dtors_out);
                     co_return 7;
                 }(gate, &report);
 
