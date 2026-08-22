@@ -60,6 +60,10 @@ Real symbols — signatures, type names, the enum, the handle — plus a few lin
 API shape is the highest-stakes thing in most PRs and the hardest to judge from prose, so show the surface, do not describe it.
 Note what was deleted here too.
 
+**Link the code.**
+The message must carry markdown links to the handful of files that matter most — the ones a reviewer would open first — and to **every new example**, without exception.
+Examples are how we get a feel for an API, so a new one that is not linked is a link you forgot.
+
 **3. Numbered findings.**
 The reviewer answers by number, so the numbering is the interface.
 
