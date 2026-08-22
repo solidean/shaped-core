@@ -9,6 +9,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread.hh>
@@ -18,6 +19,17 @@
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
+
+// TEMPORARY ARM PROBE — the branch counters defined in async.cc. Reverted with the probe.
+namespace cc::impl
+{
+extern cc::atomic<int> g_probe_cold_store;
+extern cc::atomic<int> g_probe_yield_store;
+extern cc::atomic<int> g_probe_park_store;
+extern cc::atomic<int> g_probe_wake_skip;
+extern cc::atomic<int> g_probe_found_ready;
+extern cc::atomic<int> g_probe_polls;
+} // namespace cc::impl
 
 namespace
 {
@@ -357,7 +369,13 @@ REC_TEST("record/async-scope - PROBE arm")
             });
         (void)r;
 
-        cc::println("PROBE delay={} {}", d, report);
+        cc::println("PROBE delay={} {} | cold={} yield={} park={} wakeskip={} foundready={} polls={}", d, report,
+                    cc::impl::g_probe_cold_store.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_yield_store.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_park_store.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_wake_skip.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_found_ready.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_polls.load(cc::memory_order_relaxed));
     }
     CHECK(true);
 }

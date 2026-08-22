@@ -127,6 +127,14 @@ void for_each_domain(cc::function_ref<void(rec::domain&)> f);
 /// Applies `mask` to every registered domain, and to every domain registered afterwards.
 /// The follow-on part is what makes this usable from main() before a plugin's static initializers have run.
 void set_all_domains_enabled_mask(u32 mask);
+
+/// ORs `bits` into every registered domain's mask, and into every domain registered afterwards.
+///
+/// The ADDITIVE counterpart to set_all_domains_enabled_mask, which is absolute.
+/// This decides nothing about the bits it does not name, so it turns something on without silently reverting a
+/// per-domain choice somebody made — which an absolute mask cannot help doing.
+/// Composes with the absolute form in either order: the override lands first on a later domain, then these bits.
+void enable_all_domains_mask_bits(u32 bits);
 } // namespace cc::rec
 
 /// Define a domain declared with CC_REC_DECLARE_DOMAIN; put this in exactly one .cc, in the same namespace.

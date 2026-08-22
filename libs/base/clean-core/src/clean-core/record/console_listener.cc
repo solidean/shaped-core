@@ -273,12 +273,10 @@ void cc::rec::enable_environment_log_levels()
         if (l >= parsed.value())
             bits |= rec::enable_bit_of(l);
 
-    rec::for_each_domain([bits](rec::domain& d) { d.set_enabled_mask(d.enabled_mask() | bits); });
-
-    // for_each_domain covers what is registered NOW; this covers what registers later, which is what a plugin loaded
-    // after main() begins looks like.
-    rec::set_all_domains_enabled_mask(rec::all_category_bits | bits | rec::enable_bit_of(rec::level::info)
-                                      | rec::enable_bit_of(rec::level::warning) | rec::enable_bit_of(rec::level::error));
+    // The ADDITIVE form, and the distinction has teeth: set_all_domains_enabled_mask is absolute, so calling it here
+    // would turn back OFF every level the variable does not name — including one a program enabled in code.
+    // It covers domains registered later too, which is what reaches a plugin loaded after main() begins.
+    rec::enable_all_domains_mask_bits(bits);
 }
 
 cc::rec::listener_handle cc::rec::install_default_console_listener()
