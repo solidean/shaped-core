@@ -1,3 +1,4 @@
+#include <clean-core/common/log.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/atomic.hh>
 #include <shaped-viewer/scene/light.hh>
@@ -16,8 +17,8 @@ area_light_gpu area_light_gpu::from(area_light const& light)
     {
         static auto warned = cc::atomic_flag();
         if (!warned.test_and_set())
-            cc::eprintln("[sv] an area_light has a negative emission component — set area_light::emission "
-                         "(its default is deliberately negative)");
+            CC_LOG_WARNING("an area_light has a negative emission component — set area_light::emission "
+                           "(its default is deliberately negative)");
     }
 
     // cross(u, v) gives the emitting face directly.

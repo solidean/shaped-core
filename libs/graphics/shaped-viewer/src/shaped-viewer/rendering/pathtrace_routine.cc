@@ -1,4 +1,5 @@
 #include <clean-core/common/asserts.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
@@ -71,6 +72,8 @@ bool pathtrace_routine::is_ready(sg::command_list& cmd)
 
 void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
 {
+    CC_RECORD_SCOPE("sv.pathtrace");
+
     auto const& self = acquire(cmd);
     auto& ctx = cmd.context();
 
