@@ -16,6 +16,9 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 ---
 
+**Recording domain:** `cc`, shadowed by `cc.record` inside `cc::rec` so the recorder's own bookkeeping gates separately from the library's.
+Every `CC_LOG_*` and `CC_RECORD_*` site is attributed to one of the two; see [logging](docs/logging.md).
+
 ## Primitives & types
 
 ```cpp
@@ -984,6 +987,7 @@ CC_LOG_TRACE / _DEBUG / _INFO / _WARNING / _ERROR         // trace+debug off by 
 CC_RECORD_SCOPE();                           // times the block, named after the enclosing function
 CC_RECORD_SCOPE("upload-pass");              // ... or explicitly. MUST NOT cross a co_await (cc::async asserts)
 CC_RECORD_SCOPE_BEGIN("span"); CC_RECORD_SCOPE_END("span"); // when the two ends live in different functions
+// A BEGIN whose END never runs costs that one span only: an END with nothing open is refused, not popped below zero.
 CC_RECORD_SCOPE_IF(bytes.size() >= threshold, "json.read"); // condition read ONCE at entry; a skipped scope costs no depth
 // SCOPE_IF is for sites where the EVENT RATE is the problem, not the duration — the sampler finds slow things itself.
 
@@ -1103,6 +1107,11 @@ auto console = cc::rec::console_listener({.min_level = cc::rec::level::info,   /
                                           .color = cc::console::color_mode::never});
 // Options given EXPLICITLY are taken verbatim; only a DEFAULT-constructed listener reads the environment:
 //   CC_LOG_LEVEL  CC_LOG_TIME  CC_LOG_COLOR  CC_LOG_THREAD  CC_LOG_DOMAIN  CC_LOG_SITE   (plus NO_COLOR / FORCE_COLOR)
+cc::rec::console_options::from_environment(base);  // ... the same overrides over defaults of YOUR choosing
+cc::rec::enable_environment_log_levels();    // opens every DOMAIN down to CC_LOG_LEVEL — a listener's min_level only
+                                             //    filters what was recorded, and trace/debug are gated off before that
+// Neither reads well during static init: the environment and "is stdout a terminal" have no answer that early.
+cc::rec::is_listener_registered(h);          // -> bool; false for a stale handle onto a REUSED slot too
 
 cc::rec::recording_listener capture;
 auto const h = cc::rec::register_listener(capture); // the index IS the layer; register must-see-everything first

@@ -41,6 +41,9 @@ CC_RECORD_SCOPE_END("sv.frame");
 ```
 
 An unbalanced pair produces a wrong trace rather than a diagnostic, so prefer the block form wherever the span fits a block.
+A `BEGIN` whose `END` is never reached — an early return, a throw — costs exactly the span it opened and nothing more.
+An `END` only pops when it finds something open, so the depth never wraps and poisons every later scope on the thread.
+That bounds the mistake; it does not make it correct.
 
 ### Conditional scopes
 
@@ -97,13 +100,19 @@ The unit is a `cc::rec::unit`, a plain struct rather than an enum, so adding one
 Where a library already keeps a counter, record it **where that counter is written** rather than at the call sites.
 `blob-cache` does this in the one adder every stat bump goes through, which is what stops the recorded numbers and the in-process `cache_stats` struct from ever disagreeing.
 
+Make that mapping **total**, and assert on a field it does not know.
+A stat's name is a string literal in the event descriptor, so it cannot be computed from the counter: a new one has to be added by hand.
+The failure mode for forgetting is a number that silently never appears, which is exactly what the assert converts into a loud one.
+
 ## Where to put a scope
 
 The useful question is what a reader would want to see in a flame graph, not what is slow.
 
 - **Entry points**, at the granularity a caller thinks in — "load an image", not "decode a PNG chunk".
 - **Startup and shutdown**, where hangs live.
-  The thread pool's constructor and destructor carry one for exactly this reason.
+  `cc.thread_pool.create` / `cc.thread_pool.destroy` and `cc.actor.start` / `cc.actor.shutdown` carry one for exactly this reason.
+  The destructor joins, so work that never returns hangs there rather than where it was submitted.
+  A thread's own body carries none: a scope spanning a whole thread would be the innermost open scope for every sample taken on it, which costs the sampler exactly the frames it exists to find.
 - **Stalls**, where one side waits for another — `sg.epoch.wait` is the CPU waiting on the GPU, and its duration is the answer to "am I GPU-bound".
 - **Anything that compiles, loads or allocates from the OS**, which is where the milliseconds are.
 

@@ -97,6 +97,7 @@ Test and example binaries get theirs from `nx::run` and need no setup at all.
 It returns a handle, and a program that later calls `cc::rec::shutdown()` **must unregister it first**.
 Shutdown frees the pool every listener's callback reads out of, and asserts that none are left.
 An application that simply runs until the process ends can ignore the handle.
+Calling it again after that unregister re-registers the same listener, so bringing the recorder back up gets the console back rather than a handle to nothing.
 
 A line looks like this:
 
@@ -105,7 +106,7 @@ A line looks like this:
 ```
 
 Local wall-clock time by default, because it lines a log up against everything else that happened on the machine and makes a stale terminal obvious at a glance.
-A test run wants `console_time::elapsed` instead, and nexus passes it explicitly.
+A test run wants `console_time::elapsed` instead, and nexus asks for it as the base its environment overrides apply over.
 
 Source locations are **off** by default, warnings and errors included.
 A `.ccrec` carries them for every event, offline and exactly, which is a better answer than a suffix on the lines that happened to be printed.
@@ -135,6 +136,12 @@ A **default-constructed** listener resolves its options from the environment ins
 `NO_COLOR` and `FORCE_COLOR` are honored too, by the same `cc::console` policy every other tool in the repo uses.
 An unparseable value is ignored rather than diagnosed: a misspelled log setting must never be why a program refuses to start.
 
+`from_environment(base)` applies the same overrides over defaults of your own, which is how a program moves one setting without giving up the rest.
+That is what nexus does: test binaries stamp `elapsed` because a run's question is "how far in", and `CC_LOG_LEVEL=debug uv run dev.py test "..."` still reaches them.
+
+**Neither form may run during static initialization.**
+Reading the environment and asking whether stdout is a terminal are questions with no answer that early, so a process-wide listener is built on first use rather than as a global.
+
 ## Logs in tests
 
 nexus stands a recorder up for every run and buckets each test's events, so a test can ask what its subject logged:
@@ -159,6 +166,10 @@ Both that it fires and that it fires **once**, which is the whole point of the g
 
 A failing test's recording is written out as a `.ccrec`, so a CI failure arrives with its log inline.
 Assertion failures and failed `CHECK`s are recorded too, which is what puts them in that file next to whatever the code recorded around them.
+A check reported from a thread the test started is recorded the same way, and says so — nexus cannot attribute it to a section, so it never reaches the section tree.
+
+Past thirty failures in one test a `CHECK` behaves as a `REQUIRE` and the test ends.
+It is a circuit breaker against a wall of output nobody reads, not a resource limit, and it is measured per test rather than per section-replay pass.
 
 ## What it costs
 
