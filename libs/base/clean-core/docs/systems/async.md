@@ -636,7 +636,12 @@ cc never learns what is in the word — composition is the tag chain in [`async_
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // address-unique, per consumer
 
 cc::async_ambient_scope const s(my_tag(), &my_state); // push; RAII, LIFO
-auto* const v = cc::async_ambient_lookup(my_tag());   // from anywhere inside a frame
+auto* const v = cc::async_ambient_lookup_ptr(my_tag()); // from anywhere inside a frame
+
+// The slot itself is a 64-bit word rather than a pointer, so a consumer storing a VALUE — cc::rec stores a trace id —
+// keeps every bit of it on a 32-bit target too.
+cc::async_ambient_scope const t(other_tag(), wire_id); // a u64, no pointer involved
+auto const id = cc::async_ambient_lookup(other_tag());
 ```
 
 **Attribution is drive-site.**

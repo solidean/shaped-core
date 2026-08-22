@@ -15,6 +15,8 @@ add_library(babel-serializer
     src/babel-serializer/image/jpg.cc
     src/babel-serializer/image/png.cc
     src/babel-serializer/image/impl/stb_backend.cc
+
+    src/babel-serializer/trace/chrome_trace.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -40,6 +42,8 @@ target_sources(babel-serializer
     src/babel-serializer/image/image.hh
     src/babel-serializer/image/jpg.hh
     src/babel-serializer/image/png.hh
+
+    src/babel-serializer/trace/chrome_trace.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -97,6 +101,8 @@ if(SC_BUILD_TESTS)
         tests/geometry/obj-test.cc
 
         tests/image/image-test.cc
+
+        tests/trace/chrome_trace-test.cc
     )
 
     target_link_libraries(babel-serializer-test
@@ -110,3 +116,6 @@ if(SC_BUILD_TESTS)
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(babel-serializer-test)
 endif()
+
+# Examples: how the API reads in practice. See docs/guides/examples.md.
+add_subdirectory(examples)

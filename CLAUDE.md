@@ -19,6 +19,9 @@ One-liner per library:
 
 * **`libs/base/clean-core`** — foundational data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, fixed containers,
   `function_ref`, …). Namespace `cc`. No dependencies.
+  Also home to **`cc::rec`** (`record/`), the one event stream logging, profiling, values, stats and tracing all write into —
+  a recording is a value type, which is what makes live observability, crash forensics and test assertions one mechanism.
+  See [docs/systems/recording.md](libs/base/clean-core/docs/systems/recording.md).
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   Namespace `nx`. Depends on clean-core.

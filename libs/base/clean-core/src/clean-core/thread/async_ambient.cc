@@ -23,7 +23,7 @@ void cc::impl::async_ambient_free(async_ambient_link* l)
     }
 }
 
-cc::async_ambient_scope::async_ambient_scope(void const* tag, void* value)
+cc::async_ambient_scope::async_ambient_scope(void const* tag, u64 value)
 {
     CC_ASSERT(tag != nullptr, "an ambient tag must be a real address — see CC_ASYNC_AMBIENT_TAG");
 
@@ -36,6 +36,9 @@ cc::async_ambient_scope::async_ambient_scope(void const* tag, void* value)
 
     _link = new (cc::placement_new, raw) async_ambient_link{tag, value, parent, {1}};
     impl::async_tls().ambient = _link;
+
+    // Creating a scope always changes the context, so this never needs the compare the poll sites do.
+    cc::rec::impl::note_ambient_change(_link);
 }
 
 cc::async_ambient_scope::~async_ambient_scope()
@@ -48,10 +51,11 @@ cc::async_ambient_scope::~async_ambient_scope()
     // The link is refcounted, so work outliving this scope is safe rather than dangling — see the type's docs.
 
     impl::async_tls().ambient = _link->parent;
+    cc::rec::impl::note_ambient_change(_link->parent);
     impl::async_ambient_release(_link);
 }
 
 i32 cc::async_ambient_scope::outstanding() const
 {
-    return _link->refs.load(cc::memory_order_acquire) - 1; // minus our own
+    return cc::async_ambient_outstanding(_link);
 }

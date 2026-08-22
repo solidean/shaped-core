@@ -11,6 +11,15 @@
 // Only time.cc is allowed to include it, and the .shaped-lint.yml entry next to that file is what enforces it.
 // docs/notes/build-times.md has the measurement.
 
+namespace cc::impl
+{
+/// A monotonic nanosecond tick, for architectures with no counter register of their own.
+///
+/// Out of line and through the steady clock, which is what makes it a real call rather than an instruction — the
+/// reason `has_cycle_counter()` still says "no cheap counter here" even though `current_cycles()` now works.
+[[nodiscard]] u64 monotonic_ticks();
+} // namespace cc::impl
+
 namespace cc
 {
 /// Seconds on a steady clock: never adjusted, never runs backwards, and its zero point is arbitrary.
@@ -29,23 +38,66 @@ namespace cc
 /// A double holds present-day epoch seconds to about a microsecond, finer than any platform's wall clock resolves.
 [[nodiscard]] double current_time_wall_secs();
 
-/// Whether current_cycles() returns a real reading on this architecture, known at compile time.
-/// False on ARM and WASM, where a caller must fall back to current_time_steady_secs().
+/// Whether this architecture has a CHEAP counter register, known at compile time.
+/// True on x86 and ARM64, false on WASM.
+///
+/// **This is no longer "does current_cycles() work" — that always works now.**
+/// It is "is reading it free enough for an inner loop": an instruction where this is true, a call through the steady
+/// clock where it is false.
+/// A benchmark deciding whether to take a reading per iteration wants this; a caller that just needs a monotonic tick
+/// does not.
 [[nodiscard]] constexpr bool has_cycle_counter()
 {
     return impl::has_cycle_counter();
 }
 
-/// A monotonic cycle count, or 0 where the architecture has none (see has_cycle_counter).
+/// A monotonic tick, on every platform.
 ///
-/// On x86 this is the TSC.
-/// It is constant-rate on modern CPUs, so it tracks wall-clock time rather than halted core cycles — a cheap reference clock, not a measure of work done.
+/// On x86 this is the TSC; on ARM64 it is CNTVCT_EL0, the generic timer's virtual counter; where there is neither —
+/// WASM — it is the steady clock in nanoseconds.
+/// All three are constant-rate, so this tracks wall-clock time rather than halted core cycles: a reference clock, not
+/// a measure of work done.
 /// Nothing here converts it to seconds, because the rate is not knowable without calibration the caller has to do.
 ///
-/// Inline and header-only on purpose: a benchmark loop reads this twice per sample, and a call would be a
-/// meaningful share of what it is trying to measure.
+/// **What a tick IS varies by three orders of magnitude**, which is why the rate is calibrated rather than assumed.
+/// A fraction of a nanosecond on x86; about 42 ns on Apple silicon, where the timer runs in the tens of megahertz
+/// rather than at the core's clock; a nanosecond on WASM, but through a call rather than an instruction.
+/// Fine for a profiling scope everywhere, and only x86 is fine for timing a handful of instructions — a microbenchmark
+/// measuring something that short has to loop rather than trust one pair of readings.
+///
+/// Inline where there is a counter, because a benchmark loop reads this twice per sample and a call would be a
+/// meaningful share of what it is trying to measure; a call where there is not, since there is nothing else to do.
 [[nodiscard]] CC_FORCE_INLINE u64 current_cycles()
 {
-    return u64(impl::read_cycles());
+    if constexpr (impl::has_cycle_counter())
+        return u64(impl::read_cycles());
+    else
+        return impl::monotonic_ticks();
+}
+
+/// current_cycles() plus the core the reading was taken on, or core 0 where the architecture does not report one.
+///
+/// The core id is the point: without pinning, a thread migrates, and a migration is the usual explanation for a step in
+/// otherwise steady per-iteration timings.
+/// It costs about ten cycles over current_cycles(), so a caller taking one per event should mean it.
+///
+/// **Only x86 reports one.** ARM64 has the counter and nothing beside it, so it always says core 0 — a reader must not
+/// take that as "the same core every time".
+///
+/// **Neither reading is ordered against surrounding code on both sides.**
+/// This one waits for prior instructions to retire but does not stop later ones from being hoisted above it, so two
+/// readings around a very short span can still come back out of order.
+[[nodiscard]] CC_FORCE_INLINE u64 current_cycles_and_core(u32& core_out)
+{
+    if constexpr (!impl::has_cycle_counter())
+    {
+        core_out = 0;
+        return impl::monotonic_ticks();
+    }
+
+    unsigned int core = 0;
+    auto const cycles = u64(impl::read_cycles_and_core(core));
+    core_out = u32(core);
+    return cycles;
 }
 } // namespace cc

@@ -3,7 +3,22 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 
+// Outside the CC_HAS_THREADS guard: the OS's own thread id and its scheduler tick describe the PLATFORM, and a
+// single-threaded build still runs on one.
+#if defined(_WIN32)
+#include <clean-core/common/utility.hh>
+#include <clean-core/platform/win32_sanitized.hh>
+#include <timeapi.h> // timeBeginPeriod / timeEndPeriod, which <Windows.h> does not pull in under LEAN_AND_MEAN
+#elif defined(__APPLE__)
+#include <pthread.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 #if CC_HAS_THREADS
+// <chrono> is expensive and normally confined to time.cc; this is the one other place that needs it, because
+// std::this_thread::sleep_for takes a duration and there is no other portable way to spell one.
+#include <chrono>
 #include <thread>
 
 int cc::num_hardware_threads()
@@ -11,10 +26,31 @@ int cc::num_hardware_threads()
     unsigned const n = std::thread::hardware_concurrency();
     return n == 0 ? 1 : int(n);
 }
+void cc::this_thread_yield()
+{
+    std::this_thread::yield();
+}
+
+void cc::this_thread_sleep_secs(double secs)
+{
+    if (secs <= 0)
+        return;
+    std::this_thread::sleep_for(std::chrono::duration<double>(secs));
+}
 #else
 int cc::num_hardware_threads()
 {
     return 1;
+}
+
+void cc::this_thread_yield()
+{
+    // Nothing else can be runnable, so there is nobody to yield to.
+}
+
+void cc::this_thread_sleep_secs(double)
+{
+    // Nothing else can be runnable, so sleeping could only ever waste the wait.
 }
 #endif
 
@@ -29,6 +65,57 @@ thread_local cc::thread_id tl_thread_id = cc::thread_id::invalid;
 
 cc::atomic<bool> g_main_claimed = {false};
 } // namespace
+
+double cc::scheduler_tick_secs()
+{
+#if defined(_WIN32)
+    // The scheduler tick is what a sleep rounds up to, and NtQueryTimerResolution reports it in 100ns units.
+    // The documented alternative — GetSystemTimeAdjustment — reports the clock's update interval, which tracks it.
+    DWORD increment = 0;
+    DWORD adjustment = 0;
+    BOOL disabled = FALSE;
+    if (::GetSystemTimeAdjustment(&adjustment, &increment, &disabled) != 0 && increment > 0)
+        return double(increment) * 1e-7;
+    return 0.0156;
+#else
+    return 0.001;
+#endif
+}
+
+cc::scoped_scheduler_tick::scoped_scheduler_tick(double secs)
+{
+#if defined(_WIN32) && CC_HAS_THREADS
+    auto const ms = secs > 0 ? cc::max(1u, unsigned(secs * 1000.0 + 0.5)) : 1u;
+    if (::timeBeginPeriod(ms) == TIMERR_NOERROR)
+        _granted_ms = ms;
+#else
+    (void)secs;
+#endif
+}
+
+cc::scoped_scheduler_tick::~scoped_scheduler_tick()
+{
+#if defined(_WIN32) && CC_HAS_THREADS
+    if (_granted_ms != 0)
+        ::timeEndPeriod(_granted_ms);
+#endif
+}
+
+cc::u64 cc::native_thread_id()
+{
+#if !CC_HAS_THREADS
+    return 0;
+#elif defined(_WIN32)
+    return u64(::GetCurrentThreadId());
+#elif defined(__APPLE__)
+    u64 id = 0;
+    return pthread_threadid_np(nullptr, &id) == 0 ? id : 0;
+#elif defined(__linux__)
+    return u64(::gettid());
+#else
+    return 0;
+#endif
+}
 
 cc::thread_id cc::current_thread_id()
 {
@@ -55,8 +142,13 @@ void cc::mark_current_thread_as_main()
 
 // Declared here (not via <windows.h>) to keep this TU light, mirroring how assert.cc imports IsDebuggerPresent.
 // char16_t and Windows wchar_t are both 16-bit, so the wide buffer maps directly.
-extern "C" __declspec(dllimport) void* __stdcall GetCurrentThread() noexcept;
-extern "C" __declspec(dllimport) long __stdcall SetThreadDescription(void*, wchar_t const*) noexcept;
+//
+// **Deliberately without `noexcept`**, matching how the platform declares them.
+// Since C++17 an exception specification is part of a function's type, so a `noexcept` here is a REDECLARATION
+// conflict rather than extra information wherever something else in the TU has already declared them — which VS2026's
+// standard library does and VS2022's did not.
+extern "C" __declspec(dllimport) void* __stdcall GetCurrentThread();
+extern "C" __declspec(dllimport) long __stdcall SetThreadDescription(void*, wchar_t const*);
 
 void cc::set_current_thread_name(string_view name)
 {

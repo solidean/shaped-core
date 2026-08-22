@@ -14,7 +14,8 @@ auto const tag0 = doc.root()["tags"][0].as_double(); // 1
 Headers are included by their full path from `src/`, e.g. `#include <babel-serializer/geometry/obj.hh>`.
 Each format lives in its own sub-namespace (`babel::json`, `babel::obj`); `<babel-serializer/all.hh>` is the umbrella.
 
-This library is at an **early stage** — a base64 codec, a JSON reader, a markdown block reader, a live SQLite handle, OBJ and glTF/GLB readers, and PNG/JPG image read+write exist so far.
+This library is at an **early stage**.
+A base64 codec, a JSON reader, a markdown block reader, a live SQLite handle, OBJ and glTF/GLB readers, PNG/JPG image read+write, and a Chrome Trace writer exist so far.
 See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
 ## Design at a glance
@@ -41,6 +42,7 @@ Source lives in `src/babel-serializer/`, grouped by topic:
 | `data/`     | `base64` — the base64 codec (`decode` / `decode_into` / `decoded_size` / `encode`); `json` — the JSON reader (`document` / `node` / `ref`, `read`); `markdown` — the block-level markdown reader (same `document` / `ref` shape); `sqlite` — a live SQLite handle (`database` / `statement` / `row`) |
 | `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`); `gltf` — the glTF 2.0 / GLB reader (`data` + `accessor_view`, `read` over pinned bytes) |
 | `image/`    | `png` / `jpg` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
+| `trace/`    | `chrome_trace` — writes a `cc::rec::recording` as Chrome Trace Event JSON, for `chrome://tracing` and `ui.perfetto.dev` (`encode` / `write`) |
 
 `sqlite` deviates on purpose: SQLite is a live database *engine*, so it is a thin RAII wrapper over an open connection rather than a one-shot parser.
 Open a file / `:memory:` / a byte image, `exec` / `query`, iterate rows — full read/write.

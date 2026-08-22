@@ -38,6 +38,21 @@ option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVE
 # so it is a whole-build switch: never set it per-target. Must precede include(Emscripten) below.
 option(SC_THREADS "Build with OS thread support; OFF forces a single-threaded build" ON)
 
+# Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
+# frame, against a microsecond for the table-driven unwind that is the only alternative.
+#
+# Costs roughly 0.5-2% and one register on x86-64, and next to nothing on arm64 where macOS mandates the chain anyway.
+# Only clang and GCC honour it: MSVC cannot maintain a frame pointer on x64 at all (/Oy is x86-only), which is why
+# Windows walks with RtlCaptureStackBackTrace instead and does not care about this switch.
+option(SC_FRAME_POINTERS "Keep frame pointers, so stacks can be captured by chasing the chain" ON)
+if (SC_FRAME_POINTERS)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
+        add_compile_options(/Oy-) # clang-cl spells it the MSVC way and rejects -fno-omit-frame-pointer
+    elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        add_compile_options(-fno-omit-frame-pointer)
+    endif()
+endif()
+
 # Target CPU is x86-64. Only the instruction-tracer tool and its Zydis decoder ask — both are x86-64 by
 # construction, not by omission — so this is a plain variable rather than a cached option: it describes the
 # target, it is not a choice. Must precede add_subdirectory(extern), which gates the zydis build on it.

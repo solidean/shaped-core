@@ -47,13 +47,19 @@ def archive_diag(build_dirs: list[Path], output: Path, root: Path) -> int:
 def archive_logs(build_root: Path, output: Path, root: Path) -> int:
     """Bundle captured run logs and step sidecars under `build_root` into `output`.
 
-    Collects ``run-logs/*``, the per-preset step sidecars, and any ``*.results.xml``.
+    Collects ``run-logs/*``, the per-preset step sidecars, ``*.results.xml``, and the ``*.ccrec``
+    recordings nexus leaves beside them for a failing test.
     The diag sidecars are deliberately left out — `archive_diag` has them.
+
+    The ``.ccrec`` files are what makes a remote-only failure diagnosable rather than guessable:
+    a ``nx::config::recorded`` test that fails writes its whole event stream out, so the run's
+    evidence comes back from a machine nobody can attach a debugger to.
     """
     files: list[Path] = []
     if build_root.is_dir():
         files.extend(build_root.rglob("run-logs/*"))
         files.extend(build_root.rglob("*.results.xml"))
+        files.extend(build_root.rglob("*.ccrec"))
         for name in _STEP_SIDECARS:
             files.extend(build_root.rglob(name))
     return _zip(files, output, root)

@@ -48,6 +48,21 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 The Tier-3 WebAssembly variants have configure knobs already: `SC_THREADS`, `SC_WASM_WEBGPU` and `SC_WASM_EXCEPTIONS`.
 They fail configure today with a clear "not yet supported" message rather than building — [requirements.md](requirements.md#emscripten--wasm) owns those knobs.
 
+## Frame pointers (`SC_FRAME_POINTERS`)
+
+`SC_FRAME_POINTERS` (default `ON`) keeps a frame pointer in every frame, so `cc::capture_stack` can walk a stack by chasing the chain.
+That is a few nanoseconds a frame, against roughly a microsecond for the table-driven unwind that is the only alternative.
+
+It reaches **clang and GCC only**, as `-fno-omit-frame-pointer` (or `/Oy-` under clang-cl).
+MSVC cannot maintain a frame pointer on x64 at all — `/Oy` is x86-only — which is why Windows captures with `RtlCaptureStackBackTrace` and does not care about this knob.
+So the capture cost is genuinely asymmetric across tier 1, and stacktrace policy should account for it rather than assume one number.
+
+**Turning it `OFF` costs clang and GCC the capture itself, not merely its speed.**
+There is no table-driven fallback off Windows, so the walk chases a chain that is no longer maintained, fails its validation and reports `broken` after a frame or two.
+Windows is unaffected either way, since it never used the chain.
+So `OFF` means "this build does not capture stacks on clang or GCC" — which is a real choice for a shipping target that wants the register back, and never a free one.
+Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to nothing on arm64, where macOS mandates the chain anyway.
+
 ## Threading (`SC_THREADS`)
 
 `SC_THREADS` (default `ON`) is the repo-wide threading knob; it reaches C++ as clean-core's `CC_HAS_THREADS`, 0 or 1.

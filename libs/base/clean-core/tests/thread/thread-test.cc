@@ -52,3 +52,25 @@ TEST("thread - current_thread_id is stable per thread and distinct across them")
     CHECK(other != mine);
 #endif
 }
+
+TEST("thread - the scheduler tick can be asked to be finer")
+{
+    // Deliberately not asserting that sleeps got shorter.
+    // Since Windows 10 2004 the request applies per PROCESS while scheduler_tick_secs reports the SYSTEM setting, so
+    // the two legitimately disagree — and timing the sleep instead would be a flake on any loaded machine.
+    CHECK(cc::scheduler_tick_secs() > 0);
+
+    {
+        cc::scoped_scheduler_tick const finer(0.001);
+
+#if defined(_WIN32) && CC_HAS_THREADS
+        CHECK(finer.is_active()); // timeBeginPeriod(1) is granted on every Windows this runs on
+#endif
+
+        // Nesting has to be safe, because two subsystems asking at once is the normal case.
+        cc::scoped_scheduler_tick const also(0.001);
+        CHECK(also.is_active() == finer.is_active());
+    }
+
+    CHECK(cc::scheduler_tick_secs() > 0);
+}

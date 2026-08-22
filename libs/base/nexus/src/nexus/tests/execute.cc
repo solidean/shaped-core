@@ -6,6 +6,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
@@ -18,6 +19,7 @@
 #include <clean-core/thread/thread_pump.hh>
 #include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
+#include <nexus/impl/rec_session.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/section.hh>
@@ -204,7 +206,7 @@ struct scoped_body
 /// Reads the ambient chain, so it is correct on a pool worker driving this test's nodes, and equally correct when this thread is driving some OTHER test's stolen node.
 test_context* current_context()
 {
-    return static_cast<test_context*>(cc::async_ambient_lookup(nx::impl::test_ambient_tag()));
+    return static_cast<test_context*>(cc::async_ambient_lookup_ptr(nx::impl::test_ambient_tag()));
 }
 
 /// Is a report here part of `ctx`'s own test body — its control flow, its section path, its unsynchronized stats?
@@ -674,6 +676,15 @@ struct async_test_state
     cc::shared_async<cc::unit> root;
     std::chrono::high_resolution_clock::time_point started_at;
     bool started = false;
+
+    // The trace this test's recording is bucketed under, minted alongside the ambient link above.
+    cc::rec::trace_id record_trace = cc::rec::trace_id::none;
+
+    // Held for the whole test rather than for one poll, unlike its counterpart in the synchronous path.
+    // An async body spans many polls and the recorder has to stay handed over across all of them, so this outlives the
+    // frame that made it and comes back in finish_async_test.
+    // Null for every test that did not ask, which is nearly all of them.
+    cc::unique_ptr<nx::impl::recorder_handover_scope> record_handover;
 };
 
 /// Run an ASYNC_TEST body to its return under `ctx`, and take the graph it handed back.
@@ -758,13 +769,17 @@ void finish_async_test(async_test_state& state)
     state.root = {};
 
     // `ambient` holds exactly one reference; anything beyond it is work that outlived the test still naming it.
-    auto const* const link = static_cast<cc::async_ambient_link const*>(state.ambient.head());
-    auto const outstanding = link != nullptr ? link->refs.load(cc::memory_order_acquire) - 1 : 0;
+    auto const outstanding = cc::async_ambient_outstanding(state.ambient.head());
     auto const leaked = outstanding > 0;
     if (leaked)
         note_leaked_async_work(ctx, decl, outstanding);
 
     test_execute_end(cc::move(state.ctx), leaked);
+
+    // The run's recorder comes back BEFORE the bucket is closed against it, which is the order the synchronous path
+    // gets from scoping alone.
+    state.record_handover = {};
+    nx::impl::close_test_bucket(state.record_trace, state.execution->is_considered_failing());
 }
 
 /// Drive one poll of an async test's wrapper node.
@@ -779,6 +794,16 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         state.ctx->allows_sections = false;
 
         auto const& decl = *state.execution->instance.declaration;
+
+        state.record_trace = nx::impl::new_test_trace(decl.test_config.recorded || state.config->record_all);
+        nx::impl::open_test_bucket(state.record_trace, decl.name);
+
+        // Beneath the test's own link, so the handle taken below keeps both alive — a link's parent reference is
+        // strong, so capturing the head captures the chain.
+        cc::rec::impl::trace_link_scope const record_link(state.record_trace);
+
+        if (decl.test_config.owns_recorder)
+            state.record_handover = cc::make_unique<nx::impl::recorder_handover_scope>(true);
 
         // The link this test is known by.
         // Pushed and popped inside this one poll, which is the only shape async_ambient_scope allows, and kept alive past it by `ambient`.
@@ -959,7 +984,7 @@ bool nx::impl::is_declaration_active(nx::test_declaration const* decl)
     {
         if (l->tag != test_ambient_tag())
             continue;
-        auto const* const ctx = static_cast<test_context const*>(l->value);
+        auto const* const ctx = reinterpret_cast<test_context const*>(l->value);
         if (ctx != nullptr && ctx->execution != nullptr && ctx->execution->instance.declaration == decl)
             return true;
     }
@@ -1228,7 +1253,15 @@ void nx::impl::run_test_body(nx::test_execution& execution,
     // Installing the context as the ambient is what makes a check find this test, from this thread or any other.
     // The scope closes before test_execute_end, so nothing can look the context up while it is being destroyed.
     auto leaked_async_work = false;
+    auto const record_trace = nx::impl::new_test_trace(decl.test_config.recorded || config.record_all);
+    nx::impl::open_test_bucket(record_trace, decl.name);
     {
+        // Under the test's own ambient link, so every event this test records — on any worker — carries the id that
+        // buckets it.
+        // A test that opted out mints `none`, and this installs nothing at all.
+        cc::rec::impl::trace_link_scope const record_link(record_trace);
+        nx::impl::recorder_handover_scope const handover(decl.test_config.owns_recorder);
+
         cc::async_ambient_scope const test_ambient(nx::impl::test_ambient_tag(), &ctx);
         scoped_body const own_body(&ctx); // this thread is inside ctx's body from here until the replay loop ends
 
@@ -1338,6 +1371,10 @@ void nx::impl::run_test_body(nx::test_execution& execution,
 
     // Clean up test context (finalizes execution.root)
     test_execute_end(cc::move(owned_ctx), leaked_async_work);
+
+    // After the link is gone and the verdict is in.
+    // A passing test's events are dropped here, which is what returns their chunks to the pool.
+    nx::impl::close_test_bucket(record_trace, execution.is_considered_failing());
 
     if (config.verbose)
     {

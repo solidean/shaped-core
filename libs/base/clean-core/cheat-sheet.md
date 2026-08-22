@@ -503,8 +503,11 @@ cc::current_time_steady_secs();            // -> double; MONOTONIC, arbitrary ze
 cc::current_time_wall_secs();              // -> double; seconds since the Unix epoch, comparable across processes/runs
                                            //    the one to PERSIST (an expiry, a timestamp) — and it can step either way,
                                            //    so a difference of two readings is not a duration
-cc::has_cycle_counter();                   // -> constexpr bool; false on ARM and WASM
-cc::current_cycles();                      // -> u64 TSC on x86, 0 where there is none; inline, for a benchmark's inner loop
+cc::has_cycle_counter();                   // -> constexpr bool; true on x86 and ARM64, false on WASM
+cc::current_cycles();                      // -> u64; TSC on x86, CNTVCT_EL0 on ARM64, 0 on WASM; inline, for an inner loop
+// A tick is MUCH coarser on ARM64 — a fixed timer in the tens of MHz, ~42 ns on Apple silicon, not the core's clock.
+// Fine for a profiling scope, useless for a handful of instructions: loop rather than trust one pair of readings.
+// current_cycles_and_core's core id is x86-only; ARM64 always says core 0, which is not "the same core".
                                            //    constant-rate, so it tracks wall time rather than work done, and nothing
                                            //    here converts it to seconds (the rate needs calibration you do yourself)
 ```
@@ -896,8 +899,11 @@ cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)
 cc::async_ambient_scope const s(my_tag(), &my_state); // push; RAII and strictly LIFO. The only way to install one
-void* v = cc::async_ambient_lookup(my_tag());         // walk the calling thread's chain; null if absent
-void* v2 = cc::async_ambient_lookup_in(head, my_tag());  // same, from a head you already hold (no TLS)
+u64 v = cc::async_ambient_lookup(my_tag());           // walk the calling thread's chain; 0 if absent. The slot is
+                                                      // 64 bits on EVERY target, so a wide value (a trace id) survives
+void* p = cc::async_ambient_lookup_ptr(my_tag());     // the same walk for a slot holding a pointer; null if absent
+u64 v2 = cc::async_ambient_lookup_in(head, my_tag()); // same, from a head you already hold (no TLS)
+void* p2 = cc::async_ambient_lookup_ptr_in(head, my_tag()); // ...and its pointer spelling
 s.link();  s.outstanding();      // this scope's chain head / how much async work still carries it (racy; diagnostics)
 cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
                                  // or escape a worker thread and terminate — the question before reporting by throw
@@ -926,6 +932,260 @@ co_await cc::async_fail("boom");      // never resumes; the uniform failure spel
 co_return cc::error("boom");          // non-unit T only (return_void and return_value cannot coexist)
 // Not here yet: plain (non-async) dep args, structured/owned children, immovable T through co_return, error-type
 // conversion across a heterogeneous-E graph (the make_async_* sugar assumes a single E; raw frames bridge by hand).
+```
+
+## Recording — logging / profiling / stats, one stream (see [systems/recording](docs/systems/recording.md))
+
+Every observability API in the repo writes into the same per-thread byte stream and differs only in its descriptor.
+A site is a `static constexpr cc::rec::desc` plus a write, so a disabled one costs a load and an AND.
+
+**Nothing is recorded before `cc::rec::initialize()`** — test and example binaries get it from `nx::run`.
+
+```cpp
+#include <clean-core/record/system.hh>
+cc::rec::initialize();                     // once, from the application; a second call asserts
+cc::rec::initialize({.chunk_bytes = 1 << 20, .budget_bytes = 64 << 20,
+                     .overflow = cc::rec::overflow_policy::drop, .threaded = true});
+cc::rec::shutdown();                       // no other thread may be recording, listeners already unregistered
+cc::rec::is_initialized();                 // -> bool
+cc::rec::cycles_per_second();              // -> f64; calibrated at initialize, 0 without a cycle counter
+cc::rec::stats();                          // -> system_stats{threads, allocated_bytes, events_processed, ...}
+```
+
+Domains tag a site with the part of the source it came from, resolved by unqualified name lookup:
+
+```cpp
+#include <clean-core/record/domain_fwd.hh>            // costs a fwd.hh nothing: one incomplete type + a constexpr address
+namespace sg { CC_REC_DECLARE_DOMAIN(g_rec_domain); } // in the library's fwd.hh
+namespace sg { CC_REC_DEFINE_DOMAIN(g_rec_domain, "shaped-graphics"); } // in exactly one .cc
+
+#include <clean-core/record/domain.hh>
+dom.set_enabled(cc::rec::category::profiling, false); // one word write; reaches every site under the domain at once
+dom.set_enabled(cc::rec::level::debug, true);
+dom.set_captures_stacktrace(cc::rec::level::error, true);
+cc::rec::find_domain("shaped-graphics");   // -> domain*, or null
+cc::rec::set_all_domains_enabled_mask(m);  // applies to domains registered later too
+```
+
+Recording sites — every name below MUST be a compile-time constant, since it lives in the site's descriptor:
+
+```cpp
+#include <clean-core/common/log.hh>          // CC_LOG_*
+CC_LOG_INFO("shader cache warmed");          // no payload at all: the text IS the descriptor
+CC_LOG_WARNING("fell back to {} after {}", name, reason); // formatted straight into the chunk, no temp buffer
+CC_LOG_TRACE / _DEBUG / _INFO / _WARNING / _ERROR         // trace+debug off by default; error captures a stack
+                                             // too long for the chunk => truncated and flagged, never dropped
+
+#include <clean-core/common/profiling.hh>    // scopes, values, markers, stats
+CC_RECORD_SCOPE();                           // times the block, named after the enclosing function
+CC_RECORD_SCOPE("upload-pass");              // ... or explicitly. MUST NOT cross a co_await (cc::async asserts)
+CC_RECORD_SCOPE_BEGIN("span"); CC_RECORD_SCOPE_END("span"); // when the two ends live in different functions
+
+#include <clean-core/record/async_scope.hh>
+CC_RECORD_ASYNC_SCOPE("load-level");         // an ambient-chain entry, so it DOES follow a co_await and every spawn
+CC_RECORD_ASYNC_SCOPE_WITH_ID("inbound", wire_id);       // ... under an id from off the wire
+cc::rec::current_async_scope();              // -> desc const*, the innermost one; null outside any
+cc::rec::current_trace_id();                 // -> trace_id; an async scope ALWAYS has one (see Tracing below)
+// Pick by unit of work: async scope per logical operation, CC_RECORD_SCOPE per span of one thread's time.
+// It allocates two links and takes their refcounts, so it is the heavier of the two — wrong tool for an inner loop.
+// Deltas are eager (an ambient_changed event at each cc::async restore whose TRACE differs), because a chain of
+// co_awaits recording NOTHING still has to be attributed — the scope is about where time goes.
+#include <clean-core/record/sampling.hh>      // what the threads were ACTUALLY doing, beside what they were told to say
+cc::rec::sampling_scope const s({.rate_hz = 1000.0});    // or start_sampling / stop_sampling / is_sampling
+// rate_hz is PER THREAD (a tick covers all of them). Capped ~1.9 kHz by the OS timer — measured, not guessed.
+// threads_per_tick = 1 restores a fixed budget split across threads. The sampler logs its own ticks as scopes.
+auto const merged = captured.spliced_samples();          // samples ride the SAMPLER's stream until you splice them
+// A sample carries an ANCHOR (which thread, how far its stream had committed), not a copy of that thread's state —
+// so a reader replaying that thread in order reaches the sample with its trace and open scopes already in hand.
+// It stops at the innermost open scope, so a sample inside instrumented code is often one address. That is the point.
+// No sampler without threads, or where a foreign thread's stack cannot be walked; is_sampling() says which.
+
+#include <clean-core/platform/symbolize.hh>  // addresses -> names, at ANALYSIS time and never on the hot path
+cc::symbolizer sym;                          // this process; caches; NOT thread-safe (DbgHelp serializes on you)
+cc::symbolizer sym(rec.modules());           // a RECORDED table instead, in a debug-info session of its own
+sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:42", or "app.exe+0x1234", or <unknown>
+// The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
+// A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
+
+cc::rec::reconfigure_sampling(cfg);          // LIVE: takes effect next tick, no stop/restart, loses no samples
+cc::rec::current_sampling_config();          // what it is running with now — drive a UI checkbox off this
+cc::rec::sampling_override const o({...});   // apply a config for a scope, restored on exit
+// include_unknown_threads is OFF by default: it walks every OS thread per tick, and measured at 1 kHz over 0.5s
+// that turned 374 ticks into 220 — the threads you asked about get sampled 40% less often. Turn it on to hunt a
+// thread that records nothing, which is the only thing it is for.
+
+#include <clean-core/record/splicing_listener.hh>  // samples placed where they were taken, LIVE
+cc::rec::splicing_listener splicer(my_listener);     // register THIS, not my_listener; it must outlive the splicer
+splicer.flush();                                     // after the final flush_blocking, or the last samples stay put
+// Everything is delayed by one batch; a sample that misses its target waits max_hold_batches, then goes out unplaced.
+// Unplaced is not lost — it keeps the position it was recorded at, exactly as an offline splice leaves it.
+// Measured: every ANCHORED sample gets placed live, matching recording::spliced_samples exactly.
+
+cc::rec::recording_listener bounded({.max_secs = 30, .max_bytes = 128 << 20});  // both are CAPS; first to bind wins
+cc::rec::recording_listener forensic({.guaranteed_secs = 20, .max_bytes = 64 << 20}); // 20s promised, cap gives way
+rec.trim(policy); rec.retained(policy); rec.total_bytes();  // in place / as a value / what is held
+// Every limit is off at zero, so a default policy keeps everything. max_secs outranks guaranteed_secs.
+// Block-granular: a block is what a chunk ref keeps alive, so the bound is approximate by one chunk.
+
+event.field_as_u64_array("frames");          // a sample's or a stacktrace's addresses, always written out in full
+// No interning: a stack is written inline every time, so a block means the same thing however it was captured and
+// however much retention has since evicted around it.
+
+#include <clean-core/record/hot_functions.hh> // where the time went, without a viewer
+auto const hot = cc::rec::hot_functions(rec);        // symbolizes and folds every sampled stack by function
+hot.to_string(20);                                   // a self%/total% table, ordered by SELF time
+hot.self_ratio_of("render_frame") > 0.3;             // the assertion form: a regression is a ratio that moved
+// SELF is the innermost frame and is what a profile is for; a high TOTAL and low SELF is a caller, not a problem.
+// Inclusive counts cover only what was CAPTURED — sampling stops at the innermost open scope by design.
+// {.include_stacktrace_events = true} folds in the stacks logs captured, which is a different question.
+
+#include <clean-core/platform/module_table.hh>   // which binaries were mapped where
+cc::enumerate_loaded_modules();              // -> cc::vector<cc::loaded_module>{base, size, path, identity}
+loaded_module::identity                      // the exact BUILD (PE TimeDateStamp+SizeOfImage), not just the path
+loaded_module::contains(addr), .name()       // which module an address fell in; "app.exe", not its install dir
+// Serializing captures this for you; recording.modules() is empty when the recording is this process's own.
+
+CC_RECORD_MARK("fallback-taken");            // "did this code run" — the cheapest useful annotation
+CC_RECORD("mesh_vertices", n);               // scalars/enums/pointers inline; anything string_view-ish by BYTES
+CC_RECORD("asset", "meshes/tree.obj");       // a LITERAL (char const[N]) is stored as its address, bytes stay in .rodata
+CC_RECORD_NAMED(counter.name(), n);          // a name only known at runtime; value must be fixed-size
+
+#include <clean-core/record/pinned_value.hh>  // bytes kept alive rather than copied
+CC_RECORD_PINNED("frame.depth", pinned);     // a cc::pinned_data<T>: the event is an address + a size, 16 bytes
+e.field_as_bytes("value");                   // -> span<byte const>; the originals live, the file's copy loaded
+// Opt a type in with cc::rec::pinnable_traits; pinned_data<T> already is. The bytes must NOT change while any
+// recording holding them is alive — nothing copies them, so a mutation rewrites history.
+// The 64-slot pin array is not a limit: a full one spills into a heap block that becomes a single pin.
+// The const is the tier: `char const[N]` = literal, stored by address and REQUIRED to outlive the process.
+// `char[N]` — the snprintf-into-a-local shape — is non-const, so it is copied inline and needs no lifetime thought.
+// A `char const buf[32]` local is misuse: nothing reads the payload at the site, so the address is read long after.
+// Prefer CC_RECORD: a static name costs the stream nothing, a runtime one is copied into every event.
+CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless
+CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a DELTA to add up
+// units: unit_count, unit_bytes, unit_seconds, unit_ratio, unit_hertz — or define your own cc::rec::unit
+```
+
+The low-level seam the above expand into:
+
+```cpp
+#include <clean-core/record/record.hh>
+CC_RECORD_EVENT(cc::rec::event_kind::marker, cc::rec::category::values, "cache-miss-fallback");
+CC_RECORD_EVENT_WITH(cc::rec::event_kind::value, cc::rec::category::values, "upload", nullptr, my_fields, payload);
+
+cc::rec::is_recording(desc);               // -> bool; the gate on its own
+cc::rec::record_event(desc, payload);      // POD payload, cc::span<byte const>, or nothing
+auto w = cc::rec::open_event(desc, 256);   // reserve, fill w.payload() in place, then w.commit(n) — no temp buffer
+cc::rec::set_current_thread_record_name("worker");
+cc::rec::seal_current_thread_chunk();      // hand this thread's tail over without waiting for the chunk to fill
+```
+
+Getting events out:
+
+```cpp
+#include <clean-core/record/listener.hh>
+#include <clean-core/record/recording.hh>
+struct my_listener : cc::rec::listener { void on_chunk(cc::rec::chunk_view const& v) override { ... } };
+struct per_event : cc::rec::event_listener<per_event> { void on_event(auto const& chunk, auto const& e) { ... } };
+
+#include <clean-core/record/console_listener.hh>
+auto console = cc::rec::console_listener({.min_level = cc::rec::level::info}); // log events only, in timestamp order
+
+cc::rec::recording_listener capture;
+auto const h = cc::rec::register_listener(capture); // the index IS the layer; register must-see-everything first
+cc::rec::flush_blocking();                 // drains on the CALLING thread; everything published before it is offered
+cc::rec::unregister_listener(h);           // blocks until no callback into it can still be running
+auto const rec = capture.take();           // a VALUE: append, replay, walk
+
+rec.event_count(); rec.block_count(); rec.empty();
+rec.for_each_event([](auto const& chunk, auto const& e) { ... });
+rec.replay(some_listener);                 // works on a listener that was never registered
+e.name(); e.kind(); e.level(); e.domain(); e.cycles; e.core; e.site();
+e.field_as_double("bytes"); e.field_as_int("count"); e.field_as_text("path"); // empty when absent or wrong type
+e.field_as_u64("trace");                   // the LOSSLESS reader an opaque 64-bit id needs (double stops at 2^53)
+e.field_as_u64_array("members"); e.relation();  // u64_array fields, and a relation event's type
+e.field_as_desc("scope0");                 // -> desc const*, for desc_ref fields; null when the slot names nothing
+// Every chunk opens with an event_kind::stream_state preamble: the trace, scope_depth, named_scopes, scope0..scope2.
+// Producer-written, because an open scope CANNOT be derived — a long-lived one opens once, and a ring buffer or a
+// crash dump's tail has outlived its scope_begin. named_scopes < scope_depth means "deeper, but unnamed here".
+chunk.wall_secs_of(e.cycles);              // exact on a sealed chunk; uses cycles_per_second on a live one
+```
+
+The algebra — capturing copies nothing, NARROWING synthesizes owned blocks and stops pinning the chunks:
+
+```cpp
+rec.from_thread(cc::current_thread_id());  // the synchronous way to narrow to the code under test
+rec.from_domain(&sg::g_rec_domain); rec.of_kind(cc::rec::event_kind::log);
+rec.in_cycle_range(begin, end);
+rec.filtered([](auto const& chunk, auto const& e) { return e.level() >= cc::rec::level::error; });
+rec.decimated({.keep_from_cycles = cutoff}); // drops old, KEEPS open scopes, leaves a dropped_span saying what went
+rec.append(other);                           // concatenation
+```
+
+Queries — everything ordered is ordered by TIMESTAMP, so it means the same across threads as within one:
+
+```cpp
+rec.count("cache-miss"); rec.contains("cache-miss"); rec.count_of_kind(cc::rec::event_kind::marker);
+rec.first_value("vertex_count");           // -> optional<f64>; ABSENT is not zero, which is the point
+rec.last_value("queue_depth"); rec.values("attempts");   // -> vector<f64>
+rec.first_text("path");                    // -> optional<cc::string>
+rec.contains_in_order({"open", "write", "close"});       // anything allowed between; wrong order is false
+rec.messages();                            // -> vector<cc::string>, every log line as it would print
+rec.scopes(); rec.scopes("upload-pass");   // -> vector<scope_span>{name(), depth, duration_secs(), is_open}
+```
+
+Tracing — correlating work the thread stack and the clock do not relate (the graph is built OFFLINE):
+
+```cpp
+#include <clean-core/record/trace.hh>
+// A trace IS an async scope: CC_RECORD_ASYNC_SCOPE opens one and mints the id, so it follows a co_await and
+// every spawn. There is no separate trace scope, and the id is not optional — it is what the stream attributes by.
+cc::rec::current_trace_id();               // -> the chain's, so correct on whichever worker resumed the work
+cc::rec::new_trace_id();                   // per-thread counter; no allocation, registry or lock
+// The scope's begin/end pair is what puts a NAME on an id, which a static descriptor alone could never do.
+// Gating splits: the scope answers to category::profiling, only the relations below to category::tracing.
+
+CC_RECORD_RELATION(cc::rec::relation_parent_of, request, fetch);      // n-ary; FIRST member is the subject
+CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c);           // symmetric: every member is a peer
+CC_RECORD_RELATION_MANY(type, runtime_member_span);
+
+// A relation TYPE is a static object, not an enum — same protocol as cc::rec::unit, and for the same reason:
+struct relation_type { char const* name, * inverse_name; bool is_symmetric, is_transitive, is_equivalence; };
+// built-ins: relation_parent_of, relation_caused_by, relation_same_key_as, relation_follows
+// is_equivalence is the one flag a reconstruction acts on directly: those ids may be MERGED (cc::disjoint_set)
+
+rec.from_trace(id);                        // -> recording; carries the per-thread running value forward
+rec.trace_relations();                     // -> vector<trace_relation>{type, members, cycles}; .subject() .objects()
+```
+
+What the recorder itself cost:
+
+```cpp
+#include <clean-core/record/overhead.hh>
+cc::rec::measure_overhead();               // a few ms; RECORDS into the live system, in the cc.record domain
+cc::rec::overhead();                       // -> overhead_model{fixed_cycles, cycles_per_byte, disabled_cycles, is_measured}
+cc::rec::set_overhead(model);
+rec.estimated_overhead_cycles();           // an event that measured itself (a stacktrace) beats the model
+rec.estimated_overhead_ratio();            // over wall time summed across threads; 0 when no time passed
+```
+
+Persisting one, and the crash dump (see [systems/recording-formats](docs/systems/recording-formats.md)):
+
+```cpp
+#include <clean-core/record/serialize.hh>
+cc::rec::serialize(rec);                   // -> cc::vector<byte>, self-describing; NO stability guarantee
+cc::rec::save_recording(rec, path);        // -> cc::result<cc::unit>
+cc::rec::save_serialized_recording(bytes, path); // write bytes serialize() already made — for serialize-early/write-late,
+                                           // since a recording holds chunk refs and cannot outlive the recorder
+auto loaded = cc::rec::load_recording(path);  // -> cc::result<loaded_recording>; OWNS what its events point at
+loaded.value().events();                   // -> recording const&; algebra + queries work identically
+loaded.value().is_truncated(); loaded.value().cycles_per_second(); loaded.value().dumped_at_wall_secs();
+// gotcha: from_domain(domain const*) matches NOTHING on a loaded recording — use from_domain("name")
+
+#include <clean-core/record/crash_dump.hh>
+cc::install_crash_handler();                                  // the hook list this rides on
+cc::rec::install_crash_dump({.path = "crash.ccrec"});         // reserves its arena NOW; the handler allocates nothing
+cc::rec::write_crash_dump_now();                              // -> bool; the identical path, on demand
+// reads the chunks directly, so it sees events NO listener ever drained, and suspends no thread
 ```
 
 ## Strings — encoding conversion
@@ -1055,6 +1315,15 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`string` / `string_view` are NOT null-terminated.**
   `data()` is not a C string — use `str.c_str_materialize()`, whose result is valid only until the next non-const operation.
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
+- **A recording site's name must be a compile-time constant.**
+  It lives in the site's `static constexpr` descriptor, which is what keeps a site free of a guard variable — so a helper taking a runtime `char const*` does not compile.
+- **`cc::rec` timestamps STRICTLY increase within a thread**, and that is a guarantee rather than a happy accident.
+  Every event goes through a per-thread monotonic stamp, so a tie or an inversion is impossible to observe — which is what makes scopes nest and `in_cycle_range` mean something.
+  The cost is that a burst arriving faster than the counter ticks gets one tick per event whatever it really took: sub-nanosecond on x86, ~42 ns on Apple silicon.
+  Across threads there is no such guarantee — two threads can share a tick, and queries break that tie by capture order.
+- **A serialized recording carries no format stability guarantee** and will not for a good while.
+  A reader refuses a version it does not know rather than misreading it; durability comes from an exporter, not from these bytes.
+- **A recording is process-local.** Events point at descriptors, and descriptors are static objects in this binary — nothing about one survives a save or a wire.
 - **An `interned_string`'s identity is process-local and must never leave the process.**
   Serialize `as_string_view()`, and hash durable data over those bytes — two runs will not agree on anything else.
 - **`interned_string` has no `<`, on purpose.** Everything about the type is a pointer operation except ordering by bytes, so making that cost visible beats a `<` that quietly memcmps.

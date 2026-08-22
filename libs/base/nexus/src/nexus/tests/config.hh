@@ -67,6 +67,16 @@ struct nx::config::cfg
     char const* exclusion_tags[max_exclusion_tags] = {};
     int exclusion_tag_count = 0;
     bool exclusive_global = false; // excludes every other test, not just fellow tag holders
+
+    // Bucket this test's cc::rec events so nx::test_recording() can read them back.
+    // OFF by default, because attribution is paid per test whether or not the test ever asks — see
+    // libs/base/nexus/docs/recording.md.
+    bool recorded = false;
+
+    // This test drives cc::rec::initialize / shutdown itself, so the run hands its own recorder over for the duration.
+    // Requires an untagged `exclusive()` and forbids `recorded`; the schedule asserts on both rather than trusting the
+    // order the config objects were spelled in.
+    bool owns_recorder = false;
 };
 
 namespace nx::config
@@ -78,6 +88,27 @@ constexpr struct
 {
     void apply(cfg& result) const { result.enabled = false; }
 } disabled;
+
+// Bucket this test's cc::rec events, so nx::test_recording() can read them back and a failure keeps them.
+//
+// Opt-in, because attribution is per TEST rather than per event: a trace link, plus an ambient delta wherever the work
+// moves between contexts.
+// A test that never asks would pay all of it for an answer nobody reads, and most tests never ask.
+constexpr struct
+{
+    void apply(cfg& result) const { result.recorded = true; }
+} recorded;
+
+// This test owns the cc::rec singleton: the run shuts its recorder down before the body and re-initializes after.
+//
+// **Requires an untagged `exclusive()`**, since a recorder torn down on one thread is torn down for every thread —
+// a tagged exclusive only holds off fellow tag holders, which is not enough.
+// It also forbids `recorded`: there is no run recorder left to bucket into.
+// Both are asserted when the schedule is built, so neither depends on the order these are spelled in.
+constexpr struct
+{
+    void apply(cfg& result) const { result.owns_recorder = true; }
+} owns_recorder;
 
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
 // It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.

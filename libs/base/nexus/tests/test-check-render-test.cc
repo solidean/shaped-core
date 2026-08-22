@@ -24,26 +24,39 @@ nx::test_error const& first_error(nx::test_schedule_execution const& exec)
     return exec.executions[0].root.errors[0];
 }
 
-template <class F>
-nx::test_schedule_execution run_failing(F&& body)
+// An execution POINTS AT its registry's declarations, so the two have to be returned together.
+//
+// Returning the execution alone leaves every `instance.declaration` dangling the moment the helper returns, and
+// nothing notices until something reads one — write_junit_xml reads `decl->name`, and a freed cc::string reports
+// whatever text landed in its bytes as a length.
+// Member order is the fix: `exec` is declared second, so it is destroyed first.
+struct failing_run
 {
     nx::test_registry reg;
-    reg.add_declaration("subject", {}, body);
-    auto schedule = nx::test_schedule::create({}, reg);
-    return nx::execute_tests(schedule, {});
+    nx::test_schedule_execution exec;
+};
+
+template <class F>
+failing_run run_failing(F&& body)
+{
+    failing_run r;
+    r.reg.add_declaration("subject", {}, body);
+    auto schedule = nx::test_schedule::create({}, r.reg);
+    r.exec = nx::execute_tests(schedule, {});
+    return r;
 }
 } // namespace
 
 TEST("check render - a comparison keeps its operands and appends every annotation", no_scheduler)
 {
-    auto const exec = run_failing(
+    auto const run = run_failing(
         []
         {
             auto const v = 3;
             CHECK(1 == 2).context("during parse phase").note("checking the header").dump("v", v);
         });
 
-    auto const& err = first_error(exec);
+    auto const& err = first_error(run.exec);
 
     // the decomposed comparison still leads
     CHECK(err.expanded.contains("1 == 2"));
@@ -60,37 +73,37 @@ TEST("check render - a comparison keeps its operands and appends every annotatio
 
 TEST("check render - a bare boolean appends its annotations too", no_scheduler)
 {
-    auto const exec = run_failing(
+    auto const run = run_failing(
         []
         {
             auto const flag = false;
             CHECK(flag).context("flag must be set after init");
         });
 
-    auto const& err = first_error(exec);
+    auto const& err = first_error(run.exec);
     CHECK(err.expanded.contains("failed"));
     CHECK(err.expanded.contains("flag must be set after init"));
 }
 
 TEST("check render - a user context does not shadow the throws diagnostic", no_scheduler)
 {
-    auto const exec = run_failing([] { CHECK_THROWS([] {}()).context("parsing an empty document"); });
+    auto const run = run_failing([] { CHECK_THROWS([] {}()).context("parsing an empty document"); });
 
-    auto const& err = first_error(exec);
+    auto const& err = first_error(run.exec);
     CHECK(err.expanded.contains("no exception was thrown"));
     CHECK(err.expanded.contains("parsing an empty document"));
 }
 
 TEST("check render - a user context does not shadow the throws_as diagnostic", no_scheduler)
 {
-    auto const exec = run_failing(
+    auto const run = run_failing(
         []
         {
             CHECK_THROWS_AS([] { throw std::runtime_error("boom"); }(), std::logic_error) //
                 .context("expected a logic error here");
         });
 
-    auto const& err = first_error(exec);
+    auto const& err = first_error(run.exec);
     CHECK(err.expanded.contains("wrong exception type"));
     CHECK(err.expanded.contains("expected a logic error here"));
 }
@@ -98,9 +111,9 @@ TEST("check render - a user context does not shadow the throws_as diagnostic", n
 #if CC_ASSERT_ENABLED
 TEST("check render - a user context does not shadow the asserts diagnostic", no_scheduler)
 {
-    auto const exec = run_failing([] { CHECK_ASSERTS([] {}()).context("the guard should have fired"); });
+    auto const run = run_failing([] { CHECK_ASSERTS([] {}()).context("the guard should have fired"); });
 
-    auto const& err = first_error(exec);
+    auto const& err = first_error(run.exec);
     CHECK(err.expanded.contains("no assertion was triggered"));
     CHECK(err.expanded.contains("the guard should have fired"));
 }
@@ -122,8 +135,8 @@ TEST("check render - annotations reach the junit report", no_scheduler)
 {
     // The results XML is the only channel from a failing check to `dev.py test` / test_diag, so an
     // annotation that renders but does not export is still invisible where it matters.
-    auto const exec = run_failing([] { CHECK(1 == 2).context("corpus.md:14"); });
+    auto const run = run_failing([] { CHECK(1 == 2).context("corpus.md:14"); });
 
-    cc::string const xml = nx::write_junit_xml("render-suite", exec);
+    cc::string const xml = nx::write_junit_xml("render-suite", run.exec);
     CHECK(xml.contains("corpus.md:14"));
 }

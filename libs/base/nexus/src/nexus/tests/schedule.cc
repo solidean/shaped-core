@@ -130,6 +130,19 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
             config.verbose = true;
             continue;
         }
+        // Record everything: bucket every test, whatever its own config says.
+        else if (arg == "--record")
+        {
+            config.record_all = true;
+            continue;
+        }
+        // No recording: leave cc::rec down for the whole run.
+        // Wins over --record, since there is no recorder for it to bucket into.
+        else if (arg == "--no-recording")
+        {
+            config.no_recording = true;
+            continue;
+        }
         // Manual mode: select the manual bucket, so wildcard filters can select among manual tests (e.g.
         // `--manual bench` runs every manual test whose name contains "bench"). Disabled tests stay out.
         else if (arg == "--manual")
@@ -381,6 +394,18 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
             continue;
 
         CC_ASSERT(decl.function.is_valid() || decl.is_async(), "invalid test decl");
+
+        // Checked here rather than left to the order the config objects happen to be spelled in.
+        // `owns_recorder` tears the recorder down for every thread at once, so a test holding it while another runs is
+        // not a rule about this test — it breaks the other one.
+        // Untagged exclusive specifically: a TAGGED one only excludes fellow tag holders, which leaves every other
+        // test in the run free to be recording into a recorder this one is about to tear down.
+        CC_ASSERT(!decl.test_config.owns_recorder || decl.test_config.exclusive_global,
+                  "nx::config::owns_recorder requires an untagged nx::config::exclusive() — the recorder is "
+                  "process-wide, so handing it to one test takes it away from every test running alongside it");
+        CC_ASSERT(!decl.test_config.owns_recorder || !decl.test_config.recorded,
+                  "nx::config::owns_recorder and nx::config::recorded are mutually exclusive — a test that owns the "
+                  "recorder has no run recorder to be bucketed into");
 
         if (!config.would_run(decl))
             continue;

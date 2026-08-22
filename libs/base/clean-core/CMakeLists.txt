@@ -31,10 +31,34 @@ add_library(clean-core
     src/clean-core/platform/console.cc
     src/clean-core/platform/environment.cc
     src/clean-core/platform/file_path.cc
+    src/clean-core/platform/stack_capture.cc
+    src/clean-core/platform/module_table.cc
+    src/clean-core/platform/symbolize.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
+    src/clean-core/record/domain.cc
+    src/clean-core/record/chunk.cc
+    src/clean-core/record/chunk_pool.cc
+    src/clean-core/record/writer.cc
+    src/clean-core/record/event_view.cc
+    src/clean-core/record/system.cc
+    src/clean-core/record/recording.cc
+    src/clean-core/record/pinned_value.cc
+    src/clean-core/record/value.cc
+    src/clean-core/record/log.cc
+    src/clean-core/record/console_listener.cc
+    src/clean-core/record/impl/serialized_format.cc
+    src/clean-core/record/serialize.cc
+    src/clean-core/record/crash_dump.cc
+    src/clean-core/record/trace.cc
+    src/clean-core/record/ambient.cc
+    src/clean-core/record/async_scope.cc
+    src/clean-core/record/sampling.cc
+    src/clean-core/record/overhead.cc
+    src/clean-core/record/hot_functions.cc
+    src/clean-core/record/splicing_listener.cc
     src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/format.cc
@@ -79,6 +103,8 @@ target_sources(clean-core
     src/clean-core/common/endian.hh
     src/clean-core/common/assert.hh
     src/clean-core/common/time.hh
+    src/clean-core/common/log.hh
+    src/clean-core/common/profiling.hh
     src/clean-core/common/impl/small_size_type.hh
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
@@ -98,6 +124,9 @@ target_sources(clean-core
     src/clean-core/platform/file_path.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
+    src/clean-core/platform/stack_capture.hh
+    src/clean-core/platform/module_table.hh
+    src/clean-core/platform/symbolize.hh
     src/clean-core/platform/win32_sanitized.hh
     src/clean-core/platform/intrinsics.hh
 
@@ -165,6 +194,38 @@ target_sources(clean-core
     src/clean-core/error/optional.hh
     src/clean-core/error/crash_handler.hh
 
+    src/clean-core/record/domain_fwd.hh
+    src/clean-core/record/fwd.hh
+    src/clean-core/record/desc.hh
+    src/clean-core/record/domain.hh
+    src/clean-core/record/chunk.hh
+    src/clean-core/record/chunk_pool.hh
+    src/clean-core/record/impl/thread_state.hh
+    src/clean-core/record/impl/writer_tls.hh
+    src/clean-core/record/impl/system_state.hh
+    src/clean-core/record/writer.hh
+    src/clean-core/record/event_view.hh
+    src/clean-core/record/listener.hh
+    src/clean-core/record/system.hh
+    src/clean-core/record/record.hh
+    src/clean-core/record/recording.hh
+    src/clean-core/record/pinned_value.hh
+    src/clean-core/record/value.hh
+    src/clean-core/record/stat.hh
+    src/clean-core/record/log.hh
+    src/clean-core/record/scope.hh
+    src/clean-core/record/console_listener.hh
+    src/clean-core/record/impl/serialized_format.hh
+    src/clean-core/record/serialize.hh
+    src/clean-core/record/hot_functions.hh
+    src/clean-core/record/splicing_listener.hh
+    src/clean-core/record/crash_dump.hh
+    src/clean-core/record/trace.hh
+    src/clean-core/record/impl/ambient_hook.hh
+    src/clean-core/record/async_scope.hh
+    src/clean-core/record/sampling.hh
+    src/clean-core/record/overhead.hh
+
     src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
     src/clean-core/thread/thread.hh
@@ -207,6 +268,12 @@ target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3 zstd lz4)
 find_package(Threads REQUIRED)
 target_link_libraries(clean-core PUBLIC Threads::Threads)
 
+# timeBeginPeriod / timeEndPeriod (cc::scoped_scheduler_tick) live in winmm, which is not part of the default
+# Windows link set. Private: nothing in our headers names it.
+if(WIN32)
+    target_link_libraries(clean-core PRIVATE winmm)
+endif()
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(clean-core
     PUBLIC
@@ -230,6 +297,7 @@ target_compile_definitions(clean-core
     $<$<CONFIG:Release>:CC_RELEASE>
     $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
     $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
+    $<$<BOOL:${SC_FRAME_POINTERS}>:CC_FRAME_POINTERS>
 )
 
 # Detect and link the correct library for std::stacktrace support.
@@ -308,6 +376,9 @@ sc_declare_pch_tier(CC_ALL EXTENDS CC HEADERS
     <clean-core/platform/console.hh>
     <clean-core/platform/stacktrace.hh>
     <clean-core/sequence/sequence.hh>
+    <clean-core/common/log.hh>
+    <clean-core/common/profiling.hh>
+    <clean-core/record/record.hh>
 )
 
 # CC_ALL plus the expensive standard headers our containers and strings reach anyway.
@@ -355,6 +426,8 @@ if(SC_BUILD_TESTS)
         tests/platform/console-test.cc
         tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
+        tests/platform/stack-capture-test.cc
+        tests/platform/symbolize-test.cc
 
         tests/algorithm/sort-test.cc
         tests/algorithm/select-test.cc
@@ -416,6 +489,17 @@ if(SC_BUILD_TESTS)
         tests/streams/span_stream-test.cc
         tests/streams/file_stream-test.cc
         tests/streams/read_line-test.cc
+
+        tests/record/record-test.cc
+        tests/record/record-frontends-test.cc
+        tests/record/record-query-test.cc
+        tests/record/record-serialize-test.cc
+        tests/record/record-trace-test.cc
+        tests/record/record-async-scope-test.cc
+        tests/record/record-sampling-test.cc
+    tests/record/record-hot-functions-test.cc
+    tests/record/record-retention-test.cc
+    tests/record/record-splicing-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc

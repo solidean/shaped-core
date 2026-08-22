@@ -26,8 +26,8 @@ rules:
 
   - kind: allow-include
     value: <chrono>
-    reason: cc::current_time_steady_secs replaces it repo-wide; <chrono> is the standard library's most expensive header on MSVC (1.16 s, 148 files, via <format> and <xutility>) so it must never reach a header — see docs/notes/build-times.md
-    files: src/clean-core/common/time.cc
+    reason: cc::current_time_steady_secs replaces it repo-wide; <chrono> is the standard library's most expensive header on MSVC (1.16 s, 148 files, via <format> and <xutility>) so it must never reach a header — see docs/notes/build-times.md. thread.cc is the one other .cc that needs it: std::this_thread::sleep_for takes a duration, and there is no portable way to spell one without <chrono>
+    files: [src/clean-core/common/time.cc, src/clean-core/thread/thread.cc]
 
   - kind: allow-include
     value: [<cstddef>, <cstdint>]
@@ -120,6 +120,43 @@ rules:
       - src/clean-core/memory/allocation.cc
       - src/clean-core/platform/console.cc
       - src/clean-core/platform/native.cc
+
+  - kind: allow-include
+    value: <new>
+    reason: std::nothrow, so a chunk whose pin array spilled and could not allocate falls back to recording the value inline instead of throwing from a recording site
+    files: src/clean-core/record/chunk.cc
+
+  - kind: allow-include
+    value: <memory>
+    reason: a pin holds a cc::pinned_data's owner, which IS a std::shared_ptr<void const> — cc::shared_ptr supports neither the type erasure nor the aliasing that owner needs, which is why pinned_data.hh uses std:: too
+    files: src/clean-core/record/pinned_value.cc
+
+  - kind: allow-include
+    value: <dbghelp.h>
+    reason: SymFromAddr and SymGetLineFromAddr64 are the only route from an address to a name on Windows
+    files: src/clean-core/platform/symbolize.cc
+
+  - kind: allow-include
+    value: <tlhelp32.h>
+    reason: the thread and module snapshots are the only way to find what the recorder was never told about
+    files:
+      - src/clean-core/record/sampling.cc
+      - src/clean-core/platform/module_table.cc
+
+  - kind: allow-include
+    value: <timeapi.h>
+    reason: timeBeginPeriod and timeEndPeriod live there, and <Windows.h> does not pull them in under LEAN_AND_MEAN
+    files: src/clean-core/thread/thread.cc
+
+  - kind: allow-include
+    value: [<pthread.h>, <unistd.h>]
+    reason: gettid and pthread_threadid_np are the only routes to the OS's own thread id
+    files: src/clean-core/thread/thread.cc
+
+  - kind: allow-include
+    value: <pthread.h>
+    reason: a thread's stack bounds are what a frame-chain walk validates against, and pthread is the only source
+    files: src/clean-core/platform/stack_capture.cc
 
   - kind: allow-include
     value: <csignal>
