@@ -400,9 +400,16 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         // not a rule about this test — it breaks the other one.
         // Untagged exclusive specifically: a TAGGED one only excludes fellow tag holders, which leaves every other
         // test in the run free to be recording into a recorder this one is about to tear down.
-        CC_ASSERT(!decl.test_config.owns_recorder || decl.test_config.exclusive_global,
-                  "nx::config::owns_recorder requires an untagged nx::config::exclusive() — the recorder is "
-                  "process-wide, so handing it to one test takes it away from every test running alongside it");
+        // main_thread counts as exclusive here, and every EXAMPLE is main_thread.
+        // It forces scheduler_mode::none, and that phase drives bodies one at a time on the calling thread while the
+        // phases themselves run in sequence — the same "runs beside nothing" guarantee an untagged exclusive() asks
+        // for, arrived at by a different route.
+        // Demanding the spelling as well would make every example that owns the recorder carry a redundant word.
+        auto const runs_alone = decl.test_config.exclusive_global || decl.test_config.main_thread;
+        CC_ASSERT(!decl.test_config.owns_recorder || runs_alone,
+                  "nx::config::owns_recorder requires an untagged nx::config::exclusive() (or nx::main_thread, which "
+                  "an EXAMPLE already is) — the recorder is process-wide, so handing it to one test takes it away "
+                  "from every test running alongside it");
         CC_ASSERT(!decl.test_config.owns_recorder || !decl.test_config.recorded,
                   "nx::config::owns_recorder and nx::config::recorded are mutually exclusive — a test that owns the "
                   "recorder has no run recorder to be bucketed into");

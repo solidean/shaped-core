@@ -141,7 +141,11 @@ namespace cc::rec
 /// An application that wants a non-default budget calls `initialize(config)` FIRST; this then only registers.
 ///
 /// Idempotent: calling it twice registers one listener and hands back the same handle both times.
-/// The listener it owns lives until the process ends, so nothing has to outlive-check it at shutdown.
+/// The listener it owns lives until the process ends, so nothing has to outlive-check it.
+///
+/// **A program that calls `rec::shutdown()` must unregister this first** — shutdown frees the pool every listener's
+/// callback reads out of, and asserts that none are left.
+/// That is what the returned handle is for; an application that simply runs until the process ends can ignore it.
 ///
 /// **Deliberately not something a library may call.** How many megabytes recording may cost, and whether anything is
 /// printed at all, are the program's decisions — see the note at the top of record/system.hh.

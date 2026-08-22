@@ -94,6 +94,10 @@ cc::rec::install_default_console_listener();   // initializes if needed, then re
 
 Test and example binaries get theirs from `nx::run` and need no setup at all.
 
+It returns a handle, and a program that later calls `cc::rec::shutdown()` **must unregister it first**.
+Shutdown frees the pool every listener's callback reads out of, and asserts that none are left.
+An application that simply runs until the process ends can ignore the handle.
+
 A line looks like this:
 
 ```text

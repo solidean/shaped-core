@@ -183,9 +183,8 @@ void load_assets()
 // owns_recorder because this drives cc::rec::initialize itself, and nx::run stands a recorder up for the whole binary.
 // Without it the initialize below is a second one, which asserts.
 //
-// exclusive() comes with it, and untagged: the recorder is process-wide, so handing it to one entry takes it away
-// from everything running alongside — which nexus asserts on rather than letting it produce a torn recording.
-EXAMPLE("babel-serializer/chrome-trace", nx::config::exclusive(), nx::config::owns_recorder)
+// No exclusive() needed: an EXAMPLE is main_thread, which already runs beside nothing.
+EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
 {
     using namespace cc::primitive_defines;
 
@@ -197,7 +196,7 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::exclusive(), nx::config::ow
     // Registered first, so it is the layer everything else records BELOW — and default-constructed, so the run
     // honors CC_LOG_LEVEL, CC_LOG_COLOR and friends:
     //   CC_LOG_LEVEL=debug uv run dev.py example babel-serializer/chrome-trace
-    cc::rec::install_default_console_listener();
+    auto const console = cc::rec::install_default_console_listener();
 
     cc::rec::recording captured;
     {
@@ -306,5 +305,10 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::exclusive(), nx::config::ow
     cc::println("wrote {}", path);
     cc::println("open it in chrome://tracing or at https://ui.perfetto.dev");
 
+    // The console has to go before the recorder does: shutdown() requires that every listener is already gone, since
+    // it frees the pool their callbacks read out of.
+    // A normal application never reaches this — it installs a console and lets the process end — which is why
+    // install_default_console_listener hands back a handle rather than keeping it to itself.
+    cc::rec::unregister_listener(console);
     cc::rec::shutdown();
 }
