@@ -62,7 +62,7 @@ struct nx::config::cfg
 
     bool main_thread = false; // the body must run on the process main thread; orthogonal to `scheduler`
 
-    // A command line for this test, reachable from its body through nx::current_args().
+    // A command line for this test, reachable from its body through nx::test_args().
     // A `char const*` for the same reason exclusion_tags is an array of them: cfg stays trivially copyable,
     // and config.hh stays the light header every test TU includes.
     // nullptr means none was declared, which is distinct from `""` — an explicitly empty line.
@@ -91,7 +91,7 @@ namespace nx::config
 // A command line this test receives, as it would be typed.
 //
 // Tokenized once when the schedule is built, by the same rules a response file uses, and reachable from the
-// body through nx::current_args().
+// body through nx::test_args().
 // The point is an EXAMPLE that demonstrates something without the reader having to type anything:
 //
 //     EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose"))

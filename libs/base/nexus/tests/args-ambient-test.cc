@@ -26,14 +26,16 @@ TEST("args ambient - the program is identified, or honestly not")
 
 TEST("args ambient - argv[0] is not one of the arguments")
 {
-    for (auto const& arg : nx::current_args())
+    for (auto const& arg : nx::process_args())
         CHECK(arg != nx::program_path());
 }
 
-TEST("args ambient - current_args and process_args agree outside a test scope")
+TEST("args ambient - the two sources are separate, with no fallback between them")
 {
-    // Per-test arguments do not exist yet, so inside a test these are still the process's own.
-    CHECK(nx::current_args().size() == nx::process_args().size());
+    // This test declares no arguments of its own, so test_args() is empty — it does not quietly become the
+    // process's, which is how a test ends up trying to parse the harness's flags.
+    CHECK(nx::test_args().empty());
+    CHECK(!nx::process_args().empty());
 }
 
 TEST("args ambient - the undeclared accessors never fail")

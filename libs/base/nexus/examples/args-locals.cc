@@ -42,7 +42,7 @@ EXAMPLE("nexus/args-locals", nx::config::args("--jobs 8 --verbose --output out.b
     // readable in one place.
     args.no_auto_print();
 
-    auto const result = args.parse(nx::current_args());
+    auto const result = args.parse(nx::test_args());
 
     if (result.outcome() == nx::args_outcome::help_requested)
     {

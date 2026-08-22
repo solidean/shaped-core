@@ -62,11 +62,20 @@ TEST("test cli - jobs, in all three spellings")
         CHECK(parse({"-j0"}).jobs == 0);
     }
 
-    SECTION("a bad count leaves the default rather than failing the run")
+    SECTION("a bad count fails the parse rather than running anyway")
     {
-        // A mistyped -j must not look like a green suite, but it must not abort one either.
-        CHECK(parse({"-jabc"}).jobs == 0);
-        CHECK(parse({"--jobs", "abc"}).jobs == 0);
+        // The old parser warned and kept the default, which meant a mistyped -j ran the whole suite and
+        // reported green.
+        // Running "most of" what was asked for is the one outcome a typo must not produce.
+        CHECK(parse({"-jabc"}).parse_failed);
+        CHECK(parse({"--jobs", "abc"}).parse_failed);
+        CHECK(parse({"--jobs", "-1"}).parse_failed);
+    }
+
+    SECTION("a good one does not")
+    {
+        CHECK(!parse({"-j4"}).parse_failed);
+        CHECK(!parse({}).parse_failed);
     }
 }
 
@@ -159,12 +168,27 @@ TEST("test cli - the flags accepted only so an invocation does not error")
 
 TEST("test cli - a Catch2-escaped bracket is unescaped in the compat modes")
 {
-    // Only the OPENING bracket, which is the asymmetry this has always had: Catch2 escapes `[` because it
-    // opens tag syntax, and the `]` is left as whatever the user typed.
-    // Pinned as-is rather than tidied, so a migration cannot quietly change what a filter matches.
+    // A backslash makes the NEXT character literal, whatever it is — Catch2's own rule, rather than a
+    // special case for brackets.
+    // A filter that round-trips through an IDE has to mean the same thing on both sides.
     auto const compat = parse({"--reporter", "xml", "\\[tag\\]"});
     REQUIRE(compat.filters.size() == 1);
-    CHECK(compat.filters[0] == "[tag\\]");
+    CHECK(compat.filters[0] == "[tag]");
+
+    SECTION("any escaped character, not only a bracket")
+    {
+        auto const other = parse({"--reporter", "xml", "a\\\\b"});
+        REQUIRE(other.filters.size() == 1);
+        CHECK(other.filters[0] == "a\\b");
+    }
+
+    SECTION("but a comma still separates, escaped or not")
+    {
+        // Splitting happens before unescaping, so `\,` is two filters rather than one literal comma.
+        // Catch2 would read it as one; nexus has always split first, and changing that is its own change.
+        auto const split = parse({"--reporter", "xml", "a\\,b"});
+        CHECK(split.filters.size() == 2);
+    }
 
     SECTION("and nothing is unescaped in an ordinary run")
     {

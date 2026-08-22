@@ -75,7 +75,7 @@ EXAMPLE("nexus/args-validation", nx::config::args("--port 9000 --workers 8"))
     auto options = server_options();
     auto args = build(options);
 
-    auto const result = args.parse(nx::current_args());
+    auto const result = args.parse(nx::test_args());
 
     if (result.outcome() == nx::args_outcome::help_requested)
     {

@@ -310,11 +310,14 @@ What this process was invoked with, answerable from anywhere:
 ```cpp
 #include <nexus/args/ambient.hh>   // light: no parser comes with it
 
-nx::current_args();    // the running test's declared arguments inside one, otherwise the process's
-nx::process_args();    // always the process's
+nx::test_args();       // the running test's declared arguments, empty when it declared none
+nx::process_args();    // the process's own
 nx::program_path();    // argv[0]
 nx::program_name();    // its basename, without a directory or .exe
 ```
+
+**Two sources, two names, and no fallback between them.**
+A call site says which it means, because an accessor that silently switches is one that eventually hands a test the harness's own flags to parse — at the moment nobody is looking.
 
 `nx::run` records argv, so a nexus binary answers exactly.
 A binary that never went through the harness falls back to the OS — `__argv` on Windows, `/proc/self/cmdline` on Linux and Android, `_NSGetArgv` on Apple.
@@ -331,7 +334,7 @@ EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose"))
     auto args = nx::args({.name = "mytool build"});
     nx::declare_args(args, options);
 
-    if (auto const r = args.parse(nx::current_args()); r.should_exit())
+    if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return;
 
     // ... demonstrate with options
@@ -341,12 +344,11 @@ EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose"))
 Run it with something else via `uv run dev.py example mytool/build --test-args "--jobs 1"`, or `dev.py test <name> --test-args "..."`.
 The CLI form **replaces** the declared line rather than adding to it — two argument lines cannot be merged into one that means anything — and it applies to every test the run selects.
 
-Three rules worth knowing:
+Two rules worth knowing:
 
-* A test that declares **nothing** falls through to the process's own arguments, which is what keeps a helper written for a tool working when it is called from inside a test.
-* A test that declares an **empty** line (`nx::config::args("")`) sees exactly nothing.
-  Not the same thing: an example run by `dev.py example` would otherwise be handed the harness's own `--examples` flag to parse.
-* The arguments are read off the running instance through nexus's ambient chain rather than a thread-local.
+* `nx::test_args()` is empty for a test that declared none — it never reaches for the process's arguments.
+  Ask for those by name, with `nx::process_args()`.
+* They are read off the running instance through nexus's ambient chain rather than a thread-local.
   So they are correct on a pool worker, and a dispatched invocable inherits the arguments of the test that drove it.
 
 ### The undeclared accessors
@@ -360,11 +362,12 @@ A debug convenience and no more.
 These read a command line **nobody declared**, so they cannot know whether `--foo bar` is a flag with a value or a flag followed by a positional — they guess, and they never fail.
 
 * `--name=value` is unambiguous; `--name value` is taken when the next token does not itself start with `-`.
+* They read the **process's** arguments, always — including from inside a test, where that means the test binary's own flags rather than the test's.
 * A name may be written `verbose`, `--verbose` or `-v`; all three mean the same lookup.
 * Everything after a bare `--` is ignored, so an argument being passed to another program cannot switch on a debug path in this one.
 * Absent and unparseable are not distinguished: a debug helper that explained itself would invite being depended on.
 
-Worth saying out loud: outside a test these read the whole process command line, so `nx::has_arg("jobs")` in a library is true whenever `dev.py test -j8` ran.
+Worth saying out loud: these read the whole process command line, so `nx::has_arg("jobs")` in a library is true whenever `dev.py test -j8` ran.
 
 ---
 

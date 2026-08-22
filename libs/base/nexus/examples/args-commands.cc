@@ -70,7 +70,7 @@ EXAMPLE("nexus/args-commands", nx::config::args("build --jobs 8 src/main.cc"))
 
     cc::println(cc::format("before parsing, {} command(s) have declared their arguments", declare_count));
 
-    auto const result = args.parse(nx::current_args());
+    auto const result = args.parse(nx::test_args());
 
     if (result.outcome() == nx::args_outcome::help_requested)
     {

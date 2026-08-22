@@ -19,17 +19,12 @@ struct nx::test_instance
     // Aliases are pure filters, not additive schedule entries.
     cc::vector<cc::vector<cc::string>> section_scopes;
 
-    // What nx::current_args() answers inside this test's body.
+    // What nx::test_args() answers inside this test's body.
     // Tokenized once here rather than per query, and carried per instance because tests run concurrently.
     // The run's --test-args replaces whatever nx::config::args declared; see test_schedule::create.
     cc::vector<cc::string> args;
 
-    // Whether a line was DECLARED, as distinct from whether it has any tokens.
-    // `nx::config::args("")` means "run me with no arguments" and must not fall through to the process's
-    // own — an example run by `dev.py example` would otherwise see --examples and try to parse it.
-    bool has_declared_args = false;
-
-    // Views over `args`, which is what nx::current_args() hands back.
+    // Views over `args`, which is what nx::test_args() hands back.
     // Built once by test_schedule::create, after `args` has stopped growing — a view taken earlier would
     // point into a reallocated buffer, and cc::string's small-string optimization makes that silent.
     cc::vector<cc::string_view> arg_views;
@@ -70,6 +65,10 @@ struct nx::test_schedule_config
     // A test asking for own_pool(n) names its own width instead, and is unaffected.
     int jobs = 1;
 
+    // The command line did not parse, and nx::run reports it and exits rather than running a subset.
+    // Running "most of" what was asked for is the one outcome a mistyped flag must never produce.
+    bool parse_failed = false;
+
     bool is_catch2_xml_discovery = false;
     bool report_catch2_xml_results = false;
     bool verbose = false;
@@ -94,7 +93,7 @@ struct nx::test_schedule_config
     // Set via --perf-json <file>; nx::guide records the metrics.
     cc::string perf_json_file;
 
-    // The arguments the selected test itself receives, reachable from its body through nx::current_args().
+    // The arguments the selected test itself receives, reachable from its body through nx::test_args().
     // Set via --test-args "<line>", or by everything after a bare --.
     // Tokenized once here, by the same rules a response file uses.
     // Recorded but not yet delivered: wiring it through the scheduler is a separate change.

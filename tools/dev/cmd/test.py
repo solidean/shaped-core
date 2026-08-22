@@ -35,7 +35,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "A low count is what reproduces a small CI runner's scheduling on a wide dev machine.")
     p.add_argument("--test-args", metavar="LINE",
                    help="A command line for the selected test itself, reachable from its body through "
-                        "nx::current_args(). Forwarded to the runner as one string and tokenized there, "
+                        "nx::test_args(). Forwarded to the runner as one string and tokenized there, "
                         "which is why it survives dev.py's own '--' handling. It replaces whatever the test "
                         "declared with nx::config::args, and applies to every test the run selects.")
     p.add_argument("--repeat", type=int, default=1, metavar="N",

@@ -5,7 +5,10 @@
 #include <nexus/tests/schedule.hh>
 
 // A test's own command line: declared with nx::config::args, replaced by --test-args, and read back from
-// inside the body through nx::current_args().
+// inside the body through nx::test_args().
+//
+// nx::process_args() is the other source and has its own name, deliberately: neither ever falls back to the
+// other, so a call site always says which it means.
 //
 // The first few run their assertions on themselves, which is the only honest way to check that the ambient
 // chain really delivers to a running body.
@@ -29,7 +32,7 @@ nx::test_schedule_config parse(cc::span<char const* const> args)
 cc::string joined_args()
 {
     auto out = cc::string();
-    for (auto const& arg : nx::current_args())
+    for (auto const& arg : nx::test_args())
     {
         if (!out.empty())
             out += "|";
@@ -48,17 +51,18 @@ TEST("test args - a declared line reaches the body", nx::config::args("--jobs 8 
 
 TEST("test args - quoting follows the shared tokenizer rules", nx::config::args("--name \"two words\" --path 'c:\\temp'"))
 {
-    auto const args = nx::current_args();
+    auto const args = nx::test_args();
     REQUIRE(args.size() == 4);
     CHECK(args[1] == "two words");
     CHECK(args[3] == "c:\\temp"); // single quotes keep a Windows path intact
 }
 
-TEST("test args - a test that declares none sees the process's own")
+TEST("test args - a test that declares none sees nothing")
 {
-    // Not the empty list: outside a declared line, current_args falls through to the process, which is what
-    // makes a helper written for a tool keep working when it is called from inside a test.
-    CHECK(nx::current_args().size() == nx::process_args().size());
+    // Not the process's arguments: there is no fallback between the two sources, so a test cannot be handed
+    // the harness's own flags to parse without asking for them by name.
+    CHECK(nx::test_args().empty());
+    CHECK(!nx::process_args().empty()); // ...which is still there, under its own name
 }
 
 TEST("test args - the declared line is what nx::args parses", nx::config::args("--jobs 12 extra"))
@@ -72,16 +76,17 @@ TEST("test args - the declared line is what nx::args parses", nx::config::args("
     args.positional("REST", rest, {.desc = "whatever else"});
 
     // The whole point: a test or example parses its own command line with the same machinery a tool does.
-    REQUIRE(args.parse(nx::current_args()).ok());
+    REQUIRE(args.parse(nx::test_args()).ok());
     CHECK(jobs == 12);
     REQUIRE(rest.size() == 1);
     CHECK(rest[0] == "extra");
 }
 
-TEST("test args - an explicitly empty line is not the same as none", nx::config::args(""))
+TEST("test args - an explicitly empty line is simply empty", nx::config::args(""))
 {
-    // `""` was declared, so the test sees nothing rather than falling through to the process's arguments.
-    CHECK(nx::current_args().empty());
+    // With no fallback there is nothing for the two cases to differ about, which is the simplification the
+    // separate names buy.
+    CHECK(nx::test_args().empty());
 }
 
 // --- how the run's own flags interact with a declared line ---------------------------------------------

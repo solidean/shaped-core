@@ -117,7 +117,7 @@ int nx::run(int argc, char** argv)
     // Before anything else can start a thread: a test asking for nx::main_thread means THIS one.
     cc::mark_current_thread_as_main();
 
-    // Record the command line so nx::current_args can answer from anywhere, including a library deep in a
+    // Record the command line so nx::test_args can answer from anywhere, including a library deep in a
     // call stack that has no argv of its own.
     nx::impl::set_process_args(argc, argv);
 
@@ -141,6 +141,11 @@ int nx::run(int argc, char** argv)
 
     // Create schedule config from command line arguments
     auto config = test_schedule_config::create_from_args(argc, argv);
+
+    // A command line that did not parse stops here: the parse already reported what was wrong, and running
+    // the subset it managed to understand is the one outcome a mistyped flag must never produce.
+    if (config.parse_failed)
+        return 1;
 
     // Get the static test registry
     auto& registry = get_static_test_registry();

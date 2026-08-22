@@ -42,7 +42,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "Sets SC_REQUEST_BACKGROUND=1, which sr::window_system reads (sr::background_request_env_var).")
     p.add_argument("--test-args", metavar="LINE",
                    help="A command line for the example itself, reachable from its body through "
-                        "nx::current_args(). Forwarded as one string and tokenized by the runner, so the "
+                        "nx::test_args(). Forwarded as one string and tokenized by the runner, so the "
                         "example's own flags never collide with dev.py's. Replaces whatever the example "
                         "declared with nx::config::args.")
     p.add_argument("match", nargs="?",

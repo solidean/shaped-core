@@ -53,7 +53,7 @@ void describe(build_options const& options)
 
 EXAMPLE("nexus/args-struct", nx::config::args("--jobs 8 main.cc"))
 {
-    auto const parsed = nx::parse_args<build_options>(nx::current_args());
+    auto const parsed = nx::parse_args<build_options>(nx::test_args());
 
     // Three states, not two: --help is neither success nor failure, and a bool return could not say so.
     if (parsed.should_exit())

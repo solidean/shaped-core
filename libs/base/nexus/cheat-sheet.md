@@ -226,7 +226,7 @@ uv run dev.py test                       # build + run the whole suite
 // Catch2-compatible (for IDEs/tooling, not daily use): --list-tests, --reporter xml,
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // --test-args "<line>", or everything after a bare --, is a command line for the SELECTED TEST itself,
-//   readable from its body through nx::current_args(). Replaces whatever nx::config::args declared.
+//   readable from its body through nx::test_args(). Replaces whatever nx::config::args declared.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --examples (sweep example bucket), --perf-json <file> (write recorded-metric sidecar).
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
@@ -279,16 +279,17 @@ if (auto const r = args.parse(argc, argv); r.should_exit())    // --help is neit
 
 ```cpp
 #include <nexus/args/ambient.hh>          // light: no parser comes with it
-nx::current_args();                       // the test's declared args inside one, else the process's
+nx::test_args();                          // the running test's declared args; empty if it declared none
+nx::process_args();                       // the process's own — no fallback between the two, ask by name
 nx::program_name();                       // basename of argv[0], no directory, no .exe
-nx::has_arg("--trace") / nx::get_arg<int>("budget")   // DEBUG only: guesses, never fails, ignores past --
+nx::has_arg("--trace") / nx::get_arg<int>("budget")   // DEBUG only, over PROCESS args: guesses, never fails
 ```
 
 ```cpp
 // A test or example can be given its own command line, which is what makes an EXAMPLE self-demonstrating:
-EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose")) { /* nx::current_args() */ }
+EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose")) { /* nx::test_args() */ }
 // Override per run: dev.py example mytool/build --test-args "--jobs 1"   (REPLACES the declared line)
-// Declaring "" means "no arguments"; declaring nothing falls through to the process's own.
+// A test that declared nothing sees an empty nx::test_args(), never the process's.
 ```
 
 ```bash

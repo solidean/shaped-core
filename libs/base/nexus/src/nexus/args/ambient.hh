@@ -7,13 +7,14 @@
 #include <nexus/args/value.hh>
 
 // =========================================================================================================
-// What this process was invoked with, answerable from anywhere.
+// Which arguments are in play, answerable from anywhere.
 //
 // Deliberately light: span, string_view and the value traits, and nothing from the builder.
 // This is the header a debug site three libraries down includes, and it must not drag a parser in with it.
 //
-// `nx::current_args()` is one function with two answers, which is the point — a helper written for a tool
-// keeps working when it is called from inside a test.
+// TWO SOURCES, TWO NAMES, and no fallback between them.
+// A call site says which it means, because an accessor that silently switches is one that eventually hands
+// a test the harness's own flags to parse — and does it at the moment nobody is looking.
 //
 // The captured copy is exact and free.
 // The OS fallback exists for a binary that never went through nx::run, and every platform that cannot
@@ -22,11 +23,12 @@
 
 namespace nx
 {
-/// The arguments in effect here: the running test's when called inside one, otherwise the process's.
-/// argv[0] is NOT included — `program_path()` is where that lives.
-[[nodiscard]] cc::span<cc::string_view const> current_args();
+/// The arguments the running test declared with nx::config::args, or `--test-args` gave the run.
+/// Empty outside a test, and empty for a test that declared none — this never reaches for the process's.
+[[nodiscard]] cc::span<cc::string_view const> test_args();
 
-/// The process's own arguments, ignoring any test scope.
+/// The arguments this process itself was invoked with.
+/// argv[0] is NOT included — `program_path()` is where that lives.
 [[nodiscard]] cc::span<cc::string_view const> process_args();
 
 /// argv[0], or empty when the platform cannot say.
@@ -49,12 +51,15 @@ namespace nx
 //
 // Everything after a bare `--` is ignored, so an argument being passed through to another program cannot
 // switch on a debug path in this one.
+//
+// They read the PROCESS's arguments, always — including from inside a test, where that means the test
+// binary's own flags rather than the test's.
 // =========================================================================================================
 
-/// Whether `name` appears at all, written with or without dashes.
+/// Whether `name` appears in the PROCESS's arguments at all, written with or without dashes.
 [[nodiscard]] bool has_arg(cc::string_view name);
 
-/// The raw text `name` was given, or nothing.
+/// The raw text `name` was given on the PROCESS's command line, or nothing.
 [[nodiscard]] cc::optional<cc::string_view> get_arg(cc::string_view name);
 
 /// The value of `name`, parsed as `T`, or nothing when it is absent or does not parse.
@@ -85,14 +90,9 @@ namespace nx::impl
 /// running one.
 void set_process_args(int argc, char const* const* argv);
 
-/// The arguments the running test DECLARED, or nothing when there is no test scope, or it declared none.
-///
-/// An optional rather than a possibly-empty span, because the two cases differ: a test that declared an
-/// empty line means "no arguments", while a test that declared nothing falls through to the process's own.
-/// Getting that wrong would hand an example the harness's own --examples flag to parse.
-///
+/// Backs nx::test_args().
 /// Defined in execute.cc, which already owns the ambient chain this reads — declared here so the light
-/// ambient header can offer one answer without dragging the test machinery in with it.
-[[nodiscard]] cc::optional<cc::span<cc::string_view const>> current_test_args();
+/// ambient header can offer the answer without dragging the test machinery in with it.
+[[nodiscard]] cc::span<cc::string_view const> current_test_args();
 
 } // namespace nx::impl

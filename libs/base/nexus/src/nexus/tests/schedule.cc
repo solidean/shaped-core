@@ -23,6 +23,26 @@ std::string_view as_sv(cc::string_view s)
     return std::string_view(s.data(), size_t(s.size()));
 }
 
+// Catch2's own escaping rule: a backslash makes the NEXT character literal, whatever it is.
+// So `\[tag\]` is the name `[tag]`, and `\\` is one backslash.
+//
+// Catch2's TestSpecParser does exactly this rather than special-casing brackets, and a filter that
+// round-trips through an IDE has to mean the same thing on both sides.
+// A trailing lone backslash has nothing to escape and stays as typed.
+cc::string unescape_catch2(cc::string_view text)
+{
+    auto out = cc::string();
+    for (isize i = 0; i < text.size(); ++i)
+    {
+        if (text[i] == '\\' && i + 1 < text.size())
+            ++i;
+
+        out += text[i];
+    }
+
+    return out;
+}
+
 // Decimal, no sign, no whitespace; -1 for anything else, including an empty view.
 int parse_count(cc::string_view s)
 {
@@ -153,17 +173,10 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.arg({"v"}, config.verbose, "print the schedule before running it");
     args.arg({"c"}, config.section_filters, {.desc = "run only sections matching this name", .metavar = "NAME"});
 
-    // Not bound directly: a bad count has always warned and kept the default rather than failing the run,
-    // and a migration is the wrong place to start rejecting command lines that used to work.
-    args.value_action({"j", "jobs"},
-                      [&config](cc::string_view value)
-                      {
-                          if (auto const count = parse_count(value); count >= 0)
-                              config.jobs = count;
-                          else
-                              cc::eprintln("nexus: ignoring `{}`: expected a job count", value);
-                      },
-                      {.desc = "how many tests may run at once; 0 means one per hardware thread", .metavar = "N"});
+    args.arg({"j", "jobs"}, config.jobs,
+             {.desc = "how many tests may run at once; 0 means one per hardware thread",
+              .metavar = "N",
+              .validate = nx::arg::at_least(0)});
 
     args.group("selection");
     args.action(
@@ -205,9 +218,9 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
              {.desc = "write a JSON listing of every test here (- for stdout) and exit", .metavar = "FILE"});
 
     args.group("arguments for the test itself");
-    args.arg({"test-args"}, state.test_args_line,
-             {.desc = "a command line for the selected test, reachable from it through nx::current_args()",
-              .metavar = "LINE"});
+    args.arg(
+        {"test-args"}, state.test_args_line,
+        {.desc = "a command line for the selected test, reachable from it through nx::test_args()", .metavar = "LINE"});
     args.rest(state.passthrough, "ARGS", "the same, for everything after a bare --");
 
     args.group("Catch2 compatibility");
@@ -219,8 +232,8 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.value_action({"verbosity"}, [](cc::string_view) {}, {.desc = "accepted and ignored", .metavar = "LEVEL"});
     args.value_action({"durations"}, [](cc::string_view) {}, {.desc = "accepted and ignored", .metavar = "YES/NO"});
 
-    // The harness owns printing and exiting, so the parse only reports.
-    args.no_auto_print();
+    // Errors print themselves, as nx::args does everywhere else.
+    // Only --help stays the harness's: nx::run intercepts it, because exiting is its call rather than ours.
     args.no_auto_help();
     return args;
 }
@@ -233,23 +246,15 @@ namespace
 /// The run's --test-args wins over whatever nx::config::args declared, because replacement is the only
 /// merge rule for two command lines that stays predictable.
 /// It applies to EVERY selected test, which is worth knowing when a run selects more than one.
-struct declared_args
-{
-    cc::vector<cc::string> tokens;
-    bool declared = false;
-};
-
-declared_args args_for(nx::test_declaration const& decl, nx::test_schedule_config const& config)
+cc::vector<cc::string> args_for(nx::test_declaration const& decl, nx::test_schedule_config const& config)
 {
     if (!config.test_args.empty())
-        return {.tokens = config.test_args, .declared = true};
+        return config.test_args;
 
     if (decl.test_config.test_args == nullptr)
         return {};
 
-    // An explicitly empty line is still a declaration: it means "no arguments", not "whatever the process
-    // was given".
-    return {.tokens = nx::args_tokenize(decl.test_config.test_args), .declared = true};
+    return nx::args_tokenize(decl.test_config.test_args);
 }
 } // namespace
 
@@ -264,7 +269,7 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
 
     auto state = cli_state();
     auto args = build_cli(config, state);
-    args.parse(argc, argv);
+    config.parse_failed = !args.parse(argc, argv).ok();
 
     // Unrecognized tokens rejoin the filters, which is where they always went.
     for (auto const& token : state.unknown)
@@ -301,11 +306,7 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     if (config.is_catch2_xml_discovery || config.report_catch2_xml_results)
     {
         for (auto& filter : config.filters)
-        {
-            // Catch2 escapes an opening square bracket as \[, because it opens tag syntax; undo that.
-            // The closing one is left as typed, which is what nexus has always done.
-            filter.replace_all("\\[", "[");
-        }
+            filter = unescape_catch2(filter);
     }
 
     // Without an explicit bucket flag, a filter may reach a test in another bucket; is_eligible decides that per test, on an exact name.
@@ -439,12 +440,10 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         if (!config.would_run(decl))
             continue;
 
-        auto declared = args_for(decl, config);
         schedule.instances.push_back(test_instance{
             .declaration = &decl,
             .registry = &registry,
-            .args = cc::move(declared.tokens),
-            .has_declared_args = declared.declared,
+            .args = args_for(decl, config),
         });
     }
 
@@ -494,11 +493,9 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
                 }
             if (scoped == nullptr)
             {
-                auto declared = args_for(*frag.driver, config);
                 schedule.instances.push_back(test_instance{.declaration = frag.driver,
                                                            .registry = &registry,
-                                                           .args = cc::move(declared.tokens),
-                                                           .has_declared_args = declared.declared});
+                                                           .args = args_for(*frag.driver, config)});
                 scoped = &schedule.instances.back();
             }
 

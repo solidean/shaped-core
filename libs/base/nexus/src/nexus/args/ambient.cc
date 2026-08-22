@@ -126,15 +126,9 @@ cc::span<cc::string_view const> nx::process_args()
     return effective_slot().views;
 }
 
-cc::span<cc::string_view const> nx::current_args()
+cc::span<cc::string_view const> nx::test_args()
 {
-    // A test that declared a line gets exactly that line, empty included.
-    // Only a test that declared nothing falls through, which is what keeps a helper written for a tool
-    // working when it is called from inside one.
-    if (auto const test = impl::current_test_args(); test.has_value())
-        return test.value();
-
-    return process_args();
+    return impl::current_test_args();
 }
 
 cc::string_view nx::program_path()
@@ -164,8 +158,10 @@ cc::string_view nx::program_name()
 
 cc::optional<cc::string_view> nx::get_arg(cc::string_view name)
 {
+    // The process's, deliberately, and even from inside a test: these are for a debug flag on the binary,
+    // and a test's own arguments are asked for by name through nx::test_args().
     auto const wanted = strip_dashes(name);
-    auto const args = current_args();
+    auto const args = process_args();
 
     for (auto i = isize(0); i < args.size(); ++i)
     {
