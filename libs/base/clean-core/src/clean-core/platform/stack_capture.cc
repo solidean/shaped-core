@@ -408,9 +408,10 @@ cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void
 
 #if CC_CAN_UNWIND_TABLES
     // Our own frames are dropped by ADDRESS rather than by count.
-    // Counting them was wrong on arm64: this function's tail call into capture_from_context leaves it no frame, so a
-    // "+1 for my own" skipped the caller's frame instead and frame 0 came back one level too far out.
-    // A threshold holds either way, since a frame that no longer exists is simply one fewer frame below it.
+    // A count assumes each of them still exists, and a frame whose function does nothing but forward a call need not:
+    // MSVC on arm64 tail-calls such a function and leaves it none, which is measured — not for this pair, but for a
+    // caller shaped exactly like it (see the symbolize test's helper).
+    // A threshold needs no such assumption, since a frame that is not there is simply one fewer frame below the mark.
     return capture_from_context(nullptr, out, skip, stop_frame, reinterpret_cast<u64>(cc::impl::current_frame_address()));
 #else
     (void)stop_frame;

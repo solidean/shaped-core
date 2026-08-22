@@ -1,4 +1,5 @@
 #include <clean-core/common/log.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/module_table.hh>
 #include <clean-core/platform/stack_capture.hh>
@@ -18,9 +19,21 @@ using namespace cc::primitive_defines;
 namespace
 {
 /// A function distinctive enough to look for by name, and kept out of line so it has a frame to be found in.
+///
+/// **`CC_DONT_INLINE` alone does not buy a frame.** It stops the body being inlined, and a function whose body is
+/// nothing but a forwarded call can still be TAIL-CALLED away: MSVC on arm64 did exactly that to the earlier
+/// `return cc::capture_stack(out).count`, since the count is already the register the callee returns in.
+/// The symbol still resolved, so the test's own guard saw nothing wrong — the frame simply was not on the stack, and
+/// the walk's frame 0 was this function's caller.
+/// Capturing through a local and copying out is what forces a frame: the buffer has to outlive the call.
 CC_DONT_INLINE isize capture_here_for_symbolize_test(cc::span<void*> out)
 {
-    auto const r = cc::capture_stack(out);
+    void* local[64] = {};
+
+    auto const r = cc::capture_stack(cc::span<void*>(local, cc::min(out.size(), isize(64))));
+    for (isize i = 0; i < r.count; ++i)
+        out[i] = local[i];
+
     return r.count;
 }
 
