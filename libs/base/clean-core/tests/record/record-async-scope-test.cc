@@ -5,6 +5,8 @@
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
@@ -288,4 +290,74 @@ REC_TEST("record/async-scope - a scope OPENED INSIDE a coroutine survives the su
     CHECK(inside == "opened-inside");
     CHECK(after_suspend == "opened-inside"); // the scope is still the innermost one after the suspend
     CHECK(ambient_changes(r) >= 2);
+}
+
+
+// TEMPORARY ARM PROBE — reports the path the coroutine actually took, from a runner we cannot attach to.
+REC_TEST("record/async-scope - PROBE arm")
+{
+    if (!threads_available())
+        SKIP("no threads");
+
+    double const delays[] = {-1.0, 0.0, 0.0001, 0.001, 0.02};
+
+    for (auto const d : delays)
+    {
+        rec_fixture const fixture(deterministic_config());
+
+        cc::string report;
+        auto const r = capture(
+            [&]
+            {
+                auto gate = cc::make_async_manual<int>();
+                if (d < 0)
+                    gate->push_value(1);
+
+                auto const co = [](cc::shared_async<int> g, cc::string* out) -> cc::shared_async<int>
+                {
+                    CC_RECORD_ASYNC_SCOPE("opened-inside");
+
+                    auto const* const s_in = cc::rec::current_async_scope();
+                    auto* const amb_in = cc::async_current_ambient();
+                    auto const tid_in = cc::current_thread_id();
+
+                    co_await cc::async_settled(g);
+
+                    auto const* const s_out = cc::rec::current_async_scope();
+                    auto* const amb_out = cc::async_current_ambient();
+                    auto const tid_out = cc::current_thread_id();
+
+                    // The three states that tell the paths apart:
+                    //   ambient null      -> nothing was installed on the resuming thread
+                    //   ambient non-null, scope null -> a DIFFERENT chain was installed (the entry context)
+                    //   ambient equal     -> the fix held
+                    *out = cc::format("in[tid={} amb={} scope={}] out[tid={} amb={} scope={}] same_amb={}",
+                                      u64(tid_in), amb_in != nullptr, s_in != nullptr ? s_in->name : "<null>",
+                                      u64(tid_out), amb_out != nullptr, s_out != nullptr ? s_out->name : "<null>",
+                                      amb_in == amb_out);
+                    co_return 7;
+                }(gate, &report);
+
+                if (d < 0)
+                {
+                    CHECK(cc::async_blocking_get(co) == 7);
+                }
+                else
+                {
+                    std::thread waker(
+                        [&gate, d]
+                        {
+                            if (d > 0)
+                                cc::this_thread_sleep_secs(d);
+                            gate->push_value(1);
+                        });
+                    CHECK(cc::async_blocking_get(co) == 7);
+                    waker.join();
+                }
+            });
+        (void)r;
+
+        cc::println("PROBE delay={} {}", d, report);
+    }
+    CHECK(true);
 }
