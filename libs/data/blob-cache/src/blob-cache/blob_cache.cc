@@ -210,13 +210,11 @@ cc::shared_async<blob> blob_cache::acquire(cache_key const& key,
                                            cc::unique_function<cc::shared_async<blob>()> compute,
                                            acquire_options options)
 {
-    // The async scope goes HERE, around the code that BUILDS the pipeline, rather than inside the coroutine.
+    // Around the code that BUILDS the pipeline rather than inside the coroutine, so the span covers the singleflight
+    // decision too — a JOINER never enters the coroutine at all, and is still part of this acquire.
     //
     // It rides cc::async's ambient chain, so the node created below inherits it and carries it to whichever worker
     // ends up running the lookup, the compute and the store — which is what makes one acquire read as one operation.
-    // Opening it inside the coroutine body instead puts the scope object in the coroutine frame, where it is entered
-    // and left at suspension points rather than around them; that fast-fails rather than diagnosing, so it is worth
-    // saying plainly.
     CC_RECORD_ASYNC_SCOPE("bcache.acquire");
 
     // The generation is minted before the claim, so the frame knows which slot it will release without anything having to reach back into a node that is already running.

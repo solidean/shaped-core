@@ -989,8 +989,7 @@ CC_RECORD_SCOPE_IF(bytes.size() >= threshold, "json.read"); // condition read ON
 
 #include <clean-core/record/async_scope.hh>
 CC_RECORD_ASYNC_SCOPE("load-level");         // an ambient-chain entry, so it DOES follow a co_await and every spawn
-// Open one AROUND the code that builds the async work, never inside the coroutine body — a scope object living in a
-// coroutine frame is entered and left at suspension points rather than around them, and that fast-fails.
+// Legal both inside a coroutine body and around the code that builds one; pick by what the span should COVER.
 CC_RECORD_ASYNC_SCOPE_WITH_ID("inbound", wire_id);       // ... under an id from off the wire
 cc::rec::current_async_scope();              // -> desc const*, the innermost one; null outside any
 cc::rec::current_trace_id();                 // -> trace_id; an async scope ALWAYS has one (see Tracing below)

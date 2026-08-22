@@ -64,9 +64,11 @@ It nests logically rather than as a stack frame, and popping it does not require
 CC_RECORD_ASYNC_SCOPE("bcache.acquire");
 ```
 
-**Open one around the code that BUILDS the async work, never inside the coroutine body.**
-A scope object living in a coroutine frame is entered and left at suspension points rather than around them, and that fast-fails rather than diagnosing.
-`blob_cache::acquire` is the worked example: the scope sits in the plain function that constructs the pipeline, and the coroutine inherits it through the chain.
+Opening one **inside** a coroutine body works: the body's suspend records the context it suspended in, so the scope is still installed when it resumes.
+Opening one **around** the code that builds the async work also works, and is what `blob_cache::acquire` does.
+There the span covers the singleflight decision too, and a joiner that never enters the coroutine is still part of the operation.
+
+Which to pick is about what the span should cover, not about what is legal.
 
 It costs two refcounted allocations against a scope's two thread-local writes, so it is the right trade for a request, a frame or a job, and the wrong one for an inner loop.
 
