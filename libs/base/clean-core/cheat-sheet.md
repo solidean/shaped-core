@@ -343,6 +343,11 @@ cc::glob_matches(pat, path, cc::glob_option::normalize | cc::glob_option::ignore
 // Normalize once yourself when one side is reused across many comparisons; the option redoes both sides per call.
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
+#include <clean-core/string/from_string.hh>      // the inverse, for bool/ints/floats only
+cc::from_string<int>("42")                       // -> cc::optional<int>; cc::nullopt on any rejection
+cc::from_string(sv, value)                       // -> bool; the out-param form, leaves `value` alone on failure
+// Accepts exactly what to_string produces and nothing else: no leading '+', no whitespace, no "0x", bool is true/false.
+// The whole view must parse, so "12abc" and "12 " fail; a value the type cannot hold fails rather than wrapping.
 #include <clean-core/string/to_debug_string.hh>  // cc::to_debug_string(v, cfg = {}) -> diagnostics string
 // to_debug_string: quotes strings/chars, prints pointers as ptr(0xHEX), recurses into ranges [..] and tuples (..).
 // Best-effort and non-semantic — the output is unstable across builds, so never parse it.
@@ -1245,6 +1250,9 @@ ccc::configure(ccc::color_mode::automatic);         // ONCE, before the first by
                                                     // auto: NO_COLOR beats FORCE_COLOR, else stdout AND stderr
                                                     // must be TTYs; also enables ANSI on old Windows consoles
 ccc::color_enabled()                                // bool — false until configure() runs
+ccc::terminal_width()                               // cc::optional<int> — columns, or nothing when unanswerable
+// COLUMNS wins when it holds a positive number, which is how a wrapped renderer is tested without a terminal.
+// Independent of configure(), and never cached: a terminal can be resized between two calls.
 
 ccc::colorize(ccc::color::red, sv)                  // cc::string — unchanged when color is off (global flag)
 ccc::colorize(ccc::color::red, sv, enabled)         // cc::string — the explicit-flag form, for pure renderers

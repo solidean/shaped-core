@@ -60,7 +60,7 @@ private:
 };
 } // namespace
 
-// Every test here writes process-wide state — the global color mode, and NO_COLOR / FORCE_COLOR in the environment — so they share one exclusion tag.
+// Every test here writes process-wide state — the global color mode, and NO_COLOR / FORCE_COLOR / COLUMNS in the environment — so they share one exclusion tag.
 TEST("console - never colors", exclusive("cc-console-color"))
 {
     color_scope const scope(color_mode::never);
@@ -153,4 +153,36 @@ TEST("console - an empty string round-trips", exclusive("cc-console-color"))
 {
     color_scope const scope(color_mode::always);
     CHECK(dim("") == "\033[2m\033[0m");
+}
+
+// Whether a real terminal is behind stdout is not something a test can pin, so these cover the COLUMNS
+// override — the path that exists precisely so wrapped output can be tested without one.
+
+TEST("console - COLUMNS overrides the terminal", exclusive("cc-console-color"))
+{
+    env_scope const columns("COLUMNS", "37");
+
+    auto const width = terminal_width();
+    REQUIRE(width.has_value());
+    CHECK(width.value() == 37);
+}
+
+TEST("console - a COLUMNS that is not a positive number is ignored", exclusive("cc-console-color"))
+{
+    // Each falls through to the real terminal, which may or may not answer; what must not happen is 0 or a negative width.
+    for (auto const* const bad : {"0", "-5", "wide", "", "80x24", "80 "})
+    {
+        env_scope const columns("COLUMNS", bad);
+
+        auto const width = terminal_width();
+        CHECK((!width.has_value() || width.value() > 0)); // the extra parens keep CHECK from decomposing the ||
+    }
+}
+
+TEST("console - width is independent of the color flag", exclusive("cc-console-color"))
+{
+    env_scope const columns("COLUMNS", "120");
+
+    color_scope const scope(color_mode::never);
+    CHECK(terminal_width().value_or(0) == 120);
 }

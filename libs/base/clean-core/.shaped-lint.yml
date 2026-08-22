@@ -98,10 +98,11 @@ rules:
 
   - kind: allow-include
     value: <charconv>
-    reason: from_chars / to_chars are what cc::to_string and cc::format are implemented over
+    reason: from_chars / to_chars are what cc::to_string, cc::from_string and cc::format are implemented over
     files:
       - src/clean-core/string/format.cc
       - src/clean-core/string/to_string.cc
+      - src/clean-core/string/from_string.cc
 
   - kind: allow-include
     value: <cstdio>
@@ -213,6 +214,11 @@ rules:
     value: <mutex>
     reason: guards the process-wide DbgHelp session, which is not thread-safe — cc::mutex is layered above this file
     files: src/clean-core/platform/native.cc
+
+  - kind: allow-include
+    value: <sys/ioctl.h>
+    reason: TIOCGWINSZ is the only route to a POSIX terminal's column count
+    files: src/clean-core/platform/console.cc
 
   - kind: allow-include
     value: <unistd.h>

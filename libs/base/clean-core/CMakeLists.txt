@@ -61,6 +61,7 @@ add_library(clean-core
     src/clean-core/record/splicing_listener.cc
     src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc
+    src/clean-core/string/from_string.cc
     src/clean-core/string/format.cc
     src/clean-core/string/print.cc
     src/clean-core/string/string.cc
@@ -177,6 +178,7 @@ target_sources(clean-core
     src/clean-core/string/string_view.hh
     src/clean-core/string/char_predicates.hh
     src/clean-core/string/to_string.hh
+    src/clean-core/string/from_string.hh
     src/clean-core/string/to_debug_string.hh
     src/clean-core/string/impl/format_spec.hh
     src/clean-core/string/impl/format_backend.hh
@@ -472,6 +474,7 @@ if(SC_BUILD_TESTS)
 
         tests/string/conversion-test.cc
         tests/string/format-test.cc
+        tests/string/from_string-test.cc
         tests/string/glob-test.cc
         tests/string/interned_string-test.cc
         tests/string/print-test.cc
