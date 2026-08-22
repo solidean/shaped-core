@@ -2,14 +2,11 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/math/bit.hh>
-#include <clean-core/record/domain.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 
 namespace sg
 {
-CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg");
-
 command_list_slot command_list_slot_allocator::acquire()
 {
     return _state.lock(

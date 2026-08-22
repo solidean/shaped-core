@@ -84,24 +84,7 @@ void log_debug_layer_message(dx12_message_severity severity, char const* descrip
     }
 }
 
-char const* severity_label(dx12_message_severity severity)
-{
-    switch (severity)
-    {
-    case dx12_message_severity::corruption:
-        return "corruption";
-    case dx12_message_severity::error:
-        return "error";
-    case dx12_message_severity::warning:
-        return "warning";
-    case dx12_message_severity::info:
-        return "info";
-    default:
-        return "message";
-    }
-}
-
-// Validation messages, handed to the context's listener or written to stderr when it has none.
+// Validation messages, handed to the context's listener or logged at the debug layer's own severity when it has none.
 // Registered on the device's info queue when the debug layer is active, and runs on whatever thread the runtime raises the message from.
 void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
                                     D3D12_MESSAGE_SEVERITY severity,
