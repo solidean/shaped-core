@@ -191,8 +191,8 @@ rules:
     files: src/clean-core/platform/environment.cc
 
   - kind: allow-include
-    value: <iostream>
-    reason: "TODO: migrate to cc::eprintln — the assert path predates it, and printing while the process is dying wants a careful change"
+    value: <string>
+    reason: std::to_string(std::stacktrace) is the only renderer that produces frame text, and it returns a std::string
     files: src/clean-core/common/assert.cc
 
   # =========================================================================================================
