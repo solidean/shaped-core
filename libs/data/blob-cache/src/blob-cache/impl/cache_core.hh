@@ -28,4 +28,15 @@ struct cache_core
     /// False for a cache built by create_disabled(), which has no actor at all.
     bool has_actor() const { return actor != nullptr; }
 };
+
+/// Mirrors one cache_stats counter into the recording, adding `n` to it.
+///
+/// Every counter bump in the library goes through here, so the recorded numbers and the in-process struct can never
+/// disagree about what happened — hit rate is bcache's primary health signal, and until this existed the only way to
+/// see it was to hold a live cache and ask.
+///
+/// **Total over cache_stats' counters**, and it asserts on a field it does not know: a stat name is a string literal
+/// in the event descriptor, so the mapping cannot be computed and a new counter has to be added here by hand.
+/// Asserting is what turns that into a compile-then-fail rather than a number that silently never appears.
+void record_stat(i64 cache_stats::* field, i64 n);
 } // namespace bcache::impl

@@ -17,24 +17,6 @@ namespace bcache::impl
 {
 namespace
 {
-/// Mirrors one in-process counter into the recording.
-///
-/// Here rather than at each call site so the two can never disagree about what happened: every counter bump goes
-/// through one of the two adders, and this is what they both end at.
-/// Hit rate is bcache's primary health signal — the design says a storage failure IS a miss — and until now the only
-/// way to see it was to ask a live cache for its struct.
-void record_stat(i64 cache_stats::* field, i64 n)
-{
-    if (field == &cache_stats::hits)
-        CC_RECORD_ACCUM("bcache.hits", cc::rec::unit_count, n);
-    else if (field == &cache_stats::misses)
-        CC_RECORD_ACCUM("bcache.misses", cc::rec::unit_count, n);
-    else if (field == &cache_stats::expired_as_miss)
-        CC_RECORD_ACCUM("bcache.expired_as_miss", cc::rec::unit_count, n);
-    else if (field == &cache_stats::computes_started)
-        CC_RECORD_ACCUM("bcache.computes_started", cc::rec::unit_count, n);
-}
-
 namespace sql = babel::sqlite;
 
 /// The timing policy, copied out of cache_config at open so the actor never reads a caller's struct again.
