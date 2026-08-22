@@ -56,3 +56,8 @@ namespace cc::rec
 CC_REC_DEFINE_DOMAIN(g_default_domain, "default");
 CC_REC_DEFINE_DOMAIN(g_system_domain, "cc.record");
 } // namespace cc::rec
+
+namespace cc
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "cc");
+} // namespace cc

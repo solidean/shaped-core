@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// Aggregate forward declarations for shaped-rendering.
@@ -54,4 +55,7 @@ namespace impl
 {
 class imgui_texture_registry;
 }
+
+/// The domain every recording site in shaped-rendering is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sr

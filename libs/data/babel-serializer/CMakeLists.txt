@@ -4,6 +4,8 @@ project(babel-serializer LANGUAGES CXX)
 # Serialization / deserialization of various formats. Each format parses into an unopinionated, read-once
 # structure; opinionated aggregators sit on top later. See readme.md and docs/structure.md.
 add_library(babel-serializer
+    src/babel-serializer/fwd.cc
+
     src/babel-serializer/data/base64.cc
     src/babel-serializer/data/json.cc
     src/babel-serializer/data/markdown.cc

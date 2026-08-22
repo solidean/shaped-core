@@ -10,6 +10,12 @@
 
 namespace cc::rec
 {
+/// The recorder's own bookkeeping answers to the system domain rather than to clean-core's.
+///
+/// This shadows `cc::g_rec_domain` for everything inside cc::rec, so silencing `cc` never blinds you to how the
+/// recorder itself is doing — the two are separate questions and gate separately.
+CC_REC_DECLARE_DOMAIN(g_system_domain);
+
 //
 // Enumerations
 //

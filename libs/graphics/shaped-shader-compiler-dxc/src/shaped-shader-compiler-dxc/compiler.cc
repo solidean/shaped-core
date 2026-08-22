@@ -1,4 +1,5 @@
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/record/domain.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 #include <shaped-shader-compiler-dxc/impl/command_line_args.hh>
 #include <shaped-shader-compiler-dxc/impl/dxc_common.hh>
@@ -10,6 +11,8 @@
 
 namespace ssc::dxc
 {
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "ssc.dxc");
+
 struct compiler::state
 {
     impl::ComPtr<IDxcUtils> utils;

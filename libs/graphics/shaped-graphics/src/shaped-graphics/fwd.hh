@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 
 #include <memory>
 
@@ -370,4 +371,8 @@ using async_compute_pipeline = cc::shared_async<compute_pipeline_handle>; // blo
 using async_raster_pipeline = cc::shared_async<raster_pipeline_handle>;   // blocking_get -> raster_pipeline_handle
 using async_raytracing_pipeline
     = cc::shared_async<raytracing_pipeline_handle>; // blocking_get -> raytracing_pipeline_handle
+
+/// The domain every recording site in shaped-graphics is attributed to.
+/// Each backend shadows it with one of its own, so a dx12 message is never mistaken for a portable one.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sg

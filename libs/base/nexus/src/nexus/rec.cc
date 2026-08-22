@@ -1,6 +1,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/console_listener.hh>
+#include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/listener.hh>
 #include <clean-core/record/serialize.hh>
@@ -13,6 +14,11 @@
 #include <nexus/rec.hh>
 
 using namespace cc::primitive_defines;
+
+namespace nx
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "nexus");
+} // namespace nx
 
 namespace
 {

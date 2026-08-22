@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 #include <shaped-rendering/fwd.hh>
 
 #include <memory>
@@ -181,6 +182,9 @@ inline constexpr layout_node_id invalid_node = layout_node_id(-1);
 // post-processing
 enum class post_process_kind : u8;
 struct post_process;
+
+/// The domain every recording site in shaped-viewer is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sv
 
 /// Strongly-typed resource handles a scene item references.
