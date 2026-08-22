@@ -1,3 +1,5 @@
+#include <clean-core/common/log.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -120,8 +122,7 @@ bool cc::threaded_actor_base::is_running() const
 
 void cc::threaded_actor_base::report_unhandled_exception(char const* where) noexcept
 {
-    cc::eprint("threaded_actor: unhandled exception in ");
-    cc::eprintln(where);
+    CC_LOG_ERROR("unhandled exception in {}", where);
 }
 
 void cc::threaded_actor_base::execute_actor_thread()

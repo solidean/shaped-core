@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 
 #if CC_HAS_THREADS
