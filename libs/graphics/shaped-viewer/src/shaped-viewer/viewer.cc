@@ -491,12 +491,13 @@ frame viewer::acquire_frame()
 
 frame& viewer::begin_frame()
 {
-    // The outer frame bracket, closed in end_frame — everything a frame does nests under this one span.
-    CC_RECORD_SCOPE_BEGIN("sv.frame");
-
     auto& im = *_impl;
     CC_ASSERT(!im.current_frame._open, "the previous frame was never ended — every frame begin_frame opens needs its "
                                        "end_frame");
+
+    // The outer frame bracket, closed in end_frame — everything a frame does nests under this one span.
+    // After the assert above, so the misuse it catches does not also open a second span.
+    CC_RECORD_SCOPE_BEGIN("sv.frame");
 
     // A closed frame holds no backbuffer and no command list, so overwriting one strands nothing.
     im.current_frame = acquire_frame();

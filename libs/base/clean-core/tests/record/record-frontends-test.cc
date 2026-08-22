@@ -307,6 +307,42 @@ REC_TEST("record/scope - the explicit begin/end pair nests like the block form")
     CHECK(c.count_named("inside") == 1);
 }
 
+REC_TEST("record/scope - an END with nothing open is refused rather than wrapping the depth")
+{
+    // The failure this bounds: a BEGIN whose END is never reached — an early return, a throw — leaves the thread one
+    // level deep forever, and every later END pops one too many.
+    // scope_depth is UNSIGNED, so the first over-pop would wrap it to four billion and misplace every scope on the
+    // thread for the rest of its life, long after the frame that dropped its END is gone.
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        // A leak, then a close that has nothing of its own to close.
+        CC_RECORD_SCOPE_BEGIN("leaked");
+        CC_RECORD_SCOPE_END("leaked");
+        CC_RECORD_SCOPE_END("nothing-is-open");
+
+        // Whatever the damage above, the depth is still sane here.
+        // In its own block, so its END is recorded before the flush rather than after it.
+        {
+            CC_RECORD_SCOPE("after");
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const ends = c.of_kind(cc::rec::event_kind::scope_end);
+
+    // Two ends, not three: the unmatched one recorded nothing at all.
+    REQUIRE(ends.size() == 2);
+
+    // And the scope opened afterwards still sits at depth 0, which is what would have been lost to a wrap.
+    CHECK(c.of_kind(cc::rec::event_kind::scope_begin).size() == 2);
+    CHECK(ends[1]->depth.value() == 0);
+}
+
 REC_TEST("record/scope - a disabled category leaves the pair balanced")
 {
     rec_fixture const fixture(deterministic_config());

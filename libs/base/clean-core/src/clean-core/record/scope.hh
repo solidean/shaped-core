@@ -77,6 +77,24 @@ private:
     /// that lands mid-scope.
     rec::desc const* _end;
 };
+
+/// Pops the innermost open scope for a CC_RECORD_SCOPE_END, reporting whether there was one to pop.
+///
+/// **`scope_depth` is unsigned**, so an END with no matching BEGIN would wrap it to four billion and leave every
+/// later scope on that thread misplaced — for the rest of the thread's life, not just for the frame that slipped.
+/// Refusing is what bounds the damage of an unmatched pair to the one span that went missing.
+///
+/// Deliberately not an assert: the same "nothing open" state is what a domain enabled BETWEEN the begin and the end
+/// legitimately produces, and scope_guard already absorbs that case the same way through its null `_end`.
+[[nodiscard]] CC_FORCE_INLINE bool pop_unmatched_scope()
+{
+    auto& w = t_writer;
+    if (w.scope_depth == 0)
+        return false;
+
+    --w.scope_depth;
+    return true;
+}
 } // namespace cc::rec::impl
 
 namespace cc::rec
@@ -132,8 +150,12 @@ namespace cc::rec
     auto const cc_rec_scope_ = ::cc::rec::impl::scope_guard(cc_rec_scope_begin_, cc_rec_scope_end_, bool(cond_))
 
 /// Opens a scope without a matching block, for a span whose ends are in different functions.
+///
 /// The caller owes a CC_RECORD_SCOPE_END on the same thread, and an unbalanced pair produces a wrong trace rather than
 /// a diagnostic — prefer CC_RECORD_SCOPE wherever the span fits a block.
+/// A BEGIN whose END is never reached costs exactly the span it opened: the depth is only ever popped by an END that
+/// finds something open, so it cannot go negative and poison every later scope on the thread.
+/// That bounds the mistake; it does not make it correct, and the span will still be wrong.
 #define CC_RECORD_SCOPE_BEGIN(name_)                                                                               \
     do                                                                                                             \
     {                                                                                                              \
@@ -156,9 +178,6 @@ namespace cc::rec
         CC_REC_DEFINE_DESC(cc_rec_site_desc_, ::cc::rec::event_kind::scope_end, ::cc::rec::level::info, \
                            ::cc::rec::enable_bit_of(::cc::rec::category::profiling), (name_), nullptr,  \
                            ::cc::rec::impl::scope_fields, 1, 4);                                        \
-        if (::cc::rec::is_recording(cc_rec_site_desc_))                                                 \
-        {                                                                                               \
-            --::cc::rec::impl::t_writer.scope_depth;                                                    \
+        if (::cc::rec::is_recording(cc_rec_site_desc_) && ::cc::rec::impl::pop_unmatched_scope())       \
             ::cc::rec::record_event(cc_rec_site_desc_, ::cc::rec::impl::t_writer.scope_depth);          \
-        }                                                                                               \
     } while (false)
