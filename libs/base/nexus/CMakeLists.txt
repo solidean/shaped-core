@@ -192,3 +192,7 @@ if(SC_BUILD_TESTS)
     # Browser test runner (Emscripten only): nexus-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(nexus-test)
 endif()
+
+# The examples corpus: nexus has owned the mechanism since sc_add_example landed, and now uses it too.
+# A no-op when SC_BUILD_EXAMPLES is off, which sc_add_single_file_examples handles for us.
+add_subdirectory(examples)
