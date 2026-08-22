@@ -1,5 +1,6 @@
 #include <babel-serializer/image/impl/stb_backend.hh>
 #include <babel-serializer/image/png.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 
 namespace babel::png
@@ -47,6 +48,8 @@ cc::result<interlace_method> interlace_from_byte(int v)
 
 cc::result<data> read(cc::span<byte const> bytes)
 {
+    CC_RECORD_SCOPE("png.read");
+
     // The IHDR chunk is fixed-layout and always first, so its structural fields need no full chunk walker:
     //   [0..7] signature, [8..11] length, [12..15] "IHDR", [16..19] width, [20..23] height,
     //   [24] bit depth, [25] color type, [26] compression, [27] filter, [28] interlace.

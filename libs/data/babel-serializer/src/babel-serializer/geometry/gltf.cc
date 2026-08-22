@@ -1,7 +1,8 @@
 #include <babel-serializer/data/base64.hh>
 #include <babel-serializer/data/json.hh>
 #include <babel-serializer/geometry/gltf.hh>
-#include <clean-core/common/endian.hh>  // cc::load_bytes_le — GLB is little-endian, whatever the host is
+#include <clean-core/common/endian.hh> // cc::load_bytes_le — GLB is little-endian, whatever the host is
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move, cc::unit, cc::memcpy
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
@@ -1163,6 +1164,10 @@ container detect_container(cc::span<byte const> bytes)
 
 cc::result<data> read(cc::pinned_data<byte const> bytes, read_options opts)
 {
+    // The funnel every overload reaches, so one span covers them all.
+    CC_RECORD_SCOPE("gltf.read");
+    CC_RECORD_ACCUM("gltf.bytes_read", cc::rec::unit_bytes, bytes.size());
+
     auto parser = babel::impl::gltf_parser();
     parser.input = cc::move(bytes);
     parser.opts = opts;

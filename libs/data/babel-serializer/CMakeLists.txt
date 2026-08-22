@@ -94,6 +94,8 @@ if(SC_BUILD_TESTS)
     add_executable(babel-serializer-test
         tests/main.cc
 
+        tests/babel-recording-test.cc
+
         tests/data/base64-test.cc
         tests/data/json-test.cc
         tests/data/markdown-test.cc

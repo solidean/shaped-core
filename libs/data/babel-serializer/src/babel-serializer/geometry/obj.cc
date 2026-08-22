@@ -1,4 +1,5 @@
 #include <babel-serializer/geometry/obj.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::unit, cc::move
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
@@ -246,6 +247,9 @@ namespace babel::obj
 {
 cc::result<data> read(cc::read_stream& in)
 {
+    // The funnel every overload reaches, so one span covers them all.
+    CC_RECORD_SCOPE("obj.read");
+
     auto parser = babel::impl::obj_parser();
     return parser.parse(in);
 }
