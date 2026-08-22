@@ -428,7 +428,7 @@ int run_bless_includes_command(cc::span<char const* const> args)
 
     if (opts.has_error())
     {
-        cc::eprintln("error: {}", opts.error().to_string());
+        cc::eprintln("error: {}", opts.error());
         cc::eprint(scl::bless_includes_usage_text());
         return exit_usage;
     }
@@ -454,7 +454,7 @@ int run_prose_command(cc::span<char const* const> args)
 
         if (opts.has_error())
         {
-            cc::eprintln("error: {}", opts.error().to_string());
+            cc::eprintln("error: {}", opts.error());
             cc::eprint(scl::prose_stats_usage_text());
             return exit_usage;
         }
@@ -480,7 +480,7 @@ int run_prose_command(cc::span<char const* const> args)
 
     if (opts.has_error())
     {
-        cc::eprintln("error: {}", opts.error().to_string());
+        cc::eprintln("error: {}", opts.error());
         cc::eprint(scl::prose_apply_usage_text());
         return exit_usage;
     }
@@ -516,7 +516,7 @@ int main(int argc, char const* const* argv)
 
     if (opts.has_error())
     {
-        cc::eprintln("error: {}", opts.error().to_string());
+        cc::eprintln("error: {}", opts.error());
         cc::eprint(scl::usage_text());
         return exit_usage;
     }

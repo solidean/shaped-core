@@ -63,6 +63,35 @@ void append_wrapped(cc::string& out, cc::string_view text, isize width, isize ha
     }
 }
 
+/// Wrap `text` while KEEPING the line structure it already has.
+///
+/// A section is prose the caller wrote, and often carries a worked example whose indentation and line
+/// breaks are the content — reflowing it into one paragraph destroys exactly the part worth reading.
+/// So each line is wrapped on its own, hanging under its own leading indentation.
+void append_block(cc::string& out, cc::string_view text, isize width, isize indent_columns)
+{
+    auto line_start = isize(0);
+    for (auto i = isize(0); i <= text.size(); ++i)
+    {
+        if (i < text.size() && text[i] != '\n')
+            continue;
+
+        auto const line = text.subview({.start = line_start, .end = i});
+        line_start = i + 1;
+
+        out.resize_to_filled(out.size() + indent_columns, ' ');
+
+        // The line's own indentation becomes the hanging indent, so a wrapped example stays aligned.
+        auto leading = isize(0);
+        while (leading < line.size() && line[leading] == ' ')
+            ++leading;
+
+        out.resize_to_filled(out.size() + leading, ' ');
+        append_wrapped(out, line.subview(leading), width - leading, indent_columns + leading);
+        out += "\n";
+    }
+}
+
 void append_padded(cc::string& out, cc::string_view text, isize width)
 {
     out += text;
@@ -254,8 +283,7 @@ cc::string nx::impl::help_renderer::render(args_builder const& builder, args_ren
     if (full && !info.help.empty())
     {
         out += "\n";
-        append_wrapped(out, info.help, options.width, 0);
-        out += "\n";
+        append_block(out, info.help, options.width, 0);
     }
 
     out += "\n";
@@ -429,9 +457,7 @@ cc::string nx::impl::help_renderer::render(args_builder const& builder, args_ren
         out += "\n";
         out += cc::console::colorize(cc::console::color::bold, cc::format("{}:", s.title), options.color);
         out += "\n";
-        out.resize_to_filled(out.size() + indent, ' ');
-        append_wrapped(out, s.text, options.width - indent, indent);
-        out += "\n";
+        append_block(out, s.text, options.width - indent, indent);
     }
 
     if (!builder._examples.empty())
