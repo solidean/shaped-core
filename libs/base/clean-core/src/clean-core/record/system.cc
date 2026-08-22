@@ -533,6 +533,23 @@ cc::rec::listener_handle cc::rec::register_listener(cc::rec::listener& l)
         });
 }
 
+bool cc::rec::is_listener_registered(cc::rec::listener_handle h)
+{
+    if (!h.is_valid())
+        return false;
+
+    return g_processing.lock(
+        [&](processing& p)
+        {
+            if (h._index >= p.listeners.size())
+                return false;
+
+            // Both halves are load-bearing: the generation rules out a stale handle onto a REUSED slot, and the null
+            // rules out one onto a slot that was cleared and not yet reused.
+            return p.listeners[h._index].generation == h._generation && p.listeners[h._index].l != nullptr;
+        });
+}
+
 void cc::rec::unregister_listener(cc::rec::listener_handle h)
 {
     if (!h.is_valid())

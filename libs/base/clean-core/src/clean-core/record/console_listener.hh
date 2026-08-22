@@ -22,7 +22,7 @@ enum class cc::rec::console_time
     /// No timestamp at all.
     none,
 
-    /// Seconds since the first event this listener saw.
+    /// Seconds since the earliest event this listener printed.
     /// What a test run or a benchmark wants: the number means "how far into the run", which is the question there.
     elapsed,
 
@@ -67,7 +67,7 @@ struct cc::rec::console_options
     /// `automatic` is resolved once, at construction, rather than per line.
     cc::console::color_mode color = cc::console::color_mode::automatic;
 
-    /// The options a default-constructed listener uses: these defaults, with the environment applied over them.
+    /// `base` with the environment applied over it, which is what a default-constructed listener uses.
     ///
     /// Reading the environment is what lets someone debug a program they cannot rebuild, which is the whole reason
     /// this exists — so the variables are read once here rather than consulted per line.
@@ -78,7 +78,17 @@ struct cc::rec::console_options
     ///
     /// An unset variable leaves its field alone, and an unparseable one is ignored rather than diagnosed — a
     /// misspelled log setting must never be the reason a program refuses to start.
+    ///
+    /// Pass a `base` to move a default without giving up the overrides: nexus stamps its output `elapsed` this way,
+    /// and `CC_LOG_LEVEL` still reaches a test binary.
+    ///
+    /// **Do not call this during static initialization.** It reads the environment, and the color it resolves asks
+    /// the OS whether a stream is a terminal — neither question has an answer that early.
+    ///
+    /// Two overloads rather than one defaulted argument: `= {}` here would need console_options complete inside its
+    /// own definition, which it is not yet.
     [[nodiscard]] static rec::console_options from_environment();
+    [[nodiscard]] static rec::console_options from_environment(rec::console_options base);
 };
 
 /// Prints log events, in timestamp order across threads.
@@ -110,11 +120,15 @@ struct cc::rec::console_listener final : rec::listener
     [[nodiscard]] isize printed_count() const { return _printed; }
 
 private:
-    /// One buffered line, already rendered, waiting for the batch to finish so it can be ordered.
+    /// One buffered line, waiting for the batch to finish so it can be ordered.
+    ///
+    /// The timestamp is kept unrendered rather than baked into `text`: `elapsed` is an offset from the earliest event
+    /// in the run, and which event that is only becomes knowable once the batch is sorted.
     struct pending_line
     {
         u64 cycles = 0;
-        cc::string text;
+        f64 wall_secs = 0;
+        cc::string text; ///< the line from the level tag onwards, newline included
         bool to_stderr = false;
     };
 
@@ -127,13 +141,32 @@ private:
     cc::vector<pending_line> _pending;
     isize _printed = 0;
 
-    /// The wall clock of the first event ever seen, so elapsed times read as an offset into the run.
+    /// The wall clock of the earliest event this listener has printed, so an elapsed time reads as an offset into
+    /// the run rather than into whichever batch happened to arrive first.
+    ///
+    /// Fixed at the first BATCH rather than the first chunk: chunks arrive from different threads out of order, so
+    /// the first one seen is not the earliest one, and seeding from it would render the run's opening lines negative.
     f64 _origin_secs = 0;
     bool _has_origin = false;
 };
 
 namespace cc::rec
 {
+/// Opens every domain's gate down to `CC_LOG_LEVEL`, and does nothing when it is unset.
+///
+/// **A listener's `min_level` only filters what was already recorded**, and `trace` and `debug` are off at the domain
+/// by default.
+/// So `CC_LOG_LEVEL=debug` without this turns a filter on in front of events that were never written, and this is the
+/// half that makes the variable mean what someone typing it expects.
+///
+/// Applies to domains registered later too, so a plugin loaded afterwards is covered.
+/// Levels are only ever turned ON: a variable naming `error` does not silence the info messages a program asked for
+/// in code, because the environment is a debugging aid and not a way to break a program's own configuration.
+///
+/// **A program's own call, never a library's** — it is process-wide, and install_default_console_listener makes it
+/// for an application that wants the default behavior.
+void enable_environment_log_levels();
+
 /// Gets an application's log messages onto its terminal, in one call.
 ///
 /// Brings the recording system up if it is not up already, then registers a process-owned console_listener
@@ -146,6 +179,11 @@ namespace cc::rec
 /// **A program that calls `rec::shutdown()` must unregister this first** — shutdown frees the pool every listener's
 /// callback reads out of, and asserts that none are left.
 /// That is what the returned handle is for; an application that simply runs until the process ends can ignore it.
+///
+/// Calling it AGAIN after that unregister re-registers the same listener and hands back the new handle, so a program
+/// that shuts the recorder down and brings it back up gets its console back rather than a handle to nothing.
+/// The options are resolved once, on the first call: re-reading the environment mid-process would make two stretches
+/// of the same run disagree for a reason nobody could see.
 ///
 /// **Deliberately not something a library may call.** How many megabytes recording may cost, and whether anything is
 /// printed at all, are the program's decisions — see the note at the top of record/system.hh.

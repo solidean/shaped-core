@@ -52,6 +52,7 @@ TEST("record/console - the defaults are the ones an application wants")
     CHECK(defaults.show_domain);
     CHECK(defaults.split_streams);
 
+
     // Source locations are off even for errors: a .ccrec carries them for every event, offline and exactly.
     CHECK(!defaults.show_site);
 }
@@ -91,8 +92,7 @@ TEST("time/local_calendar_time - the epoch comes back as a real date")
     auto const t = cc::local_calendar_time(1'000'000'000.25);
 
     CHECK(t.year == 2001);
-    CHECK(t.month >= 9);
-    CHECK(t.month <= 9);
+    CHECK(t.month == 9);
     CHECK(t.hour < 24);
     CHECK(t.minute < 60);
     CHECK(t.second <= 60);

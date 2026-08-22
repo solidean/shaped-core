@@ -10,6 +10,8 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 cc::string_view level_tag(cc::rec::level l)
@@ -97,6 +99,40 @@ cc::optional<cc::console::color_mode> parse_color(cc::string_view s)
     return {};
 }
 
+/// The bracketed stamp a line opens with, empty for console_time::none.
+///
+/// `origin_secs` is only read by the elapsed mode, and is the earliest event the listener has printed rather than the
+/// first one it saw — which is why this runs after the batch is sorted rather than as each event lands.
+cc::string timestamp_of(cc::rec::console_time mode, f64 wall_secs, f64 origin_secs)
+{
+    auto out = cc::string();
+    switch (mode)
+    {
+    case cc::rec::console_time::none:
+        break;
+
+    case cc::rec::console_time::elapsed:
+        out.appendf("[{:8.3f}] ", wall_secs - origin_secs);
+        break;
+
+    case cc::rec::console_time::wall_time:
+    {
+        auto const t = cc::local_calendar_time(wall_secs);
+        out.appendf("[{:02}:{:02}:{:02}.{:03}] ", t.hour, t.minute, t.second, t.millisecond);
+        break;
+    }
+
+    case cc::rec::console_time::wall_datetime:
+    {
+        auto const t = cc::local_calendar_time(wall_secs);
+        out.appendf("[{}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}] ", t.year, t.month, t.day, t.hour, t.minute, t.second,
+                    t.millisecond);
+        break;
+    }
+    }
+    return out;
+}
+
 /// Applies one flag variable, leaving the field alone when it is unset.
 void apply_flag(cc::string_view name, bool& field)
 {
@@ -107,7 +143,12 @@ void apply_flag(cc::string_view name, bool& field)
 
 cc::rec::console_options cc::rec::console_options::from_environment()
 {
-    auto options = rec::console_options{};
+    return from_environment(rec::console_options{});
+}
+
+cc::rec::console_options cc::rec::console_options::from_environment(rec::console_options base)
+{
+    auto options = base;
 
     if (auto const v = cc::environment_variable("CC_LOG_LEVEL"); v.has_value())
         if (auto const parsed = parse_level(v.value()); parsed.has_value())
@@ -137,38 +178,9 @@ void cc::rec::console_listener::on_chunk(cc::rec::chunk_view const& view)
             continue;
 
         auto const wall_secs = view.wall_secs_of(e.cycles);
-        if (!_has_origin)
-        {
-            _origin_secs = wall_secs;
-            _has_origin = true;
-        }
 
+        // The timestamp is NOT rendered here — see pending_line.
         auto line = cc::string();
-
-        switch (_options.time)
-        {
-        case rec::console_time::none:
-            break;
-
-        case rec::console_time::elapsed:
-            line.appendf("[{:8.3f}] ", wall_secs - _origin_secs);
-            break;
-
-        case rec::console_time::wall_time:
-        {
-            auto const t = cc::local_calendar_time(wall_secs);
-            line.appendf("[{:02}:{:02}:{:02}.{:03}] ", t.hour, t.minute, t.second, t.millisecond);
-            break;
-        }
-
-        case rec::console_time::wall_datetime:
-        {
-            auto const t = cc::local_calendar_time(wall_secs);
-            line.appendf("[{}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}] ", t.year, t.month, t.day, t.hour, t.minute,
-                         t.second, t.millisecond);
-            break;
-        }
-        }
 
         line += colorize_level(e.level(), _colored);
         line += ' ';
@@ -203,6 +215,7 @@ void cc::rec::console_listener::on_chunk(cc::rec::chunk_view const& view)
 
         _pending.push_back({
             .cycles = e.cycles,
+            .wall_secs = wall_secs,
             .text = cc::move(line),
             .to_stderr = _options.split_streams && e.level() >= rec::level::warning,
         });
@@ -218,12 +231,22 @@ void cc::rec::console_listener::on_batch_end()
     // Only same-cycle ties are left unordered.
     cc::sort(_pending, [](pending_line const& a, pending_line const& b) { return a.cycles < b.cycles; });
 
+    // After the sort, so the run's zero is its EARLIEST event rather than whichever chunk this listener saw first.
+    if (!_has_origin)
+    {
+        _origin_secs = _pending.front().wall_secs;
+        _has_origin = true;
+    }
+
     for (auto const& line : _pending)
     {
+        auto stamped = timestamp_of(_options.time, line.wall_secs, _origin_secs);
+        stamped += line.text;
+
         if (line.to_stderr)
-            cc::eprint(line.text);
+            cc::eprint(stamped);
         else
-            cc::print(line.text);
+            cc::print(stamped);
     }
 
     // print() does not flush, so the batch is handed over in one go at the end rather than per line.
@@ -234,20 +257,51 @@ void cc::rec::console_listener::on_batch_end()
     _pending.clear();
 }
 
+void cc::rec::enable_environment_log_levels()
+{
+    auto const v = cc::environment_variable("CC_LOG_LEVEL");
+    if (!v.has_value())
+        return;
+
+    auto const parsed = parse_level(v.value());
+    if (!parsed.has_value())
+        return;
+
+    // Every level AT OR ABOVE the named one, OR-ed onto what each domain already has.
+    auto bits = u32(0);
+    for (auto const l : {rec::level::trace, rec::level::debug, rec::level::info, rec::level::warning, rec::level::error})
+        if (l >= parsed.value())
+            bits |= rec::enable_bit_of(l);
+
+    rec::for_each_domain([bits](rec::domain& d) { d.set_enabled_mask(d.enabled_mask() | bits); });
+
+    // for_each_domain covers what is registered NOW; this covers what registers later, which is what a plugin loaded
+    // after main() begins looks like.
+    rec::set_all_domains_enabled_mask(rec::all_category_bits | bits | rec::enable_bit_of(rec::level::info)
+                                      | rec::enable_bit_of(rec::level::warning) | rec::enable_bit_of(rec::level::error));
+}
+
 cc::rec::listener_handle cc::rec::install_default_console_listener()
 {
-    // One function-local static does the whole thing exactly once, initialization order included.
-    //
-    // Function-local rather than file-scope so it is built on the first CALL: reading the environment and asking
-    // whether stdout is a terminal are questions with no answer during static initialization.
+    // Function-local rather than file-scope so the listener is built on the first CALL: reading the environment and
+    // asking whether stdout is a terminal are questions with no answer during static initialization.
     // Never destroyed — unregistering at exit would race every thread still recording, and the process is ending.
-    static auto const handle = []
-    {
-        if (!rec::is_initialized())
-            rec::initialize();
+    static auto* const listener = new rec::console_listener();
 
-        return rec::register_listener(*new rec::console_listener());
-    }();
+    // The HANDLE is deliberately not cached alongside it.
+    // A program that unregisters this before rec::shutdown() — which the docs require of anyone calling shutdown at
+    // all — would otherwise be handed a dead handle by the next call, when re-registering is exactly what it asked for.
+    static auto handle = rec::listener_handle{};
+
+    if (!rec::is_initialized())
+        rec::initialize();
+
+    // Here rather than in the listener's constructor: opening a domain's gate is a process-wide act, and a listener
+    // is not the thing that gets to make it.
+    rec::enable_environment_log_levels();
+
+    if (!rec::is_listener_registered(handle))
+        handle = rec::register_listener(*listener);
 
     return handle;
 }
