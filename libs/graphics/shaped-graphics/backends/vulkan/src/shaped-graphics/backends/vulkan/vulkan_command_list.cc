@@ -1,6 +1,7 @@
 // vulkan_command_list: allocation, submission, drop, and teardown.
 // The list type itself is header-only, so its create / submit / drop bodies and its destructor live here.
 
+#include <clean-core/common/log.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -23,8 +24,8 @@ vulkan_command_list::~vulkan_command_list()
 
     // Safety net: a list left neither submitted nor dropped.
     // Reclaim it like a drop so the open-list count, the slot and the pool don't leak — but warn, since the explicit call is required.
-    cc::eprintln("[sg] command list destroyed without submit or drop — auto-dropping. Submit or drop every "
-                 "command list explicitly through the context.");
+    CC_LOG_WARNING("command list destroyed without submit or drop — auto-dropping. Submit or drop every "
+                   "command list explicitly through the context.");
     _ctx.reclaim_unsubmitted_command_list(*this);
 }
 

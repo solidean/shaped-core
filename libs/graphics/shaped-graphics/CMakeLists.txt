@@ -198,6 +198,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/access_state-test.cc
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
+        tests/barrier/slot-recording-test.cc
     )
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend

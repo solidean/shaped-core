@@ -1,5 +1,7 @@
 // dx12 context bring-up: debug layer, adapter selection, device + queue creation.
 
+#include <clean-core/common/log.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/conversion.hh> // utf16_to_utf8 — DXGI_ADAPTER_DESC1::Description is wide
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -61,6 +63,27 @@ dx12_message_severity to_sg_severity(D3D12_MESSAGE_SEVERITY severity)
     }
 }
 
+/// Relays one debug-layer message at the level the debug layer itself assigned it.
+///
+/// Mapping rather than flattening: a corruption message and an info message are not the same news, and a reader
+/// filtering to warnings and above is exactly who needs the difference.
+void log_debug_layer_message(dx12_message_severity severity, char const* description)
+{
+    switch (severity)
+    {
+    case dx12_message_severity::corruption:
+    case dx12_message_severity::error:
+        CC_LOG_ERROR("debug layer: {}", description);
+        break;
+    case dx12_message_severity::warning:
+        CC_LOG_WARNING("debug layer: {}", description);
+        break;
+    default:
+        CC_LOG_INFO("debug layer: {}", description);
+        break;
+    }
+}
+
 char const* severity_label(dx12_message_severity severity)
 {
     switch (severity)
@@ -91,7 +114,7 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
     if (ctx != nullptr && ctx->_message_callback.is_valid())
         ctx->_message_callback(level, description);
     else
-        cc::eprintln("[dx12 {}] {}", severity_label(level), description);
+        log_debug_layer_message(level, description);
 }
 
 // Turns the D3D12 debug layer on, at most once for the whole process, and reports whether it is available.
@@ -147,6 +170,10 @@ namespace sg
 {
 cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config)
 {
+    // Adapter selection, device creation and every resource system's setup — tens of milliseconds, and the first
+    // thing anyone looks at when a program is slow to show a window.
+    CC_RECORD_SCOPE("sg.context.create");
+
     using namespace sg::backend::dx12;
 
     // No DXGI_CREATE_FACTORY_DEBUG here, deliberately.

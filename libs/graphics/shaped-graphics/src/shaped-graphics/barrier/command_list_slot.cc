@@ -1,4 +1,6 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/string/print.hh>
@@ -15,6 +17,11 @@ command_list_slot command_list_slot_allocator::acquire()
         {
             ++s.live;
 
+            // A SNAPSHOT rather than an accumulate: this is how many exist right now, and summing that would be
+            // meaningless.
+            // sg counted these already, purely to size a bitmask; nothing ever reported the number.
+            CC_RECORD_STAT("sg.command_lists.live", cc::rec::unit_count, s.live);
+
             // Fast path: a free bit exists in the base 64. Lowest clear bit = trailing ones of the mask.
             if (~s.bits != 0)
             {
@@ -28,8 +35,8 @@ command_list_slot command_list_slot_allocator::acquire()
             if (!s.overflow_warned)
             {
                 s.overflow_warned = true;
-                cc::eprintln("[sg] more than 64 concurrent command lists — likely a command list that was never "
-                             "submitted or dropped");
+                CC_LOG_WARNING("more than 64 concurrent command lists — likely a command list that was never "
+                               "submitted or dropped");
             }
             for (isize j = 0; j < s.overflow.size(); ++j)
                 if (!s.overflow[j])
@@ -51,6 +58,7 @@ bool command_list_slot_allocator::release(command_list_slot slot)
         {
             CC_ASSERT(s.live > 0, "releasing a command_list_slot when none are live");
             --s.live;
+            CC_RECORD_STAT("sg.command_lists.live", cc::rec::unit_count, s.live);
             if (i < 64)
             {
                 u64 const mask = u64(1) << i;

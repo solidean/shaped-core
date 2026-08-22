@@ -3,6 +3,7 @@
 // See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 // Device-level teardown (shutdown) lives in dx12_context.cc.
 
+#include <clean-core/common/profiling.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
@@ -172,6 +173,9 @@ void dx12_context::process_completed_epochs()
 
 void dx12_context::wait_for_epoch(sg::epoch e)
 {
+    // A STALL: the CPU is waiting on the GPU, and how long says whether the frame is GPU-bound.
+    CC_RECORD_SCOPE("sg.epoch.wait");
+
     // Ordering matters: drain the copy actors before blocking.
     // A list submitted this epoch may be waiting on the async-upload completion fence, which only the copy actor signals.
     // Where the actor has no thread of its own, the GPU would never reach the epoch signal and the wait below would never return.
@@ -204,6 +208,9 @@ void dx12_context::wait_for_epoch(sg::epoch e)
 
 void dx12_context::wait_for_next_inflight_epoch()
 {
+    // The other stall: too many frames in flight, so the CPU waits for one to retire.
+    CC_RECORD_SCOPE("sg.epoch.wait_inflight");
+
     cc::optional<sg::epoch> oldest = _epoch_state.lock(
         [](dx12_epoch_state& s) -> cc::optional<sg::epoch>
         {
