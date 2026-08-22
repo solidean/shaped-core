@@ -76,6 +76,9 @@ cc::symbolizer::symbolizer()
 
 cc::symbolizer::symbolizer(cc::span<cc::loaded_module const> modules)
 {
+    // Opens a DbgHelp session and loads a PDB per module, which is tens of milliseconds against a real symbol server.
+    CC_RECORD_SCOPE("cc.symbolize.open");
+
     _modules.push_back_range(modules);
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -126,6 +129,10 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
     auto const key = reinterpret_cast<u64>(address);
     if (auto* const hit = _cache.get_ptr(key); hit != nullptr)
         return *hit;
+
+    // Misses only: a hit is a map lookup, and counting those would measure how often a caller asks rather than what
+    // symbolization cost.
+    CC_RECORD_ACCUM("cc.symbolize.resolved", cc::rec::unit_count, 1);
 
     auto& out = _cache[key];
 

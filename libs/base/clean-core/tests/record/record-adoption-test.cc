@@ -1,6 +1,5 @@
 #include "record-test-types.hh"
 
-#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/record/event_view.hh>
@@ -37,7 +36,9 @@ f64 accumulated(cc::rec::recording const& r, cc::string_view name)
 
 REC_TEST("record/adoption - a file stream reports the bytes it moved")
 {
-    auto const path = cc::format("{}/cc-rec-adoption.bin", cc::temp_directory_path());
+    // temp_file_path rather than a fixed name: it keys on the process and a counter, so a second copy of this binary
+    // running beside the first does not overwrite its file out from under it.
+    auto const path = cc::temp_file_path("cc-rec-adoption", ".bin");
     auto const payload = cc::string("the bytes a stat has to account for");
 
     rec_fixture const fixture(deterministic_config());

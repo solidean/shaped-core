@@ -1,6 +1,5 @@
 #include "record-test-types.hh"
 
-#include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/container/map.hh>
