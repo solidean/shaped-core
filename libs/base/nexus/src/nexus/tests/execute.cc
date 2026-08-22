@@ -26,7 +26,6 @@
 #include <nexus/tests/section.hh>
 
 #include <chrono>        // std::chrono: no cc timing yet
-#include <cstdio>        // std::fputs / std::fwrite: crash-context hook writes to stderr without allocating
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
@@ -1089,17 +1088,24 @@ void nx::impl::report_running_test() noexcept
         if (decl == nullptr || decl->name.empty())
             continue;
 
-        std::fputs(reported == 0 ? "running test: \"" : "   also running: \"", stderr);
-        std::fwrite(decl->name.data(), 1, size_t(decl->name.size()), stderr);
-        std::fputc('"', stderr);
+        // cc::eprint takes a string_view straight to one fwrite, so every line here stays allocation-free —
+        // which is the whole constraint on this function: it runs from a crash handler.
+        cc::eprint(reported == 0 ? "running test: \"" : "   also running: \"");
+        cc::eprint(decl->name);
+        cc::eprint("\"");
         if (auto const section = g_running_tests[i].section.load(cc::memory_order_relaxed); section > 0)
-            std::fprintf(stderr, " (section %d)", section);
-        std::fputc('\n', stderr);
+        {
+            // format_to writes into THIS buffer rather than returning a string, so the number costs no heap.
+            char buffer[32] = {};
+            auto const written = cc::format_to(cc::span<char>(buffer), " (section {})", section);
+            cc::eprint(cc::string_view(buffer, written));
+        }
+        cc::eprint("\n");
         ++reported;
     }
 
     if (reported == 0)
-        std::fputs("running test: <none>\n", stderr);
+        cc::eprint("running test: <none>\n");
 }
 
 void nx::impl::record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better)

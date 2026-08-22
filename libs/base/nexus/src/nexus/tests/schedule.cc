@@ -8,7 +8,6 @@
 #include <clean-core/thread/thread.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 
-#include <iostream>    // std::cout: console output
 #include <string_view> // std::string_view: streams a cc::string into std::ostream
 
 using namespace cc::primitive_defines;
@@ -490,9 +489,7 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
 
 void nx::test_schedule::print() const
 {
-    std::cout << "test schedule:\n";
+    cc::println("test schedule:");
     for (auto const& instance : instances)
-    {
-        std::cout << "  - \"" << as_sv(instance.declaration->name) << "\"\n";
-    }
+        cc::println("  - \"{}\"", as_sv(instance.declaration->name));
 }
