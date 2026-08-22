@@ -1,8 +1,10 @@
 #include <babel-serializer/data/sqlite.hh>
 #include <blob-cache/blob_cache.hh>
 #include <blob-cache/impl/cache_core.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/thread/async_coroutine.hh> // including it is what makes acquire_pipeline a coroutine
 
 namespace bcache
@@ -36,6 +38,10 @@ void bump(std::weak_ptr<cache_core> const& core, i64 cache_stats::* field)
 {
     if (auto const held = core.lock())
         held->stats.lock([&](cache_stats& s) { s.*field += 1; });
+
+    // The only counter reaching this adder is computes_started; the rest go through the actor's.
+    if (field == &cache_stats::computes_started)
+        CC_RECORD_ACCUM("bcache.computes_started", cc::rec::unit_count, 1);
 }
 
 /// The lookup half, as a node the pipeline can park on.
@@ -204,6 +210,15 @@ cc::shared_async<blob> blob_cache::acquire(cache_key const& key,
                                            cc::unique_function<cc::shared_async<blob>()> compute,
                                            acquire_options options)
 {
+    // The async scope goes HERE, around the code that BUILDS the pipeline, rather than inside the coroutine.
+    //
+    // It rides cc::async's ambient chain, so the node created below inherits it and carries it to whichever worker
+    // ends up running the lookup, the compute and the store — which is what makes one acquire read as one operation.
+    // Opening it inside the coroutine body instead puts the scope object in the coroutine frame, where it is entered
+    // and left at suspension points rather than around them; that fast-fails rather than diagnosing, so it is worth
+    // saying plainly.
+    CC_RECORD_ASYNC_SCOPE("bcache.acquire");
+
     // The generation is minted before the claim, so the frame knows which slot it will release without anything having to reach back into a node that is already running.
     auto const generation = flight_table::next_generation();
 
@@ -215,6 +230,10 @@ cc::shared_async<blob> blob_cache::acquire(cache_key const& key,
     if (!claim.is_owner)
     {
         _core->stats.lock([](cache_stats& s) { s.singleflight_joins += 1; });
+
+        // Mirrored beside the counter it belongs to: this acquire turned out to BE the one already running, which is
+        // what singleflight exists to make true.
+        CC_RECORD_ACCUM("bcache.singleflight_joins", cc::rec::unit_count, 1);
         return cc::move(claim.operation);
     }
 

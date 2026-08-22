@@ -1,4 +1,5 @@
 #include <blob-cache/impl/singleflight.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/atomic.hh>
