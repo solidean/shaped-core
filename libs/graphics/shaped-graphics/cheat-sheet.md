@@ -25,6 +25,9 @@ How to read this: each block leads with the include, then one symbol per line wi
 
 ---
 
+**Recording domain:** `sg` — each backend shadows it: `sg.dx12`, `sg.vulkan`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## Handles & types
 
 ```cpp

@@ -10,6 +10,9 @@ Format conventions for this sheet live in [docs/guides/cheat-sheets.md](../../..
 
 ---
 
+**Recording domain:** `nexus`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## Writing a test
 
 ```cpp

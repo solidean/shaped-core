@@ -21,7 +21,9 @@ One-liner per library:
   `function_ref`, …). Namespace `cc`. No dependencies.
   Also home to **`cc::rec`** (`record/`), the one event stream logging, profiling, values, stats and tracing all write into —
   a recording is a value type, which is what makes live observability, crash forensics and test assertions one mechanism.
-  See [docs/systems/recording.md](libs/base/clean-core/docs/systems/recording.md).
+  [docs/logging.md](libs/base/clean-core/docs/logging.md) and [docs/profiling.md](libs/base/clean-core/docs/profiling.md) are the user-facing halves;
+  [docs/systems/recording.md](libs/base/clean-core/docs/systems/recording.md) is the mechanism.
+  **Every library has a recording domain and logs its diagnostics** — a library never prints, and never writes its own `[lib]` prefix.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   Namespace `nx`. Depends on clean-core.
@@ -369,6 +371,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Coding standards & conventions   | [docs/coding-guidelines.md](docs/coding-guidelines.md)           |
+| Log or profile something         | [logging](libs/base/clean-core/docs/logging.md) / [profiling](libs/base/clean-core/docs/profiling.md) (`CC_LOG_*`, `CC_RECORD_SCOPE`, `CC_RECORD_STAT`) |
 | Recall a library's API fast      | its `cheat-sheet.md` (e.g. [clean-core](libs/base/clean-core/cheat-sheet.md), [nexus](libs/base/nexus/cheat-sheet.md)) |
 | Write a test (nexus)             | [cheat-sheet](libs/base/nexus/cheat-sheet.md), then the [docs hub](libs/base/nexus/docs/_index.md) for invocables, fuzzing and the CLI layer |
 | Explore the repo                 | `repo_tools` MCP (`repo_search` / `repo_structure`)              |
