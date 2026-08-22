@@ -381,7 +381,7 @@ TEST("async - a node woken across threads still runs under its own ambient conte
     auto dependent = cc::make_async_lazy<i64>(
         [](i64) -> i64
         {
-            auto* const v = cc::async_ambient_lookup(pool_tag());
+            auto* const v = cc::async_ambient_lookup_ptr(pool_tag());
             return v == nullptr ? 0 : *static_cast<int*>(v);
         },
         gate);
@@ -455,7 +455,7 @@ TEST("async - a work item stolen by a parked participant runs under its own cont
     auto victim = cc::make_async_lazy<i64>(
         [&]() -> i64
         {
-            auto* const v = cc::async_ambient_lookup(pool_tag());
+            auto* const v = cc::async_ambient_lookup_ptr(pool_tag());
             observed.store(v == nullptr ? 0 : *static_cast<int*>(v), cc::memory_order_release);
             return 1;
         });

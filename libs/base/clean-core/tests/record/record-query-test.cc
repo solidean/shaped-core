@@ -356,16 +356,26 @@ REC_TEST("record/query - decimating keeps the scope you are sitting inside")
 {
     rec_fixture const fixture(deterministic_config());
 
-    u64 cutoff = 0;
     auto const r = capture(
-        [&]
+        []
         {
             CC_RECORD_SCOPE_BEGIN("surrounding");
             CC_RECORD_MARK("ancient");
-            cutoff = cc::current_cycles();
             CC_RECORD_MARK("recent");
             CC_RECORD_SCOPE_END("surrounding");
         });
+
+    // Cut at the later marker's own stamp, not at a clock read taken between the two.
+    // A tick is ~42 ns on Apple silicon, so a raw reading ties with the event before it and `keep_from_cycles` — which
+    // is inclusive — then keeps the marker this test wants gone.
+    u64 cutoff = 0;
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (cc::string_view(e.name()) == "recent")
+                cutoff = e.cycles;
+        });
+    REQUIRE(cutoff > 0);
 
     auto const thinned = r.decimated({.keep_from_cycles = cutoff, .keep_open_scopes = true});
 

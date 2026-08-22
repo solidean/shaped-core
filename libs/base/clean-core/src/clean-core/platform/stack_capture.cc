@@ -1,6 +1,7 @@
 #include "stack_capture.hh"
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/platform/intrinsics.hh>
 
 #if defined(__EMSCRIPTEN__)
 // No walkable native stack.
@@ -72,10 +73,16 @@ constexpr bool has_stack_capture = false;
 /// It offers a per-frame hook, which is what `stop_frame` needs; and it walks an arbitrary CONTEXT, which is what
 /// sampling a suspended thread needs — RtlCaptureStackBackTrace only ever walks its own caller.
 /// The history table is reused across frames, which is where most of the per-frame lookup cost goes.
+///
+/// `skip_below` is a STACK ADDRESS, and every frame at or below it is dropped before `skip` is applied at all.
+/// That is how a self-capture leaves the recorder's own frames out WITHOUT counting them: the count is not knowable
+/// here, because whether cc::capture_stack still has a frame of its own is the optimizer's business — MSVC on arm64
+/// tail-calls into this function and leaves none.
 CC_DONT_INLINE cc::stack_capture_result capture_from_context(void* start,
                                                              cc::span<void*> out,
                                                              isize skip,
-                                                             void const* stop_frame)
+                                                             void const* stop_frame,
+                                                             u64 skip_below = 0)
 {
     cc::stack_capture_result result;
 
@@ -142,6 +149,10 @@ CC_DONT_INLINE cc::stack_capture_result capture_from_context(void* start,
             result.stopped = true;
             break;
         }
+
+        // Still inside our own frames, which the caller never asked about.
+        if (skip_below != 0 && u64(context_sp(ctx)) <= skip_below)
+            continue;
 
         if (!take(pc))
             break;
@@ -396,9 +407,11 @@ cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void
 #endif
 
 #if CC_CAN_UNWIND_TABLES
-    // One extra, for this function's own frame: capture_from_context is deliberately not inlined, so the walk starts
-    // one level below the caller either way and frame 0 must still be the CALLER's call site.
-    return capture_from_context(nullptr, out, skip + 1, stop_frame);
+    // Our own frames are dropped by ADDRESS rather than by count.
+    // Counting them was wrong on arm64: this function's tail call into capture_from_context leaves it no frame, so a
+    // "+1 for my own" skipped the caller's frame instead and frame 0 came back one level too far out.
+    // A threshold holds either way, since a frame that no longer exists is simply one fewer frame below it.
+    return capture_from_context(nullptr, out, skip, stop_frame, reinterpret_cast<u64>(cc::impl::current_frame_address()));
 #else
     (void)stop_frame;
     (void)walk;

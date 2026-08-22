@@ -28,7 +28,7 @@ int value_b = 2;
 /// 0 means "no context installed".
 [[nodiscard]] i64 observed()
 {
-    auto* const v = cc::async_ambient_lookup(tag_a());
+    auto* const v = cc::async_ambient_lookup_ptr(tag_a());
     return v == nullptr ? 0 : *static_cast<int*>(v);
 }
 
@@ -39,7 +39,7 @@ int value_b = 2;
 /// So a bare head is not the question; whether our tags are present is.
 bool no_scope_of_ours()
 {
-    return cc::async_ambient_lookup(tag_a()) == nullptr && cc::async_ambient_lookup(tag_b()) == nullptr;
+    return cc::async_ambient_lookup_ptr(tag_a()) == nullptr && cc::async_ambient_lookup_ptr(tag_b()) == nullptr;
 }
 } // namespace
 
@@ -48,16 +48,26 @@ TEST("async-ambient - nothing installed by default")
     CHECK(no_scope_of_ours());
 }
 
+TEST("async-ambient - the slot carries a full 64-bit value, not a pointer")
+{
+    // cc::rec puts a trace id here, and an id that came off the wire uses every bit.
+    // A slot only as wide as a pointer truncates that on a 32-bit target, and the lookup then misses for good.
+    constexpr auto wide = u64(0x1234'5678'9ABC'DEF0);
+
+    cc::async_ambient_scope const s(tag_a(), wide);
+    CHECK(cc::async_ambient_lookup(tag_a()) == wide);
+}
+
 TEST("async-ambient - a scope installs and pops")
 {
     {
         cc::async_ambient_scope const s(tag_a(), &value_a);
         CHECK(cc::async_current_ambient() != nullptr);
-        CHECK(cc::async_ambient_lookup(tag_a()) == &value_a);
-        CHECK(cc::async_ambient_lookup(tag_b()) == nullptr); // a miss walks the whole chain and reports absence
+        CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &value_a);
+        CHECK(cc::async_ambient_lookup_ptr(tag_b()) == nullptr); // a miss walks the whole chain and reports absence
     }
     CHECK(no_scope_of_ours());
-    CHECK(cc::async_ambient_lookup(tag_a()) == nullptr);
+    CHECK(cc::async_ambient_lookup_ptr(tag_a()) == nullptr);
 }
 
 TEST("async-ambient - two consumers compose in one chain")
@@ -67,8 +77,8 @@ TEST("async-ambient - two consumers compose in one chain")
 
     // The head is inner's, and a lookup for the outer consumer still finds it — that is the whole point of the chain.
     CHECK(cc::async_current_ambient() == inner.link());
-    CHECK(cc::async_ambient_lookup(tag_a()) == &value_a);
-    CHECK(cc::async_ambient_lookup(tag_b()) == &value_b);
+    CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &value_a);
+    CHECK(cc::async_ambient_lookup_ptr(tag_b()) == &value_b);
 }
 
 TEST("async-ambient - the innermost scope for a tag wins")
@@ -76,12 +86,12 @@ TEST("async-ambient - the innermost scope for a tag wins")
     int shadowing = 42;
 
     cc::async_ambient_scope const outer(tag_a(), &value_a);
-    CHECK(cc::async_ambient_lookup(tag_a()) == &value_a);
+    CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &value_a);
     {
         cc::async_ambient_scope const inner(tag_a(), &shadowing);
-        CHECK(cc::async_ambient_lookup(tag_a()) == &shadowing);
+        CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &shadowing);
     }
-    CHECK(cc::async_ambient_lookup(tag_a()) == &value_a); // popping the inner one restores the outer
+    CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &value_a); // popping the inner one restores the outer
 }
 
 TEST("async-ambient - tags from separate declarations are distinct addresses")
@@ -103,8 +113,8 @@ TEST("async-ambient - a lookup can be given an explicit head")
 
     // The scope is popped, but the chain the captured head names is intact.
     CHECK(no_scope_of_ours());
-    CHECK(cc::async_ambient_lookup(tag_a()) == nullptr);
-    CHECK(cc::async_ambient_lookup_in(captured, tag_a()) == &value_a);
+    CHECK(cc::async_ambient_lookup_ptr(tag_a()) == nullptr);
+    CHECK(cc::async_ambient_lookup_ptr_in(captured, tag_a()) == &value_a);
 
     cc::impl::async_ambient_release(captured);
 }
@@ -120,14 +130,14 @@ TEST("async-ambient - a held link outlives its scope, and the parent chain with 
             cc::impl::async_ambient_retain(held);
         }
         // inner popped, but our reference keeps it alive
-        CHECK(cc::async_ambient_lookup_in(held, tag_b()) == &value_b);
+        CHECK(cc::async_ambient_lookup_ptr_in(held, tag_b()) == &value_b);
     }
 
     // outer popped too.
     // The held link holds its parent STRONGLY, so the outer link is still reachable through it.
     // This is what makes it safe for a node to outlive the scope that named it.
-    CHECK(cc::async_ambient_lookup_in(held, tag_b()) == &value_b);
-    CHECK(cc::async_ambient_lookup_in(held, tag_a()) == &value_a);
+    CHECK(cc::async_ambient_lookup_ptr_in(held, tag_b()) == &value_b);
+    CHECK(cc::async_ambient_lookup_ptr_in(held, tag_a()) == &value_a);
 
     cc::impl::async_ambient_release(held); // frees inner, then outer, in one iterative walk
 }
@@ -146,7 +156,7 @@ TEST("async-ambient - a scope pops cleanly with work still outstanding")
     }
 
     CHECK(no_scope_of_ours());
-    CHECK(cc::async_ambient_lookup_in(held, tag_a()) == &value_a); // still readable by whoever carries it
+    CHECK(cc::async_ambient_lookup_ptr_in(held, tag_a()) == &value_a); // still readable by whoever carries it
     cc::impl::async_ambient_release(held);
 }
 
@@ -206,7 +216,7 @@ TEST("async-ambient - a deep chain frees iteratively")
     }
 
     CHECK(no_scope_of_ours());
-    CHECK(cc::async_ambient_lookup_in(head, tag_a()) == &value_a);
+    CHECK(cc::async_ambient_lookup_ptr_in(head, tag_a()) == &value_a);
     cc::impl::async_ambient_release(head); // drops all `depth` links in one loop
 }
 
@@ -280,7 +290,7 @@ TEST("async-ambient - the scope is restored after a drive")
     {
         cc::async_ambient_scope const s(tag_a(), &value_a);
         CHECK(cc::async_blocking_get(n) == value_a);
-        CHECK(cc::async_ambient_lookup(tag_a()) == &value_a); // poll() restored what it installed
+        CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &value_a); // poll() restored what it installed
     }
     CHECK(no_scope_of_ours());
 }

@@ -899,8 +899,11 @@ cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)
 cc::async_ambient_scope const s(my_tag(), &my_state); // push; RAII and strictly LIFO. The only way to install one
-void* v = cc::async_ambient_lookup(my_tag());         // walk the calling thread's chain; null if absent
-void* v2 = cc::async_ambient_lookup_in(head, my_tag());  // same, from a head you already hold (no TLS)
+u64 v = cc::async_ambient_lookup(my_tag());           // walk the calling thread's chain; 0 if absent. The slot is
+                                                      // 64 bits on EVERY target, so a wide value (a trace id) survives
+void* p = cc::async_ambient_lookup_ptr(my_tag());     // the same walk for a slot holding a pointer; null if absent
+u64 v2 = cc::async_ambient_lookup_in(head, my_tag()); // same, from a head you already hold (no TLS)
+void* p2 = cc::async_ambient_lookup_ptr_in(head, my_tag()); // ...and its pointer spelling
 s.link();  s.outstanding();      // this scope's chain head / how much async work still carries it (racy; diagnostics)
 cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
                                  // or escape a worker thread and terminate — the question before reporting by throw

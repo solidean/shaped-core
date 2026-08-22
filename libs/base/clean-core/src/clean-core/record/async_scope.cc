@@ -16,7 +16,7 @@ cc::rec::impl::trace_link_scope::trace_link_scope(cc::rec::trace_id id)
 
     // The id's bit pattern IS the value, not a pointer to it.
     // The link routinely outlives this object, so anything it pointed at would have to outlive it too.
-    new (cc::placement_new, _storage) cc::async_ambient_scope(rec::impl::trace_tag(), reinterpret_cast<void*>(u64(id)));
+    new (cc::placement_new, _storage) cc::async_ambient_scope(rec::impl::trace_tag(), u64(id));
     _installed = true;
 }
 

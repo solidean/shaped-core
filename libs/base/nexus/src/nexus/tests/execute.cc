@@ -206,7 +206,7 @@ struct scoped_body
 /// Reads the ambient chain, so it is correct on a pool worker driving this test's nodes, and equally correct when this thread is driving some OTHER test's stolen node.
 test_context* current_context()
 {
-    return static_cast<test_context*>(cc::async_ambient_lookup(nx::impl::test_ambient_tag()));
+    return static_cast<test_context*>(cc::async_ambient_lookup_ptr(nx::impl::test_ambient_tag()));
 }
 
 /// Is a report here part of `ctx`'s own test body — its control flow, its section path, its unsynchronized stats?
@@ -984,7 +984,7 @@ bool nx::impl::is_declaration_active(nx::test_declaration const* decl)
     {
         if (l->tag != test_ambient_tag())
             continue;
-        auto const* const ctx = static_cast<test_context const*>(l->value);
+        auto const* const ctx = reinterpret_cast<test_context const*>(l->value);
         if (ctx != nullptr && ctx->execution != nullptr && ctx->execution->instance.declaration == decl)
             return true;
     }

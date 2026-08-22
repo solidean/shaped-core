@@ -45,8 +45,7 @@ void cc::rec::impl::note_ambient_change(void* head)
     if (!rec::is_recording(ambient_desc))
         return;
 
-    auto const trace
-        = head == nullptr ? u64(0) : reinterpret_cast<u64>(cc::async_ambient_lookup_in(head, rec::impl::trace_tag()));
+    auto const trace = head == nullptr ? u64(0) : cc::async_ambient_lookup_in(head, rec::impl::trace_tag());
 
     // A worker draining related items restores the same context over and over, and two different heads under one
     // trace are the same attribution anyway — so this skips strictly more than an address compare could.

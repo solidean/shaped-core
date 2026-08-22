@@ -86,7 +86,7 @@ namespace cc::rec
 /// The descriptor of the innermost async scope in effect on the calling thread, or null.
 [[nodiscard]] inline rec::desc const* current_async_scope()
 {
-    return static_cast<rec::desc const*>(cc::async_ambient_lookup(impl::async_scope_tag()));
+    return static_cast<rec::desc const*>(cc::async_ambient_lookup_ptr(impl::async_scope_tag()));
 }
 } // namespace cc::rec
 

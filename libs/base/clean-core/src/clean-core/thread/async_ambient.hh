@@ -29,10 +29,15 @@
 /// That is what makes it safe for a node to outlive the scope that named it (see cc::async_ambient_scope).
 ///
 /// Never build one by hand: async_ambient_scope owns the allocation and the install.
+///
+/// **The slot is sixty-four bits on every target, not one pointer.**
+/// Most consumers put a pointer in it, but cc::rec puts a trace id — and an id that came off the wire is a full 64-bit
+/// value on a 32-bit target too, where narrowing it to a pointer truncates silently and every lookup keyed on the
+/// original then misses.
 struct cc::async_ambient_link
 {
     void const* tag = nullptr;
-    void* value = nullptr;
+    cc::u64 value = 0;
     async_ambient_link* parent = nullptr;
     cc::atomic<i32> refs = {1};
 };
@@ -172,21 +177,37 @@ namespace cc
     return impl::async_tls().ambient;
 }
 
-/// Walk `head`'s chain for `tag`, returning its value or null.
+/// Walk `head`'s chain for `tag`, returning the slot's raw value, or 0 for a miss.
 /// For code that already holds a head; a profiler storing one per sample wants this rather than the TLS form.
-[[nodiscard]] inline void* async_ambient_lookup_in(void const* head, void const* tag)
+///
+/// A consumer whose slot holds a pointer wants async_ambient_lookup_ptr_in, which spells the cast once.
+[[nodiscard]] inline u64 async_ambient_lookup_in(void const* head, void const* tag)
 {
     for (auto const* l = static_cast<async_ambient_link const*>(head); l != nullptr; l = l->parent)
         if (l->tag == tag)
             return l->value;
-    return nullptr;
+    return 0;
+}
+
+/// The same walk for a consumer whose slot holds a pointer, returning null for a miss.
+/// Narrowing back to a pointer is sound only because such a consumer stored one — a slot holding a wide value must be
+/// read through async_ambient_lookup_in instead.
+[[nodiscard]] inline void* async_ambient_lookup_ptr_in(void const* head, void const* tag)
+{
+    return reinterpret_cast<void*>(async_ambient_lookup_in(head, tag));
 }
 
 /// Look `tag` up in the ambient context installed on the calling thread.
 /// This is the form for code reached indirectly — a CHECK deep inside a call stack — and the only one that touches TLS.
-[[nodiscard]] inline void* async_ambient_lookup(void const* tag)
+[[nodiscard]] inline u64 async_ambient_lookup(void const* tag)
 {
     return async_ambient_lookup_in(async_current_ambient(), tag);
+}
+
+/// The pointer spelling of the TLS lookup.
+[[nodiscard]] inline void* async_ambient_lookup_ptr(void const* tag)
+{
+    return async_ambient_lookup_ptr_in(async_current_ambient(), tag);
 }
 
 /// True while this thread is inside async_node_base::poll, at any depth.
@@ -282,7 +303,13 @@ struct cc::async_ambient_scope
 {
     /// `tag` identifies the consumer and must be address-unique — see CC_ASYNC_AMBIENT_TAG.
     /// `value` is opaque to cc and is what a lookup returns.
-    explicit async_ambient_scope(void const* tag, void* value);
+    explicit async_ambient_scope(void const* tag, cc::u64 value);
+
+    /// The spelling for a consumer whose slot holds a pointer, which is most of them.
+    explicit async_ambient_scope(void const* tag, void* value)
+      : async_ambient_scope(tag, reinterpret_cast<cc::u64>(value))
+    {
+    }
     ~async_ambient_scope();
 
     async_ambient_scope(async_ambient_scope const&) = delete;

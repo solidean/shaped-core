@@ -11,22 +11,18 @@ using namespace cc::primitive_defines;
 
 /// How many low bits of a trace id are the per-thread counter.
 ///
-/// **A trace id has to fit in a pointer**, because that is where it rides: cc::async's ambient slot is a `void*` and
-/// the id's bit pattern is stored in it directly, with no allocation and no lifetime — see record/async_scope.hh.
-/// So the layout follows the pointer width rather than being one fixed split.
+/// Forty bits of counter — a trillion ids per thread, which no run reaches — and twenty-four of thread identity, far
+/// more threads than a process starts.
 ///
-/// Sixty-four-bit pointers get forty bits of counter — a trillion ids per thread, which no run reaches — and
-/// twenty-four of thread identity, far more threads than a process starts.
-/// Thirty-two-bit pointers (wasm32) get twenty-four and eight: sixteen million ids and 256 threads, which is ample on
-/// a platform that has no threads at all.
-///
-/// Getting this wrong is silent rather than loud: the id truncates on its way into the slot, comes back different, and
-/// every lookup keyed on the original misses.
-constexpr int counter_bits = CC_HAS_64BIT_POINTERS ? 40 : 24;
-constexpr int thread_bits = CC_HAS_64BIT_POINTERS ? 24 : 8;
+/// One split on every target, because the ambient slot a minted id rides in is sixty-four bits everywhere; see
+/// cc::async_ambient_link.
+/// Following the POINTER width instead would be silently lossy rather than loud, and would not help anyway: an id that
+/// came off the wire is a full 64-bit value that no minting rule constrains.
+constexpr int counter_bits = 40;
+constexpr int thread_bits = 24;
 
-static_assert(counter_bits + thread_bits <= int(sizeof(void*)) * 8,
-              "a trace id must fit in cc::async's ambient slot, which is one pointer");
+static_assert(counter_bits + thread_bits <= int(sizeof(u64)) * 8,
+              "a trace id must fit in cc::async's ambient slot, which is 64 bits");
 
 /// How many members a relation event writes inline before it gives up.
 /// Generous: a fan-in of a thousand inputs is already a design smell, and the cap keeps the payload bounded.
@@ -47,7 +43,7 @@ cc::rec::trace_id cc::rec::new_trace_id()
 cc::rec::trace_id cc::rec::current_trace_id()
 {
     // The chain, not a thread-local: a trace has to survive a co_await, and a thread-local cannot.
-    return rec::trace_id(reinterpret_cast<u64>(cc::async_ambient_lookup(rec::impl::trace_tag())));
+    return rec::trace_id(cc::async_ambient_lookup(rec::impl::trace_tag()));
 }
 
 void cc::rec::impl::record_relation_members(cc::rec::desc const& d, cc::span<cc::rec::trace_id const> members)

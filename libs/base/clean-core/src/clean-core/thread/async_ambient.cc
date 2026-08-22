@@ -23,7 +23,7 @@ void cc::impl::async_ambient_free(async_ambient_link* l)
     }
 }
 
-cc::async_ambient_scope::async_ambient_scope(void const* tag, void* value)
+cc::async_ambient_scope::async_ambient_scope(void const* tag, u64 value)
 {
     CC_ASSERT(tag != nullptr, "an ambient tag must be a real address — see CC_ASYNC_AMBIENT_TAG");
 
