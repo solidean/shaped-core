@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 #include <versioned-document-file/impl/payload_codec.hh>
 #include <versioned-document-file/impl/snapshot_codec.hh>
@@ -85,6 +86,9 @@ cc::optional<asset_part> try_read_part(vdoc::value_view entry)
 
 cc::result<cc::unit> load(store_reader& reader, store& target)
 {
+    // Opening a .vdoc is the one operation whose cost scales with the whole document rather than with an edit.
+    CC_RECORD_SCOPE("vdoc.file.load");
+
     // load is the store's friend, so the report is reached here and passed on as a plain reference.
     auto& report = target._report;
 

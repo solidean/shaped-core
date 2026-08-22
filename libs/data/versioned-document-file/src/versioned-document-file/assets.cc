@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 #include <versioned-document-file/assets.hh>
 #include <versioned-document-file/impl/payload_codec.hh>
@@ -75,6 +76,10 @@ part_range asset_record::parts_named(cc::string_view name) const
 
 cc::result<blob_upload> blob_upload::of(cc::span<byte const> decoded, cc::string_view format, cc::string_view encoding)
 {
+    // Hashing and compressing a blob, both proportional to its size.
+    CC_RECORD_SCOPE("vdoc.file.blob_upload");
+    CC_RECORD_ACCUM("vdoc.file.blob_bytes_in", cc::rec::unit_bytes, decoded.size());
+
     auto const* codec = impl::find_payload_codec(encoding);
     if (codec == nullptr)
         return cc::error(cc::any_error(cc::format("this build has no codec for the blob encoding '{}'", encoding)));

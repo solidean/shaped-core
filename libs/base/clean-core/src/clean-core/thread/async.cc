@@ -8,6 +8,22 @@
 #include <chrono> // the poll interval a driver waiting on an external push sleeps for
 #include <thread>
 
+// TEMPORARY ARM PROBE — branch counters. Reverted with the probe.
+namespace cc::impl
+{
+cc::atomic<int> g_probe_cold_store = {0};
+cc::atomic<int> g_probe_yield_store = {0};
+cc::atomic<int> g_probe_park_store = {0};
+cc::atomic<int> g_probe_wake_skip = {0};
+cc::atomic<int> g_probe_found_ready = {0};
+cc::atomic<int> g_probe_polls = {0};
+cc::atomic<cc::u64> g_probe_park_tls = {0};      // what the park stored
+cc::atomic<cc::u64> g_probe_park_slot = {0};     // the node slot it stored into, after the store
+cc::atomic<cc::u64> g_probe_last_installed = {0};// what the most recent poll installed
+cc::atomic<cc::u64> g_probe_installed_incl_null = {0}; // ... including a null, which the above hides
+cc::atomic<cc::u64> g_probe_tls_before_invoke = {0};   // the thread ambient as the frame is entered
+} // namespace cc::impl
+
 using namespace cc::primitive_defines;
 
 // Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump, and the node state machine / poll loop.
@@ -287,7 +303,10 @@ void cc::async_node_base::schedule()
         // Ambient write site 1 of 3: a COLD node is being handed to a queue, so it takes the context of whoever hands it over.
         // Deliberately not the `blocked` case, which is a wake — see the ambient section in libs/base/clean-core/docs/systems/async.md.
         if (s == async_node_state::cold)
+        {
+            impl::g_probe_cold_store.fetch_add(1, cc::memory_order_relaxed);
             impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+        }
 
         // cold or blocked -> make runnable (we route exactly once, below, after releasing the lock)
         store_state(async_node_state::scheduled);
@@ -370,6 +389,7 @@ void cc::async_node_base::reschedule_self()
         // Ambient write site 2 of 3, and the easiest to overlook.
         // A node driven INLINE as someone's dependency was never scheduled, so it carries no context yet; without this it would come back off the queue with none.
         // Unconditional rather than cold-only: we are running, so the installed context IS this node's, and a repeat store writes the same word.
+        impl::g_probe_yield_store.fetch_add(1, cc::memory_order_relaxed);
         impl::async_ambient_store(ambient(), impl::async_tls().ambient);
 
         store_state_clear_wake(async_node_state::scheduled);
@@ -821,7 +841,11 @@ void cc::async_node_base::poll()
     //
     // A node with no token falls straight through and inherits the driver's context.
     // That is the eager depth-first drive: a dependency polled inline belongs to the subtree driving it, and a 512-node chain pays ONE install rather than 512.
+    impl::g_probe_polls.fetch_add(1, cc::memory_order_relaxed);
     void* const installed = ambient();
+    impl::g_probe_installed_incl_null.store(u64(installed), cc::memory_order_relaxed);
+    if (installed != nullptr)
+        impl::g_probe_last_installed.store(u64(installed), cc::memory_order_relaxed);
     impl::async_ambient_poll_scope const ambient_scope(installed);
 
     async_context_base ctx;
@@ -866,18 +890,31 @@ void cc::async_node_base::poll()
 
             // Install wakeup continuations late, then decide whether to park.
             bool const found_ready = subscribe_to_pending_deps();
+            if (found_ready)
+                impl::g_probe_found_ready.fetch_add(1, cc::memory_order_relaxed);
 
             bool parked = false;
             if (!found_ready)
             {
                 lock_scope g(this);
                 if (wake_pending())
+                {
+                    impl::g_probe_wake_skip.fetch_add(1, cc::memory_order_relaxed);
                     clear_wake(); // a dependency woke us mid-subscribe: don't park, re-evaluate
+                }
                 else
                 {
                     // Ambient write site 3 of 3: we are about to leave this stack, and whoever re-polls us must resume under the context we suspended in.
-                    // Same reasoning as the yield above — we are running, so `installed` is ours.
-                    impl::async_ambient_store(ambient(), installed);
+                    //
+                    // The LIVE thread ambient rather than `installed`, which is what this poll STARTED under.
+                    // A body that opened an ambient scope of its own — CC_RECORD_ASYNC_SCOPE inside a coroutine — is
+                    // suspending under that scope, and resuming under the entry context instead would leave its guard
+                    // popping a link the thread no longer has installed.
+                    // Where the body opened none the two are the same word, and async_ambient_store early-outs on that.
+                    impl::g_probe_park_store.fetch_add(1, cc::memory_order_relaxed);
+                    impl::g_probe_park_tls.store(u64(impl::async_tls().ambient), cc::memory_order_relaxed);
+                    impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+                    impl::g_probe_park_slot.store(u64(ambient()), cc::memory_order_relaxed);
 
                     store_state(async_node_state::blocked);
                     parked = true;
@@ -896,7 +933,8 @@ void cc::async_node_base::poll()
         // Run the compute step with the frame in place -- it is never moved, so parking is free and a stateful (mutable) closure picks up where it left off.
         // If it resolves, with a value OR an error, it has already destroyed itself: finish_value / finish_error builds the result over the frame's own slot.
         // A frame that throws instead is failed on its error channel by invoke_frame_step, so it too arrives here as produced_error.
-        switch (invoke_frame_step(ctx))
+        impl::g_probe_tls_before_invoke.store(u64(impl::async_tls().ambient), cc::memory_order_relaxed);
+    switch (invoke_frame_step(ctx))
         {
         case async_step_status::produced_value:
         case async_step_status::produced_error:

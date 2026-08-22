@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 
 /// Aggregate forward declarations for versioned-document.
 ///
@@ -285,3 +286,9 @@ struct layer_view;
 /// Reusable buffers for composing one entity across several layers.
 struct compose_scratch;
 } // namespace vdoc::impl
+
+namespace vdoc
+{
+/// The domain every recording site in versioned-document is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace vdoc

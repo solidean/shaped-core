@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
@@ -57,6 +58,11 @@ stream_upload_handle context_stream_scope::bytes_to_buffer(raw_buffer_handle buf
 
     if (data.empty())
         return stream_upload_handle(make_settled_control());
+
+    // Counted where the SIZE is known and the request is made, rather than in a backend: how much a frame asked to
+    // move is the question, and the two backends would have to agree on the answer to be worth anything.
+    CC_RECORD_ACCUM("sg.upload.bytes", cc::rec::unit_bytes, data.size());
+
     return _ctx.stream_bytes_to_buffer(cc::move(buffer), cc::move(data), offset_in_bytes, scope);
 }
 
@@ -122,6 +128,9 @@ stream_download_handle context_stream_scope::bytes_from_buffer(raw_buffer_handle
     if (size_in_bytes == 0)
         return stream_download_handle(make_settled_control(),
                                       bytes_future(cc::pinned_data<byte const>(), make_ready_completion()));
+
+    CC_RECORD_ACCUM("sg.download.bytes", cc::rec::unit_bytes, size_in_bytes);
+
     return _ctx.stream_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes, scope);
 }
 

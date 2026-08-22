@@ -14,6 +14,9 @@ Headers are included by full path from `src/`: `#include <shaped-rendering/<name
 #include <shaped-rendering/all.hh>   // umbrella (window API + concrete routines as they land)
 ```
 
+**Recording domain:** `sr`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## GPU vocabulary
 
 Types that exist only to match what a GPU constant buffer expects, shared by every library recording draws above sg.

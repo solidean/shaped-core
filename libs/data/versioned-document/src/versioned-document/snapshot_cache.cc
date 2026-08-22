@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/set.hh>
 #include <versioned-document/op_graph.hh>
@@ -177,6 +178,8 @@ bool vdoc::install_snapshot_if_useful(op_graph const& graph, op_id const& head, 
 
 bool vdoc::advance_snapshot(op_graph const& graph, snapshot_cache& cache, op_id const& parent, op_id const& child)
 {
+    CC_RECORD_SCOPE("vdoc.advance_snapshot");
+
     auto const* const o = graph.find(child);
 
     // A skeleton is refused rather than treated as writing nothing: its assignments are GONE, not empty, so advancing

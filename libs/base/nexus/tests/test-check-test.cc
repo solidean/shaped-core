@@ -1264,3 +1264,85 @@ TEST("check - REQUIRE_ASSERTS aborts on first failure", no_scheduler)
 }
 
 #endif // CC_ASSERT_ENABLED
+
+//
+// The failure cap
+//
+
+TEST("check - a test stops after too many failed checks", no_scheduler)
+{
+    // A test that fails thousands of checks has said what it has to say early on, so the runner promotes CHECK to
+    // REQUIRE once enough have failed.
+    nx::test_registry reg;
+    int reached = 0;
+    reg.add_declaration("many_failures", {},
+                        [&reached]
+                        {
+                            for (auto i = 0; i < 500; ++i)
+                            {
+                                CHECK(false);
+                                ++reached;
+                            }
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(exec.count_failed_tests() == 1);
+
+    // The cap itself, not merely "fewer than 500": the thirtieth failure is the one that throws, so thirty are
+    // reported and the body never completes the iteration that raised it.
+    CHECK(exec.count_failed_checks() == 30);
+    CHECK(reached == 29);
+}
+
+TEST("check - the cap is a whole-test budget, not a per-section one", no_scheduler)
+{
+    // failed_checks is exchanged into the leaf section after every replay pass, so a per-pass counter would give a
+    // test with many sections a fresh budget in each — which is the wall of output the cap exists to stop.
+    nx::test_registry reg;
+    int sections_entered = 0;
+    reg.add_declaration("failures_across_sections", {},
+                        [&sections_entered]
+                        {
+                            SECTION("a")
+                            {
+                                ++sections_entered;
+                                for (auto i = 0; i < 100; ++i)
+                                    CHECK(false);
+                            }
+                            SECTION("b")
+                            {
+                                ++sections_entered;
+                                for (auto i = 0; i < 100; ++i)
+                                    CHECK(false);
+                            }
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(exec.count_failed_tests() == 1);
+    CHECK(exec.count_failed_checks() == 30);
+
+    // The second section never ran: hitting the cap ends the test, not just the pass that hit it.
+    CHECK(sections_entered == 1);
+}
+
+TEST("check - a passing test with many checks is never capped", no_scheduler)
+{
+    // The cap counts FAILURES, so the millions-of-checks tests we actually have are untouched.
+    nx::test_registry reg;
+    reg.add_declaration("many_passes", {},
+                        []
+                        {
+                            for (auto i = 0; i < 5000; ++i)
+                                CHECK(i == i);
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(exec.count_total_checks() == 5000);
+}

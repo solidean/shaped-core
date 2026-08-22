@@ -1,10 +1,13 @@
 // dx12_context: device-level lifetime bodies (shutdown / teardown). The heavier bring-up path
 // lives in dx12_context.create.cc.
 
+#include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
 namespace sg::backend::dx12
 {
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg.dx12");
+
 void dx12_context::shutdown()
 {
     if (_is_shut_down)

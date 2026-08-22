@@ -30,9 +30,12 @@ inline constexpr rec::field scope_fields[] = {
 /// name still nest correctly.
 struct scope_guard
 {
-    CC_FORCE_INLINE scope_guard(rec::desc const& begin_desc, rec::desc const& end_desc) : _end(&end_desc)
+    /// `condition` is the caller's own gate, evaluated once here and never consulted again.
+    /// Tested BEFORE the site's, so a false one costs a branch and not the domain's load.
+    CC_FORCE_INLINE scope_guard(rec::desc const& begin_desc, rec::desc const& end_desc, bool condition)
+      : _end(&end_desc)
     {
-        if (!rec::is_recording(begin_desc))
+        if (!condition || !rec::is_recording(begin_desc))
         {
             _end = nullptr;
             return;
@@ -74,6 +77,24 @@ private:
     /// that lands mid-scope.
     rec::desc const* _end;
 };
+
+/// Pops the innermost open scope for a CC_RECORD_SCOPE_END, reporting whether there was one to pop.
+///
+/// **`scope_depth` is unsigned**, so an END with no matching BEGIN would wrap it to four billion and leave every
+/// later scope on that thread misplaced — for the rest of the thread's life, not just for the frame that slipped.
+/// Refusing is what bounds the damage of an unmatched pair to the one span that went missing.
+///
+/// Deliberately not an assert: the same "nothing open" state is what a domain enabled BETWEEN the begin and the end
+/// legitimately produces, and scope_guard already absorbs that case the same way through its null `_end`.
+[[nodiscard]] CC_FORCE_INLINE bool pop_unmatched_scope()
+{
+    auto& w = t_writer;
+    if (w.scope_depth == 0)
+        return false;
+
+    --w.scope_depth;
+    return true;
+}
 } // namespace cc::rec::impl
 
 namespace cc::rec
@@ -109,11 +130,32 @@ namespace cc::rec
 /// Must not cross a `co_await` — see the header comment, and CC_RECORD_ASYNC_SCOPE for work that suspends.
 #define CC_RECORD_SCOPE(...)                                      \
     CC_REC_IMPL_SCOPE_DESCS(CC_REC_IMPL_SCOPE_NAME(__VA_ARGS__)); \
-    auto const cc_rec_scope_ = ::cc::rec::impl::scope_guard(cc_rec_scope_begin_, cc_rec_scope_end_)
+    auto const cc_rec_scope_ = ::cc::rec::impl::scope_guard(cc_rec_scope_begin_, cc_rec_scope_end_, true)
+
+/// Times the enclosing block only when `cond_` holds, named either explicitly or after the function it sits in.
+///
+///   CC_RECORD_SCOPE_IF(bytes.size() >= json_scope_threshold);
+///   CC_RECORD_SCOPE_IF(bytes.size() >= json_scope_threshold, "json-parse");
+///
+/// **The condition is evaluated once, at entry**, and does not affect whether the scope closes: a scope that opened
+/// closes, whatever the condition would say by then.
+///
+/// This is for sites where the EVENT RATE is the problem, not the duration — the sampler finds slow things on its
+/// own, and needs no help from a scope to do it.
+/// A JSON parse of a twelve-byte value called a million times a frame would bury the stream; the same call on a forty
+/// megabyte document is exactly the span you want.
+/// Give the threshold a name rather than writing a number here.
+#define CC_RECORD_SCOPE_IF(cond_, ...)                            \
+    CC_REC_IMPL_SCOPE_DESCS(CC_REC_IMPL_SCOPE_NAME(__VA_ARGS__)); \
+    auto const cc_rec_scope_ = ::cc::rec::impl::scope_guard(cc_rec_scope_begin_, cc_rec_scope_end_, bool(cond_))
 
 /// Opens a scope without a matching block, for a span whose ends are in different functions.
+///
 /// The caller owes a CC_RECORD_SCOPE_END on the same thread, and an unbalanced pair produces a wrong trace rather than
 /// a diagnostic — prefer CC_RECORD_SCOPE wherever the span fits a block.
+/// A BEGIN whose END is never reached costs exactly the span it opened: the depth is only ever popped by an END that
+/// finds something open, so it cannot go negative and poison every later scope on the thread.
+/// That bounds the mistake; it does not make it correct, and the span will still be wrong.
 #define CC_RECORD_SCOPE_BEGIN(name_)                                                                               \
     do                                                                                                             \
     {                                                                                                              \
@@ -136,9 +178,6 @@ namespace cc::rec
         CC_REC_DEFINE_DESC(cc_rec_site_desc_, ::cc::rec::event_kind::scope_end, ::cc::rec::level::info, \
                            ::cc::rec::enable_bit_of(::cc::rec::category::profiling), (name_), nullptr,  \
                            ::cc::rec::impl::scope_fields, 1, 4);                                        \
-        if (::cc::rec::is_recording(cc_rec_site_desc_))                                                 \
-        {                                                                                               \
-            --::cc::rec::impl::t_writer.scope_depth;                                                    \
+        if (::cc::rec::is_recording(cc_rec_site_desc_) && ::cc::rec::impl::pop_unmatched_scope())       \
             ::cc::rec::record_event(cc_rec_site_desc_, ::cc::rec::impl::t_writer.scope_depth);          \
-        }                                                                                               \
     } while (false)

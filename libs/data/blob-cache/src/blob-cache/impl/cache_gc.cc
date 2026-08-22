@@ -1,4 +1,5 @@
 #include <blob-cache/impl/cache_gc.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
@@ -88,6 +89,10 @@ cc::result<i64> cache_collector::remove_expired_batch(double now)
 
 cc::result<i64> cache_collector::evict_batch(score_parameters const& params, i64 bytes_to_shed, i64 entries_to_shed)
 {
+    // A full scan and sort per batch, which is the one collection step whose cost is not bounded by the batch size.
+    CC_RECORD_SCOPE("bcache.evict_batch");
+    CC_RECORD_ACCUM("bcache.evicted_bytes", cc::rec::unit_bytes, bytes_to_shed);
+
     // A full scan and sort per batch: the score is computed, and nothing indexes it.
     // COALESCE rather than max(compute_secs, default): the default stands in for an UNKNOWN cost, and a floor would
     // also overwrite a small cost somebody honestly measured, making a cheap entry indistinguishable from one that never said.
@@ -122,6 +127,8 @@ cc::result<i64> cache_collector::evict_batch(score_parameters const& params, i64
 
 cc::result<gc_result> cache_collector::reclaim_orphan_batch()
 {
+    CC_RECORD_SCOPE("bcache.reclaim_orphans");
+
     // DELETE ... LIMIT needs SQLITE_ENABLE_UPDATE_DELETE_LIMIT, which is not a default build option — so every
     // bounded delete here goes through `id IN (SELECT ... LIMIT ?)`, which works on any build.
     auto stmt = _db.query("SELECT id, size FROM objects WHERE refcount <= 0 LIMIT ?1");

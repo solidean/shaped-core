@@ -1,5 +1,6 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/hash.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/all.hh>
@@ -447,6 +448,9 @@ void view_renderer::trace(sg::command_list& cmd,
 
 sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v, scene_resources& resources, view_store& store)
 {
+    // One span per view, which is the unit a viewer with several panes is actually spending its frame on.
+    CC_RECORD_SCOPE("sv.view.render");
+
     auto& ctx = cmd.context();
 
     auto const* const scene = primary_scene_3d(v);

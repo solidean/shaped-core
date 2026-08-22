@@ -1,4 +1,5 @@
 #include <babel-serializer/data/markdown.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/streams/span_stream.hh>
 
@@ -548,6 +549,12 @@ struct markdown_parser
 
 namespace babel::markdown
 {
+namespace
+{
+/// Below this a document is small enough that parsing it is not the thing you are looking for.
+constexpr isize scope_threshold_bytes = 64 * 1024;
+} // namespace
+
 cc::result<document> read(cc::read_stream& in)
 {
     auto parser = babel::impl::markdown_parser();
@@ -556,6 +563,8 @@ cc::result<document> read(cc::read_stream& in)
 
 cc::result<document> read(cc::span<byte const> bytes)
 {
+    CC_RECORD_SCOPE_IF(bytes.size() >= scope_threshold_bytes, "markdown.read");
+
     auto adapter = cc::span_read_stream_adapter(bytes);
     cc::read_stream stream = adapter;
     return read(stream);

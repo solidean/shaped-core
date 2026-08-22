@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/set.hh>
+#include <clean-core/record/domain.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -11,6 +12,11 @@
 #include <shaped-shader-library/shader_library.hh>
 
 using namespace cc::primitive_defines;
+
+namespace slib
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "slib");
+} // namespace slib
 
 namespace
 {

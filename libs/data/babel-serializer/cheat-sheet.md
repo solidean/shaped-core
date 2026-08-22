@@ -12,6 +12,9 @@ Namespace `babel`; headers included by full path from `src/`.
 
 ---
 
+**Recording domain:** `babel` — each format shadows it: `babel.json`, `babel.obj`, `babel.gltf`, `babel.png`, `babel.jpg`, `babel.image`, `babel.markdown`, `babel.sqlite`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## base64 (`babel::base64`)
 
 Tolerant on input, canonical on output.

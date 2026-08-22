@@ -3,6 +3,8 @@
 // Allocators are epoch-gated, recycled once the epoch retires — see libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
 #include <clean-core/common/assertf.hh>
+#include <clean-core/common/log.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
@@ -590,6 +592,10 @@ cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command
 
 sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd)
 {
+    // Barrier resolution plus ExecuteCommandLists — the per-submit CPU cost a frame pays whatever the GPU does.
+    CC_RECORD_SCOPE("sg.command_list.submit");
+    CC_RECORD_ACCUM("sg.submits", cc::rec::unit_count, 1);
+
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
@@ -748,8 +754,8 @@ dx12_command_list::~dx12_command_list()
 
     // Safety net: a list left neither submitted nor dropped.
     // Reclaim it like a drop so the open-list count, its slot, and its allocator/list don't leak — but warn, since the explicit call is required.
-    cc::eprintln("[sg] command list destroyed without submit or drop — auto-dropping. Submit or drop every "
-                 "command list explicitly through the context.");
+    CC_LOG_WARNING("command list destroyed without submit or drop — auto-dropping. Submit or drop every "
+                   "command list explicitly through the context.");
     _ctx.reclaim_unsubmitted_command_list(*this);
 }
 } // namespace sg::backend::dx12

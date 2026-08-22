@@ -1,4 +1,5 @@
 #include <clean-core/common/asserts.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
@@ -494,6 +495,10 @@ frame& viewer::begin_frame()
     CC_ASSERT(!im.current_frame._open, "the previous frame was never ended — every frame begin_frame opens needs its "
                                        "end_frame");
 
+    // The outer frame bracket, closed in end_frame — everything a frame does nests under this one span.
+    // After the assert above, so the misuse it catches does not also open a second span.
+    CC_RECORD_SCOPE_BEGIN("sv.frame");
+
     // A closed frame holds no backbuffer and no command list, so overwriting one strands nothing.
     im.current_frame = acquire_frame();
     return im.current_frame;
@@ -505,6 +510,9 @@ void viewer::end_frame()
     // Dropping the frame afterwards is what makes "is a frame open" a question the stored frame itself answers.
     _impl->current_frame.present();
     _impl->current_frame = frame{};
+
+    // Closed LAST, so the present is inside the frame it belongs to rather than after it.
+    CC_RECORD_SCOPE_END("sv.frame");
 }
 
 frame_range viewer::frames()

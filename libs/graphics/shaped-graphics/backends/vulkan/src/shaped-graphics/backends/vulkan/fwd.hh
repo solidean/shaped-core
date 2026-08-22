@@ -17,4 +17,8 @@ class vulkan_texture;
 /// No command-list handle: a list is move-only, held by std::unique_ptr<vulkan_command_list>.
 using vulkan_buffer_handle = std::shared_ptr<vulkan_buffer>;
 using vulkan_texture_handle = std::shared_ptr<vulkan_texture>;
+
+/// The domain every recording site in the Vulkan backend is attributed to.
+/// It shadows sg's, so a backend message is never mistaken for a portable one.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sg::backend::vulkan

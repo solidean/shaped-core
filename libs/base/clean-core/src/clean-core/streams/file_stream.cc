@@ -1,10 +1,36 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move, cc::max
 #include <clean-core/streams/file_stream.hh>
 
 
 namespace cc
 {
+namespace
+{
+// Bytes crossing the OS boundary, counted at the buffer granularity a stream actually does IO in.
+//
+// Here rather than in native_file because the CRASH DUMP writes through native_file directly, while the process is
+// dying and the recorder may already be mid-serialization — the one path that must touch nothing.
+// Errors are not counted: a failed read moved no bytes, and a byte total that includes them measures nothing.
+
+cc::result<isize> read_counted(cc::impl::native_file& f, cc::span<byte> dst)
+{
+    auto n = f.read(dst);
+    if (n.has_value())
+        CC_RECORD_ACCUM("cc.file.bytes_read", cc::rec::unit_bytes, n.value());
+    return n;
+}
+
+cc::result<isize> write_counted(cc::impl::native_file& f, cc::span<byte const> src)
+{
+    auto n = f.write(src);
+    if (n.has_value())
+        CC_RECORD_ACCUM("cc.file.bytes_written", cc::rec::unit_bytes, n.value());
+    return n;
+}
+} // namespace
+
 // =========================================================================================================
 // file_read_stream_adapter
 // =========================================================================================================
@@ -28,7 +54,7 @@ cc::result<i64> file_read_stream_adapter::impl_seek_and_fill(byte*& curr, byte*&
     CC_RETURN_IF_ERROR(s);
     _buffer_offset = target;
 
-    auto n = _file.read(cc::span<byte>(_buffer, k_buffer_size));
+    auto n = read_counted(_file, cc::span<byte>(_buffer, k_buffer_size));
     CC_RETURN_IF_ERROR(n);
     curr = _buffer;
     end = _buffer + n.value();
@@ -58,7 +84,8 @@ cc::result<i64> file_read_stream_adapter::impl_flush(byte*& curr,
             CC_ASSERT(leftover < file_read_stream_adapter::k_buffer_size, "refilling a full buffer makes no progress");
             std::memmove(base, curr, size_t(leftover));
             self._buffer_offset = pos;
-            auto n = self._file.read(cc::span<byte>(base + leftover, file_read_stream_adapter::k_buffer_size - leftover));
+            auto n = read_counted(self._file,
+                                  cc::span<byte>(base + leftover, file_read_stream_adapter::k_buffer_size - leftover));
             CC_RETURN_IF_ERROR(n);
             curr = base;
             end = base + leftover + n.value();
@@ -145,7 +172,7 @@ cc::result<i64> file_write_stream_adapter::impl_write_through(byte*& curr, byte*
         isize remaining = isize(curr - first_write);
         while (remaining > 0)
         {
-            auto w = _file.write(cc::span<byte const>(p, remaining));
+            auto w = write_counted(_file, cc::span<byte const>(p, remaining));
             CC_RETURN_IF_ERROR(w);
             CC_ASSERT(w.value() > 0, "write made no progress");
             p += w.value();
@@ -250,7 +277,7 @@ cc::result<i64> file_read_write_stream_adapter::impl_drain(byte* curr, byte* fir
         isize remaining = isize(curr - first_write);
         while (remaining > 0)
         {
-            auto w = _file.write(cc::span<byte const>(p, remaining));
+            auto w = write_counted(_file, cc::span<byte const>(p, remaining));
             CC_RETURN_IF_ERROR(w);
             CC_ASSERT(w.value() > 0, "write made no progress");
             p += w.value();
@@ -266,7 +293,7 @@ cc::result<i64> file_read_write_stream_adapter::impl_fill(byte*& curr, byte*& en
     // the unconsumed read data occupies [base, base + leftover); fresh file data follows it on disk
     auto s = _file.seek(_buffer_offset + leftover);
     CC_RETURN_IF_ERROR(s);
-    auto n = _file.read(cc::span<byte>(base + leftover, k_buffer_size - leftover));
+    auto n = read_counted(_file, cc::span<byte>(base + leftover, k_buffer_size - leftover));
     CC_RETURN_IF_ERROR(n);
 
     curr = base;

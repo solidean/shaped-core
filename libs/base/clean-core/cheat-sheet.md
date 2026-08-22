@@ -16,6 +16,9 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 ---
 
+**Recording domain:** `cc`, shadowed by `cc.record` inside `cc::rec` so the recorder's own bookkeeping gates separately from the library's.
+Every `CC_LOG_*` and `CC_RECORD_*` site is attributed to one of the two; see [logging](docs/logging.md).
+
 ## Primitives & types
 
 ```cpp
@@ -509,6 +512,9 @@ cc::current_time_steady_secs();            // -> double; MONOTONIC, arbitrary ze
 cc::current_time_wall_secs();              // -> double; seconds since the Unix epoch, comparable across processes/runs
                                            //    the one to PERSIST (an expiry, a timestamp) — and it can step either way,
                                            //    so a difference of two readings is not a duration
+cc::local_calendar_time(wall_secs);        // -> calendar_time{year, month, day, hour, minute, second, millisecond}
+                                           //    LOCAL, resolved per call so a process outliving a DST change is right
+                                           //    output-only: no arithmetic on one, and no way back to epoch seconds
 cc::has_cycle_counter();                   // -> constexpr bool; true on x86 and ARM64, false on WASM
 cc::current_cycles();                      // -> u64; TSC on x86, CNTVCT_EL0 on ARM64, 0 on WASM; inline, for an inner loop
 // A tick is MUCH coarser on ARM64 — a fixed timer in the tens of MHz, ~42 ns on Apple silicon, not the core's clock.
@@ -963,13 +969,14 @@ Domains tag a site with the part of the source it came from, resolved by unquali
 ```cpp
 #include <clean-core/record/domain_fwd.hh>            // costs a fwd.hh nothing: one incomplete type + a constexpr address
 namespace sg { CC_REC_DECLARE_DOMAIN(g_rec_domain); } // in the library's fwd.hh
-namespace sg { CC_REC_DEFINE_DOMAIN(g_rec_domain, "shaped-graphics"); } // in exactly one .cc
+namespace sg { CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg"); }             // in exactly one .cc
+// A nested namespace SHADOWS the enclosing one, so babel::png and sg::backend::dx12 gate separately for free.
 
 #include <clean-core/record/domain.hh>
 dom.set_enabled(cc::rec::category::profiling, false); // one word write; reaches every site under the domain at once
 dom.set_enabled(cc::rec::level::debug, true);
 dom.set_captures_stacktrace(cc::rec::level::error, true);
-cc::rec::find_domain("shaped-graphics");   // -> domain*, or null
+cc::rec::find_domain("sg");                // -> domain*, or null
 cc::rec::set_all_domains_enabled_mask(m);  // applies to domains registered later too
 ```
 
@@ -986,9 +993,13 @@ CC_LOG_TRACE / _DEBUG / _INFO / _WARNING / _ERROR         // trace+debug off by 
 CC_RECORD_SCOPE();                           // times the block, named after the enclosing function
 CC_RECORD_SCOPE("upload-pass");              // ... or explicitly. MUST NOT cross a co_await (cc::async asserts)
 CC_RECORD_SCOPE_BEGIN("span"); CC_RECORD_SCOPE_END("span"); // when the two ends live in different functions
+// A BEGIN whose END never runs costs that one span only: an END with nothing open is refused, not popped below zero.
+CC_RECORD_SCOPE_IF(bytes.size() >= threshold, "json.read"); // condition read ONCE at entry; a skipped scope costs no depth
+// SCOPE_IF is for sites where the EVENT RATE is the problem, not the duration — the sampler finds slow things itself.
 
 #include <clean-core/record/async_scope.hh>
 CC_RECORD_ASYNC_SCOPE("load-level");         // an ambient-chain entry, so it DOES follow a co_await and every spawn
+// Legal both inside a coroutine body and around the code that builds one; pick by what the span should COVER.
 CC_RECORD_ASYNC_SCOPE_WITH_ID("inbound", wire_id);       // ... under an id from off the wire
 cc::rec::current_async_scope();              // -> desc const*, the innermost one; null outside any
 cc::rec::current_trace_id();                 // -> trace_id; an async scope ALWAYS has one (see Tracing below)
@@ -1094,7 +1105,19 @@ struct my_listener : cc::rec::listener { void on_chunk(cc::rec::chunk_view const
 struct per_event : cc::rec::event_listener<per_event> { void on_event(auto const& chunk, auto const& e) { ... } };
 
 #include <clean-core/record/console_listener.hh>
-auto console = cc::rec::console_listener({.min_level = cc::rec::level::info}); // log events only, in timestamp order
+cc::rec::install_default_console_listener();  // an application's one line: initializes if needed, then registers
+// [14:23:07.882] warn  {t3} sg: a texture is bound as both a sampled and a storage view
+auto console = cc::rec::console_listener({.min_level = cc::rec::level::info,   // log events only, in timestamp order
+                                          .time = cc::rec::console_time::elapsed, // none | elapsed | wall_time | wall_datetime
+                                          .show_site = true,                   // off by default: a .ccrec carries it anyway
+                                          .color = cc::console::color_mode::never});
+// Options given EXPLICITLY are taken verbatim; only a DEFAULT-constructed listener reads the environment:
+//   CC_LOG_LEVEL  CC_LOG_TIME  CC_LOG_COLOR  CC_LOG_THREAD  CC_LOG_DOMAIN  CC_LOG_SITE   (plus NO_COLOR / FORCE_COLOR)
+cc::rec::console_options::from_environment(base);  // ... the same overrides over defaults of YOUR choosing
+cc::rec::enable_environment_log_levels();    // opens every DOMAIN down to CC_LOG_LEVEL — a listener's min_level only
+                                             //    filters what was recorded, and trace/debug are gated off before that
+// Neither reads well during static init: the environment and "is stdout a terminal" have no answer that early.
+cc::rec::is_listener_registered(h);          // -> bool; false for a stale handle onto a REUSED slot too
 
 cc::rec::recording_listener capture;
 auto const h = cc::rec::register_listener(capture); // the index IS the layer; register must-see-everything first

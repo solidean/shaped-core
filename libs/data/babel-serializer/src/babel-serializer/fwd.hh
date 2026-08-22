@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 
 /// Aggregate forward declarations for babel-serializer.
 /// Each format lives in its own sub-namespace — babel::base64, babel::json, babel::markdown, babel::sqlite,
@@ -12,6 +13,9 @@ namespace babel
 // Pull in the shaped-core vocabulary types (i32, u8, isize, ...) so we write them bare inside babel
 // without leaking them into the global namespace.
 using namespace cc::primitive_defines;
+
+/// The domain a babel recording site falls back to when its format declares none of its own.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel
 
 namespace babel::chrome_trace
@@ -25,6 +29,9 @@ enum class node_kind : u8;
 struct node;
 class document;
 struct ref;
+
+/// The domain every recording site in babel::json is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::json
 
 namespace babel::markdown
@@ -33,6 +40,9 @@ enum class node_kind : u8;
 struct node;
 class document;
 struct ref;
+
+/// The domain every recording site in babel::markdown is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::markdown
 
 namespace babel::obj
@@ -41,6 +51,9 @@ struct corner;
 struct face;
 struct group;
 struct data;
+
+/// The domain every recording site in babel::obj is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::obj
 
 namespace babel::gltf
@@ -86,6 +99,9 @@ struct sampler;
 struct accessor_view;
 struct read_options;
 struct data;
+
+/// The domain every recording site in babel::gltf is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::gltf
 
 namespace babel::sqlite
@@ -100,6 +116,9 @@ class statement;
 class blob_handle;
 class transaction;
 class database;
+
+/// The domain every recording site in babel::sqlite is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::sqlite
 
 namespace babel::png
@@ -110,6 +129,9 @@ enum class component : u8;
 struct text_entry;
 struct physical_dimensions;
 struct data;
+
+/// The domain every recording site in babel::png is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::png
 
 namespace babel::jpg
@@ -118,6 +140,9 @@ enum class subsampling : u8;
 enum class density_unit : u8;
 struct density;
 struct data;
+
+/// The domain every recording site in babel::jpg is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::jpg
 
 namespace babel::image
@@ -125,4 +150,7 @@ namespace babel::image
 enum class format : u8;
 enum class component : u8;
 struct image;
+
+/// The domain every recording site in babel::image is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::image

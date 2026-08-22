@@ -5,15 +5,37 @@
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
+#include <thread>
+
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
+
+// TEMPORARY ARM PROBE — the branch counters defined in async.cc. Reverted with the probe.
+namespace cc::impl
+{
+extern cc::atomic<int> g_probe_cold_store;
+extern cc::atomic<int> g_probe_yield_store;
+extern cc::atomic<int> g_probe_park_store;
+extern cc::atomic<int> g_probe_wake_skip;
+extern cc::atomic<int> g_probe_found_ready;
+extern cc::atomic<int> g_probe_polls;
+extern cc::atomic<cc::u64> g_probe_park_tls;
+extern cc::atomic<cc::u64> g_probe_park_slot;
+extern cc::atomic<cc::u64> g_probe_last_installed;
+extern cc::atomic<cc::u64> g_probe_installed_incl_null;
+extern cc::atomic<cc::u64> g_probe_tls_before_invoke;
+extern cc::atomic<int> g_probe_ambient_scope_dtors;
+} // namespace cc::impl
 
 namespace
 {
@@ -231,4 +253,147 @@ REC_TEST("record/async-scope - a recording's pin is not outstanding work")
         cc::rec::flush_blocking();
         CHECK(s.outstanding() == 0);
     }
+}
+
+REC_TEST("record/async-scope - a scope OPENED INSIDE a coroutine survives the suspend it spans")
+{
+    // The other direction from the test above: there the scope wraps the coroutine, here it lives IN it.
+    //
+    // A coroutine that PARKS must record the context it suspended in, not the one it was entered under — otherwise a
+    // scope pushed by the body is missing when the body resumes, and the guard's LIFO check fires from a destructor.
+    // Under nexus that assert becomes a throw, and a throw out of a noexcept destructor is a bare terminate, so this
+    // used to look like a crash with no message at all.
+    //
+    // Parking is the case that broke, and a plain co_await on a ready value never parks: the dependency here is a
+    // MANUAL node completed by another thread, which is the shape blob_cache::acquire has.
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and parking needs a second one to wake it");
+
+    rec_fixture const fixture(deterministic_config());
+
+    cc::string inside;
+    cc::string after_suspend;
+
+    auto const r = capture(
+        [&]
+        {
+            auto gate = cc::make_async_manual<int>();
+
+            auto const co = [](cc::shared_async<int> g, cc::string* in, cc::string* after) -> cc::shared_async<int>
+            {
+                CC_RECORD_ASYNC_SCOPE("opened-inside");
+
+                if (auto const* const s = cc::rec::current_async_scope(); s != nullptr)
+                    *in = s->name;
+
+                co_await cc::async_settled(g);
+
+                if (auto const* const s = cc::rec::current_async_scope(); s != nullptr)
+                    *after = s->name;
+
+                co_return 7;
+            }(gate, &inside, &after_suspend);
+
+            std::thread waker(
+                [&gate]
+                {
+                    cc::this_thread_sleep_secs(0.02);
+                    gate->push_value(1);
+                });
+
+            CHECK(cc::async_blocking_get(co) == 7);
+            waker.join();
+        });
+
+    CHECK(inside == "opened-inside");
+    CHECK(after_suspend == "opened-inside"); // the scope is still the innermost one after the suspend
+    CHECK(ambient_changes(r) >= 2);
+}
+
+
+// TEMPORARY ARM PROBE — reports the path the coroutine actually took, from a runner we cannot attach to.
+REC_TEST("record/async-scope - PROBE arm")
+{
+    if (!threads_available())
+        SKIP("no threads");
+
+    double const delays[] = {-1.0, 0.0, 0.0001, 0.001, 0.02};
+
+    for (auto const d : delays)
+    {
+        rec_fixture const fixture(deterministic_config());
+
+        cc::string report;
+        auto const r = capture(
+            [&]
+            {
+                auto gate = cc::make_async_manual<int>();
+                if (d < 0)
+                    gate->push_value(1);
+
+                auto const co = [](cc::shared_async<int> g, cc::string* out) -> cc::shared_async<int>
+                {
+                    CC_RECORD_ASYNC_SCOPE("opened-inside");
+
+                    auto const dtors_in = cc::impl::g_probe_ambient_scope_dtors.load(cc::memory_order_relaxed);
+                    auto const* const s_in = cc::rec::current_async_scope();
+                    auto* const amb_in = cc::async_current_ambient();
+                    auto const tid_in = cc::current_thread_id();
+
+                    co_await cc::async_settled(g);
+
+                    auto const* const s_out = cc::rec::current_async_scope();
+                    auto* const amb_out = cc::async_current_ambient();
+                    auto const tid_out = cc::current_thread_id();
+
+                    // The three states that tell the paths apart:
+                    //   ambient null      -> nothing was installed on the resuming thread
+                    //   ambient non-null, scope null -> a DIFFERENT chain was installed (the entry context)
+                    //   ambient equal     -> the fix held
+                    auto const dtors_out = cc::impl::g_probe_ambient_scope_dtors.load(cc::memory_order_relaxed);
+
+                    // dtors_out > dtors_in means an ambient scope was POPPED across the suspend — and the only one
+                    // live here is this body's own.
+                    *out = cc::format("in[tid={} amb={:#x} scope={}] out[tid={} amb={:#x} scope={}] dtors {}->{}",
+                                      u64(tid_in), u64(amb_in), s_in != nullptr ? s_in->name : "<null>",
+                                      u64(tid_out), u64(amb_out), s_out != nullptr ? s_out->name : "<null>",
+                                      dtors_in, dtors_out);
+                    co_return 7;
+                }(gate, &report);
+
+                if (d < 0)
+                {
+                    CHECK(cc::async_blocking_get(co) == 7);
+                }
+                else
+                {
+                    std::thread waker(
+                        [&gate, d]
+                        {
+                            if (d > 0)
+                                cc::this_thread_sleep_secs(d);
+                            gate->push_value(1);
+                        });
+                    CHECK(cc::async_blocking_get(co) == 7);
+                    waker.join();
+                }
+            });
+        (void)r;
+
+        cc::println("PROBE delay={} {} | cold={} yield={} park={} wakeskip={} foundready={} polls={}", d, report,
+                    cc::impl::g_probe_cold_store.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_yield_store.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_park_store.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_wake_skip.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_found_ready.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_polls.load(cc::memory_order_relaxed));
+        cc::println("      park_tls={:#x} park_slot={:#x} last_installed={:#x}",
+                    cc::impl::g_probe_park_tls.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_park_slot.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_last_installed.load(cc::memory_order_relaxed));
+        cc::println("      installed_incl_null={:#x} tls_before_invoke={:#x}",
+                    cc::impl::g_probe_installed_incl_null.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_tls_before_invoke.load(cc::memory_order_relaxed));
+    }
+    CHECK(true);
 }

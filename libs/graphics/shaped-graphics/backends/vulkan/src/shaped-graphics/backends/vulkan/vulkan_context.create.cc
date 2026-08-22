@@ -1,6 +1,7 @@
 // vulkan context bring-up: optional validation, instance, physical-device selection, logical device + graphics queue.
 // Split off from the other vulkan_context bodies because it grows with every device feature opted into.
 
+#include <clean-core/common/log.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
@@ -32,7 +33,17 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_messenger_callback(VkDebugUtilsMessageSever
         level = "info";
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
         level = "verbose";
-    cc::eprintln("[vulkan {}] {}", level, data->pMessage);
+    // The validation layer already told us how bad it is, so the level maps straight across rather than flattening
+    // every message onto one.
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+        CC_LOG_ERROR("validation: {}", data->pMessage);
+    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        CC_LOG_WARNING("validation: {}", data->pMessage);
+    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+        CC_LOG_INFO("validation: {}", data->pMessage);
+    else
+        CC_LOG_DEBUG("validation: {}", data->pMessage);
+    (void)level;
     return VK_FALSE;
 }
 

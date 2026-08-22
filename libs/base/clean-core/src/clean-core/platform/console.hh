@@ -53,6 +53,16 @@ namespace cc::console
 /// Also enables ANSI processing on Windows consoles that still need to be told.
 void configure(color_mode mode);
 
+/// What `configure` would decide for `mode`, without deciding it for the whole process.
+///
+/// This is the form a component with a color setting of its own needs — a log listener, a report writer — so that
+/// two of them can disagree, and so that resolving one never reaches into a global another is reading.
+/// `automatic` applies the same NO_COLOR / FORCE_COLOR / both-streams-a-terminal policy `configure` documents.
+///
+/// Enabling ANSI on a Windows console is a process-wide act and still happens here when the answer is yes: it is
+/// idempotent, and a caller that resolved to "colored" needs it done whoever asked first.
+[[nodiscard]] bool resolve(color_mode mode);
+
 /// False until `configure` runs, so a process that never configures prints plain.
 bool color_enabled();
 

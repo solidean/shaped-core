@@ -41,6 +41,12 @@ cc::async_ambient_scope::async_ambient_scope(void const* tag, u64 value)
     cc::rec::impl::note_ambient_change(_link);
 }
 
+// TEMPORARY ARM PROBE
+namespace cc::impl
+{
+cc::atomic<int> g_probe_ambient_scope_dtors = {0};
+} // namespace cc::impl
+
 cc::async_ambient_scope::~async_ambient_scope()
 {
     CC_ASSERT(impl::async_tls().ambient == _link,
@@ -50,6 +56,7 @@ cc::async_ambient_scope::~async_ambient_scope()
     // Deliberately no "nothing outstanding" assert here.
     // The link is refcounted, so work outliving this scope is safe rather than dangling — see the type's docs.
 
+    impl::g_probe_ambient_scope_dtors.fetch_add(1, cc::memory_order_relaxed);
     impl::async_tls().ambient = _link->parent;
     cc::rec::impl::note_ambient_change(_link->parent);
     impl::async_ambient_release(_link);

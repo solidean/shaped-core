@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 
 namespace nx
 {
@@ -17,6 +18,9 @@ struct test_schedule_config; // what the CLI arguments select (tests/schedule.hh
 struct test_thread_scope;    // attributes a thread's checks to a captured test (tests/thread_scope.hh)
 
 enum class filter_mode; // how the positional filters are read (tests/schedule.hh)
+
+/// The domain every recording site in nexus is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 
 } // namespace nx
 

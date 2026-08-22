@@ -56,7 +56,9 @@ That guard is thread-scoped rather than per-context, and deliberately so: D3D12 
 With several contexts alive — the normal state of the dx12 suite at `-jN` — silencing one context's listener leaves the others to fail the test anyway.
 The message is raised synchronously on the thread that provoked it, so the thread is what names the right test.
 
-The `[sg]` warnings printed by sg itself (`cc::eprintln`) are **not** covered — that wants a real `cc` log system, which does not exist yet.
+sg's own warnings go through `CC_LOG_WARNING`, so they are **events rather than terminal output** and a test can assert on one.
+Register a `cc::rec::recording_listener`, provoke the warning, and ask the recording whether it fired — `tests/barrier/slot-recording-test.cc` is the worked example.
+That is also how you pin a warning firing exactly ONCE, which the hand-rolled `warned` guards around them exist to guarantee.
 
 **What belongs here:** every statement about the public API — allocation shapes, lifetime/epoch semantics, transfer round-trips, binding validation, the transient budget contract.
 Anything that must hold for dx12 *and* vulkan *and* a future cpu backend goes here, written once rather than duplicated per backend.

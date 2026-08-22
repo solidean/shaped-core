@@ -1,4 +1,5 @@
 #include <babel-serializer/image/image.hh>
+#include <clean-core/common/profiling.hh>
 
 // The aggregator delegates to the low-level codecs and never includes the stb backend directly.
 #include <babel-serializer/image/jpg.hh>
@@ -51,6 +52,10 @@ cc::result<format> detect_format(cc::span<byte const> bytes)
 
 cc::result<image> read(cc::span<byte const> bytes)
 {
+    // The aggregator's span rather than the codec's, so a trace shows "load an image" above whichever codec ran.
+    CC_RECORD_SCOPE("image.read");
+    CC_RECORD_ACCUM("image.bytes_decoded", cc::rec::unit_bytes, bytes.size());
+
     auto fmt = detect_format(bytes);
     CC_RETURN_IF_ERROR(fmt);
 
@@ -88,6 +93,9 @@ cc::result<image> read(cc::read_stream& in)
 
 cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options opts)
 {
+    CC_RECORD_SCOPE("image.encode");
+    CC_RECORD_ACCUM("image.pixels_encoded", cc::rec::unit_count, f64(img.width) * f64(img.height));
+
     if (img.is_empty())
         return cc::error("image encode: empty image");
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 #include <versioned-document/fwd.hh>
 
 /// Aggregate forward declarations for versioned-document-file.
@@ -149,4 +150,8 @@ struct workspace_value;
 
 /// One keyed workspace entry, as written to and read from the file.
 struct workspace_entry;
+
+/// The domain every recording site in versioned-document-file is attributed to.
+/// It shadows vdoc's, so the file layer's events stay separable from the in-memory library's.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace vdoc::file

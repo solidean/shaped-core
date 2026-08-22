@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 
 using namespace cc::primitive_defines;
 
@@ -142,6 +143,11 @@ vdoc::document vdoc::apply(document&& doc,
                            incremental_apply_options options,
                            incremental_apply_stats* stats)
 {
+    // One of the realtime edit path's three entry points, and the one a one-entity edit spends its ~10 us in.
+    // The inner per-entity and per-property loops deliberately carry NO span: at this granularity a handful of
+    // events is free and one per property is not.
+    CC_RECORD_SCOPE("vdoc.apply");
+
     out_changes.clear();
     if (stats != nullptr)
         *stats = {};

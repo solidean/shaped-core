@@ -89,6 +89,8 @@ if(SC_BUILD_TESTS)
     add_executable(versioned-document-test
         tests/main.cc
 
+        tests/vdoc-recording-test.cc
+
         tests/benchmarks/edit-latency-benchmark.cc
 
         tests/change_set-test.cc

@@ -1,4 +1,5 @@
 #include <babel-serializer/data/json.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
@@ -446,6 +447,13 @@ struct json_parser
 
 namespace babel::json
 {
+namespace
+{
+/// Below this an input is a value rather than a document, and a span per parse would cost more than it explains.
+/// A config file or a glTF's JSON chunk is comfortably above it; a number in a message is not.
+constexpr isize scope_threshold_bytes = 64 * 1024;
+} // namespace
+
 cc::result<document> read(cc::read_stream& in)
 {
     auto parser = babel::impl::json_parser();
@@ -455,6 +463,9 @@ cc::result<document> read(cc::read_stream& in)
 
 cc::result<document> read(cc::span<byte const> bytes)
 {
+    // Only the overloads that KNOW the size can gate on it, which is why the read_stream one above carries no span.
+    CC_RECORD_SCOPE_IF(bytes.size() >= scope_threshold_bytes, "json.read");
+
     auto adapter = cc::span_read_stream_adapter(bytes);
     cc::read_stream stream = adapter;
     return read(stream);

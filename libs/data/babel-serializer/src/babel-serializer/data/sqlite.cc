@@ -1,4 +1,5 @@
 #include <babel-serializer/data/sqlite.hh>
+#include <clean-core/common/profiling.hh>
 
 // SQLite backend, conditionally compiled.
 //
@@ -158,6 +159,9 @@ cc::result<cc::string, error> pragma_text(sqlite3* db, cc::string_view sql)
 
 cc::result<database, error> database::open_with_flags(cc::string_view path, int flags)
 {
+    // Opening a database touches the filesystem and runs sqlite's own setup, so it is worth a span wherever it happens.
+    CC_RECORD_SCOPE("sqlite.open");
+
     auto c_path = cc::string::create_copy_of(path);
     sqlite3* db = nullptr;
     int const rc = sqlite3_open_v2(c_path.c_str_materialize(), &db, flags, nullptr);
@@ -232,6 +236,8 @@ cc::result<database, error> database::open_blob(cc::span<byte const> bytes)
 
 cc::result<cc::unit, error> database::exec(cc::string_view sql)
 {
+    CC_RECORD_SCOPE("sqlite.exec");
+
     auto c_sql = cc::string::create_copy_of(sql);
     char* errmsg = nullptr;
     int const rc = sqlite3_exec(_db, c_sql.c_str_materialize(), nullptr, nullptr, &errmsg);
@@ -463,6 +469,10 @@ void statement::clear_bindings()
 
 void statement::_advance()
 {
+    // A COUNTER rather than a span: this is the per-row hot path, and one scope per row would cost more than the
+    // step it measured.
+    CC_RECORD_ACCUM("sqlite.rows_stepped", cc::rec::unit_count, 1);
+
     int const rc = sqlite3_step(_stmt);
     if (rc == SQLITE_ROW)
     {

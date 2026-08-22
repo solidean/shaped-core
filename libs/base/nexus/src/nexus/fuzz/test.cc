@@ -2,10 +2,10 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/string/print.hh>
 #include <nexus/fuzz/machine.hh>
 #include <nexus/fuzz/runner.hh>
 
-#include <iostream>    // std::cerr: fuzz findings / regression output
 #include <string_view> // bridges cc::string into std::ostream
 
 namespace nx::fuzz
@@ -125,7 +125,7 @@ bool test::execute_fuzz_test(cc::string_view test_var)
 
     if (!_setup_ok)
     {
-        std::cerr << "[fuzz] setup error: " << as_sv(_setup_error) << "\n";
+        cc::eprintln("[fuzz] setup error: {}", as_sv(_setup_error));
         return false;
     }
 
@@ -140,11 +140,11 @@ bool test::execute_fuzz_test(cc::string_view test_var)
         auto minimized = res.failing_run.value().minimize(rng);
         auto code = minimized.emit_regression(test_var, _dialect);
 
-        std::cerr << "\n[fuzz] found a failing run (seed " << seed << ", " << res.executed_operations
-                  << " operations): " << as_sv(res.error_message) << "\n";
-        std::cerr << "[fuzz] minimal reproducer (" << int(minimized.operations.size())
-                  << " operations) - paste as a SECTION next to your fuzz SECTION:\n\n";
-        std::cerr << as_sv(code) << "\n";
+        cc::eprintln("\n[fuzz] found a failing run (seed {}, {} operations): {}", seed, res.executed_operations,
+                     as_sv(res.error_message));
+        cc::eprintln("[fuzz] minimal reproducer ({} operations) - paste as a SECTION next to your fuzz SECTION:\n",
+                     int(minimized.operations.size()));
+        cc::eprintln(as_sv(code));
         return false;
     }
 

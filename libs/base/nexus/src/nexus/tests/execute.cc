@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -26,7 +27,6 @@
 #include <nexus/tests/section.hh>
 
 #include <chrono>        // std::chrono: no cc timing yet
-#include <cstdio>        // std::fputs / std::fwrite: crash-context hook writes to stderr without allocating
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
@@ -142,6 +142,16 @@ struct test_context
     int failed_checks = 0;
     cc::vector<test_error> errors;
 
+    // Failures across the WHOLE test, which failed_checks cannot answer: that one is exchanged into the leaf section
+    // after every section-replay pass, so it counts the pass rather than the test.
+    // This is what the failure cap is measured against, so a test with many sections gets one budget rather than one
+    // per section.
+    int total_failed_checks = 0;
+
+    // Set when the cap promoted a CHECK to a REQUIRE, so the replay loop stops instead of moving to the next section.
+    // The throw alone would only end the current pass, which is not what "the test is over" means.
+    bool aborted_by_failure_cap = false;
+
     // Checks and metrics reported from anywhere else: a pool worker driving this test's nodes, or a thread it started.
     // They are counted but kept OUT of the section machinery, which is single-threaded replay state — so they merge into the ROOT section at test_execute_end.
     // Splitting them this way is what keeps the thread's own path exactly as fast, and exactly as section-aware, as it was.
@@ -167,6 +177,36 @@ struct test_context
 
     int exec_count = 0;
 };
+
+/// How many `execute_tests` calls are on the stack, process-wide.
+///
+/// Greater than one means nexus is running nexus: a test built a registry of its own and executed it, so the inner
+/// run's failures are that test's DATA rather than the run's.
+/// Global rather than thread-local because an inner run dispatches its own bodies to whichever threads it likes, and
+/// what is being asked is about the process, not about a thread.
+cc::atomic<int> g_execution_depth = {0};
+
+/// Whether a check failure reaching the report path belongs to a real run rather than to a simulated one.
+[[nodiscard]] bool is_outermost_execution()
+{
+    return g_execution_depth.load(cc::memory_order_relaxed) <= 1;
+}
+
+struct scoped_execution_depth
+{
+    scoped_execution_depth() { g_execution_depth.fetch_add(1, cc::memory_order_relaxed); }
+    ~scoped_execution_depth() { g_execution_depth.fetch_sub(1, cc::memory_order_relaxed); }
+
+    scoped_execution_depth(scoped_execution_depth const&) = delete;
+    scoped_execution_depth& operator=(scoped_execution_depth const&) = delete;
+};
+
+/// How many checks may fail in one test before the next failing CHECK behaves as a REQUIRE and ends it.
+///
+/// The point is a readable report rather than a resource limit: past a couple of dozen failures the output is a wall
+/// nobody reads, and every further one costs a test_error and a log line to say what is already known.
+/// Deliberately not configurable — a run whose verdict changes with a knob is worth less than one whose does not.
+constexpr int max_reported_check_failures = 30;
 
 // Exception thrown when a REQUIRE fails
 struct test_require_failed
@@ -1061,17 +1101,24 @@ void nx::impl::report_running_test() noexcept
         if (decl == nullptr || decl->name.empty())
             continue;
 
-        std::fputs(reported == 0 ? "running test: \"" : "   also running: \"", stderr);
-        std::fwrite(decl->name.data(), 1, size_t(decl->name.size()), stderr);
-        std::fputc('"', stderr);
+        // cc::eprint takes a string_view straight to one fwrite, so every line here stays allocation-free —
+        // which is the whole constraint on this function: it runs from a crash handler.
+        cc::eprint(reported == 0 ? "running test: \"" : "   also running: \"");
+        cc::eprint(decl->name);
+        cc::eprint("\"");
         if (auto const section = g_running_tests[i].section.load(cc::memory_order_relaxed); section > 0)
-            std::fprintf(stderr, " (section %d)", section);
-        std::fputc('\n', stderr);
+        {
+            // format_to writes into THIS buffer rather than returning a string, so the number costs no heap.
+            char buffer[32] = {};
+            auto const written = cc::format_to(cc::span<char>(buffer), " (section {})", section);
+            cc::eprint(cc::string_view(buffer, written));
+        }
+        cc::eprint("\n");
         ++reported;
     }
 
     if (reported == 0)
-        std::fputs("running test: <none>\n", stderr);
+        cc::eprint("running test: <none>\n");
 }
 
 void nx::impl::record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better)
@@ -1140,6 +1187,13 @@ void nx::impl::report_check_result(check_result result)
     // Counted on the side, and never allowed near the section tree.
     if (!is_own_test_body(&ctx))
     {
+        // Recorded before the divert, so an off-thread failure reaches the test's `.ccrec` like any other.
+        // The failure CAP is deliberately not applied here: it ends a test by throwing, and a throw on a pool worker
+        // would take the worker rather than the test.
+        if (!result.passed && result.op != cmp_op::skip && is_outermost_execution())
+            CC_LOG_ERROR("check failed off-thread: {} — {} at {}:{}", result.expr, render_expanded(result),
+                         result.location.file_name(), result.location.line());
+
         report_off_thread_check_result(ctx, cc::move(result));
         return;
     }
@@ -1155,8 +1209,19 @@ void nx::impl::report_check_result(check_result result)
     if (!result.passed)
     {
         ++ctx.failed_checks;
+        ++ctx.total_failed_checks;
 
         auto expanded = render_expanded(result);
+
+        // Recorded as well as reported, so the failure sits in the test's own recording next to everything the code
+        // under test recorded around it — which is what a failing run's .ccrec is for.
+        //
+        // Only FAILURES reach here: a passing check returns above, and the fuzz engine's capture sink diverts long
+        // before this, which matters when one fuzz test evaluates tens of millions of them.
+        // A nested run is excluded too — see g_execution_depth.
+        if (is_outermost_execution())
+            CC_LOG_ERROR("check failed: {} — {} at {}:{}", result.expr, expanded, result.location.file_name(),
+                         result.location.line());
 
         // Add test error
         ctx.errors.push_back(test_error{
@@ -1165,6 +1230,24 @@ void nx::impl::report_check_result(check_result result)
             .extra_lines = std::move(result.extra_lines),
             .expanded = std::move(expanded),
         });
+
+        // Past the cap a CHECK behaves as a REQUIRE.
+        //
+        // A test that fails thousands of checks has said what it has to say by the thirtieth: the rest is a wall of
+        // output nobody reads, one test_error each, and a long wait for a verdict already decided.
+        // Counted per TEST rather than per section-replay pass, so a test with many sections gets one budget.
+        if (ctx.total_failed_checks >= max_reported_check_failures && result.kind != check_kind::require)
+        {
+            ctx.aborted_by_failure_cap = true;
+            ctx.errors.push_back(test_error{
+                .expr = "too many failed checks",
+                .location = result.location,
+                .extra_lines = {},
+                .expanded = cc::format("stopped after {} failed checks — the rest of this test did not run",
+                                       ctx.total_failed_checks),
+            });
+            throw test_require_failed{};
+        }
 
         // If this was a REQUIRE, throw exception to abort test execution
         if (result.kind == check_kind::require)
@@ -1361,6 +1444,12 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                 sec->errors = cc::exchange(ctx.errors, {});
             }
 
+            // The cap ends the TEST, not just the pass that hit it.
+            // A bare throw would unwind this pass and the loop would go on to the next section, which is exactly the
+            // wall of output the cap exists to stop.
+            if (ctx.aborted_by_failure_cap)
+                should_continue = false;
+
             // no new sections to execute? we're done
             if (ctx.root_section->next_open_section == nullptr)
             {
@@ -1432,6 +1521,8 @@ private:
 
 nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, test_schedule_config const& config)
 {
+    scoped_execution_depth const depth_guard;
+
     test_schedule_execution result;
 
     if (config.verbose)

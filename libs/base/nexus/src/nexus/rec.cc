@@ -1,6 +1,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/console_listener.hh>
+#include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/listener.hh>
 #include <clean-core/record/serialize.hh>
@@ -13,6 +14,11 @@
 #include <nexus/rec.hh>
 
 using namespace cc::primitive_defines;
+
+namespace nx
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "nexus");
+} // namespace nx
 
 namespace
 {
@@ -119,7 +125,26 @@ private:
 };
 
 bucketing_listener g_bucketing;
-cc::rec::console_listener g_console;
+
+/// nexus's own defaults, with `CC_LOG_*` applied over them.
+///
+/// Elapsed rather than wall-clock time, because a test run's question is "how far into the run" and not "what time is
+/// it": the run is seconds long and its output is read next to the failure it explains.
+/// The environment still wins, so `CC_LOG_LEVEL=debug uv run dev.py test "..."` reaches a test binary — which is the
+/// first thing anyone chasing a library's debug output reaches for.
+///
+/// **Built on the first run rather than at static-initialization time.** Reading the environment and asking whether
+/// stdout is a terminal are questions with no answer that early.
+/// A test that pins the listener's own behavior constructs one with explicit options instead, so the suite that
+/// covers this configuration is not itself configured by it.
+cc::rec::console_listener& run_console()
+{
+    static auto listener = cc::rec::console_listener(cc::rec::console_options::from_environment({
+        .min_level = cc::rec::level::info,
+        .time = cc::rec::console_time::elapsed,
+    }));
+    return listener;
+}
 
 /// Failing tests' recordings, already serialized, waiting for a directory to be written into.
 ///
@@ -154,7 +179,11 @@ bool nx::impl::begin_run_recording()
 
     cc::rec::initialize();
 
-    g_console_handle = cc::rec::register_listener(g_console);
+    // The console's min_level only filters what was recorded, and trace/debug are off at the DOMAIN by default — so
+    // this is what makes `CC_LOG_LEVEL=debug uv run dev.py test "..."` show anything at all.
+    cc::rec::enable_environment_log_levels();
+
+    g_console_handle = cc::rec::register_listener(run_console());
     g_bucketing_handle = cc::rec::register_listener(g_bucketing);
     g_active = true;
     return true;

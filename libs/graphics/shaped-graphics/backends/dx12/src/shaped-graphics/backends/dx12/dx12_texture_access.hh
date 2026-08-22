@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -126,9 +127,9 @@ public:
                                                                     "layouts in one operation");
                     if (c.result == layout_combine::degraded && !warned)
                     {
-                        cc::eprintln("[sg] a texture is bound as both a sampled and a storage view in one "
-                                     "operation — using the COMMON layout, which is slower to sample. Prefer "
-                                     "a single view class.");
+                        CC_LOG_WARNING("a texture is bound as both a sampled and a storage view in one "
+                                       "operation — using the COMMON layout, which is slower to sample. Prefer "
+                                       "a single view class.");
                         warned = true;
                     }
                     target = c.layout;
@@ -264,26 +265,26 @@ private:
         for (auto const& cbox : _canonical.boxes())
         {
             sg::texture_layout const canonical_layout = cbox.state.prev_layout;
-            s.partition.for_each_box_in(cbox.range,
-                                        [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
-                                        {
-                                            if (state.prev_layout == canonical_layout)
-                                                return; // already in the canonical layout
-                                            state.declare({}, {}, canonical_layout);
-                                            auto const b = state.flush();
-                                            if (b.needed)
-                                            {
-                                                out.push_back({box_range, b});
-                                                if (!warned)
-                                                {
-                                                    cc::eprintln("[sg] reverting a texture to its canonical layout at "
-                                                                 "submit "
-                                                                 "because other command lists are still open (a hidden "
-                                                                 "cost of concurrent recording)");
-                                                    warned = true;
-                                                }
-                                            }
-                                        });
+            s.partition.for_each_box_in(
+                cbox.range,
+                [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
+                {
+                    if (state.prev_layout == canonical_layout)
+                        return; // already in the canonical layout
+                    state.declare({}, {}, canonical_layout);
+                    auto const b = state.flush();
+                    if (b.needed)
+                    {
+                        out.push_back({box_range, b});
+                        if (!warned)
+                        {
+                            CC_LOG_WARNING("reverting a texture to its canonical layout at submit "
+                                           "because other command lists are still open (a hidden "
+                                           "cost of concurrent recording)");
+                            warned = true;
+                        }
+                    }
+                });
         }
         return out;
     }

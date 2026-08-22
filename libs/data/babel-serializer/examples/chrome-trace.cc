@@ -3,6 +3,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/console_listener.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/hot_functions.hh>
 #include <clean-core/record/recording.hh>
@@ -181,6 +182,8 @@ void load_assets()
 
 // owns_recorder because this drives cc::rec::initialize itself, and nx::run stands a recorder up for the whole binary.
 // Without it the initialize below is a second one, which asserts.
+//
+// No exclusive() needed: an EXAMPLE is main_thread, which already runs beside nothing.
 EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
 {
     using namespace cc::primitive_defines;
@@ -188,6 +191,12 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     // Nothing is recorded until the system is up — a library never decides this on the program's behalf.
     cc::rec::initialize();
     cc::rec::set_current_thread_record_name("main");
+
+    // What an application writes to get its own log onto its terminal.
+    // Registered first, so it is the layer everything else records BELOW — and default-constructed, so the run
+    // honors CC_LOG_LEVEL, CC_LOG_COLOR and friends:
+    //   CC_LOG_LEVEL=debug uv run dev.py example babel-serializer/chrome-trace
+    auto const console = cc::rec::install_default_console_listener();
 
     cc::rec::recording captured;
     {
@@ -296,5 +305,10 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     cc::println("wrote {}", path);
     cc::println("open it in chrome://tracing or at https://ui.perfetto.dev");
 
+    // The console has to go before the recorder does: shutdown() requires that every listener is already gone, since
+    // it frees the pool their callbacks read out of.
+    // A normal application never reaches this — it installs a console and lets the process end — which is why
+    // install_default_console_listener hands back a handle rather than keeping it to itself.
+    cc::rec::unregister_listener(console);
     cc::rec::shutdown();
 }

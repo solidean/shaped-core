@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <shaped-graphics/command_list/command_list.hh> // cmd.context()
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-graphics/routine/render_routine_base.hh>
@@ -15,6 +16,8 @@ void render_routine_base::ensure_initialized_no_materialize_impl(init_state& s, 
     u64 const current = current_generation();
     if (s.declared_generation != current)
     {
+        // Re-runs on every shader reload, so this is what a hot-reload hitch costs.
+        CC_RECORD_SCOPE("sg.routine.declare");
         init_declare(ctx);
         s.declared_generation = current;
     }
@@ -29,6 +32,8 @@ void render_routine_base::ensure_initialized_impl(init_state& s, command_list& c
     // and the next frame would re-run declare alone and never catch materialize up.
     if (s.materialized_generation != s.declared_generation)
     {
+        // Where a routine's pipelines are actually created, so the multi-millisecond half of a reload lands here.
+        CC_RECORD_SCOPE("sg.routine.materialize");
         init_materialize(cmd);
         s.materialized_generation = s.declared_generation;
     }

@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/store.hh>
 
@@ -11,6 +12,8 @@ namespace vdoc::file::impl
 {
 cc::result<snapshot_write_result> apply_snapshot_write(store_writer& writer, snapshot_write_job const& job)
 {
+    CC_RECORD_SCOPE("vdoc.file.snapshot_write");
+
     if (job.snapshots.empty() && job.skeletonized.empty())
         return snapshot_write_result{}; // nothing to write performs no I/O at all
 

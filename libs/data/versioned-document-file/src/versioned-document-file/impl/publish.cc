@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <versioned-document-file/impl/store_io.hh>
 #include <versioned-document-file/store.hh>
 
@@ -22,6 +23,11 @@ cc::vector<cc::vector<byte>> split_into_chunks(cc::span<byte const> payload)
 
 cc::result<publish_result> apply_publish(store_writer& writer, publish_job const& job)
 {
+    // On the WORK rather than on store::publish, which only posts the job and hands back a handle.
+    // A span around the enqueue would report microseconds and mean nothing; this one runs on the actor thread and
+    // covers the transaction that actually writes.
+    CC_RECORD_SCOPE("vdoc.file.publish");
+
     CC_RETURN_IF_ERROR(writer.begin());
 
     for (auto const& row : job.ops)

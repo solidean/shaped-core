@@ -4,6 +4,8 @@
 #include <blob-cache/impl/cache_gc.hh>
 #include <blob-cache/impl/cache_io.hh>
 #include <blob-cache/impl/cache_schema.hh>
+#include <clean-core/common/log.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/map.hh>
@@ -386,6 +388,11 @@ private:
 
         _is_degraded = true;
         _degrade_reason = error.to_string();
+
+        // A WARNING, never an error: deleting all cache data can never affect correctness, so a storage failure
+        // degrades the cache to a permanent miss rather than failing anything a caller asked for.
+        CC_LOG_WARNING("cache degraded to always-miss: {}", _degrade_reason);
+
         if (_on_error.is_valid())
             _on_error(_degrade_reason);
         publish_totals();
@@ -588,6 +595,8 @@ private:
     {
         if (auto core = _core.lock())
             core->stats.lock([&](cache_stats& s) { s.*field += n; });
+
+        record_stat(field, n);
     }
 
     void publish_totals()

@@ -13,6 +13,9 @@ How to read this: each block leads with the include; one symbol per line with a 
 
 ---
 
+**Recording domain:** `ssc.dxc`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## options & inputs
 
 ```cpp

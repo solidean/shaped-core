@@ -1,6 +1,7 @@
 #include <SDL3/SDL.h>
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/macros.hh>  // CC_OS_WINDOWS
+#include <clean-core/common/macros.hh> // CC_OS_WINDOWS
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/platform/win32_sanitized.hh>
 #include <shaped-rendering/impl/input_translation.hh>
@@ -498,6 +499,9 @@ void window::send_to_back()
 
 void window_system::poll_events()
 {
+    // The OS pump, which is where an unresponsive-looking application usually turns out to be.
+    CC_RECORD_SCOPE("sr.window.poll_events");
+
     assert_owning_thread();
 
     // Keep a background run out of the way for as long as it is not being used.

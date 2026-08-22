@@ -1,3 +1,5 @@
+#include <clean-core/common/log.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -7,6 +9,8 @@
 
 void cc::threaded_actor_base::start(threaded_actor_mode mode)
 {
+    CC_RECORD_SCOPE("cc.actor.start");
+
     CC_ASSERT(!_is_started.load(), "start() must be called exactly once");
 
     _is_started.store(true);
@@ -45,6 +49,11 @@ void cc::threaded_actor_base::begin_shutdown()
 
 void cc::threaded_actor_base::shutdown()
 {
+    // Drains the inbox and joins the thread, so an actor that will not stop hangs HERE.
+    // The thread body itself carries no scope: one spanning a whole thread would be the innermost open scope for
+    // every sample taken on it, which costs the sampler exactly the frames it exists to find.
+    CC_RECORD_SCOPE("cc.actor.shutdown");
+
     CC_ASSERT(_is_started.load(), "actor must be started before shutdown()");
     CC_ASSERT(!_is_shut_down.load(), "shutdown() must be called at most once");
 
@@ -120,8 +129,14 @@ bool cc::threaded_actor_base::is_running() const
 
 void cc::threaded_actor_base::report_unhandled_exception(char const* where) noexcept
 {
-    cc::eprint("threaded_actor: unhandled exception in ");
-    cc::eprintln(where);
+    CC_LOG_ERROR("unhandled exception in {}", where);
+
+    // Printed as well as logged, which is the exception to "a library never prints" that a failing assertion already
+    // makes: the actor's work is over, the loop will not run again, and a program that installed no listener would
+    // otherwise learn nothing at all.
+    // A warning gets to wait for someone who is watching; this does not.
+    cc::eprintln("threaded_actor: unhandled exception in {}", where);
+    cc::eflush();
 }
 
 void cc::threaded_actor_base::execute_actor_thread()

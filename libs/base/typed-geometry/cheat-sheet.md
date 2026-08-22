@@ -12,6 +12,9 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 ---
 
+**Recording domain:** `tg`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## Types & typedefs
 
 ```cpp

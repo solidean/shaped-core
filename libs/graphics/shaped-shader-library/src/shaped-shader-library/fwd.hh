@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 
 #include <memory>
 
@@ -39,4 +40,7 @@ using filesystem_handle = std::shared_ptr<filesystem>;
 /// This is what a generated package symbol holds, so it is the handle call sites see.
 /// std::shared_ptr to keep one ownership vocabulary with filesystem_handle.
 using shader_asset_handle = std::shared_ptr<shader_asset>;
+
+/// The domain every recording site in slib is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace slib

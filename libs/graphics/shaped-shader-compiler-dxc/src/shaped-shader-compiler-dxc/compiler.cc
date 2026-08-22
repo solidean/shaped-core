@@ -1,4 +1,6 @@
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/record/domain.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 #include <shaped-shader-compiler-dxc/impl/command_line_args.hh>
 #include <shaped-shader-compiler-dxc/impl/dxc_common.hh>
@@ -10,6 +12,8 @@
 
 namespace ssc::dxc
 {
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "ssc.dxc");
+
 struct compiler::state
 {
     impl::ComPtr<IDxcUtils> utils;
@@ -96,6 +100,8 @@ cc::result<preprocessed_source> compiler::preprocess(shader_description const& d
                                                      include_resolver resolve_include,
                                                      compile_options const& options)
 {
+    CC_RECORD_SCOPE("ssc.preprocess");
+
     auto args = impl::build_preprocess_args(desc, options);
     CC_RETURN_IF_ERROR(args);
 
@@ -117,6 +123,9 @@ cc::result<preprocessed_source> compiler::preprocess(shader_description const& d
 
 cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc, compile_options const& options)
 {
+    // The most expensive thing this library does by a wide margin, and the reason the cache in front of it exists.
+    CC_RECORD_SCOPE("ssc.compile");
+
     auto args = impl::build_compile_args(desc, options);
     CC_RETURN_IF_ERROR(args);
 

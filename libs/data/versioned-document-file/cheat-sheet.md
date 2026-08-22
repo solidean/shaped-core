@@ -5,6 +5,9 @@ Namespace `vdoc::file`. Depends on versioned-document and babel-serializer.
 
 > The on-disk shape is fully specified in [docs/format.md](docs/format.md).
 
+**Recording domain:** `vdoc.file` — shadows vdoc's.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## Opening and reading
 
 ```cpp
