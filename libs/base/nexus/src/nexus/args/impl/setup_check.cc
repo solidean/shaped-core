@@ -92,6 +92,17 @@ nx::args_result nx::impl::setup_checker::run(args_builder const& builder)
         }
     }
 
+    if (!builder._commands.empty() && !builder._positional_order.empty())
+        result.add_diagnostic(setup_error("this level declares both subcommands and positionals, so a bare word could "
+                                          "be either"));
+
+    for (auto i = isize(0); i < builder._commands.size(); ++i)
+        for (auto j = i + 1; j < builder._commands.size(); ++j)
+            for (auto const& a : builder._commands[i].names)
+                for (auto const& b : builder._commands[j].names)
+                    if (a.text == b.text)
+                        result.add_diagnostic(setup_error(cc::format("two commands both claim '{}'", a.text)));
+
     if (variadic_positionals > 1)
         result.add_diagnostic(setup_error("more than one variadic positional was declared, so how to split the values "
                                           "between them is undefined"));

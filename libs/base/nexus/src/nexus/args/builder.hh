@@ -2,9 +2,11 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/args/diagnostic.hh>
 #include <nexus/args/impl/binding.hh>
+#include <nexus/args/impl/command.hh>
 #include <nexus/args/options.hh>
 
 /// One command line, declared.
@@ -52,6 +54,7 @@ public:
         auto b = impl::binding();
         impl::bind_scalar(b, target, !opts.required);
         impl::bind_make_default(b, target, opts);
+        impl::bind_validator(b, target, opts);
         b.takes_value = !b.is_bool;
         configure(b, names, impl::to_common(opts));
         return add_option(cc::move(b));
@@ -70,6 +73,7 @@ public:
     {
         auto b = impl::binding();
         impl::bind_vector(b, target);
+        impl::bind_element_validator(b, opts);
         b.takes_value = true;
         configure(b, names, impl::to_common(opts));
         return add_option(cc::move(b));
@@ -119,6 +123,7 @@ public:
         b.kind = impl::binding_kind::positional;
         impl::bind_scalar(b, target, !opts.required);
         impl::bind_make_default(b, target, opts);
+        impl::bind_validator(b, target, opts);
         b.takes_value = true;
         configure_positional(b, metavar, impl::to_common(opts));
         return add_positional(cc::move(b));
@@ -132,10 +137,51 @@ public:
         auto b = impl::binding();
         b.kind = impl::binding_kind::positional;
         impl::bind_vector(b, target);
+        impl::bind_element_validator(b, opts);
         b.takes_value = true;
         configure_positional(b, metavar, impl::to_common(opts));
         return add_positional(cc::move(b));
     }
+
+    // =====================================================================================================
+    // Subcommands
+    //
+    // A subcommand is a nested builder, so nesting costs nothing and help at any depth is the same code.
+    // `declare` runs LAZILY — only when the command is selected, or when help or completion needs it — so
+    // it must be pure declaration, callable at any time before the parse returns, and idempotent.
+    // =====================================================================================================
+
+    /// One subcommand, whose arguments `declare` will add to its own nested builder.
+    args_builder& command(cc::span<arg::name_spec const> names,
+                          cc::string_view desc,
+                          cc::unique_function<void(args_builder&)> declare);
+
+    /// A command this program does not own: everything after its name goes to `run` untouched, `--help`
+    /// and `--` included, and whatever it returns becomes the exit code.
+    /// Help lists it without pretending to know its options, because it genuinely cannot.
+    args_builder& delegate(cc::span<arg::name_spec const> names,
+                           cc::string_view desc,
+                           cc::unique_function<int(cc::span<cc::string_view const>)> run);
+
+    /// Accept this option at any depth, rather than only before the command name.
+    /// Declared rather than emergent, because "which options survive the subcommand" is exactly what rots
+    /// in a hand-rolled parser.
+    args_builder& global();
+
+    /// Run this command when none is named, instead of failing.
+    args_builder& default_command(cc::string_view name);
+
+    /// Turn off the implicit `help <command>` subcommand.
+    args_builder& no_auto_help_command();
+
+    /// Which command ran, as its canonical name — empty when none did.
+    [[nodiscard]] cc::string_view selected_command() const;
+
+    /// The whole chain for a nested command, outermost first.
+    [[nodiscard]] cc::span<cc::string const> command_path() const { return _command_path; }
+
+    /// Whether the chain is exactly `path`, e.g. "remote add".
+    [[nodiscard]] bool is_command(cc::string_view path) const;
 
     /// Everything after a bare `--`.
     /// Declaring this is what makes `--` legal: without it a `--` on the command line is an error rather
@@ -145,6 +191,10 @@ public:
     // =====================================================================================================
     // Shaping the help
     // =====================================================================================================
+
+    /// Replace the name, description and version.
+    /// What a `declare_args` function calls first, since parse_args cannot know them before it asks.
+    args_builder& info(app_info value);
 
     /// Every argument declared after this joins `title`. A mode setter, not a per-argument property.
     args_builder& group(cc::string_view title);
@@ -162,6 +212,26 @@ public:
     // =====================================================================================================
     // Behaviour
     // =====================================================================================================
+
+    // =====================================================================================================
+    // Cross-argument rules
+    //
+    // Each states itself in the CONSTRAINTS section of the help, so a rule cannot be enforced silently.
+    // All of them are skipped when anything earlier already failed: a rule read over a half-bound command
+    // line produces nonsense, and nonsense on top of a real error is worse than saying nothing.
+    // =====================================================================================================
+
+    /// A rule of your own over the bound variables.
+    args_builder& require(cc::string_view description, cc::unique_function<bool()> predicate);
+
+    /// Giving `name` means every one of `required` must be given too.
+    args_builder& requires_all(cc::string_view name, cc::span<cc::string_view const> required);
+
+    /// At most one of these may be given.
+    args_builder& mutually_exclusive(cc::span<cc::string_view const> names);
+
+    /// At least one of these must be given.
+    args_builder& at_least_one_of(cc::span<cc::string_view const> names);
 
     /// Collect unrecognized tokens instead of failing on them — for a wrapper that forwards them onward.
     args_builder& allow_unknown(cc::vector<cc::string_view>& target);
@@ -251,6 +321,18 @@ private:
     cc::vector<impl::binding> _bindings;
     cc::vector<isize> _positional_order; // indices into _bindings, in declaration order
 
+    /// Set when this builder is a subcommand's, so a `global()` option declared above is still reachable.
+    /// A pointer rather than copied bindings, because a binding owns move-only thunks and, more to the
+    /// point, must keep writing the SAME variable the parent bound.
+    args_builder* _parent = nullptr;
+
+    cc::vector<impl::command_node> _commands;
+    cc::vector<cc::unique_ptr<args_builder>> _subtrees; // owned by the ROOT, indexed by command_node::subtree
+    cc::vector<cc::string> _command_path;
+    cc::string _default_command;
+    bool _auto_help_command = true;
+
+    cc::vector<document_validator> _document_validators;
     cc::vector<section_entry> _sections;
     cc::vector<example_entry> _examples;
     cc::vector<env_entry> _documented_env;

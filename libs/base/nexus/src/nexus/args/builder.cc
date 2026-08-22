@@ -144,6 +144,104 @@ nx::args_builder& nx::args_builder::rest(cc::vector<cc::string_view>& target, cc
     return *this;
 }
 
+namespace
+{
+/// A subcommand is a word, never a letter: `app b` would be indistinguishable from a positional.
+nx::impl::command_node make_command_node(cc::span<nx::arg::name_spec const> names, cc::string_view desc)
+{
+    auto node = nx::impl::command_node();
+    node.desc = cc::string(desc);
+
+    for (auto const& spec : names)
+    {
+        auto text = spec.text;
+        if (text.starts_with("--"))
+            text = text.subview(2);
+
+        node.names.push_back({.text = cc::string(text), .is_short = false, .hidden = spec.hidden});
+    }
+
+    if (!node.names.empty())
+        node.canonical = node.names.front().text;
+
+    for (auto const& name : node.names)
+        if (!name.hidden)
+        {
+            node.canonical = name.text;
+            break;
+        }
+
+    return node;
+}
+} // namespace
+
+nx::args_builder& nx::args_builder::command(cc::span<arg::name_spec const> names,
+                                            cc::string_view desc,
+                                            cc::unique_function<void(args_builder&)> declare)
+{
+    auto node = make_command_node(names, desc);
+    node.declare = cc::move(declare);
+    _commands.push_back(cc::move(node));
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::delegate(cc::span<arg::name_spec const> names,
+                                             cc::string_view desc,
+                                             cc::unique_function<int(cc::span<cc::string_view const>)> run)
+{
+    auto node = make_command_node(names, desc);
+    node.delegate = cc::move(run);
+    _commands.push_back(cc::move(node));
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::global()
+{
+    // Applies to the argument declared just before it, which is the only one it could sensibly mean.
+    if (!_bindings.empty())
+        _bindings.back().is_global = true;
+
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::default_command(cc::string_view name)
+{
+    _default_command = cc::string(name);
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::no_auto_help_command()
+{
+    _auto_help_command = false;
+    return *this;
+}
+
+cc::string_view nx::args_builder::selected_command() const
+{
+    return _command_path.empty() ? cc::string_view() : cc::string_view(_command_path.front());
+}
+
+bool nx::args_builder::is_command(cc::string_view path) const
+{
+    // Compared as one space-separated string, because chaining == over a span reads badly at every call site.
+    auto joined = cc::string();
+    for (auto const& part : _command_path)
+    {
+        if (!joined.empty())
+            joined += " ";
+
+        joined += part;
+    }
+
+    return cc::string_view(joined) == path;
+}
+
+nx::args_builder& nx::args_builder::info(app_info value)
+{
+    _info = value;
+    return *this;
+}
+
 nx::args_builder& nx::args_builder::group(cc::string_view title)
 {
     _current_group = cc::string(title);
@@ -165,6 +263,112 @@ nx::args_builder& nx::args_builder::example(cc::string_view command_line, cc::st
 nx::args_builder& nx::args_builder::document_env(cc::string_view name, cc::string_view desc)
 {
     _documented_env.push_back({.name = cc::string(name), .desc = cc::string(desc)});
+    return *this;
+}
+
+namespace
+{
+/// Whether a canonical name was given at least once, matched the way a user would write it.
+bool was_given(cc::span<nx::impl::binding const> bindings, cc::string_view name)
+{
+    for (auto const& b : bindings)
+        if (b.canonical == name)
+            return b.occurrences > 0;
+
+    return false;
+}
+
+cc::string join_names(cc::span<cc::string_view const> names, cc::string_view separator)
+{
+    auto out = cc::string();
+    for (auto const& name : names)
+    {
+        if (!out.empty())
+            out += separator;
+
+        out += name;
+    }
+
+    return out;
+}
+} // namespace
+
+nx::args_builder& nx::args_builder::require(cc::string_view description, cc::unique_function<bool()> predicate)
+{
+    _document_validators.push_back({.description = cc::string(description), .check = cc::move(predicate)});
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::requires_all(cc::string_view name, cc::span<cc::string_view const> required)
+{
+    auto owned_name = cc::string(name);
+    auto owned_required = cc::vector<cc::string>();
+    for (auto const& r : required)
+        owned_required.push_back(cc::string(r));
+
+    auto description = cc::format("{} requires {}", name, join_names(required, " and "));
+
+    _document_validators.push_back({
+        .description = description,
+        .check =
+            [this, owned_name = cc::move(owned_name), owned_required = cc::move(owned_required)]
+        {
+            if (!was_given(_bindings, owned_name))
+                return true;
+
+            for (auto const& r : owned_required)
+                if (!was_given(_bindings, r))
+                    return false;
+
+            return true;
+        },
+    });
+
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::mutually_exclusive(cc::span<cc::string_view const> names)
+{
+    auto owned = cc::vector<cc::string>();
+    for (auto const& n : names)
+        owned.push_back(cc::string(n));
+
+    _document_validators.push_back({
+        .description = cc::format("at most one of {} may be given", join_names(names, ", ")),
+        .check =
+            [this, owned = cc::move(owned)]
+        {
+            auto given = isize(0);
+            for (auto const& n : owned)
+                if (was_given(_bindings, n))
+                    ++given;
+
+            return given <= 1;
+        },
+    });
+
+    return *this;
+}
+
+nx::args_builder& nx::args_builder::at_least_one_of(cc::span<cc::string_view const> names)
+{
+    auto owned = cc::vector<cc::string>();
+    for (auto const& n : names)
+        owned.push_back(cc::string(n));
+
+    _document_validators.push_back({
+        .description = cc::format("at least one of {} is required", join_names(names, ", ")),
+        .check =
+            [this, owned = cc::move(owned)]
+        {
+            for (auto const& n : owned)
+                if (was_given(_bindings, n))
+                    return true;
+
+            return false;
+        },
+    });
+
     return *this;
 }
 

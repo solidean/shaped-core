@@ -28,9 +28,10 @@ int main(int argc, char** argv)
 
 ## What is here today
 
-The core: the grammar below, bind-to-locals, error accumulation with did-you-mean, `-h` / `--help` / `--version`, groups, sections, examples, environment fallbacks, and setup validation.
+The grammar below, both ways of binding — to locals and to an options struct — subcommands, and validation.
+Around them: error accumulation with did-you-mean, `-h` / `--help` / `--version`, groups, sections, examples, environment fallbacks, and setup validation.
 
-Still to land, in this order: subcommands, validation, the options-struct protocol, ambient args, response files, and completion generation.
+Still to land, in this order: ambient args, response files, and completion generation.
 
 ---
 
@@ -158,6 +159,125 @@ TEST("mytool - the CLI declaration is sound")
     CHECK(args.validate_setup().ok());
 }
 ```
+
+---
+
+## Options as a struct
+
+The other way to bind, for a program whose options are worth a name.
+A thin wrapper over the same builder rather than a second engine, so everything else on this page applies unchanged.
+
+```cpp
+struct build_options
+{
+    int jobs = 4;                      // the member initializers ARE the defaults
+    bool verbose = false;
+
+    static void declare_args(nx::args_builder& args, build_options& self)
+    {
+        args.info({.name = "build", .description = "build the project"});
+        args.arg({"j", "jobs"}, self.jobs, "how many jobs to run at once");
+        args.arg({"v", "verbose"}, self.verbose, "print more");
+    }
+};
+
+auto const parsed = nx::parse_args<build_options>(argc, argv);
+if (parsed.should_exit())
+    return parsed.exit_code();
+
+run_build(parsed.value());
+```
+
+Two tiers, in the precedence [cc::hash uses](../../clean-core/docs/customization-points.md):
+
+1. a `nx::custom::args_trait<T>` specialization — the override tier, checked first, for a type you cannot change
+2. a static member `T::declare_args(nx::args_builder&, T&)` — for a type you own
+
+`nx::declare_args(builder, value)` is the dispatcher, and works on a builder you own too.
+
+---
+
+## Subcommands
+
+A subcommand is a nested builder, not a special case, so nesting costs nothing and help at any depth is the same code path.
+
+```cpp
+auto build = build_options();
+auto args = nx::args({.name = "mytool"});
+
+args.arg({"v", "verbose"}, verbose, "print more");
+args.global();                                    // ...accepted after the command name too
+
+args.command({"build", "b"}, "build the project", [&](nx::args_builder& sub) { nx::declare_args(sub, build); });
+
+if (auto const r = args.parse(argc, argv); r.should_exit())
+    return r.exit_code();
+
+if (args.selected_command() == "build")
+    return run_build(build);
+```
+
+**Query is the primitive, not a callback.**
+`selected_command()`, `command_path()` and `is_command("remote add")` let the program keep its own control flow, and the declaration lambda binds into variables the caller owns.
+
+**Declaration is deferred.** A command's callback runs only when that command is selected, or when help or completion needs that subtree — so a tool with twenty commands pays for one on a normal run.
+The contract that places on the callback, since the forcing is invisible from the call site: it must be **pure declaration, callable at any point before the parse returns, and idempotent**.
+
+**Consequence worth knowing:** a parse validates the root plus the selected path only.
+A declaration bug in a sibling surfaces on full `--help`, on completion, or on an explicit `validate_setup()`.
+
+Other pieces:
+
+* `.global()` applies to the argument declared just before it, and makes it reachable at any depth.
+  A child's own option of the same name still wins.
+* `.default_command("build")` runs one when none is named; otherwise a level with commands requires one.
+* `help <command>` works as an alias for `<command> --help`, unless `.no_auto_help_command()`.
+* Commands and positionals cannot share a level — a bare word would be ambiguous — and that is a setup error.
+
+### Delegates
+
+For a command this program does not own, whose tail belongs to another library's parser:
+
+```cpp
+args.delegate({"external"}, "hand off to another tool",
+              [](cc::span<cc::string_view const> tail) { return other_library::main(tail); });
+```
+
+Everything after the command name passes through untouched, `--help` and `--` included, and the return value becomes the exit code.
+Help lists it and says to ask it directly, rather than showing an empty option list for something it genuinely cannot introspect.
+
+---
+
+## Validation
+
+A rule is an object carrying its own description, so the thing that rejects a bad value is the thing that prints the rule in help.
+That is the whole reason these are not lambdas: a predicate can only say no.
+
+```cpp
+args.arg({"j", "jobs"}, jobs, {.desc = "how many", .validate = nx::arg::in_range(1, 256)});
+```
+
+renders as `-j, --jobs INT  how many [default: 4] (must be in [1, 256])`, and rejects `0` naming the same rule.
+
+`nx::arg::` provides `in_range`, `at_least`, `at_most`, `one_of`, `non_empty` and `satisfies(description, predicate)`.
+Compose with `&&`.
+
+A factory does not need to know the bound type: it returns a spec that becomes an `arg_validator<T>` where the argument is declared, which is the only place `T` is known.
+
+**Value rules run per occurrence**, right after conversion, so the complaint quotes the token that broke it rather than reporting the variable's final value.
+On a vector target the rule is about each element.
+
+**Cross-argument rules** go on the builder, because they are about the command line rather than any one argument:
+
+```cpp
+args.mutually_exclusive({"--quiet", "--verbose"});
+args.at_least_one_of({"--input", "--stdin"});
+args.requires_all("--sign", {"--key"});
+args.require("width must not be less than height", [&] { return width >= height; });
+```
+
+Each states itself in the CONSTRAINTS section, so a rule cannot be enforced silently.
+All of them are **skipped when anything earlier already failed**: a rule read over a half-bound command line reports something that is not true, on top of an error that is.
 
 ---
 

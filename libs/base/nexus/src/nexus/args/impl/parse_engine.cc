@@ -51,11 +51,11 @@ bool looks_like_negative_number(cc::string_view token)
     return token.size() >= 2 && token[0] == '-' && cc::is_digit(token[1]);
 }
 
-binding* find_long(bindings_t& bindings, cc::string_view name, bool normalize)
+binding* find_long_in(bindings_t& bindings, cc::string_view name, bool normalize, bool globals_only)
 {
     for (auto& b : bindings)
     {
-        if (b.kind != binding_kind::option)
+        if (b.kind != binding_kind::option || (globals_only && !b.is_global))
             continue;
 
         for (auto const& n : b.names)
@@ -66,21 +66,11 @@ binding* find_long(bindings_t& bindings, cc::string_view name, bool normalize)
     return nullptr;
 }
 
-/// A negatable bool also answers to `--no-<name>`, for every long spelling it has.
-binding* find_negated(bindings_t& bindings, cc::string_view name, bool normalize)
-{
-    if (!name.starts_with("no-"))
-        return nullptr;
-
-    auto* const b = find_long(bindings, name.subview(3), normalize);
-    return (b != nullptr && b->negatable) ? b : nullptr;
-}
-
-binding* find_short(bindings_t& bindings, char c)
+binding* find_short_in(bindings_t& bindings, char c, bool globals_only)
 {
     for (auto& b : bindings)
     {
-        if (b.kind != binding_kind::option)
+        if (b.kind != binding_kind::option || (globals_only && !b.is_global))
             continue;
 
         for (auto const& n : b.names)
@@ -89,44 +79,6 @@ binding* find_short(bindings_t& bindings, char c)
     }
 
     return nullptr;
-}
-
-/// Every spelling a typo could have meant, hidden aliases included — a deprecated name is exactly what
-/// somebody half-remembers, so leaving it out of the suggestions would be the wrong kind of tidy.
-cc::vector<cc::string> suggestion_space(bindings_t const& bindings, bool want_long)
-{
-    auto out = cc::vector<cc::string>();
-
-    for (auto const& b : bindings)
-    {
-        if (b.kind != binding_kind::option)
-            continue;
-
-        for (auto const& n : b.names)
-            if (n.is_short != want_long)
-                out.push_back(n.display());
-    }
-
-    return out;
-}
-
-/// Would every character of `-abc` resolve as a short option?
-/// Asked BEFORE walking, because `-force` begins with a perfectly good `-f` and would otherwise be
-/// reported as four unknown letters instead of as the long name it obviously is.
-/// A value taker ends the question: it swallows whatever remains, so nothing after it has to resolve.
-bool cluster_fully_resolves(bindings_t& bindings, cc::string_view token)
-{
-    for (auto k = isize(1); k < token.size(); ++k)
-    {
-        auto* const b = find_short(bindings, token[k]);
-        if (b == nullptr)
-            return false;
-
-        if (b->takes_value)
-            return true;
-    }
-
-    return true;
 }
 
 struct parse_state
@@ -156,7 +108,10 @@ struct parse_state
 };
 
 /// Hand one token to a binding, reporting a conversion failure against the argument that refused it.
-bool apply_value(parse_state& state, binding& b, cc::string_view value, isize index, cc::string_view token)
+///
+/// The diagnostic's `token` is the VALUE, not the option it followed: the value is the offending text, and
+/// which option it belonged to is already in `arg_name`.
+bool apply_value(parse_state& state, binding& b, cc::string_view value, isize index)
 {
     if (b.value_action.is_valid())
     {
@@ -168,9 +123,23 @@ bool apply_value(parse_state& state, binding& b, cc::string_view value, isize in
     if (b.parse_fn != nullptr && !b.parse_fn(b.target, value, error))
     {
         auto const reason = error.empty() ? cc::string("the value was not accepted") : error;
-        state.add(nx::diagnostic_kind::invalid_value, index, token, b.canonical,
+        state.add(nx::diagnostic_kind::invalid_value, index, value, b.canonical,
                   cc::format("invalid value '{}' for {}: {}", value, b.canonical, reason));
         return false;
+    }
+
+    // The rule runs per occurrence, right here, so the complaint can quote the token that broke it rather
+    // than reporting the variable's final value long after the line has been forgotten.
+    if (b.validate.is_valid())
+    {
+        auto rule_error = cc::string();
+        if (!b.validate(b.target, rule_error))
+        {
+            auto const reason = rule_error.empty() ? b.validator_description : rule_error;
+            state.add(nx::diagnostic_kind::failed_validation, index, value, b.canonical,
+                      cc::format("invalid value '{}' for {}: {}", value, b.canonical, reason));
+            return false;
+        }
     }
 
     return true;
@@ -199,7 +168,7 @@ void assign_positionals(bindings_t& bindings, cc::span<isize const> order, parse
                 continue;
             }
 
-            apply_value(state, bindings[order[k]], values[k], -1, values[k]);
+            apply_value(state, bindings[order[k]], values[k], -1);
         }
 
         for (auto k = values.size(); k < order.size(); ++k)
@@ -232,14 +201,14 @@ void assign_positionals(bindings_t& bindings, cc::span<isize const> order, parse
     auto next = isize(0);
 
     for (auto k = isize(0); k < before && next < values.size(); ++k, ++next)
-        apply_value(state, bindings[order[k]], values[next], -1, values[next]);
+        apply_value(state, bindings[order[k]], values[next], -1);
 
     auto& variadic = bindings[order[variadic_slot]];
     for (auto k = isize(0); k < variadic_count; ++k, ++next)
-        apply_value(state, variadic, values[next], -1, values[next]);
+        apply_value(state, variadic, values[next], -1);
 
     for (auto k = variadic_slot + 1; k < order.size() && next < values.size(); ++k, ++next)
-        apply_value(state, bindings[order[k]], values[next], -1, values[next]);
+        apply_value(state, bindings[order[k]], values[next], -1);
 
     if (variadic_count < variadic.min_count)
         state.add(
@@ -303,6 +272,123 @@ void apply_fallbacks(bindings_t& bindings, parse_state& state)
 }
 } // namespace
 
+namespace
+{
+/// A negatable bool also answers to `--no-<name>`, for every long spelling it has.
+binding* find_negated(nx::args_builder& builder, cc::string_view name, bool normalize)
+{
+    if (!name.starts_with("no-"))
+        return nullptr;
+
+    auto* const b = nx::impl::parse_engine::find_long(builder, name.subview(3), normalize);
+    return (b != nullptr && b->negatable) ? b : nullptr;
+}
+
+/// Would every character of `-abc` resolve as a short option?
+/// Asked BEFORE walking, because `-force` begins with a perfectly good `-f` and would otherwise be
+/// reported as four unknown letters instead of as the long name it obviously is.
+/// A value taker ends the question: it swallows whatever remains, so nothing after it has to resolve.
+bool cluster_fully_resolves(nx::args_builder& builder, cc::string_view token)
+{
+    for (auto k = isize(1); k < token.size(); ++k)
+    {
+        auto* const b = nx::impl::parse_engine::find_short(builder, token[k]);
+        if (b == nullptr)
+            return false;
+
+        if (b->takes_value)
+            return true;
+    }
+
+    return true;
+}
+} // namespace
+
+nx::impl::binding* nx::impl::parse_engine::find_long(args_builder& builder, cc::string_view name, bool normalize)
+{
+    // This level first: a subcommand that declares its own --output means its own, not the parent's.
+    if (auto* const own = find_long_in(builder._bindings, name, normalize, false); own != nullptr)
+        return own;
+
+    for (auto* up = builder._parent; up != nullptr; up = up->_parent)
+        if (auto* const inherited = find_long_in(up->_bindings, name, normalize, true); inherited != nullptr)
+            return inherited;
+
+    return nullptr;
+}
+
+nx::impl::binding* nx::impl::parse_engine::find_short(args_builder& builder, char c)
+{
+    if (auto* const own = find_short_in(builder._bindings, c, false); own != nullptr)
+        return own;
+
+    for (auto* up = builder._parent; up != nullptr; up = up->_parent)
+        if (auto* const inherited = find_short_in(up->_bindings, c, true); inherited != nullptr)
+            return inherited;
+
+    return nullptr;
+}
+
+cc::vector<cc::string> nx::impl::parse_engine::suggestion_space(args_builder& builder, bool want_long)
+{
+    // Hidden aliases are included on purpose: a deprecated name is exactly what somebody half-remembers,
+    // so leaving it out would be the wrong kind of tidy.
+    auto out = cc::vector<cc::string>();
+
+    auto const collect = [&](bindings_t const& bindings, bool globals_only)
+    {
+        for (auto const& b : bindings)
+        {
+            if (b.kind != binding_kind::option || (globals_only && !b.is_global))
+                continue;
+
+            for (auto const& n : b.names)
+                if (n.is_short != want_long)
+                    out.push_back(n.display());
+        }
+    };
+
+    collect(builder._bindings, false);
+    for (auto* up = builder._parent; up != nullptr; up = up->_parent)
+        collect(up->_bindings, true);
+
+    return out;
+}
+
+nx::impl::command_node* nx::impl::parse_engine::find_command(args_builder& builder, cc::string_view name)
+{
+    for (auto& node : builder._commands)
+        for (auto const& n : node.names)
+            if (n.text == name)
+                return &node;
+
+    return nullptr;
+}
+
+nx::args_builder& nx::impl::parse_engine::force_declare(args_builder& builder, command_node& node)
+{
+    // Idempotent on purpose: help forces every subtree, a parse forces the selected one, and completion
+    // forces the lot again.
+    // Declaring twice would double every argument.
+    if (!node.declared)
+    {
+        auto child = cc::make_unique<args_builder>(app_info{.name = node.canonical, .description = node.desc});
+        child->_parent = &builder;
+        child->_auto_print = builder._auto_print;
+        child->_normalize_underscores = builder._normalize_underscores;
+        child->_usage_exit_code = builder._usage_exit_code;
+
+        if (node.declare.is_valid())
+            node.declare(*child);
+
+        builder._subtrees.push_back(cc::move(child));
+        node.subtree = builder._subtrees.size() - 1;
+        node.declared = true;
+    }
+
+    return *builder._subtrees[node.subtree];
+}
+
 nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::string_view const> tokens)
 {
     // A declaration bug is not the user's problem and must not be reported as one, so it short-circuits.
@@ -337,6 +423,8 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
     auto& bindings = builder._bindings;
     for (auto& b : bindings)
         b.occurrences = 0;
+
+    builder._command_path.clear();
 
     auto state = parse_state();
     auto const& owned = builder._tokens;
@@ -377,24 +465,24 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
             auto const has_value = eq >= 0;
             auto const inline_value = has_value ? body.subview(eq + 1) : cc::string_view();
 
-            if (builder._auto_help && name == "help" && find_long(bindings, "help", normalize) == nullptr)
+            if (builder._auto_help && name == "help" && find_long(builder, "help", normalize) == nullptr)
             {
                 state.help_requested = true;
                 break;
             }
 
             if (builder._auto_version && !builder._info.version.empty() && name == "version"
-                && find_long(bindings, "version", normalize) == nullptr)
+                && find_long(builder, "version", normalize) == nullptr)
             {
                 state.version_requested = true;
                 break;
             }
 
-            auto* b = find_long(bindings, name, normalize);
+            auto* b = find_long(builder, name, normalize);
             auto negated = false;
             if (b == nullptr)
             {
-                b = find_negated(bindings, name, normalize);
+                b = find_negated(builder, name, normalize);
                 negated = b != nullptr;
             }
 
@@ -406,7 +494,7 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
                     continue;
                 }
 
-                auto const space = suggestion_space(bindings, true);
+                auto const space = suggestion_space(builder, true);
                 state.add(diagnostic_kind::unknown_option, i, token, {}, cc::format("unknown option '--{}'", name),
                           best_suggestion(cc::format("--{}", name), space));
                 continue;
@@ -451,7 +539,7 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
             {
                 // The one place a value is optional, and only because '=' makes it unambiguous.
                 if (has_value)
-                    apply_value(state, *b, inline_value, i, token);
+                    apply_value(state, *b, inline_value, i);
                 else if (b->set_bool_fn != nullptr)
                     b->set_bool_fn(b->target, true);
 
@@ -460,7 +548,7 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
 
             if (has_value)
             {
-                apply_value(state, *b, inline_value, i, token);
+                apply_value(state, *b, inline_value, i);
                 continue;
             }
 
@@ -472,16 +560,16 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
             }
 
             ++i;
-            apply_value(state, *b, owned[i], i, token);
+            apply_value(state, *b, owned[i], i);
             continue;
         }
 
         auto const is_cluster = !options_ended && token.size() >= 2 && token[0] == '-' && token != "-"
-                             && !(looks_like_negative_number(token) && find_short(bindings, token[1]) == nullptr);
+                             && !(looks_like_negative_number(token) && find_short(builder, token[1]) == nullptr);
 
         if (is_cluster)
         {
-            if (builder._auto_help && token == "-h" && find_short(bindings, 'h') == nullptr)
+            if (builder._auto_help && token == "-h" && find_short(builder, 'h') == nullptr)
             {
                 state.short_help_requested = true;
                 break;
@@ -490,7 +578,7 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
             // The classic slip: a long name typed with one dash.
             // Said once, rather than as a complaint about each of its letters.
             // Only when the token does not also read as a real cluster, which a deliberate `-abc` still does.
-            if (!cluster_fully_resolves(bindings, token) && find_long(bindings, token.subview(1), normalize) != nullptr)
+            if (!cluster_fully_resolves(builder, token) && find_long(builder, token.subview(1), normalize) != nullptr)
             {
                 if (builder._unknown_target != nullptr)
                     builder._unknown_target->push_back(token);
@@ -505,7 +593,7 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
             for (auto k = isize(1); k < token.size(); ++k)
             {
                 auto const c = token[k];
-                auto* const b = find_short(bindings, c);
+                auto* const b = find_short(builder, c);
 
                 if (b == nullptr)
                 {
@@ -515,7 +603,7 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
                         break;
                     }
 
-                    auto const space = suggestion_space(bindings, false);
+                    auto const space = suggestion_space(builder, false);
                     state.add(diagnostic_kind::unknown_option, i, token, {}, cc::format("unknown option '-{}'", c),
                               best_suggestion(cc::format("-{}", c), space));
                     break;
@@ -559,7 +647,7 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
 
                 if (!remainder.empty())
                 {
-                    apply_value(state, *b, remainder, i, token);
+                    apply_value(state, *b, remainder, i);
                     break;
                 }
 
@@ -571,11 +659,67 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
                 }
 
                 ++i;
-                apply_value(state, *b, owned[i], i, token);
+                apply_value(state, *b, owned[i], i);
                 break;
             }
 
             continue;
+        }
+
+        // A bare word is a subcommand when this level declares any: commands and positionals are mutually
+        // exclusive, so there is never a question of which one it is.
+        if (!options_ended && !builder._commands.empty())
+        {
+            if (builder._auto_help_command && token == "help" && find_command(builder, "help") == nullptr)
+            {
+                // `app help build` is what people try first, and it means `app build --help`.
+                if (i + 1 < count)
+                {
+                    if (auto* const target = find_command(builder, owned[i + 1]);
+                        target != nullptr && !target->is_delegate())
+                    {
+                        auto& child = force_declare(builder, *target);
+                        auto const child_tokens = cc::vector<cc::string_view>{"--help"};
+                        return run(child, child_tokens);
+                    }
+                }
+
+                state.help_requested = true;
+                break;
+            }
+
+            auto* const node = find_command(builder, token);
+            if (node == nullptr)
+            {
+                auto candidates = cc::vector<cc::string>();
+                for (auto const& c : builder._commands)
+                    for (auto const& n : c.names)
+                        candidates.push_back(n.text);
+
+                state.add(diagnostic_kind::unknown_command, i, token, {}, cc::format("unknown command '{}'", token),
+                          best_suggestion(token, candidates));
+                break;
+            }
+
+            auto tail = cc::vector<cc::string_view>();
+            for (auto j = i + 1; j < count; ++j)
+                tail.push_back(owned[j]);
+
+            if (node->is_delegate())
+            {
+                // Untouched: --help and -- past this point belong to whoever we are handing off to.
+                builder._command_path.push_back(node->canonical);
+                return args_result(args_outcome::success, node->delegate(tail));
+            }
+
+            auto& child = force_declare(builder, *node);
+            auto child_result = run(child, tail);
+
+            builder._command_path.push_back(node->canonical);
+            for (auto const& part : child._command_path)
+                builder._command_path.push_back(part);
+
+            return child_result;
         }
 
         state.positional_values.push_back(token);
@@ -608,8 +752,35 @@ nx::args_result nx::impl::parse_engine::run(args_builder& builder, cc::span<cc::
         return args_result(args_outcome::version_requested, 0);
     }
 
+    if (!builder._commands.empty() && builder._command_path.empty() && !state.result.has_diagnostics())
+    {
+        if (!builder._default_command.empty())
+        {
+            if (auto* const node = find_command(builder, builder._default_command); node != nullptr)
+            {
+                auto& child = force_declare(builder, *node);
+                auto child_result = run(child, {});
+                builder._command_path.push_back(node->canonical);
+                return child_result;
+            }
+        }
+        else
+            state.add(diagnostic_kind::unknown_command, -1, {}, {}, "a command is required");
+    }
+
     assign_positionals(bindings, builder._positional_order, state);
     apply_fallbacks(bindings, state);
+
+    // Only over a command line that is otherwise sound: a cross-argument rule read against half-bound
+    // variables reports something that is not true, on top of an error that is.
+    if (!state.result.has_diagnostics())
+    {
+        for (auto const& rule : builder._document_validators)
+        {
+            if (rule.check.is_valid() && !rule.check())
+                state.add(diagnostic_kind::failed_validation, -1, {}, {}, cc::string(rule.description));
+        }
+    }
 
     if (state.result.has_diagnostics())
     {

@@ -70,6 +70,7 @@ struct binding
     bool required = false;
     bool hidden = false;
     bool accumulates = false; // a vector target: every occurrence appends
+    bool is_global = false;   // accepted at any subcommand depth, not only before the command name
     complete_hint complete = complete_hint::automatic;
 
     // Arity, for a variadic positional.
@@ -82,6 +83,11 @@ struct binding
     void (*set_bool_fn)(void* target, bool value) = nullptr;
     void (*add_count_fn)(void* target, isize delta) = nullptr;
     void (*enumerate_values_fn)(cc::vector<cc::string>& out) = nullptr;
+
+    /// The value rule, erased to "check what is behind `target`".
+    /// Runs per occurrence, right after conversion, so a failure can quote the token that caused it.
+    cc::string validator_description;
+    cc::unique_function<bool(void const* target, cc::string& error)> validate;
 
     cc::unique_function<void()> action;
     cc::unique_function<void(cc::string_view)> value_action;
@@ -203,6 +209,34 @@ void bind_make_default(binding& b, T& target, arg_options<T>& opts)
         return;
 
     b.apply_make_default = [fn = cc::move(opts.make_default), p = &target]() { *p = fn(); };
+}
+
+/// Erase a typed value rule down to "check what is behind the target pointer".
+template <class T>
+void bind_validator(binding& b, T& target, arg_options<T>& opts)
+{
+    if (!opts.validate.is_valid())
+        return;
+
+    b.validator_description = opts.validate.description;
+    b.validate = [check = cc::move(opts.validate.check)](void const* t, cc::string& error)
+    { return check(*static_cast<T const*>(t), error); };
+}
+
+/// The same for a vector target, where the rule is about each ELEMENT rather than about the list.
+/// Checked against the element just appended, so the diagnostic names the token that failed.
+template <class T>
+void bind_element_validator(binding& b, arg_options<T>& opts)
+{
+    if (!opts.validate.is_valid())
+        return;
+
+    b.validator_description = opts.validate.description;
+    b.validate = [check = cc::move(opts.validate.check)](void const* t, cc::string& error)
+    {
+        auto const& values = *static_cast<cc::vector<T> const*>(t);
+        return values.empty() || check(values.back(), error);
+    };
 }
 
 /// A counting flag: `-vvv` is three occurrences and the target ends up 3.

@@ -148,6 +148,9 @@ cc::string annotations_of(binding const& b)
         }
     }
 
+    if (!b.validator_description.empty())
+        cc::format_append(out, " ({})", b.validator_description);
+
     if (!b.deprecated.empty())
         cc::format_append(out, " [deprecated: {}]", b.deprecated);
 
@@ -188,6 +191,9 @@ cc::string nx::impl::help_renderer::usage(args_builder const& builder)
 
     if (has_options)
         out += " [options]";
+
+    if (!builder._commands.empty())
+        out += " <command>";
 
     // A required option is spelled out rather than hidden inside "[options]": leaving it out is an error,
     // so the usage line has to show it.
@@ -343,6 +349,42 @@ cc::string nx::impl::help_renderer::render(args_builder const& builder, args_ren
                 emit_row(row.first, row.second, {});
     }
 
+    // Commands come before the extras, because on a tool that has them they are what the reader came for.
+    auto visible_commands = isize(0);
+    for (auto const& c : builder._commands)
+        if (!c.hidden)
+            ++visible_commands;
+
+    if (visible_commands > 0)
+    {
+        out += "\n";
+        out += cc::console::colorize(cc::console::color::bold, "commands:", options.color);
+        out += "\n";
+
+        auto command_width = isize(0);
+        for (auto const& c : builder._commands)
+            if (!c.hidden && c.canonical.size() > command_width && c.canonical.size() <= max_name_column)
+                command_width = c.canonical.size();
+
+        for (auto const& c : builder._commands)
+        {
+            if (c.hidden)
+                continue;
+
+            out.resize_to_filled(out.size() + indent, ' ');
+            append_padded(out, c.canonical, command_width + gap);
+
+            auto text = cc::string(c.desc);
+
+            // A delegate is opaque by nature, and saying so beats showing an empty option list for it.
+            if (c.is_delegate())
+                cc::format_append(text, " (see '{} {} --help')", builder._info.name, c.canonical);
+
+            append_wrapped(out, text, options.width - indent - command_width - gap, indent + command_width + gap);
+            out += "\n";
+        }
+    }
+
     if (!full)
         return out;
 
@@ -364,6 +406,20 @@ cc::string nx::impl::help_renderer::render(args_builder const& builder, args_ren
             out.resize_to_filled(out.size() + indent, ' ');
             append_padded(out, e.name, env_width + gap);
             append_wrapped(out, e.desc, options.width - indent - env_width - gap, indent + env_width + gap);
+            out += "\n";
+        }
+    }
+
+    if (!builder._document_validators.empty())
+    {
+        out += "\n";
+        out += cc::console::colorize(cc::console::color::bold, "constraints:", options.color);
+        out += "\n";
+
+        for (auto const& rule : builder._document_validators)
+        {
+            out.resize_to_filled(out.size() + indent, ' ');
+            append_wrapped(out, rule.description, options.width - indent, indent);
             out += "\n";
         }
     }

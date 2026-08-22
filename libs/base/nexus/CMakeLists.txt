@@ -7,6 +7,7 @@ add_library(nexus
     src/nexus/args/builder.cc
     src/nexus/args/diagnostic.cc
     src/nexus/args/value.cc
+    src/nexus/args/validation.cc
     src/nexus/args/impl/help_render.cc
     src/nexus/args/impl/parse_engine.cc
     src/nexus/args/impl/setup_check.cc
@@ -52,7 +53,9 @@ target_sources(nexus
     src/nexus/args/diagnostic.hh
     src/nexus/args/fwd.hh
     src/nexus/args/options.hh
+    src/nexus/args/parse_args.hh
     src/nexus/args/value.hh
+    src/nexus/args/validation.hh
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
@@ -141,6 +144,9 @@ if(SC_BUILD_TESTS)
         tests/args-diagnostic-test.cc
         tests/args-setup-test.cc
         tests/args-help-test.cc
+        tests/args-validation-test.cc
+        tests/args-commands-test.cc
+        tests/args-struct-test.cc
         tests/test-api-test.cc
         tests/test-check-test.cc
         tests/test-recording-test.cc

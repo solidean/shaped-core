@@ -15,6 +15,11 @@ template <class T>
 struct arg_options; // everything about one argument except its names and its target (args/options.hh)
 
 template <class T>
+struct arg_validator; // one rule over one value, carrying the text that describes it (args/validation.hh)
+
+struct document_validator; // one rule over the whole command line (args/validation.hh)
+
+template <class T>
 class parsed; // the by-value counterpart of args_result, carrying the struct it filled (args/args.hh)
 
 struct arg_source; // where a token came from, which splicing makes worth recording (args/diagnostic.hh)
@@ -43,6 +48,7 @@ struct args_trait; // how one options struct declares itself (args/args.hh)
 namespace nx::impl
 {
 struct binding;        // one declared argument, with its type erased (args/impl/binding.hh)
+struct command_node;   // one subcommand, declared lazily (args/impl/command.hh)
 struct common_options; // the T-independent half of arg_options (args/impl/binding.hh)
 struct parse_engine;   // the token grammar (args/impl/parse_engine.hh)
 struct help_renderer;  // the help page (args/impl/help_render.hh)

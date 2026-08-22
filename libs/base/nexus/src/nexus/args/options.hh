@@ -3,6 +3,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/args/fwd.hh>
+#include <nexus/args/validation.hh>
 
 /// What a shell should offer when completing an argument's value.
 enum class nx::complete_hint
@@ -104,6 +105,10 @@ struct nx::arg_options
     /// Both are printed in the usage line, so FILES... and [FILES...] differ.
     isize min_count = 0;
     isize max_count = -1;
+
+    /// What the value must satisfy beyond parsing, e.g. `nx::arg::in_range(1, 256)`.
+    /// The rule prints itself in help, and compose several with `&&`.
+    arg_validator<T> validate;
 
     /// Computes the default, lazily and only when the argument is absent from a successful parse.
     /// Never called to render help — pair it with `default_text` for that.
