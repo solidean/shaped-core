@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -54,6 +55,12 @@ void configure(color_mode mode);
 
 /// False until `configure` runs, so a process that never configures prints plain.
 bool color_enabled();
+
+/// How many columns the terminal has, or nothing when that cannot be answered — output is redirected, or the platform has no notion of it.
+/// COLUMNS wins when it is set to a positive number, so a caller can pin the width without a terminal at all, which is what makes wrapped output testable.
+/// Independent of `configure`: width is a property of the stream, not of whether color was resolved.
+/// Nothing is cached, because a terminal can be resized between two calls.
+cc::optional<int> terminal_width();
 
 /// Wrap `text` in `c`'s escape when `enabled`, and return it unchanged otherwise.
 /// The form for a renderer that carries its own color flag: a pure function stays pure, and its tests do not depend on how the process was invoked.

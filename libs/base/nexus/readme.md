@@ -29,6 +29,7 @@ Four capabilities are easy to miss from the macros alone:
 | API-sequence fuzzing with shrinking and emitted reproducers | `nx::fuzz::test` | [docs/fuzz-testing.md](docs/fuzz-testing.md) |
 | recorded perf metrics, consumed by `dev.py pgo` | `GUIDE_BENCHMARK` + `nx::guide` | [docs/guides/perf-results.md](../../../docs/guides/perf-results.md) |
 | runnable demonstrations of an API in practice | `EXAMPLE` + `dev.py example` | [docs/guides/examples.md](../../../docs/guides/examples.md) |
+| a command line, with help, validation and completion | `nx::args` | [docs/args.md](docs/args.md) |
 | hardware performance counters around a workload | `nx::bench::measure_hw_counters` | [docs/guides/profiling.md](../../../docs/guides/profiling.md) |
 | asserting on what a test logged, recorded or measured | `nx::test_recording()` | [docs/recording.md](docs/recording.md) |
 
@@ -43,9 +44,12 @@ Source lives in `src/nexus/`, grouped by responsibility:
 | `tests/export/` | output formats: Catch2 XML, JUnit XML, the JSON test listing `dev.py test` pre-selects binaries with, and the perf sidecar |
 | `bench/` | hardware performance counters, with a per-OS backend under `impl/` |
 | `fuzz/` | the API-sequence fuzzing engine: operations, the state machine, shrinking, and regression emission |
+| `args/` | `nx::args`: the grammar, subcommands, validation, help rendering, completion, and the ambient accessors |
 | `web/` | the Emscripten browser-runner ABI, wired up by `cmake/NexusWebRunner.cmake`'s `sc_add_nexus_web_runner` |
 
-`bench/impl/` is a private implementation detail — don't include from it directly.
+`bench/impl/` and `args/impl/` are private implementation details — don't include from them directly.
+
+`examples/` holds runnable demonstrations of `nx::args`, one binary per file.
 
 ## More
 

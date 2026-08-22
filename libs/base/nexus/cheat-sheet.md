@@ -222,8 +222,11 @@ uv run dev.py test                       # build + run the whole suite
 
 ```cpp
 #include <nexus/run.hh>                  // test main is just: int main(int c, char** v){ return nx::run(c, v); }
-// Catch2-compatible CLI (for IDEs/tooling, not daily use): --list-tests, --reporter xml,
+// The runner's own CLI is declared with nx::args, so `<binary> --help` lists every flag below.
+// Catch2-compatible (for IDEs/tooling, not daily use): --list-tests, --reporter xml,
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
+// --test-args "<line>", or everything after a bare --, is a command line for the SELECTED TEST itself,
+//   readable from its body through nx::test_args(). Replaces whatever nx::config::args declared.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --examples (sweep example bucket), --perf-json <file> (write recorded-metric sidecar).
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
@@ -237,6 +240,71 @@ uv run dev.py test                       # build + run the whole suite
 //   allow_cross_bucket_naming, run_disabled_tests) and eligible_count / eligible_alias_count, under the rest of
 //   the args, then exit 0. Used by `dev.py test` to pre-select binaries. "-" means stdout.
 ```
+
+## Command-line arguments (`nx::args`)
+
+```cpp
+#include <nexus/args/args.hh>
+
+auto jobs = 4;                                   // the variable's initializer IS the default
+auto files = cc::vector<cc::string>();
+
+auto args = nx::args({.name = "mytool", .description = "does the thing", .version = "0.1"});
+args.arg({"j", "jobs"}, jobs, {.desc = "how many at once"});   // names braced; 1 char = short
+args.arg({"v", "verbose"}, verbose, "print more");             // the description-only overload
+args.positional("FILES", files, {.desc = "inputs", .min_count = 1});
+
+if (auto const r = args.parse(argc, argv); r.should_exit())    // --help is neither success nor failure
+    return r.exit_code();                                      // 0 for help/version, 1 for a usage error
+```
+
+```cpp
+// Binding:   T& (scalar, last wins) · cc::vector<T>& (accumulates) · .count(...) for -vvv · .action(...)
+// Options:   .desc .help .metavar .group .env .default_text .required .negatable .hidden .deprecated
+//            .make_default .validate .min_count .max_count .complete
+// Builder:   .group(t) (mode setter) .section(t,x) .example(c,d) .document_env(n,d) .rest(v)
+//            .allow_unknown(v[, takes_value]) .stop_at_first_positional() .enable_response_files()
+//            .no_auto_print() .exact_long_names() .usage_exit_code(n) .full_help_on_error()
+//            .validate_setup() — NOT const: checking a default_command means declaring it
+// Commands:  .command({"build","b"}, desc, declare_fn)   // declared LAZILY, only when needed
+//            .delegate(names, desc, fn)  .global()  .default_command(n)
+//            args.selected_command() / .command_path() / .is_command("remote add")
+//   default_command gets the tokens THIS level could not account for, and sees the root's options too;
+//   a name claimed by both the root and the default command is a setup error.
+// Validate:  nx::arg::in_range(lo,hi) at_least at_most one_of non_empty satisfies(desc,pred), composed with &&
+//            args.mutually_exclusive({...}) .at_least_one_of({...}) .requires_all(n,{...}) .require(desc,pred)
+// Struct:    static void T::declare_args(nx::args_builder&, T&)   -> nx::parse_args<T>(argc, argv)
+//            or specialize nx::custom::args_trait<T> to adapt a type you cannot change (checked FIRST)
+// Values:    specialize nx::custom::arg_value_trait<T>: parse(sv, T&, cc::string& err), type_name(), values()
+// Rendering: args.help_text({.color=false, .width=100}) / .short_help_text() / .usage_line()
+//            r.diagnostic_text()  — width and colour are parameters, never sniffed, so goldens are stable
+```
+
+```cpp
+#include <nexus/args/ambient.hh>          // light: no parser comes with it
+nx::test_args();                          // the running test's declared args; empty if it declared none
+nx::process_args();                       // the process's own — no fallback between the two, ask by name
+nx::program_name();                       // basename of argv[0], no directory, no .exe / .js
+nx::has_arg("--trace") / nx::get_arg<int>("budget")   // DEBUG only, over PROCESS args: guesses, never fails
+```
+
+```cpp
+// A test or example can be given its own command line, which is what makes an EXAMPLE self-demonstrating:
+EXAMPLE("mytool/build", nx::config::args("--jobs 8 --verbose")) { /* nx::test_args() */ }
+// Override per run: dev.py example mytool/build --test-args "--jobs 1"   (REPLACES the declared line)
+// A test that declared nothing sees an empty nx::test_args(), never the process's.
+```
+
+```bash
+mytool --completion bash    # also zsh, fish, powershell — generated from the same declaration
+                            # completes option names, command names and a type's values(); .complete overrides
+mytool @response.rsp        # after .enable_response_files(); @@x is a literal @x
+```
+
+Gotchas: `-j=8` is rejected for short options (`-j8` or `-j 8`); a bool takes a value only as `--flag=x`;
+`--` with no `.rest(...)` declared is an error rather than a silent drop; there is no abbreviation, only did-you-mean.
+`.env` is held to `.validate` like a typed value is, and a bound `in_range` the argument's type cannot hold asserts at declaration.
+[docs/args.md](docs/args.md) is the full reference and carries the grammar as a spec.
 
 ## Fuzz testing (`nx::fuzz`)
 

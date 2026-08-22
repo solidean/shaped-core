@@ -52,7 +52,9 @@ target_include_directories(shaped-linter-core PUBLIC
 target_compile_options(shaped-linter-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
 # clean-core is PUBLIC: it appears in our headers (cc:: everywhere), so the exe and test inherit it.
-target_link_libraries(shaped-linter-core PUBLIC clean-core)
+# nexus is PRIVATE: only options.cc reaches for it, to declare the CLI with nx::args.
+# A tool depending on nexus is the intended direction — it is the binary harness, not only a test framework.
+target_link_libraries(shaped-linter-core PUBLIC clean-core PRIVATE nexus)
 
 # CC, and measured against the alternatives: shaped-linter-core goes 0.42 here but 0.50 at CC_STD,
 # because it is a pure clean-core consumer and the heavy STL block is a PCH it pays to load and never reads.

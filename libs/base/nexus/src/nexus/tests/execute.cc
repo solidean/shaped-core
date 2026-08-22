@@ -17,6 +17,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <nexus/args/ambient.hh>
 #include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/impl/rec_session.hh>
@@ -976,6 +977,18 @@ nx::test_registry const* nx::impl::active_registry()
     return ctx->execution->instance.registry;
 }
 
+cc::span<cc::string_view const> nx::impl::current_test_args()
+{
+    // Read off the running instance through the ambient chain, exactly as active_registry is, and for the
+    // same reason: tests run concurrently, so "the current test" cannot live in a thread-local, and a
+    // dispatched invocable has to inherit the arguments of the test that drove it.
+    auto const* const ctx = current_context();
+    if (ctx == nullptr || ctx->execution == nullptr)
+        return {};
+
+    return ctx->execution->instance.arg_views;
+}
+
 bool nx::impl::is_declaration_active(nx::test_declaration const* decl)
 {
     // The ambient chain, not this thread's stack: it holds the same enclosing tests, and holds them for work running anywhere.
@@ -1483,6 +1496,11 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                   "an ASYNC_TEST cannot use no_scheduler: nothing would drive the graph it returns");
         auto& execution = result.executions[i];
         execution.instance = instance;
+
+        // After the copy, never before: arg_views would otherwise point into the SCHEDULE's strings, which
+        // is a live view into a different object for as long as the run lasts.
+        execution.instance.rebuild_arg_views();
+
         if (execution.instance.registry == nullptr)
             execution.instance.registry = schedule.registry; // a hand-built schedule may only name the registry once
 
