@@ -1227,11 +1227,16 @@ cc::remove_file(path);                              // true == gone, which inclu
                                                     // NOT a filesystem layer: no mkdir, no iteration, no metadata,
                                                     // no path arithmetic. Reading and writing are the file streams'.
 
-#include <clean-core/platform/environment.hh>     // read-only process environment
+#include <clean-core/platform/environment.hh>     // the process environment
 cc::environment_variable("HOME");                   // cc::optional<cc::string>; EMPTY value reads as absent
 cc::is_environment_flag_set("SC_REQUEST_BACKGROUND");  // bool; set and not "0"/"false"/"no"/"off" (case-insensitive)
-                                                    // No setter: it is process-global and racy against every other
-                                                    // thread — pass the variable when spawning the child instead.
+cc::set_environment_variable("K", "v");             // process-global and NOT thread-safe; "" removes
+cc::unset_environment_variable("K");
+cc::scoped_environment_variable const s("K", "v");  // set for a scope, restored (or unset) on the way out
+                                                    // Writing is for exercising a read path from a test — prefer the
+                                                    // scoped form, since a failed REQUIRE past a bare set leaks the
+                                                    // variable into every test after it. To make a CHILD see one,
+                                                    // pass it when spawning that child; never set it here first.
 
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)

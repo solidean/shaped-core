@@ -1,9 +1,8 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/args/args.hh>
 #include <nexus/test.hh>
-
-#include <cstdlib> // setenv / unsetenv / _putenv_s, for the env-fallback tests below
 
 // Value rules and cross-argument rules.
 // The point of a validator being an object is that the thing which rejects a value is also the thing that
@@ -247,46 +246,7 @@ TEST("args validation - a cross-argument rule is skipped when something already 
 //
 // Writing an environment variable is process-wide, so everything below shares one exclusion tag.
 
-namespace
-{
-/// One environment variable, set for the duration of a test and restored after it.
-/// Restoring matters: a leaked variable would silently feed every later test in this binary.
-struct env_scope
-{
-    env_scope(char const* name, char const* value) : _name(name)
-    {
-        auto const* const previous = std::getenv(name);
-        _had_previous = previous != nullptr;
-        if (_had_previous)
-            _previous = cc::string::create_copy_c_str_materialized(previous);
-
-        set(name, value);
-    }
-
-    ~env_scope() { set(_name, _had_previous ? _previous.c_str_if_terminated() : nullptr); }
-
-    env_scope(env_scope const&) = delete;
-    env_scope& operator=(env_scope const&) = delete;
-
-private:
-    /// `value == nullptr` removes the variable.
-    static void set(char const* name, char const* value)
-    {
-#ifdef CC_OS_WINDOWS
-        _putenv_s(name, value == nullptr ? "" : value); // an empty value removes it
-#else
-        if (value == nullptr)
-            unsetenv(name);
-        else
-            setenv(name, value, 1);
-#endif
-    }
-
-    char const* _name;
-    cc::string _previous;
-    bool _had_previous = false;
-};
-} // namespace
+using cc::scoped_environment_variable;
 
 TEST("args validation - a value from the environment is held to the same rule", exclusive("nx-args-env"))
 {
@@ -297,7 +257,7 @@ TEST("args validation - a value from the environment is held to the same rule", 
 
     SECTION("a value the rule accepts")
     {
-        env_scope const set("NX_ARGS_TEST_JOBS", "8");
+        scoped_environment_variable const set("NX_ARGS_TEST_JOBS", "8");
         CHECK(args.parse({}).ok());
         CHECK(jobs == 8);
     }
@@ -306,7 +266,7 @@ TEST("args validation - a value from the environment is held to the same rule", 
     {
         // Skipping the rule here would let the variable through at 0 while --jobs 0 is rejected, leaving it
         // holding something the declaration says is impossible.
-        env_scope const set("NX_ARGS_TEST_JOBS", "0");
+        scoped_environment_variable const set("NX_ARGS_TEST_JOBS", "0");
 
         auto const r = args.parse({});
         CHECK(!r.ok());
@@ -319,7 +279,7 @@ TEST("args validation - a value from the environment is held to the same rule", 
 
     SECTION("a value the type itself refuses still reports as an invalid value")
     {
-        env_scope const set("NX_ARGS_TEST_JOBS", "lots");
+        scoped_environment_variable const set("NX_ARGS_TEST_JOBS", "lots");
 
         auto const r = args.parse({});
         CHECK(!r.ok());
@@ -329,7 +289,7 @@ TEST("args validation - a value from the environment is held to the same rule", 
 
     SECTION("the command line still wins over both")
     {
-        env_scope const set("NX_ARGS_TEST_JOBS", "0");
+        scoped_environment_variable const set("NX_ARGS_TEST_JOBS", "0");
         CHECK(args.parse({"-j", "12"}).ok());
         CHECK(jobs == 12);
     }

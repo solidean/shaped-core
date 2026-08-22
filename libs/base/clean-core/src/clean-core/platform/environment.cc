@@ -1,3 +1,5 @@
+#include <clean-core/common/assert.hh>
+#include <clean-core/common/macros.hh>
 #include <clean-core/platform/environment.hh>
 
 #include <cstdlib>
@@ -30,6 +32,39 @@ cc::optional<cc::string> cc::environment_variable(cc::string_view name)
     if (value == nullptr || value[0] == '\0')
         return cc::nullopt;
     return cc::string(value);
+}
+
+void cc::set_environment_variable(cc::string_view name, cc::string_view value)
+{
+    CC_ASSERT(!name.empty(), "an environment variable needs a name");
+    CC_ASSERT(name.find('=') < 0, "'=' separates a name from its value and cannot be part of the name");
+
+    if (value.empty())
+        return unset_environment_variable(name);
+
+    // Both APIs want null-terminated strings, which a string_view is not.
+    auto key = cc::string(name);
+    auto owned = cc::string(value);
+
+#ifdef CC_OS_WINDOWS
+    _putenv_s(key.c_str_materialize(), owned.c_str_materialize());
+#else
+    setenv(key.c_str_materialize(), owned.c_str_materialize(), /*overwrite=*/1);
+#endif
+}
+
+void cc::unset_environment_variable(cc::string_view name)
+{
+    CC_ASSERT(!name.empty(), "an environment variable needs a name");
+    CC_ASSERT(name.find('=') < 0, "'=' separates a name from its value and cannot be part of the name");
+
+    auto key = cc::string(name);
+
+#ifdef CC_OS_WINDOWS
+    _putenv_s(key.c_str_materialize(), ""); // an empty value is how the CRT spells removal
+#else
+    unsetenv(key.c_str_materialize());
+#endif
 }
 
 bool cc::is_environment_flag_set(cc::string_view name)

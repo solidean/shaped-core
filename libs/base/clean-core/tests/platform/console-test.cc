@@ -1,13 +1,7 @@
-#include <clean-core/common/macros.hh>
 #include <clean-core/platform/console.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
-
-#include <cstdlib> // getenv / setenv / _putenv_s
-
-#ifndef CC_OS_WINDOWS
-#include <unistd.h>
-#endif
 
 using namespace cc::console;
 
@@ -21,44 +15,10 @@ struct color_scope
     ~color_scope() { configure(color_mode::never); }
 };
 
-/// `value == nullptr` removes the variable.
-void set_env(char const* name, char const* value)
-{
-#ifdef CC_OS_WINDOWS
-    _putenv_s(name, value == nullptr ? "" : value); // an empty value removes it
-#else
-    if (value == nullptr)
-        unsetenv(name);
-    else
-        setenv(name, value, 1);
-#endif
-}
-
-/// One environment variable, set for the duration of a test and restored after it.
-/// Restoring matters: a leaked NO_COLOR would silently disable color for every later test in this binary.
-struct env_scope
-{
-    env_scope(char const* name, char const* value) : _name(name)
-    {
-        auto const* const previous = std::getenv(name);
-        _had_previous = previous != nullptr;
-        if (_had_previous)
-            _previous = cc::string::create_copy_c_str_materialized(previous);
-
-        set_env(name, value);
-    }
-
-    ~env_scope() { set_env(_name, _had_previous ? _previous.c_str_if_terminated() : nullptr); }
-
-    env_scope(env_scope const&) = delete;
-    env_scope& operator=(env_scope const&) = delete;
-
-private:
-    char const* _name;
-    cc::string _previous;
-    bool _had_previous = false;
-};
 } // namespace
+
+// Restoring matters here: a leaked NO_COLOR would silently disable color for every later test in this binary.
+using cc::scoped_environment_variable;
 
 // Every test here writes process-wide state — the global color mode, and NO_COLOR / FORCE_COLOR / COLUMNS in the environment — so they share one exclusion tag.
 TEST("console - never colors", exclusive("cc-console-color"))
@@ -125,8 +85,8 @@ TEST("console - colorize takes the flag explicitly or from the global", exclusiv
 
 TEST("console - NO_COLOR forces plain and beats FORCE_COLOR", exclusive("cc-console-color"))
 {
-    env_scope const no_color("NO_COLOR", "1");
-    env_scope const force_color("FORCE_COLOR", "1");
+    scoped_environment_variable const no_color("NO_COLOR", "1");
+    scoped_environment_variable const force_color("FORCE_COLOR", "1");
     color_scope const scope(color_mode::automatic);
 
     CHECK(!color_enabled());
@@ -134,8 +94,8 @@ TEST("console - NO_COLOR forces plain and beats FORCE_COLOR", exclusive("cc-cons
 
 TEST("console - FORCE_COLOR colors a stream that is not a terminal", exclusive("cc-console-color"))
 {
-    env_scope const no_color("NO_COLOR", nullptr);
-    env_scope const force_color("FORCE_COLOR", "1");
+    scoped_environment_variable const no_color("NO_COLOR", ""); // empty is how this API spells "unset"
+    scoped_environment_variable const force_color("FORCE_COLOR", "1");
     color_scope const scope(color_mode::automatic);
 
     CHECK(color_enabled());
@@ -143,7 +103,7 @@ TEST("console - FORCE_COLOR colors a stream that is not a terminal", exclusive("
 
 TEST("console - an explicit mode ignores the environment entirely", exclusive("cc-console-color"))
 {
-    env_scope const force_color("FORCE_COLOR", "1");
+    scoped_environment_variable const force_color("FORCE_COLOR", "1");
     color_scope const scope(color_mode::never);
 
     CHECK(!color_enabled());
@@ -160,7 +120,7 @@ TEST("console - an empty string round-trips", exclusive("cc-console-color"))
 
 TEST("console - COLUMNS overrides the terminal", exclusive("cc-console-color"))
 {
-    env_scope const columns("COLUMNS", "37");
+    scoped_environment_variable const columns("COLUMNS", "37");
 
     auto const width = terminal_width();
     REQUIRE(width.has_value());
@@ -172,7 +132,7 @@ TEST("console - a COLUMNS that is not a positive number is ignored", exclusive("
     // Each falls through to the real terminal, which may or may not answer; what must not happen is 0 or a negative width.
     for (auto const* const bad : {"0", "-5", "wide", "", "80x24", "80 "})
     {
-        env_scope const columns("COLUMNS", bad);
+        scoped_environment_variable const columns("COLUMNS", bad);
 
         auto const width = terminal_width();
         CHECK((!width.has_value() || width.value() > 0)); // the extra parens keep CHECK from decomposing the ||
@@ -181,7 +141,7 @@ TEST("console - a COLUMNS that is not a positive number is ignored", exclusive("
 
 TEST("console - width is independent of the color flag", exclusive("cc-console-color"))
 {
-    env_scope const columns("COLUMNS", "120");
+    scoped_environment_variable const columns("COLUMNS", "120");
 
     color_scope const scope(color_mode::never);
     CHECK(terminal_width().value_or(0) == 120);

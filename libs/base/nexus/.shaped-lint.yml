@@ -31,10 +31,6 @@ rules:
     reason: the CRT's __argc / __argv, which is what Windows has instead of /proc/self/cmdline
     files: src/nexus/args/impl/os_args.cc
 
-  - kind: allow-include
-    value: <cstdlib>
-    reason: setenv / _putenv_s, since clean-core reads the environment but does not write it
-    files: tests/args-validation-test.cc
 
   # =========================================================================================================
   # Waiting on a cc:: replacement — see docs/stdlib-migration.md
