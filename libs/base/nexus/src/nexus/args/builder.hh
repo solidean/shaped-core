@@ -298,6 +298,13 @@ public:
     void print_help() const;
     void print_short_help() const;
 
+    /// Whether `name` appeared on the command line at least once, spelled as help spells it (`--jobs`).
+    ///
+    /// For the question a bound variable cannot answer: was this given, or is it merely at its default?
+    /// A program that adjusts one setting only when the user left another alone needs exactly this, and
+    /// comparing against the default is the wrong way to ask — the user may well have typed the default.
+    [[nodiscard]] bool was_given(cc::string_view name) const;
+
     /// Everything after the bare `--`, whether or not a `rest` binding was declared.
     [[nodiscard]] cc::span<cc::string_view const> raw() const { return _raw; }
 

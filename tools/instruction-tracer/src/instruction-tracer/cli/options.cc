@@ -2,378 +2,316 @@
 
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/args/args.hh>
+
+// The richest CLI in the repo, declared once.
+//
+// Two of its flags take a comma-separated set rather than a scalar, so each is a value TYPE with its own
+// trait: the accepted names are then listed in help and offered by completion, instead of living in a
+// hand-written table that a new section has to be remembered into.
+
+/// `--sections trace,stats,...` — the set, not one of them.
+template <>
+struct nx::custom::arg_value_trait<itrace::output_sections>
+{
+    static bool parse(cc::string_view token, itrace::output_sections& out, cc::string& error);
+    static cc::string_view type_name() { return "LIST"; }
+    static void values(cc::vector<cc::string>& out)
+    {
+        for (auto const* const name : {"trace", "stats", "memory", "cachelines", "memory-stats", "timing"})
+            out.push_back(cc::string(name));
+    }
+};
+
+/// `--memory-regions heap,stack,...` — likewise, and an explicit list REPLACES the default rather than
+/// adding to it, so the first token seen clears what the struct came with.
+template <>
+struct nx::custom::arg_value_trait<itrace::memory_regions>
+{
+    static bool parse(cc::string_view token, itrace::memory_regions& out, cc::string& error);
+    static cc::string_view type_name() { return "LIST"; }
+    static void values(cc::vector<cc::string>& out)
+    {
+        for (auto const* const name : {"heap", "frame", "stack", "instructions"})
+            out.push_back(cc::string(name));
+    }
+};
 
 namespace itrace
 {
 namespace
 {
-/// Parse a non-negative decimal.
-/// Fails on empty/garbage/overflow, so a typo'd --skip is loud.
-cc::result<u64> parse_u64(cc::string_view text, cc::string_view flag)
-{
-    if (text.empty())
-        return cc::error(cc::format("{} expects a number", flag));
-
-    u64 value = 0;
-    for (char const c : text)
-    {
-        if (c < '0' || c > '9')
-            return cc::error(cc::format("{} expects a number, got '{}'", flag, text));
-
-        u64 const digit = u64(c - '0');
-        if (value > (u64(-1) - digit) / 10)
-            return cc::error(cc::format("{} value '{}' is too large", flag, text));
-
-        value = value * 10 + digit;
-    }
-    return value;
-}
-
-/// Apply `fn` to each comma-separated, whitespace-free token of `value`.
+/// Apply `fn` to each comma-separated token of `value`.
 /// Empty tokens are skipped, so "a,,b" and a trailing comma are tolerated.
-/// Stops and forwards the first error `fn` returns.
 template <class F>
-cc::result<cc::unit> for_each_token(cc::string_view value, F&& fn)
+bool for_each_token(cc::string_view value, F&& fn)
 {
-    isize start = 0;
+    auto start = isize(0);
     while (start <= value.size())
     {
         auto const comma = value.find(',', start);
         auto const end = comma < 0 ? value.size() : comma;
-        if (end > start)
-            CC_RETURN_IF_ERROR(fn(value.subview({.start = start, .end = end})));
+        if (end > start && !fn(value.subview({.start = start, .end = end})))
+            return false;
 
         if (comma < 0)
             break;
+
         start = comma + 1;
     }
-    return cc::unit{};
-}
 
-cc::result<cc::unit> parse_sections(cc::string_view value, output_sections& out)
+    return true;
+}
+} // namespace
+} // namespace itrace
+
+bool nx::custom::arg_value_trait<itrace::output_sections>::parse(cc::string_view token,
+                                                                 itrace::output_sections& out,
+                                                                 cc::string& error)
 {
-    return for_each_token(value,
-                          [&](cc::string_view token) -> cc::result<cc::unit>
-                          {
-                              if (token == "trace")
-                                  out.trace = true;
-                              else if (token == "stats")
-                                  out.stats = true;
-                              else if (token == "memory")
-                                  out.memory = true;
-                              else if (token == "cachelines")
-                                  out.cachelines = true;
-                              else if (token == "memory-stats")
-                                  out.memory_stats = true;
-                              else if (token == "timing")
-                                  out.timing = true;
-                              else
-                                  return cc::error(cc::format("unknown section '{}' (valid: trace, stats, memory, "
-                                                              "cachelines, memory-stats, timing)",
-                                                              token));
-                              return cc::unit{};
-                          });
+    return itrace::for_each_token(token,
+                                  [&](cc::string_view name)
+                                  {
+                                      if (name == "trace")
+                                          out.trace = true;
+                                      else if (name == "stats")
+                                          out.stats = true;
+                                      else if (name == "memory")
+                                          out.memory = true;
+                                      else if (name == "cachelines")
+                                          out.cachelines = true;
+                                      else if (name == "memory-stats")
+                                          out.memory_stats = true;
+                                      else if (name == "timing")
+                                          out.timing = true;
+                                      else
+                                      {
+                                          error = cc::format("unknown section '{}'", name);
+                                          return false;
+                                      }
+
+                                      return true;
+                                  });
 }
 
-cc::result<cc::unit> parse_memory_regions(cc::string_view value, memory_regions& out)
+bool nx::custom::arg_value_trait<itrace::memory_regions>::parse(cc::string_view token,
+                                                                itrace::memory_regions& out,
+                                                                cc::string& error)
 {
     // An explicit list replaces the default, so start from nothing selected.
     out = {.heap = false, .frame = false, .stack = false, .instructions = false};
-    return for_each_token(value,
-                          [&](cc::string_view token) -> cc::result<cc::unit>
-                          {
-                              if (token == "heap")
-                                  out.heap = true;
-                              else if (token == "frame")
-                                  out.frame = true;
-                              else if (token == "stack")
-                                  out.stack = true;
-                              else if (token == "instructions")
-                                  out.instructions = true;
-                              else
-                                  return cc::error(cc::format(
-                                      "unknown memory region '{}' (valid: heap, frame, stack, instructions)", token));
-                              return cc::unit{};
-                          });
+
+    return itrace::for_each_token(token,
+                                  [&](cc::string_view name)
+                                  {
+                                      if (name == "heap")
+                                          out.heap = true;
+                                      else if (name == "frame")
+                                          out.frame = true;
+                                      else if (name == "stack")
+                                          out.stack = true;
+                                      else if (name == "instructions")
+                                          out.instructions = true;
+                                      else
+                                      {
+                                          error = cc::format("unknown memory region '{}'", name);
+                                          return false;
+                                      }
+
+                                      return true;
+                                  });
 }
 
-/// Match `--flag` / `--no-flag`, writing the sense into `out`. Returns false if `arg` is neither.
-bool match_bool(cc::string_view arg, cc::string_view name, bool& out)
+namespace itrace
 {
-    if (arg.size() > 2 && arg.subview({.start = 0, .end = 2}) == "--")
-    {
-        auto const body = arg.subview({.start = 2, .end = arg.size()});
-        if (body == name)
-        {
-            out = true;
-            return true;
-        }
-        if (body.starts_with("no-") && body.subview({.start = 3, .end = body.size()}) == name)
-        {
-            out = false;
-            return true;
-        }
-    }
-    return false;
+namespace
+{
+/// The whole CLI, shared by the parse and by --help so neither can describe what the other does not.
+nx::args_builder build_cli(options& opts, cc::vector<cc::string_view>& debuggee_args, cc::string& target_error)
+{
+    auto args = nx::args({
+        .name = "instruction-tracer",
+        .description = "record what optimized x64 code actually executed (Windows only)",
+        .help = "Every boolean flag has a --no-<flag> form, e.g. --no-source.\n"
+                "All sections come from one capture, since memory data cannot be reliably reproduced across runs.",
+    });
+
+    args.arg({"exe"}, opts.exe, {.desc = "the binary to trace", .metavar = "PATH", .required = true});
+
+    args.group("target (exactly one)");
+
+    // Three spellings of one setting, so each writes it its own way and a document rule keeps them apart.
+    args.value_action({"symbol"},
+                      [&opts](cc::string_view value)
+                      {
+                          // An explicit --symbol is always a symbol, even when it looks like an address.
+                          opts.target.form = target_spec::kind::symbol;
+                          opts.target.symbol = value;
+                      },
+                      {.desc = "break on a symbol; a unique substring is enough", .metavar = "NAME"});
+
+    args.value_action({"address"},
+                      [&opts, &target_error](cc::string_view value)
+                      {
+                          auto address = parse_address(value);
+                          if (address.has_error())
+                          {
+                              target_error = address.error().to_string();
+                              return;
+                          }
+
+                          opts.target.form = target_spec::kind::address;
+                          opts.target.address = address.value();
+                      },
+                      {.desc = "break on an absolute runtime address, e.g. 0x7ff611203410", .metavar = "HEX"});
+
+    args.value_action({"target"},
+                      [&opts, &target_error](cc::string_view value)
+                      {
+                          auto spec = parse_target_spec(value);
+                          if (spec.has_error())
+                          {
+                              target_error = spec.error().to_string();
+                              return;
+                          }
+
+                          opts.target = cc::move(spec.value());
+                      },
+                      {.desc = "one of: foo::bar | 0x7ff6... | mod.exe!foo::bar | mod.exe+0x3410", .metavar = "SPEC"});
+
+    args.mutually_exclusive({"--symbol", "--address", "--target"});
+    args.at_least_one_of({"--symbol", "--address", "--target"});
+
+    args.group("collection");
+    args.arg({"skip"}, opts.skip, {.desc = "ignore the first n entry hits", .metavar = "N"});
+    args.arg({"traces"}, opts.traces, {.desc = "record n invocations", .metavar = "N", .validate = nx::arg::at_least(1)});
+    args.arg({"instructions"}, opts.instructions,
+             {.desc = "max retired instructions per trace", .metavar = "N", .validate = nx::arg::at_least(1)});
+    args.arg({"until-return"}, opts.until_return, {.desc = "stop once the entry frame returns", .negatable = true});
+    args.arg({"stop-at-syscall"}, opts.stop_at_syscall, {.desc = "stop before executing a syscall", .negatable = true});
+
+    args.group("output sections (combine freely; all come from one capture)");
+    args.arg({"sections"}, opts.sections, {.desc = "which sections to print", .metavar = "LIST"});
+    args.arg({"stats"}, opts.sections.stats, {.desc = "shortcut for --sections stats", .negatable = true});
+    args.arg({"html"}, opts.html_path,
+             {.desc = "write a self-contained HTML report here; forces a full capture and the larger budget",
+              .metavar = "PATH"});
+
+    args.group("timing (llvm-mca cost model)");
+    args.arg(
+        {"mca"}, opts.mca_tool,
+        {.desc = "path to llvm-mca; enables the timing section. Absent, timing degrades to nothing", .metavar = "PATH"});
+    args.arg({"mca-cpu"}, opts.mca_cpu,
+             {.desc = "micro-arch to model (default: host via -mcpu=native)", .metavar = "NAME"});
+
+    args.group("trace section");
+    args.arg({"stack"}, opts.stack, {.desc = "print the stack at entry", .negatable = true});
+    args.arg({"source"}, opts.source, {.desc = "annotate with source file/line and text", .negatable = true});
+    args.arg({"register-diffs"}, opts.register_diffs,
+             {.desc = "show registers changed by each instruction", .negatable = true});
+
+    args.group("memory sections");
+    args.arg({"memory-regions"}, opts.regions,
+             {.desc = "which address regions to include; frame is this function's own stack, stack another's, "
+                      "instructions the code fetches",
+              .metavar = "LIST"});
+    args.arg({"memory-instruction-addresses"}, opts.memory_instruction_addresses,
+             {.desc = "annotate accesses with the accessing rip", .negatable = true});
+
+    args.group("process");
+    args.arg({"terminate-after-traces"}, opts.terminate_after_traces,
+             {.desc = "kill the debuggee once done", .negatable = true});
+
+    args.group("output");
+    args.action({"colored"}, [&opts] { opts.color = cc::console::color_mode::always; }, "force color on");
+    args.action({"plain"}, [&opts] { opts.color = cc::console::color_mode::never; }, "force color off");
+
+    args.rest(debuggee_args, "ARGS", "everything after -- goes to the debuggee verbatim");
+
+    args.section("the instruction budget",
+                 "Any non-trace section, and --html, raise the --instructions default to 100000: a truncated trace "
+                 "makes every aggregate silently wrong, and 100 would truncate anything worth tabling.\n"
+                 "An explicit --instructions is always respected, whichever order the flags came in.");
+
+    args.no_auto_print();
+    args.no_auto_completion();
+    return args;
 }
 } // namespace
 
-cc::string_view usage_text()
+cc::result<options, cc::string> parse_options(cc::span<char const* const> args)
 {
-    return R"(instruction-tracer — record what optimized x64 code actually executed (Windows only)
+    auto opts = options();
+    auto debuggee_args = cc::vector<cc::string_view>();
+    auto target_error = cc::string();
 
-usage:
-  instruction-tracer --exe <path> (--symbol <name> | --address <hex> | --target <spec>)
-                     [options] [-- <args passed to the debuggee>]
-
-target (exactly one):
-  --symbol <name>        break on a symbol; a unique substring is enough
-  --address <hex>        break on an absolute runtime address, e.g. 0x7ff611203410
-  --target <spec>        one of: foo::bar | 0x7ff6... | mod.exe!foo::bar | mod.exe+0x3410
-
-collection:
-  --skip <n>             ignore the first n entry hits            (default 0)
-  --traces <n>           record n invocations                     (default 1)
-  --instructions <n>     max retired instructions per trace       (default 100)
-  --until-return         stop once the entry frame returns        (default on)
-  --stop-at-syscall      stop before executing a syscall          (default on)
-
-output sections (combine freely; all come from one capture):
-  --sections <list>      comma-separated subset of:                (default: trace)
-                           trace         the retired-instruction trace
-                           stats         per-symbol instruction table
-                           memory        raw chronological memory accesses
-                           cachelines    memory accesses bucketed by cacheline
-                           memory-stats  per-symbol memory table
-                           timing        the llvm-mca cost model (needs --mca)
-                         any non-trace section raises the --instructions default to
-                         100000, since a truncated trace corrupts the aggregates
-  --stats                shortcut for --sections stats             (default off)
-  --html <path>          write a self-contained HTML report to <path>; forces a full
-                         capture (source, memory, registers) and the 100000 budget.
-                         Without --sections it replaces stdout with a one-line summary
-
-timing (llvm-mca cost model):
-  --mca <path>           path to llvm-mca; enables the timing section and the HTML
-                         timing views. Absent, timing degrades to nothing (no error)
-  --mca-cpu <name>       micro-arch to model (default: host via -mcpu=native)
-
-trace section:
-  --stack                print the stack at entry                 (default on)
-  --source               annotate with source file/line and text  (default on)
-  --register-diffs       show registers changed by each instruction (default off)
-
-memory sections:
-  --memory-regions <list>  comma-separated subset of heap,frame,stack,instructions
-                           to include                             (default: heap,stack)
-                           frame = the current function's own stack; stack = another
-                           function's stack (a stack array reached through a span);
-                           instructions = code fetches (an I-cache footprint)
-  --memory-instruction-addresses  annotate accesses with the accessing rip (default off)
-
-process:
-  --terminate-after-traces  kill the debuggee once done           (default on)
-
-  Every boolean flag has a --no-<flag> form, e.g. --no-source.
-  --colored / --plain    force color on / off (default: auto-detect the terminal)
-  -h / --help            print this and exit
-)";
-}
-
-cc::result<options> parse_options(cc::span<char const* const> args)
-{
-    options opts;
-    bool has_target = false;
-    bool explicit_instructions = false;
+    auto parser = build_cli(opts, debuggee_args, target_error);
 
     // argv[0] is the program itself.
-    for (isize i = 1; i < args.size(); ++i)
+    auto tokens = cc::vector<cc::string_view>();
+    for (auto i = isize(1); i < args.size(); ++i)
+        tokens.push_back(cc::string_view(args[i]));
+
+    auto const result = parser.parse(tokens);
+
+    if (result.outcome() == nx::args_outcome::help_requested)
     {
-        cc::string_view const arg = args[i];
-
-        // Everything after `--` belongs to the debuggee.
-        if (arg == "--")
-        {
-            for (isize j = i + 1; j < args.size(); ++j)
-                opts.target_args.push_back(cc::string(args[j]));
-            break;
-        }
-
-        if (arg == "-h" || arg == "--help")
-        {
-            opts.help = true;
-            return opts;
-        }
-
-        // Not --no- style: these are a pair overriding the same auto-detected setting.
-        if (arg == "--colored")
-        {
-            opts.color = cc::console::color_mode::always;
-            continue;
-        }
-        if (arg == "--plain")
-        {
-            opts.color = cc::console::color_mode::never;
-            continue;
-        }
-
-        // Flags taking a value.
-        // `need_value` keeps the "missing value" error in one place.
-        auto const need_value = [&](cc::string_view& out) -> cc::result<cc::unit>
-        {
-            if (i + 1 >= args.size())
-                return cc::error(cc::format("{} expects a value", arg));
-            out = args[++i];
-            return cc::unit{};
-        };
-
-        cc::string_view value;
-
-        if (arg == "--exe")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            opts.exe = value;
-            continue;
-        }
-
-        if (arg == "--html")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            opts.html_path = value;
-            continue;
-        }
-
-        if (arg == "--mca")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            opts.mca_tool = value;
-            continue;
-        }
-
-        if (arg == "--mca-cpu")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            opts.mca_cpu = value;
-            continue;
-        }
-
-        if (arg == "--symbol" || arg == "--address" || arg == "--target")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-
-            if (has_target)
-                return cc::error("--symbol / --address / --target are mutually exclusive");
-            has_target = true;
-
-            if (arg == "--symbol")
-            {
-                // An explicit --symbol is always a symbol, even if it looks like an address.
-                opts.target.form = target_spec::kind::symbol;
-                opts.target.symbol = value;
-            }
-            else if (arg == "--address")
-            {
-                auto address = parse_address(value);
-                CC_RETURN_IF_ERROR(address);
-                opts.target.form = target_spec::kind::address;
-                opts.target.address = address.value();
-            }
-            else
-            {
-                auto spec = parse_target_spec(value);
-                CC_RETURN_IF_ERROR(spec);
-                opts.target = cc::move(spec.value());
-            }
-            continue;
-        }
-
-        if (arg == "--skip")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            auto n = parse_u64(value, arg);
-            CC_RETURN_IF_ERROR(n);
-            opts.skip = n.value();
-            continue;
-        }
-
-        if (arg == "--traces" || arg == "--instructions")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            auto n = parse_u64(value, arg);
-            CC_RETURN_IF_ERROR(n);
-            if (n.value() == 0)
-                return cc::error(cc::format("{} must be at least 1", arg));
-
-            if (arg == "--traces")
-            {
-                opts.traces = u32(cc::min<u64>(n.value(), u32(-1)));
-            }
-            else
-            {
-                opts.instructions = u32(cc::min<u64>(n.value(), u32(-1)));
-                explicit_instructions = true;
-            }
-            continue;
-        }
-
-        if (arg == "--sections")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            CC_RETURN_IF_ERROR(parse_sections(value, opts.sections));
-            opts.sections_explicit = true;
-            continue;
-        }
-
-        if (arg == "--memory-regions")
-        {
-            CC_RETURN_IF_ERROR(need_value(value));
-            CC_RETURN_IF_ERROR(parse_memory_regions(value, opts.regions));
-            continue;
-        }
-
-        // Shortcut for `--sections stats`; `--no-stats` clears just that section.
-        {
-            bool stats = opts.sections.stats;
-            if (match_bool(arg, "stats", stats))
-            {
-                opts.sections.stats = stats;
-                opts.sections_explicit = true;
-                continue;
-            }
-        }
-
-        if (match_bool(arg, "until-return", opts.until_return))
-            continue;
-        if (match_bool(arg, "stop-at-syscall", opts.stop_at_syscall))
-            continue;
-        if (match_bool(arg, "stack", opts.stack))
-            continue;
-        if (match_bool(arg, "source", opts.source))
-            continue;
-        if (match_bool(arg, "terminate-after-traces", opts.terminate_after_traces))
-            continue;
-        if (match_bool(arg, "register-diffs", opts.register_diffs))
-            continue;
-        if (match_bool(arg, "memory-instruction-addresses", opts.memory_instruction_addresses))
-            continue;
-
-        return cc::error(cc::format("unknown argument '{}' (see --help)", arg));
+        opts.help = true;
+        return opts;
     }
 
-    if (opts.exe.empty())
-        return cc::error("--exe is required (see --help)");
-    if (!has_target)
-        return cc::error("one of --symbol / --address / --target is required (see --help)");
+    // A target spec that did not parse is reported by the action that read it, since the value is valid
+    // text and only this program knows what shape it must have.
+    if (!target_error.empty())
+        return cc::error(target_error);
+
+    if (!result.ok())
+    {
+        auto message = cc::string();
+        for (auto const& diagnostic : result.diagnostics())
+        {
+            if (!message.empty())
+                message += "\n";
+
+            message += diagnostic.message;
+            if (!diagnostic.suggestion.empty())
+                cc::format_append(message, " (did you mean {}?)", diagnostic.suggestion);
+        }
+
+        return cc::error(message);
+    }
+
+    for (auto const& arg : debuggee_args)
+        opts.target_args.push_back(cc::string(arg));
+
+    // Either spelling of the shortcut is an explicit choice about sections, including --no-stats.
+    opts.sections_explicit = parser.was_given("--sections") || parser.was_given("--stats");
 
     // No section selected means the trace alone.
     if (opts.sections.none())
         opts.sections.trace = true;
 
-    // Order-independent: the cap is only raised where the user set none, whichever flag came first on the command line.
+    // Order-independent: the cap is raised only where the user set none, whichever flag came first.
     // The HTML export bundles every aggregate, so it takes the same budget.
-    if ((opts.sections.any_non_trace() || !opts.html_path.empty()) && !explicit_instructions)
+    if ((opts.sections.any_non_trace() || !opts.html_path.empty()) && !parser.was_given("--instructions"))
         opts.instructions = stats_instruction_default;
 
     return opts;
+}
+
+cc::string_view usage_text()
+{
+    // Rendered once and kept, because the declared return type is a view.
+    static auto const text = []
+    {
+        auto opts = options();
+        auto debuggee_args = cc::vector<cc::string_view>();
+        auto target_error = cc::string();
+        auto args = build_cli(opts, debuggee_args, target_error);
+
+        return args.help_text({.width = cc::console::terminal_width().value_or(100)});
+    }();
+
+    return text;
 }
 } // namespace itrace

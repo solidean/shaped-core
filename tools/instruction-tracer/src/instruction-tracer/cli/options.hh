@@ -107,7 +107,7 @@ namespace itrace
 /// Parse argv; argv[0] is ignored.
 /// Every boolean flag has a `--no-<flag>` form.
 /// Fails on an unknown flag, a missing or malformed value, or a missing --exe / target.
-cc::result<options> parse_options(cc::span<char const* const> args);
+cc::result<options, cc::string> parse_options(cc::span<char const* const> args);
 
 cc::string_view usage_text();
 } // namespace itrace

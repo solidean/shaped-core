@@ -285,7 +285,7 @@ int main(int argc, char const* const* argv)
 
     if (opts.has_error())
     {
-        cc::eprintln("error: {}\n", opts.error().to_string());
+        cc::eprintln("error: {}\n", opts.error());
         cc::eprint(itrace::usage_text());
         return exit_usage;
     }

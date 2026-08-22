@@ -268,16 +268,6 @@ nx::args_builder& nx::args_builder::document_env(cc::string_view name, cc::strin
 
 namespace
 {
-/// Whether a canonical name was given at least once, matched the way a user would write it.
-bool was_given(cc::span<nx::impl::binding const> bindings, cc::string_view name)
-{
-    for (auto const& b : bindings)
-        if (b.canonical == name)
-            return b.occurrences > 0;
-
-    return false;
-}
-
 cc::string join_names(cc::span<cc::string_view const> names, cc::string_view separator)
 {
     auto out = cc::string();
@@ -292,6 +282,15 @@ cc::string join_names(cc::span<cc::string_view const> names, cc::string_view sep
     return out;
 }
 } // namespace
+
+bool nx::args_builder::was_given(cc::string_view name) const
+{
+    for (auto const& b : _bindings)
+        if (b.canonical == name)
+            return b.occurrences > 0;
+
+    return false;
+}
 
 nx::args_builder& nx::args_builder::require(cc::string_view description, cc::unique_function<bool()> predicate)
 {
@@ -313,11 +312,11 @@ nx::args_builder& nx::args_builder::requires_all(cc::string_view name, cc::span<
         .check =
             [this, owned_name = cc::move(owned_name), owned_required = cc::move(owned_required)]
         {
-            if (!was_given(_bindings, owned_name))
+            if (!was_given(owned_name))
                 return true;
 
             for (auto const& r : owned_required)
-                if (!was_given(_bindings, r))
+                if (!was_given(r))
                     return false;
 
             return true;
@@ -340,7 +339,7 @@ nx::args_builder& nx::args_builder::mutually_exclusive(cc::span<cc::string_view 
         {
             auto given = isize(0);
             for (auto const& n : owned)
-                if (was_given(_bindings, n))
+                if (was_given(n))
                     ++given;
 
             return given <= 1;
@@ -362,7 +361,7 @@ nx::args_builder& nx::args_builder::at_least_one_of(cc::span<cc::string_view con
             [this, owned = cc::move(owned)]
         {
             for (auto const& n : owned)
-                if (was_given(_bindings, n))
+                if (was_given(n))
                     return true;
 
             return false;

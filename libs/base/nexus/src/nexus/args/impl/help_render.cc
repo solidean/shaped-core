@@ -132,9 +132,6 @@ cc::string names_of(binding const& b)
     if (b.takes_value && !b.metavar.empty())
         cc::format_append(out, " {}", b.metavar);
 
-    if (b.negatable)
-        out += ", --no-...";
-
     return out;
 }
 
@@ -176,6 +173,16 @@ cc::string annotations_of(binding const& b)
             out += "]";
         }
     }
+
+    // The negated spelling goes here rather than in the names column: `--no-memory-instruction-addresses`
+    // beside its positive form would be sixty-five characters of name against a four-word description.
+    if (b.negatable && !b.names.empty())
+        for (auto const& n : b.names)
+            if (!n.is_short && !n.hidden)
+            {
+                cc::format_append(out, " [or --no-{}]", n.text);
+                break;
+            }
 
     if (!b.validator_description.empty())
         cc::format_append(out, " ({})", b.validator_description);
