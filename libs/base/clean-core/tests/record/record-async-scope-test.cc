@@ -32,6 +32,8 @@ extern cc::atomic<int> g_probe_polls;
 extern cc::atomic<cc::u64> g_probe_park_tls;
 extern cc::atomic<cc::u64> g_probe_park_slot;
 extern cc::atomic<cc::u64> g_probe_last_installed;
+extern cc::atomic<cc::u64> g_probe_installed_incl_null;
+extern cc::atomic<cc::u64> g_probe_tls_before_invoke;
 } // namespace cc::impl
 
 namespace
@@ -382,6 +384,9 @@ REC_TEST("record/async-scope - PROBE arm")
                     cc::impl::g_probe_park_tls.load(cc::memory_order_relaxed),
                     cc::impl::g_probe_park_slot.load(cc::memory_order_relaxed),
                     cc::impl::g_probe_last_installed.load(cc::memory_order_relaxed));
+        cc::println("      installed_incl_null={:#x} tls_before_invoke={:#x}",
+                    cc::impl::g_probe_installed_incl_null.load(cc::memory_order_relaxed),
+                    cc::impl::g_probe_tls_before_invoke.load(cc::memory_order_relaxed));
     }
     CHECK(true);
 }

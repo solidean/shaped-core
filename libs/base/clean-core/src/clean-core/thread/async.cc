@@ -20,6 +20,8 @@ cc::atomic<int> g_probe_polls = {0};
 cc::atomic<cc::u64> g_probe_park_tls = {0};      // what the park stored
 cc::atomic<cc::u64> g_probe_park_slot = {0};     // the node slot it stored into, after the store
 cc::atomic<cc::u64> g_probe_last_installed = {0};// what the most recent poll installed
+cc::atomic<cc::u64> g_probe_installed_incl_null = {0}; // ... including a null, which the above hides
+cc::atomic<cc::u64> g_probe_tls_before_invoke = {0};   // the thread ambient as the frame is entered
 } // namespace cc::impl
 
 using namespace cc::primitive_defines;
@@ -841,6 +843,7 @@ void cc::async_node_base::poll()
     // That is the eager depth-first drive: a dependency polled inline belongs to the subtree driving it, and a 512-node chain pays ONE install rather than 512.
     impl::g_probe_polls.fetch_add(1, cc::memory_order_relaxed);
     void* const installed = ambient();
+    impl::g_probe_installed_incl_null.store(u64(installed), cc::memory_order_relaxed);
     if (installed != nullptr)
         impl::g_probe_last_installed.store(u64(installed), cc::memory_order_relaxed);
     impl::async_ambient_poll_scope const ambient_scope(installed);
@@ -930,7 +933,8 @@ void cc::async_node_base::poll()
         // Run the compute step with the frame in place -- it is never moved, so parking is free and a stateful (mutable) closure picks up where it left off.
         // If it resolves, with a value OR an error, it has already destroyed itself: finish_value / finish_error builds the result over the frame's own slot.
         // A frame that throws instead is failed on its error channel by invoke_frame_step, so it too arrives here as produced_error.
-        switch (invoke_frame_step(ctx))
+        impl::g_probe_tls_before_invoke.store(u64(impl::async_tls().ambient), cc::memory_order_relaxed);
+    switch (invoke_frame_step(ctx))
         {
         case async_step_status::produced_value:
         case async_step_status::produced_error:
