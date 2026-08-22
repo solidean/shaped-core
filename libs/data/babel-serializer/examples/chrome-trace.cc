@@ -3,6 +3,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/console_listener.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/hot_functions.hh>
 #include <clean-core/record/recording.hh>
@@ -181,13 +182,22 @@ void load_assets()
 
 // owns_recorder because this drives cc::rec::initialize itself, and nx::run stands a recorder up for the whole binary.
 // Without it the initialize below is a second one, which asserts.
-EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
+//
+// exclusive() comes with it, and untagged: the recorder is process-wide, so handing it to one entry takes it away
+// from everything running alongside — which nexus asserts on rather than letting it produce a torn recording.
+EXAMPLE("babel-serializer/chrome-trace", nx::config::exclusive(), nx::config::owns_recorder)
 {
     using namespace cc::primitive_defines;
 
     // Nothing is recorded until the system is up — a library never decides this on the program's behalf.
     cc::rec::initialize();
     cc::rec::set_current_thread_record_name("main");
+
+    // What an application writes to get its own log onto its terminal.
+    // Registered first, so it is the layer everything else records BELOW — and default-constructed, so the run
+    // honors CC_LOG_LEVEL, CC_LOG_COLOR and friends:
+    //   CC_LOG_LEVEL=debug uv run dev.py example babel-serializer/chrome-trace
+    cc::rec::install_default_console_listener();
 
     cc::rec::recording captured;
     {
