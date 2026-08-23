@@ -73,6 +73,10 @@ There the span covers the singleflight decision too, and a joiner that never ent
 
 Which to pick is about what the span should cover, not about what is legal.
 
+**Except on MSVC ARM64, where opening one inside a coroutine body does not survive the suspend.**
+The body resumes attributed to its caller's context instead of its own, so the span is wrong rather than missing — everything cc::async does with the context measures correct, and the loss happens inside the coroutine resume.
+`record-async-scope-test.cc` skips its in-coroutine case there and says what is known; open the scope around the code that builds the work if that target matters to you.
+
 It costs two refcounted allocations against a scope's two thread-local writes, so it is the right trade for a request, a frame or a job, and the wrong one for an inner loop.
 
 ## Stats
