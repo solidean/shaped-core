@@ -4,6 +4,8 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/platform/console.hh>
+#include <clean-core/platform/environment.hh>
+#include <clean-core/record/domain.hh>
 #include <clean-core/record/console_listener.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
@@ -17,11 +19,22 @@ using namespace cc_rec_test;
 // These pin the OPTIONS and the resolution rules rather than the exact glyphs: the layout is meant to be tuned, and
 // a test that pins every space would make tuning it a chore rather than a decision.
 
-TEST("record/console - explicit options are taken verbatim, ignoring the environment")
+// The environment is PROCESS-wide, so every test below that writes one excludes its fellows.
+// A tag rather than a bare exclusive(): they conflict only with each other, and the rest of the suite runs beside
+// them freely — without it they interleave and clobber each other's scoped variables, which is a failure that reads
+// like a parsing bug.
+TEST("record/console - explicit options are taken verbatim, ignoring the environment", nx::config::exclusive("env"))
 {
     // The contract that lets an application configure its logging and keep it: only a DEFAULT-constructed listener
     // consults the environment, so a stray CC_LOG_LEVEL in a developer's shell cannot silence a program that asked
     // for debug output in code.
+    //
+    // The variables are set here rather than assumed absent, which is the whole claim — reading the fields back out
+    // of a listener nothing tried to override would pass whether or not the contract held.
+    cc::scoped_environment_variable const level("CC_LOG_LEVEL", "error");
+    cc::scoped_environment_variable const time("CC_LOG_TIME", "datetime");
+    cc::scoped_environment_variable const thread("CC_LOG_THREAD", "1");
+
     auto const listener = cc::rec::console_listener({
         .min_level = cc::rec::level::debug,
         .time = cc::rec::console_time::none,
@@ -33,6 +46,83 @@ TEST("record/console - explicit options are taken verbatim, ignoring the environ
     CHECK(listener.options().time == cc::rec::console_time::none);
     CHECK(!listener.options().show_thread);
     CHECK(!listener.is_colored());
+}
+
+TEST("record/console - from_environment parses every variable it documents", nx::config::exclusive("env"))
+{
+    cc::scoped_environment_variable const level("CC_LOG_LEVEL", "trace");
+    cc::scoped_environment_variable const time("CC_LOG_TIME", "datetime");
+    cc::scoped_environment_variable const color("CC_LOG_COLOR", "never");
+    cc::scoped_environment_variable const thread("CC_LOG_THREAD", "off");
+    cc::scoped_environment_variable const domain("CC_LOG_DOMAIN", "0");
+    cc::scoped_environment_variable const site("CC_LOG_SITE", "yes");
+
+    auto const options = cc::rec::console_options::from_environment();
+
+    CHECK(options.min_level == cc::rec::level::trace);
+    CHECK(options.time == cc::rec::console_time::wall_datetime); // spelled `datetime` in the environment
+    CHECK(options.color == cc::console::color_mode::never);
+    CHECK(!options.show_thread);
+    CHECK(!options.show_domain);
+    CHECK(options.show_site);
+}
+
+TEST("record/console - an unset variable leaves its field alone, and an unparseable one is ignored", nx::config::exclusive("env"))
+{
+    // Both halves of "a misspelled log setting must never be why a program refuses to start": nonsense is dropped
+    // rather than diagnosed, and it leaves the default it failed to replace.
+    cc::scoped_environment_variable const level("CC_LOG_LEVEL", "loud");
+    cc::scoped_environment_variable const time("CC_LOG_TIME", "yesterday");
+    cc::scoped_environment_variable const color("CC_LOG_COLOR", "chartreuse");
+
+    auto const defaults = cc::rec::console_options{};
+    auto const options = cc::rec::console_options::from_environment();
+
+    CHECK(options.min_level == defaults.min_level);
+    CHECK(options.time == defaults.time);
+    CHECK(options.color == defaults.color);
+}
+
+TEST("record/console - the environment applies OVER a caller's base, not over the struct's defaults", nx::config::exclusive("env"))
+{
+    // How nexus keeps `elapsed` for a test run while CC_LOG_LEVEL still reaches the binary.
+    cc::scoped_environment_variable const level("CC_LOG_LEVEL", "debug");
+    cc::scoped_environment_variable const time("CC_LOG_TIME", {}); // unset: the base's choice stands
+
+    auto const options = cc::rec::console_options::from_environment({
+        .min_level = cc::rec::level::warning,
+        .time = cc::rec::console_time::elapsed,
+    });
+
+    CHECK(options.min_level == cc::rec::level::debug);         // the environment won
+    CHECK(options.time == cc::rec::console_time::elapsed);     // ... and left alone what it said nothing about
+}
+
+TEST("record/console - CC_LOG_LEVEL opens the domain gate, and only ever opens it", nx::config::exclusive("env"))
+{
+    // The half that a listener cannot do: trace and debug are off at the DOMAIN, so a min_level below info would
+    // otherwise filter events that were never recorded in the first place.
+    scoped_domain_mask const restore(cc::rec::g_default_domain);
+
+    auto const before = cc::rec::g_default_domain.enabled_mask();
+    REQUIRE(!cc::rec::g_default_domain.is_enabled(cc::rec::level::debug));
+
+    {
+        cc::scoped_environment_variable const level("CC_LOG_LEVEL", "debug");
+        cc::rec::enable_environment_log_levels();
+    }
+
+    CHECK(cc::rec::g_default_domain.is_enabled(cc::rec::level::debug));
+    CHECK(cc::rec::g_default_domain.is_enabled(cc::rec::level::info)); // everything above it too
+
+    // Only ever ON: a variable naming `error` must not silence what a program asked for in code.
+    {
+        cc::scoped_environment_variable const level("CC_LOG_LEVEL", "error");
+        cc::rec::enable_environment_log_levels();
+    }
+
+    CHECK(cc::rec::g_default_domain.is_enabled(cc::rec::level::debug));
+    CHECK((cc::rec::g_default_domain.enabled_mask() & before) == before);
 }
 
 TEST("record/console - color::always resolves to colored whether or not a terminal is attached")
