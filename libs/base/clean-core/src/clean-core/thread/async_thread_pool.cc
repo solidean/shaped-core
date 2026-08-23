@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 
 #if CC_HAS_THREADS
@@ -68,6 +69,9 @@ int cc::async_thread_pool::default_worker_count()
 // So the poll loop must keep publishing dependencies rather than assume it is alone and drive them all inline.
 cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(true)
 {
+    // Spawning N OS threads, which is where a slow start-up is.
+    CC_RECORD_SCOPE("cc.thread_pool.create");
+
     CC_ASSERT(worker_count >= 1, "a thread pool needs at least one worker");
     _thread_count = worker_count;
 
@@ -87,6 +91,9 @@ cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(tru
 
 cc::async_thread_pool::~async_thread_pool()
 {
+    // Joins every worker, so a task that never returns hangs HERE rather than where it was submitted.
+    CC_RECORD_SCOPE("cc.thread_pool.destroy");
+
     CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
               "uninstall this pool as the default before destroying it (uninstall_default_async_scheduler / "
               "scoped_default_async_scheduler)");

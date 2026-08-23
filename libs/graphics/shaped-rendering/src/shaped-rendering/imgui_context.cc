@@ -1,4 +1,5 @@
 #include <clean-core/common/asserts.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/memory/allocation.hh> // cc::default_memory_resource
 #include <imgui/imgui.h>
 #include <shaped-rendering/imgui_context.hh>
@@ -479,6 +480,10 @@ void imgui_context::begin_frame(window& win, float delta_time)
 {
     CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
 
+    // A span whose ends are in different functions, so the unmatched form — end_frame owes the close.
+    // ImGui's frame IS a bracket across user code, and there is no block to wrap.
+    CC_RECORD_SCOPE_BEGIN("sr.imgui.frame");
+
     auto& wsys = win.system();
     install_clipboard(wsys);
     install_viewports(wsys, win);
@@ -540,6 +545,8 @@ void imgui_context::end_frame()
 {
     CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
     ImGui::Render(); // builds the draw data ImGui::GetDrawData() returns
+
+    CC_RECORD_SCOPE_END("sr.imgui.frame");
 
     _viewport_update_pending = (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0;
 }

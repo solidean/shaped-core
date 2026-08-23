@@ -2,6 +2,7 @@
 // Placement itself happens in create_dx12_buffer.
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -44,6 +45,8 @@ sg::memory_requirements dx12_memory_heap::query_buffer_requirements(isize size_i
 
 cc::result<dx12_memory_heap_handle> dx12_context::create_dx12_memory_heap(isize size_in_bytes)
 {
+    CC_RECORD_ACCUM("sg.heap.bytes_allocated", cc::rec::unit_bytes, size_in_bytes);
+
     return dx12_memory_heap::create(_device.Get(), size_in_bytes);
 }
 } // namespace sg::backend::dx12

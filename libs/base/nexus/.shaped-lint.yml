@@ -42,11 +42,6 @@ rules:
     files: src/nexus/bench/**
 
   - kind: allow-include
-    value: [<iostream>, <cstdio>]
-    reason: "TODO: migrate to cc::println / cc::eprintln — the runner's output predates cc::print"
-    files: src/**
-
-  - kind: allow-include
     value: [<string>, <string_view>]
     reason: "TODO: migrate to cc::string — the runner's own strings predate it"
     files: src/**

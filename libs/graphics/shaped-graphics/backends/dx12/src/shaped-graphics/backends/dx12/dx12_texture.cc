@@ -1,6 +1,7 @@
 // dx12_texture: GPU texture creation, committed and dedicated, plus the deferred-deletion destructor.
 // The type is otherwise header-only (ctor + fields).
 
+#include <clean-core/common/profiling.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
@@ -118,6 +119,8 @@ dx12_texture::~dx12_texture()
 cc::result<dx12_texture_handle> dx12_context::create_dx12_texture(sg::texture_description const& desc,
                                                                   sg::allocation_info const& alloc)
 {
+    CC_RECORD_ACCUM("sg.texture.count_allocated", cc::rec::unit_count, 1);
+
     // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point
     // rather than surfacing as a CreateCommittedResource driver error.
     desc.assert_valid();

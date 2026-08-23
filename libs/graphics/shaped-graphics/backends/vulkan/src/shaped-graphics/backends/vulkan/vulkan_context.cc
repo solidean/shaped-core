@@ -1,10 +1,13 @@
 // vulkan_context: device-level lifetime bodies (shutdown / teardown) plus small shared helpers.
 // Bring-up lives in vulkan_context.create.cc, the epoch bodies in vulkan_epoch.cc.
 
+#include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
 namespace sg::backend::vulkan
 {
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg.vulkan");
+
 char const* vk_result_name(VkResult r)
 {
     switch (r)

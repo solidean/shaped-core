@@ -17,6 +17,14 @@ namespace cc::rec
 {
 [[nodiscard]] rec::listener_handle register_listener(rec::listener& l);
 void unregister_listener(rec::listener_handle h);
+
+/// Whether `h` still names a live registration.
+///
+/// False for a default-constructed handle, for one already unregistered, and for one whose slot has since been reused
+/// by somebody else — the generation is what separates the last case from a match.
+/// This is for code that hands a handle out and may be called again after the caller unregistered it; a listener that
+/// knows its own lifetime needs nothing here.
+[[nodiscard]] bool is_listener_registered(rec::listener_handle h);
 } // namespace cc::rec
 
 /// Registration handle.
@@ -33,6 +41,7 @@ struct cc::rec::listener_handle
 private:
     friend rec::listener_handle rec::register_listener(rec::listener&);
     friend void rec::unregister_listener(rec::listener_handle);
+    friend bool rec::is_listener_registered(rec::listener_handle);
 
     isize _index = -1;
     u64 _generation = 0;

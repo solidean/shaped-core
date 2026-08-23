@@ -107,31 +107,39 @@ cc::string_view escape_of(color c)
 }
 } // namespace
 
-void configure(color_mode mode)
+bool resolve(color_mode mode)
 {
+    auto enabled = false;
     switch (mode)
     {
     case color_mode::always:
-        g_enabled = true;
+        enabled = true;
         break;
 
     case color_mode::never:
-        g_enabled = false;
+        enabled = false;
         break;
 
     case color_mode::automatic:
         // NO_COLOR wins over FORCE_COLOR (the no-color.org convention).
         if (std::getenv("NO_COLOR") != nullptr)
-            g_enabled = false;
+            enabled = false;
         else if (std::getenv("FORCE_COLOR") != nullptr)
-            g_enabled = true;
+            enabled = true;
         else
-            g_enabled = is_terminal(stdout) && is_terminal(stderr);
+            enabled = is_terminal(stdout) && is_terminal(stderr);
         break;
     }
 
-    if (g_enabled)
+    if (enabled)
         enable_windows_vt();
+
+    return enabled;
+}
+
+void configure(color_mode mode)
+{
+    g_enabled = resolve(mode);
 }
 
 bool color_enabled()

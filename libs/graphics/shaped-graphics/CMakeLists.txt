@@ -5,6 +5,7 @@ project(shaped-graphics LANGUAGES CXX)
 # GPU resource types plus the pure-virtual backend bridge. Concrete backends live under
 # backends/ as their own static libraries and are added conditionally below.
 add_library(shaped-graphics
+    src/shaped-graphics/fwd.cc
     src/shaped-graphics/resource/raw_buffer.cc
     src/shaped-graphics/resource/raw_texture.cc
     src/shaped-graphics/bytes_future.cc
@@ -198,6 +199,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/access_state-test.cc
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
+        tests/barrier/slot-recording-test.cc
     )
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend

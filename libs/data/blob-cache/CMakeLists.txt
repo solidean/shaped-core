@@ -56,6 +56,7 @@ target_compile_options(blob-cache
 if(SC_BUILD_TESTS)
     add_executable(blob-cache-test
         tests/main.cc
+        tests/recording-test.cc
         tests/cache_fixture.cc
         tests/default-cache-test.cc
         tests/put-get-test.cc

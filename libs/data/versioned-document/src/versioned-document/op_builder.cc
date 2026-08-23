@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/set.hh>
 #include <versioned-document/value_builder.hh>
 
@@ -92,6 +93,9 @@ vdoc::op vdoc::op_builder::build(op_graph const& graph, snapshot_cache& cache) c
 
 vdoc::op vdoc::op_builder::impl_build(op_graph const& graph, snapshot_cache* cache) const
 {
+    // On impl_build rather than build, so the cacheless overload is covered by the same span.
+    CC_RECORD_SCOPE("vdoc.op_builder.build");
+
     auto parents = _parents;
     cc::sort(parents, op_id::by_bytes{});
 

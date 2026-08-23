@@ -3,6 +3,7 @@
 // present fence gates back-buffer reuse.
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -43,6 +44,8 @@ void apply_hdr_colorspace(IDXGISwapChain3* swapchain, sg::pixel_format format)
 
 cc::result<dx12_swapchain_handle> dx12_context::create_dx12_swapchain(sg::swapchain_description const& desc)
 {
+    CC_RECORD_SCOPE("sg.swapchain.create");
+
     // Validate the contract before any DXGI work, so a bad desc asserts at the entry point.
     desc.assert_valid();
 
@@ -142,6 +145,9 @@ void dx12_swapchain::release_backbuffers()
 
 cc::result<cc::unit> dx12_swapchain::resize(tg::vec2i size)
 {
+    // Drains the GPU and rebuilds every backbuffer, so a resize is a stall by construction.
+    CC_RECORD_SCOPE("sg.swapchain.resize");
+
     // ResizeBuffers requires zero outstanding back-buffer references — hence the present-fence wait plus release below.
     wait_for_gpu();
     release_backbuffers();
@@ -158,6 +164,9 @@ cc::result<cc::unit> dx12_swapchain::resize(tg::vec2i size)
 
 sg::render_target_view dx12_swapchain::acquire_backbuffer()
 {
+    // Blocks when the presentation queue is full, which is where a frame-paced program spends its wait.
+    CC_RECORD_SCOPE("sg.swapchain.acquire_backbuffer");
+
     CC_ASSERT(!_acquired, "acquire_backbuffer() called twice without an intervening present()");
 
     // Auto-resize to the window, but only the first acquire of each epoch checks.
@@ -199,6 +208,8 @@ void dx12_swapchain::record_present_transition(sg::command_list& cmd)
 
 void dx12_swapchain::present()
 {
+    CC_RECORD_SCOPE("sg.swapchain.present");
+
     CC_ASSERT(_acquired, "present() without a matching acquire_backbuffer()");
     _acquired = false;
 

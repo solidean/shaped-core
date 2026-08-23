@@ -1,6 +1,7 @@
 #include <babel-serializer/image/impl/stb_backend.hh>
 #include <babel-serializer/image/jpg.hh>
 #include <clean-core/common/endian.hh> // cc::load_bytes_be — JPEG's marker segments are big-endian
+#include <clean-core/common/profiling.hh>
 
 namespace babel::jpg
 {
@@ -122,6 +123,8 @@ header_scan scan_headers(cc::span<byte const> bytes)
 
 cc::result<data> read(cc::span<byte const> bytes)
 {
+    CC_RECORD_SCOPE("jpg.read");
+
     if (bytes.size() < 2 || bytes[0] != byte(0xFF) || bytes[1] != byte(0xD8))
         return cc::error("jpg: bad SOI marker (not a JPEG)");
 

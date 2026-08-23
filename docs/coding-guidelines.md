@@ -519,6 +519,28 @@ Each explicit UB usage must be heavily documented and justified.
 
 ---
 
+## Diagnostics & Observability
+
+**A library never prints.** Only a binary's own top layer does.
+
+`cc::print` is for a program's OUTPUT — a CLI's result, a test runner's report, an example demonstrating something.
+Anything a library noticed while doing its job is a log message: `CC_LOG_WARNING`, `CC_LOG_ERROR`, and the rest of `CC_LOG_*`.
+A library does not know whether anyone is watching a terminal, and must not be the one deciding that a message deserves one.
+
+A logged diagnostic also reaches what a printed one cannot: a crash dump, a file listener, and a failing test's `.ccrec`.
+That is what makes a warning something a test can assert on rather than something a person has to notice.
+
+**Every library declares a recording domain** in its top-level `fwd.hh`, and defines it in exactly one `.cc`.
+A domain is what a site is attributed to, resolved by ordinary unqualified name lookup.
+So no call site ever names one, and a nested namespace shadows the enclosing one for free.
+
+Do NOT prefix a message with the library's name: the domain already supplies it, and a hand-written `[sg]` only double-prints.
+
+[logging](../libs/base/clean-core/docs/logging.md) and [profiling](../libs/base/clean-core/docs/profiling.md) are the how.
+[systems/recording](../libs/base/clean-core/docs/systems/recording.md) is the mechanism underneath both.
+
+---
+
 ## Standard Library & Dependencies
 
 **Avoid `std::` code.** Almost always use `cc::` equivalents instead.
@@ -877,6 +899,7 @@ Liberal use of `friend` in core API is allowed to access internals in `experimen
 - [ ] Consider C++23 deducing `this` where appropriate
 - [ ] Move assignment is subobject-safe (or documented otherwise)
 - [ ] Avoid `std::`—use `cc::` equivalents (a new stdlib header needs a blessing in the library's `.shaped-lint.yml`)
+- [ ] Diagnostics go through `CC_LOG_*`, never `cc::print` — and carry no hand-written library prefix
 - [ ] No reliance on UB (or heavily documented/justified)
 - [ ] Template bloat minimized (type erasure, thin templates)
 - [ ] `static_assert` used for quality error messages in templates

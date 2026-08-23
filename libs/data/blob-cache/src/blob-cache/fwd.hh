@@ -2,6 +2,7 @@
 
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 
 /// Aggregate forward declarations for blob-cache.
 ///
@@ -108,3 +109,9 @@ class flight_table;
 /// One registration in that table: the operation, held weakly, plus the generation that dates it.
 struct flight_slot;
 } // namespace bcache::impl
+
+namespace bcache
+{
+/// The domain every recording site in blob-cache is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace bcache

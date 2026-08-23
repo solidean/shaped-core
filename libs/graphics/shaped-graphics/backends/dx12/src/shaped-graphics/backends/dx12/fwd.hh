@@ -100,4 +100,8 @@ class dx12_upload_waker;
 class dx12_download_async_system;
 struct dx12_async_download_job;
 struct dx12_download_sink;
+
+/// The domain every recording site in the DirectX 12 backend is attributed to.
+/// It shadows sg's, so a backend message is never mistaken for a portable one.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sg::backend::dx12

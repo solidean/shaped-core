@@ -20,6 +20,21 @@ namespace cc::impl
 [[nodiscard]] u64 monotonic_ticks();
 } // namespace cc::impl
 
+/// One wall-clock instant, split into the fields a person reads.
+///
+/// Only ever produced by local_calendar_time — there is no arithmetic on one and no way back to epoch seconds,
+/// because a broken-down local time is an OUTPUT format rather than a way to carry a timestamp around.
+struct cc::calendar_time
+{
+    i32 year = 1970;
+    u8 month = 1;  ///< 1-12
+    u8 day = 1;    ///< 1-31
+    u8 hour = 0;   ///< 0-23
+    u8 minute = 0; ///< 0-59
+    u8 second = 0; ///< 0-60, since a leap second is a real reading
+    u16 millisecond = 0;
+};
+
 namespace cc
 {
 /// Seconds on a steady clock: never adjusted, never runs backwards, and its zero point is arbitrary.
@@ -37,6 +52,14 @@ namespace cc
 /// So a difference of two readings is NOT a duration: for how long something took, use current_time_steady_secs.
 /// A double holds present-day epoch seconds to about a microsecond, finer than any platform's wall clock resolves.
 [[nodiscard]] double current_time_wall_secs();
+
+/// Splits epoch seconds into LOCAL calendar fields, applying whatever UTC offset and DST rule is in effect then.
+///
+/// The offset is resolved per call rather than cached, because a process that outlives a DST transition would
+/// otherwise print an hour that never happened — and a long-running one is exactly what logs come from.
+/// A reading the platform cannot convert comes back as the epoch rather than as an error: this formats a log line,
+/// and a wrong-looking timestamp beats losing the message it was attached to.
+[[nodiscard]] cc::calendar_time local_calendar_time(double wall_secs);
 
 /// Whether this architecture has a CHEAP counter register, known at compile time.
 /// True on x86 and ARM64, false on WASM.

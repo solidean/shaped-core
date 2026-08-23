@@ -2,6 +2,7 @@
 // The heavy bodies live in the respective dx12_*.cc; these are the context create_dx12_* entry points.
 // Plus the sg::context override forwarders, which unpack the description and downcast the abstract layout handles.
 
+#include <clean-core/common/profiling.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
@@ -54,6 +55,10 @@ cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipel
                                                                                     cc::span<byte const> cached_pipeline,
                                                                                     sg::lifetime_scope scope)
 {
+    // Pipeline creation is the multi-millisecond one: the driver compiles here, and a cached blob is the difference
+    // between a stutter and none.
+    CC_RECORD_SCOPE("sg.pipeline.compute.create");
+
     require_persistent(scope);
     return dx12_compute_pipeline::create(_device.Get(), cc::move(layout), shader, cached_pipeline);
 }
@@ -62,6 +67,8 @@ cc::result<dx12_raster_pipeline_handle> dx12_context::create_dx12_raster_pipelin
                                                                                   dx12_pipeline_layout_handle layout,
                                                                                   sg::lifetime_scope scope)
 {
+    CC_RECORD_SCOPE("sg.pipeline.raster.create");
+
     require_persistent(scope);
     return dx12_raster_pipeline::create(_device.Get(), cc::move(layout), desc);
 }
@@ -71,6 +78,8 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_context::create_dx12_raytracing
     dx12_pipeline_layout_handle layout,
     sg::lifetime_scope scope)
 {
+    CC_RECORD_SCOPE("sg.pipeline.raytracing.create");
+
     require_persistent(scope);
     return dx12_raytracing_pipeline::create(_device.Get(), cc::move(layout), desc);
 }
@@ -79,6 +88,8 @@ cc::result<dx12_raytracing_shader_table_handle> dx12_context::create_dx12_raytra
     sg::raytracing_shader_table_description const& desc,
     sg::lifetime_scope scope)
 {
+    CC_RECORD_SCOPE("sg.pipeline.shader_table.create");
+
     require_persistent(scope);
     return dx12_raytracing_shader_table::create(*this, desc);
 }

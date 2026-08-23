@@ -2,6 +2,7 @@
 
 #include <blob-cache/blob_cache.hh>
 #include <blob-cache/default_cache.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/container/pinned_data.hh>
@@ -164,9 +165,15 @@ sg::async_compiled_shader shader_cache::compile(shader_description const& desc, 
 {
     auto const key = this->compute_key(desc, options);
 
+    // A miss is the lambda RUNNING: the in-memory tier hands back an existing node on a hit and never calls it.
+    // Counting it here rather than around acquire is what makes the two numbers add up to the number of requests.
+    CC_RECORD_ACCUM("ssc.cache.requests", cc::rec::unit_count, 1);
+
     return _cache.acquire(key,
                           [&]() -> sg::async_compiled_shader
                           {
+                              CC_RECORD_ACCUM("ssc.cache.misses", cc::rec::unit_count, 1);
+
                               // Copy desc + options into the deferred coroutine — it outlives this call.
                               auto node
                                   = compile_shader(desc, options, this->resolve_blob_cache(), this->persistent_key(key));

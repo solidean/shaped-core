@@ -1,6 +1,7 @@
 // dx12_buffer: GPU buffer creation, committed and placed, plus the deferred-deletion destructor.
 // The buffer type is otherwise header-only (ctor + fields).
 
+#include <clean-core/common/profiling.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 
@@ -158,6 +159,10 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_by
                                                                 sg::buffer_usages usage,
                                                                 sg::allocation_info const& alloc)
 {
+    // sg tracks no VRAM usage of its own — only the budgets you SET, never the bytes you took — so these are the
+    // first numbers that say how much a program actually allocated.
+    CC_RECORD_ACCUM("sg.buffer.bytes_allocated", cc::rec::unit_bytes, size_in_bytes);
+
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
 
     ComPtr<ID3D12Resource> resource;

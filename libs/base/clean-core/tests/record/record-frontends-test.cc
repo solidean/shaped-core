@@ -307,6 +307,42 @@ REC_TEST("record/scope - the explicit begin/end pair nests like the block form")
     CHECK(c.count_named("inside") == 1);
 }
 
+REC_TEST("record/scope - an END with nothing open is refused rather than wrapping the depth")
+{
+    // The failure this bounds: a BEGIN whose END is never reached — an early return, a throw — leaves the thread one
+    // level deep forever, and every later END pops one too many.
+    // scope_depth is UNSIGNED, so the first over-pop would wrap it to four billion and misplace every scope on the
+    // thread for the rest of its life, long after the frame that dropped its END is gone.
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        // A leak, then a close that has nothing of its own to close.
+        CC_RECORD_SCOPE_BEGIN("leaked");
+        CC_RECORD_SCOPE_END("leaked");
+        CC_RECORD_SCOPE_END("nothing-is-open");
+
+        // Whatever the damage above, the depth is still sane here.
+        // In its own block, so its END is recorded before the flush rather than after it.
+        {
+            CC_RECORD_SCOPE("after");
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const ends = c.of_kind(cc::rec::event_kind::scope_end);
+
+    // Two ends, not three: the unmatched one recorded nothing at all.
+    REQUIRE(ends.size() == 2);
+
+    // And the scope opened afterwards still sits at depth 0, which is what would have been lost to a wrap.
+    CHECK(c.of_kind(cc::rec::event_kind::scope_begin).size() == 2);
+    CHECK(ends[1]->depth.value() == 0);
+}
+
 REC_TEST("record/scope - a disabled category leaves the pair balanced")
 {
     rec_fixture const fixture(deterministic_config());
@@ -366,7 +402,7 @@ REC_TEST("record/console - only log events reach the terminal, in timestamp orde
 {
     rec_fixture const fixture(deterministic_config());
 
-    auto console = cc::rec::console_listener({.min_level = cc::rec::level::warning, .show_time = false});
+    auto console = cc::rec::console_listener({.min_level = cc::rec::level::warning, .time = cc::rec::console_time::none});
     {
         scoped_listener const reg(console);
 
@@ -405,4 +441,76 @@ REC_TEST("record/log - an error carries the stack it was logged from")
 
     REQUIRE(frame_count >= 0); // the event itself must be there either way
     CHECK((frame_count > 0) == cc::stack_capture_available());
+}
+
+REC_TEST("record/scope - CC_RECORD_SCOPE_IF opens only when its condition holds")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        {
+            CC_RECORD_SCOPE_IF(true, "taken");
+        }
+        {
+            CC_RECORD_SCOPE_IF(false, "skipped");
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    CHECK(c.count_named("taken") == 2); // one begin, one end
+    CHECK(c.count_named("skipped") == 0);
+}
+
+REC_TEST("record/scope - a scope that opened still closes, whatever the condition would say later")
+{
+    // The condition is read once, at entry.
+    // A guard that re-read it on the way out could close a scope it never opened, or leave one open forever — and
+    // an unbalanced pair is a wrong flame graph rather than a diagnostic.
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        auto still_true = true;
+        {
+            CC_RECORD_SCOPE_IF(still_true, "closes-anyway");
+            still_true = false;
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    CHECK(c.count_named("closes-anyway") == 2);
+}
+
+REC_TEST("record/scope - a conditional scope nests inside an unconditional one")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        {
+            CC_RECORD_SCOPE("outer");
+            {
+                CC_RECORD_SCOPE_IF(false, "inner-skipped");
+                {
+                    CC_RECORD_SCOPE("inner-kept");
+                }
+            }
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    // A skipped scope must not consume a depth level, or everything under it is re-nested one step too deep.
+    CHECK(c.count_named("outer") == 2);
+    CHECK(c.count_named("inner-skipped") == 0);
+    CHECK(c.count_named("inner-kept") == 2);
 }

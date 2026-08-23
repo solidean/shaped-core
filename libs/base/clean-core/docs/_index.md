@@ -36,6 +36,11 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   what indexing checks, and when references and iterators die.
 - [strings](strings.md) — `cc::string` and `cc::string_view`: null-termination and C interop, when a pointer dies,
   how storage moves between inline and heap, and what hashes equal to what.
+- [logging](logging.md) — `CC_LOG_*`: the five levels and when each is right, and how a library gets a domain.
+  Why a varying format string destroys the grouping that makes "how often does this fire" answerable.
+  Configuring the console listener, its environment overrides, and how a logged warning becomes something a test can assert on.
+- [profiling](profiling.md) — scopes, async scopes, sampling and stats: which to reach for, and where a scope belongs and where it does not.
+  The snapshot-vs-accumulate choice, which decides whether a graph means anything at all.
 - [formatting](formatting.md) — `cc::format` and the `to_string` / `to_debug_string` alternatives.
   The placeholder grammar, the `cc::custom::formatter<T>` protocol, and what the compile-time check does and does not cover.
 - [sequence](sequence.md) — `cc::sequence`, the lazy forward cursor over a range.

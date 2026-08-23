@@ -17,6 +17,9 @@ The authoring surface sits at the root; everything else is one folder down — `
 #include <shaped-viewer/all.hh>   // umbrella
 ```
 
+**Recording domain:** `sv`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
 ## Per-frame description — what to render
 
 ```cpp

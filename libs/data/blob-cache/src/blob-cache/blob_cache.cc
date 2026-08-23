@@ -1,8 +1,10 @@
 #include <babel-serializer/data/sqlite.hh>
 #include <blob-cache/blob_cache.hh>
 #include <blob-cache/impl/cache_core.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/thread/async_coroutine.hh> // including it is what makes acquire_pipeline a coroutine
 
 namespace bcache
@@ -36,6 +38,10 @@ void bump(std::weak_ptr<cache_core> const& core, i64 cache_stats::* field)
 {
     if (auto const held = core.lock())
         held->stats.lock([&](cache_stats& s) { s.*field += 1; });
+
+    // Outside the lock, and deliberately: a dead core means nobody can read the struct any more, but the event still
+    // belongs in the stream of the run that produced it.
+    impl::record_stat(field, 1);
 }
 
 /// The lookup half, as a node the pipeline can park on.
@@ -129,6 +135,39 @@ cc::shared_async<blob> acquire_pipeline(std::weak_ptr<cache_core> core,
 }
 } // namespace
 
+namespace impl
+{
+void record_stat(i64 cache_stats::* field, i64 n)
+{
+    if (field == &cache_stats::hits)
+        CC_RECORD_ACCUM("bcache.hits", cc::rec::unit_count, n);
+    else if (field == &cache_stats::misses)
+        CC_RECORD_ACCUM("bcache.misses", cc::rec::unit_count, n);
+    else if (field == &cache_stats::expired_as_miss)
+        CC_RECORD_ACCUM("bcache.expired_as_miss", cc::rec::unit_count, n);
+    else if (field == &cache_stats::puts_stored)
+        CC_RECORD_ACCUM("bcache.puts_stored", cc::rec::unit_count, n);
+    else if (field == &cache_stats::puts_deduplicated)
+        CC_RECORD_ACCUM("bcache.puts_deduplicated", cc::rec::unit_count, n);
+    else if (field == &cache_stats::puts_lost_race)
+        CC_RECORD_ACCUM("bcache.puts_lost_race", cc::rec::unit_count, n);
+    else if (field == &cache_stats::put_failures)
+        CC_RECORD_ACCUM("bcache.put_failures", cc::rec::unit_count, n);
+    else if (field == &cache_stats::computes_started)
+        CC_RECORD_ACCUM("bcache.computes_started", cc::rec::unit_count, n);
+    else if (field == &cache_stats::singleflight_joins)
+        CC_RECORD_ACCUM("bcache.singleflight_joins", cc::rec::unit_count, n);
+    else if (field == &cache_stats::access_rows_written)
+        CC_RECORD_ACCUM("bcache.access_rows_written", cc::rec::unit_count, n);
+    else if (field == &cache_stats::entries_evicted)
+        CC_RECORD_ACCUM("bcache.entries_evicted", cc::rec::unit_count, n);
+    else if (field == &cache_stats::bytes_reclaimed)
+        CC_RECORD_ACCUM("bcache.bytes_reclaimed", cc::rec::unit_bytes, n);
+    else
+        CC_ASSERT(false, "this cache_stats counter has no recorded name — add one in record_stat");
+}
+} // namespace impl
+
 // ---- creation ------------------------------------------------------------------------------------
 
 blob_cache::blob_cache()
@@ -204,6 +243,13 @@ cc::shared_async<blob> blob_cache::acquire(cache_key const& key,
                                            cc::unique_function<cc::shared_async<blob>()> compute,
                                            acquire_options options)
 {
+    // Around the code that BUILDS the pipeline rather than inside the coroutine, so the span covers the singleflight
+    // decision too — a JOINER never enters the coroutine at all, and is still part of this acquire.
+    //
+    // It rides cc::async's ambient chain, so the node created below inherits it and carries it to whichever worker
+    // ends up running the lookup, the compute and the store — which is what makes one acquire read as one operation.
+    CC_RECORD_ASYNC_SCOPE("bcache.acquire");
+
     // The generation is minted before the claim, so the frame knows which slot it will release without anything having to reach back into a node that is already running.
     auto const generation = flight_table::next_generation();
 
@@ -214,7 +260,9 @@ cc::shared_async<blob> blob_cache::acquire(cache_key const& key,
     auto claim = _core->flights.claim_or_join(key, cc::move(fresh), generation);
     if (!claim.is_owner)
     {
-        _core->stats.lock([](cache_stats& s) { s.singleflight_joins += 1; });
+        // Through the same adder as every other counter: this acquire turned out to BE the one already running,
+        // which is what singleflight exists to make true.
+        bump(_core, &cache_stats::singleflight_joins);
         return cc::move(claim.operation);
     }
 

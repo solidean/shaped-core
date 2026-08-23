@@ -876,8 +876,13 @@ void cc::async_node_base::poll()
                 else
                 {
                     // Ambient write site 3 of 3: we are about to leave this stack, and whoever re-polls us must resume under the context we suspended in.
-                    // Same reasoning as the yield above — we are running, so `installed` is ours.
-                    impl::async_ambient_store(ambient(), installed);
+                    //
+                    // The LIVE thread ambient rather than `installed`, which is what this poll STARTED under.
+                    // A body that opened an ambient scope of its own — CC_RECORD_ASYNC_SCOPE inside a coroutine — is
+                    // suspending under that scope, and resuming under the entry context instead would leave its guard
+                    // popping a link the thread no longer has installed.
+                    // Where the body opened none the two are the same word, and async_ambient_store early-outs on that.
+                    impl::async_ambient_store(ambient(), impl::async_tls().ambient);
 
                     store_state(async_node_state::blocked);
                     parked = true;

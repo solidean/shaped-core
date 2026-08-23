@@ -1,5 +1,6 @@
 #include "record-test-types.hh"
 
+#include <clean-core/common/macros.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/record/async_scope.hh>
@@ -11,6 +12,8 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
+
+#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -231,4 +234,78 @@ REC_TEST("record/async-scope - a recording's pin is not outstanding work")
         cc::rec::flush_blocking();
         CHECK(s.outstanding() == 0);
     }
+}
+
+REC_TEST("record/async-scope - a scope OPENED INSIDE a coroutine survives the suspend it spans")
+{
+    // The other direction from the test above: there the scope wraps the coroutine, here it lives IN it.
+    //
+    // A coroutine that PARKS must record the context it suspended in, not the one it was entered under — otherwise a
+    // scope pushed by the body is missing when the body resumes, and the guard's LIFO check fires from a destructor.
+    // Under nexus that assert becomes a throw, and a throw out of a noexcept destructor is a bare terminate, so this
+    // used to look like a crash with no message at all.
+    //
+    // Parking is the case that broke, and a plain co_await on a ready value never parks: the dependency here is a
+    // MANUAL node completed by another thread, which is the shape blob_cache::acquire has.
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and parking needs a second one to wake it");
+
+#ifdef CC_ARCH_ARM64
+    // KNOWN BROKEN on MSVC ARM64, and skipped rather than weakened: the assertion below is right and the platform
+    // is wrong, so relaxing it would hide a real defect on a target we ship.
+    //
+    // Deterministic there and reproduced nowhere else — not on x64 clang or MSVC, not on any Linux leg, and not in
+    // 300 local repeats or a sweep of waker delays from "already settled" to 20 ms.
+    // Every step of the machinery measures CORRECT on ARM: the park stores the chain the body suspended under, the
+    // node keeps it, the resuming poll reads it back and installs it, and the thread ambient is still that chain as
+    // the frame is entered. The scope guard is never destroyed.
+    // The body then wakes under a DIFFERENT chain — constant across runs, and the one naming the enclosing test —
+    // which places the corruption inside the coroutine resume itself rather than anywhere in cc::async's ambient
+    // handling.
+    //
+    // The next thing to look at is the awaiter TEMPORARY: `co_await cc::async_settled(g)` stores a pointer to it
+    // across the suspension point, and MSVC ARM64 has previously differed from every other compiler about
+    // materializing such a temporary rather than eliding it.
+    SKIP("known broken on MSVC ARM64 — the coroutine resumes under the enclosing test's ambient rather than its own");
+#endif
+
+    rec_fixture const fixture(deterministic_config());
+
+    cc::string inside;
+    cc::string after_suspend;
+
+    auto const r = capture(
+        [&]
+        {
+            auto gate = cc::make_async_manual<int>();
+
+            auto const co = [](cc::shared_async<int> g, cc::string* in, cc::string* after) -> cc::shared_async<int>
+            {
+                CC_RECORD_ASYNC_SCOPE("opened-inside");
+
+                if (auto const* const s = cc::rec::current_async_scope(); s != nullptr)
+                    *in = s->name;
+
+                co_await cc::async_settled(g);
+
+                if (auto const* const s = cc::rec::current_async_scope(); s != nullptr)
+                    *after = s->name;
+
+                co_return 7;
+            }(gate, &inside, &after_suspend);
+
+            std::thread waker(
+                [&gate]
+                {
+                    cc::this_thread_sleep_secs(0.02);
+                    gate->push_value(1);
+                });
+
+            CHECK(cc::async_blocking_get(co) == 7);
+            waker.join();
+        });
+
+    CHECK(inside == "opened-inside");
+    CHECK(after_suspend == "opened-inside"); // the scope is still the innermost one after the suspend
+    CHECK(ambient_changes(r) >= 2);
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/record/domain_fwd.hh>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -411,6 +413,17 @@ union storage_for;
 struct sentinel;
 struct offset_size;
 struct start_end;
+
+struct calendar_time; // one wall-clock instant, split into the fields a person reads (common/time.hh)
+
+
+//
+// Recording
+//
+
+/// The domain every recording site in clean-core is attributed to.
+/// cc::rec shadows this with the system domain, so the recorder's own bookkeeping stays separable from the library's.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 
 } // namespace cc
 

@@ -1,5 +1,6 @@
 #include "module_table.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -52,6 +53,9 @@ bool cc::module_enumeration_available()
 
 cc::vector<cc::loaded_module> cc::enumerate_loaded_modules()
 {
+    // A process snapshot, which is a system call that walks every loaded module.
+    CC_RECORD_SCOPE("cc.modules.enumerate");
+
     cc::vector<cc::loaded_module> out;
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
