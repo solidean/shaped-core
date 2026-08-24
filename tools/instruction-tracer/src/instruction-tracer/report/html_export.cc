@@ -1,8 +1,8 @@
 #include "html_export.hh"
 
+#include <babel-serializer/data/json.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/string/format.hh>
-#include <instruction-tracer/report/json_writer.hh>
 #include <instruction-tracer/report/source_view.hh>
 #include <instruction-tracer/report/trace_formatter.hh> // format_address
 #include <instruction-tracer/report/trace_stats.hh>     // collect_stats, strip_template_args
@@ -15,6 +15,8 @@ namespace itrace
 {
 namespace
 {
+namespace json = babel::json;
+
 cc::string_view reason_text(step_reason reason)
 {
     switch (reason)
@@ -108,131 +110,121 @@ cc::string display_text(recorded_instruction const& insn)
 
 /// {name, value} pairs for the GPRs and flags this instruction changed — the same set the terminal's register-diff shows.
 /// Values are strings, since a register can hold a full 64-bit pointer.
-void write_regdiff(json_writer& j, register_snapshot const& before, register_snapshot const& after)
+void write_regdiff(json::object_writer& parent,
+                   cc::string_view key,
+                   register_snapshot const& before,
+                   register_snapshot const& after)
 {
-    j.begin_array();
+    auto diff = parent.write_array(key);
     for (int i = 0; i < gpr_count; ++i)
     {
         if (before.gpr[i] == after.gpr[i])
             continue;
-        j.begin_object();
-        j.field("name", gpr_names[i]);
-        j.field("value", cc::format("{:#x}", after.gpr[i]));
-        j.end_object();
+        auto r = diff.write_object();
+        r.write("name", gpr_names[i]);
+        r.write("value", cc::format("{:#x}", after.gpr[i]));
     }
     for (auto const& f : flag_bits)
     {
         if (flag_set(before.rflags, f.bit) == flag_set(after.rflags, f.bit))
             continue;
-        j.begin_object();
-        j.field("name", f.name);
-        j.field("value", flag_set(after.rflags, f.bit) ? "1" : "0");
-        j.end_object();
+        auto r = diff.write_object();
+        r.write("name", f.name);
+        r.write("value", flag_set(after.rflags, f.bit) ? "1" : "0");
     }
-    j.end_array();
 }
 
 /// The full entry state: every GPR, rflags, and the named status flags currently set.
-void write_registers(json_writer& j, register_snapshot const& s)
+void write_registers(json::object_writer& parent, cc::string_view key, register_snapshot const& s)
 {
-    j.begin_object();
-    j.key("gpr");
-    j.begin_array();
-    for (int i = 0; i < gpr_count; ++i)
+    auto regs = parent.write_object(key);
     {
-        j.begin_object();
-        j.field("name", gpr_names[i]);
-        j.field("value", cc::format("{:#018x}", s.gpr[i]));
-        j.end_object();
+        auto gpr = regs.write_array("gpr");
+        for (int i = 0; i < gpr_count; ++i)
+        {
+            auto r = gpr.write_object();
+            r.write("name", gpr_names[i]);
+            r.write("value", cc::format("{:#018x}", s.gpr[i]));
+        }
     }
-    j.end_array();
-    j.field("rflags", cc::format("{:#010x}", s.rflags));
-    j.key("flags");
-    j.begin_array();
-    for (auto const& f : flag_bits)
-        if (flag_set(s.rflags, f.bit))
-            j.value_string(f.name);
-    j.end_array();
-    j.end_object();
+    regs.write("rflags", cc::format("{:#010x}", s.rflags));
+    {
+        auto flags = regs.write_array("flags");
+        for (auto const& f : flag_bits)
+            if (flag_set(s.rflags, f.bit))
+                flags.write(f.name);
+    }
 }
 
-void write_meta(json_writer& j, html_export_meta const& meta)
+void write_meta(json::object_writer& root, html_export_meta const& meta)
 {
-    j.key("meta");
-    j.begin_object();
-    j.field("generatedAt", meta.generated_at_iso);
-    j.field("osVersion", meta.os_version);
-    j.field("exePath", meta.exe_path);
-    j.field("exeSizeBytes", cc::format("{}", meta.exe_size_bytes));
-    j.field("commandLine", meta.command_line);
-    j.field("target", meta.target);
-    j.field_uint("skip", meta.skip);
-    j.field_uint("traces", meta.traces);
-    j.field_uint("instructions", meta.instructions);
-    j.field_bool("untilReturn", meta.until_return);
-    j.field_bool("stopAtSyscall", meta.stop_at_syscall);
-    j.key("regions");
-    j.begin_object();
-    j.field_bool("heap", meta.regions.heap);
-    j.field_bool("frame", meta.regions.frame);
-    j.field_bool("stack", meta.regions.stack);
-    j.field_bool("instructions", meta.regions.instructions);
-    j.end_object();
-    j.end_object();
+    auto m = root.write_object("meta");
+    m.write("generatedAt", meta.generated_at_iso);
+    m.write("osVersion", meta.os_version);
+    m.write("exePath", meta.exe_path);
+    m.write("exeSizeBytes", cc::format("{}", meta.exe_size_bytes));
+    m.write("commandLine", meta.command_line);
+    m.write("target", meta.target);
+    m.write("skip", meta.skip);
+    m.write("traces", meta.traces);
+    m.write("instructions", meta.instructions);
+    m.write("untilReturn", meta.until_return);
+    m.write("stopAtSyscall", meta.stop_at_syscall);
+
+    auto regions = m.write_object("regions");
+    regions.write("heap", meta.regions.heap);
+    regions.write("frame", meta.regions.frame);
+    regions.write("stack", meta.regions.stack);
+    regions.write("instructions", meta.regions.instructions);
 }
 
-void write_stats(json_writer& j, trace const& t)
+void write_stats(json::object_writer& out, trace const& t)
 {
     // Per-trace table: a one-element span, unlike the CLI's global aggregate.
     auto const summary = collect_stats(cc::span<trace const>(&t, 1));
 
-    j.key("stats");
-    j.begin_object();
-    j.key("rows");
-    j.begin_array();
-    for (auto const& r : summary.rows)
+    auto stats = out.write_object("stats");
     {
-        j.begin_object();
-        j.field("symbol", r.symbol);
-        j.field_uint("instructions", r.instructions);
-        j.field_uint("atomics", r.atomics);
-        j.field_uint("slow", r.slow);
-        j.field_uint("directCalls", r.direct_calls);
-        j.field_uint("indirectCalls", r.indirect_calls);
-        j.field_uint("memoryReads", r.memory_reads);
-        j.field_uint("memoryWrites", r.memory_writes);
-        j.field_uint("branches", r.branches);
-        j.field_uint("branchesTaken", r.branches_taken);
-        j.end_object();
+        auto rows = stats.write_array("rows");
+        for (auto const& r : summary.rows)
+        {
+            auto row = rows.write_object();
+            row.write("symbol", r.symbol);
+            row.write("instructions", r.instructions);
+            row.write("atomics", r.atomics);
+            row.write("slow", r.slow);
+            row.write("directCalls", r.direct_calls);
+            row.write("indirectCalls", r.indirect_calls);
+            row.write("memoryReads", r.memory_reads);
+            row.write("memoryWrites", r.memory_writes);
+            row.write("branches", r.branches);
+            row.write("branchesTaken", r.branches_taken);
+        }
     }
-    j.end_array();
-    j.key("slowOps");
-    j.begin_array();
-    for (auto const& s : summary.slow_ops)
     {
-        j.begin_object();
-        j.field("mnemonic", s.mnemonic);
-        j.field("symbol", s.symbol);
-        j.field_uint("count", s.count);
-        j.end_object();
+        auto slow_ops = stats.write_array("slowOps");
+        for (auto const& s : summary.slow_ops)
+        {
+            auto op = slow_ops.write_object();
+            op.write("mnemonic", s.mnemonic);
+            op.write("symbol", s.symbol);
+            op.write("count", s.count);
+        }
     }
-    j.end_array();
-    j.field_uint("traces", summary.traces);
-    j.field_bool("truncated", summary.truncated);
-    j.end_object();
+    stats.write("traces", summary.traces);
+    stats.write("truncated", summary.truncated);
 }
 
-void write_source(json_writer& j, source_view_model const& sv, cc::map<cc::string, int> const& file_ids)
+void write_source(json::object_writer& out, source_view_model const& sv, cc::map<cc::string, int> const& file_ids)
 {
-    j.key("source");
-    j.begin_object();
-    j.key("files");
-    j.begin_array();
+    auto source = out.write_object("source");
+    auto files = source.write_array("files");
     for (auto const& f : sv.files)
     {
-        j.begin_object();
-        j.field_int("fileId", file_ids.get_or(f.path, -1));
-        j.field("path", f.path);
+        auto file = files.write_object();
+        file.write("fileId", file_ids.get_or(f.path, -1));
+        file.write("path", f.path);
+
         // Display name: the last path component, for the range sub-headers.
         auto slash = f.path.size();
         for (isize i = f.path.size() - 1; i >= 0; --i)
@@ -241,114 +233,96 @@ void write_source(json_writer& j, source_view_model const& sv, cc::map<cc::strin
                 slash = i + 1;
                 break;
             }
-        j.field("displayName", f.path.subview({.start = slash, .end = f.path.size()}));
-        j.key("ranges");
-        j.begin_array();
+        file.write("displayName", f.path.subview({.start = slash, .end = f.path.size()}));
+
+        auto ranges = file.write_array("ranges");
         for (auto const& range : f.ranges)
         {
-            j.begin_object();
-            j.field_uint("start", range.start);
-            j.field_uint("end", range.end);
-            j.key("lines");
-            j.begin_array();
+            auto r = ranges.write_object();
+            r.write("start", range.start);
+            r.write("end", range.end);
+
+            auto lines = r.write_array("lines");
             for (auto const& line : range.lines)
             {
-                j.begin_object();
-                j.field_uint("number", line.number);
-                j.field("text", line.text);
-                j.field_bool("executed", line.executed);
-                j.end_object();
+                auto l = lines.write_object();
+                l.write("number", line.number);
+                l.write("text", line.text);
+                l.write("executed", line.executed);
             }
-            j.end_array();
-            j.end_object();
         }
-        j.end_array();
-        j.end_object();
     }
-    j.end_array();
-    j.end_object();
 }
 
-void write_mca(json_writer& j, mca_result const& m)
+void write_mca(json::object_writer& out, mca_result const& m)
 {
-    j.key("mca");
-    j.begin_object();
-    j.field_bool("available", m.available);
-    j.field_bool("perInstructionValid", m.per_instruction_valid);
-    j.field("cpu", m.cpu);
+    auto mca = out.write_object("mca");
+    mca.write("available", m.available);
+    mca.write("perInstructionValid", m.per_instruction_valid);
+    mca.write("cpu", m.cpu);
 
-    j.key("resources");
-    j.begin_array();
-    for (auto const& r : m.resources)
-        j.value_string(r);
-    j.end_array();
-
-    j.key("summary");
-    j.begin_object();
-    j.field_double("ipc", m.summary.ipc);
-    j.field_double("blockRThroughput", m.summary.block_rthroughput);
-    j.field_double("uopsPerCycle", m.summary.uops_per_cycle);
-    j.field_uint("totalCycles", m.summary.total_cycles);
-    j.field_uint("totalUops", m.summary.total_uops);
-    j.field_uint("dispatchWidth", m.summary.dispatch_width);
-    j.field_uint("iterations", m.summary.iterations);
-    j.end_object();
-
-    j.key("bottleneck");
-    j.begin_object();
-    j.field_bool("available", m.bottleneck.available);
-    j.field_uint("totalCycles", m.bottleneck.total_cycles);
-    j.field_uint("dataDependency", m.bottleneck.data_dependency);
-    j.field_uint("registerDependency", m.bottleneck.register_dependency);
-    j.field_uint("memoryDependency", m.bottleneck.memory_dependency);
-    j.field_uint("resourcePressure", m.bottleneck.resource_pressure);
-    j.field_uint("pressureIncrease", m.bottleneck.pressure_increase);
-    j.key("topPorts");
-    j.begin_array();
-    for (auto const& p : m.bottleneck.top_ports)
     {
-        j.begin_object();
-        j.field("resource", p.resource);
-        j.field_double("cycles", p.cycles);
-        j.end_object();
+        auto resources = mca.write_array("resources");
+        for (auto const& r : m.resources)
+            resources.write(r);
     }
-    j.end_array();
-    j.end_object();
+    {
+        auto summary = mca.write_object("summary");
+        summary.write("ipc", m.summary.ipc);
+        summary.write("blockRThroughput", m.summary.block_rthroughput);
+        summary.write("uopsPerCycle", m.summary.uops_per_cycle);
+        summary.write("totalCycles", m.summary.total_cycles);
+        summary.write("totalUops", m.summary.total_uops);
+        summary.write("dispatchWidth", m.summary.dispatch_width);
+        summary.write("iterations", m.summary.iterations);
+    }
+    {
+        auto bottleneck = mca.write_object("bottleneck");
+        bottleneck.write("available", m.bottleneck.available);
+        bottleneck.write("totalCycles", m.bottleneck.total_cycles);
+        bottleneck.write("dataDependency", m.bottleneck.data_dependency);
+        bottleneck.write("registerDependency", m.bottleneck.register_dependency);
+        bottleneck.write("memoryDependency", m.bottleneck.memory_dependency);
+        bottleneck.write("resourcePressure", m.bottleneck.resource_pressure);
+        bottleneck.write("pressureIncrease", m.bottleneck.pressure_increase);
+
+        auto top_ports = bottleneck.write_array("topPorts");
+        for (auto const& p : m.bottleneck.top_ports)
+        {
+            auto port = top_ports.write_object();
+            port.write("resource", p.resource);
+            port.write("cycles", p.cycles);
+        }
+    }
 
     // Aligned 1:1 to the trace instructions; a blank {valid:false} keeps the index mapping.
-    j.key("instructions");
-    j.begin_array();
+    auto instructions = mca.write_array("instructions");
     for (auto const& mi : m.instructions)
     {
-        j.begin_object();
-        j.field_bool("valid", mi.valid);
-        if (mi.valid)
-        {
-            j.field_uint("uops", mi.uops);
-            j.field_uint("latency", mi.latency);
-            j.field_double("rthroughput", mi.rthroughput);
-            j.field_bool("mayLoad", mi.may_load);
-            j.field_bool("mayStore", mi.may_store);
-            j.field_bool("hasTimeline", mi.has_timeline);
-            j.field_uint("cDispatched", mi.c_dispatched);
-            j.field_uint("cReady", mi.c_ready);
-            j.field_uint("cIssued", mi.c_issued);
-            j.field_uint("cExecuted", mi.c_executed);
-            j.field_uint("cRetired", mi.c_retired);
-            j.key("portPressure");
-            j.begin_array();
-            for (double const usage : mi.port_pressure)
-                j.value_double(usage);
-            j.end_array();
-        }
-        j.end_object();
-    }
-    j.end_array();
+        auto insn = instructions.write_object();
+        insn.write("valid", mi.valid);
+        if (!mi.valid)
+            continue;
 
-    j.end_object();
+        insn.write("uops", mi.uops);
+        insn.write("latency", mi.latency);
+        insn.write("rthroughput", mi.rthroughput);
+        insn.write("mayLoad", mi.may_load);
+        insn.write("mayStore", mi.may_store);
+        insn.write("hasTimeline", mi.has_timeline);
+        insn.write("cDispatched", mi.c_dispatched);
+        insn.write("cReady", mi.c_ready);
+        insn.write("cIssued", mi.c_issued);
+        insn.write("cExecuted", mi.c_executed);
+        insn.write("cRetired", mi.c_retired);
+
+        auto pressure = insn.write_array("portPressure");
+        for (double const usage : mi.port_pressure)
+            pressure.write(usage);
+    }
 }
 
-void write_trace(json_writer& j, trace const& t, u32 total, source_cache& sources, mca_result const* mca)
+void write_trace(json::array_writer& out, trace const& t, u32 total, source_cache& sources, mca_result const* mca)
 {
     // A per-trace file-path → id map, shared between instructions and the source view so the
     // front-end can cross-highlight a source line and the instructions that ran it.
@@ -362,114 +336,100 @@ void write_trace(json_writer& j, trace const& t, u32 total, source_cache& source
                 e.emplace(next_id++);
         }
 
-    j.begin_object();
-    j.field_uint("index", t.index);
-    j.field_uint("total", total);
-    j.field_uint("threadId", t.thread_id);
-    j.field_uint("hit", t.hit_index);
-    j.field("entrySymbol", t.entry_symbol);
-    j.field("returnSymbol", t.return_symbol);
-    j.field("reason", reason_text(t.reason));
-    j.field_uint("instructionCount", u32(t.instructions.size()));
-    j.field_bool("truncated", t.reason == step_reason::instruction_budget);
+    auto tr = out.write_object();
+    tr.write("index", t.index);
+    tr.write("total", total);
+    tr.write("threadId", t.thread_id);
+    tr.write("hit", t.hit_index);
+    tr.write("entrySymbol", t.entry_symbol);
+    tr.write("returnSymbol", t.return_symbol);
+    tr.write("reason", reason_text(t.reason));
+    tr.write("instructionCount", u32(t.instructions.size()));
+    tr.write("truncated", t.reason == step_reason::instruction_budget);
 
-    j.key("stack");
-    j.begin_array();
-    for (auto const& f : t.entry_stack)
     {
-        j.begin_object();
-        j.field("symbol", f.symbol);
-        j.field("module", f.module);
-        j.field("file", f.file);
-        j.field_uint("line", f.line);
-        j.field("addr", format_address(f.rip));
-        j.end_object();
+        auto stack = tr.write_array("stack");
+        for (auto const& f : t.entry_stack)
+        {
+            auto frame = stack.write_object();
+            frame.write("symbol", f.symbol);
+            frame.write("module", f.module);
+            frame.write("file", f.file);
+            frame.write("line", f.line);
+            frame.write("addr", format_address(f.rip));
+        }
     }
-    j.end_array();
 
     // The trailing snapshot is absent at the syscall stop; the front snapshot is the entry state.
     if (!t.registers.empty())
-    {
-        j.key("entryRegisters");
-        write_registers(j, t.registers.front());
-    }
+        write_registers(tr, "entryRegisters", t.registers.front());
     else
+        tr.write("entryRegisters", nullptr);
+
     {
-        j.key("entryRegisters");
-        j.value_null();
+        auto instructions = tr.write_array("instructions");
+        for (isize i = 0; i < t.instructions.size(); ++i)
+        {
+            auto const& insn = t.instructions[i];
+
+            auto o = instructions.write_object();
+            o.write("addr", format_address(insn.rip));
+            o.write("text", display_text(insn));
+
+            auto const m = mnemonic_of(insn.text);
+            if (m.empty())
+                o.write("mnemonic", nullptr);
+            else
+                o.write("mnemonic", m);
+
+            o.write("fileId", insn.file.empty() ? -1 : file_ids.get_or(insn.file, -1));
+            o.write("file", insn.file);
+            o.write("line", insn.line);
+            o.write("category", category_name(insn.category));
+            o.write("isAtomic", insn.is_atomic);
+
+            if (insn.slow_mnemonic != nullptr)
+                o.write("slowMnemonic", cc::string_view(insn.slow_mnemonic));
+            else
+                o.write("slowMnemonic", nullptr);
+
+            o.write("isIndirect", insn.is_indirect);
+            o.write("diverged", diverged(insn));
+            o.write("branchTaken", insn.category == insn_category::conditional_branch && diverged(insn));
+
+            if (insn.target_symbol.empty())
+                o.write("target", nullptr);
+            else
+                o.write("target", insn.target_symbol);
+
+            o.write("owner", insn.owner_symbol.empty() ? cc::string() : strip_template_args(insn.owner_symbol));
+
+            if (i + 1 < t.registers.size())
+                write_regdiff(o, "regdiff", t.registers[i], t.registers[i + 1]);
+            else
+            {
+                auto const empty = o.write_array("regdiff"); // the last instruction has no next snapshot to diff against
+            }
+
+            auto mem = o.write_array("mem");
+            for (auto const& acc : insn.memory_accesses)
+            {
+                auto a = mem.write_object();
+                a.write("addr", format_address(acc.address));
+                a.write("size", acc.size);
+                a.write("isRead", acc.is_read);
+                a.write("isWrite", acc.is_write);
+                a.write("region", region_name(acc.region));
+                a.write("symbol", acc.symbol);
+            }
+        }
     }
 
-    j.key("instructions");
-    j.begin_array();
-    for (isize i = 0; i < t.instructions.size(); ++i)
-    {
-        auto const& insn = t.instructions[i];
-        j.begin_object();
-        j.field("addr", format_address(insn.rip));
-        j.field("text", display_text(insn));
-        auto const m = mnemonic_of(insn.text);
-        if (m.empty())
-        {
-            j.key("mnemonic");
-            j.value_null();
-        }
-        else
-            j.field("mnemonic", m);
-        j.field_int("fileId", insn.file.empty() ? -1 : file_ids.get_or(insn.file, -1));
-        j.field("file", insn.file);
-        j.field_uint("line", insn.line);
-        j.field("category", category_name(insn.category));
-        j.field_bool("isAtomic", insn.is_atomic);
-        if (insn.slow_mnemonic != nullptr)
-            j.field("slowMnemonic", insn.slow_mnemonic);
-        else
-        {
-            j.key("slowMnemonic");
-            j.value_null();
-        }
-        j.field_bool("isIndirect", insn.is_indirect);
-        j.field_bool("diverged", diverged(insn));
-        j.field_bool("branchTaken", insn.category == insn_category::conditional_branch && diverged(insn));
-        if (insn.target_symbol.empty())
-        {
-            j.key("target");
-            j.value_null();
-        }
-        else
-            j.field("target", insn.target_symbol);
-        j.field("owner", insn.owner_symbol.empty() ? cc::string() : strip_template_args(insn.owner_symbol));
-
-        j.key("regdiff");
-        if (i + 1 < t.registers.size())
-            write_regdiff(j, t.registers[i], t.registers[i + 1]);
-        else
-            j.begin_array(), j.end_array();
-
-        j.key("mem");
-        j.begin_array();
-        for (auto const& acc : insn.memory_accesses)
-        {
-            j.begin_object();
-            j.field("addr", format_address(acc.address));
-            j.field_uint("size", acc.size);
-            j.field_bool("isRead", acc.is_read);
-            j.field_bool("isWrite", acc.is_write);
-            j.field("region", region_name(acc.region));
-            j.field("symbol", acc.symbol);
-            j.end_object();
-        }
-        j.end_array();
-        j.end_object();
-    }
-    j.end_array();
-
-    write_stats(j, t);
-    write_source(j, collect_source_view(t, sources), file_ids);
+    write_stats(tr, t);
+    write_source(tr, collect_source_view(t, sources), file_ids);
 
     if (mca != nullptr && mca->available)
-        write_mca(j, *mca);
-
-    j.end_object();
+        write_mca(tr, *mca);
 }
 
 cc::string serialize(cc::span<trace const> traces,
@@ -477,17 +437,27 @@ cc::string serialize(cc::span<trace const> traces,
                      source_cache& sources,
                      cc::span<mca_result const> mca)
 {
-    json_writer j;
-    j.begin_object();
-    write_meta(j, meta);
-    j.key("traces");
-    j.begin_array();
-    auto const total = u32(traces.size());
-    for (isize i = 0; i < traces.size(); ++i)
-        write_trace(j, traces[i], total, sources, i < mca.size() ? &mca[i] : nullptr);
-    j.end_array();
-    j.end_object();
-    return j.str();
+    // escape_html: the payload is embedded in a <script> tag, so a symbol or source line containing "</script>"
+    //   must not be able to end it.
+    //   The JS parser turns the escape back into '<', so the data is unchanged.
+    // non_finite -> null: an MCA number that came out NaN is a hole in one table, not a reason to lose the report.
+    auto w = babel::json::string_writer({
+        .non_finite = babel::json::non_finite_policy::null,
+        .escape_html = true,
+    });
+
+    {
+        auto root = w.object();
+        write_meta(root, meta);
+
+        auto all = root.write_array("traces");
+        auto const total = u32(traces.size());
+        for (isize i = 0; i < traces.size(); ++i)
+            write_trace(all, traces[i], total, sources, i < mca.size() ? &mca[i] : nullptr);
+    }
+
+    // The sink is a growing in-memory string, so the only way this fails is a bug, not I/O.
+    return w.finish().value();
 }
 } // namespace
 

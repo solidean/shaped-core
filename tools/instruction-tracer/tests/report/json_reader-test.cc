@@ -84,7 +84,7 @@ TEST("json_reader - string escapes")
 
 TEST("json_reader - unicode escapes")
 {
-    // json_writer emits '<' as < so "</script>" cannot break out; the reader turns it back.
+    // The HTML export escapes '<' (babel::json write_options::escape_html) so "</script>" cannot break out; the reader turns it back.
     CHECK(parse_ok("\"\\u003c/script>\"").as_string() == "</script>");
     // BMP multi-byte: U+00E9 -> 2 UTF-8 bytes (0xC3 0xA9).
     CHECK(parse_ok("\"caf\\u00e9\"").as_string() == "caf\xc3\xa9");

@@ -59,7 +59,7 @@ target_compile_options(instruction-tracer-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:
 # symbol_session hides dbghelp behind opaque void* handles, and only instruction_decoder.cc includes Zydis.h.
 # nexus is PRIVATE: only cli/options.cc reaches for it, to declare the CLI with nx::args.
 # A tool depending on nexus is the intended direction — it is the binary harness, not only a test framework.
-target_link_libraries(instruction-tracer-core PUBLIC clean-core PRIVATE dbghelp zydis nexus)
+target_link_libraries(instruction-tracer-core PUBLIC clean-core PRIVATE dbghelp zydis nexus babel-serializer)
 
 sc_target_pch(instruction-tracer-core CC) # 0.59
 
