@@ -331,7 +331,7 @@ void write_events(babel::json::array_writer& events,
             // "E" carries no name in the format, but writing one keeps a hand-read trace legible and viewers ignore it.
             if (opts.include_scopes)
                 common("E");
-            continue;
+            break;
 
         case cc::rec::event_kind::stat_snapshot:
         case cc::rec::event_kind::stat_accumulate:

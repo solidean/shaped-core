@@ -44,10 +44,11 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
     // One entry per line: the listing is read by dev.py, but it is also read by a person chasing why a filter
     // selected nothing, and a field per line would bury a thousand tests.
     //
-    // large_integers -> string, defensively: nothing here exceeds 2^53 today (a seed is an int), but this listing is
-    // the natural home for an id or a hash, and a number that silently rounds in a JS reader is an easy mistake to
-    // make once and never notice.
-    auto w = json::string_writer({.indent = 2, .large_integers = json::large_integer_policy::string});
+    // Every number here is a quantity a reader does arithmetic on — a seed is an int, a line a u32, a count a size —
+    // so the default `number` policy is the right one.
+    // A field that is an opaque id belongs in quotes at ITS call site, rather than under a document-wide policy that
+    // would change a field's type for exactly the values that got large.
+    auto w = json::string_writer({.indent = 2});
 
     {
         auto root = w.object();

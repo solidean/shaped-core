@@ -407,9 +407,7 @@ void write_trace(json::array_writer& out, trace const& t, u32 total, source_cach
             if (i + 1 < t.registers.size())
                 write_regdiff(o, "regdiff", t.registers[i], t.registers[i + 1]);
             else
-            {
-                auto const empty = o.write_array("regdiff"); // the last instruction has no next snapshot to diff against
-            }
+                (void)o.write_array("regdiff"); // the last instruction has no next snapshot to diff against
 
             auto mem = o.write_array("mem");
             for (auto const& acc : insn.memory_accesses)
