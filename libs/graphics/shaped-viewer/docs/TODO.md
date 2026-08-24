@@ -59,7 +59,7 @@ What is left is the interaction on top of it, in dependency order:
 
 ## What the bindless lock does not cover
 
-`sv::gpu_resource_manager` holds the lock, and its header carries the same three entries.
+`sv::gpu_resource_manager` holds the lock, and its header carries the same two entries.
 They are recorded rather than solved: the lock is sound, but it is not what makes an index valid.
 What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not acquired this epoch* — which is structural and needs no lock.
 
@@ -71,13 +71,6 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   That answer is a fresh snapshot, rebound for the dispatches after it.
   A clean `snapshot()` is the cached handle, so it is nearly free.
   The lock refuses instead.
-- **An index written into a buffer that outlives its epoch is unprotected**, and the lock hides that by looking like it covers everything.
-  `material_manager::acquire` uploads its `pbr_material_gpu` buffer once and caches it by content hash across many epochs.
-  Once that buffer carries texture indices, they are epoch-transient values baked into a persistent one — stale the next epoch, with nothing asserting, because nobody re-acquired.
-  Three ways out, to be chosen when streaming starts.
-  Re-upload index-bearing buffers every epoch, which kills the O(1) content-hash cache.
-  Store a stable `texture_id` in the buffer and rebuild a small per-epoch `id -> index` table, which preserves it and needs nothing new from sg.
-  Or bring sg's persistent/refcounted acquire split forward.
 
 ## Everything else
 

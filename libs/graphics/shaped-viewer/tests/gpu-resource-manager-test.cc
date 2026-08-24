@@ -120,7 +120,7 @@ TEST("sv - two freezes in one epoch keep the first's indices")
     m.advance_to(ctx.current_epoch());
 
     auto const a = make_texture(ctx);
-    auto const a_index = m.acquire_texture(sv::bindless_table::textures_2d, a.as_readonly_view());
+    auto const a_index = u32(m.acquire_texture(sv::bindless_table::textures_2d, a.as_readonly_view()));
     {
         auto const bound = m.freeze();
         CHECK(bound.elements(sv::bindless_table::textures_2d).size() == 1);
@@ -128,9 +128,9 @@ TEST("sv - two freezes in one epoch keep the first's indices")
     }
 
     auto const b = make_texture(ctx);
-    auto const b_index = m.acquire_texture(sv::bindless_table::textures_2d, b.as_readonly_view());
+    auto const b_index = u32(m.acquire_texture(sv::bindless_table::textures_2d, b.as_readonly_view()));
     CHECK(b_index != a_index);
-    CHECK(m.acquire_texture(sv::bindless_table::textures_2d, a.as_readonly_view()) == a_index);
+    CHECK(u32(m.acquire_texture(sv::bindless_table::textures_2d, a.as_readonly_view())) == a_index);
 
     {
         auto const bound = m.freeze();
@@ -149,6 +149,44 @@ TEST("sv - two freezes in one epoch keep the first's indices")
     {
         auto const bound = m.freeze();
         CHECK(bound.elements(sv::bindless_table::textures_2d).empty());
+    }
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv - a pinned texture is declared and outlives its epoch")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    // What a material buffer will hold: an index that stays true across epochs, so the buffer can be uploaded
+    // once and cached by content hash rather than re-uploaded whenever the tables move.
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = only(sv::bindless_table::textures_2d, 4)});
+    m.advance_to(ctx.current_epoch());
+
+    auto const tex = make_texture(ctx);
+    auto const pin = m.pin_texture(sv::bindless_table::textures_2d, tex.as_readonly_view());
+    REQUIRE(pin != nullptr);
+    auto const index = pin->index();
+
+    // A pinned element belongs in the access declaration even though nothing acquired it this epoch: a dispatch
+    // reaches it through the buffer, never through acquire.
+    {
+        auto const bound = m.freeze();
+        CHECK(bound.elements(sv::bindless_table::textures_2d).size() == 1);
+        CHECK(bound.elements(sv::bindless_table::textures_2d)[0] == index);
+    }
+
+    // Churn the transient working set through later epochs; the pinned index is unmoved.
+    for (auto i = 0; i < 3; ++i)
+    {
+        ctx.advance_epoch_and_wait_for_idle();
+        m.advance_to(ctx.current_epoch());
+        (void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_readonly_view());
+        CHECK(pin->index() == index);
     }
 
     ctx.advance_epoch_and_wait_for_idle();

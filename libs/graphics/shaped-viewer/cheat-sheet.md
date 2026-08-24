@@ -250,8 +250,11 @@ sv::bindless_table_budget   // { bindless_table table; u32 count; }  — count 0
 sv::bindless_config         // { cc::vector<bindless_table_budget> tables = default_bindless_tables(); }
 sv::make_bindless_bindings(cfg)  // -> cc::vector<sg::binding> — the hand-declared layout; pure, so it needs no context
 
-m.acquire_texture(table, raw_view) -> u32   // element index, minted on a miss; asserts when frozen or when the table is not declared
-m.acquire_buffer(raw_view) -> u32           // the same for the byte-address table
+m.acquire_texture(table, raw_view) -> sg::bindless_index   // THIS EPOCH ONLY; asserts when frozen or when the table is not declared
+m.acquire_buffer(raw_view) -> sg::bindless_index           // the same for the byte-address table
+m.pin_texture(table, raw_view) -> sg::bindless_element_handle  // pinned; h->index() outlives the epoch — what a material buffer stores
+m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for the byte-address table
+                                            //   a pin needs no unlock, and is recorded for the access declaration like an acquire
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
 bound.group()                               // -> sg::binding_group_handle const& — what to bind
@@ -261,7 +264,9 @@ m.has_table(table) / m.table_capacity(table)
 
 The layout is hand-written rather than reflected, so the manager is constructible before any shader compiles — a shader matches the names above.
 The lock lives here rather than on `sg::bindless_array` because the invariant spans every array over one staging group.
-What keeps an index valid is sg's reclaim rule (a full array reclaims only what was NOT acquired this epoch), not the lock — see the header's TODO block for what that leaves open.
+What keeps an index valid is sg's reclaim rule, not the lock: a full array reclaims only what was NOT acquired this epoch, and never a pinned element.
+See the header's TODO block for what that leaves open.
+An index that must outlive its epoch is *pinned*, and the type system enforces it: a `bindless_index` cannot be stored where a persistent one belongs.
 
 ## Rendering — the view_renderer + routines
 

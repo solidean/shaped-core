@@ -136,14 +136,21 @@ It is deliberately small: it shares the group's handle, so the group cannot go o
 The layout, how many tables there are and what they are called all stay with the caller.
 One array touches nothing but its own binding, so several arrays over one group are independent.
 
-- **`acquire(view)` returns the element index**, minting one on a miss and writing exactly one staging descriptor.
+There are two ways in, reached through scopes as elsewhere in sg, and **which one you need is decided by how long the index has to stay true**.
+
+- **`transient.acquire(view)` returns a `bindless_index`**, minting one on a miss and writing exactly one staging descriptor.
   Identity is the view's hash, so re-acquiring the same view is O(1), returns the same index and touches no descriptor.
   An unchanged working set therefore never dirties the group, and its snapshot is the cached one.
-- **An index is valid only for the epoch it was acquired in.**
-  Re-acquire the working set every epoch.
+  It is valid **only for the epoch it was acquired in**, so re-acquire the working set every epoch.
   When the array is full, every index not acquired this epoch is reclaimed at once — the mint dirties the group and forces a snapshot anyway, so there is nothing to save by evicting less.
-  If every index was acquired this epoch, the working set exceeds the binding's count and `acquire` asserts.
-- **It is movable**, so an owner can keep one array per table in a container; it is never copyable, since two arrays over one binding would mint conflicting descriptors from two tables.
+  If every index was acquired this epoch, the working set exceeds the binding's count and it asserts.
+- **`persistent.acquire(view)` returns a shared `bindless_element_handle`** whose index stays true for as long as any copy of the handle lives.
+  That is the only index that may be written into GPU memory outliving the epoch — a material buffer above all.
+  The refcount *is* the pin, so acquiring a view already held returns the same handle.
+  The last one out frees the slot and clears its descriptor, so a stale index reads vacant rather than reading whatever moved in.
+  Pins raise the floor the transient working set has to fit above, so capacity must cover both.
+- **The two types differ on purpose.** Storing a transient index somewhere persistent is the one mistake the array cannot catch at runtime, so it is made not to compile.
+- **Copies and moves share one table**, so two arrays over one binding agree rather than minting conflicting descriptors, and an element handle may outlive every array naming its binding.
 
 **Guarding the window between a mint and the snapshot that must contain it is not the array's job**, and there is nothing here to do it with.
 One array cannot enforce that invariant, because it spans every array over a group: the owner is whoever holds the group and all its arrays, and taking the snapshot is that owner's too.

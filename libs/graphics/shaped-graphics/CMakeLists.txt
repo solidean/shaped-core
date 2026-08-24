@@ -124,6 +124,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/binding_group.hh
     src/shaped-graphics/binding/staging_binding_group.hh
     src/shaped-graphics/binding/bindless_array.hh
+    src/shaped-graphics/binding/impl/bindless_array_state.hh
     src/shaped-graphics/present/swapchain.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/memory/allocation_info.hh

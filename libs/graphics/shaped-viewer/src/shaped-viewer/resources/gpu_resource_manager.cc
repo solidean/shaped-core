@@ -72,33 +72,64 @@ void gpu_resource_manager::advance_to(sg::epoch e)
     _epoch = e;
 }
 
-u32 gpu_resource_manager::acquire_texture(bindless_table table, sg::raw_view const& view)
+sg::bindless_index gpu_resource_manager::acquire_texture(bindless_table table, sg::raw_view const& view)
 {
     CC_ASSERT(table != bindless_table::buffers, "acquire_texture is for the texture tables — use acquire_buffer");
     return _acquire(table, view);
 }
 
-u32 gpu_resource_manager::acquire_buffer(sg::raw_view const& view)
+sg::bindless_index gpu_resource_manager::acquire_buffer(sg::raw_view const& view)
 {
     return _acquire(bindless_table::buffers, view);
 }
 
-u32 gpu_resource_manager::_acquire(bindless_table table, sg::raw_view const& view)
+sg::bindless_element_handle gpu_resource_manager::pin_texture(bindless_table table, sg::raw_view const& view)
+{
+    CC_ASSERT(table != bindless_table::buffers, "pin_texture is for the texture tables — use pin_buffer");
+    return _pin(table, view);
+}
+
+sg::bindless_element_handle gpu_resource_manager::pin_buffer(sg::raw_view const& view)
+{
+    return _pin(bindless_table::buffers, view);
+}
+
+sg::bindless_index gpu_resource_manager::_acquire(bindless_table table, sg::raw_view const& view)
 {
     CC_ASSERT(!_locked, "no acquires while frozen — the bound snapshot could not contain the mint");
+    auto& t = _tables[_declared_slot_of(table)];
+    auto const index = t.array.transient.acquire(view);
+    _record(t, u32(index));
+    return index;
+}
+
+sg::bindless_element_handle gpu_resource_manager::_pin(bindless_table table, sg::raw_view const& view)
+{
+    auto& t = _tables[_declared_slot_of(table)];
+    auto handle = t.array.persistent.acquire(view);
+
+    // A pinned element is resident for as long as the handle lives, so it belongs in every access declaration
+    // this epoch — a dispatch reading it through a material buffer never went through acquire.
+    _record(t, handle->index());
+    return handle;
+}
+
+i32 gpu_resource_manager::_declared_slot_of(bindless_table table) const
+{
+    CC_ASSERT(table < bindless_table::count_, "not a bindless table");
     auto const slot = _slot_of[u32(table)];
     CC_ASSERT(slot >= 0, "that bindless table was not declared (its budget is 0)");
+    return slot;
+}
 
-    auto& t = _tables[slot];
-    auto const index = t.array.acquire(view);
-
+void gpu_resource_manager::_record(table_entry& t, u32 index)
+{
     // Re-acquiring a view returns the index it already has, so the list is deduplicated rather than appended to
     // blindly — an access declaration naming one element twice is not what a dispatch expects.
     for (auto const e : t.acquired)
         if (e == index)
-            return index;
+            return;
     t.acquired.push_back(index);
-    return index;
 }
 
 void gpu_resource_manager::lock()

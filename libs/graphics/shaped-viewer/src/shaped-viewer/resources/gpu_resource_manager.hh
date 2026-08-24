@@ -73,16 +73,19 @@ private:
 /// That is what makes the lock enforceable at all: an array cannot refuse an acquire on behalf of its siblings,
 /// because the invariant spans the whole group.
 ///
+/// **An index that outlives its epoch must be pinned, not acquired.**
+/// `acquire_texture` hands out a `sg::bindless_index` good for this epoch only, and the type says so — writing
+/// one into a buffer that is cached across epochs does not compile.
+/// `pin_texture` is what a material buffer holds, and the element stays resident for as long as the handle does.
+///
 /// TODO: the lock is sound but conservative, and it is not what makes an index valid.
 /// What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not
-/// acquired this epoch* — which is structural and needs no lock.
+/// acquired this epoch*, and never a pinned one — which is structural and needs no lock.
 /// The lock covers one narrower hazard: binding a snapshot taken before your mint.
-/// Three things are known-open, and [docs/TODO.md](../../../docs/TODO.md) carries them:
+/// Two things are known-open, and [docs/TODO.md](../../../docs/TODO.md) carries them:
 /// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify*;
-/// it is global where the hazard is per-recording, so a routine acquiring mid-recording is refused rather than
-/// told to re-snapshot and rebind (which is nearly free, since a clean `snapshot()` is cached);
-/// and an index written into GPU memory that outlives its epoch is unprotected, which is what streaming will
-/// collide with once a material buffer carries texture indices.
+/// and it is global where the hazard is per-recording, so a routine acquiring mid-recording is refused rather
+/// than told to re-snapshot and rebind (which is nearly free, since a clean `snapshot()` is cached).
 class sv::gpu_resource_manager
 {
 public:
@@ -99,12 +102,23 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const { return _epoch; }
 
-    /// The element index for `view` in `table`, minted on a miss (see `sg::bindless_array` for index lifetime).
+    /// The element index for `view` in `table` **this epoch**, minted on a miss.
     /// The view's dimension must match the table's, and the manager must not be locked.
-    [[nodiscard]] u32 acquire_texture(bindless_table table, sg::raw_view const& view);
+    /// Never store the result where it outlives the epoch — `pin_texture` is what that needs.
+    [[nodiscard]] sg::bindless_index acquire_texture(bindless_table table, sg::raw_view const& view);
 
     /// The same, for the byte-address buffer table.
-    [[nodiscard]] u32 acquire_buffer(sg::raw_view const& view);
+    [[nodiscard]] sg::bindless_index acquire_buffer(sg::raw_view const& view);
+
+    /// A shared hold on `view`'s element in `table`, whose index stays true until the last handle dies.
+    /// This is the index that may be written into GPU memory outliving the epoch — a material buffer above all.
+    /// Pinning does not require the manager to be unlocked: it mints no descriptor a bound snapshot could miss
+    /// when the element is already resident, and when it is not, the caller is by definition not recording
+    /// against it yet.
+    [[nodiscard]] sg::bindless_element_handle pin_texture(bindless_table table, sg::raw_view const& view);
+
+    /// The same, for the byte-address buffer table.
+    [[nodiscard]] sg::bindless_element_handle pin_buffer(sg::raw_view const& view);
 
     /// Refuses acquires until `unlock`.
     ///
@@ -141,14 +155,6 @@ private:
                          texture_manager textures,
                          sg::staging_binding_group_handle group);
 
-    /// The array for `table`, or null if the table was not declared.
-    [[nodiscard]] sg::bindless_array* _array_of(bindless_table table);
-    [[nodiscard]] sg::bindless_array const* _array_of(bindless_table table) const;
-
-    [[nodiscard]] u32 _acquire(bindless_table table, sg::raw_view const& view);
-
-    sg::staging_binding_group_handle _group;
-
     /// One entry per declared table, in table order; a table budgeted at 0 has none.
     /// `_slot_of` maps a table onto its entry, so a caller never indexes this by table.
     struct table_entry
@@ -157,6 +163,22 @@ private:
         sg::bindless_array array;
         cc::vector<u32> acquired; ///< the element indices acquired this epoch, for the access declaration
     };
+
+    /// The position of `table` in `_tables`, asserting that it was declared at all.
+    [[nodiscard]] i32 _declared_slot_of(bindless_table table) const;
+
+    /// Notes `index` as in use this epoch, for the access declaration; already-present indices are skipped.
+    static void _record(table_entry& t, u32 index);
+
+    /// The array for `table`, or null if the table was not declared.
+    [[nodiscard]] sg::bindless_array* _array_of(bindless_table table);
+    [[nodiscard]] sg::bindless_array const* _array_of(bindless_table table) const;
+
+    [[nodiscard]] sg::bindless_index _acquire(bindless_table table, sg::raw_view const& view);
+    [[nodiscard]] sg::bindless_element_handle _pin(bindless_table table, sg::raw_view const& view);
+
+    sg::staging_binding_group_handle _group;
+
     cc::vector<table_entry> _tables;
 
     /// Position of each table in `_tables`, or -1 when it was not declared.
