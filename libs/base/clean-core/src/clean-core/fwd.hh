@@ -89,7 +89,8 @@ struct string_view;
 template <class... Args>
 struct format_string;
 
-enum class glob_option; // what glob_matches does beyond a byte-for-byte match (string/glob.hh)
+enum class glob_option;           // what glob_matches does beyond a byte-for-byte match (string/glob.hh)
+enum class float_notation : char; // how cc::to_chars renders a float (string/to_string.hh)
 
 class interned_string; // a handle to one canonical copy of a byte sequence (string/interned_string.hh)
 class string_interner; // a table of them, for tests that want isolation from the process-wide one
@@ -387,6 +388,8 @@ class span_read_write_stream_adapter;
 class file_read_stream_adapter;
 class file_write_stream_adapter;
 class file_read_write_stream_adapter;
+class vector_write_stream_adapter;
+class string_write_stream_adapter;
 
 
 //

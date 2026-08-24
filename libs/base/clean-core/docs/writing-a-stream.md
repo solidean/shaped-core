@@ -14,7 +14,8 @@ Hub: [_index.md](_index.md).
   **Only `flush` is a real call.**
 - **An adapter** is the owning type *you* write.
   It holds the buffer and the I/O state, supplies the one flush callback, and hands out a stream over its buffer.
-  clean-core ships adapters for spans ([span_stream.hh](../src/clean-core/streams/span_stream.hh)) and files ([file_stream.hh](../src/clean-core/streams/file_stream.hh)).
+  clean-core ships three: spans ([span_stream.hh](../src/clean-core/streams/span_stream.hh)), files ([file_stream.hh](../src/clean-core/streams/file_stream.hh)),
+  and growing in-memory buffers ([growing_stream.hh](../src/clean-core/streams/growing_stream.hh)).
   That is how you would add one for a socket, a compressor, or a ring buffer.
 
 The authoring contract — `cc::seek_dir` and the `cc::stream_flush_fn` signature — is public in [streams/stream_flush.hh](../src/clean-core/streams/stream_flush.hh).
@@ -136,6 +137,26 @@ When your buffer is smaller than the source — a file, a socket — the plain f
 On a write-capable stream, the first write into the window sets `first_write` to where it began, and the bytes `[first_write, curr)` are *pending*.
 On flush you must write them through to the sink.
 **Do not reset `first_write`** — the stream clears it after a successful non-dry flush, and leaves it intact on error so the write can be retried.
+
+### Growing adapters (an owned buffer that is also the window)
+
+A third shape sits between the two: the sink is in memory but its size is not known up front.
+`cc::vector_write_stream_adapter` / `cc::string_write_stream_adapter` ([growing_stream.hh](../src/clean-core/streams/growing_stream.hh)) are that case.
+
+The trick is that **the window is the container's spare capacity**, so nothing is ever copied on a flush:
+
+```
+[data(), data() + size())              already committed
+[data() + size(), data() + capacity)   the stream's [curr, end) window
+```
+
+The pending bytes `[first_write, curr)` are therefore already stored where they belong, and the plain flush only has to:
+
+1. commit them — `resize_to_uninitialized(max(size(), curr - data()))`, the `max` covering a cursor that was seeked backwards;
+2. `reserve_back(...)` for more room, which is what makes the growth exponential and the per-byte cost amortized O(1);
+3. recompute `curr` and `end` from the container's (possibly new) base, since the reserve may have reallocated.
+
+Step 3 is the one that bites: a growing adapter is the case where `curr`/`end` being **by-reference** parameters actually matters.
 
 ### `read_write` and the second end
 

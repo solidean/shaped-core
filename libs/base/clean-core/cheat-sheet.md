@@ -346,6 +346,9 @@ cc::glob_matches(pat, path, cc::glob_option::normalize | cc::glob_option::ignore
 // Normalize once yourself when one side is reused across many comparisons; the option redoes both sides per call.
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
+cc::to_chars(buf, v)                             // -> isize written; the same rendering into a char buffer, no allocation
+cc::to_chars(buf, 1.5, cc::float_notation::fixed, 3)  // shortest (default) / fixed / scientific / general; precision < 0 = default
+cc::to_chars_int_max  cc::to_chars_float_max     // buffer sizes that always fit; a short buffer asserts
 #include <clean-core/string/from_string.hh>      // the inverse, for bool/char/byte/ints/floats
 cc::from_string<int>("42")                       // -> cc::optional<int>; cc::nullopt on any rejection
 cc::from_string(sv, value)                       // -> bool; the out-param form, leaves `value` alone on failure
@@ -1326,6 +1329,12 @@ cc::read_stream r = cc::move(seekable);   // narrow to any weaker stream; RVALUE
 #include <clean-core/streams/span_stream.hh> // in-memory adapters (seekable, unbuffered — whole span is the window)
 cc::span_read_stream_adapter(bytes);  cc::span_write_stream_adapter(buf);  cc::span_read_write_stream_adapter(buf);
 // construct explicitly; converts IMPLICITLY to the matching stream (or a legal narrowing). Must outlive the stream.
+
+#include <clean-core/streams/growing_stream.hh> // owning, GROWING in-memory sinks (seekable; unbounded)
+cc::vector_write_stream_adapter(initial = {});  cc::string_write_stream_adapter(initial = {});
+adapter.take();                           // -> the cc::vector<byte> / cc::string; flush (or destroy) the stream FIRST
+// The window IS the container's spare capacity, so a flush copies nothing and take() hands back the bytes in place.
+// Neither movable nor copyable: the adapter is the stream's context.
 
 #include <clean-core/streams/file_stream.hh> // buffered file adapters (seekable; 4 KiB inline buffer)
 cc::file_read_stream_adapter::open(path);        // -> result<...>  existing file, read
