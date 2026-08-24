@@ -31,7 +31,6 @@ add_library(nexus
     src/nexus/tests/export/xml.cc
     src/nexus/tests/export/catch2.cc
     src/nexus/tests/export/junit.cc
-    src/nexus/tests/export/json.cc
     src/nexus/tests/export/perf_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
@@ -87,7 +86,6 @@ target_sources(nexus
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
-    src/nexus/tests/export/json.hh
     src/nexus/tests/export/perf_json.hh
     src/nexus/tests/export/listing_json.hh
 
@@ -120,6 +118,10 @@ target_include_directories(nexus
 target_link_libraries(nexus
     PUBLIC
     clean-core
+    # nexus is a leaf: the harness sits on top of the libraries it tests, so babel::json writing the
+    # listing and perf sidecars is a dependency going DOWN, not an upward one.
+    PRIVATE
+    babel-serializer
 )
 
 # nexus/bench hardware-counter backend: exactly one per platform.
@@ -186,6 +188,7 @@ if(SC_BUILD_TESTS)
     target_link_libraries(nexus-test
         PRIVATE
         nexus
+        babel-serializer # the export tests read the listing JSON back rather than matching its text
     )
 
     # CC rather than a bigger tier, and measured: nexus-test goes 0.63 at CC but 0.84 once the heavy STL block is added.

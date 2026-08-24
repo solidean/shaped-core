@@ -1,32 +1,38 @@
 #include "perf_json.hh"
 
+#include <babel-serializer/data/json.hh>
 #include <clean-core/common/assert.hh>
-#include <clean-core/string/format.hh>
-#include <nexus/tests/export/json.hh>
 
 cc::string nx::write_perf_json(cc::string_view suite_name, nx::test_schedule_execution const& execution)
 {
-    cc::string out;
-    out.appendf("{{\n  \"suite\": \"{}\",\n  \"metrics\": [", json_escape(suite_name));
+    namespace json = babel::json;
 
-    bool first = true;
-    for (auto const& exec : execution.executions)
+    // One metric per line, and a non-finite reading becomes null rather than invalid JSON: a sidecar nothing can
+    // parse is worse than a hole in one row.
+    auto w = json::string_writer({.indent = 2, .non_finite = json::non_finite_policy::null});
+
     {
-        CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
-        cc::string const test = json_escape(exec.instance.declaration->name);
+        auto root = w.object();
+        root.write("suite", suite_name);
 
-        for (auto const& metric : exec.metrics)
+        auto metrics = root.write_array("metrics");
+        for (auto const& exec : execution.executions)
         {
-            out += first ? "\n" : ",\n";
-            first = false;
+            CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
+            auto const test = exec.instance.declaration->name;
 
-            out.appendf("    {{\"test\": \"{}\", \"name\": \"{}\", \"value\": {}, \"unit\": \"{}\", "
-                        "\"higher_is_better\": {}}}",
-                        test, json_escape(metric.name), metric.value, json_escape(metric.unit), metric.higher_is_better);
+            for (auto const& metric : exec.metrics)
+            {
+                auto m = metrics.write_object(json::layout::compact);
+                m.write("test", test);
+                m.write("name", metric.name);
+                m.write("value", metric.value);
+                m.write("unit", metric.unit);
+                m.write("higher_is_better", metric.higher_is_better);
+            }
         }
     }
 
-    out += first ? "]\n" : "\n  ]\n";
-    out += "}\n";
-    return out;
+    // The sink is a growing in-memory string, so the only way this fails is a bug, not I/O.
+    return w.finish().value();
 }

@@ -26,7 +26,8 @@ One-liner per library:
   **Every library has a recording domain and logs its diagnostics** — a library never prints, and never writes its own `[lib]` prefix.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
-  Namespace `nx`. Depends on clean-core.
+  Namespace `nx`. Depends on clean-core, plus babel-serializer privately (`babel::json` writes its listing and perf sidecars).
+  **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
   The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
@@ -96,6 +97,7 @@ Supporting directories:
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry points.
 
 A library depends only on lower libraries (plus its own external deps). No upward or cyclic dependencies.
+The one exception is **nexus**, the test and app harness: it is a leaf nothing links but test binaries, so it may depend on any library.
 Each entry above names what it depends on, and the `CMakeLists.txt` files are the ground truth.
 
 ---

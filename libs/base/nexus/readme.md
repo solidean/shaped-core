@@ -1,7 +1,8 @@
 # nexus
 
 Lightweight C++23 test framework, Catch2 v3 CLI–compatible so IDE test integration works out of the box.
-Namespace `nx`. Depends on clean-core.
+Namespace `nx`. Depends on clean-core, plus babel-serializer privately for the JSON sidecars.
+Nothing links nexus but test binaries, so the harness is a leaf and may depend on any library.
 Every `<lib>-test` binary in shaped-core is built on it.
 
 ```cpp

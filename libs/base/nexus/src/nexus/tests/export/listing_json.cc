@@ -1,11 +1,12 @@
 #include "listing_json.hh"
 
-#include <clean-core/string/format.hh>
+#include <babel-serializer/data/json.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
-#include <nexus/tests/export/json.hh>
 
 namespace
 {
+namespace json = babel::json;
+
 cc::string_view bucket_name(nx::config::test_bucket bucket)
 {
     switch (bucket)
@@ -40,63 +41,71 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
         if (config.alias_filter_matches(alias))
             ++eligible_alias_count;
 
-    cc::string out;
-    out.appendf("{{\n  \"suite\": \"{}\",\n", json_escape(suite_name));
+    // One entry per line: the listing is read by dev.py, but it is also read by a person chasing why a filter
+    // selected nothing, and a field per line would bury a thousand tests.
+    auto w = json::string_writer({.indent = 2});
 
-    out += "  \"filters\": [";
-    for (isize i = 0; i < config.filters.size(); ++i)
-        out.appendf("{}\"{}\"", i == 0 ? "" : ", ", json_escape(config.filters[i]));
-    out += "],\n";
-
-    // The *resolved* reading of those filters, so a caller can say why nothing matched.
-    out.appendf("  \"filter_mode\": \"{}\",\n", config.matching_files ? "file" : "name");
-    out.appendf("  \"selected_bucket\": \"{}\",\n", bucket_name(config.selected_bucket));
-    out.appendf("  \"allow_cross_bucket_naming\": {},\n", config.allow_cross_bucket_naming);
-    out.appendf("  \"run_disabled_tests\": {},\n", config.run_disabled_tests);
-    out.appendf("  \"eligible_count\": {},\n", eligible_count);
-    out.appendf("  \"eligible_alias_count\": {},\n", eligible_alias_count);
-
-    out += "  \"tests\": [";
-    bool first = true;
-    for (auto const& decl : registry.declarations)
     {
-        auto const& tc = decl.test_config;
+        auto root = w.object();
+        root.write("suite", suite_name);
 
-        out += first ? "\n" : ",\n";
-        first = false;
+        {
+            auto filters = root.write_array("filters", json::layout::compact);
+            for (auto const& filter : config.filters)
+                filters.write(filter);
+        }
 
-        // Invocable (inert) tests never run standalone, so they are reported as not eligible; they are
-        // still listed (with invocable: true) so tooling can see them and not treat the binary as empty.
-        bool const invocable = decl.is_invocable();
-        bool const eligible = !invocable && config.would_run(decl);
+        // The *resolved* reading of those filters, so a caller can say why nothing matched.
+        root.write("filter_mode", config.matching_files ? "file" : "name");
+        root.write("selected_bucket", bucket_name(config.selected_bucket));
+        root.write("allow_cross_bucket_naming", config.allow_cross_bucket_naming);
+        root.write("run_disabled_tests", config.run_disabled_tests);
+        root.write("eligible_count", eligible_count);
+        root.write("eligible_alias_count", eligible_alias_count);
 
-        // A declared argument line is part of what a test IS, so a listing that omitted it could not explain
-        // why a parametrized example behaved the way it did.
-        // Empty when none was declared.
-        out.appendf("    {{\"name\": \"{}\", \"file\": \"{}\", \"line\": {}, \"bucket\": \"{}\", \"enabled\": {}, "
-                    "\"seed\": {}, \"invocable\": {}, \"args\": \"{}\", \"filter_matches\": {}, \"eligible\": {}}}",
-                    json_escape(decl.name), json_escape(decl.location.file_name()), decl.location.line(),
-                    bucket_name(tc.bucket), tc.enabled, tc.seed, invocable,
-                    json_escape(tc.test_args != nullptr ? cc::string_view(tc.test_args) : cc::string_view()),
-                    config.filter_matches(decl), eligible);
+        {
+            auto tests = root.write_array("tests");
+            for (auto const& decl : registry.declarations)
+            {
+                auto const& tc = decl.test_config;
+
+                // Invocable (inert) tests never run standalone, so they are reported as not eligible; they are
+                // still listed (with invocable: true) so tooling can see them and not treat the binary as empty.
+                bool const invocable = decl.is_invocable();
+                bool const eligible = !invocable && config.would_run(decl);
+
+                auto t = tests.write_object(json::layout::compact);
+                t.write("name", decl.name);
+                t.write("file", decl.location.file_name());
+                t.write("line", decl.location.line());
+                t.write("bucket", bucket_name(tc.bucket));
+                t.write("enabled", tc.enabled);
+                t.write("seed", tc.seed);
+                t.write("invocable", invocable);
+
+                // A declared argument line is part of what a test IS, so a listing that omitted it could not explain
+                // why a parametrized example behaved the way it did.
+                // Empty when none was declared.
+                t.write("args", tc.test_args != nullptr ? cc::string_view(tc.test_args) : cc::string_view());
+
+                t.write("filter_matches", config.filter_matches(decl));
+                t.write("eligible", eligible);
+            }
+        }
+
+        // Aliases: pseudo test-names a filter can select (each expands to one or more scoped fragment runs).
+        auto aliases = root.write_array("aliases");
+        for (auto const& alias : registry.aliases)
+        {
+            auto a = aliases.write_object(json::layout::compact);
+            a.write("name", alias.name);
+            a.write("file", alias.location.file_name());
+            a.write("line", alias.location.line());
+            a.write("fragment_count", alias.fragments.size());
+            a.write("filter_matches", config.alias_filter_matches(alias));
+        }
     }
-    out += first ? "]\n" : "\n  ]\n";
 
-    // Aliases: pseudo test-names a filter can select (each expands to one or more scoped fragment runs).
-    out += "  ,\"aliases\": [";
-    bool first_alias = true;
-    for (auto const& alias : registry.aliases)
-    {
-        out += first_alias ? "\n" : ",\n";
-        first_alias = false;
-
-        out.appendf("    {{\"name\": \"{}\", \"file\": \"{}\", \"line\": {}, \"fragment_count\": {}, "
-                    "\"filter_matches\": {}}}",
-                    json_escape(alias.name), json_escape(alias.location.file_name()), alias.location.line(),
-                    alias.fragments.size(), config.alias_filter_matches(alias));
-    }
-    out += first_alias ? "]\n" : "\n  ]\n";
-
-    out += "}\n";
-    return out;
+    // The sink is a growing in-memory string, so the only way this fails is a bug, not I/O.
+    return w.finish().value();
 }

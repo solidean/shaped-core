@@ -7,6 +7,7 @@ Per-library roadmaps track what exists today.
 
 Libraries live under `libs/<category>/<lib>`: `src/<lib>/` with colocated `.hh`/`.cc`, `tests/` holding a `<lib>-test` binary, and an optional `docs/`.
 A library depends only on lower libraries — there are **no upward or cyclic dependencies** — and each entry below names what it depends on.
+nexus is the one exception, and the reason is under its entry: as the harness nothing links, it is a leaf rather than a base layer.
 The `CMakeLists.txt` files are the ground truth if an entry and the build ever disagree.
 
 ## base
@@ -32,13 +33,17 @@ Highlights:
 
 The source tree is organized by topic, and the [readme](../libs/base/clean-core/readme.md#file-organization) has the map.
 
-### nexus — namespace `nx` — depends on clean-core
+### nexus — namespace `nx` — depends on clean-core, babel-serializer (private)
 
 [readme](../libs/base/nexus/readme.md) · [docs](../libs/base/nexus/docs/_index.md)
 
 Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML), so IDE test integration works out of the box.
 This is what every `<lib>-test` binary is built on.
 Beyond `TEST` / `CHECK`, it carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks, and hardware performance counters.
+
+**nexus is a leaf, not a base layer.**
+Nothing in shaped-core links it except test binaries, so the harness sits on top of the libraries it tests even though it lives in `base/`.
+That is what lets it write its JSON sidecars — the test listing and the perf metrics — through `babel::json` instead of hand-rolling an escaper.
 The source tree is organized by responsibility, and the [readme](../libs/base/nexus/readme.md#file-organization) has the map.
 
 ### typed-geometry — namespace `tg` — depends on clean-core
