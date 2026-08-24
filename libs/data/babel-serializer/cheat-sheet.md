@@ -69,17 +69,23 @@ cc::string_view key = e.key();    // this node's key within its parent object ("
 ```cpp
 auto w = babel::json::writer(out, {.indent = 2});  // out: a cc::write_stream
 auto sw = babel::json::string_writer({});          // owns a cc::string; finish() -> result<cc::string>
+auto& j = sw.underlying();                         // the writer under the convenience wrapper
 
-auto o = w.object();  auto a = w.array();   // the root scope; RAII, closes when the handle dies
-w.write(42);                                // ...or a bare scalar as the whole document
-o.write("key", value);                      // null / bool / any int width / float / double / string_view
-o.write("x", 1.5, cc::float_notation::fixed, 3);   // this one value, its own notation
-o.write_ascii("k", utf8);                   // escape every non-ASCII byte as \uXXXX
-o.write_raw("k", R"([1,2])");               // verbatim JSON: never parsed, escaped or checked
-auto inner = o.write_object("k");  auto arr = o.write_array("k");   // nesting; array scopes take no key
+// the imperative layer, which is the whole API
+j.begin_object();  j.begin_array("k");  j.end_array();  j.end_object();  // keyed forms in an object, bare in an array
+j.write("key", value);                      // null / bool / any int width / float / double / string_view
+j.write(value);                             // an array element, or a bare scalar as the whole document
+j.write("x", 1.5, cc::float_notation::fixed, 3);   // this one value, its own notation
+j.write_ascii("k", utf8);                   // escape every non-ASCII byte as \uXXXX
+j.write_raw("k", R"([1,2])");               // verbatim JSON: never parsed, escaped or checked
+
+// the RAII layer, sugar over exactly those calls, and the two mix freely on one writer
+auto o = w.object();  auto a = w.array();   // the root scope; closes when the handle dies
+o.write("key", value);                      // the same set; an array scope's overloads take no key
+auto inner = o.write_object("k");  auto arr = o.write_array("k");
 auto rec = arr.write_object(babel::json::layout::compact);          // this scope (and all inside it) on ONE line
-arr.write(1); arr.write_object(); arr.write_array();                // ...the same set, minus the keys
-cc::result<cc::unit> r = w.finish();        // THE place errors surface; idempotent
+
+cc::result<cc::unit> r = w.finish();        // THE place errors surface; a scope left open is one of them
 babel::json::write_report rep = w.report(); // what CHANGED on the way out; survives finish()
 rep.is_clean();                             // non_finite + large_integers + undecodable_bytes all 0
 ```
@@ -89,13 +95,16 @@ rep.is_clean();                             // non_finite + large_integers + und
 `escape_non_ascii`, `escape_html` (`<` as a `\u003c`, for a `<script>` payload), `newline_delimited` (json-nd: several roots, one per line).
 
 - **Errors are sticky**: the first failed write is recorded, later writes are no-ops, `finish()` reports it.
-  Structural misuse (a scope written to while its child is open, a key into an array, a scope closed out of order) lands there too, and asserts as well where assertions are on.
+  Structural misuse (a scope written to while its child is open, a key into an array, an `end_array()` closing an object) lands there too, and asserts as well where assertions are on.
+  Treat that assert as today's contract rather than a promise: it may later become a reported error, since widening costs callers nothing while the reverse kills programs relying on it.
+  The one structural failure that is **not** an assert is `finish()` with a scope still open — the brackets go out anyway, so the bytes stay well-formed, and `finish()` says the document stops short.
   A writer that is never finished logs its error via `CC_LOG_ERROR` rather than losing it.
 - **A valid document can still be lossy**: a NaN became null, an id past 2^53 will round in a double-based reader.
   That is what `report()` counts — it is never an error, and the counts are flat because a streaming writer knows the value, not the path to it.
 - **Duplicate keys are not detected, and UTF-8 is never validated** — both on purpose, both documented in the header.
 - **`layout::compact` is one record per line** in an otherwise indented document — what a trace or a log wants, where a field per line is unreadable.
-- `dev.py example babel-serializer/json-write` (and `json-read`, `json-write-stream`, `json-newline-delimited`, `json-round-trip`) runs the examples.
+- `dev.py example babel-serializer/json-write` runs one example.
+  The others are `json-read`, `json-imperative`, `json-write-stream`, `json-write-numbers`, `json-newline-delimited` and `json-round-trip`.
 
 ## Markdown (`babel::markdown`)
 

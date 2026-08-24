@@ -47,21 +47,48 @@ decoded decode_utf8(cc::string_view s, isize i)
     if (b0 < 0x80)
         return {.code_point = b0, .length = 1, .ok = true};
 
+    // A well-formed sequence is not just one whose bits parse: an overlong encoding, a surrogate that came in as
+    // UTF-8, and anything past U+10FFFF all decode "successfully" into something no escape can represent.
+    // Reporting them as undecodable is what keeps them on the passthrough path, counted rather than rewritten.
     if ((b0 & 0xE0) == 0xC0 && continuation(1))
-        return {.code_point = (u32(b0 & 0x1F) << 6) | u32(u8(s[i + 1]) & 0x3F), .length = 2, .ok = true};
-
-    if ((b0 & 0xF0) == 0xE0 && continuation(1) && continuation(2))
-        return {.code_point = (u32(b0 & 0x0F) << 12) | (u32(u8(s[i + 1]) & 0x3F) << 6) | u32(u8(s[i + 2]) & 0x3F),
-                .length = 3,
-                .ok = true};
-
-    if ((b0 & 0xF8) == 0xF0 && continuation(1) && continuation(2) && continuation(3))
-        return {.code_point = (u32(b0 & 0x07) << 18) | (u32(u8(s[i + 1]) & 0x3F) << 12)
-                            | (u32(u8(s[i + 2]) & 0x3F) << 6) | u32(u8(s[i + 3]) & 0x3F),
-                .length = 4,
-                .ok = true};
+    {
+        auto const cp = (u32(b0 & 0x1F) << 6) | u32(u8(s[i + 1]) & 0x3F);
+        if (cp >= 0x80)
+            return {.code_point = cp, .length = 2, .ok = true};
+    }
+    else if ((b0 & 0xF0) == 0xE0 && continuation(1) && continuation(2))
+    {
+        auto const cp = (u32(b0 & 0x0F) << 12) | (u32(u8(s[i + 1]) & 0x3F) << 6) | u32(u8(s[i + 2]) & 0x3F);
+        if (cp >= 0x800 && (cp < 0xD800 || cp > 0xDFFF))
+            return {.code_point = cp, .length = 3, .ok = true};
+    }
+    else if ((b0 & 0xF8) == 0xF0 && continuation(1) && continuation(2) && continuation(3))
+    {
+        auto const cp = (u32(b0 & 0x07) << 18) | (u32(u8(s[i + 1]) & 0x3F) << 12) | (u32(u8(s[i + 2]) & 0x3F) << 6)
+                      | u32(u8(s[i + 3]) & 0x3F);
+        if (cp >= 0x10000 && cp <= 0x10FFFF)
+            return {.code_point = cp, .length = 4, .ok = true};
+    }
 
     return {};
+}
+
+/// Renders a float or double through cc::to_chars and hands the text to `emit`.
+/// The stack buffer covers the shortest form and every default precision; a precision large enough to outgrow it is
+/// rare enough that one allocation beats sizing every frame for the worst case.
+template <class T, class Emit>
+void render_float(Emit&& emit, T v, cc::float_notation notation, int precision)
+{
+    auto const needed = cc::to_chars_size(notation, precision);
+    if (needed <= cc::to_chars_float_max) [[likely]]
+    {
+        char buf[cc::to_chars_float_max];
+        emit(cc::string_view(buf, cc::to_chars(buf, v, notation, precision)));
+        return;
+    }
+
+    auto scratch = cc::vector<char>::create_uninitialized(needed);
+    emit(cc::string_view(scratch.data(), cc::to_chars(scratch, v, notation, precision)));
 }
 } // namespace
 
@@ -70,18 +97,24 @@ decoded decode_utf8(cc::string_view s, isize i)
 
 void json::writer::impl_emit(cc::string_view text)
 {
-    if (!_error.is_empty()) // sticky: every write after the first failure is a no-op
+    if (_failed) // sticky: every write after the first failure is a no-op
         return;
 
     auto r = _out->write(cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size()));
     if (!r.has_value())
+    {
+        _failed = true;
         _error = cc::move(r).error();
+    }
 }
 
 void json::writer::impl_misuse(char const* what)
 {
     // Assert first: where assertions are on, a programming error should stop at the site with a stack behind it,
     // which is strictly more than finish() can tell anyone later.
+    //
+    // The assert is the contract as it stands today, and starting strict is deliberate: dropping it later leaves every
+    // caller written against it working, while adding it back would kill programs that had come to rely on the error.
     CC_ASSERT(false, what);
 
     this->impl_fail(cc::format("json writer: {}", what));
@@ -89,8 +122,11 @@ void json::writer::impl_misuse(char const* what)
 
 void json::writer::impl_fail(cc::string message)
 {
-    if (_error.is_empty())
-        _error = cc::any_error(cc::move(message));
+    if (_failed) // the first failure is the one worth reporting; the rest are its consequences
+        return;
+
+    _failed = true;
+    _error = cc::any_error(cc::move(message));
 }
 
 void json::writer::impl_indent()
@@ -125,7 +161,8 @@ void json::writer::impl_begin_root()
 
 bool json::writer::impl_begin_member(cc::string_view key, i32 depth)
 {
-    // A live scope always has depth >= 1, so an equal stack size also means the stack is not empty.
+    if (!this->impl_expect(!_stack.empty(), "wrote a keyed value while no scope is open"))
+        return false;
     if (!this->impl_expect(i32(_stack.size()) == depth, "wrote through a scope whose child is still open"))
         return false;
     if (!this->impl_expect(_stack.back().is_object, "wrote a key into an array scope"))
@@ -144,6 +181,8 @@ bool json::writer::impl_begin_member(cc::string_view key, i32 depth)
 
 bool json::writer::impl_begin_element(i32 depth)
 {
+    if (!this->impl_expect(!_stack.empty(), "wrote an array element while no scope is open"))
+        return false;
     if (!this->impl_expect(i32(_stack.size()) == depth, "wrote through a scope whose child is still open"))
         return false;
     if (!this->impl_expect(!_stack.back().is_object, "wrote an unkeyed value into an object scope"))
@@ -156,6 +195,28 @@ bool json::writer::impl_begin_element(i32 depth)
 
     this->impl_indent();
     return true;
+}
+
+bool json::writer::impl_begin_value()
+{
+    if (_stack.empty()) // a bare scalar, or an object / array, as the whole document
+    {
+        this->impl_begin_root();
+        return true;
+    }
+
+    return this->impl_begin_element(this->impl_depth());
+}
+
+void json::writer::impl_end(bool is_object)
+{
+    if (!this->impl_expect(!_stack.empty(), "closed a JSON scope while none is open"))
+        return;
+    if (!this->impl_expect(_stack.back().is_object == is_object,
+                           is_object ? "end_object() closed an array scope" : "end_array() closed an object scope"))
+        return;
+
+    this->impl_close(this->impl_depth());
 }
 
 void json::writer::impl_open(bool is_object, layout l)
@@ -202,13 +263,13 @@ void json::writer::impl_i64(i64 v)
 {
     auto const magnitude = v < 0 ? u64(-(v + 1)) + 1 : u64(v); // negation without overflowing at i64's minimum
     char buf[cc::to_chars_int_max];
-    this->impl_integer(cc::string_view(buf, cc::to_chars(buf, (long long)(v))), magnitude);
+    this->impl_integer(cc::string_view(buf, cc::to_chars(buf, v)), magnitude);
 }
 
 void json::writer::impl_u64(u64 v)
 {
     char buf[cc::to_chars_int_max];
-    this->impl_integer(cc::string_view(buf, cc::to_chars(buf, (unsigned long long)(v))), v);
+    this->impl_integer(cc::string_view(buf, cc::to_chars(buf, v)), v);
 }
 
 /// Emits already-rendered digits, applying the large-integer policy to them.
@@ -239,7 +300,7 @@ void json::writer::impl_integer(cc::string_view digits, u64 magnitude)
     }
 }
 
-void json::writer::impl_double(double v, cc::float_notation notation, i32 precision)
+void json::writer::impl_double(double v, cc::float_notation notation, int precision)
 {
     if (!is_finite(v))
     {
@@ -259,11 +320,10 @@ void json::writer::impl_double(double v, cc::float_notation notation, i32 precis
         }
     }
 
-    char buf[cc::to_chars_float_max];
-    this->impl_emit(cc::string_view(buf, cc::to_chars(buf, v, notation, precision)));
+    render_float([this](cc::string_view text) { this->impl_emit(text); }, v, notation, precision);
 }
 
-void json::writer::impl_float(float v, cc::float_notation notation, i32 precision)
+void json::writer::impl_float(float v, cc::float_notation notation, int precision)
 {
     if (!is_finite(double(v)))
     {
@@ -271,8 +331,7 @@ void json::writer::impl_float(float v, cc::float_notation notation, i32 precisio
         return;
     }
 
-    char buf[cc::to_chars_float_max];
-    this->impl_emit(cc::string_view(buf, cc::to_chars(buf, v, notation, precision)));
+    render_float([this](cc::string_view text) { this->impl_emit(text); }, v, notation, precision);
 }
 
 void json::writer::impl_raw(cc::string_view fragment)
@@ -399,7 +458,95 @@ void json::writer::impl_string(cc::string_view v, bool escape_non_ascii)
 }
 
 // -------------------------------------------------------------------------------------------------
-// scopes and finishing
+// the imperative layer
+//
+// A misused call still opens or still closes: the error is already recorded, so everything after it is a no-op, and
+// the structure the caller believes it is in stays the structure the writer is in.
+
+void json::writer::begin_object(cc::string_view key, layout l)
+{
+    (void)this->impl_begin_member(key, this->impl_depth());
+    this->impl_open(true, l);
+}
+
+void json::writer::begin_array(cc::string_view key, layout l)
+{
+    (void)this->impl_begin_member(key, this->impl_depth());
+    this->impl_open(false, l);
+}
+
+void json::writer::begin_object(layout l)
+{
+    (void)this->impl_begin_value();
+    this->impl_open(true, l);
+}
+
+void json::writer::begin_array(layout l)
+{
+    (void)this->impl_begin_value();
+    this->impl_open(false, l);
+}
+
+void json::writer::end_object()
+{
+    this->impl_end(true);
+}
+
+void json::writer::end_array()
+{
+    this->impl_end(false);
+}
+
+void json::writer::write(cc::string_view key, double value, cc::float_notation notation, int precision)
+{
+    if (this->impl_begin_member(key, this->impl_depth()))
+        this->impl_double(value, notation, precision);
+}
+
+void json::writer::write(cc::string_view key, float value, cc::float_notation notation, int precision)
+{
+    if (this->impl_begin_member(key, this->impl_depth()))
+        this->impl_float(value, notation, precision);
+}
+
+void json::writer::write_ascii(cc::string_view key, cc::string_view value)
+{
+    if (this->impl_begin_member(key, this->impl_depth()))
+        this->impl_string(value, true);
+}
+
+void json::writer::write_raw(cc::string_view key, cc::string_view fragment)
+{
+    if (this->impl_begin_member(key, this->impl_depth()))
+        this->impl_raw(fragment);
+}
+
+void json::writer::write(double value, cc::float_notation notation, int precision)
+{
+    if (this->impl_begin_value())
+        this->impl_double(value, notation, precision);
+}
+
+void json::writer::write(float value, cc::float_notation notation, int precision)
+{
+    if (this->impl_begin_value())
+        this->impl_float(value, notation, precision);
+}
+
+void json::writer::write_ascii(cc::string_view value)
+{
+    if (this->impl_begin_value())
+        this->impl_string(value, true);
+}
+
+void json::writer::write_raw(cc::string_view fragment)
+{
+    if (this->impl_begin_value())
+        this->impl_raw(fragment);
+}
+
+// -------------------------------------------------------------------------------------------------
+// the RAII layer, and finishing
 
 json::object_writer json::writer::object(layout l)
 {
@@ -463,24 +610,42 @@ cc::result<cc::unit> json::writer::finish()
 {
     if (!_finished)
     {
+        // Close before reporting, not after: impl_fail turns every later emit into a no-op, so a document still open
+        // here would lose the very brackets that keep it parseable.
+        auto const was_open = !_stack.empty();
         while (!_stack.empty())
             this->impl_close(i32(_stack.size()));
         if (_opts.newline_delimited && _root_count > 0)
             this->impl_emit("\n"); // every record on its own line, the last one included
 
+        // Not an assert, unlike the rest of the structural checks: an assert has to fire where the mistake is, and
+        // this one is only visible somewhere else entirely — including on the destructor's path, where an early
+        // return must not take the program down.
+        if (was_open)
+            this->impl_fail("json writer: finish() with a scope still open; the brackets were closed for you, but the "
+                            "document stops short of what the caller meant to write");
+
         _finished = true;
 
-        if (_error.is_empty())
+        if (!_failed)
         {
             auto r = _out->flush();
             if (!r.has_value())
+            {
+                _failed = true;
                 _error = cc::move(r).error();
+            }
         }
     }
 
-    if (!_error.is_empty())
-        return cc::error(cc::move(_error));
-    return cc::unit{};
+    if (!_failed)
+        return cc::unit{};
+
+    // The message MOVES OUT with the first report, so a repeat call still fails — just without the detail, rather
+    // than silently claiming the write went fine.
+    if (_error.is_empty())
+        return cc::error("json writer: the write already failed; the first finish() carried the reason");
+    return cc::error(cc::move(_error));
 }
 
 json::writer::~writer()

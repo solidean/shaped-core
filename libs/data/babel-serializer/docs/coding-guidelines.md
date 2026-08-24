@@ -207,6 +207,14 @@ So neither is a validation channel, and every slice site needs a bounds check th
 A convenience type may own an in-memory sink on top — `json::string_writer` owns a `cc::string` and hands it over with no copy.
 It stays a wrapper over the stream writer, never a second implementation.
 
+**The imperative calls are the API, and RAII is sugar over them — never the other way round.**
+`begin_object` / `write` / `end_object` is what the writer offers; `object_writer` and friends add closing-on-destruction and nothing else.
+Scope handles cannot cross a function boundary, so a caller whose structure comes from a visitor, a state machine or a recursive walk cannot use them at all.
+An API offering only the sugar would simply be unusable there.
+The wrapper types expose the writer underneath (`string_writer::underlying()`) so the two layers mix on one document.
+It also puts the structural checks where they can be reached.
+At the RAII layer a key in an array scope is not expressible, so an API with no lower layer would be documenting a misuse nobody could commit.
+
 **The whole-value-in, bytes-out pair is the fallback**, for a format whose encoder genuinely needs the complete value before it can emit anything.
 Images are that case, and established the pair:
 
@@ -224,6 +232,13 @@ Whichever shape a format takes, three rules bind it:
   **Structural misuse is sticky too, AND asserts**: an assert alone stops a debug run at the site, which is worth having, but it leaves a release build emitting a document that is silently malformed.
   The check is a compare the caller already has the operands for, so the cost is a predictable branch and the failure path stays out of line.
   A misused call then does nothing rather than corrupting what follows, and the scope handles it hands back stay valid — a null handle would turn a recoverable mistake into a crash.
+  **Start strict on that assert, because only one direction is free.**
+  Dropping it later leaves every caller written against it working; adding it back kills programs that had come to rely on the error being survivable.
+  So a misuse we are unsure about asserts today and may be widened into a plain reported error once we know, never the reverse.
+- **An error nobody can see at the call site is reported rather than asserted.**
+  `finish()` with a scope still open is the case: an assert has to fire where the mistake is, and this one is only observable somewhere else.
+  On the destructor's path, at that, where an early return must not take the program down.
+  The brackets go out anyway, so what reached the sink still parses, and `finish()` says the document stops short.
 - **A writer that is never finished logs its error rather than losing it.**
   `CC_LOG_ERROR` from the destructor, not an assert: skipping `finish()` on an early return is ordinary, and tearing the program down for it is the wrong tool.
 
@@ -254,3 +269,24 @@ Two rules keep it honest, and they mirror the issue list's:
 
 **Where the loss is a choice, make it a policy rather than a report-only surprise** — `non_finite_policy`, `large_integer_policy`.
 Both were open-coded in the first two callers before they existed, which is the usual sign.
+
+---
+
+## JSON numbers are narrower than the JSON grammar, and the writer cannot fix that
+
+The grammar puts no precision limit on a number.
+`JSON.parse` is specified to produce an IEEE double, so the de-facto format every JS consumer speaks is narrower than the one on paper.
+A producer therefore has to guess which of the two its reader implements.
+That is a defect in JSON, inherited from JS — not something a writer gets to resolve.
+
+What follows for us:
+
+- **Never make the decision value-dependent.**
+  A policy that stringifies an integer once it passes 2^53 changes a field's *type* for exactly the data that got large.
+  A consumer written against small values then breaks in production and nowhere else.
+  Protobuf's canonical JSON mapping stringifies int64 unconditionally and Twitter shipped `id` next to `id_str`; both are ugly, and both are type-level for this reason.
+- **Decide per field, at the call site.**
+  A field that is an opaque id has precision as its only content and belongs in quotes always; a field that is a quantity a reader does arithmetic on belongs in a number always.
+  `large_integer_policy` is document-wide and therefore right only where the writer genuinely cannot tell — `chrome_trace`'s generic payload loop, emitting whatever a recording declared as a `u64`.
+- **Count it either way.**
+  `write_report::large_integers` answers "did anything here land past what a double carries", which is the question a caller can act on without the writer guessing.

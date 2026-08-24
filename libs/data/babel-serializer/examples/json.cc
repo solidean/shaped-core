@@ -1,4 +1,5 @@
 #include <babel-serializer/data/json.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/streams/growing_stream.hh>
 #include <clean-core/streams/stream.hh>
 #include <clean-core/string/print.hh>
@@ -61,6 +62,37 @@ EXAMPLE("babel-serializer/json-write")
         build.write("debug", true);
         build.write("jobs", 16);
     }
+
+    cc::println("{}", w.finish().value());
+}
+
+EXAMPLE("babel-serializer/json-imperative")
+{
+    // The RAII scopes are sugar: begin_* / end_* is the layer underneath, and it is the one to reach for when the
+    // structure comes from somewhere a scope handle cannot follow — a visitor, a state machine, a recursive walk.
+    auto w = babel::json::string_writer({.indent = 2});
+    auto& j = w.underlying();
+
+    struct node
+    {
+        char const* name;
+        cc::span<node const> children;
+    };
+    node const leaves[] = {{.name = "vec"}, {.name = "mat"}};
+    node const tree = {.name = "tg", .children = leaves};
+
+    // a plain recursive function, which is exactly what an RAII handle cannot be threaded through cleanly
+    auto const write_node = [&j](auto const& self, node const& n) -> void
+    {
+        j.begin_object();
+        j.write("name", n.name);
+        j.begin_array("children");
+        for (auto const& c : n.children)
+            self(self, c);
+        j.end_array();
+        j.end_object();
+    };
+    write_node(write_node, tree);
 
     cc::println("{}", w.finish().value());
 }

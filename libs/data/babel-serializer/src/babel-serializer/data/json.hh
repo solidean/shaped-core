@@ -217,6 +217,28 @@ inline ref document::root() const
 // The writer is imperative and streaming: there is no document to build up, values go straight into a
 // cc::write_stream as they are written, and nothing but one small scope stack is held in between.
 //
+// THERE ARE TWO LAYERS, and the lower one is the whole API — the upper one adds no capability.
+//
+// The IMPERATIVE layer is begin_object / begin_array / write / end_object / end_array on the writer itself.
+// Nothing about it is optional or discouraged: a caller whose structure comes from a visitor, a state machine or a
+// loop that opens in one function and closes in another cannot hold an RAII handle across that boundary, and it is
+// the layer that exists for them.
+//
+//   auto w = babel::json::writer(out, {.indent = 2});
+//   w.begin_object();
+//   w.write("name", "shaped");
+//   w.begin_array("tags");
+//   w.write(1);
+//   w.write(2);
+//   w.end_array();
+//   w.end_object();
+//   CC_ASSERT(w.finish().has_value());
+//
+// The RAII layer is sugar over exactly those calls: object_writer / array_writer close their scope when the handle
+// dies, so the nesting in the source IS the nesting in the output and no end_* can be forgotten.
+// An object scope takes a key with every value and an array scope takes none, so at this layer the two cannot be
+// confused at all — which is why the same mistake is only reachable through the imperative layer.
+//
 //   auto w = babel::json::writer(out, {.indent = 2});
 //   {
 //       auto obj = w.object();
@@ -227,18 +249,27 @@ inline ref document::root() const
 //   }
 //   CC_ASSERT(w.finish().has_value());
 //
-// Scopes are RAII handles onto the writer, so an object closes when its handle dies, and the nesting in
-// the source IS the nesting in the output.
-// An object scope takes a key with every value and an array scope takes none, so the two cannot be confused.
+// The two mix freely on one writer, since the RAII handles hold nothing the imperative calls do not.
 //
 // ERRORS ARE STICKY, and there is exactly one place to check them: finish().
 // A failing stream write is recorded, every later write becomes a no-op, and finish() reports it.
 //
-// STRUCTURAL MISUSE GOES THERE TOO — writing through a scope whose child is still open, a key into an array, a scope
-// closed out of order.
+// STRUCTURAL MISUSE GOES THERE TOO — writing through a scope whose child is still open, a key into an array, an
+// end_array() closing an object.
 // It also asserts where assertions are on, so a debug run stops at the site with a stack rather than at finish().
 // Both, because an assert alone would leave a release build silently emitting a document that is not valid JSON, and
 // that is a worse outcome than a slower write.
+//
+// TREAT THAT ASSERT AS THE CONTRACT, NOT AS A PROMISE ABOUT THE FUTURE.
+// Misuse may later become a reported error and nothing more, because widening a contract that way costs its callers
+// nothing: code written against the assert keeps working.
+// The reverse, turning a tolerated error back into an assert, kills programs that were relying on it.
+// So the strict reading is the one to start from.
+//
+// One structural failure is deliberately NOT an assert: finish() with a scope still open.
+// An assert has to fire where the mistake is, and this one is only observable somewhere else entirely — on the
+// destructor's path, at that, where an early return must not take the program down.
+// The brackets are closed anyway, so the bytes on the wire stay well-formed, and finish() reports the document short.
 //
 // A writer that is never finished LOGS its error rather than losing it (CC_LOG_ERROR from the destructor).
 //
@@ -304,7 +335,7 @@ struct babel::json::write_options
     cc::float_notation floats = cc::float_notation::shortest;
 
     /// Digits for the fixed / scientific / general notations; a negative value means their own default of 6.
-    i32 float_precision = -1;
+    int float_precision = -1;
 
     non_finite_policy non_finite = non_finite_policy::error;
 
@@ -362,30 +393,73 @@ public:
     writer(writer const&) = delete;
     writer& operator=(writer const&) = delete;
 
-    // the root value
+    // the imperative layer
+public:
+    /// Opens an object / array as the next value of the innermost open scope, or as the root when none is open.
+    /// The keyed forms belong in an object scope and the bare ones in an array scope or at the root; using the wrong
+    /// one is structural misuse.
+    void begin_object(cc::string_view key, layout l = layout::inherit);
+    void begin_array(cc::string_view key, layout l = layout::inherit);
+    void begin_object(layout l = layout::inherit);
+    void begin_array(layout l = layout::inherit);
+
+    /// Closes the innermost open scope, which must be of the matching kind.
+    void end_object();
+    void end_array();
+
+    /// One keyed value in the innermost object scope.
+    template <class T>
+        requires writable_scalar<T>
+    void write(cc::string_view key, T const& value)
+    {
+        if (this->impl_begin_member(key, this->impl_depth()))
+            this->impl_value(value);
+    }
+
+    /// Renders this one value with a notation of its own, leaving the writer's default alone.
+    void write(cc::string_view key, double value, cc::float_notation notation, int precision = -1);
+    void write(cc::string_view key, float value, cc::float_notation notation, int precision = -1);
+
+    /// Like write, but escapes every non-ASCII byte as \uXXXX.
+    void write_ascii(cc::string_view key, cc::string_view value);
+
+    /// Emits `fragment` verbatim as the value; see object_writer::write_raw.
+    void write_raw(cc::string_view key, cc::string_view fragment);
+
+    /// One unkeyed value: an element of the innermost array scope, or a bare scalar as the whole document, which is
+    /// valid JSON on its own.
+    template <class T>
+        requires writable_scalar<T>
+    void write(T const& value)
+    {
+        if (this->impl_begin_value())
+            this->impl_value(value);
+    }
+
+    void write(double value, cc::float_notation notation, int precision = -1);
+    void write(float value, cc::float_notation notation, int precision = -1);
+    void write_ascii(cc::string_view value);
+    void write_raw(cc::string_view fragment);
+
+    // the RAII layer, which is sugar over the calls above
 public:
     /// Opens the root object / array.
     /// The handle must be destroyed before finish().
     [[nodiscard]] object_writer object(layout l = layout::inherit);
     [[nodiscard]] array_writer array(layout l = layout::inherit);
 
-    /// A bare scalar as the whole document, which is valid JSON on its own.
-    template <class T>
-        requires writable_scalar<T>
-    void write(T const& value)
-    {
-        this->impl_begin_root();
-        this->impl_value(value);
-    }
-
     // finishing
 public:
     /// Closes any scope still open, drains the stream, and reports the first error the writer hit.
-    /// Idempotent, so calling it and then letting the writer die is fine.
+    /// A scope still open here is itself an error: the brackets are emitted anyway, so the bytes stay well-formed,
+    /// but the document is incomplete and finish() says so.
+    /// Idempotent, so calling it and then letting the writer die is fine — a repeat call reports the same outcome,
+    /// though only the first carries the original message.
     [[nodiscard]] cc::result<cc::unit> finish();
 
     /// True once a write has failed; every write after that is a no-op.
-    [[nodiscard]] bool has_error() const { return !_error.is_empty(); }
+    /// Stays true across finish(), which consumes the message but not the fact.
+    [[nodiscard]] bool has_error() const { return _failed; }
 
     /// What the writer changed on the way out, so far.
     /// Readable at any point, and finish() does not clear it.
@@ -398,10 +472,17 @@ private:
 
     /// Emits the separator, newline and indentation before a value, plus the key when inside an object.
     /// `depth` is the calling scope's, which is what catches a write through a scope whose child is still open.
+    /// The imperative layer passes its own depth, so only the RAII layer can trip that check.
     /// False means the write must not proceed.
     [[nodiscard]] bool impl_begin_member(cc::string_view key, i32 depth);
     [[nodiscard]] bool impl_begin_element(i32 depth);
     void impl_begin_root();
+
+    /// The unkeyed imperative write: an array element, or the root when no scope is open.
+    [[nodiscard]] bool impl_begin_value();
+
+    /// The imperative close, which also checks the scope's kind against the end_* that was called.
+    void impl_end(bool is_object);
 
     /// Structural misuse: records it and reports whether the caller may proceed.
     /// The check itself is a compare the caller already has the operands for; the failure path is out of line.
@@ -422,8 +503,8 @@ private:
     void impl_i64(i64 v);
     void impl_u64(u64 v);
     void impl_integer(cc::string_view digits, u64 magnitude);
-    void impl_double(double v, cc::float_notation notation, i32 precision);
-    void impl_float(float v, cc::float_notation notation, i32 precision);
+    void impl_double(double v, cc::float_notation notation, int precision);
+    void impl_float(float v, cc::float_notation notation, int precision);
     void impl_string(cc::string_view v, bool escape_non_ascii);
     void impl_raw(cc::string_view fragment);
 
@@ -461,7 +542,12 @@ private:
     cc::write_stream* _out = nullptr;
     write_options _opts;
     cc::small_vector<level, 16> _stack;
+
+    /// The first failure's message, which finish() MOVES out when it reports it.
+    /// `_failed` is therefore the sticky fact and `_error` only the detail — a second finish() still has the former.
     cc::any_error _error;
+    bool _failed = false;
+
     write_report _report;
     i32 _root_count = 0;
 
@@ -489,12 +575,12 @@ struct babel::json::object_writer
     }
 
     /// Renders this one value with a notation of its own, leaving the writer's default alone.
-    void write(cc::string_view key, double value, cc::float_notation notation, i32 precision = -1)
+    void write(cc::string_view key, double value, cc::float_notation notation, int precision = -1)
     {
         if (_w->impl_begin_member(key, _depth))
             _w->impl_double(value, notation, precision);
     }
-    void write(cc::string_view key, float value, cc::float_notation notation, i32 precision = -1)
+    void write(cc::string_view key, float value, cc::float_notation notation, int precision = -1)
     {
         if (_w->impl_begin_member(key, _depth))
             _w->impl_float(value, notation, precision);
@@ -545,12 +631,12 @@ struct babel::json::array_writer
     }
 
     /// Renders this one value with a notation of its own, leaving the writer's default alone.
-    void write(double value, cc::float_notation notation, i32 precision = -1)
+    void write(double value, cc::float_notation notation, int precision = -1)
     {
         if (_w->impl_begin_element(_depth))
             _w->impl_double(value, notation, precision);
     }
-    void write(float value, cc::float_notation notation, i32 precision = -1)
+    void write(float value, cc::float_notation notation, int precision = -1)
     {
         if (_w->impl_begin_element(_depth))
             _w->impl_float(value, notation, precision);
@@ -595,6 +681,10 @@ public:
     [[nodiscard]] object_writer object(layout l = layout::inherit) { return _writer.object(l); }
     [[nodiscard]] array_writer array(layout l = layout::inherit) { return _writer.array(l); }
 
+    /// The writer underneath, for the imperative layer and anything else this wrapper does not forward.
+    /// The same object the forwarders here use, so the two layers mix on one document.
+    [[nodiscard]] json::writer& underlying() { return _writer; }
+
     template <class T>
         requires writable_scalar<T>
     void write(T const& value)
@@ -602,8 +692,7 @@ public:
         _writer.write(value);
     }
 
-    /// Finishes the write and moves the text out.
-    /// Every open scope must be destroyed first.
+    /// Finishes the write and moves the text out; see writer::finish().
     [[nodiscard]] cc::result<cc::string> finish();
 
     /// What the writer changed on the way out; see write_report.

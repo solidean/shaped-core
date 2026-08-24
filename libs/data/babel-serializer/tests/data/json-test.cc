@@ -456,6 +456,46 @@ TEST("json - write report counts what changed on the way out")
     }
 }
 
+TEST("json - escape_non_ascii passes malformed UTF-8 through rather than inventing an escape")
+{
+    // A sequence whose bits parse is not automatically well-formed, and each of these decodes into something no
+    // \\uXXXX escape can honestly represent — so they take the passthrough path and land in the report.
+    auto const cases = {
+        cc::string_view("\xC0\x80"),        // overlong NUL: would become \\u0000 and smuggle a terminator through
+        cc::string_view("\xED\xA0\x80"),    // a surrogate encoded as UTF-8: would become a lone \\ud800
+        cc::string_view("\xF7\xBF\xBF\xBF") // past U+10FFFF: no code point, so no surrogate pair either
+    };
+
+    for (auto const bad : cases)
+    {
+        auto w = babel::json::string_writer({.escape_non_ascii = true});
+        w.write(bad);
+        auto const text = w.finish().value();
+
+        CHECK(w.report().undecodable_bytes == bad.size());
+        CHECK(!text.contains("\\u")); // nothing was escaped, because nothing decoded
+    }
+
+    // ...while a well-formed astral code point still goes out as its surrogate pair
+    auto ok = babel::json::string_writer({.escape_non_ascii = true});
+    ok.write(cc::string_view("\xF0\x9F\x98\x80"));
+    CHECK(ok.finish().value() == R"("\ud83d\ude00")");
+    CHECK(ok.report().is_clean());
+}
+
+TEST("json - a precision past the fixed buffer still renders every digit")
+{
+    // cc::to_chars_float_max covers the shortest form and the default precision; beyond that the writer has to size
+    // off cc::to_chars_size, and getting that wrong would splice unspecified bytes into the document.
+    auto const precision = 400;
+    auto const text
+        = written({.floats = cc::float_notation::fixed, .float_precision = precision}, [](auto& w) { w.write(0.5); });
+
+    CHECK(text.size() == isize(1 + 1 + precision)); // "0" + "." + the digits
+    CHECK(text.subview({.offset = 0, .size = 4}) == "0.50");
+    CHECK(babel::json::read(text).value().root().as_double() == 0.5);
+}
+
 TEST("json - write raw and ascii")
 {
     auto const text = written({},
@@ -521,50 +561,92 @@ TEST("json - write round-trips through the reader")
     CHECK(root["list"][3].size() == 0);
 }
 
-#if !CC_ASSERT_ENABLED
-// Structural misuse asserts where assertions are on, so this behaviour is only reachable — and only matters — in a
-// build without them: there, the alternative to a sticky error is a document that is silently not JSON.
-TEST("json - structural misuse fails the write rather than emitting malformed JSON")
+// Structural misuse is a contract violation and asserts, so there is nothing here that pins it: a test would have to
+// run only on assert-disabled presets, and testing a promise on the one build where it degrades is the wrong shape.
+// What IS tested below is the failure the writer reports rather than asserts on — a scope still open at finish().
+
+TEST("json - the imperative layer writes the same document as the RAII one")
 {
-    SECTION("writing through a scope whose child is still open")
+    auto const via_scopes = written({.indent = 2},
+                                    [](auto& w)
+                                    {
+                                        auto root = w.object();
+                                        root.write("name", "shaped");
+                                        auto tags = root.write_array("tags");
+                                        tags.write(1);
+                                        auto inner = tags.write_object();
+                                        inner.write("deep", true);
+                                    });
+
+    auto w = babel::json::string_writer({.indent = 2});
     {
-        auto w = babel::json::string_writer();
-        {
-            auto o = w.object();
-            auto child = o.write_object("child");
-            o.write("stale", 1);
-        }
-        CHECK(w.finish().has_error());
+        auto& imp = w.underlying();
+        imp.begin_object();
+        imp.write("name", "shaped");
+        imp.begin_array("tags");
+        imp.write(1);
+        imp.begin_object();
+        imp.write("deep", true);
+        imp.end_object();
+        imp.end_array();
+        imp.end_object();
     }
 
-    SECTION("a key into an array")
-    {
-        auto w = babel::json::string_writer();
-        {
-            auto a = w.array();
-            auto o = a.write_object();
-            (void)o; // `a` is the array; the misuse is writing a key through the scope below
-        }
-        CHECK(w.finish().has_value()); // ...that one is well-formed; the next is not
-
-        auto bad = babel::json::string_writer();
-        {
-            auto a = bad.array();
-            auto inner = a.write_array();
-            a.write(1); // through the parent array while the inner one is open
-        }
-        CHECK(bad.finish().has_error());
-    }
-
-    SECTION("a second root value without newline_delimited")
-    {
-        auto w = babel::json::string_writer();
-        w.write(1);
-        w.write(2);
-        CHECK(w.finish().has_error());
-    }
+    CHECK(w.finish().value() == via_scopes);
 }
-#endif // !CC_ASSERT_ENABLED
+
+TEST("json - the two layers mix on one document")
+{
+    auto w = babel::json::string_writer();
+    {
+        auto root = w.object();
+        root.write("a", 1);
+        {
+            // a scope opened by hand INSIDE an RAII scope, closed by hand again
+            auto& imp = w.underlying();
+            imp.begin_array("b");
+            imp.write(2);
+            imp.end_array();
+        }
+        root.write("c", 3);
+    }
+    CHECK(w.finish().value() == R"({"a":1,"b":[2],"c":3})");
+}
+
+TEST("json - a scope left open is reported rather than asserted")
+{
+    auto w = babel::json::string_writer();
+    w.underlying().begin_object();
+    w.underlying().write("a", 1);
+    // no end_object(): an imperative caller can forget one, and that is not a call-site mistake anything can assert on
+
+    auto const r = w.finish();
+    REQUIRE(r.has_error());
+
+    // ...and the brackets were still emitted, so what did reach the sink parses
+    auto second = babel::json::string_writer();
+    second.underlying().begin_object();
+    second.underlying().write("a", 1);
+    (void)second.finish();
+}
+
+TEST("json - finish() reports the same outcome when called twice")
+{
+    byte buffer[4]; // far too small, so the very first write fails
+    auto adapter = cc::span_write_stream_adapter(buffer);
+    cc::write_stream stream = adapter;
+    auto w = babel::json::writer(stream);
+
+    {
+        auto o = w.object();
+        o.write("key", "a value that does not fit");
+    }
+
+    CHECK(w.finish().has_error());
+    CHECK(w.finish().has_error()); // the message moved out with the first report; the failure did not
+    CHECK(w.has_error());
+}
+
 
 TEST("json - write errors are sticky")
 {
