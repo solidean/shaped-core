@@ -1,6 +1,7 @@
 #include <babel-serializer/data/json.hh>
 #include <clean-core/common/utility.hh> // cc::min
 #include <clean-core/container/span.hh>
+#include <clean-core/streams/span_stream.hh>
 #include <clean-core/streams/stream.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -150,4 +151,249 @@ TEST("json - parsing over a chunked stream matches in-memory")
         CHECK(root["nums"][2].as_double() == 3);
         CHECK(root["nested"]["ok"].as_bool() == true);
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+// writing
+
+namespace
+{
+/// Runs `build` against a string_writer and returns the text it produced.
+template <class F>
+cc::string written(babel::json::write_options opts, F&& build)
+{
+    auto w = babel::json::string_writer(opts);
+    build(w);
+    return w.finish().value();
+}
+} // namespace
+
+TEST("json - write scalars and containers")
+{
+    CHECK(written({}, [](auto& w) { w.write(nullptr); }) == "null");
+    CHECK(written({}, [](auto& w) { w.write(true); }) == "true");
+    CHECK(written({}, [](auto& w) { w.write(42); }) == "42");
+    CHECK(written({}, [](auto& w) { w.write(-7); }) == "-7");
+    CHECK(written({}, [](auto& w) { w.write(0.5); }) == "0.5");
+    CHECK(written({}, [](auto& w) { w.write("hi"); }) == "\"hi\"");
+
+    CHECK(written({}, [](auto& w) { auto o = w.object(); }) == "{}");
+    CHECK(written({}, [](auto& w) { auto a = w.array(); }) == "[]");
+
+    auto const nested = written({},
+                                [](auto& w)
+                                {
+                                    auto o = w.object();
+                                    o.write("name", "shaped");
+                                    o.write("n", 3);
+                                    {
+                                        auto tags = o.write_array("tags");
+                                        tags.write(1);
+                                        tags.write(2);
+                                        auto inner = tags.write_object();
+                                        inner.write("deep", true);
+                                    }
+                                    o.write("done", nullptr);
+                                });
+    CHECK(nested == R"({"name":"shaped","n":3,"tags":[1,2,{"deep":true}],"done":null})");
+}
+
+TEST("json - write indented")
+{
+    auto const text = written({.indent = 2},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  o.write("a", 1);
+                                  auto arr = o.write_array("b");
+                                  arr.write(1);
+                                  arr.write(2);
+                              });
+
+    CHECK(text == "{\n  \"a\": 1,\n  \"b\": [\n    1,\n    2\n  ]\n}");
+
+    // an empty container stays on one line whatever the indent
+    CHECK(written({.indent = 4}, [](auto& w) { auto o = w.object(); }) == "{}");
+
+    auto const four = written({.indent = 4},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  auto inner = o.write_object("x");
+                                  inner.write("y", 1);
+                              });
+    CHECK(four == "{\n    \"x\": {\n        \"y\": 1\n    }\n}");
+}
+
+TEST("json - write escapes")
+{
+    CHECK(written({}, [](auto& w) { w.write("a\"b\\c"); }) == R"("a\"b\\c")");
+    CHECK(written({}, [](auto& w) { w.write("\b\f\n\r\t"); }) == R"("\b\f\n\r\t")");
+    CHECK(written({}, [](auto& w) { w.write(cc::string_view("\x01\x1F")); }) == "\"\\u0001\\u001f\"");
+
+    // UTF-8 passes through byte-for-byte by default
+    CHECK(written({}, [](auto& w) { w.write("\xC3\xA4"); }) == "\"\xC3\xA4\"");
+
+    // ...and becomes \uXXXX on request, astral code points as a surrogate pair
+    CHECK(written({.escape_non_ascii = true}, [](auto& w) { w.write("\xC3\xA4"); }) == "\"\\u00e4\"");
+    CHECK(written({.escape_non_ascii = true}, [](auto& w) { w.write("\xF0\x9F\x98\x80"); }) == "\"\\ud83d\\ude00\"");
+
+    // a byte that does not decode is passed on rather than replaced or rejected
+    CHECK(written({.escape_non_ascii = true}, [](auto& w) { w.write(cc::string_view("\xFF")); }) == "\"\xFF\"");
+
+    // keys go through the same escaper
+    auto const keyed = written({},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   o.write("a\nb", 1);
+                               });
+    CHECK(keyed == R"({"a\nb":1})");
+}
+
+TEST("json - write floats")
+{
+    CHECK(written({}, [](auto& w) { w.write(0.1); }) == "0.1"); // shortest round-trip, not 0.100000000000000006
+    CHECK(written({}, [](auto& w) { w.write(1.0); }) == "1");
+    CHECK(written({.floats = cc::float_notation::fixed, .float_precision = 2}, [](auto& w) { w.write(1.5); }) == "1.50");
+    CHECK(written({.floats = cc::float_notation::scientific, .float_precision = 1}, [](auto& w) { w.write(1500.0); })
+          == "1.5e+03");
+
+    // one value can pick its own notation without touching the writer's default
+    auto const mixed = written({},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   o.write("shortest", 1.5);
+                                   o.write("fixed", 1.5, cc::float_notation::fixed, 3);
+                               });
+    CHECK(mixed == R"({"shortest":1.5,"fixed":1.500})");
+}
+
+TEST("json - write non-finite")
+{
+    auto const inf = 1e308 * 10;
+    auto const nan = inf - inf;
+
+    SECTION("error is the default")
+    {
+        auto w = babel::json::string_writer();
+        w.write(nan);
+        CHECK(w.finish().has_error());
+    }
+
+    SECTION("null")
+    {
+        CHECK(written({.non_finite = babel::json::non_finite_policy::null}, [&](auto& w) { w.write(nan); }) == "null");
+        CHECK(written({.non_finite = babel::json::non_finite_policy::null}, [&](auto& w) { w.write(inf); }) == "null");
+    }
+
+    SECTION("string")
+    {
+        auto const opts = babel::json::write_options{.non_finite = babel::json::non_finite_policy::string};
+        CHECK(written(opts, [&](auto& w) { w.write(nan); }) == "\"NaN\"");
+        CHECK(written(opts, [&](auto& w) { w.write(inf); }) == "\"Infinity\"");
+        CHECK(written(opts, [&](auto& w) { w.write(-inf); }) == "\"-Infinity\"");
+    }
+}
+
+TEST("json - write raw and ascii")
+{
+    auto const text = written({},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  o.write_raw("pre", R"([1,{"a":2}])");
+                                  o.write_ascii("uml", "\xC3\xA4");
+                                  auto a = o.write_array("more");
+                                  a.write_raw("1e999");
+                              });
+    CHECK(text == "{\"pre\":[1,{\"a\":2}],\"uml\":\"\\u00e4\",\"more\":[1e999]}");
+}
+
+TEST("json - write newline-delimited")
+{
+    auto const text = written({.indent = 2, .newline_delimited = true}, // nd forces compact whatever the indent says
+                              [](auto& w)
+                              {
+                                  for (auto i = 0; i < 3; ++i)
+                                  {
+                                      auto o = w.object();
+                                      o.write("i", i);
+                                  }
+                              });
+    CHECK(text == "{\"i\":0}\n{\"i\":1}\n{\"i\":2}\n");
+}
+
+TEST("json - write round-trips through the reader")
+{
+    auto const text = written({.indent = 2},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  o.write("msg", "hello \"world\"\n");
+                                  o.write("pi", 3.25);
+                                  o.write("big", u64(9007199254740993ull));
+                                  o.write("neg", -12345);
+                                  o.write("yes", true);
+                                  o.write("nothing", nullptr);
+                                  {
+                                      auto arr = o.write_array("list");
+                                      arr.write(1);
+                                      arr.write("two");
+                                      {
+                                          auto sub = arr.write_object();
+                                          sub.write("three", 3.5);
+                                      }
+                                      auto empty = arr.write_array();
+                                  }
+                              });
+
+    auto const doc = babel::json::read(text).value();
+    auto const root = doc.root();
+    CHECK(root["msg"].as_string() == "hello \"world\"\n");
+    CHECK(root["pi"].as_double() == 3.25);
+    CHECK(root["neg"].as_double() == -12345);
+    CHECK(root["yes"].as_bool());
+    CHECK(root["nothing"].is_null());
+    REQUIRE(root["list"].size() == 4);
+    CHECK(root["list"][1].as_string() == "two");
+    CHECK(root["list"][2]["three"].as_double() == 3.5);
+    CHECK(root["list"][3].size() == 0);
+}
+
+TEST("json - write errors are sticky")
+{
+    // a span sink far too small for the document: the first overflowing write fails, the rest are no-ops
+    byte buffer[8];
+    auto adapter = cc::span_write_stream_adapter(buffer);
+    cc::write_stream stream = adapter;
+    auto w = babel::json::writer(stream);
+
+    {
+        auto o = w.object();
+        for (auto i = 0; i < 100; ++i)
+            o.write("key", "a long value that will not fit");
+    }
+    CHECK(w.has_error());
+    CHECK(w.finish().has_error());
+}
+
+TEST("json - write into a bounded span sink")
+{
+    // the writer only ever sees a cc::write_stream, so a growing buffer and a bounded span behave the same
+    byte buffer[64];
+    auto adapter = cc::span_write_stream_adapter(buffer);
+    cc::write_stream stream = adapter;
+
+    {
+        auto w = babel::json::writer(stream);
+        {
+            auto o = w.object();
+            o.write("ok", true);
+        }
+        REQUIRE(w.finish().has_value());
+    }
+
+    CHECK(cc::string_view(reinterpret_cast<char const*>(buffer), 11) == R"({"ok":true})");
 }

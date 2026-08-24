@@ -8,6 +8,7 @@ add_library(babel-serializer
 
     src/babel-serializer/data/base64.cc
     src/babel-serializer/data/json.cc
+    src/babel-serializer/data/json_writer.cc
     src/babel-serializer/data/markdown.cc
     src/babel-serializer/data/sqlite.cc
     src/babel-serializer/geometry/gltf.cc

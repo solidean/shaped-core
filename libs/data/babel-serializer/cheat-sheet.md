@@ -64,6 +64,31 @@ bool has = r.has("key");          // object has this member?
 cc::string_view key = e.key();    // this node's key within its parent object ("" for array elements)
 ```
 
+**Writing is a separate API** — imperative, streaming, and sharing no type with the reader (there is no writable document):
+
+```cpp
+auto w = babel::json::writer(out, {.indent = 2});  // out: a cc::write_stream
+auto sw = babel::json::string_writer({});          // owns a cc::string; finish() -> result<cc::string>
+
+auto o = w.object();  auto a = w.array();   // the root scope; RAII, closes when the handle dies
+w.write(42);                                // ...or a bare scalar as the whole document
+o.write("key", value);                      // null / bool / any int width / float / double / string_view
+o.write("x", 1.5, cc::float_notation::fixed, 3);   // this one value, its own notation
+o.write_ascii("k", utf8);                   // escape every non-ASCII byte as \uXXXX
+o.write_raw("k", R"([1,2])");               // verbatim JSON: never parsed, escaped or checked
+auto inner = o.write_object("k");  auto arr = o.write_array("k");   // nesting; array scopes take no key
+arr.write(1); arr.write_object(); arr.write_array();                // ...the same set, minus the keys
+cc::result<cc::unit> r = w.finish();        // THE place errors surface; idempotent
+```
+
+`write_options`: `indent` (0 = compact; indenting also puts a space after ':'), `floats` + `float_precision`,
+`non_finite` (`error` (default) / `null` / `string`), `escape_non_ascii`, `newline_delimited` (json-nd: several roots, one per line).
+
+- **Errors are sticky**: the first failed write is recorded, later writes are no-ops, `finish()` reports it.
+  API misuse (a scope written to while its child is open, a scope closed out of order) is a `CC_ASSERT` instead.
+- **Duplicate keys are not detected, and UTF-8 is never validated** — both on purpose, both documented in the header.
+- `dev.py example babel-serializer/json-write` (and `json-read`, `json-write-stream`, `json-newline-delimited`, `json-round-trip`) runs the examples.
+
 ## Markdown (`babel::markdown`)
 
 Block level only — the same flat `document` / `ref` shape as JSON.

@@ -200,13 +200,25 @@ So neither is a validation channel, and every slice site needs a bounds check th
 
 ---
 
-## The writer convention (established by images, babel's first writer)
+## The writer convention: stream first, blob only where the format forces it
 
-Images are babel's first format to **write**.
-The pair every future writer should mirror:
+**A format that can be written incrementally gets a streaming writer, and that writer is the primary API.**
+`babel::json::writer` is the shape: values go into a `cc::write_stream` as they arrive, nothing but a small scope stack is held in between, and there is no document to build first.
+A convenience type may own an in-memory sink on top — `json::string_writer` owns a `cc::string` and hands it over with no copy.
+It stays a wrapper over the stream writer, never a second implementation.
+
+**The whole-value-in, bytes-out pair is the fallback**, for a format whose encoder genuinely needs the complete value before it can emit anything.
+Images are that case, and established the pair:
 
 - `encode(...) -> cc::result<cc::vector<cc::byte>>` — encode to an in-memory blob;
 - `write(cc::write_stream& out, ...) -> cc::result<cc::unit>` — encode, then write to a stream (`write` is `encode` + `out.write(...)`, so the two never diverge).
 
-Encoder tuning travels in a per-format `write_options` struct (e.g. `jpg::write_options{ int quality }`), passed by value with sensible defaults.
-A writer never reuses the reader's native structure as an input contract beyond the fields it needs; metadata the backend cannot emit is silently ignored and documented.
+Reach for it when streaming is impossible, not when it is inconvenient.
+
+Whichever shape a format takes, three rules bind it:
+
+- **Encoder tuning travels in a per-format `write_options` struct**, passed by value with sensible defaults (`jpg::write_options{ int quality }`, `json::write_options{ i32 indent }`).
+- **A writer never reuses the reader's native structure as an input contract** beyond the fields it needs; metadata the backend cannot emit is silently ignored and documented.
+- **A streaming writer's errors are sticky, with one place to check them.**
+  Checking a `cc::result` per value would cost more than the write, so the first failure is recorded, every later write becomes a no-op, and `finish()` reports it.
+  API misuse is a `CC_ASSERT` instead, so the only thing reaching that result is the sink failing.
