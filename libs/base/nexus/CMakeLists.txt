@@ -120,8 +120,12 @@ target_link_libraries(nexus
     clean-core
     # nexus is a leaf: the harness sits on top of the libraries it tests, so babel::json writing the
     # listing and perf sidecars is a dependency going DOWN, not an upward one.
+    #
+    # babel-data rather than babel-serializer, and that constraint is nexus' rather than babel's: EVERY *-test binary
+    # in the repo links nexus, so whatever nexus depends on is a tax the whole tree pays and a link every test binary
+    # waits for. Only libraries that pull in no external of their own belong here.
     PRIVATE
-    babel-serializer
+    babel-data
 )
 
 # nexus/bench hardware-counter backend: exactly one per platform.
@@ -188,7 +192,7 @@ if(SC_BUILD_TESTS)
     target_link_libraries(nexus-test
         PRIVATE
         nexus
-        babel-serializer # the export tests read the listing JSON back rather than matching its text
+        babel-data # the export tests read the listing JSON back rather than matching its text
     )
 
     # CC rather than a bigger tier, and measured: nexus-test goes 0.63 at CC but 0.84 once the heavy STL block is added.

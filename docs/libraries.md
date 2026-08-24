@@ -33,7 +33,7 @@ Highlights:
 
 The source tree is organized by topic, and the [readme](../libs/base/clean-core/readme.md#file-organization) has the map.
 
-### nexus — namespace `nx` — depends on clean-core, babel-serializer (private)
+### nexus — namespace `nx` — depends on clean-core, babel-data (private)
 
 [readme](../libs/base/nexus/readme.md) · [docs](../libs/base/nexus/docs/_index.md)
 
@@ -42,8 +42,9 @@ This is what every `<lib>-test` binary is built on.
 Beyond `TEST` / `CHECK`, it carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks, and hardware performance counters.
 
 **nexus is a leaf, not a base layer.**
-Nothing in shaped-core links it except test binaries, so the harness sits on top of the libraries it tests even though it lives in `base/`.
+Nothing in shaped-core links it except test binaries, so the harness sits on top of the libraries it tests even though it lives in `base/`, and it is added last in the root `CMakeLists.txt`.
 That is what lets it write its JSON sidecars — the test listing and the perf metrics — through `babel::json` instead of hand-rolling an escaper.
+It links `babel-data` rather than all of babel, and that constraint belongs to nexus rather than to babel: every `*-test` binary links nexus, so whatever nexus depends on is a tax the whole tree pays.
 The source tree is organized by responsibility, and the [readme](../libs/base/nexus/readme.md#file-organization) has the map.
 
 ### typed-geometry — namespace `tg` — depends on clean-core
@@ -87,8 +88,13 @@ Serialization and deserialization of various formats, often thin wrappers over e
 Two layers, kept distinct: each format parses into an **unopinionated native structure**, and **opinionated aggregators** — "load an image", "load a mesh" — sit on top of those.
 Reading is optimized for the read-once case and takes a `cc::read_stream`, with one deviation for a format that must hand back zero-copy views of its input.
 [coding-guidelines.md](../libs/data/babel-serializer/docs/coding-guidelines.md) owns all of that.
-Today: a base64 codec, JSON and markdown readers plus a SQLite engine wrapper (`data/`), and Wavefront OBJ and glTF 2.0/GLB readers (`geometry/`).
+Today: a base64 codec, JSON reading and writing, a markdown reader plus a SQLite engine wrapper (`data/`), and Wavefront OBJ and glTF 2.0/GLB readers (`geometry/`).
 Plus PNG/JPEG read+write, with the `babel::image` aggregator on top (`image/`).
+
+**One namespace, several link targets.**
+`babel-data` is the externals-free base — base64, JSON and markdown over clean-core alone — and `babel-serializer` is everything else on top of it, the target to link when in doubt.
+The split is by dependency rather than by topic, so `data/` itself spans both: `sqlite` sits in the upper target because of what it needs, not because of what it is.
+
 The roadmap lives in [structure.md](../libs/data/babel-serializer/docs/structure.md).
 
 ### versioned-document — namespace `vdoc` — depends on clean-core

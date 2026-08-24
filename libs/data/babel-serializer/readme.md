@@ -14,8 +14,21 @@ auto const tag0 = doc.root()["tags"][0].as_double(); // 1
 Headers are included by their full path from `src/`, e.g. `#include <babel-serializer/geometry/obj.hh>`.
 Each format lives in its own sub-namespace (`babel::json`, `babel::obj`); `<babel-serializer/all.hh>` is the umbrella.
 
+## One namespace, several link targets
+
+`babel-serializer` is **the** target — link it when in doubt, and it carries every format below.
+It is not the only one, because the namespace and the link graph answer different questions.
+
+- **`babel-data`** is the base: the formats that are pure parsing and need nothing but clean-core (base64, JSON, markdown).
+  Its whole contract is that dependency list, so a consumer that wants JSON does not link an image decoder, a database engine or typed-geometry to get it.
+  That is why `data/` itself spans two targets — `sqlite` sits above because of what it *needs*, not because of what it *is*.
+- **`babel-serializer`** is everything else, and links `babel-data` publicly.
+
+Spin off a third only when a format arrives carrying a dependency nobody should pay for by accident — a cursed vendor SDK, a heavyweight decoder — and give it the same treatment.
+**The namespace never splits with the targets**: `babel::json` is `babel::json` wherever it is linked from, and `fwd.hh` stays single.
+
 This library is at an **early stage**.
-A base64 codec, a JSON reader, a markdown block reader, a live SQLite handle, OBJ and glTF/GLB readers, PNG/JPG image read+write, and a Chrome Trace writer exist so far.
+A base64 codec, a JSON reader and writer, a markdown block reader, a live SQLite handle, OBJ and glTF/GLB readers, PNG/JPG image read+write, and a Chrome Trace writer exist so far.
 See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
 ## Design at a glance
