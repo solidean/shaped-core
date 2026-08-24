@@ -108,13 +108,17 @@ EXAMPLE("babel-serializer/json-write-numbers")
         auto o = w.object();
         o.write("shortest", 0.1);                            // the shortest text that reads back as 0.1
         o.write("fixed", 0.1, cc::float_notation::fixed, 4); // one value, rendered its own way
-        o.write("huge", u64(18446744073709551615ull));       // integers print exactly, never through a double
+        o.write("huge", u64(18446744073709551615ull));       // exact here, but past 2^53 - see the report
         o.write("nan", not_a_number);                        // -> "NaN", per the policy above
         o.write_raw("precomputed", R"({"already":"json"})"); // verbatim: never parsed, escaped or checked
         o.write_ascii("umlaut", "\xC3\xA4");                 // -> "\\u00e4", for an ASCII-only consumer
     }
 
     cc::println("{}", w.finish().value());
+
+    // The document is valid and it is NOT what was written: report() is where that goes, since it is not an error.
+    auto const report = w.report();
+    cc::println("non-finite: {}, past 2^53: {}, clean: {}", report.non_finite, report.large_integers, report.is_clean());
 }
 
 EXAMPLE("babel-serializer/json-newline-delimited")

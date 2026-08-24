@@ -31,7 +31,9 @@ class document;
 struct ref;
 
 enum class non_finite_policy : u8;
+enum class large_integer_policy : u8;
 enum class layout : u8;
+struct write_report;
 struct write_options;
 class writer;
 struct object_writer;

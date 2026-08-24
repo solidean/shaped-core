@@ -236,6 +236,11 @@ inline ref document::root() const
 // MISUSE IS AN ASSERT instead — writing through a scope whose child is still open, or closing out of order.
 // So the only thing that reaches finish()'s result is the sink failing.
 //
+// WHAT THE WRITER CHANGED ON THE WAY OUT is counted in report(), which finish() does not replace.
+// A JSON document can be valid and still not be what the caller handed over — a NaN became null, an id past 2^53
+// will round in any reader that parses into a double — and those are not errors, so they need somewhere else to go.
+// The counters are flat on purpose: naming WHERE it happened would cost a key per open scope on every write.
+//
 // TWO THINGS THE WRITER DOES NOT DO, both on purpose:
 //   * DUPLICATE KEYS ARE NOT DETECTED.
 //     Tracking them would cost a set per object, on every write, forever.
@@ -249,6 +254,35 @@ enum class babel::json::non_finite_policy : babel::u8
     error,  // fail the write; emitting invalid JSON silently is worse than failing loudly
     null,   // emit null
     string, // emit "NaN" / "Infinity" / "-Infinity", which some parsers accept
+};
+
+/// What a writer does with an integer a JSON number cannot hold exactly, i.e. one past 2^53.
+/// Every reader that parses numbers into a double — every JavaScript one, among others — rounds those.
+enum class babel::json::large_integer_policy : babel::u8
+{
+    number, // emit the digits anyway: exact in the file, rounded by such a reader
+    string, // emit "9007199254740993", which is what an opaque id wants, since precision is all it has
+    error,  // fail the write
+};
+
+/// What the writer changed on the way out, none of which is an error.
+/// Counts rather than a list of sites: a streaming writer knows the value it is writing, not the path to it, and
+/// keeping that path would cost a key per open scope on every single write.
+struct babel::json::write_report
+{
+    /// NaN / infinity values that hit the non_finite policy.
+    i64 non_finite = 0;
+
+    /// Integers past 2^53. What happened to them is large_integers policy's business; under the default `number`
+    /// these are exactly the values a double-based reader will round.
+    i64 large_integers = 0;
+
+    /// Bytes that did not decode as UTF-8 while escape_non_ascii was on, and were passed through untouched.
+    /// Always 0 otherwise, because nothing decodes them then.
+    i64 undecodable_bytes = 0;
+
+    /// True when the document says exactly what the caller wrote.
+    [[nodiscard]] bool is_clean() const { return non_finite == 0 && large_integers == 0 && undecodable_bytes == 0; }
 };
 
 /// Writer tuning, passed by value.
@@ -267,6 +301,8 @@ struct babel::json::write_options
     i32 float_precision = -1;
 
     non_finite_policy non_finite = non_finite_policy::error;
+
+    large_integer_policy large_integers = large_integer_policy::number;
 
     /// Escape every non-ASCII byte as \uXXXX instead of passing the UTF-8 through.
     bool escape_non_ascii = false;
@@ -345,6 +381,10 @@ public:
     /// True once a write has failed; every write after that is a no-op.
     [[nodiscard]] bool has_error() const { return !_error.is_empty(); }
 
+    /// What the writer changed on the way out, so far.
+    /// Readable at any point, and finish() does not clear it.
+    [[nodiscard]] write_report report() const { return _report; }
+
     // internals shared with the scope handles
 private:
     friend struct object_writer;
@@ -362,6 +402,7 @@ private:
     void impl_bool(bool v);
     void impl_i64(i64 v);
     void impl_u64(u64 v);
+    void impl_integer(cc::string_view digits, u64 magnitude);
     void impl_double(double v, cc::float_notation notation, i32 precision);
     void impl_float(float v, cc::float_notation notation, i32 precision);
     void impl_string(cc::string_view v, bool escape_non_ascii);
@@ -402,6 +443,7 @@ private:
     write_options _opts;
     cc::small_vector<level, 16> _stack;
     cc::any_error _error;
+    write_report _report;
     i32 _root_count = 0;
 
     /// Depth of the outermost open compact scope, or 0 when none is open — everything below it is compact too.
@@ -544,6 +586,9 @@ public:
     /// Finishes the write and moves the text out.
     /// Every open scope must be destroyed first.
     [[nodiscard]] cc::result<cc::string> finish();
+
+    /// What the writer changed on the way out; see write_report.
+    [[nodiscard]] write_report report() const { return _writer.report(); }
 
 private:
     cc::string_write_stream_adapter _buffer;

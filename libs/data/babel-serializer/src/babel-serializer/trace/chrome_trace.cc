@@ -35,26 +35,6 @@ struct located_event
     cc::rec::event_view event;
 };
 
-/// A JSON number is a double, so anything past 2^53 has to go out as a string or arrive wrong.
-/// That is exactly the case for a trace id, which is opaque rather than a quantity, so precision is all it has.
-constexpr u64 k_exactly_representable = u64(1) << 53;
-
-void write_u64(babel::json::object_writer& o, cc::string_view key, u64 v)
-{
-    if (v < k_exactly_representable)
-        o.write(key, v);
-    else
-        o.write(key, cc::format("{}", v));
-}
-
-void write_u64(babel::json::array_writer& a, u64 v)
-{
-    if (v < k_exactly_representable)
-        a.write(v);
-    else
-        a.write(cc::format("{}", v));
-}
-
 cc::string_view level_name(cc::rec::level l)
 {
     switch (l)
@@ -422,10 +402,10 @@ void write_events(babel::json::array_writer& events,
                     {
                         auto values = args.write_array(f.name);
                         for (auto const v : e.field_as_u64_array(f.name))
-                            write_u64(values, v);
+                            values.write(v);
                     }
                     else if (f.type == cc::rec::type_code::u64_)
-                        write_u64(args, f.name, e.field_as_u64(f.name).value_or(0));
+                        args.write(f.name, e.field_as_u64(f.name).value_or(0));
                     else if (auto const d = e.field_as_double(f.name); d.has_value())
                         args.write(f.name, d.value());
                     else
@@ -449,10 +429,13 @@ cc::result<cc::unit> babel::chrome_trace::write(cc::write_stream& out,
                                                 write_options opts)
 {
     // non_finite -> null: a NaN or an infinity in a recorded value must not take the whole trace down, and a viewer
-    // renders a null datapoint as a hole in the plot, which is what it is.
+    //   renders a null datapoint as a hole in the plot, which is what it is.
+    // large_integers -> string: a recorded u64 is usually an id or an address rather than a quantity, so precision is
+    //   all it has, and every viewer here parses numbers into a double.
     auto w = json::writer(out, {
                                    .indent = opts.pretty ? 1 : 0,
                                    .non_finite = json::non_finite_policy::null,
+                                   .large_integers = json::large_integer_policy::string,
                                });
 
     {

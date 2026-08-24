@@ -359,6 +359,102 @@ TEST("json - write non-finite")
     }
 }
 
+TEST("json - write large integers")
+{
+    constexpr auto exact_max = u64(1) << 53; // 2^53 round-trips through a double; 2^53 + 1 does not
+
+    SECTION("the default emits the digits, exact in the file")
+    {
+        CHECK(written({}, [](auto& w) { w.write(u64(exact_max + 1)); }) == "9007199254740993");
+        CHECK(written({}, [](auto& w) { w.write(i64(-9007199254740993ll)); }) == "-9007199254740993");
+    }
+
+    SECTION("string keeps an id readable to a double-based parser")
+    {
+        auto const opts = babel::json::write_options{.large_integers = babel::json::large_integer_policy::string};
+        CHECK(written(opts, [](auto& w) { w.write(u64(exact_max + 1)); }) == "\"9007199254740993\"");
+        CHECK(written(opts, [](auto& w) { w.write(i64(-9007199254740993ll)); }) == "\"-9007199254740993\"");
+
+        // 2^53 itself is exact, so it stays a number — the boundary is the point of the rule
+        CHECK(written(opts, [](auto& w) { w.write(u64(exact_max)); }) == "9007199254740992");
+        CHECK(written(opts, [](auto& w) { w.write(42); }) == "42");
+
+        // i64's minimum is where a naive negation overflows
+        CHECK(written(opts, [](auto& w) { w.write(i64(-9223372036854775807ll - 1)); }) == "\"-9223372036854775808\"");
+    }
+
+    SECTION("error refuses to write a value it would lose")
+    {
+        auto w = babel::json::string_writer({.large_integers = babel::json::large_integer_policy::error});
+        w.write(u64(exact_max + 1));
+        CHECK(w.finish().has_error());
+    }
+}
+
+TEST("json - write report counts what changed on the way out")
+{
+    auto const infinity = 1e308 * 10;
+
+    SECTION("a faithful document reports nothing")
+    {
+        auto w = babel::json::string_writer({});
+        {
+            auto o = w.object();
+            o.write("a", 1);
+            o.write("b", 0.5);
+            o.write("c", "text");
+        }
+        CHECK(w.report().is_clean());
+    }
+
+    SECTION("substituted non-finites are counted, whatever the policy did")
+    {
+        auto w = babel::json::string_writer({.non_finite = babel::json::non_finite_policy::null});
+        {
+            auto a = w.array();
+            a.write(infinity);
+            a.write(infinity - infinity);
+            a.write(float(infinity)); // the float path counts once, not twice
+            a.write(1.0);
+        }
+        CHECK(w.report().non_finite == 3);
+        CHECK(!w.report().is_clean());
+    }
+
+    SECTION("integers past 2^53 are counted even when they are emitted as-is")
+    {
+        auto w = babel::json::string_writer({});
+        {
+            auto a = w.array();
+            a.write(u64((u64(1) << 53) + 1));
+            a.write(u64(1) << 53); // exact, so not counted
+            a.write(7);
+        }
+        CHECK(w.report().large_integers == 1);
+    }
+
+    SECTION("undecodable bytes are counted only when escape_non_ascii looks at them")
+    {
+        auto w = babel::json::string_writer({.escape_non_ascii = true});
+        w.write(cc::string_view("a\xFF"
+                                "b\xFE"));
+        CHECK(w.report().undecodable_bytes == 2);
+
+        auto passthrough = babel::json::string_writer({});
+        passthrough.write(cc::string_view("a\xFF"
+                                          "b"));
+        CHECK(passthrough.report().is_clean());
+    }
+
+    SECTION("the report survives finish()")
+    {
+        auto w = babel::json::string_writer({.non_finite = babel::json::non_finite_policy::null});
+        w.write(infinity);
+        CHECK(w.finish().has_value());
+        CHECK(w.report().non_finite == 1);
+    }
+}
+
 TEST("json - write raw and ascii")
 {
     auto const text = written({},

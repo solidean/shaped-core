@@ -1,6 +1,7 @@
 #include <babel-serializer/data/json.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::unit, cc::min
+#include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
 
 using namespace babel;
@@ -12,6 +13,10 @@ constexpr char k_spaces[32] = {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
                                ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
 
 constexpr char k_hex_digits[] = "0123456789abcdef";
+
+/// The largest integer a double holds exactly: 2^53.
+/// 2^53 itself round-trips; 2^53 + 1 does not, which is where a JSON number stops being able to carry an id.
+constexpr u64 k_exact_integer_max = u64(1) << 53;
 
 /// Finite means the exponent bits are not all ones, which is exact and needs no <cmath>.
 bool is_finite(double v)
@@ -175,20 +180,51 @@ void json::writer::impl_bool(bool v)
 
 void json::writer::impl_i64(i64 v)
 {
+    auto const magnitude = v < 0 ? u64(-(v + 1)) + 1 : u64(v); // negation without overflowing at i64's minimum
     char buf[cc::to_chars_int_max];
-    this->impl_emit(cc::string_view(buf, cc::to_chars(buf, (long long)(v))));
+    this->impl_integer(cc::string_view(buf, cc::to_chars(buf, (long long)(v))), magnitude);
 }
 
 void json::writer::impl_u64(u64 v)
 {
     char buf[cc::to_chars_int_max];
-    this->impl_emit(cc::string_view(buf, cc::to_chars(buf, (unsigned long long)(v))));
+    this->impl_integer(cc::string_view(buf, cc::to_chars(buf, (unsigned long long)(v))), v);
+}
+
+/// Emits already-rendered digits, applying the large-integer policy to them.
+/// One compare against a constant on the common path, which is nothing next to the to_chars that produced `digits`.
+void json::writer::impl_integer(cc::string_view digits, u64 magnitude)
+{
+    if (magnitude <= k_exact_integer_max) [[likely]]
+    {
+        this->impl_emit(digits);
+        return;
+    }
+
+    ++_report.large_integers;
+
+    switch (_opts.large_integers)
+    {
+    case large_integer_policy::number:
+        this->impl_emit(digits);
+        return;
+    case large_integer_policy::string:
+        this->impl_emit("\""); // the digits need no escaping, so the quotes are the whole of it
+        this->impl_emit(digits);
+        this->impl_emit("\"");
+        return;
+    case large_integer_policy::error:
+        this->impl_fail(cc::format("json writer: {} is past 2^53 and a JSON number cannot carry it exactly", digits));
+        return;
+    }
 }
 
 void json::writer::impl_double(double v, cc::float_notation notation, i32 precision)
 {
     if (!is_finite(v))
     {
+        ++_report.non_finite;
+
         switch (_opts.non_finite)
         {
         case non_finite_policy::error:
@@ -211,7 +247,7 @@ void json::writer::impl_float(float v, cc::float_notation notation, i32 precisio
 {
     if (!is_finite(double(v)))
     {
-        this->impl_double(double(v), notation, precision); // one policy, one place
+        this->impl_double(double(v), notation, precision); // one policy, one place, counted there
         return;
     }
 
@@ -261,6 +297,7 @@ void json::writer::impl_string(cc::string_view v, bool escape_non_ascii)
             auto const d = decode_utf8(v, i);
             if (!d.ok) // undecodable byte: leave it exactly as it came in
             {
+                ++_report.undecodable_bytes;
                 ++i;
                 continue;
             }

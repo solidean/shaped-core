@@ -222,3 +222,31 @@ Whichever shape a format takes, three rules bind it:
 - **A streaming writer's errors are sticky, with one place to check them.**
   Checking a `cc::result` per value would cost more than the write, so the first failure is recorded, every later write becomes a no-op, and `finish()` reports it.
   API misuse is a `CC_ASSERT` instead, so the only thing reaching that result is the sink failing.
+
+---
+
+## A writer reports what it changed, where a reader reports what it could not use
+
+The [issue list](#a-complex-formats-result-carries-an-issue-list-not-just-a-ccresult) above says a JSON-shaped format needs none.
+On the READ side that is right: every input is either understood or an error.
+
+**Writing is the asymmetric case.**
+A format narrower than the values handed to it produces a document that is valid, succeeds, and is not what the caller wrote.
+A NaN that became `null`; an id past 2^53 that will round in any reader parsing into a double.
+Neither is an error (the output is well-formed, and the caller chose the policy), so a writer that only had `cc::result` would have nowhere to say it.
+
+So a **lossy** writer returns a `report`: a flat struct of **counts**, readable at any point and not consumed by `finish()`.
+`babel::json::write_report` is the first — `non_finite`, `large_integers`, `undecodable_bytes`, plus `is_clean()`.
+
+Two rules keep it honest, and they mirror the issue list's:
+
+- **A report and an error are mutually exclusive per value.**
+  Anything that would make the document *wrong* stays a `cc::result` error; anything the caller can act on but survive without is a count.
+  A policy set to `error` produces the error, and the count as well — one value, one outcome, recorded once.
+- **Counts, not sites.**
+  A reader holds the whole input and can name a byte offset; a streaming writer knows the value it is writing and nothing about the path to it.
+  Keeping that path would cost a key per open scope on *every* write, which is the cost the streaming shape exists to avoid.
+  Reach for a `cc::result` error when the caller must know *which* value, and a count when "did anything change?" is the real question.
+
+**Where the loss is a choice, make it a policy rather than a report-only surprise** — `non_finite_policy`, `large_integer_policy`.
+Both were open-coded in the first two callers before they existed, which is the usual sign.
