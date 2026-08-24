@@ -271,9 +271,22 @@ struct babel::json::write_options
     /// Escape every non-ASCII byte as \uXXXX instead of passing the UTF-8 through.
     bool escape_non_ascii = false;
 
+    /// Escape '<' as \u003c, so the output can be embedded in an HTML <script> tag.
+    /// Without it a string containing "</script>" or "<!--" ends the tag early; the parsed value is the same either way.
+    bool escape_html = false;
+
     /// Newline-delimited JSON: several root values, one per line.
     /// This is what allows more than one root value at all, and it forces compact output.
     bool newline_delimited = false;
+};
+
+/// Whether a nested scope keeps the writer's indentation or puts itself on one line.
+/// `compact` covers everything inside it too, which is what gives one-record-per-line output from an indented document.
+/// It means nothing when the writer is not indenting at all.
+enum class babel::json::layout : babel::u8
+{
+    inherit,
+    compact,
 };
 
 namespace babel::json
@@ -311,8 +324,8 @@ public:
 public:
     /// Opens the root object / array.
     /// The handle must be destroyed before finish().
-    [[nodiscard]] object_writer object();
-    [[nodiscard]] array_writer array();
+    [[nodiscard]] object_writer object(layout l = layout::inherit);
+    [[nodiscard]] array_writer array(layout l = layout::inherit);
 
     /// A bare scalar as the whole document, which is valid JSON on its own.
     template <class T>
@@ -342,7 +355,7 @@ private:
     void impl_begin_element();
     void impl_begin_root();
 
-    void impl_open(bool is_object);
+    void impl_open(bool is_object, layout l);
     void impl_close(i32 depth);
 
     void impl_null();
@@ -390,6 +403,9 @@ private:
     cc::small_vector<level, 16> _stack;
     cc::any_error _error;
     i32 _root_count = 0;
+
+    /// Depth of the outermost open compact scope, or 0 when none is open — everything below it is compact too.
+    i32 _compact_depth = 0;
     bool _finished = false;
 };
 
@@ -438,8 +454,8 @@ struct babel::json::object_writer
         _w->impl_raw(fragment);
     }
 
-    [[nodiscard]] object_writer write_object(cc::string_view key);
-    [[nodiscard]] array_writer write_array(cc::string_view key);
+    [[nodiscard]] object_writer write_object(cc::string_view key, layout l = layout::inherit);
+    [[nodiscard]] array_writer write_array(cc::string_view key, layout l = layout::inherit);
 
 private:
     friend class writer;
@@ -493,8 +509,8 @@ struct babel::json::array_writer
         _w->impl_raw(fragment);
     }
 
-    [[nodiscard]] object_writer write_object();
-    [[nodiscard]] array_writer write_array();
+    [[nodiscard]] object_writer write_object(layout l = layout::inherit);
+    [[nodiscard]] array_writer write_array(layout l = layout::inherit);
 
 private:
     friend class writer;
@@ -515,8 +531,8 @@ public:
     string_writer(string_writer&&) = delete;
     string_writer& operator=(string_writer&&) = delete;
 
-    [[nodiscard]] object_writer object() { return _writer.object(); }
-    [[nodiscard]] array_writer array() { return _writer.array(); }
+    [[nodiscard]] object_writer object(layout l = layout::inherit) { return _writer.object(l); }
+    [[nodiscard]] array_writer array(layout l = layout::inherit) { return _writer.array(l); }
 
     template <class T>
         requires writable_scalar<T>

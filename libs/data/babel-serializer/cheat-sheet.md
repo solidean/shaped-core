@@ -77,16 +77,19 @@ o.write("x", 1.5, cc::float_notation::fixed, 3);   // this one value, its own no
 o.write_ascii("k", utf8);                   // escape every non-ASCII byte as \uXXXX
 o.write_raw("k", R"([1,2])");               // verbatim JSON: never parsed, escaped or checked
 auto inner = o.write_object("k");  auto arr = o.write_array("k");   // nesting; array scopes take no key
+auto rec = arr.write_object(babel::json::layout::compact);          // this scope (and all inside it) on ONE line
 arr.write(1); arr.write_object(); arr.write_array();                // ...the same set, minus the keys
 cc::result<cc::unit> r = w.finish();        // THE place errors surface; idempotent
 ```
 
 `write_options`: `indent` (0 = compact; indenting also puts a space after ':'), `floats` + `float_precision`,
-`non_finite` (`error` (default) / `null` / `string`), `escape_non_ascii`, `newline_delimited` (json-nd: several roots, one per line).
+`non_finite` (`error` (default) / `null` / `string`), `escape_non_ascii`, `escape_html` (`<` as a `\u003c`, for a `<script>` payload),
+`newline_delimited` (json-nd: several roots, one per line).
 
 - **Errors are sticky**: the first failed write is recorded, later writes are no-ops, `finish()` reports it.
   API misuse (a scope written to while its child is open, a scope closed out of order) is a `CC_ASSERT` instead.
 - **Duplicate keys are not detected, and UTF-8 is never validated** — both on purpose, both documented in the header.
+- **`layout::compact` is one record per line** in an otherwise indented document — what a trace or a log wants, where a field per line is unreadable.
 - `dev.py example babel-serializer/json-write` (and `json-read`, `json-write-stream`, `json-newline-delimited`, `json-round-trip`) runs the examples.
 
 ## Markdown (`babel::markdown`)

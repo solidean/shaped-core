@@ -225,6 +225,68 @@ TEST("json - write indented")
     CHECK(four == "{\n    \"x\": {\n        \"y\": 1\n    }\n}");
 }
 
+TEST("json - write compact scopes inside an indented document")
+{
+    // one record per line: the outer document indents, each record puts itself (and everything in it) on one line
+    auto const text = written({.indent = 1},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  auto events = o.write_array("events");
+                                  for (auto i = 0; i < 2; ++i)
+                                  {
+                                      auto e = events.write_object(babel::json::layout::compact);
+                                      e.write("i", i);
+                                      auto inner = e.write_array("in"); // an inner scope inherits the compact run
+                                      inner.write(1);
+                                  }
+                              });
+
+    CHECK(text == "{\n \"events\": [\n  {\"i\":0,\"in\":[1]},\n  {\"i\":1,\"in\":[1]}\n ]\n}");
+
+    // indentation resumes after the compact scope closes
+    auto const after = written({.indent = 2},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   {
+                                       auto c = o.write_object("compact", babel::json::layout::compact);
+                                       c.write("a", 1);
+                                   }
+                                   o.write("after", 2);
+                               });
+    CHECK(after == "{\n  \"compact\": {\"a\":1},\n  \"after\": 2\n}");
+
+    // compact means nothing when the writer was not indenting anyway
+    CHECK(written({},
+                  [](auto& w)
+                  {
+                      auto o = w.object(babel::json::layout::compact);
+                      o.write("a", 1);
+                  })
+          == R"({"a":1})");
+}
+
+TEST("json - write html-safe strings")
+{
+    // "</script>" must not be able to end the tag the JSON is embedded in
+    CHECK(written({.escape_html = true}, [](auto& w) { w.write("</script>"); }) == "\"\\u003c/script>\"");
+    CHECK(written({.escape_html = true}, [](auto& w) { w.write("<!--"); }) == "\"\\u003c!--\"");
+
+    // off by default, and it never touches anything but '<'
+    CHECK(written({}, [](auto& w) { w.write("</script>"); }) == R"("</script>")");
+    CHECK(written({.escape_html = true}, [](auto& w) { w.write("a > b"); }) == R"("a > b")");
+
+    // keys go through the same escaper
+    auto const keyed = written({.escape_html = true},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   o.write("<k>", 1);
+                               });
+    CHECK(keyed == "{\"\\u003ck>\":1}");
+}
+
 TEST("json - write escapes")
 {
     CHECK(written({}, [](auto& w) { w.write("a\"b\\c"); }) == R"("a\"b\\c")");

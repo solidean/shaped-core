@@ -80,7 +80,7 @@ void json::writer::impl_fail(cc::string message)
 
 void json::writer::impl_indent()
 {
-    if (_opts.indent <= 0 || _opts.newline_delimited)
+    if (_opts.indent <= 0 || _opts.newline_delimited || _compact_depth > 0)
         return;
 
     this->impl_emit("\n");
@@ -119,7 +119,7 @@ void json::writer::impl_begin_member(cc::string_view key)
 
     this->impl_indent();
     this->impl_string(key, _opts.escape_non_ascii);
-    this->impl_emit(_opts.indent > 0 && !_opts.newline_delimited ? ": " : ":");
+    this->impl_emit(_opts.indent > 0 && !_opts.newline_delimited && _compact_depth == 0 ? ": " : ":");
 }
 
 void json::writer::impl_begin_element()
@@ -134,10 +134,13 @@ void json::writer::impl_begin_element()
     this->impl_indent();
 }
 
-void json::writer::impl_open(bool is_object)
+void json::writer::impl_open(bool is_object, layout l)
 {
     this->impl_emit(is_object ? "{" : "[");
     _stack.push_back({.is_object = is_object, .has_any = false});
+
+    if (l == layout::compact && _compact_depth == 0) // an inner compact scope is already covered by the outer one
+        _compact_depth = i32(_stack.size());
 }
 
 void json::writer::impl_close(i32 depth)
@@ -147,10 +150,14 @@ void json::writer::impl_close(i32 depth)
     CC_ASSERT(i32(_stack.size()) == depth, "JSON scopes must be closed innermost-first");
 
     auto const lvl = _stack.back();
+    auto const ends_compact = _compact_depth == depth;
     _stack.pop_back();
     if (lvl.has_any)
         this->impl_indent(); // the closing bracket lines up with what opened it, one level out
     this->impl_emit(lvl.is_object ? "}" : "]");
+
+    if (ends_compact) // ...after the bracket, so the compact scope's own closing stays on the line
+        _compact_depth = 0;
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -272,6 +279,15 @@ void json::writer::impl_string(cc::string_view v, bool escape_non_ascii)
             continue;
         }
 
+        if (c == '<' && _opts.escape_html) // so an embedded "</script>" cannot end the tag it sits in
+        {
+            flush_run(i);
+            emit_unicode_escape(c);
+            ++i;
+            run_start = i;
+            continue;
+        }
+
         cc::string_view escape;
         switch (c)
         {
@@ -328,49 +344,49 @@ void json::writer::impl_string(cc::string_view v, bool escape_non_ascii)
 // -------------------------------------------------------------------------------------------------
 // scopes and finishing
 
-json::object_writer json::writer::object()
+json::object_writer json::writer::object(layout l)
 {
     this->impl_begin_root();
-    this->impl_open(true);
+    this->impl_open(true, l);
     return object_writer(this, i32(_stack.size()));
 }
 
-json::array_writer json::writer::array()
+json::array_writer json::writer::array(layout l)
 {
     this->impl_begin_root();
-    this->impl_open(false);
+    this->impl_open(false, l);
     return array_writer(this, i32(_stack.size()));
 }
 
-json::object_writer json::object_writer::write_object(cc::string_view key)
+json::object_writer json::object_writer::write_object(cc::string_view key, layout l)
 {
     CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
     _w->impl_begin_member(key);
-    _w->impl_open(true);
+    _w->impl_open(true, l);
     return object_writer(_w, _depth + 1);
 }
 
-json::array_writer json::object_writer::write_array(cc::string_view key)
+json::array_writer json::object_writer::write_array(cc::string_view key, layout l)
 {
     CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
     _w->impl_begin_member(key);
-    _w->impl_open(false);
+    _w->impl_open(false, l);
     return array_writer(_w, _depth + 1);
 }
 
-json::object_writer json::array_writer::write_object()
+json::object_writer json::array_writer::write_object(layout l)
 {
     CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
     _w->impl_begin_element();
-    _w->impl_open(true);
+    _w->impl_open(true, l);
     return object_writer(_w, _depth + 1);
 }
 
-json::array_writer json::array_writer::write_array()
+json::array_writer json::array_writer::write_array(layout l)
 {
     CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
     _w->impl_begin_element();
-    _w->impl_open(false);
+    _w->impl_open(false, l);
     return array_writer(_w, _depth + 1);
 }
 
