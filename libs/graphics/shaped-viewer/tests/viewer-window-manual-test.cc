@@ -65,7 +65,7 @@ TEST("sv - viewer window (manual)", nx::config::manual)
 
     // Build the scene once; only the camera moves.
     auto const cloud = sv_test::make_triangle_cloud(96);
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
 
@@ -128,7 +128,7 @@ TEST("sv - viewer window (manual)", nx::config::manual)
         auto rt = sc->acquire_backbuffer(); // auto-resizes to the window
         auto cmd = ctx.create_command_list();
         // Both once per frame, before any view resolves its ids or reaches for its accumulator.
-        resources.begin_frame(ctx.current_epoch());
+        resources.advance_to(ctx.current_epoch());
         store.begin_frame(u64(ctx.current_epoch()));
 
         // The whole frame in one call: flatten it into a plan, trace every view, then composite up to the back buffer.

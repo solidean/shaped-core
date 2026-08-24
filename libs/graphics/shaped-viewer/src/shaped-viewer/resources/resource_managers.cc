@@ -211,9 +211,10 @@ material_set_id material_manager::acquire(cc::span<mesh_attribute const> attribu
     return insert(key, {.materials = cc::move(buffer), .count = triangle_count}, size_in_bytes);
 }
 
-scene_resources scene_resources::create(sg::context& ctx, scene_resources_config const& cfg)
+texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg)
 {
-    return scene_resources(mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
-                           texture_manager::create(ctx));
+    auto m = texture_manager(ctx);
+    m.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
+    return m;
 }
 } // namespace sv

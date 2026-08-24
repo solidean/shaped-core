@@ -100,7 +100,7 @@ struct viewer::impl
 {
     // Only `resources` must be constructed in place (its managers hold a context reference, so it is not
     // assignable); everything else try_create fills in after make_unique.
-    impl(sg::context& c, scene_resources res) : ctx(&c), resources(cc::move(res)) {}
+    impl(sg::context& c, gpu_resource_manager res) : ctx(&c), resources(cc::move(res)) {}
 
     view_id id;
     viewer_config config;
@@ -117,7 +117,7 @@ struct viewer::impl
 
     cc::unique_ptr<slib::shader_library> shader_library; // the viewer owns its shader library
 
-    scene_resources resources;
+    gpu_resource_manager resources;
 
     u64 frame_index = 0;
     bool stopped = false; // device lost
@@ -218,7 +218,7 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     shader_library->add_package(sv::shader_package());
     shader_library->add_package(sr::shader_package());
 
-    auto im = cc::make_unique<viewer::impl>(ctx, scene_resources::create(ctx));
+    auto im = cc::make_unique<viewer::impl>(ctx, gpu_resource_manager::create(ctx, config.resources));
     im->id = view_id::from_string(id_str);
     im->config = cc::move(config);
     im->window_system = cc::move(ws);
@@ -283,7 +283,7 @@ bool viewer::is_running() const
     return !im.window->is_close_requested() && !im.window_system->is_quit_requested();
 }
 
-scene_resources& viewer::scene_resources_of()
+gpu_resource_manager& viewer::resources()
 {
     return _impl->resources;
 }
@@ -650,7 +650,7 @@ void viewer::finish_frame(frame& f)
         // Reclaim stale / over-budget resources and advance to this frame's epoch, before any view resolves its ids or
         // reaches for its accumulator.
         // The view store already advanced on the same epoch, back in next_frame.
-        im.resources.begin_frame(im.ctx->current_epoch());
+        im.resources.advance_to(im.ctx->current_epoch());
 
         // With no views authored this places nothing and the clear alone lands, so the window is never left with
         // stale contents.

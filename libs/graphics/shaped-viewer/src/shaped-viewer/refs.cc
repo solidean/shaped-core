@@ -2,6 +2,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/refs.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/scene/mesh.hh>

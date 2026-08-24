@@ -40,6 +40,8 @@
 #include <shaped-viewer/layout/solvers.hh>
 
 // resources
+#include <shaped-viewer/resources/bindless_tables.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 

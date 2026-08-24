@@ -209,7 +209,7 @@ Set `look_requires_button = false` once the caller has captured the cursor (`sr:
 ## Resources by id — the managers
 
 ```cpp
-sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials } with per-manager budgets
+sv::gpu_resource_manager::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials, textures; bindless_config bindless }
 sv::mesh_manager::create(ctx, cfg)     // cfg = manager_config { resource_budget budget }; ctx must outlive it
 
 // What you hand a manager: an owning cc::pinned_data payload + the cc::hash128 that identifies it.
@@ -229,24 +229,45 @@ material_manager::acquire(attributes, triangle_count) -> material_set_id
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
-scene_resources.begin_frame(epoch)                  // reclaim + advance; the CALLER owns this — once per frame, no routine does it
+resources.advance_to(epoch)                         // reclaim + advance; IDEMPOTENT, so every window's draw path may call it and the first one pays
+resources.current_epoch()                           // -> sg::epoch — what it last advanced to
 sv::mesh_id / material_set_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
 ```
 
 The managers ride on `sv::impl::lru_pool<Id, Record>`, the reusable id-pool.
 It mints ids, tracks each record's byte size and last-used epoch, and evicts on the idle timeout or the byte budget, least-recently-used first.
-It never evicts this frame's working set; `begin_frame` in its header states that rule exactly.
+It never evicts this frame's working set; `advance_to` in its header states that rule exactly.
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
 A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
 
-Bindless tables are `sg::bindless_array` over a staging binding group the caller owns — see the shaped-graphics cheat sheet.
-sv holds no bindless type of its own.
+### Bindless tables — declared by sv, owned by the manager
+
+```cpp
+sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d / _2d_array / cube / cube_array / _3d / buffers (+ count_)
+sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: gBindlessTextures2D, gBindlessBuffers, …
+sv::space_of(table)         // -> u32 — one register space per table, so a category needs no register-offset math
+sv::bindless_table_budget   // { bindless_table table; u32 count; }  — count 0 OMITS the table; a non-zero count < 2 ASSERTS (sg reads 1 as a scalar binding)
+sv::bindless_config         // { cc::vector<bindless_table_budget> tables = default_bindless_tables(); }
+sv::make_bindless_bindings(cfg)  // -> cc::vector<sg::binding> — the hand-declared layout; pure, so it needs no context
+
+m.acquire_texture(table, raw_view) -> u32   // element index, minted on a miss; asserts when frozen or when the table is not declared
+m.acquire_buffer(raw_view) -> u32           // the same for the byte-address table
+m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
+m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
+bound.group()                               // -> sg::binding_group_handle const& — what to bind
+bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
+m.has_table(table) / m.table_capacity(table)
+```
+
+The layout is hand-written rather than reflected, so the manager is constructible before any shader compiles — a shader matches the names above.
+The lock lives here rather than on `sg::bindless_array` because the invariant spans every array over one staging group.
+What keeps an index valid is sg's reclaim rule (a full array reclaims only what was NOT acquired this epoch), not the lock — see the header's TODO block for what that leaves open.
 
 ## Rendering — the view_renderer + routines
 
 ```cpp
 // Both the FRAME's job — once, before the first view resolves its ids or reaches for its accumulator.
-resources.begin_frame(ctx.current_epoch())
+resources.advance_to(ctx.current_epoch())
 store.begin_frame(u64(ctx.current_epoch()))               // reclaims idle view textures; skipping it only means nothing is reclaimed
 
 // One view -> the texture the store keeps under its id. A convenience for a caller tracing a single view with no plan.
@@ -425,7 +446,7 @@ for (auto f : sv::interactive("simple"))
 
 ```cpp
 // setup (once): build the scene through the managers
-auto resources = sv::scene_resources::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
+auto resources = sv::gpu_resource_manager::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
 auto mesh = resources.meshes.acquire(sv::triangle_data::create(positions));   // or indexed_triangle_data::create(positions, indices)
 auto mats = resources.materials.acquire(sv::material_data::create(materials));
 
@@ -453,7 +474,7 @@ auto const plan = sv::build_render_plan(def, {w, h}, frame_index, history);
 
 auto rt = sc->acquire_backbuffer();
 auto cmd = ctx.create_command_list();
-resources.begin_frame(ctx.current_epoch());                 // both once per frame, before anything reaches for a texture
+resources.advance_to(ctx.current_epoch());                 // both once per frame, before anything reaches for a texture
 store.begin_frame(u64(ctx.current_epoch()));
 sv::viewer_renderer::execute(*cmd, def, plan, resources, store, rt.cleared(clear_color));
 ctx.submit_command_list_and_present(*sc, cc::move(cmd));

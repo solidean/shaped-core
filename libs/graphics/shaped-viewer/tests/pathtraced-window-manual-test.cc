@@ -203,7 +203,7 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
 
     // Build the Cornell box once; only the camera moves.
     auto const box = sv_test::make_cornell_box();
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(box.positions));
     auto const materials = resources.materials.acquire(sv::material_data::create(box.materials));
     auto const* const mesh_rec = resources.meshes.get_ptr(mesh);

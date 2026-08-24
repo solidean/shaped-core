@@ -57,6 +57,28 @@ What is left is the interaction on top of it, in dependency order:
   drive.
   The plan and `trace` are already per `(view, layer)`.
 
+## What the bindless lock does not cover
+
+`sv::gpu_resource_manager` holds the lock, and its header carries the same three entries.
+They are recorded rather than solved: the lock is sound, but it is not what makes an index valid.
+What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not acquired this epoch* — which is structural and needs no lock.
+
+- **The lock prohibits where a generation stamp would verify.**
+  Bump a counter on every mint and record it in `bound_resources`.
+  Asserting at bind time that the snapshot covers every index the recording used would *check* the invariant rather than forbid its violation — same cost, and a failure that names what went wrong.
+- **The lock is global where the hazard is per-recording.**
+  A routine that legitimately wants to acquire mid-recording — a stream just landed, a later trace in the same list wants it — has one correct answer.
+  That answer is a fresh snapshot, rebound for the dispatches after it.
+  A clean `snapshot()` is the cached handle, so it is nearly free.
+  The lock refuses instead.
+- **An index written into a buffer that outlives its epoch is unprotected**, and the lock hides that by looking like it covers everything.
+  `material_manager::acquire` uploads its `pbr_material_gpu` buffer once and caches it by content hash across many epochs.
+  Once that buffer carries texture indices, they are epoch-transient values baked into a persistent one — stale the next epoch, with nothing asserting, because nobody re-acquired.
+  Three ways out, to be chosen when streaming starts.
+  Re-upload index-bearing buffers every epoch, which kills the O(1) content-hash cache.
+  Store a stable `texture_id` in the buffer and rebuild a small per-epoch `id -> index` table, which preserves it and needs nothing new from sg.
+  Or bring sg's persistent/refcounted acquire split forward.
+
 ## Everything else
 
 - Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.
@@ -97,8 +119,8 @@ What is left is the interaction on top of it, in dependency order:
   It rides in `frame_constants_gpu` / `pt_frame_constants_gpu` only because the trace binds one mesh per view.
   That is the same reason `Vertices` / `Indices` / `Materials` are single global bindings.
   Fold it into the per-instance mesh descriptor table the "one mesh per view" seam wants anyway, indexed by `InstanceID()` and carrying each mesh's vertex/index range or bindless handles.
-  The bindless side now exists in sg: `sg::bindless_array` mints an element index per view.
-  What remains is building the group its arrays sit on, the per-instance table itself, and wiring the trace through it.
+  The bindless side now exists on both sides: `sg::bindless_array` mints an element index per view, and `sv::gpu_resource_manager` owns the group and one array per table.
+  What remains is the per-instance table itself and wiring the trace through it.
   Moving the flag alone would not help: a per-instance flag over a still-global vertex buffer is no more correct.
   The DXR-native alternative is per-geometry data in the hit-group shader record via a local root signature, which specializes the `[branch]` in `mesh.hlsli` away.
   It needs local-root-signature support in sg's shader table first.

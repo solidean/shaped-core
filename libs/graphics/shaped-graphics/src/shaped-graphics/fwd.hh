@@ -221,7 +221,6 @@ enum class binding_slot : u32; // defined below — declared here so the definit
 
 // A non-owning bindless view over ONE array binding of a staging_binding_group (see binding/bindless_array.hh).
 class bindless_array;
-class bindless_lock; // RAII lock over a bindless_array: no acquires for its lifetime
 
 namespace impl
 {

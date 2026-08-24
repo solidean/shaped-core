@@ -27,6 +27,8 @@ add_library(shaped-viewer
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/resources/resource_managers.cc
+    src/shaped-viewer/resources/bindless_tables.cc
+    src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
@@ -74,6 +76,8 @@ target_sources(shaped-viewer
     src/shaped-viewer/impl/keyed_cache.hh
     src/shaped-viewer/impl/view_state.hh
     src/shaped-viewer/resources/resource_managers.hh
+    src/shaped-viewer/resources/bindless_tables.hh
+    src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
     src/shaped-viewer/rendering/frame_constants.hh
     src/shaped-viewer/rendering/raytrace_routine.hh
@@ -150,6 +154,7 @@ if(SC_BUILD_TESTS)
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
+        tests/bindless-tables-test.cc
     )
 
     target_link_libraries(shaped-viewer-test
@@ -170,6 +175,7 @@ if(SC_BUILD_TESTS)
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
             tests/layout-routine-test.cc
+            tests/gpu-resource-manager-test.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
             tests/immediate-viewer-window-manual-test.cc

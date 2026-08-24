@@ -583,9 +583,9 @@ arr.acquire(raw_view)       // -> u32 element index — same view -> SAME index,
                             //   an index is valid ONLY for the epoch it was acquired in — re-acquire the working set every epoch
                             //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
 arr.slot() / capacity() / occupied_count()  // -> binding_slot / u32 / u32 (capacity IS the binding's count)
-arr.lock() / unlock()       // void — refuses acquires until unlock, which must come in the SAME epoch (both asserted); mints NOTHING
-arr.lock_scoped()           // -> sg::bindless_lock — RAII form, unlocks at scope exit; move-only (a moved-from lock is disarmed)
-                            // the SNAPSHOT stays yours: lock every array over the group, sbg->snapshot(), bind, unlock
+                            // MOVABLE (keep one per table in a container), never copyable
+                            // NO lock here: guarding "my mint is in the snapshot I bound" spans every array over the group, so it belongs to the group's OWNER
+                            //   (sv::gpu_resource_manager is that owner in shaped-viewer; it holds the lock and hands out the snapshot)
                             // several arrays over different bindings of one group are independent; access declaration is the CONSUMER's (declare_array_*_access)
 
 // recording (on a command_list, via the cmd.compute scope):

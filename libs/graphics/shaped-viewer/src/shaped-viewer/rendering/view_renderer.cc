@@ -6,6 +6,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/view/render_settings.hh>
@@ -39,7 +40,7 @@ struct resolved_view
     material_record const* materials = nullptr;
 };
 
-resolved_view resolve_scene(layer const& l, scene_resources& resources)
+resolved_view resolve_scene(layer const& l, gpu_resource_manager& resources)
 {
     // The bound Materials/Vertices come from the first mesh: with one item (this slice) that is exact.
     // Multiple meshes want per-instance indexing — a flagged seam.
@@ -374,7 +375,7 @@ void view_renderer::trace(sg::command_list& cmd,
                           render_plan const& plan,
                           u32 trace_index,
                           plan_resources const& res,
-                          scene_resources& resources,
+                          gpu_resource_manager& resources,
                           view_store& store)
 {
     auto& ctx = cmd.context();
@@ -446,7 +447,10 @@ void view_renderer::trace(sg::command_list& cmd,
         ++slot->accum_frame;
 }
 
-sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v, scene_resources& resources, view_store& store)
+sg::texture_2d view_renderer::execute(sg::command_list& cmd,
+                                      view_data const& v,
+                                      gpu_resource_manager& resources,
+                                      view_store& store)
 {
     // One span per view, which is the unit a viewer with several panes is actually spending its frame on.
     CC_RECORD_SCOPE("sv.view.render");

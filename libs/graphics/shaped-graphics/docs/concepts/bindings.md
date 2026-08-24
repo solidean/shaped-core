@@ -143,8 +143,11 @@ One array touches nothing but its own binding, so several arrays over one group 
   Re-acquire the working set every epoch.
   When the array is full, every index not acquired this epoch is reclaimed at once — the mint dirties the group and forces a snapshot anyway, so there is nothing to save by evicting less.
   If every index was acquired this epoch, the working set exceeds the binding's count and `acquire` asserts.
-- **`lock()` refuses acquires until `unlock()`**, in the same epoch, and mints nothing.
-  It guards the window in which a snapshot is bound; taking that snapshot stays the group owner's job.
+- **It is movable**, so an owner can keep one array per table in a container; it is never copyable, since two arrays over one binding would mint conflicting descriptors from two tables.
+
+**Guarding the window between a mint and the snapshot that must contain it is not the array's job**, and there is nothing here to do it with.
+One array cannot enforce that invariant, because it spans every array over a group: the owner is whoever holds the group and all its arrays, and taking the snapshot is that owner's too.
+In shaped-viewer that owner is [`sv::gpu_resource_manager`](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.hh), which holds the lock and hands out the snapshot.
 
 ## Samplers: not views
 

@@ -34,7 +34,7 @@ TEST("sv - a view accumulates across frames under its id")
         SKIP("no DXC compiler to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
 
@@ -55,7 +55,7 @@ TEST("sv - a view accumulates across frames under its id")
     auto const trace = [&](sv::view_data const& view)
     {
         auto cmd = ctx.create_command_list();
-        resources.begin_frame(ctx.current_epoch());
+        resources.advance_to(ctx.current_epoch());
         store.begin_frame(u64(ctx.current_epoch()));
         auto const target = sv::view_renderer::execute(*cmd, view, resources, store);
         ctx.submit_command_list(cc::move(cmd));
@@ -200,7 +200,7 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
         SKIP("no DXC compiler to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
 
@@ -238,7 +238,7 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
     auto const frame = [&](u64 index)
     {
         auto cmd = ctx.create_command_list();
-        resources.begin_frame(ctx.current_epoch());
+        resources.advance_to(ctx.current_epoch());
         store.begin_frame(u64(ctx.current_epoch()));
 
         // No history fed in: this asserts the store's own bookkeeping, not the refresh policy's.

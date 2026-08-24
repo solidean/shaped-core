@@ -18,21 +18,16 @@
 /// When the array is full, every index not acquired this epoch is reclaimed at once; if every index was
 /// acquired this epoch, the working set exceeds the binding's count and acquire asserts.
 ///
-/// `lock()` refuses acquires until `unlock()`, which must come in the same epoch (both asserted), and mints
-/// nothing.
-/// What it guards is that an index minted after a snapshot was taken is not in that snapshot — the snapshot
-/// itself is immutable and a later mint cannot touch it.
-/// Taking the snapshot stays the group owner's job: lock every array over the group, call `group->snapshot()`,
-/// bind it, unlock.
-/// `lock_scoped()` is the RAII form.
+/// Guarding the window between a mint and the snapshot that must contain it is NOT this class's job.
+/// One array cannot enforce it, because the invariant spans every array over one staging group: the owner is
+/// whoever holds the group and all its arrays, and in shaped-viewer that is `sv::gpu_resource_manager`.
+/// Taking the snapshot is that owner's too — `group->snapshot()`, bind it, and refuse acquires while it is the
+/// bound one.
 ///
-/// TODO: this guard sits on the wrong class and is provisional.
-/// It belongs on the resource manager that owns the staging group and its arrays: the manager's `lock()`
-/// returns the snapshot, an epoch begins unlocked (acquire, set), then locks for the rest of the epoch, which
-/// makes "every index I acquired is valid for the work I am recording" structural rather than conventional.
-/// Landing with it, `acquire` splits into a transient handle (a typed enum, this epoch only) and a persistent
-/// one (refcounted, frees its slot), with eager eviction the default so a stale index fails immediately.
-/// Do not build on `lock` / `unlock` / `bindless_lock` as final.
+/// TODO: `acquire` should split into a transient handle (a typed enum, this epoch only) and a persistent one
+/// (refcounted, frees its slot), with eager eviction the default so a stale index fails immediately.
+/// Until it does, an index written into GPU memory that outlives its epoch has nothing protecting it — the
+/// reclaim rule above only covers indices re-acquired every epoch.
 ///
 /// Access declaration stays the consumer's job: whoever binds the group declares the elements its dispatch
 /// reads via declare_array_*_access.
@@ -57,68 +52,21 @@ public:
     [[nodiscard]] u32 occupied_count() const { return u32(_table.occupied_count()); }
 
     /// The element index for `view`, minted or re-used (see the class doc for index lifetime).
-    /// The view must satisfy the binding — the staging group validates it — and the array must not be locked.
+    /// The view must satisfy the binding — the staging group validates it.
     [[nodiscard]] u32 acquire(raw_view const& view);
 
-    /// Refuses acquires until `unlock`, which must come in the same epoch.
-    void lock();
-    void unlock();
-
-    /// The RAII form of the pair above: locks now, unlocks when the returned lock leaves scope.
-    /// The lock must be destroyed in the epoch it was taken in — the same-epoch rule, made structural.
-    [[nodiscard]] bindless_lock lock_scoped();
-
-    [[nodiscard]] bool is_locked() const { return _locked; }
-
-    /// Pinned in place: two arrays over one binding would mint conflicting descriptors from two tables, and
-    /// moving one out from under a live `bindless_lock` would have the lock unlock the moved-from object.
-    /// `for_binding` returns a prvalue, so no call site pays for this.
+    /// Movable, so an owner can keep one array per table in a container.
+    /// Never copied: two arrays over one binding would mint conflicting descriptors from two tables.
+    bindless_array(bindless_array&&) noexcept = default;
+    bindless_array& operator=(bindless_array&&) noexcept = default;
     bindless_array(bindless_array const&) = delete;
     bindless_array& operator=(bindless_array const&) = delete;
-    bindless_array(bindless_array&&) = delete;
-    bindless_array& operator=(bindless_array&&) = delete;
 
 private:
     bindless_array(context& ctx, staging_binding_group_handle group, binding_slot slot, u32 capacity);
 
-    context& _ctx;
+    context* _ctx = nullptr; // a reference would cost the move assignment; never null after construction
     staging_binding_group_handle _group;
     binding_slot _slot = binding_slot::invalid;
     impl::slot_table<raw_view> _table;
-
-    bool _locked = false;
-    epoch _lock_epoch = epoch::invalid;
 };
-
-/// Holds a bindless_array's lock for its lifetime — `lock_scoped()`'s return value.
-/// Unlocks on destruction, so lock and unlock cannot come apart; the same-epoch rule becomes "do not carry
-/// this across an epoch advance".
-/// Move-only: the moved-from lock is disarmed and unlocks nothing.
-class sg::bindless_lock
-{
-public:
-    ~bindless_lock()
-    {
-        if (_array != nullptr)
-            _array->unlock();
-    }
-
-    bindless_lock(bindless_lock&& rhs) noexcept : _array(rhs._array) { rhs._array = nullptr; }
-
-    bindless_lock(bindless_lock const&) = delete;
-    bindless_lock& operator=(bindless_lock const&) = delete;
-    bindless_lock& operator=(bindless_lock&&) = delete;
-
-private:
-    // Only the array mints one, through lock_scoped().
-    friend class bindless_array;
-    explicit bindless_lock(bindless_array& array) : _array(&array) {}
-
-    bindless_array* _array = nullptr; // null = disarmed (moved-from)
-};
-
-inline sg::bindless_lock sg::bindless_array::lock_scoped()
-{
-    lock();
-    return bindless_lock(*this);
-}

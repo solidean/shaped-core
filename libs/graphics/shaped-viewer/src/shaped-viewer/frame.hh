@@ -160,7 +160,7 @@ private:
     ///
     /// Internal, because acquiring is not the caller's job: `scene_ref::add_mesh` does it from the content hashes an
     /// `sv::mesh` already carries, which is what keeps a per-frame add O(1).
-    [[nodiscard]] scene_resources& resources();
+    [[nodiscard]] gpu_resource_manager& resources();
 
     /// The window named `id`, appending it (and the root view it presents) on first use.
     [[nodiscard]] u32 ensure_window(cc::string_view id);

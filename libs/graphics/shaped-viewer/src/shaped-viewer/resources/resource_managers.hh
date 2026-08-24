@@ -116,51 +116,24 @@ private:
     sg::context& _ctx;
 };
 
-/// Placeholder texture manager — the seam for material textures once the scene grows past flat per-triangle PBR.
-/// Empty this slice; it exists so `texture_id` has an owner to point at.
-class sv::texture_manager
+/// One uploaded texture and the view a bindless table binds it through.
+/// Empty this slice — the manager below mints no records yet, and the streaming change is what fills it in.
+struct sv::texture_record
 {
-public:
-    /// Takes the context to match the other managers; unused this slice (no config yet).
-    [[nodiscard]] static texture_manager create(sg::context&) { return texture_manager(); }
-
-    [[nodiscard]] bool contains(texture_id) const { return false; }
-    [[nodiscard]] isize count() const { return 0; }
 };
 
-/// Per-manager configuration for a whole scene's resources.
-struct sv::scene_resources_config
-{
-    manager_config meshes = {};
-    manager_config materials = {};
-};
-
-/// The bundle of resource managers a `viewer_definition` resolves its ids against.
-/// One per scene; passed to `sv::view_renderer::execute` / `sv::viewer_renderer::execute`.
-/// All three managers share the context it is created with, which must outlive it.
+/// Hands out `texture_id`s and owns the texture behind each, with LRU budgeting (see resource_budget).
 ///
-/// Set per-manager budgets through the config (`scene_resources::create(ctx, {.meshes = {.budget = ...}})`).
-/// `begin_frame` is the caller's to run, once per frame, before the first view resolves its ids — no routine does it, because none of them knows how many more views the frame holds.
-class sv::scene_resources
+/// The seam for material textures once the scene grows past flat per-triangle PBR.
+/// It carries the pool and its budget already, so what is missing is only `acquire` and the upload path behind it.
+class sv::texture_manager : public impl::lru_pool<texture_id, texture_record>
 {
 public:
-    /// Creates all three managers on `ctx`, each budgeted by its slice of `cfg`.
-    [[nodiscard]] static scene_resources create(sg::context& ctx, scene_resources_config const& cfg = {});
-
-    /// Advance every budgeted manager to epoch `e`, running its idle + budget eviction first.
-    void begin_frame(sg::epoch e)
-    {
-        meshes.begin_frame(e);
-        materials.begin_frame(e);
-    }
-
-    mesh_manager meshes;
-    material_manager materials;
-    texture_manager textures;
+    /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
+    [[nodiscard]] static texture_manager create(sg::context& ctx, manager_config const& cfg = {});
 
 private:
-    scene_resources(mesh_manager meshes, material_manager materials, texture_manager textures)
-      : meshes(cc::move(meshes)), materials(cc::move(materials)), textures(cc::move(textures))
-    {
-    }
+    explicit texture_manager(sg::context& ctx) : _ctx(ctx) {}
+
+    sg::context& _ctx;
 };

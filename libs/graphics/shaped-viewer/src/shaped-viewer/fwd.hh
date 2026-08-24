@@ -21,7 +21,13 @@ struct resource_budget;
 struct manager_config;
 struct mesh_record;
 struct material_record;
-struct scene_resources_config;
+struct texture_record;
+struct gpu_resource_manager_config;
+
+// The bindless tables sv declares, and their budgets (see resources/bindless_tables.hh)
+enum class bindless_table : u8;
+struct bindless_table_budget;
+struct bindless_config;
 
 struct view_id;
 struct camera;
@@ -88,7 +94,8 @@ class material_manager;
 class texture_manager;
 // The class-key must match the definition: the Microsoft ABI mangles struct and class differently, so a
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
-class scene_resources;
+class gpu_resource_manager;
+class bound_resources; // the manager's tables, snapshotted and locked for one recording
 
 // render plan
 enum class draw_kind : u8;

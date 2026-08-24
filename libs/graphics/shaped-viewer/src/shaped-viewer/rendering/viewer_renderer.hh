@@ -14,7 +14,7 @@
 /// Traces hoist above every pass because a ray-tracing dispatch may not be recorded inside one.
 /// The loop is kind-driven rather than two fixed phases, so a future stage that *does* interleave stays expressible.
 ///
-/// Nothing here advances `resources` or `store`: call `resources.begin_frame(ctx.current_epoch())` and
+/// Nothing here advances `resources` or `store`: call `resources.advance_to(ctx.current_epoch())` and
 /// `store.begin_frame(ctx.current_epoch())` once per frame, before this.
 ///
 /// It holds no state and takes no guard, so the lock order through the frame is view_renderer, then the layout routine.
@@ -34,7 +34,7 @@ public:
     static void execute(sg::command_list& cmd,
                         viewer_definition const& def,
                         render_plan const& plan,
-                        scene_resources& resources,
+                        gpu_resource_manager& resources,
                         view_store& store,
                         sg::color_target const& output);
 

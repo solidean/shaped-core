@@ -9,6 +9,7 @@
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/view_state.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/view/view_id.hh>
 
 /// How a viewer is created.
@@ -26,6 +27,11 @@ struct sv::viewer_config
     /// Swapchain back buffers, and also the pipelining depth passed to advance_epoch.
     /// Must be >= 2.
     int buffer_count = 3;
+
+    /// Budgets for the viewer's own `gpu_resource_manager` — per-manager LRU limits and the bindless table sizes.
+    /// The defaults suit a viewer-sized working set; a caller whose content says otherwise sets them here rather
+    /// than reaching past the viewer.
+    gpu_resource_manager_config resources = {};
 };
 
 /// The viewer: owns the window, swapchain, shader library and scene resources, and drives the per-frame loop.
@@ -120,7 +126,7 @@ private:
 
     /// The GPU resources every view in this viewer draws from.
     /// Reached through `frame::resources`, which is the only sanctioned way in — a caller has no viewer to ask.
-    [[nodiscard]] sv::scene_resources& scene_resources_of();
+    [[nodiscard]] sv::gpu_resource_manager& resources();
 
     /// The persistent state of the view named `id`, created on first use.
     /// The frame reaches this on a caller's behalf; nothing outside authoring should hold the reference across frames,

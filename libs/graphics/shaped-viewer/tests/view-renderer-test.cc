@@ -31,7 +31,7 @@ TEST("sv - view renderer end to end (headless)")
 
     // Build the scene through the managers (this is where the BLAS is built).
     auto const cloud = sv_test::make_triangle_cloud(64);
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
     REQUIRE(resources.meshes.contains(mesh));
@@ -52,8 +52,8 @@ TEST("sv - view renderer end to end (headless)")
                                                   .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch()); // the frame's job, not the renderer's
-    auto store = sv::view_store{};              // and so is what the view keeps across frames
+    resources.advance_to(ctx.current_epoch()); // the frame's job, not the renderer's
+    auto store = sv::view_store{};             // and so is what the view keeps across frames
 
     // The renderer only ever hands back a texture — it never sees an output target.
     auto const traced = sv::view_renderer::execute(*cmd, v, resources, store);
@@ -92,7 +92,7 @@ TEST("sv - view renderer renders indexed geometry (headless)")
     REQUIRE(welded.indices.size() == box.positions.size());
     REQUIRE(welded.positions.size() < box.positions.size()); // the quads really do share vertices
 
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));
     auto const materials = resources.materials.acquire(sv::material_data::create(box.materials));
 
@@ -117,7 +117,7 @@ TEST("sv - view renderer renders indexed geometry (headless)")
                                                   .emission = tg::vec3f(15.0f, 15.0f, 15.0f)});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch());
+    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
     (void)sv::view_renderer::execute(*cmd, v, resources, store);
     ctx.submit_command_list(cc::move(cmd));
