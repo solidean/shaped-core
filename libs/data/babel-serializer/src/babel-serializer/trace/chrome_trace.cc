@@ -1,5 +1,6 @@
 #include "chrome_trace.hh"
 
+#include <babel-serializer/data/json.hh>
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
@@ -8,6 +9,7 @@
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
+#include <clean-core/streams/growing_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 
@@ -33,70 +35,24 @@ struct located_event
     cc::rec::event_view event;
 };
 
-/// Appends `s` as a JSON string literal, quotes included.
-void append_json_string(cc::string& out, cc::string_view s)
-{
-    out += '"';
-    for (auto const c : s)
-    {
-        switch (c)
-        {
-        case '"':
-            out += "\\\"";
-            break;
-        case '\\':
-            out += "\\\\";
-            break;
-        case '\b':
-            out += "\\b";
-            break;
-        case '\f':
-            out += "\\f";
-            break;
-        case '\n':
-            out += "\\n";
-            break;
-        case '\r':
-            out += "\\r";
-            break;
-        case '\t':
-            out += "\\t";
-            break;
-        default:
-            // Everything below 0x20 must be escaped; UTF-8 continuation bytes pass through untouched, which is what
-            // keeps a non-ASCII name readable rather than mangled into \u sequences.
-            if (static_cast<unsigned char>(c) < 0x20)
-                out.appendf("\\u{:04x}", u32(static_cast<unsigned char>(c)));
-            else
-                out += c;
-            break;
-        }
-    }
-    out += '"';
-}
-
-/// Renders a u64 without losing it.
-///
 /// A JSON number is a double, so anything past 2^53 has to go out as a string or arrive wrong.
 /// That is exactly the case for a trace id, which is opaque rather than a quantity, so precision is all it has.
-void append_json_u64(cc::string& out, u64 v)
+constexpr u64 k_exactly_representable = u64(1) << 53;
+
+void write_u64(babel::json::object_writer& o, cc::string_view key, u64 v)
 {
-    constexpr u64 exactly_representable = u64(1) << 53;
-    if (v < exactly_representable)
-        out.appendf("{}", v);
+    if (v < k_exactly_representable)
+        o.write(key, v);
     else
-        out.appendf("\"{}\"", v);
+        o.write(key, cc::format("{}", v));
 }
 
-/// Renders a double the way JSON needs it, with no infinities or NaNs to trip a parser.
-void append_json_number(cc::string& out, f64 v)
+void write_u64(babel::json::array_writer& a, u64 v)
 {
-    if (v != v || v > 1e308 || v < -1e308)
-    {
-        out += "null";
-        return;
-    }
-    out.appendf("{}", v);
+    if (v < k_exactly_representable)
+        a.write(v);
+    else
+        a.write(cc::format("{}", v));
 }
 
 cc::string_view level_name(cc::rec::level l)
@@ -138,61 +94,78 @@ cc::string_view log_text(cc::rec::event_view const& e)
 {
     return e.payload.empty() ? e.name() : e.payload_as_text();
 }
-} // namespace
 
-cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording const& recording, write_options opts)
+/// Whether this event knows where it was recorded, which every descriptor carries.
+bool has_source(cc::rec::event_view const& e)
 {
-    // The mapping from cycles to time is per block, so every event travels with the block it came from.
-    cc::vector<located_event> events;
-    recording.for_each_event([&](cc::rec::chunk_view const& v, cc::rec::event_view const& e)
-                             { events.push_back({v, e}); });
+    return e.desc != nullptr && e.desc->site.file != nullptr && e.desc->site.file[0] != char(0);
+}
 
-    cc::sort(events, [](located_event const& a, located_event const& b) { return a.event.cycles < b.event.cycles; });
+/// The `"source": "path:line"` pair.
+///
+/// In args rather than in the name, for the same reason a sampled frame's location is: a viewer groups spans BY
+/// name, so a name carrying a line number would split one scope into a span per line.
+/// The path is whole rather than a file name, because a reader following a profile wants to open the file, and
+/// two `renderer.cc` in different directories are otherwise indistinguishable.
+void write_source(babel::json::object_writer& args, cc::rec::event_view const& e)
+{
+    args.write("source", cc::format("{}:{}", e.desc->site.file, e.desc->site.line));
+}
+
+/// Writes every event of the recording into the already-open `traceEvents` array.
+void write_events(babel::json::array_writer& events,
+                  cc::rec::recording const& recording,
+                  babel::chrome_trace::write_options const& opts)
+{
+    namespace json = babel::json;
+
+    // Pretty output is one event per LINE rather than one field per line: a trace has too many events for the latter
+    // to be readable, and a line per event is what makes it greppable and diffable.
+    auto const event_layout = opts.pretty ? json::layout::compact : json::layout::inherit;
+
+    // The mapping from cycles to time is per block, so every event travels with the block it came from.
+    cc::vector<located_event> located;
+    recording.for_each_event([&](cc::rec::chunk_view const& v, cc::rec::event_view const& e)
+                             { located.push_back({v, e}); });
+
+    cc::sort(located, [](located_event const& a, located_event const& b) { return a.event.cycles < b.event.cycles; });
 
     // Relative to the earliest event rather than to the epoch: absolute time would spend most of a double's precision
     // on a number no viewer shows.
     f64 origin_secs = 0;
-    for (auto const& le : events)
+    for (auto const& le : located)
     {
         auto const secs = le.view.wall_secs_of(le.event.cycles);
         if (origin_secs == 0 || secs < origin_secs)
             origin_secs = secs;
     }
 
-    auto out = cc::string::create_with_capacity(events.size() * 128 + 256);
-    auto const separator = opts.pretty ? cc::string_view(",\n ") : cc::string_view(",");
-
-    out += opts.pretty ? "{\n\"traceEvents\": [\n " : "{\"traceEvents\":[";
-
-    auto first = true;
-    auto const open_event = [&]
-    {
-        if (!first)
-            out += separator;
-        first = false;
-        out += '{';
-    };
-
     // Process and thread names, so the viewer shows something better than a bare id.
     {
-        open_event();
-        out.appendf(R"("ph":"M","name":"process_name","pid":{},"tid":0,"args":{{"name":)", opts.process_id);
-        append_json_string(out, opts.process_name);
-        out += "}}";
+        auto e = events.write_object(event_layout);
+        e.write("ph", "M");
+        e.write("name", "process_name");
+        e.write("pid", opts.process_id);
+        e.write("tid", 0);
+        auto args = e.write_object("args");
+        args.write("name", opts.process_name);
     }
 
     cc::set<u32> named_threads;
-    for (auto const& le : events)
+    for (auto const& le : located)
     {
         auto const tid = le.view.thread.index;
         if (named_threads.contains(tid))
             continue;
         named_threads.insert(tid);
 
-        open_event();
-        out.appendf(R"("ph":"M","name":"thread_name","pid":{},"tid":{},"args":{{"name":)", opts.process_id, tid);
-        append_json_string(out, le.view.thread.name.empty() ? cc::string_view("thread") : le.view.thread.name);
-        out += "}}";
+        auto e = events.write_object(event_layout);
+        e.write("ph", "M");
+        e.write("name", "thread_name");
+        e.write("pid", opts.process_id);
+        e.write("tid", tid);
+        auto args = e.write_object("args");
+        args.write("name", le.view.thread.name.empty() ? cc::string_view("thread") : le.view.thread.name);
     }
 
     // An accumulate carries a delta, but a counter track shows a level — so the running total is what gets emitted.
@@ -207,33 +180,6 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     // One construction rather than a ternary: an empty module span already MEANS "this process's own", and a ternary
     // would need cc::symbolizer to be copyable or movable, which it deliberately is not.
     auto symbols = cc::symbolizer(recording.modules());
-
-    /// Whether this event knows where it was recorded, which every descriptor carries.
-    auto const has_source = [](cc::rec::event_view const& e)
-    { return e.desc != nullptr && e.desc->site.file != nullptr && e.desc->site.file[0] != char(0); };
-
-    /// The `"source": "path:line"` pair, without the args object around it.
-    ///
-    /// In args rather than in the name, for the same reason a sampled frame's location is: a viewer groups spans BY
-    /// name, so a name carrying a line number would split one scope into a span per line.
-    /// The path is whole rather than a file name, because a reader following a profile wants to open the file, and
-    /// two `renderer.cc` in different directories are otherwise indistinguishable.
-    auto const append_source_pair = [&](cc::rec::event_view const& e)
-    {
-        out += R"("source":)";
-        append_json_string(out, cc::format("{}:{}", e.desc->site.file, e.desc->site.line));
-    };
-
-    /// The same, as its own args object, for an event that has no other args.
-    auto const append_source_args = [&](cc::rec::event_view const& e)
-    {
-        if (!has_source(e))
-            return;
-
-        out += R"(,"args":{)";
-        append_source_pair(e);
-        out += '}';
-    };
 
     // Sampled frames are emitted INSIDE the scopes that were open, on the same track.
     //
@@ -253,9 +199,11 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
 
         for (isize i = open->size() - 1; i >= 0; --i)
         {
-            open_event();
-            out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, tid, ts);
-            out += '}';
+            auto e = events.write_object(event_layout);
+            e.write("ph", "E");
+            e.write("pid", opts.process_id);
+            e.write("tid", tid);
+            e.write("ts", ts, cc::float_notation::fixed, 3);
         }
         open->clear();
     };
@@ -277,43 +225,41 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
 
         for (isize i = open.size() - 1; i >= shared; --i)
         {
-            open_event();
-            out.appendf(R"("ph":"E","pid":{},"tid":{},"ts":{:.3f})", opts.process_id, tid, ts);
-            out += '}';
+            auto e = events.write_object(event_layout);
+            e.write("ph", "E");
+            e.write("pid", opts.process_id);
+            e.write("tid", tid);
+            e.write("ts", ts, cc::float_notation::fixed, 3);
         }
 
         for (isize i = shared; i < stack.size(); ++i)
         {
-            open_event();
-            out.appendf(R"("ph":"B","pid":{},"tid":{},"ts":{:.3f},"name":)", opts.process_id, tid, ts);
-
             auto const& info
                 = opts.symbolize_samples ? symbols.resolve(reinterpret_cast<void const*>(stack[i])) : cc::symbol_info{};
+
+            auto e = events.write_object(event_layout);
+            e.write("ph", "B");
+            e.write("pid", opts.process_id);
+            e.write("tid", tid);
+            e.write("ts", ts, cc::float_notation::fixed, 3);
 
             // The address stays the name when nothing resolved — a hex frame a reader can look up beats a confident
             // wrong one, and it is what a recording from another process gets.
             if (info.has_function())
-                append_json_string(out, info.function);
+                e.write("name", info.function);
             else
-                append_json_string(out, cc::format("0x{:x}", stack[i]));
+                e.write("name", cc::format("0x{:x}", stack[i]));
 
-            out += R"(,"cat":"sampled")";
+            e.write("cat", "sampled");
 
             // The source location goes in args rather than the name: a viewer groups spans BY name, and a name
             // carrying a line number would split one function into a span per line.
-            out += R"(,"args":{"address":)";
-            append_json_string(out, cc::format("0x{:x}", stack[i]));
+            auto args = e.write_object("args");
+            args.write("address", cc::format("0x{:x}", stack[i]));
             if (info.has_line())
-            {
-                out += R"(,"source":)";
-                append_json_string(out, cc::format("{}:{}", info.file, info.line));
-            }
+                args.write("source", cc::format("{}:{}", info.file, info.line));
             if (!info.module.empty())
-            {
-                out += R"(,"module":)";
-                append_json_string(out, info.module);
-            }
-            out += "}}";
+                args.write("module", info.module);
         }
 
         open = cc::move(stack);
@@ -322,7 +268,7 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     cc::set<i32> named_sample_tracks;
     auto last_ts_us = 0.0;
 
-    for (auto const& le : events)
+    for (auto const& le : located)
     {
         auto const& e = le.event;
         auto const kind = e.kind();
@@ -333,13 +279,18 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
         auto const ts_us = (le.view.wall_secs_of(e.cycles) - origin_secs) * 1e6;
         auto const tid = le.view.thread.index;
 
+        /// Opens an event object and writes the five fields every non-metadata event carries.
+        /// The scope is returned still open, so the caller adds what its own kind needs.
         auto const common = [&](cc::string_view phase)
         {
-            open_event();
-            out.appendf(R"("ph":"{}","pid":{},"tid":{},"ts":{:.3f},"name":)", phase, opts.process_id, tid, ts_us);
-            append_json_string(out, kind == cc::rec::event_kind::log ? log_text(e) : e.name());
-            out += R"(,"cat":)";
-            append_json_string(out, e.domain()->name());
+            auto ev = events.write_object(event_layout);
+            ev.write("ph", phase);
+            ev.write("pid", opts.process_id);
+            ev.write("tid", tid);
+            ev.write("ts", ts_us, cc::float_notation::fixed, 3);
+            ev.write("name", kind == cc::rec::event_kind::log ? log_text(e) : e.name());
+            ev.write("cat", e.domain()->name());
+            return ev;
         };
 
         last_ts_us = ts_us;
@@ -362,11 +313,14 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             if (owner == cc::rec::impl::sample_unknown_thread && !named_sample_tracks.contains(sample_tid))
             {
                 named_sample_tracks.insert(sample_tid);
-                open_event();
-                out.appendf(R"("ph":"M","name":"thread_name","pid":{},"tid":{},"args":{{"name":)", opts.process_id,
-                            sample_tid);
-                append_json_string(out, cc::format("os thread {} (sampled)", e.field_as_u64("native_tid").value_or(0)));
-                out += "}}";
+
+                auto ev = events.write_object(event_layout);
+                ev.write("ph", "M");
+                ev.write("name", "thread_name");
+                ev.write("pid", opts.process_id);
+                ev.write("tid", sample_tid);
+                auto args = ev.write_object("args");
+                args.write("name", cc::format("os thread {} (sampled)", e.field_as_u64("native_tid").value_or(0)));
             }
 
             apply_sample(sample_tid, ts_us, e.field_as_u64_array("frames"));
@@ -380,20 +334,24 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
         switch (kind)
         {
         case cc::rec::event_kind::scope_begin:
+        {
             if (!opts.include_scopes)
                 continue;
-            common("B");
-            append_source_args(e);
-            out += '}';
+
+            auto ev = common("B");
+            if (has_source(e))
+            {
+                auto args = ev.write_object("args");
+                write_source(args, e);
+            }
             break;
+        }
 
         case cc::rec::event_kind::scope_end:
-            if (!opts.include_scopes)
-                continue;
             // "E" carries no name in the format, but writing one keeps a hand-read trace legible and viewers ignore it.
-            common("E");
-            out += '}';
-            break;
+            if (opts.include_scopes)
+                common("E");
+            continue;
 
         case cc::rec::event_kind::stat_snapshot:
         case cc::rec::event_kind::stat_accumulate:
@@ -410,10 +368,9 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
                 level = total;
             }
 
-            common("C");
-            out += R"(,"args":{"value":)";
-            append_json_number(out, level);
-            out += "}}";
+            auto ev = common("C");
+            auto args = ev.write_object("args");
+            args.write("value", level);
             break;
         }
 
@@ -422,12 +379,11 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             if (!opts.include_logs)
                 continue;
 
-            common("i");
-            out += R"(,"s":"t","args":{"level":)";
-            append_json_string(out, level_name(e.level()));
-            out += ',';
-            append_source_pair(e); // one key across every kind, so a reader learns it once
-            out += "}}";
+            auto ev = common("i");
+            ev.write("s", "t");
+            auto args = ev.write_object("args");
+            args.write("level", level_name(e.level()));
+            write_source(args, e); // one key across every kind, so a reader learns it once
             break;
         }
 
@@ -436,17 +392,16 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             if ((kind == cc::rec::event_kind::value || kind == cc::rec::event_kind::marker) && !opts.include_values)
                 continue;
 
-            common("i");
-            out += R"(,"s":"t")";
+            auto ev = common("i");
+            ev.write("s", "t");
 
             // A relation says what it MEANS as well as who it links, so the edge is readable without the viewer
             // knowing the vocabulary.
             if (auto const* const t = e.relation(); t != nullptr)
             {
-                out += R"(,"relation":)";
-                append_json_string(out, t->name);
+                ev.write("relation", t->name);
                 if (t->is_equivalence)
-                    out += R"(,"equivalence":true)";
+                    ev.write("equivalence", true);
             }
 
             // Whatever the payload declares, rendered generically — a viewer shows it without the exporter having
@@ -455,47 +410,28 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
             // the source goes on instants and scopes and deliberately not on stat events.
             if (auto const fields = e.fields(); !fields.empty() || has_source(e))
             {
-                out += R"(,"args":{)";
-                auto first_field = true;
+                auto args = ev.write_object("args");
                 if (has_source(e))
-                {
-                    append_source_pair(e);
-                    first_field = false;
-                }
+                    write_source(args, e);
+
                 for (auto const& f : fields)
                 {
-                    if (!first_field)
-                        out += ',';
-                    first_field = false;
-
-                    append_json_string(out, f.name);
-                    out += ':';
-
                     if (auto const t = e.field_as_text(f.name); t.has_value())
-                        append_json_string(out, t.value());
+                        args.write(f.name, t.value());
                     else if (f.type == cc::rec::type_code::u64_array)
                     {
-                        out += '[';
-                        auto first_value = true;
+                        auto values = args.write_array(f.name);
                         for (auto const v : e.field_as_u64_array(f.name))
-                        {
-                            if (!first_value)
-                                out += ',';
-                            first_value = false;
-                            append_json_u64(out, v);
-                        }
-                        out += ']';
+                            write_u64(values, v);
                     }
                     else if (f.type == cc::rec::type_code::u64_)
-                        append_json_u64(out, e.field_as_u64(f.name).value_or(0));
+                        write_u64(args, f.name, e.field_as_u64(f.name).value_or(0));
                     else if (auto const d = e.field_as_double(f.name); d.has_value())
-                        append_json_number(out, d.value());
+                        args.write(f.name, d.value());
                     else
-                        out += "null";
+                        args.write(f.name, nullptr);
                 }
-                out += '}';
             }
-            out += '}';
             break;
         }
         }
@@ -505,23 +441,36 @@ cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording cons
     for (auto const& [tid, open] : open_sampled)
         if (!open.empty())
             close_sampled(tid, last_ts_us);
-
-    out += opts.pretty ? "\n],\n\"displayTimeUnit\": \"ms\"\n}\n" : R"(],"displayTimeUnit":"ms"})";
-
-    auto bytes = cc::vector<byte>();
-    bytes.resize_to_uninitialized(out.size());
-    if (!out.empty())
-        cc::memcpy(bytes.data(), out.data(), size_t(out.size()));
-    return bytes;
 }
+} // namespace
 
 cc::result<cc::unit> babel::chrome_trace::write(cc::write_stream& out,
                                                 cc::rec::recording const& recording,
                                                 write_options opts)
 {
-    auto encoded = encode(recording, opts);
-    CC_RETURN_IF_ERROR(encoded);
+    // non_finite -> null: a NaN or an infinity in a recorded value must not take the whole trace down, and a viewer
+    // renders a null datapoint as a hole in the plot, which is what it is.
+    auto w = json::writer(out, {
+                                   .indent = opts.pretty ? 1 : 0,
+                                   .non_finite = json::non_finite_policy::null,
+                               });
 
-    out.write(cc::span<byte const>(encoded.value()));
-    return cc::unit{};
+    {
+        auto root = w.object();
+        {
+            auto events = root.write_array("traceEvents");
+            write_events(events, recording, opts);
+        }
+        root.write("displayTimeUnit", "ms");
+    }
+
+    return w.finish();
+}
+
+cc::result<cc::vector<byte>> babel::chrome_trace::encode(cc::rec::recording const& recording, write_options opts)
+{
+    auto sink = cc::vector_write_stream_adapter();
+    cc::write_stream stream = sink;
+    CC_RETURN_IF_ERROR(write(stream, recording, opts));
+    return sink.take();
 }
