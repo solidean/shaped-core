@@ -42,6 +42,8 @@ struct sv::gpu_resource_manager_config
     manager_config meshes = {};
     manager_config materials = {};
     manager_config textures = {};
+    manager_config attributes = {};
+    manager_config instances = {};
     bindless_config bindless = {};
     texture_policy textures_policy = {};
     work_budget work = {};
@@ -118,7 +120,11 @@ private:
 class sv::gpu_resource_manager
 {
 public:
-    /// Creates the three managers, the staging group over `cfg.bindless`'s layout, and one array per table.
+    /// Creates the five managers, the staging group over `cfg.bindless`'s layout, and one array per table.
+    ///
+    /// `cfg.bindless` must declare `textures_2d` and `buffers`, whatever else it declares or omits: the texture manager pins into
+    /// the first and the attribute and instance managers pin into the second, so a config without them has no manager to build.
+    /// Both assert.
     [[nodiscard]] static gpu_resource_manager create(sg::context& ctx, gpu_resource_manager_config const& cfg = {});
 
     /// Reclaim and advance to epoch `e`, if not already there.
@@ -179,6 +185,28 @@ public:
     /// How many resources are still waiting for their follow-up work.
     [[nodiscard]] isize pending_work_count() const { return _pending.size(); }
 
+    /// The parameter block `r` resolves to, uploaded and pinned — what a generated shader reads per instance.
+    ///
+    /// `layout` must be the one `generate_material_shader` produced for `r`; the two are filled and read at the same offsets, and
+    /// handing them in together is what keeps that from being two independent computations of the same thing.
+    ///
+    /// This is where the chain finally reaches the GPU: a constant is copied inline, a mesh-sourced attribute is uploaded through
+    /// `attributes` and enters as an `sv_attribute_desc`, and a sampled texture enters as the bindless index of an already-acquired
+    /// `texture_id`.
+    /// Every index written into the block is a PINNED one, since the block outlives the epoch that built it.
+    ///
+    /// Content-cached on `r.parameter_key`, so re-acquiring an unchanged mesh every frame is a lookup.
+    [[nodiscard]] instance_id acquire_instance(resolved_material const& r, material_parameter_layout const& layout);
+
+    /// The bytes of `r`'s parameter block, in `layout`'s order — what `acquire_instance` uploads.
+    ///
+    /// Public because the layout is a contract rather than an internal detail: a caller packing several blocks into one buffer
+    /// itself needs exactly this, and it is what a test can check without reading GPU memory back.
+    /// It has the side effect `acquire_instance` has — a mesh-sourced attribute is uploaded and pinned here, since the descriptor
+    /// it writes is that upload's index.
+    [[nodiscard]] cc::vector<byte> build_instance_parameters(resolved_material const& r,
+                                                             material_parameter_layout const& layout);
+
     /// Whether `table` was declared at all (a budget of 0 omits it).
     [[nodiscard]] bool has_table(bindless_table table) const;
 
@@ -188,6 +216,8 @@ public:
     mesh_manager meshes;
     material_manager materials;
     texture_manager textures;
+    attribute_manager attributes;
+    instance_manager instances;
 
     gpu_resource_manager(gpu_resource_manager&&) noexcept = default;
     gpu_resource_manager(gpu_resource_manager const&) = delete;
@@ -209,6 +239,8 @@ private:
     gpu_resource_manager(mesh_manager meshes,
                          material_manager materials,
                          texture_manager textures,
+                         attribute_manager attributes,
+                         instance_manager instances,
                          sg::staging_binding_group_handle group,
                          cc::vector<table_entry> tables,
                          texture_policy texture_policy,

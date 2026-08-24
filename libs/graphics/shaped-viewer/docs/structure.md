@@ -63,7 +63,11 @@ material system (material/)              [in progress]  material_type (signature
 material shader generation               [in progress]  generate_material_shader turns a resolved_material into HLSL plus the parameter layout that source reads.
                                                         Emits only the bindless tables the permutation touches (names and spaces from bindless_tables.hh), one SamplerState per distinct sampler, and one initializer per attribute — a parameter-block load, a barycentric interpolation, or a uv sample.
                                                         The type's fragment then runs verbatim over those locals; shaders/material_runtime.hlsli is the hand-authored half it is written against.
-                                                        Compiled through slib::shader_library::compile_source. Still to come: the GPU path — attribute upload, the per-instance table, and the trace
+                                                        Compiled through slib::shader_library::compile_source
+material data on the GPU                 [in progress]  attribute_manager uploads any mesh_attribute to a byte-address buffer keyed on its own hash and pins a bindless element, which is what makes the mesh_attribute rank of the chain reachable at all.
+                                                        instance_manager owns the parameter blocks a generated shader reads, content-keyed on parameter_key; gpu_resource_manager::build_instance_parameters fills one from the layout the generator handed back.
+                                                        Every index written into a block is a PINNED one, since the block outlives the epoch that built it.
+                                                        Still to come: the per-instance table indexed by InstanceID(), one hit group per permutation, and the trace
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

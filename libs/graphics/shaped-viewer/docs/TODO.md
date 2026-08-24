@@ -81,10 +81,15 @@ What is not yet built, in dependency order:
 - **slib has no named-HLSL-fragment asset kind.**
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
-- **General attribute upload**, so the `mesh_attribute` rank of the chain reaches the GPU at all.
-  Any `sv::mesh_attribute` into a byte-address buffer keyed on its own hash, with a pinned bindless element.
-- **The per-instance descriptor table**, which is the same table the `mesh_is_indexed` entry below already asks for.
-  Slots keyed on `parameter_key`; every bindless index in one comes from `pin_*` rather than `acquire_*`, which the two types already enforce.
+- **The per-instance descriptor table** — the table a closest-hit reads by `InstanceID()` to fill its `sv_shading_context`.
+  The parameter blocks it points at exist (`instance_manager`, keyed on `parameter_key`); what is missing is the table naming one per scene item, plus each mesh's vertex / index buffer indices.
+  This is the same table the `mesh_is_indexed` entry below asks for.
+- **One buffer per parameter block.**
+  That is one bindless slot per distinct (material, mesh) pairing rather than per instance, which is affordable but not free.
+  Packing many blocks into one buffer is invisible to the shader — it already takes an offset — so it is an optimization rather than a change of contract.
+- **A permutation needs a hit group.**
+  sg's shader table already carries several (`add_hit_shader` -> `hit_index`), and `tlas_instance::hit_group_offset` selects among them per instance, so nothing is blocked.
+  What is missing is compiling one generated shader per `permutation_key` and building the DXR pipeline over the set.
 - **Several material permutations means several DXR hit groups**, which needs sg's shader table to carry more than one.
   Unconfirmed, and it is what decides whether the GPU slice can be one change.
 - **`material_runtime.hlsli` is only reachable through the source tree.**

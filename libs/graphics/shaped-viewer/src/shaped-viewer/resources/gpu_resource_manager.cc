@@ -4,6 +4,8 @@
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-viewer/material/shader_generator.hh>
+#include <shaped-viewer/scene/mesh_attribute.hh>
 
 namespace sv
 {
@@ -30,6 +32,8 @@ cc::span<u32 const> bound_resources::elements(bindless_table table) const
 gpu_resource_manager::gpu_resource_manager(mesh_manager meshes,
                                            material_manager materials,
                                            texture_manager textures,
+                                           attribute_manager attributes,
+                                           instance_manager instances,
                                            sg::staging_binding_group_handle group,
                                            cc::vector<table_entry> tables,
                                            texture_policy texture_policy,
@@ -37,6 +41,8 @@ gpu_resource_manager::gpu_resource_manager(mesh_manager meshes,
   : meshes(cc::move(meshes)),
     materials(cc::move(materials)),
     textures(cc::move(textures)),
+    attributes(cc::move(attributes)),
+    instances(cc::move(instances)),
     _group(cc::move(group)),
     _tables(cc::move(tables)),
     _texture_policy(texture_policy),
@@ -69,9 +75,13 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
 
     auto const* const textures_2d = _find_table(tables, bindless_table::textures_2d);
     CC_ASSERT(textures_2d != nullptr, "the textures_2d table must be declared — the texture manager pins into it");
+    auto const* const buffers = _find_table(tables, bindless_table::buffers);
+    CC_ASSERT(buffers != nullptr, "the buffers table must be declared — attributes and parameter blocks pin into it");
 
     return gpu_resource_manager(mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
-                                texture_manager::create(ctx, cfg.textures, textures_2d->array), cc::move(group),
+                                texture_manager::create(ctx, cfg.textures, textures_2d->array),
+                                attribute_manager::create(ctx, cfg.attributes, buffers->array),
+                                instance_manager::create(ctx, cfg.instances, buffers->array), cc::move(group),
                                 cc::move(tables), cfg.textures_policy, cfg.work);
 }
 
@@ -93,9 +103,94 @@ void gpu_resource_manager::advance_to(sg::epoch e)
     meshes.begin_frame(e);
     materials.begin_frame(e);
     textures.begin_frame(e);
+    attributes.begin_frame(e);
+    instances.begin_frame(e);
     for (auto& t : _tables)
         t.acquired.clear();
     _epoch = e;
+}
+
+
+namespace
+{
+/// Appends `value` to `out` as raw bytes, which is how every slot of a parameter block is written.
+template <class T>
+void append_pod(cc::vector<byte>& out, T const& value)
+{
+    auto const src = cc::span<T const>(&value, 1).as_bytes();
+    for (auto b : src)
+        out.push_back(b);
+}
+} // namespace
+
+cc::vector<byte> gpu_resource_manager::build_instance_parameters(resolved_material const& r,
+                                                                 material_parameter_layout const& layout)
+{
+    // Zero-filled rather than uninitialized: a layout may leave alignment padding between slots, and a block whose padding
+    // varies run to run would be two different uploads of the same material.
+    auto out = cc::vector<byte>::create_filled(layout.size_bytes, byte(0));
+
+    auto const write = [&](i32 offset, cc::span<byte const> bytes)
+    {
+        CC_ASSERT(offset + bytes.size() <= out.size(), "a parameter slot does not fit the block its layout sized");
+        for (auto i = isize(0); i < bytes.size(); ++i)
+            out[offset + i] = bytes[i];
+    };
+
+    for (auto const& slot : layout.slots)
+    {
+        auto const& a = r.attributes[slot.attribute_index];
+        switch (slot.kind)
+        {
+        case material_slot_kind::constant:
+            CC_ASSERT(a.constant.size() == slot.size_bytes, "a constant slot is its declaration's size");
+            write(slot.offset, a.constant);
+            break;
+
+        case material_slot_kind::attribute_descriptor:
+        {
+            // A descriptor slot serves either the attribute itself or, for a sampled one, the uv set it samples through.
+            auto const* const source = a.sample != nullptr ? a.uv : a.attribute;
+            CC_ASSERT(source != nullptr, "a descriptor slot names a mesh attribute the resolve found");
+
+            auto const id = attributes.acquire(*source);
+            auto const& record = attributes.get(id);
+
+            // Tightly packed from offset 0 within its own buffer, so the stride is just the element size.
+            auto desc = cc::vector<byte>();
+            append_pod(desc, record.index());
+            append_pod(desc, u32(0));
+            append_pod(desc, u32(source->format.size_bytes()));
+            write(slot.offset, desc);
+            break;
+        }
+
+        case material_slot_kind::texture_index:
+        {
+            CC_ASSERT(a.sample != nullptr, "a texture slot names a sampled attribute");
+            // The texture must already be resident: a `texture_id` on a mesh is one the caller acquired.
+            auto const& record = textures.get(a.sample->texture);
+            auto index = cc::vector<byte>();
+            append_pod(index, record.index());
+            write(slot.offset, index);
+            break;
+        }
+        }
+    }
+
+    return out;
+}
+
+instance_id gpu_resource_manager::acquire_instance(resolved_material const& r, material_parameter_layout const& layout)
+{
+    // The layout is what the generated shader reads, so a block built from a different one would be read at the wrong offsets.
+    CC_ASSERT(r.type != nullptr, "a resolved material names its type");
+
+    if (auto const resident = instances.find(r.parameter_key); resident.has_value())
+        return resident.value();
+
+    auto const bytes = build_instance_parameters(r, layout);
+    return instances.acquire(r.parameter_key, r.permutation_key, bytes);
 }
 
 sg::bindless_index gpu_resource_manager::acquire_texture(bindless_table table, sg::raw_view const& view)

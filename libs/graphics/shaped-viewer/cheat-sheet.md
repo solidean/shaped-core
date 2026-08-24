@@ -135,6 +135,31 @@ Three properties worth knowing:
 - **A cycle degrades.** It reports a `plan_diagnostic` and drops that one leaf; every sibling still renders.
   A view tree is frequently data, so it must not assert.
 
+## Material data on the GPU — attributes, and the block a permutation reads
+
+```cpp
+m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes, pins a bindless element, keyed on attribute.hash
+m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; bindless_element_handle element; format; frequency; element_count;}
+record.index()                         // -> u32, the bindless index a descriptor names; `element` is what keeps it true
+
+m.build_instance_parameters(resolved, layout)  // -> vector<byte>; uploads+pins any mesh attribute it needs on the way
+m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key
+m.instances.get(id)                    // -> instance_record {buffer<byte> parameters; element; hash128 permutation; size_bytes;}
+```
+
+A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv_attribute_desc`
+(`{bindless index, 0, element stride}`) per mesh-sourced attribute, and a bindless index per sampled texture.
+
+Gotchas:
+
+- **`gpu_resource_manager::create` requires `textures_2d` and `buffers`** in the bindless config, whatever else it declares.
+  The texture manager pins into the first; attributes and parameter blocks pin into the second.
+- **Every index in a block is a PINNED one**, never an epoch-scoped `acquire_*` — the block is content-cached across epochs.
+  The two types make storing the wrong one not compile.
+- **The layout must be the one `generate_material_shader` returned for that same resolved material**, or the block is filled at offsets the shader does not read.
+- **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
+- **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
+
 ## Materials — a type, an instance, and the frequency chain
 
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.

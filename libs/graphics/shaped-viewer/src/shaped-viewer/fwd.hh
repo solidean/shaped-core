@@ -22,6 +22,8 @@ struct manager_config;
 struct mesh_record;
 struct material_record;
 struct texture_record;
+struct attribute_record;
+struct instance_record;
 enum class residency : u8; // how much of a resource has reached the GPU (resource_managers.hh)
 struct work_budget;        // how much follow-up GPU work one epoch may record
 struct texture_policy;     // what happens to a texture once it has landed
@@ -111,9 +113,13 @@ enum class material_id : u32;
 enum class tlas_id : u32;
 enum class texture_id : u32;
 enum class buffer_id : u32;
+enum class attribute_id : u32;
+enum class instance_id : u32;
 class mesh_manager;
 class material_manager;
 class texture_manager;
+class attribute_manager;
+class instance_manager;
 // The class-key must match the definition: the Microsoft ABI mangles struct and class differently, so a
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
 class gpu_resource_manager;
@@ -261,6 +267,20 @@ enum class sv::texture_id : sv::u32
 };
 
 enum class sv::buffer_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Names one uploaded mesh attribute — the bytes plus the bindless element they are read through.
+/// Minted by `attribute_manager::acquire`, keyed on the attribute's own content hash.
+enum class sv::attribute_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Names one material parameter block — what a generated shader reads per instance.
+/// Minted by `gpu_resource_manager::acquire_instance`, keyed on a resolved material's `parameter_key`.
+enum class sv::instance_id : sv::u32
 {
     invalid = u32(-1)
 };

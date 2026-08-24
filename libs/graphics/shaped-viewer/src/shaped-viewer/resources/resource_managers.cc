@@ -280,4 +280,74 @@ texture_id texture_manager::acquire(texture_data const& texture)
                    .total_mips = total_mips},
                   uploaded_bytes);
 }
+
+namespace
+{
+// readonly_buffer so a shader reads it as a ByteAddressBuffer through the bindless table; copy_dst for the upload.
+constexpr auto bindless_bytes_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
+} // namespace
+
+attribute_manager attribute_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
+{
+    auto manager = attribute_manager(ctx, cc::move(table));
+    manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
+    return manager;
+}
+
+attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
+{
+    if (auto const resident = find_by_hash(attribute.hash); resident.has_value())
+        return resident.value();
+
+    auto const bytes = attribute.data.span();
+    CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
+
+    auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
+
+    auto up = _ctx.create_command_list();
+    up->upload.data_to_buffer(data, bytes);
+    _ctx.submit_command_list(cc::move(up));
+
+    auto element = _table.persistent.acquire(data.as_readonly_buffer());
+
+    return insert(attribute.hash,
+                  {.data = cc::move(data),
+                   .element = cc::move(element),
+                   .format = attribute.format,
+                   .frequency = attribute.frequency,
+                   .element_count = attribute.element_count()},
+                  bytes.size());
+}
+
+instance_manager instance_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
+{
+    auto manager = instance_manager(ctx, cc::move(table));
+    manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
+    return manager;
+}
+
+instance_id instance_manager::acquire(cc::hash128 key, cc::hash128 permutation, cc::span<byte const> bytes)
+{
+    if (auto const resident = find_by_hash(key); resident.has_value())
+        return resident.value();
+
+    // A material whose every attribute is sourced from somewhere needing no parameter would have an empty block, and a zero-sized buffer has no descriptor to pin.
+    // Four bytes keep the shape uniform rather than making the shader branch on whether it has a block at all.
+    auto const size = bytes.empty() ? isize(4) : bytes.size();
+    auto parameters = _ctx.persistent.create_buffer<byte>(size, bindless_bytes_usage);
+
+    auto up = _ctx.create_command_list();
+    if (!bytes.empty())
+        up->upload.data_to_buffer(parameters, bytes);
+    _ctx.submit_command_list(cc::move(up));
+
+    auto element = _table.persistent.acquire(parameters.as_readonly_buffer());
+
+    return insert(key,
+                  {.parameters = cc::move(parameters),
+                   .element = cc::move(element),
+                   .permutation = permutation,
+                   .size_bytes = i32(bytes.size())},
+                  size);
+}
 } // namespace sv

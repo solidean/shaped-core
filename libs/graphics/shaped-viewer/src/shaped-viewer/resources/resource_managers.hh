@@ -10,6 +10,7 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <shaped-viewer/resources/resource_data.hh>
+#include <shaped-viewer/scene/mesh_attribute.hh> // attribute_format / attribute_frequency, which a record carries
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <typed-geometry/linalg/pos.hh>
 
@@ -116,6 +117,94 @@ private:
     explicit material_manager(sg::context& ctx) : _ctx(ctx) {}
 
     sg::context& _ctx;
+};
+
+/// One uploaded mesh attribute: its bytes as a byte-address buffer, and the bindless element that names it.
+///
+/// The element is **pinned** rather than acquired per epoch, for the same reason a texture's is: its index is written into a
+/// material parameter block that is content-cached across epochs, so it has to stay true for as long as that block does.
+///
+/// Elements are tightly packed from offset 0, so a descriptor over this is `{index(), 0, format.size_bytes()}`.
+struct sv::attribute_record
+{
+    sg::buffer<byte> data;
+    sg::bindless_element_handle element;
+
+    attribute_format format = attribute_format::of_scalar(scalar_type::f32);
+    attribute_frequency frequency = attribute_frequency::per_vertex;
+    isize element_count = 0;
+
+    /// The bindless index a shader reads this attribute through; `element` is what keeps it true.
+    [[nodiscard]] u32 index() const { return element == nullptr ? 0 : element->index(); }
+};
+
+/// Hands out `attribute_id`s for arbitrary mesh attributes, with LRU budgeting (see resource_budget).
+///
+/// This is what makes the `mesh_attribute` rank of the material chain reach the GPU at all: any attribute a material resolves to,
+/// at any format and frequency, rather than the four PBR names the old repack knew.
+/// Keyed on the attribute's own `hash`, so a mesh re-acquired every frame costs one lookup.
+class sv::attribute_manager : public impl::lru_pool<attribute_id, attribute_record>
+{
+public:
+    /// A manager that uploads into `ctx` (which must outlive it), budgeted by `cfg`, pinning into `table`.
+    [[nodiscard]] static attribute_manager create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table);
+
+    /// The attribute_id for `attribute.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
+    /// The bytes are uploaded on one command list submitted before returning, and the element pinned, so the id resolves immediately.
+    [[nodiscard]] attribute_id acquire(mesh_attribute const& attribute);
+
+private:
+    attribute_manager(sg::context& ctx, sg::bindless_array table) : _ctx(ctx), _table(cc::move(table)) {}
+
+    sg::context& _ctx;
+    sg::bindless_array _table;
+};
+
+/// One instance's material parameter block, uploaded and pinned.
+///
+/// Its contents are what `material_parameter_layout` describes and the generated shader reads: constants inline, an
+/// `sv_attribute_desc` per mesh-sourced attribute, a bindless index per sampled texture.
+///
+/// `permutation` says which generated shader reads it, which is what a hit-group assignment is keyed on.
+/// The block is content-cached on the resolved material's `parameter_key`, so two meshes drawn identically share one.
+struct sv::instance_record
+{
+    sg::buffer<byte> parameters;
+    sg::bindless_element_handle element;
+
+    /// the `permutation_key` of the resolved material this was built from
+    cc::hash128 permutation;
+
+    i32 size_bytes = 0;
+
+    /// What the shader is handed as `ctx.param_buffer`; the block sits at offset 0 within it.
+    [[nodiscard]] u32 index() const { return element == nullptr ? 0 : element->index(); }
+};
+
+/// Hands out `instance_id`s for material parameter blocks, with LRU budgeting (see resource_budget).
+///
+/// One buffer per block today, which is one bindless slot per distinct (material, mesh) pairing rather than per instance.
+/// Packing many blocks into one buffer is invisible to the shader — it already takes an offset — so it is a later optimization
+/// rather than a change of contract.
+class sv::instance_manager : public impl::lru_pool<instance_id, instance_record>
+{
+public:
+    [[nodiscard]] static instance_manager create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table);
+
+    /// The instance_id for `key`, resident from a prior acquire (O(1)), or a freshly uploaded block holding `bytes`.
+    /// `key` is the resolved material's `parameter_key` and `permutation` its `permutation_key`; the caller builds the bytes,
+    /// because only it can resolve the attribute and texture indices they hold.
+    [[nodiscard]] instance_id acquire(cc::hash128 key, cc::hash128 permutation, cc::span<byte const> bytes);
+
+    /// The id already resident for `key`, so a caller can skip building bytes it would only throw away.
+    /// `acquire` checks this itself, so skipping it is an optimization rather than a requirement.
+    [[nodiscard]] cc::optional<instance_id> find(cc::hash128 key) { return find_by_hash(key); }
+
+private:
+    instance_manager(sg::context& ctx, sg::bindless_array table) : _ctx(ctx), _table(cc::move(table)) {}
+
+    sg::context& _ctx;
+    sg::bindless_array _table;
 };
 
 /// How much of a resource has actually reached the GPU.

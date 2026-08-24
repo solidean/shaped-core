@@ -15,9 +15,21 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+/// `table` at `count`, plus the two tables the manager requires whatever else is configured.
+/// textures_2d is what the texture manager pins into and buffers is what attributes and parameter blocks pin into, so a config
+/// omitting either has no manager to build — see gpu_resource_manager::create.
 [[nodiscard]] sv::bindless_config only(sv::bindless_table table, u32 count)
 {
-    return {.tables = cc::vector<sv::bindless_table_budget>{{.table = table, .count = count}}};
+    auto tables = cc::vector<sv::bindless_table_budget>{{.table = sv::bindless_table::textures_2d, .count = 2},
+                                                        {.table = sv::bindless_table::buffers, .count = 2}};
+    for (auto& t : tables)
+        if (t.table == table)
+        {
+            t.count = count;
+            return {.tables = cc::move(tables)};
+        }
+    tables.push_back({.table = table, .count = count});
+    return {.tables = cc::move(tables)};
 }
 
 [[nodiscard]] sg::texture_2d make_texture(sg::context& ctx)
@@ -427,6 +439,144 @@ TEST("sv - a texture policy that wants no mips queues nothing")
 
     // It stays at its base level, which is a resolvable state rather than a failure.
     CHECK(m.textures.get_ptr(id)->state == sv::residency::base_resident);
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+// --- the material chain's GPU half: attribute upload and the per-instance parameter block ---------------------
+
+namespace
+{
+/// Both tables the material path pins into, at a size a test can exhaust nothing of.
+[[nodiscard]] sv::bindless_config material_tables()
+{
+    return {.tables = cc::vector<sv::bindless_table_budget>{{.table = sv::bindless_table::textures_2d, .count = 16},
+                                                            {.table = sv::bindless_table::buffers, .count = 16}}};
+}
+
+[[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
+{
+    return sv::mesh_attribute::create(cc::move(name), f, cc::vector<f32>{a, b, c});
+}
+
+/// The u32 at `offset` of a parameter block, which is how every non-constant slot is read back.
+[[nodiscard]] u32 u32_at(cc::span<byte const> bytes, i32 offset)
+{
+    REQUIRE(offset + isize(sizeof(u32)) <= bytes.size());
+    auto const view
+        = bytes.subspan(cc::offset_size{.offset = offset, .size = isize(sizeof(u32))}).try_reinterpret_as<u32 const>();
+    REQUIRE(view.has_value());
+    return view.value()[0];
+}
+} // namespace
+
+TEST("sv - an attribute is uploaded once and pinned")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto const normals = scalar_attribute("roughness", sv::attribute_frequency::per_vertex, 0.1f, 0.2f, 0.3f);
+    auto const id = m.attributes.acquire(normals);
+    CHECK(m.attributes.count() == 1);
+
+    // Content-keyed on the attribute's own hash, so an unchanged mesh re-acquired every frame costs a lookup.
+    CHECK(m.attributes.acquire(normals) == id);
+    CHECK(m.attributes.acquire(scalar_attribute("other_name", sv::attribute_frequency::per_vertex, 0.1f, 0.2f, 0.3f))
+          == id);
+    CHECK(m.attributes.count() == 1);
+
+    auto const& record = m.attributes.get(id);
+    CHECK(record.element_count == 3);
+    CHECK(record.format == sv::attribute_format_of<f32>);
+    CHECK(record.frequency == sv::attribute_frequency::per_vertex);
+
+    // The element is pinned rather than acquired, and that is the whole point: its index has to stay true across the epochs a
+    // parameter block holding it is cached over.
+    REQUIRE(record.element != nullptr);
+    auto const index = record.index();
+
+    ctx.advance_epoch_and_wait_for_idle();
+    m.advance_to(ctx.current_epoch());
+    CHECK(m.attributes.get(id).index() == index);
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv - a parameter block is filled at the offsets the generated shader reads")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();
+
+    // roughness constant on the material, metallic from a per-vertex attribute, base_color from a texture.
+    auto overrides = cc::vector<sv::material_attribute_binding>();
+    overrides.push_back(sv::material_attribute_binding::of("roughness", 0.25f));
+    auto const gold = lib.acquire(sv::material::create("gold", pbr, overrides));
+
+    auto const pixels = cc::vector<byte>::create_filled(4 * 4 * 4, byte(0xFF));
+    auto const texture = m.acquire_texture(sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4));
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    mesh.attributes.push_back(scalar_attribute("metallic", sv::attribute_frequency::per_vertex, 0.4f, 0.5f, 0.6f));
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+    mesh.textures.push_back({.name = "base_color", .source = {.texture = texture, .uv_attribute = "uv"}});
+
+    auto const resolved = sv::resolve_material(lib, gold, mesh);
+    auto const generated = sv::generate_material_shader(resolved);
+    auto const bytes = m.build_instance_parameters(resolved, generated.layout);
+    CHECK(bytes.size() == generated.layout.size_bytes);
+    auto const block = cc::span<byte const>(bytes);
+
+    auto const slot_of = [&](cc::string_view name) -> sv::material_slot const&
+    {
+        for (auto const& s : generated.layout.slots)
+            if (s.name == name)
+                return s;
+        FAIL("no such slot");
+        return generated.layout.slots[0];
+    };
+
+    // The constant lands inline, byte for byte.
+    auto const rough = cc::span<byte const>(bytes)
+                           .subspan(cc::offset_size{.offset = slot_of("roughness").offset, .size = isize(sizeof(f32))})
+                           .try_reinterpret_as<f32 const>();
+    REQUIRE(rough.has_value());
+    CHECK(rough.value()[0] == 0.25f);
+
+    // The mesh-sourced attribute enters as a descriptor: its buffer's bindless index, offset 0, its element stride.
+    auto const& metallic = slot_of("metallic");
+    CHECK(metallic.kind == sv::material_slot_kind::attribute_descriptor);
+    CHECK(u32_at(block, metallic.offset) == m.attributes.get(m.attributes.acquire(mesh.attributes[0])).index());
+    CHECK(u32_at(block, metallic.offset + 4) == 0u);
+    CHECK(u32_at(block, metallic.offset + 8) == u32(sizeof(f32)));
+
+    // The sampled attribute enters as the texture's PINNED index, plus a descriptor for the uv set it samples through.
+    CHECK(u32_at(block, slot_of("base_color").offset) == m.textures.get(texture).index());
+    CHECK(u32_at(block, slot_of("base_color.uv").offset + 8) == u32(sizeof(tg::vec2f)));
+
+    // The block is content-cached on parameter_key, so an unchanged mesh re-acquired every frame is a lookup.
+    auto const instance = m.acquire_instance(resolved, generated.layout);
+    CHECK(m.acquire_instance(resolved, generated.layout) == instance);
+    CHECK(m.instances.count() == 1);
+    CHECK(m.instances.get(instance).permutation == resolved.permutation_key);
 
     ctx.advance_epoch_and_wait_for_idle();
 }
