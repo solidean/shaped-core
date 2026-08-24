@@ -1,4 +1,5 @@
 #include <babel-serializer/data/json.hh>
+#include <clean-core/common/assert.hh>  // CC_ASSERT_ENABLED
 #include <clean-core/common/utility.hh> // cc::min
 #include <clean-core/container/span.hh>
 #include <clean-core/streams/span_stream.hh>
@@ -519,6 +520,51 @@ TEST("json - write round-trips through the reader")
     CHECK(root["list"][2]["three"].as_double() == 3.5);
     CHECK(root["list"][3].size() == 0);
 }
+
+#if !CC_ASSERT_ENABLED
+// Structural misuse asserts where assertions are on, so this behaviour is only reachable — and only matters — in a
+// build without them: there, the alternative to a sticky error is a document that is silently not JSON.
+TEST("json - structural misuse fails the write rather than emitting malformed JSON")
+{
+    SECTION("writing through a scope whose child is still open")
+    {
+        auto w = babel::json::string_writer();
+        {
+            auto o = w.object();
+            auto child = o.write_object("child");
+            o.write("stale", 1);
+        }
+        CHECK(w.finish().has_error());
+    }
+
+    SECTION("a key into an array")
+    {
+        auto w = babel::json::string_writer();
+        {
+            auto a = w.array();
+            auto o = a.write_object();
+            (void)o; // `a` is the array; the misuse is writing a key through the scope below
+        }
+        CHECK(w.finish().has_value()); // ...that one is well-formed; the next is not
+
+        auto bad = babel::json::string_writer();
+        {
+            auto a = bad.array();
+            auto inner = a.write_array();
+            a.write(1); // through the parent array while the inner one is open
+        }
+        CHECK(bad.finish().has_error());
+    }
+
+    SECTION("a second root value without newline_delimited")
+    {
+        auto w = babel::json::string_writer();
+        w.write(1);
+        w.write(2);
+        CHECK(w.finish().has_error());
+    }
+}
+#endif // !CC_ASSERT_ENABLED
 
 TEST("json - write errors are sticky")
 {

@@ -22,6 +22,11 @@ Add entries as we discover them, and remove them as they land.
   A `shared_async<void>` dependency should contribute an ordering edge and NO argument to the `make_async_*` sugar.
   And it becomes indistinguishable from one deliberately carrying a `unit`.
 
+- **`cc::is_finite` (and friends) for floats.**
+  There is no float classification in cc at all, so a caller that must not emit a NaN hand-rolls one.
+  `babel::json`'s writer is the first, with an exponent-bit check in json_writer.cc — exact, and needing no `<cmath>`, which is not blessed there.
+  A `cc::is_finite` / `is_nan` / `is_inf` trio next to the other scalar utilities would take all three call sites this will grow.
+
 ## container
 
 - **`bitset` printing and allocation interop.**

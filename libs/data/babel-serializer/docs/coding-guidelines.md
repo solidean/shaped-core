@@ -221,7 +221,11 @@ Whichever shape a format takes, three rules bind it:
 - **A writer never reuses the reader's native structure as an input contract** beyond the fields it needs; metadata the backend cannot emit is silently ignored and documented.
 - **A streaming writer's errors are sticky, with one place to check them.**
   Checking a `cc::result` per value would cost more than the write, so the first failure is recorded, every later write becomes a no-op, and `finish()` reports it.
-  API misuse is a `CC_ASSERT` instead, so the only thing reaching that result is the sink failing.
+  **Structural misuse is sticky too, AND asserts**: an assert alone stops a debug run at the site, which is worth having, but it leaves a release build emitting a document that is silently malformed.
+  The check is a compare the caller already has the operands for, so the cost is a predictable branch and the failure path stays out of line.
+  A misused call then does nothing rather than corrupting what follows, and the scope handles it hands back stay valid — a null handle would turn a recoverable mistake into a crash.
+- **A writer that is never finished logs its error rather than losing it.**
+  `CC_LOG_ERROR` from the destructor, not an assert: skipping `finish()` on an early return is ordinary, and tearing the program down for it is the wrong tool.
 
 ---
 

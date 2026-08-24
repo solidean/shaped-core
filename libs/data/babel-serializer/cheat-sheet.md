@@ -89,7 +89,8 @@ rep.is_clean();                             // non_finite + large_integers + und
 `escape_non_ascii`, `escape_html` (`<` as a `\u003c`, for a `<script>` payload), `newline_delimited` (json-nd: several roots, one per line).
 
 - **Errors are sticky**: the first failed write is recorded, later writes are no-ops, `finish()` reports it.
-  API misuse (a scope written to while its child is open, a scope closed out of order) is a `CC_ASSERT` instead.
+  Structural misuse (a scope written to while its child is open, a key into an array, a scope closed out of order) lands there too, and asserts as well where assertions are on.
+  A writer that is never finished logs its error via `CC_LOG_ERROR` rather than losing it.
 - **A valid document can still be lossy**: a NaN became null, an id past 2^53 will round in a double-based reader.
   That is what `report()` counts — it is never an error, and the counts are flat because a streaming writer knows the value, not the path to it.
 - **Duplicate keys are not detected, and UTF-8 is never validated** — both on purpose, both documented in the header.

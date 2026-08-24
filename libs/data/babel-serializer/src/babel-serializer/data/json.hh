@@ -232,9 +232,15 @@ inline ref document::root() const
 // An object scope takes a key with every value and an array scope takes none, so the two cannot be confused.
 //
 // ERRORS ARE STICKY, and there is exactly one place to check them: finish().
-// A failing stream write is recorded, every later write becomes a cheap no-op, and finish() reports it.
-// MISUSE IS AN ASSERT instead — writing through a scope whose child is still open, or closing out of order.
-// So the only thing that reaches finish()'s result is the sink failing.
+// A failing stream write is recorded, every later write becomes a no-op, and finish() reports it.
+//
+// STRUCTURAL MISUSE GOES THERE TOO — writing through a scope whose child is still open, a key into an array, a scope
+// closed out of order.
+// It also asserts where assertions are on, so a debug run stops at the site with a stack rather than at finish().
+// Both, because an assert alone would leave a release build silently emitting a document that is not valid JSON, and
+// that is a worse outcome than a slower write.
+//
+// A writer that is never finished LOGS its error rather than losing it (CC_LOG_ERROR from the destructor).
 //
 // WHAT THE WRITER CHANGED ON THE WAY OUT is counted in report(), which finish() does not replace.
 // A JSON document can be valid and still not be what the caller handed over — a NaN became null, an id past 2^53
@@ -391,9 +397,22 @@ private:
     friend struct array_writer;
 
     /// Emits the separator, newline and indentation before a value, plus the key when inside an object.
-    void impl_begin_member(cc::string_view key);
-    void impl_begin_element();
+    /// `depth` is the calling scope's, which is what catches a write through a scope whose child is still open.
+    /// False means the write must not proceed.
+    [[nodiscard]] bool impl_begin_member(cc::string_view key, i32 depth);
+    [[nodiscard]] bool impl_begin_element(i32 depth);
     void impl_begin_root();
+
+    /// Structural misuse: records it and reports whether the caller may proceed.
+    /// The check itself is a compare the caller already has the operands for; the failure path is out of line.
+    bool impl_expect(bool ok, char const* what)
+    {
+        if (ok) [[likely]]
+            return true;
+        this->impl_misuse(what);
+        return false;
+    }
+    void impl_misuse(char const* what);
 
     void impl_open(bool is_object, layout l);
     void impl_close(i32 depth);
@@ -465,35 +484,35 @@ struct babel::json::object_writer
         requires writable_scalar<T>
     void write(cc::string_view key, T const& value)
     {
-        _w->impl_begin_member(key);
-        _w->impl_value(value);
+        if (_w->impl_begin_member(key, _depth))
+            _w->impl_value(value);
     }
 
     /// Renders this one value with a notation of its own, leaving the writer's default alone.
     void write(cc::string_view key, double value, cc::float_notation notation, i32 precision = -1)
     {
-        _w->impl_begin_member(key);
-        _w->impl_double(value, notation, precision);
+        if (_w->impl_begin_member(key, _depth))
+            _w->impl_double(value, notation, precision);
     }
     void write(cc::string_view key, float value, cc::float_notation notation, i32 precision = -1)
     {
-        _w->impl_begin_member(key);
-        _w->impl_float(value, notation, precision);
+        if (_w->impl_begin_member(key, _depth))
+            _w->impl_float(value, notation, precision);
     }
 
     /// Like write, but escapes every non-ASCII byte as \uXXXX.
     void write_ascii(cc::string_view key, cc::string_view value)
     {
-        _w->impl_begin_member(key);
-        _w->impl_string(value, true);
+        if (_w->impl_begin_member(key, _depth))
+            _w->impl_string(value, true);
     }
 
     /// Emits `fragment` verbatim as the value — already-serialized JSON, or a number rendered elsewhere.
     /// Trusted: it is never parsed, escaped or checked, not even in debug.
     void write_raw(cc::string_view key, cc::string_view fragment)
     {
-        _w->impl_begin_member(key);
-        _w->impl_raw(fragment);
+        if (_w->impl_begin_member(key, _depth))
+            _w->impl_raw(fragment);
     }
 
     [[nodiscard]] object_writer write_object(cc::string_view key, layout l = layout::inherit);
@@ -521,34 +540,34 @@ struct babel::json::array_writer
         requires writable_scalar<T>
     void write(T const& value)
     {
-        _w->impl_begin_element();
-        _w->impl_value(value);
+        if (_w->impl_begin_element(_depth))
+            _w->impl_value(value);
     }
 
     /// Renders this one value with a notation of its own, leaving the writer's default alone.
     void write(double value, cc::float_notation notation, i32 precision = -1)
     {
-        _w->impl_begin_element();
-        _w->impl_double(value, notation, precision);
+        if (_w->impl_begin_element(_depth))
+            _w->impl_double(value, notation, precision);
     }
     void write(float value, cc::float_notation notation, i32 precision = -1)
     {
-        _w->impl_begin_element();
-        _w->impl_float(value, notation, precision);
+        if (_w->impl_begin_element(_depth))
+            _w->impl_float(value, notation, precision);
     }
 
     /// Like write, but escapes every non-ASCII byte as \uXXXX.
     void write_ascii(cc::string_view value)
     {
-        _w->impl_begin_element();
-        _w->impl_string(value, true);
+        if (_w->impl_begin_element(_depth))
+            _w->impl_string(value, true);
     }
 
     /// Emits `fragment` verbatim as the element; see object_writer::write_raw.
     void write_raw(cc::string_view fragment)
     {
-        _w->impl_begin_element();
-        _w->impl_raw(fragment);
+        if (_w->impl_begin_element(_depth))
+            _w->impl_raw(fragment);
     }
 
     [[nodiscard]] object_writer write_object(layout l = layout::inherit);

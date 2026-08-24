@@ -1,6 +1,7 @@
 #include <babel-serializer/data/json.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::unit, cc::min
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
 
@@ -77,6 +78,15 @@ void json::writer::impl_emit(cc::string_view text)
         _error = cc::move(r).error();
 }
 
+void json::writer::impl_misuse(char const* what)
+{
+    // Assert first: where assertions are on, a programming error should stop at the site with a stack behind it,
+    // which is strictly more than finish() can tell anyone later.
+    CC_ASSERT(false, what);
+
+    this->impl_fail(cc::format("json writer: {}", what));
+}
+
 void json::writer::impl_fail(cc::string message)
 {
     if (_error.is_empty())
@@ -103,19 +113,23 @@ void json::writer::impl_indent()
 
 void json::writer::impl_begin_root()
 {
-    CC_ASSERT(_stack.empty(), "a root value is only written outside every scope");
-    CC_ASSERT(!_finished, "the writer is already finished");
-    CC_ASSERT(_root_count == 0 || _opts.newline_delimited, "a JSON document holds one root value; set "
-                                                           "write_options::newline_delimited for several");
+    (void)this->impl_expect(_stack.empty(), "a root value is only written outside every scope");
+    (void)this->impl_expect(!_finished, "the writer is already finished");
+    (void)this->impl_expect(_root_count == 0 || _opts.newline_delimited,
+                            "a JSON document holds one root value; set write_options::newline_delimited for several");
 
     if (_root_count > 0)
         this->impl_emit("\n");
     ++_root_count;
 }
 
-void json::writer::impl_begin_member(cc::string_view key)
+bool json::writer::impl_begin_member(cc::string_view key, i32 depth)
 {
-    CC_ASSERT(!_stack.empty() && _stack.back().is_object, "a keyed write needs an open object scope");
+    // A live scope always has depth >= 1, so an equal stack size also means the stack is not empty.
+    if (!this->impl_expect(i32(_stack.size()) == depth, "wrote through a scope whose child is still open"))
+        return false;
+    if (!this->impl_expect(_stack.back().is_object, "wrote a key into an array scope"))
+        return false;
 
     auto& lvl = _stack.back();
     if (lvl.has_any)
@@ -125,11 +139,15 @@ void json::writer::impl_begin_member(cc::string_view key)
     this->impl_indent();
     this->impl_string(key, _opts.escape_non_ascii);
     this->impl_emit(_opts.indent > 0 && !_opts.newline_delimited && _compact_depth == 0 ? ": " : ":");
+    return true;
 }
 
-void json::writer::impl_begin_element()
+bool json::writer::impl_begin_element(i32 depth)
 {
-    CC_ASSERT(!_stack.empty() && !_stack.back().is_object, "an unkeyed write needs an open array scope");
+    if (!this->impl_expect(i32(_stack.size()) == depth, "wrote through a scope whose child is still open"))
+        return false;
+    if (!this->impl_expect(!_stack.back().is_object, "wrote an unkeyed value into an object scope"))
+        return false;
 
     auto& lvl = _stack.back();
     if (lvl.has_any)
@@ -137,6 +155,7 @@ void json::writer::impl_begin_element()
     lvl.has_any = true;
 
     this->impl_indent();
+    return true;
 }
 
 void json::writer::impl_open(bool is_object, layout l)
@@ -152,7 +171,8 @@ void json::writer::impl_close(i32 depth)
 {
     if (i32(_stack.size()) < depth) // already closed by finish()
         return;
-    CC_ASSERT(i32(_stack.size()) == depth, "JSON scopes must be closed innermost-first");
+    if (!this->impl_expect(i32(_stack.size()) == depth, "closed a JSON scope that still has an open child"))
+        return;
 
     auto const lvl = _stack.back();
     auto const ends_compact = _compact_depth == depth;
@@ -395,36 +415,36 @@ json::array_writer json::writer::array(layout l)
     return array_writer(this, i32(_stack.size()));
 }
 
+// A misused opener still opens: the error is already recorded, so everything inside is a no-op, and the handle the
+// caller gets back behaves — closing in order, writing nothing — instead of being a null it would crash on.
+// The returned depth is the stack's own, so the close still matches whatever the open actually did.
+
 json::object_writer json::object_writer::write_object(cc::string_view key, layout l)
 {
-    CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
-    _w->impl_begin_member(key);
+    (void)_w->impl_begin_member(key, _depth);
     _w->impl_open(true, l);
-    return object_writer(_w, _depth + 1);
+    return object_writer(_w, _w->impl_depth());
 }
 
 json::array_writer json::object_writer::write_array(cc::string_view key, layout l)
 {
-    CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
-    _w->impl_begin_member(key);
+    (void)_w->impl_begin_member(key, _depth);
     _w->impl_open(false, l);
-    return array_writer(_w, _depth + 1);
+    return array_writer(_w, _w->impl_depth());
 }
 
 json::object_writer json::array_writer::write_object(layout l)
 {
-    CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
-    _w->impl_begin_element();
+    (void)_w->impl_begin_element(_depth);
     _w->impl_open(true, l);
-    return object_writer(_w, _depth + 1);
+    return object_writer(_w, _w->impl_depth());
 }
 
 json::array_writer json::array_writer::write_array(layout l)
 {
-    CC_ASSERT(_w->impl_depth() == _depth, "a scope with an open child cannot be written to");
-    _w->impl_begin_element();
+    (void)_w->impl_begin_element(_depth);
     _w->impl_open(false, l);
-    return array_writer(_w, _depth + 1);
+    return array_writer(_w, _w->impl_depth());
 }
 
 json::object_writer::~object_writer()
@@ -465,8 +485,15 @@ cc::result<cc::unit> json::writer::finish()
 
 json::writer::~writer()
 {
-    if (!_finished)
-        (void)this->finish(); // best-effort: an early return must not assert, and there is nobody to report to
+    if (_finished)
+        return;
+
+    // Best-effort, because an early return must not be punished for skipping finish().
+    // But an error nobody asked for is still an error, and the log is where it goes rather than nowhere.
+    auto const r = this->finish();
+    if (!r.has_value())
+        CC_LOG_ERROR("json writer destroyed without finish(); its error would otherwise be lost: {}",
+                     r.error().to_string());
 }
 
 cc::result<cc::string> json::string_writer::finish()
