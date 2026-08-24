@@ -23,6 +23,13 @@
 #include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 
+// how a mesh is shaded
+#include <shaped-viewer/material/material.hh>
+#include <shaped-viewer/material/material_attribute.hh>
+#include <shaped-viewer/material/material_library.hh>
+#include <shaped-viewer/material/material_type.hh>
+#include <shaped-viewer/material/resolve.hh>
+
 // what a view is, and how it is framed
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>

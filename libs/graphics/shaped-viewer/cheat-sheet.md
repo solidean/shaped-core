@@ -135,6 +135,57 @@ Three properties worth knowing:
 - **A cycle degrades.** It reports a `plan_diagnostic` and drops that one leaf; every sibling still renders.
   A view tree is frequently data, so it must not assert.
 
+## Materials — a type, an instance, and the frequency chain
+
+`material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
+
+```cpp
+sv::material_type                // { string name; vector<material_attribute_decl> signature; string shader; hash128 hash; }
+sv::material_type::create(name, signature, shader)   // -> hashes all three; asserts a name declared twice, and a default that is not its format's size
+t.find("roughness")              // -> material_attribute_decl const*, null if the type does not read it
+sv::material_attribute_decl      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
+sv::material_attribute_decl::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
+sv::material                     // { string name; material_type_id type; vector<material_attribute_binding> overrides; hash128 hash; }
+sv::material::create(name, type, overrides)          // -> hashes type + overrides; validates NOTHING (it cannot see the type)
+sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
+sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
+
+sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `pbr` and `unlit`
+lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
+lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
+lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
+lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
+sv::builtin_material::pbr / unlit                    // the names the builtins register under
+sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
+sv::acquire_material_library()   // -> result<material_library*>, created once per process and shared
+
+sv::resolve_material(type, material, mesh)           // -> resolved_material; the pure form
+sv::resolve_material(lib, material_id, mesh)         // -> the same, resolving the id through the library
+sv::resolved_material            // { material_type const*; material const*; vector<resolved_attribute>; hash128 permutation_key, parameter_key; }
+sv::resolved_attribute           // { string_view name; attribute_format format; material_frequency frequency;
+                                 //   span<byte const> constant; mesh_attribute const* attribute; texture_sample_source const* sample; }
+sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture
+```
+
+**The enum order IS the precedence** — a value varying more finely beats one varying more coarsely, and `resolve_material` compares nothing else.
+`is_final`, on a declaration or a binding, stops the walk there so no finer frequency overrides it — which is how a material refuses a mesh's roughness texture.
+A candidate that cannot be used is skipped rather than fatal: a mesh attribute at the wrong format, or a texture whose `uv_attribute` the mesh does not carry, simply loses its turn.
+So every declaration resolves to something and a mesh carrying none of what a type asks for still draws.
+
+**The two keys are the point.**
+`permutation_key` covers only the SHAPE of the resolution (which rank won, the geometric frequency, the uv attribute and sampler) plus the type's hash, so gold and copper share one generated shader.
+`parameter_key` covers the resolved values (constant bytes, texture ids, each mesh attribute's own hash), and keys the per-instance slot they are written into.
+Only a texture sample forces a second permutation, which is what makes "the shader stays the same" mechanical rather than aspirational.
+
+Gotchas:
+
+- **Every payload on a `resolved_attribute` BORROWS** — from the library, the material or the mesh.
+  A resolved material must not outlive any of them.
+- **Nothing is ever evicted from a library.** A `material_id` is written into GPU memory outliving its frame, so the ids have to stay meaningful; this is why it is not an `impl::lru_pool`.
+- **`material::create` validates nothing** against the type, because it cannot see one.
+  `material_library::acquire` is where a binding naming an undeclared attribute asserts.
+- **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+
 ## Mesh authoring — geometry + what a material reads
 
 One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh` and `mesh_texture.hh`.
@@ -162,8 +213,9 @@ sv::attribute_format_of<T>       // the format of an element type — scalars an
 sv::attribute_frequency          // per_instance (exactly 1 element, create asserts) | per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle
                                  //   per_edge is RESERVED and create asserts on it
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
-sv::mesh_texture                 // { string name; texture_id texture; } — a texture offered under a slot name the material binds
-sv::material_id                  // thin handle naming ONE material definition (owned elsewhere); nothing mints one yet
+sv::texture_sample_source        // { texture_id texture; string uv_attribute; sg::sampler sampler; } — everything a sample needs but what it is FOR
+sv::mesh_texture                 // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
+sv::material_id                  // thin handle naming ONE material definition, minted by material_library::acquire
 ```
 
 The material is what gives the three lists their meaning: it decides which attribute names it samples, which texture slots it binds, and how the flags change what it emits.
@@ -172,6 +224,7 @@ So a mesh may carry data no material uses and miss data another would want — a
 The mesh offers no by-name lookup, deliberately: a material resolves the names it wants once, into whatever binding table it draws from, rather than scanning strings per draw.
 Copying a mesh shares the pinned payloads (a refcount bump), so passing one around is cheap.
 Nothing renders an `sv::mesh` yet: the renderer still consumes `sv::scene_item` (ids into the managers), and the bridge is `triangle_data::from(triangle_geometry)`.
+`mesh.material` is likewise authored and not yet drawn — `sv::resolve_material` says what it means, but no shader is generated from the answer.
 The seeds behind every content key live in `impl/content_hash.hh`, so a geometry and the payload it is uploaded as agree on one key instead of caching the same bytes twice.
 
 ## Camera control — orbit and first-person

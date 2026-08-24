@@ -72,6 +72,30 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   A clean `snapshot()` is the cached handle, so it is nearly free.
   The lock refuses instead.
 
+## What the material system still needs
+
+The vocabulary and the resolution chain are in (`material/`), CPU-side and tested headless.
+What is not yet built, in dependency order:
+
+- **A shader generated from a `resolved_material`.**
+  In order: the bindless table declarations, the per-permutation parameter struct, one initializer per signature attribute, then the type's `shader` fragment verbatim.
+  The declarations come from `resources/bindless_tables.hh`, so `name_of` / `space_of` stay the one source of truth rather than the generator hand-writing `gBindlessTextures2D`.
+  `permutation_key` is what it is cached on, and it already covers exactly the inputs that change the generated text.
+- **slib has no "compile this source string" API.**
+  `shader_library::compile_shader` is public but resolves through `package_of(virtual_path)`, which `CC_UNREACHABLE`s for a path under no registered package — so a generated source has no clean door.
+  The extension belongs in slib: `compile_source(source, stage, entry, format)` returning a content-keyed `sg::async_compiled_shader`, over the library's own compiler and mount table.
+  Reaching `ssc::dxc::shader_cache` directly from sv instead would drag sv into the Windows-and-DXC gating slib already abstracts.
+- **slib has no named-HLSL-fragment asset kind.**
+  A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
+  Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
+- **General attribute upload**, so the `mesh_attribute` rank of the chain reaches the GPU at all.
+  Any `sv::mesh_attribute` into a byte-address buffer keyed on its own hash, with a pinned bindless element.
+- **The per-instance descriptor table**, which is the same table the `mesh_is_indexed` entry below already asks for.
+  Slots keyed on `parameter_key`; every bindless index in one comes from `pin_*` rather than `acquire_*`, which the two types already enforce.
+- **Several material permutations means several DXR hit groups**, which needs sg's shader table to carry more than one.
+  Unconfirmed, and it is what decides whether the GPU slice can be one change.
+
+
 ## Everything else
 
 - Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.
@@ -88,13 +112,16 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   That table also decides whether opposite half-edges share one entry, which is the real design question.
 - **An `sv::mesh` is authored but not rendered as one.** `scene_ref::add_mesh` takes one and translates it — geometry through `triangle_data::from`, per-face PBR through the
   `sv::pbr_attribute` lists — but what reaches the trace is still a `scene_item` naming two manager ids.
-  What is missing is the material *definition* the `material_id` names, plus general attribute upload; only the four PBR fields cross to the GPU today, and only because the
-  closest-hit already reads a `pbr_material_gpu` per triangle.
+  The material *definition* the `material_id` names now exists — `sv::material` in a `sv::material_library` — and `sv::resolve_material` says what every attribute of it resolves to.
+  What is still missing is everything below that: general attribute upload, the per-instance descriptor table, and a shader generated from a `resolved_material`.
+  Only the four PBR fields cross to the GPU today, and only because the closest-hit already reads a `pbr_material_gpu` per triangle.
 - **`mesh_attribute` cannot hold a struct.** `attribute_format` is a scalar plus a dimensionality, so a `pbr_material` array must be scalarized into four `per_triangle`
   attributes (`sv::pbr_material_attributes`).
   A struct protocol — a field list of scalar/vector members, so one attribute carries one AoS payload — deletes that function and the four blessed names with it.
-- **`sv::pbr_attribute`'s names are a stand-in.** A material definition should declare which attributes it samples; there is no such type, so the repack in
-  `material_manager::acquire` looks up four fixed names instead.
+- **`sv::pbr_attribute`'s names are a stand-in, and now have a replacement to retire into.**
+  `sv::material_type` is what declares which attributes a material samples, and the builtin `pbr` type declares all four plus normal and occlusion.
+  What still looks up four fixed names is the repack in `material_manager::acquire`, because nothing generates a shader from a resolved material yet.
+  Both go away together, in the slice that wires `mesh.material` through to the trace.
 - Fold `lru_pool` onto `impl::keyed_cache` — it is `keyed_cache` plus minted ids plus a content-hash index — so sv carries one eviction implementation rather than two.
 - Give `view_ref` a conditional-override vocabulary (an `ImGuiCond`-style `when { always, first_use }`), so `camera` /
   `resolution` / placement stop needing a separate `initial_*` setter each.

@@ -58,8 +58,20 @@ struct attribute_format;
 enum class attribute_frequency : u8;
 enum class mesh_flag; // per-mesh rendering opt-ins (mesh_flags.hh)
 struct mesh_attribute;
+struct texture_sample_source;
 struct mesh_texture;
 struct mesh;
+
+// the material system (see material/)
+enum class material_frequency : u8;   // where an attribute's value came from; the ORDER is the precedence
+enum class material_source_kind : u8; // a constant, or a uv-sampled texture
+struct material_attribute_decl;       // one attribute a material type requires
+struct material_attribute_binding;    // one attribute a material overrides
+struct material_type;                 // a family of materials: signature + shader fragment
+struct material;                      // one instance of a type, with some attributes bound
+struct resolved_attribute;
+struct resolved_material; // a type + material + mesh resolved down the frequency chain
+class material_library;
 
 // the per-frame description
 enum class layer_kind : u8;
@@ -89,6 +101,7 @@ struct texture_data;
 // the resource ids are defined at the bottom of this header, since they carry an `invalid` enumerator
 enum class mesh_id : u32;
 enum class material_set_id : u32;
+enum class material_type_id : u32;
 enum class material_id : u32;
 enum class tlas_id : u32;
 enum class texture_id : u32;
@@ -216,11 +229,17 @@ enum class sv::material_set_id : sv::u32
     invalid = u32(-1)
 };
 
+/// Names one material TYPE — a family of materials, PBR or unlit — minted by `material_library::register_type`.
+enum class sv::material_type_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
 /// Names ONE material definition — how a mesh is drawn — rather than a per-triangle array of them.
 ///
 /// This is the thin handle an `sv::mesh` carries: the definition lives outside the mesh and is shared across many.
 /// It is what gives a mesh's attributes, parameters, textures and flags their meaning.
-/// No manager mints these yet — the material library is still to come — so a mesh only ever carries `invalid` today.
+/// Minted by `material_library::acquire`, and never evicted — a slot in GPU memory outlives the frame that wrote it.
 enum class sv::material_id : sv::u32
 {
     invalid = u32(-1)

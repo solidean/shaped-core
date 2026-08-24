@@ -515,7 +515,7 @@ TEST("sv - a mesh carries the data its material draws it with")
         sv::mesh_attribute::create("normal", sv::attribute_frequency::per_vertex,
                                    cc::vector<tg::vec3f>{tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1)}));
     m.attributes.push_back(sv::mesh_attribute::create_value("fade", 0.5f));
-    m.textures.push_back({.name = "albedo", .texture = sv::texture_id(3)});
+    m.textures.push_back({.name = "albedo", .source = {.texture = sv::texture_id(3), .uv_attribute = "uv"}});
 
     // The lists are the material's input, keyed by name; the mesh only holds them.
     REQUIRE(m.attributes.size() == 2);
@@ -524,12 +524,12 @@ TEST("sv - a mesh carries the data its material draws it with")
     CHECK(m.attributes[1].name == "fade"); // a per-instance value rides the same list
     CHECK(m.attributes[1].value_as<f32>() == 0.5f);
     REQUIRE(m.textures.size() == 1);
-    CHECK(m.textures[0].texture == sv::texture_id(3));
+    CHECK(m.textures[0].source.texture == sv::texture_id(3));
 
     // An unauthored mesh draws, casts and receives — the empty flag set would draw nothing.
     CHECK(m.is_visible());
     CHECK(m.flags.has(sv::mesh_flag::casts_shadow));
-    CHECK(m.material == sv::material_id::invalid); // no material library mints ids yet
+    CHECK(m.material == sv::material_id::invalid); // an unauthored mesh names no material
 
     // Copying shares the pinned payload rather than duplicating the buffers.
     auto const copy = m;

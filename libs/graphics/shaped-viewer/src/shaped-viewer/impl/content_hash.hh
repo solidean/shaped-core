@@ -18,6 +18,15 @@ inline constexpr u64 index_hash_seed = 0x623435;
 inline constexpr u64 material_hash_seed = 0x523453;
 inline constexpr u64 attribute_hash_seed = 0x7a11b2;
 inline constexpr u64 texture_hash_seed = 0x9c4d17;
+inline constexpr u64 material_type_hash_seed = 0x31f0a6;
+inline constexpr u64 material_definition_hash_seed = 0x8e2b53;
+
+// The two keys a resolved material carries, and the reason there are two.
+// A permutation key covers only the SHAPE of the resolution — which attribute won at which frequency, and what a sampled one
+// samples with — so two materials differing only in their constants share one generated shader.
+// A parameter key covers the resolved values, and keys the per-instance slot those constants are written into.
+inline constexpr u64 material_permutation_hash_seed = 0xb70d94;
+inline constexpr u64 material_parameter_hash_seed = 0x2ac6f1;
 
 /// Joins two payload digests into one key, in order.
 /// Separate allocations cannot be hashed as one range, so a multi-buffer resource hashes each buffer and folds the digests here.

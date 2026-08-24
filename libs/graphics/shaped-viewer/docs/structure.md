@@ -55,7 +55,12 @@ temporal accumulation                    [in progress]  a traced layer reproject
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through sr::box_filter_mipmap_routine) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
                                                         Still to come: async streaming, placeholders while pending, and mapping visibility onto sg's stream priorities
-materials / lighting                     [planned]      one flat PBR material; a scene layer holds typed light lists + an SH background; textures and more light kinds next
+material system (material/)              [in progress]  material_type (signature + HLSL fragment) -> material (a type with attributes bound) -> material_library (content-addressed, never evicted, provider hook like the context's).
+                                                        resolve_material walks one attribute down the frequency chain — type default, material, per-instance, mesh attribute, material texture, mesh texture — finest wins, `final` blocks finer.
+                                                        It yields TWO keys: permutation_key over the resolution's shape (what a shader is generated from), parameter_key over its values (what a per-instance slot is filled from).
+                                                        So two materials differing only in constants share one shader; only a texture sample forces a second.
+                                                        CPU-side and complete; shader generation and the GPU path are next
+lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine
 multi-window                             [planned]      the plan and the layout routine are window-aware already; sv::viewer still owns exactly one window
