@@ -78,7 +78,8 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
     auto const* const buffers = _find_table(tables, bindless_table::buffers);
     CC_ASSERT(buffers != nullptr, "the buffers table must be declared — attributes and parameter blocks pin into it");
 
-    return gpu_resource_manager(mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
+    return gpu_resource_manager(mesh_manager::create(ctx, cfg.meshes, buffers->array),
+                                material_manager::create(ctx, cfg.materials),
                                 texture_manager::create(ctx, cfg.textures, textures_2d->array),
                                 attribute_manager::create(ctx, cfg.attributes, buffers->array),
                                 instance_manager::create(ctx, cfg.instances, buffers->array), cc::move(group),
@@ -179,6 +180,19 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(resolved_materi
     }
 
     return out;
+}
+
+instance_gpu gpu_resource_manager::describe_instance(mesh_id mesh, instance_id instance)
+{
+    auto const& m = meshes.get(mesh);
+    auto const& i = instances.get(instance);
+
+    // Every index here is a pinned one, since the table is rebuilt per frame over resources cached across frames.
+    return {.param_buffer = i.index(),
+            .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
+            .vertices = m.vertices_index(),
+            .indices = m.indices_index(),
+            .is_indexed = m.is_indexed ? 1u : 0u};
 }
 
 instance_id gpu_resource_manager::acquire_instance(resolved_material const& r, material_parameter_layout const& layout)

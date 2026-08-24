@@ -28,14 +28,17 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// A compute entry that calls the generated function, so the permutation is reachable from a real shader stage.
+/// A compute entry that reaches the generated function the way a closest-hit will: through an sv_instance read out of the
+/// instance table, so `sv_make_context` and the byte layout it walks are compiled too rather than only the material itself.
 constexpr cc::string_view test_entry = R"hlsl(
+StructuredBuffer<sv_instance> sv_test_instances : register(t0, space0);
 RWStructuredBuffer<float4> sv_test_out : register(u0);
 
 [numthreads(1, 1, 1)]
-void main()
+void main(uint3 tid : SV_DispatchThreadID)
 {
-    sv_shading_context ctx = (sv_shading_context)0;
+    sv_instance inst = sv_test_instances[tid.x];
+    sv_shading_context ctx = sv_make_context(inst, gBindlessBuffers[NonUniformResourceIndex(inst.indices)], 0, float2(0.25, 0.25));
     sv_surface s = sv_evaluate_material(ctx);
     sv_test_out[0] = float4(s.albedo, s.roughness) + float4(s.emissive, s.metallic) + float4(s.normal, s.occlusion);
 }

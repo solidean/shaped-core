@@ -145,6 +145,10 @@ record.index()                         // -> u32, the bindless index a descripto
 m.build_instance_parameters(resolved, layout)  // -> vector<byte>; uploads+pins any mesh attribute it needs on the way
 m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key
 m.instances.get(id)                    // -> instance_record {buffer<byte> parameters; element; hash128 permutation; size_bytes;}
+
+m.describe_instance(mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
+sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv_instance
+m.meshes.get(id).vertices_index()      // -> u32; the mesh's positions as a bindless index (indices_index() likewise)
 ```
 
 A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv_attribute_desc`
@@ -159,6 +163,8 @@ Gotchas:
 - **The layout must be the one `generate_material_shader` returned for that same resolved material**, or the block is filled at offsets the shader does not read.
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
+- **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
+- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `sv_instance` in `shaders/material_runtime.hlsli`.
 
 ## Materials — a type, an instance, and the frequency chain
 

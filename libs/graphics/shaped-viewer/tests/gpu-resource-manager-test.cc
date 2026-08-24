@@ -580,3 +580,56 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
 
     ctx.advance_epoch_and_wait_for_idle();
 }
+
+TEST("sv - an instance record names its own geometry and parameters")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();
+    auto const gold = lib.acquire(sv::material::create("gold", pbr, {}));
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto const mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+
+    auto const resolved = sv::resolve_material(lib, gold, mesh);
+    auto const generated = sv::generate_material_shader(resolved);
+
+    auto const mesh_id = m.meshes.acquire(sv::triangle_data::from(mesh.geometry));
+    auto const instance = m.acquire_instance(resolved, generated.layout);
+    auto const record = m.describe_instance(mesh_id, instance);
+
+    CHECK(record.param_buffer == m.instances.get(instance).index());
+    CHECK(record.param_offset == 0u);
+    CHECK(record.vertices == m.meshes.get(mesh_id).vertices_index());
+    CHECK(record.indices == m.meshes.get(mesh_id).indices_index());
+
+    // Geometry layout is a property of the mesh, which is what lets a view hold an indexed and a non-indexed one at once.
+    CHECK(record.is_indexed == 0u);
+
+    auto const indexed_geometry
+        = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 1, 2});
+    auto const indexed = m.meshes.acquire(sv::indexed_triangle_data::from(indexed_geometry));
+    CHECK(m.describe_instance(indexed, instance).is_indexed == 1u);
+
+    // Every index in the record is pinned, so a table built this frame still names the right resources the next one.
+    ctx.advance_epoch_and_wait_for_idle();
+    m.advance_to(ctx.current_epoch());
+    auto const again = m.describe_instance(mesh_id, instance);
+    CHECK(again.param_buffer == record.param_buffer);
+    CHECK(again.vertices == record.vertices);
+    CHECK(again.indices == record.indices);
+
+    // Two meshes are two distinct geometry slots — which is the thing "one mesh per view" made impossible.
+    CHECK(m.describe_instance(indexed, instance).vertices != record.vertices);
+
+    ctx.advance_epoch_and_wait_for_idle();
+}

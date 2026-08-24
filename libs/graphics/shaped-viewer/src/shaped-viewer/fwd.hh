@@ -24,6 +24,7 @@ struct material_record;
 struct texture_record;
 struct attribute_record;
 struct instance_record;
+struct instance_gpu;       // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
 enum class residency : u8; // how much of a resource has reached the GPU (resource_managers.hh)
 struct work_budget;        // how much follow-up GPU work one epoch may record
 struct texture_policy;     // what happens to a texture once it has landed

@@ -121,3 +121,41 @@ uint3 sv_corner_elements(sv_shading_context ctx)
     uint base = ctx.primitive * 3;
     return uint3(base + 0, base + 1, base + 2);
 }
+
+/// One scene item, as a closest-hit reads it by `InstanceID()` — mirrors sv::instance_gpu (resources/instance_data.hh).
+///
+/// Keep the two in lockstep: this is a byte layout, not a description of one.
+struct sv_instance
+{
+    uint param_buffer;
+    uint param_offset;
+    uint vertices;
+    uint indices;
+    uint is_indexed;
+    uint3 _padding;
+};
+
+/// The three vertex indices of triangle `primitive` on `inst`.
+///
+/// `[branch]` is load-bearing on the non-indexed path: a flattened select would read `index_buffer` out of range, and a
+/// non-indexed mesh binds a stand-in there that has no elements to read.
+uint3 sv_triangle_corners(sv_instance inst, ByteAddressBuffer index_buffer, uint primitive)
+{
+    uint base = primitive * 3;
+    [branch] if (inst.is_indexed != 0)
+        return uint3(index_buffer.Load(4 * (base + 0)), index_buffer.Load(4 * (base + 1)), index_buffer.Load(4 * (base + 2)));
+    return uint3(base + 0, base + 1, base + 2);
+}
+
+/// The shading context for a hit on `inst`, which is all a generated material needs to know about where it is.
+/// `bary` is the two barycentrics a hit attribute carries; the third is what is left of one.
+sv_shading_context sv_make_context(sv_instance inst, ByteAddressBuffer index_buffer, uint primitive, float2 bary)
+{
+    sv_shading_context ctx;
+    ctx.param_buffer = inst.param_buffer;
+    ctx.param_offset = inst.param_offset;
+    ctx.primitive = primitive;
+    ctx.corner = sv_triangle_corners(inst, index_buffer, primitive);
+    ctx.barycentrics = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+    return ctx;
+}

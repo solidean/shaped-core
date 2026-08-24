@@ -46,6 +46,14 @@ struct sv::mesh_record
 {
     sg::buffer<tg::pos3f> vertices;
 
+    /// The bindless elements the two buffers are reached through, so an `instance_gpu` can name this mesh's geometry.
+    ///
+    /// Pinned rather than acquired per epoch, for the reason a texture's is: an instance table built this frame is read by a
+    /// closest-hit against resources that are content-cached across frames.
+    /// Dropping the record releases both pins with it, so eviction and unbinding cannot come apart.
+    sg::bindless_element_handle vertices_element;
+    sg::bindless_element_handle indices_element;
+
     /// The mesh's own indices when `is_indexed`; otherwise the manager's stand-in buffer, which no shader
     /// reads but every binding group must still cover.
     sg::buffer<u32> indices;
@@ -53,6 +61,9 @@ struct sv::mesh_record
 
     isize triangle_count = 0;
     sg::blas_handle blas;
+
+    [[nodiscard]] u32 vertices_index() const { return vertices_element == nullptr ? 0 : vertices_element->index(); }
+    [[nodiscard]] u32 indices_index() const { return indices_element == nullptr ? 0 : indices_element->index(); }
 };
 
 /// Hands out `mesh_id`s and owns the geometry + BLAS behind each, with LRU budgeting (see resource_budget).
@@ -61,8 +72,8 @@ struct sv::mesh_record
 class sv::mesh_manager : public impl::lru_pool<mesh_id, mesh_record>
 {
 public:
-    /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
-    [[nodiscard]] static mesh_manager create(sg::context& ctx, manager_config const& cfg = {});
+    /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`, pinning its geometry into `table`.
+    [[nodiscard]] static mesh_manager create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table);
 
     /// The mesh_id for `mesh.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
     /// On a miss the geometry is uploaded and BLAS-built on command lists submitted before returning, so the id is usable immediately.
@@ -75,13 +86,14 @@ public:
     [[nodiscard]] mesh_id acquire(indexed_triangle_data const& mesh);
 
 private:
-    explicit mesh_manager(sg::context& ctx) : _ctx(ctx) {}
+    mesh_manager(sg::context& ctx, sg::bindless_array table) : _ctx(ctx), _table(cc::move(table)) {}
 
     /// The stand-in a non-indexed record binds as `Indices`, created on first use and recorded onto `cmd`.
     /// Its contents are never read — it exists only so the trace's binding group is complete.
     [[nodiscard]] sg::buffer<u32> _acquire_index_stand_in(sg::command_list& cmd);
 
     sg::context& _ctx;
+    sg::bindless_array _table;
     sg::buffer<u32> _index_stand_in;
 };
 

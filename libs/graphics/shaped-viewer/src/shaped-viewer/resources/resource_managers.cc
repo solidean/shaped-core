@@ -9,9 +9,9 @@
 
 namespace sv
 {
-mesh_manager mesh_manager::create(sg::context& ctx, manager_config const& cfg)
+mesh_manager mesh_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
 {
-    auto manager = mesh_manager(ctx);
+    auto manager = mesh_manager(ctx, cc::move(table));
     manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
     return manager;
 }
@@ -46,9 +46,14 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
     auto blas = build->raytracing.build_blas({{.vertices = vertices.raw(), .vertex_count = positions.size()}});
     _ctx.submit_command_list(cc::move(build));
 
+    auto vertices_element = _table.persistent.acquire(vertices.raw()->as_raw_readonly());
+    auto indices_element = _table.persistent.acquire(stand_in.raw()->as_raw_readonly());
+
     auto const size_in_bytes = vertices.size_in_bytes() + blas->size_in_bytes();
     return insert(mesh.hash,
                   {.vertices = cc::move(vertices),
+                   .vertices_element = cc::move(vertices_element),
+                   .indices_element = cc::move(indices_element),
                    .indices = cc::move(stand_in),
                    .is_indexed = false,
                    .triangle_count = positions.size() / 3,
@@ -82,9 +87,14 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
                                                .index_count = indices.size()}});
     _ctx.submit_command_list(cc::move(build));
 
+    auto vertices_element = _table.persistent.acquire(vertices.raw()->as_raw_readonly());
+    auto indices_element = _table.persistent.acquire(index_buffer.raw()->as_raw_readonly());
+
     auto const size_in_bytes = vertices.size_in_bytes() + index_buffer.size_in_bytes() + blas->size_in_bytes();
     return insert(mesh.hash,
                   {.vertices = cc::move(vertices),
+                   .vertices_element = cc::move(vertices_element),
+                   .indices_element = cc::move(indices_element),
                    .indices = cc::move(index_buffer),
                    .is_indexed = true,
                    .triangle_count = indices.size() / 3,

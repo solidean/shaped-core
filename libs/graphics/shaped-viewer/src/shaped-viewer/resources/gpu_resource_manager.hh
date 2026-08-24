@@ -7,6 +7,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
+#include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 
 /// How much follow-up GPU work the manager may record per epoch.
@@ -206,6 +207,13 @@ public:
     /// it writes is that upload's index.
     [[nodiscard]] cc::vector<byte> build_instance_parameters(resolved_material const& r,
                                                              material_parameter_layout const& layout);
+
+    /// The GPU record for one scene item: where its material parameters live, and where its geometry does.
+    ///
+    /// This is what retires the "one mesh per view" seam — a view uploads one of these per item and the closest-hit reaches
+    /// everything it needs from `InstanceID()`, rather than the trace binding one mesh's buffers globally.
+    /// Both ids must be resident.
+    [[nodiscard]] instance_gpu describe_instance(mesh_id mesh, instance_id instance);
 
     /// Whether `table` was declared at all (a budget of 0 omits it).
     [[nodiscard]] bool has_table(bindless_table table) const;

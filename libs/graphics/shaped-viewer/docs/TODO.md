@@ -81,9 +81,10 @@ What is not yet built, in dependency order:
 - **slib has no named-HLSL-fragment asset kind.**
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
-- **The per-instance descriptor table** — the table a closest-hit reads by `InstanceID()` to fill its `sv_shading_context`.
-  The parameter blocks it points at exist (`instance_manager`, keyed on `parameter_key`); what is missing is the table naming one per scene item, plus each mesh's vertex / index buffer indices.
-  This is the same table the `mesh_is_indexed` entry below asks for.
+- **The trace does not read the instance table yet.**
+  `sv::instance_gpu` exists and `gpu_resource_manager::describe_instance` fills one, geometry and material parameters alike, every index pinned.
+  What is missing is the view uploading one per scene item and `pt_hit.hlsl` reading it by `InstanceID()` instead of the global `Vertices` / `Indices` / `Materials` bindings.
+  That is the same change as the one below, and it retires `mesh_is_indexed` with it.
 - **One buffer per parameter block.**
   That is one bindless slot per distinct (material, mesh) pairing rather than per instance, which is affordable but not free.
   Packing many blocks into one buffer is invisible to the shader — it already takes an offset — so it is an optimization rather than a change of contract.

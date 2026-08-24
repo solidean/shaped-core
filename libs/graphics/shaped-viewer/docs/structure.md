@@ -67,7 +67,9 @@ material shader generation               [in progress]  generate_material_shader
 material data on the GPU                 [in progress]  attribute_manager uploads any mesh_attribute to a byte-address buffer keyed on its own hash and pins a bindless element, which is what makes the mesh_attribute rank of the chain reachable at all.
                                                         instance_manager owns the parameter blocks a generated shader reads, content-keyed on parameter_key; gpu_resource_manager::build_instance_parameters fills one from the layout the generator handed back.
                                                         Every index written into a block is a PINNED one, since the block outlives the epoch that built it.
-                                                        Still to come: the per-instance table indexed by InstanceID(), one hit group per permutation, and the trace
+                                                        sv::instance_gpu is the per-item record a closest-hit reads by InstanceID() — its material's parameter block, and its own geometry, every index pinned.
+                                                        Mesh geometry is pinned into the buffers table too, so a view is no longer limited to one mesh by its bindings.
+                                                        Still to come: the view uploading that table, one hit group per permutation, and the trace reading both
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine
