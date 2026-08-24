@@ -99,6 +99,7 @@ if(SC_BUILD_TESTS)
         tests/filesystem/mount_table-test.cc
         tests/filesystem/watch-test.cc
         tests/shader_library-test.cc
+        tests/compile_source-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
         tests/dxc_compiler-test.cc

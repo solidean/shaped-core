@@ -20,6 +20,7 @@ add_library(shaped-viewer
     src/shaped-viewer/material/material_library.cc
     src/shaped-viewer/material/builtin_material_types.cc
     src/shaped-viewer/material/resolve.cc
+    src/shaped-viewer/material/shader_generator.cc
     src/shaped-viewer/view/camera.cc
     src/shaped-viewer/view/camera_controller.cc
     src/shaped-viewer/view/view_data.cc
@@ -69,6 +70,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/material/material.hh
     src/shaped-viewer/material/material_library.hh
     src/shaped-viewer/material/resolve.hh
+    src/shaped-viewer/material/shader_generator.hh
     src/shaped-viewer/material/impl/material_hash.hh
     src/shaped-viewer/scene/scene_item.hh
     src/shaped-viewer/view/view_id.hh
@@ -167,6 +169,8 @@ if(SC_BUILD_TESTS)
         tests/render-plan-test.cc
         tests/bindless-tables-test.cc
         tests/material-resolution-test.cc
+        tests/material-shader-generator-test.cc
+        tests/material-shader-compile-test.cc
     )
 
     target_link_libraries(shaped-viewer-test

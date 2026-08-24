@@ -29,6 +29,7 @@
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/material/resolve.hh>
+#include <shaped-viewer/material/shader_generator.hh>
 
 // what a view is, and how it is framed
 #include <shaped-viewer/view/camera.hh>

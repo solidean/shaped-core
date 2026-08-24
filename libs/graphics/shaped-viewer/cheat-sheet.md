@@ -186,6 +186,38 @@ Gotchas:
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
 - **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
 
+## Material shaders — one permutation, generated
+
+`material/shader_generator.hh`; `shaders/material_runtime.hlsli` is the hand-authored half it is written against.
+
+```cpp
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; material_parameter_layout layout; hash128 key;}
+sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
+sv::material_shader_options      // { string_view entry_point = "sv_evaluate_material"; string_view runtime_include; bindless_config const*; }
+sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
+sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
+sv::material_slot_kind           // constant | attribute_descriptor (an sv_attribute_desc) | texture_index (a u32 into the 2D table)
+
+slib::shader_library::compile_source(src, stage, entry, format, {.include_dir = "sv_shaders"})  // -> sg::async_compiled_shader
+```
+
+The generated source is, in order: the runtime include, only the bindless tables this permutation touches, one `SamplerState` per
+distinct sampler, then the entry function.
+That function declares one local per signature attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
+and then runs the type's fragment verbatim over them.
+`g.key == resolved.permutation_key`, so two resolved materials with equal keys generate byte-identical source.
+
+Gotchas:
+
+- **The layout is the contract, and both sides read it.** The shader loads slot `offset`; the CPU fills slot `offset`.
+  Nothing recomputes it independently, which is why it comes back with the source rather than being derivable.
+- **A sampled attribute takes TWO slots** — the texture index, and the `sv_attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
+- **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
+  Three strides plus a runtime branch would be the other trade; see `material_runtime.hlsli`.
+- **`SampleLevel`, never `Sample`** — a ray tracing hit shader has no derivatives to pick a mip from.
+- **Every bindless index is wrapped in `NonUniformResourceIndex`**, because it varies per instance within a wave.
+- **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
+
 ## Mesh authoring — geometry + what a material reads
 
 One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh` and `mesh_texture.hh`.

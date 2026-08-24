@@ -59,7 +59,11 @@ material system (material/)              [in progress]  material_type (signature
                                                         resolve_material walks one attribute down the frequency chain — type default, material, per-instance, mesh attribute, material texture, mesh texture — finest wins, `final` blocks finer.
                                                         It yields TWO keys: permutation_key over the resolution's shape (what a shader is generated from), parameter_key over its values (what a per-instance slot is filled from).
                                                         So two materials differing only in constants share one shader; only a texture sample forces a second.
-                                                        CPU-side and complete; shader generation and the GPU path are next
+                                                        CPU-side and complete
+material shader generation               [in progress]  generate_material_shader turns a resolved_material into HLSL plus the parameter layout that source reads.
+                                                        Emits only the bindless tables the permutation touches (names and spaces from bindless_tables.hh), one SamplerState per distinct sampler, and one initializer per attribute — a parameter-block load, a barycentric interpolation, or a uv sample.
+                                                        The type's fragment then runs verbatim over those locals; shaders/material_runtime.hlsli is the hand-authored half it is written against.
+                                                        Compiled through slib::shader_library::compile_source. Still to come: the GPU path — attribute upload, the per-instance table, and the trace
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

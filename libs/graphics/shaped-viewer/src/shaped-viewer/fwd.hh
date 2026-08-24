@@ -70,7 +70,12 @@ struct material_attribute_binding;    // one attribute a material overrides
 struct material_type;                 // a family of materials: signature + shader fragment
 struct material;                      // one instance of a type, with some attributes bound
 struct resolved_attribute;
-struct resolved_material; // a type + material + mesh resolved down the frequency chain
+struct resolved_material;           // a type + material + mesh resolved down the frequency chain
+enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds
+struct material_slot;
+struct material_parameter_layout; // the parameter block one permutation reads
+struct generated_material_shader; // that permutation as HLSL, plus its layout
+struct material_shader_options;
 class material_library;
 
 // the per-frame description

@@ -74,17 +74,10 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 
 ## What the material system still needs
 
-The vocabulary and the resolution chain are in (`material/`), CPU-side and tested headless.
+The vocabulary, the resolution chain and the shader generator are in (`material/`), CPU-side and tested headless — plus a DXC-gated test that a generated permutation really compiles.
+`slib::shader_library::compile_source` is the door those generated sources go through.
 What is not yet built, in dependency order:
 
-- **A shader generated from a `resolved_material`.**
-  In order: the bindless table declarations, the per-permutation parameter struct, one initializer per signature attribute, then the type's `shader` fragment verbatim.
-  The declarations come from `resources/bindless_tables.hh`, so `name_of` / `space_of` stay the one source of truth rather than the generator hand-writing `gBindlessTextures2D`.
-  `permutation_key` is what it is cached on, and it already covers exactly the inputs that change the generated text.
-- **slib has no "compile this source string" API.**
-  `shader_library::compile_shader` is public but resolves through `package_of(virtual_path)`, which `CC_UNREACHABLE`s for a path under no registered package — so a generated source has no clean door.
-  The extension belongs in slib: `compile_source(source, stage, entry, format)` returning a content-keyed `sg::async_compiled_shader`, over the library's own compiler and mount table.
-  Reaching `ssc::dxc::shader_cache` directly from sv instead would drag sv into the Windows-and-DXC gating slib already abstracts.
 - **slib has no named-HLSL-fragment asset kind.**
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
@@ -94,7 +87,13 @@ What is not yet built, in dependency order:
   Slots keyed on `parameter_key`; every bindless index in one comes from `pin_*` rather than `acquire_*`, which the two types already enforce.
 - **Several material permutations means several DXR hit groups**, which needs sg's shader table to carry more than one.
   Unconfirmed, and it is what decides whether the GPU slice can be one change.
-
+- **`material_runtime.hlsli` is only reachable through the source tree.**
+  A generated shader includes it, and it resolves because sv's package mounts a real filesystem on `shaders/`.
+  Nothing in the package `#include`s it, so it is not in the embedded closure and a shipped build with no source tree would not find it.
+  Wiring the trace through the generated material fixes this by itself, since `pt_hit.hlsl` will include it.
+- **The generator handles scalars and vectors of f32 / i32 / u32 only.**
+  A matrix attribute has no settled `ByteAddressBuffer` layout here, and the narrow and 64-bit scalars need SM 6.2 16-bit types or a split load.
+  `hlsl_type_of` returns empty for those and `generate_material_shader` asserts, rather than emitting something that will not compile.
 
 ## Everything else
 

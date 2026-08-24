@@ -218,13 +218,6 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
     outcome.dependencies.push_back(cc::string::create_copy_of(virtual_path));
 
     auto const& package = package_of(virtual_path);
-    auto const* const compiler = find_compiler(package.language, format);
-    if (compiler == nullptr)
-    {
-        outcome.shader
-            = make_failed_shader(cc::format("no compiler registered to build '{}' into this format", virtual_path));
-        return outcome;
-    }
 
     auto source = _mounts.read_text(virtual_path);
     if (!source.has_value())
@@ -233,16 +226,48 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
         return outcome;
     }
 
-    auto const source_dir = impl::parent_path(virtual_path);
+    // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
+    _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
+                  package.language, stage, entry_point, format);
+    return outcome;
+}
+
+sg::async_compiled_shader slib::shader_library::compile_source(cc::string_view source,
+                                                               sg::shader_stage stage,
+                                                               cc::string_view entry_point,
+                                                               sg::shader_format format,
+                                                               compile_source_options const& opts) const
+{
+    compile_outcome outcome;
+    _compile_text(outcome, cc::string::create_copy_of(source), opts.label, opts.include_dir, cc::string_view(),
+                  opts.language, stage, entry_point, format);
+    return cc::move(outcome.shader);
+}
+
+void slib::shader_library::_compile_text(compile_outcome& outcome,
+                                         cc::string source,
+                                         cc::string_view label,
+                                         cc::string_view source_dir,
+                                         cc::string_view package_root,
+                                         shader_language language,
+                                         sg::shader_stage stage,
+                                         cc::string_view entry_point,
+                                         sg::shader_format format) const
+{
+    auto const* const compiler = find_compiler(language, format);
+    if (compiler == nullptr)
+    {
+        outcome.shader = make_failed_shader(cc::format("no compiler registered to build '{}' into this format", label));
+        return;
+    }
 
     // Every path the resolver hands back becomes a dependency, so an edit to any include reloads the shaders that pulled it in.
     // Resolving the same file twice yields empty text (pragma-once semantics) rather than a duplicate expansion.
     cc::set<cc::string> seen;
-    seen.insert(cc::string::create_copy_of(virtual_path));
+    seen.insert(cc::string::create_copy_of(label));
 
-    // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     // Fixed from the shader being compiled, so an include pulled in by another include resolves from here too, not from its includer.
-    auto const search_roots = {source_dir, cc::string_view(package.name), cc::string_view()};
+    auto const search_roots = {source_dir, package_root, cc::string_view()};
 
     // Non-const: cc::function_ref binds a mutable lvalue.
     auto resolve = [&](cc::string_view include_path) -> cc::optional<cc::string>
@@ -272,17 +297,16 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
     };
 
     shader_source_description desc
-        = {.source = cc::move(source.value()), .entry_point = cc::string::create_copy_of(entry_point), .stage = stage};
+        = {.source = cc::move(source), .entry_point = cc::string::create_copy_of(entry_point), .stage = stage};
 
     auto preprocessed = compiler->preprocess(desc, resolve);
     if (preprocessed.has_error())
     {
-        outcome.shader = make_failed_shader(
-            cc::format("preprocessing '{}' failed: {}", virtual_path, preprocessed.error().to_string()));
-        return outcome;
+        outcome.shader
+            = make_failed_shader(cc::format("preprocessing '{}' failed: {}", label, preprocessed.error().to_string()));
+        return;
     }
 
     desc.source = cc::move(preprocessed.value());
     outcome.shader = compiler->compile(desc);
-    return outcome;
 }
