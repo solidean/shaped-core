@@ -43,7 +43,11 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
 
     // One entry per line: the listing is read by dev.py, but it is also read by a person chasing why a filter
     // selected nothing, and a field per line would bury a thousand tests.
-    auto w = json::string_writer({.indent = 2});
+    //
+    // large_integers -> string, defensively: nothing here exceeds 2^53 today (a seed is an int), but this listing is
+    // the natural home for an id or a hash, and a number that silently rounds in a JS reader is an easy mistake to
+    // make once and never notice.
+    auto w = json::string_writer({.indent = 2, .large_integers = json::large_integer_policy::string});
 
     {
         auto root = w.object();
