@@ -260,7 +260,20 @@ m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks w
 bound.group()                               // -> sg::binding_group_handle const& — what to bind
 bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
 m.has_table(table) / m.table_capacity(table)
+
+// textures + the follow-up work their policy asks for
+sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
+m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, pins its element
+m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; bindless_element_handle element; residency state; uploaded_mips; total_mips; index() }
+sv::residency                // pending | base_resident | complete — an id never blocks, so what varies is how good it is yet
+m.record_pending_work(cmd) -> i32   // records what THIS epoch's budget allows, oldest first; returns dispatches spent
+m.pending_work_count()              // -> isize — resources still waiting for their follow-up
+// config: { texture_policy textures_policy = {.generate_mips = true}; work_budget work = {.max_dispatches_per_epoch = 16} }
 ```
+
+**The two budgets are different things.** Bytes in flight are sg's to schedule (`ctx.stream.set_upload_ratio`, per-handle priorities, aging).
+What `work_budget` bounds is the work that runs *after* a resource lands — mip generation today — and leaving it unbounded is what produces the microstutter.
+A chain is never split across epochs: a partially generated one would read as complete while its tail is uninitialized.
 
 The layout is hand-written rather than reflected, so the manager is constructible before any shader compiles — a shader matches the names above.
 The lock lives here rather than on `sg::bindless_array` because the invariant spans every array over one staging group.

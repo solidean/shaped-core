@@ -257,6 +257,28 @@ sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of t
   their command list unsubmitted.
 - Its shaders live in `sr_shaders` (`blit.hlsl`) — no separate package to register.
 
+## Box-filter mipmap routine
+
+Fills a texture's mip chain by averaging each level into the next — one compute dispatch per generated level.
+
+```cpp
+#include <shaped-rendering/box_filter_mipmap_routine.hh>
+sr::box_filter_mipmap_routine::execute(cmd, texture, first_level = 1);  // generates first_level..end from the level below each
+sr::box_filter_mipmap_routine::level_count(texture, first_level = 1);   // -> int — dispatches it WOULD record; ask before committing, for a work budget
+sr::box_filter_mipmap_routine::prewarm(ctx);                            // warm the compiles ahead of the first use
+// EVERY mippable shape: texture_1d/_2d/_3d, arrays, cube, cube array. Templated on the texture, so a multisampled one fails to COMPILE
+//   one HLSL entry point per view dimension (HLSL cannot abstract over them); a cube rides the 2D-array one, since its UAV is already a 2D array
+//   arrays average WITHIN a slice, never across — so cube faces never bleed. 3D is the one shape halving in z, so it is an 8-tap average
+// texture needs readonly_texture | readwrite_texture usage, and the levels ALLOCATED already — this fills a chain, never reshapes one
+// source is bound as a single-mip view of level N, target as the UAV of N+1, so no level is read and written by one dispatch
+// no-op when that variant's shader did not compile (a broken 3D shader leaves 2D working), or when there is no level to generate
+```
+
+Named for its filter deliberately.
+A box filter is the cheap separable default for "we uploaded the base level and want the rest".
+It is wrong in places: it ignores gamma, so averaging sRGB content darkens it, and it aliases where a Kaiser or Mitchell filter would not.
+Those belong in routines of their own rather than behind a flag here.
+
 ## Writing a concrete routine
 
 ```cpp

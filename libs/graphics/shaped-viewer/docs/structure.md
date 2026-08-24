@@ -52,6 +52,9 @@ persistent per-view state                [in progress]  view_id keys what a view
 id stack (push_id / scoped_id)           [done]         seeds view_id so one name under N scopes names N views; independent of layout nesting, and a duplicate within a frame asserts.
                                                         Ids are formattable and take an ImGui-style ## suffix, which separates two views without changing what a human reads
 temporal accumulation                    [in progress]  a traced layer reprojects its history through the previous camera and blends per pixel; only a scene change restarts the whole image
+textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
+                                                        Follow-up steps (mip generation through sr::box_filter_mipmap_routine) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
+                                                        Still to come: async streaming, placeholders while pending, and mapping visibility onto sg's stream priorities
 materials / lighting                     [planned]      one flat PBR material; a scene layer holds typed light lists + an SH background; textures and more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

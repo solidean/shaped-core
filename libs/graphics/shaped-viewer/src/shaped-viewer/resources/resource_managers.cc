@@ -1,7 +1,9 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-viewer/impl/content_hash.hh>
+#include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 
@@ -211,10 +213,71 @@ material_set_id material_manager::acquire(cc::span<mesh_attribute const> attribu
     return insert(key, {.materials = cc::move(buffer), .count = triangle_count}, size_in_bytes);
 }
 
-texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg)
+texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
 {
-    auto m = texture_manager(ctx);
+    auto m = texture_manager(ctx, cc::move(table));
     m.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
     return m;
+}
+
+void texture_manager::mark_mips_complete(texture_id id)
+{
+    auto* const record = mutable_record(id);
+    if (record == nullptr)
+        return;
+    record->uploaded_mips = record->total_mips;
+    record->state = residency::complete;
+}
+
+texture_id texture_manager::acquire(texture_data const& texture)
+{
+    if (auto const resident = find_by_hash(texture.hash); resident.has_value())
+        return resident.value();
+
+    CC_ASSERT(texture.width > 0 && texture.height > 0, "a texture needs a positive extent");
+    CC_ASSERT(texture.mip_count >= 1, "a texture carries at least its base level");
+
+    // The full chain is allocated up front even when only the base level is supplied, so generating the rest
+    // later fills this texture in place rather than replacing it — which would invalidate the pinned index a
+    // material buffer already stored.
+    auto const total_mips = impl::mip_count_of(texture.width, texture.height);
+    CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
+
+    auto gpu = _ctx.persistent.create_texture_2d({.format = texture.format,
+                                                  .width = texture.width,
+                                                  .height = texture.height,
+                                                  .mip_levels = total_mips,
+                                                  .usage = sg::texture_usage::readonly_texture
+                                                         | sg::texture_usage::readwrite_texture
+                                                         | sg::texture_usage::copy_dst});
+
+    // Every supplied level in one list, submitted before returning, so the id is usable the moment it is minted.
+    auto cmd = _ctx.create_command_list();
+    auto offset = isize(0);
+    auto uploaded_bytes = isize(0);
+    for (auto mip = i32(0); mip < texture.mip_count; ++mip)
+    {
+        auto const size = impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
+        CC_ASSERT(offset + size <= texture.pixels.span().size(), "texture pixels are shorter than the mips they claim");
+        cmd->upload.bytes_to_texture(gpu.raw(), texture.pixels.span().subspan({.offset = offset, .size = size}),
+                                     {.mip_level = mip});
+        offset += size;
+        uploaded_bytes += size;
+    }
+    _ctx.submit_command_list(cc::move(cmd));
+
+    auto element = _table.persistent.acquire(gpu.as_readonly_view());
+
+    // Whether it is done is the shape's answer, not the upload's: a texture given every level it has room for
+    // needs no follow-up, one given fewer is waiting on mip generation.
+    auto const state = texture.mip_count == total_mips ? residency::complete : residency::base_resident;
+
+    return insert(texture.hash,
+                  {.texture = cc::move(gpu),
+                   .element = cc::move(element),
+                   .state = state,
+                   .uploaded_mips = texture.mip_count,
+                   .total_mips = total_mips},
+                  uploaded_bytes);
 }
 } // namespace sv

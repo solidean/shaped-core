@@ -22,6 +22,9 @@ struct manager_config;
 struct mesh_record;
 struct material_record;
 struct texture_record;
+enum class residency : u8; // how much of a resource has reached the GPU (resource_managers.hh)
+struct work_budget;        // how much follow-up GPU work one epoch may record
+struct texture_policy;     // what happens to a texture once it has landed
 struct gpu_resource_manager_config;
 
 // The bindless tables sv declares, and their budgets (see resources/bindless_tables.hh)
@@ -82,6 +85,7 @@ struct frame_constants_gpu;
 struct triangle_data;
 struct indexed_triangle_data;
 struct material_data;
+struct texture_data;
 // the resource ids are defined at the bottom of this header, since they carry an `invalid` enumerator
 enum class mesh_id : u32;
 enum class material_set_id : u32;

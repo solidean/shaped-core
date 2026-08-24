@@ -9,6 +9,33 @@
 #include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 
+/// How much follow-up GPU work the manager may record per epoch.
+///
+/// This is a *different* budget from the upload one, and conflating them is the usual mistake.
+/// Bytes in flight are sg's to schedule (`ctx.stream.set_upload_ratio`, per-handle priorities, aging); what
+/// this bounds is the work that runs *after* a resource has landed — mip generation today, compression later.
+/// Leaving it unbounded is what produces the microstutter: a frame where forty textures finish at once would
+/// otherwise record forty mip chains before it draws anything.
+///
+/// The unit is dispatches rather than milliseconds because it is the one the manager can count without
+/// measuring: a level is one dispatch, and `sr::box_filter_mipmap_routine::level_count` says how many a
+/// texture needs before committing to any of them.
+struct sv::work_budget
+{
+    /// Dispatches per epoch; <= 0 disables follow-up work entirely, leaving every texture at its base level.
+    i32 max_dispatches_per_epoch = 16;
+};
+
+/// What the manager does with a resource once it has landed.
+///
+/// Generating mips is opt-in per manager rather than per acquire, because a caller who wants none wants none
+/// for the whole scene, and one who wants them wants them for everything the budget can reach.
+struct sv::texture_policy
+{
+    /// Fill the levels an acquire did not supply, through `sr::box_filter_mipmap_routine`.
+    bool generate_mips = true;
+};
+
 /// Per-manager configuration for a whole scene's GPU resources, plus the bindless tables they are bound through.
 struct sv::gpu_resource_manager_config
 {
@@ -16,6 +43,8 @@ struct sv::gpu_resource_manager_config
     manager_config materials = {};
     manager_config textures = {};
     bindless_config bindless = {};
+    texture_policy textures_policy = {};
+    work_budget work = {};
 };
 
 /// A snapshot of the bindless tables, taken for one recording — `gpu_resource_manager::freeze()`'s return value.
@@ -120,6 +149,12 @@ public:
     /// The same, for the byte-address buffer table.
     [[nodiscard]] sg::bindless_element_handle pin_buffer(sg::raw_view const& view);
 
+    /// The texture_id for `texture.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
+    ///
+    /// Prefer this over reaching `textures` directly: it also notes the texture's element for this epoch's
+    /// access declaration, which a dispatch reading it through a material buffer would otherwise miss.
+    [[nodiscard]] texture_id acquire_texture(texture_data const& texture);
+
     /// Refuses acquires until `unlock`.
     ///
     /// The pair is deliberately available raw, for a caller whose recording does not nest the way `freeze`'s
@@ -131,6 +166,18 @@ public:
     /// Locks, snapshots the group, and unlocks when the returned value dies — the form to reach for.
     /// A clean snapshot is the cached handle, so freezing an unchanged working set costs nothing.
     [[nodiscard]] bound_resources freeze();
+
+    /// Records whatever follow-up work this epoch's budget allows, oldest request first.
+    ///
+    /// Must be called with a command list the caller submits, and before the work that reads those resources —
+    /// a texture whose mips are generated after the trace that sampled it gains nothing this frame.
+    /// What does not fit stays queued for a later epoch, which is exactly the microstutter guard: the queue
+    /// drains at a bounded rate rather than all at once.
+    /// Returns how many dispatches it recorded.
+    i32 record_pending_work(sg::command_list& cmd);
+
+    /// How many resources are still waiting for their follow-up work.
+    [[nodiscard]] isize pending_work_count() const { return _pending.size(); }
 
     /// Whether `table` was declared at all (a budget of 0 omits it).
     [[nodiscard]] bool has_table(bindless_table table) const;
@@ -150,11 +197,6 @@ public:
 private:
     friend class bound_resources;
 
-    gpu_resource_manager(mesh_manager meshes,
-                         material_manager materials,
-                         texture_manager textures,
-                         sg::staging_binding_group_handle group);
-
     /// One entry per declared table, in table order; a table budgeted at 0 has none.
     /// `_slot_of` maps a table onto its entry, so a caller never indexes this by table.
     struct table_entry
@@ -164,8 +206,23 @@ private:
         cc::vector<u32> acquired; ///< the element indices acquired this epoch, for the access declaration
     };
 
+    gpu_resource_manager(mesh_manager meshes,
+                         material_manager materials,
+                         texture_manager textures,
+                         sg::staging_binding_group_handle group,
+                         cc::vector<table_entry> tables,
+                         texture_policy texture_policy,
+                         work_budget work_budget);
+
+    /// The entry for `table` in a freshly built list, before `_slot_of` exists to index it.
+    [[nodiscard]] static table_entry const* _find_table(cc::span<table_entry const> tables, bindless_table table);
+
+
     /// The position of `table` in `_tables`, asserting that it was declared at all.
     [[nodiscard]] i32 _declared_slot_of(bindless_table table) const;
+
+    /// Whether `id` is already queued for follow-up work, so a re-acquire does not queue it twice.
+    [[nodiscard]] bool _is_pending(texture_id id) const;
 
     /// Notes `index` as in use this epoch, for the access declaration; already-present indices are skipped.
     static void _record(table_entry& t, u32 index);
@@ -184,6 +241,19 @@ private:
     /// Position of each table in `_tables`, or -1 when it was not declared.
     /// Indexed by `bindless_table`.
     i32 _slot_of[u32(bindless_table::count_)] = {};
+
+    /// One resource waiting for its post-load step, in request order.
+    /// A texture whose record is gone by the time its turn comes is skipped: eviction is the answer to
+    /// "was this still wanted".
+    struct pending_work
+    {
+        texture_id texture = texture_id::invalid;
+        i32 dispatches = 0; ///< what it will cost, counted when it was queued
+    };
+    cc::vector<pending_work> _pending;
+
+    texture_policy _texture_policy;
+    work_budget _work_budget;
 
     sg::epoch _epoch = sg::epoch(0);
     bool _locked = false;

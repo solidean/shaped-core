@@ -17,6 +17,7 @@ inline constexpr u64 position_hash_seed = 0x4358345;
 inline constexpr u64 index_hash_seed = 0x623435;
 inline constexpr u64 material_hash_seed = 0x523453;
 inline constexpr u64 attribute_hash_seed = 0x7a11b2;
+inline constexpr u64 texture_hash_seed = 0x9c4d17;
 
 /// Joins two payload digests into one key, in order.
 /// Separate allocations cannot be hashed as one range, so a multi-buffer resource hashes each buffer and folds the digests here.

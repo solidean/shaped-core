@@ -3,8 +3,10 @@
 #include <clean-core/bytes/hash128.hh>  // cc::hash128
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh> // cc::span
+#include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>
+#include <shaped-graphics/resource/texture.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <shaped-viewer/resources/resource_data.hh>
@@ -116,24 +118,65 @@ private:
     sg::context& _ctx;
 };
 
-/// One uploaded texture and the view a bindless table binds it through.
-/// Empty this slice — the manager below mints no records yet, and the streaming change is what fills it in.
+/// How much of a resource has actually reached the GPU.
+///
+/// An id is handed out at once and never blocks, so a caller always has something to draw — what varies is how
+/// good it is yet.
+/// `resolve` therefore answers with a level as well as a resource, and a renderer decides for itself whether to
+/// draw the placeholder, the base level, or wait.
+enum class sv::residency : sv::u8
+{
+    pending,       ///< nothing on the GPU yet; only a placeholder can be drawn
+    base_resident, ///< the base level is up and sampling works, at reduced quality
+    complete,      ///< everything the policy asked for is up
+};
+
+/// One uploaded texture, the bindless element it is bound through, and how much of it has landed.
+///
+/// The element is a **pinned** handle rather than a per-epoch index, which is what lets a material buffer store
+/// its index once and stay content-hash cached across epochs.
+/// Dropping the record releases the pin with it, so eviction and unbinding cannot come apart.
 struct sv::texture_record
 {
+    sg::texture_2d texture;
+    sg::bindless_element_handle element;
+
+    residency state = residency::pending;
+
+    /// How many mip levels the pixels carried, and how many the texture has room for.
+    i32 uploaded_mips = 0;
+    i32 total_mips = 1;
+
+    /// The bindless index a shader indexes the 2D table with; `element` is what keeps it true.
+    [[nodiscard]] u32 index() const { return element == nullptr ? 0 : element->index(); }
 };
 
 /// Hands out `texture_id`s and owns the texture behind each, with LRU budgeting (see resource_budget).
 ///
-/// The seam for material textures once the scene grows past flat per-triangle PBR.
-/// It carries the pool and its budget already, so what is missing is only `acquire` and the upload path behind it.
+/// Unlike the mesh and material managers, a record here also owns its bindless element: a texture is reached
+/// from a shader by index, and that index has to survive as long as whatever stored it.
+/// The array it pins into is handed in at construction, so this stays ignorant of *which* tables exist.
 class sv::texture_manager : public impl::lru_pool<texture_id, texture_record>
 {
 public:
-    /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
-    [[nodiscard]] static texture_manager create(sg::context& ctx, manager_config const& cfg = {});
+    /// A manager that uploads into `ctx` (which must outlive it), budgeted by `cfg`, pinning into `table`.
+    [[nodiscard]] static texture_manager create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table);
+
+    /// The texture_id for `texture.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
+    ///
+    /// On a miss the texture is created, every mip the data carries is uploaded on one command list submitted
+    /// before returning, and its element is pinned — so the id resolves immediately.
+    /// A texture whose data carried fewer mips than the shape allows comes back `base_resident`, and the
+    /// follow-up that fills the rest is the gpu_resource_manager's to schedule.
+    [[nodiscard]] texture_id acquire(texture_data const& texture);
+
+    /// Marks `id`'s chain filled — what the manager calls once it has recorded the mip generation.
+    /// A no-op for an id that has been evicted since.
+    void mark_mips_complete(texture_id id);
 
 private:
-    explicit texture_manager(sg::context& ctx) : _ctx(ctx) {}
+    texture_manager(sg::context& ctx, sg::bindless_array table) : _ctx(ctx), _table(cc::move(table)) {}
 
     sg::context& _ctx;
+    sg::bindless_array _table;
 };

@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-rendering/box_filter_mipmap_routine.hh>
 
 namespace sv
 {
@@ -29,11 +30,22 @@ cc::span<u32 const> bound_resources::elements(bindless_table table) const
 gpu_resource_manager::gpu_resource_manager(mesh_manager meshes,
                                            material_manager materials,
                                            texture_manager textures,
-                                           sg::staging_binding_group_handle group)
-  : meshes(cc::move(meshes)), materials(cc::move(materials)), textures(cc::move(textures)), _group(cc::move(group))
+                                           sg::staging_binding_group_handle group,
+                                           cc::vector<table_entry> tables,
+                                           texture_policy texture_policy,
+                                           work_budget work_budget)
+  : meshes(cc::move(meshes)),
+    materials(cc::move(materials)),
+    textures(cc::move(textures)),
+    _group(cc::move(group)),
+    _tables(cc::move(tables)),
+    _texture_policy(texture_policy),
+    _work_budget(work_budget)
 {
     for (auto& s : _slot_of)
         s = -1;
+    for (auto i = isize(0); i < _tables.size(); ++i)
+        _slot_of[u32(_tables[i].table)] = i32(i);
 }
 
 gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource_manager_config const& cfg)
@@ -41,10 +53,10 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
     auto const bindings = make_bindless_bindings(cfg.bindless);
     auto group = ctx.persistent.create_staging_binding_group(ctx.cached.acquire_binding_group_layout(bindings));
 
-    auto m = gpu_resource_manager(mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
-                                  texture_manager::create(ctx, cfg.textures), cc::move(group));
-
-    m._tables.reserve(bindings.size());
+    // The arrays are built before the managers, because a manager that pins its resources — the texture one —
+    // is handed the array it pins into rather than reaching back for it later.
+    auto tables = cc::vector<table_entry>();
+    tables.reserve(bindings.size());
     for (auto const& b : cfg.bindless.tables)
     {
         if (b.count == 0)
@@ -52,10 +64,24 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
 
         // for_binding clears the array, which is also what tells the group this binding was set — so the
         // "every binding set before the first snapshot" rule is satisfied by wiring alone.
-        m._slot_of[u32(b.table)] = i32(m._tables.size());
-        m._tables.push_back({.table = b.table, .array = sg::bindless_array::for_binding(ctx, m._group, name_of(b.table))});
+        tables.push_back({.table = b.table, .array = sg::bindless_array::for_binding(ctx, group, name_of(b.table))});
     }
-    return m;
+
+    auto const* const textures_2d = _find_table(tables, bindless_table::textures_2d);
+    CC_ASSERT(textures_2d != nullptr, "the textures_2d table must be declared — the texture manager pins into it");
+
+    return gpu_resource_manager(mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
+                                texture_manager::create(ctx, cfg.textures, textures_2d->array), cc::move(group),
+                                cc::move(tables), cfg.textures_policy, cfg.work);
+}
+
+gpu_resource_manager::table_entry const* gpu_resource_manager::_find_table(cc::span<table_entry const> tables,
+                                                                           bindless_table table)
+{
+    for (auto const& t : tables)
+        if (t.table == table)
+            return &t;
+    return nullptr;
 }
 
 void gpu_resource_manager::advance_to(sg::epoch e)
@@ -130,6 +156,65 @@ void gpu_resource_manager::_record(table_entry& t, u32 index)
         if (e == index)
             return;
     t.acquired.push_back(index);
+}
+
+texture_id gpu_resource_manager::acquire_texture(texture_data const& texture)
+{
+    CC_ASSERT(!_locked, "no acquires while frozen — the bound snapshot could not contain the mint");
+    auto const id = textures.acquire(texture);
+
+    // Its element is pinned, so nothing here has to keep it alive; what this does is make sure the dispatch
+    // that reads it through a material buffer finds it in the access declaration.
+    auto const* const record = textures.get_ptr(id);
+    CC_ASSERT(record != nullptr, "a freshly acquired texture must be resident");
+    _record(_tables[_declared_slot_of(bindless_table::textures_2d)], record->index());
+
+    // Queued rather than done here: an acquire is on the caller's critical path, and generating a full chain
+    // inline is exactly the stall the budget exists to spread out.
+    if (_texture_policy.generate_mips && record->state == residency::base_resident && !_is_pending(id))
+    {
+        auto const dispatches = sr::box_filter_mipmap_routine::level_count(record->texture, record->uploaded_mips);
+        if (dispatches > 0)
+            _pending.push_back({.texture = id, .dispatches = dispatches});
+    }
+    return id;
+}
+
+i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
+{
+    if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())
+        return 0;
+
+    auto spent = i32(0);
+    auto keep = cc::vector<pending_work>();
+    for (auto const& w : _pending)
+    {
+        auto const* const record = textures.get_ptr(w.texture);
+        if (record == nullptr)
+            continue; // evicted since it was queued, so nobody is waiting on it any more
+
+        // Oldest first, and a request that does not fit is not split: a partially generated chain would read
+        // as complete while its tail is still uninitialized.
+        if (spent + w.dispatches > _work_budget.max_dispatches_per_epoch && spent > 0)
+        {
+            keep.push_back(w);
+            continue;
+        }
+
+        sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
+        spent += w.dispatches;
+        textures.mark_mips_complete(w.texture);
+    }
+    _pending = cc::move(keep);
+    return spent;
+}
+
+bool gpu_resource_manager::_is_pending(texture_id id) const
+{
+    for (auto const& w : _pending)
+        if (w.texture == id)
+            return true;
+    return false;
 }
 
 void gpu_resource_manager::lock()

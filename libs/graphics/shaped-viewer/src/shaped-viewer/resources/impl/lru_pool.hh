@@ -77,6 +77,16 @@ public:
     bool evict(Id id) { return _remove(id); }
 
 protected:
+    /// The mutable record for `id`, or null if absent; does NOT count as a use.
+    ///
+    /// For a manager updating its own bookkeeping — residency, say — rather than for a caller reading one.
+    /// The record's byte size is fixed at insert, so mutating one must not change what it costs.
+    [[nodiscard]] Record* mutable_record(Id id)
+    {
+        auto* const e = _entries.get_ptr(id);
+        return e == nullptr ? nullptr : &e->record;
+    }
+
     /// The resident id for content hash `hash`, or null if nothing with that hash is resident (never inserted,
     /// or evicted since). Marks a hit used this epoch (an LRU touch), so the acquire happy path keeps it alive.
     [[nodiscard]] cc::optional<Id> find_by_hash(cc::hash128 hash)

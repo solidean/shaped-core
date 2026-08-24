@@ -6,6 +6,7 @@
 /// The render-routine framework itself (sg::render_routine, ctx.routines) lives in shaped-graphics — include <shaped-graphics/routine/render_routine.hh>.
 
 #include <shaped-rendering/blit_routine.hh>
+#include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/gpu_types.hh>
 #include <shaped-rendering/imgui_context.hh>
