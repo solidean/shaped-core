@@ -348,7 +348,10 @@ cc::glob_matches(pat, path, cc::glob_option::normalize | cc::glob_option::ignore
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 cc::to_chars(buf, v)                             // -> isize written; the same rendering into a char buffer, no allocation
 cc::to_chars(buf, 1.5, cc::float_notation::fixed, 3)  // shortest (default) / fixed / scientific / general; precision < 0 = default
-cc::to_chars_int_max  cc::to_chars_float_max     // buffer sizes that always fit; a short buffer asserts
+cc::to_chars_int_max                             // fits every integer overload; a short buffer asserts
+cc::to_chars_float_max                           // fits `shortest` and the default precision — NOT an arbitrary one
+cc::to_chars_size(notation, precision)           // constexpr; the bound to size off when the precision is not yours to pick
+// A fixed-notation double carries up to 309 integer digits BEFORE the fraction, so a big precision outgrows the constant.
 #include <clean-core/string/from_string.hh>      // the inverse, for bool/char/byte/ints/floats
 cc::from_string<int>("42")                       // -> cc::optional<int>; cc::nullopt on any rejection
 cc::from_string(sv, value)                       // -> bool; the out-param form, leaves `value` alone on failure

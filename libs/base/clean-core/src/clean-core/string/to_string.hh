@@ -71,22 +71,40 @@ using byte = std::byte;
 // cc::to_chars — the same numbers, written into a caller-provided buffer.
 //
 // Returns the number of chars written; nothing is null-terminated.
-// The buffer must be large enough (to_chars_int_max / to_chars_float_max always are) — a short one asserts.
+// The buffer must be large enough — a short one asserts, since its size is the caller's to get right.
+//
+// to_chars_int_max always is, for every integer overload.
+// to_chars_float_max is for the SHORTEST form and the default precision; an explicit precision can outgrow it,
+// because a fixed-notation double carries up to 309 integer digits BEFORE the fraction the precision asks for.
+// Size off to_chars_size(notation, precision) whenever the precision is not a constant you picked yourself.
 // =========================================================================================================
 
-/// Buffer sizes that fit any result of the corresponding overloads.
+/// Buffer size that fits any result of the integer overloads.
 inline constexpr isize to_chars_int_max = 66;
+
+/// Buffer size that fits any float rendered `shortest`, or with the default precision.
 inline constexpr isize to_chars_float_max = 512;
+
+/// Buffer size that fits any float rendered with this notation and precision.
+/// An upper bound rather than the exact length: the integer part of a double is up to 309 digits and the fraction is
+/// the precision, so a large precision grows the requirement linearly and to_chars_float_max stops covering it.
+[[nodiscard]] constexpr isize to_chars_size(float_notation notation, int precision)
+{
+    if (notation == float_notation::shortest) // the precision does not apply, so the shortest bound holds
+        return to_chars_float_max;
+
+    return to_chars_float_max + 2 * isize(precision < 0 ? 6 : precision);
+}
 
 /// A precision below 0 means the notation's own default (6 digits for fixed / scientific / general).
 [[nodiscard]] isize to_chars(span<char> out,
                              float v,
                              float_notation notation = float_notation::shortest,
-                             isize precision = -1);
+                             int precision = -1);
 [[nodiscard]] isize to_chars(span<char> out,
                              double v,
                              float_notation notation = float_notation::shortest,
-                             isize precision = -1);
+                             int precision = -1);
 
 // integer types, in base 10
 // note: does not use the sized versions because this style is _complete_ for users

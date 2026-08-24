@@ -1,3 +1,4 @@
+#include <clean-core/container/vector.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/string/to_string.hh>
 #include <nexus/test.hh>
@@ -53,4 +54,20 @@ TEST("to_chars - floats")
         CHECK(chars_of(buf, 1.5, cc::float_notation::fixed) == "1.500000");  // 6 digits
         CHECK(chars_of(buf, 1.5, cc::float_notation::shortest, 3) == "1.5"); // shortest ignores it
     }
+}
+
+TEST("to_chars - a big precision outgrows to_chars_float_max")
+{
+    // The integer part of a double is up to 309 digits on its own, so the fraction the precision asks for is what
+    // pushes the requirement past the fixed buffer — which is the whole reason to_chars_size exists.
+    CHECK(cc::to_chars_size(cc::float_notation::shortest, 4000) == cc::to_chars_float_max); // precision does not apply
+    CHECK(cc::to_chars_size(cc::float_notation::fixed, 400) > cc::to_chars_float_max);
+    CHECK(cc::to_chars_size(cc::float_notation::fixed, -1) <= cc::to_chars_float_max + 12); // the default is 6 digits
+
+    auto const precision = 400;
+    auto buf = cc::vector<char>::create_uninitialized(cc::to_chars_size(cc::float_notation::fixed, precision));
+    auto const n = cc::to_chars(buf, 1.0, cc::float_notation::fixed, precision);
+
+    CHECK(n == 1 + 1 + precision); // "1" + "." + the digits
+    CHECK(cc::string_view(buf.data(), n).subview({.offset = 0, .size = 4}) == "1.00");
 }
