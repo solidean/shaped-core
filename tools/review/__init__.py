@@ -11,7 +11,7 @@ from __future__ import annotations
 # Colours are the only thing worth sharing, and keeping the import here means a downstream fork edits one line.
 from tools.dev.lib.core import console
 
-from .lib.changeset.commits import candidates_for_commit
+from .lib.changeset.commits import bulk_candidate_for_commits, candidates_for_commit, commit_atoms
 from .lib.changeset.commits import collect as collect_commit_candidates
 from .lib.changeset.ids import allocate, allocate_many, digest_of
 from .lib.changeset.ingest import (
@@ -121,8 +121,10 @@ __all__ = [
     "ask_canonical",
     "build_net_space",
     "bulk_candidate",
+    "bulk_candidate_for_commits",
     "candidates_for_commit",
     "collect_commit_candidates",
+    "commit_atoms",
     "candidates_for",
     "check_immutable",
     "compose",

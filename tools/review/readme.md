@@ -46,6 +46,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest <name>` | give ids to every change; the default sweep closes gate 1 on its own |
 | `ingest --commits A..B` | take hunks from individual commits instead, for a net hunk that blends two concerns |
 | `ingest --bulk SEL --reason WHY` | one id over a whole subtree, no hunk bodies written; the reason is mandatory |
+| `ingest --bulk-commits A..B --reason WHY` | the same, scoped to what those commits contributed — a formatting sweep is one id |
 | `ingest --rest` | ids for whatever nothing claims yet |
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed |

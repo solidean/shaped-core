@@ -29,8 +29,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="take hunks from these commits individually, instead of from the net diff")
     p.add_argument("--bulk", metavar="SEL",
                    help="one change covering everything under SEL, with no hunk bodies written")
+    p.add_argument("--bulk-commits", metavar="A..B",
+                   help="one change covering everything these commits contributed; combines with --bulk and --paths")
     p.add_argument("--reason", default="",
-                   help="why the bulk is not being read hunk by hunk; required with --bulk")
+                   help="why the bulk is not being read hunk by hunk; required with either --bulk form")
     p.add_argument("--rest", action="store_true",
                    help="only create changes for atoms nothing claims yet")
     p.add_argument("--dry-run", action="store_true", help="report what would be created, write nothing")
@@ -58,29 +60,57 @@ def matcher(selector: str):
     return matches
 
 
-def _commit_candidates(ctx: Context, cfg: review.ReviewConfig, net: review.LineSpace, args) -> list:
-    """Hunks taken from individual commits, with the merges that cannot be mapped refused up front."""
-    spec = args.commits
-    spec_base, _, spec_head = spec.partition("..")
-    spec_head = spec_head.lstrip(".").strip() or cfg.head
-    spec_base = spec_base.strip() or cfg.base
+def _resolve_commits(ctx: Context, cfg: review.ReviewConfig, spec: str) -> list:
+    """The commits a `--commits` / `--bulk-commits` spec selects, along the first-parent path.
+
+    A merge counts as the work it brought in, which is this repo's convention for naming a single commit
+    and the only reading under which "bulk that merge" means anything.
+    A single sha selects just that commit.
+    """
+    if ".." in spec:
+        spec_base, _, spec_head = spec.partition("..")
+        spec_head = spec_head.lstrip(".").strip() or cfg.head
+        spec_base = spec_base.strip() or cfg.base
+    else:
+        spec_head = spec.strip()
+        spec_base = spec_head + "^"
 
     try:
         base_sha = ctx.git.require_rev(spec_base)
         head_sha = ctx.git.require_rev(spec_head)
-        merges = ctx.git.has_merges(base_sha, head_sha)
         commits = ctx.git.commits(base_sha, head_sha)
+        merges = ctx.git.has_merges(base_sha, head_sha)
     except review.GitError as e:
         ctx.die(str(e))
 
-    if merges:
-        ctx.die(
-            f"{len(merges)} merge commit(s) in {spec} ({', '.join(m[:8] for m in merges)}); "
-            "a merge has no single parent to map lines from, so ingest those with --bulk or from the net diff"
-        )
     if not commits:
         ctx.die(f"{spec} selects no commits")
 
+    # A commit outside the review's own range contributes nothing, and saying that plainly beats reporting an empty claim.
+    try:
+        in_range = {c.sha for c in ctx.git.commits(cfg.base, cfg.head)}
+    except review.GitError:
+        in_range = set()
+    outside = [c for c in commits if in_range and c.sha not in in_range]
+    if outside and len(outside) == len(commits):
+        ctx.die(
+            f"{spec} selects no commit inside this review's range ({cfg.base_spec}..{cfg.head_spec}); "
+            f"{outside[0].short} is not one of the {len(in_range)} commits being reviewed"
+        )
+    if outside:
+        print(review.console.yellow(
+            f"{len(outside)} of {len(commits)} commits are outside the review's range and contribute nothing"
+        ))
+    if merges:
+        print(review.console.dim(
+            f"{len(merges)} merge commit(s) in {spec}; each counts as everything it brought in"
+        ))
+    return commits
+
+
+def _commit_candidates(ctx: Context, cfg: review.ReviewConfig, net: review.LineSpace, args) -> list:
+    """Hunks taken from individual commits rather than from the net diff."""
+    commits = _resolve_commits(ctx, cfg, args.commits)
     selectors = _split(args.paths)
     found, notes = review.collect_commit_candidates(
         ctx.git, [c.sha for c in commits],
@@ -90,6 +120,21 @@ def _commit_candidates(ctx: Context, cfg: review.ReviewConfig, net: review.LineS
     for note in notes:
         print(review.console.dim(note))
     return found
+
+
+def _bulk_commit_candidate(ctx: Context, cfg: review.ReviewConfig, net: review.LineSpace, args):
+    """One claim over everything a set of commits contributed, narrowed by --bulk / --paths where given."""
+    commits = _resolve_commits(ctx, cfg, args.bulk_commits)
+    selectors = _split(args.paths)
+    label = args.bulk_commits + (f" ∩ {args.bulk}" if args.bulk else "")
+
+    return review.bulk_candidate_for_commits(
+        ctx.git, [c.sha for c in commits],
+        base=cfg.base, head=cfg.head, net=net,
+        reason=args.reason, label=label,
+        matches=matcher(args.bulk) if args.bulk else None,
+        paths=selectors or None,
+    )
 
 
 def _print_stats(cfg: review.ReviewConfig, net: review.LineSpace, candidates: list) -> None:
@@ -107,13 +152,21 @@ def _print_stats(cfg: review.ReviewConfig, net: review.LineSpace, candidates: li
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open_changeset(args.name)
-    if args.bulk and not args.reason:
-        ctx.die("--bulk requires --reason: say why these changes are not being read hunk by hunk")
+    bulking = bool(args.bulk or args.bulk_commits)
+    if bulking and not args.reason:
+        ctx.die("a bulk claim requires --reason: say why these changes are not being read hunk by hunk")
+    if args.commits and args.bulk_commits:
+        ctx.die("--commits and --bulk-commits are two different answers to the same question; pick one")
 
     net = ctx.net_space(cfg)
     ledger = ctx.ledger(paths)
 
-    if args.commits:
+    if args.bulk_commits:
+        candidate = _bulk_commit_candidate(ctx, cfg, net, args)
+        if candidate is None:
+            ctx.die(f"--bulk-commits {args.bulk_commits!r} claims nothing that still stands at head")
+        candidates = [candidate]
+    elif args.commits:
         candidates = _commit_candidates(ctx, cfg, net, args)
     elif args.bulk:
         candidate = review.bulk_candidate(net, selector=args.bulk, reason=args.reason, matches=matcher(args.bulk))

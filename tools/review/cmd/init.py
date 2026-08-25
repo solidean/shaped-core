@@ -96,8 +96,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(f"  commits {len(commits)}")
         merges = ctx.git.has_merges(base, head)
         if merges:
-            print(review.console.yellow(
-                f"  note    {len(merges)} merge commit(s) on the first-parent path; commit-local ingest cannot map across them"
+            print(review.console.dim(
+                f"  merges  {len(merges)} on the first-parent path; each counts as everything it brought in"
             ))
         print(f"\nnext: uv run review.py ingest {args.name}")
     else:

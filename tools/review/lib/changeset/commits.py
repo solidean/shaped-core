@@ -82,6 +82,81 @@ def candidates_for_commit(
     return out
 
 
+def commit_atoms(
+    git: Git, sha: str, *, base: str, head: str, net: LineSpace, paths: list[str] | None = None,
+) -> LineSpace:
+    """Every atom this commit contributed that still stands at head, without reading a single hunk body.
+
+    The same carrying as `candidates_for_commit`, but over the commit's whole diff at once.
+    This is what lets a mechanical commit be accepted wholesale: the claim is exact, and no diff reaches anyone's context.
+    """
+    parent = _parent_of(git, sha)
+    forward = linemap.build(git, sha, head)
+    backward = linemap.build(git, base, parent)
+
+    claimed = LineSpace.empty()
+    for file in parse(git.diff(parent, sha, context=0, paths=paths)):
+        commit_new_path = file.new_path or file.path
+        commit_old_path = file.old_path or file.path
+
+        added: list[int] = []
+        removed: list[int] = []
+        for hunk in file.hunks:
+            hunk_added, hunk_removed = hunk.sides()
+            added.extend(hunk_added)
+            removed.extend(hunk_removed)
+
+        if added:
+            head_path, survived = linemap.map_forward(forward, commit_new_path, added)
+            claimed.add(ADDED, head_path, survived.intersect(net.get(ADDED, head_path)))
+        if removed:
+            base_path = linemap.source_path(backward, commit_old_path)
+            reached = linemap.map_backward(backward, commit_old_path, removed)
+            claimed.add(REMOVED, base_path, reached.intersect(net.get(REMOVED, base_path)))
+
+        # A file-level change is contributed whole, so it needs no mapping — only a check that head still carries it.
+        for kind, discriminant in file.file_atoms():
+            match = next((a for a in net.files if a.kind == kind and a.path in (commit_new_path, commit_old_path)), None)
+            _ = discriminant
+            if match is not None:
+                claimed.files = claimed.files | {match}
+
+    return claimed
+
+
+def bulk_candidate_for_commits(
+    git: Git, shas: list[str], *, base: str, head: str, net: LineSpace,
+    reason: str, label: str, matches=None, paths: list[str] | None = None,
+) -> Candidate | None:
+    """One change covering everything these commits contributed, with no hunk bodies on disk.
+
+    `matches` narrows it further by path, so "the formatting sweep, but only under libs/" is one claim rather than two.
+    """
+    claimed = LineSpace.empty()
+    for sha in shas:
+        claimed = claimed.union(commit_atoms(git, sha, base=base, head=head, net=net, paths=paths))
+
+    if matches is not None:
+        narrowed = LineSpace.empty()
+        for (side, path), spans in claimed.lines.items():
+            if matches(path):
+                narrowed.add(side, path, spans)
+        narrowed.files = frozenset(a for a in claimed.files if matches(a.path))
+        claimed = narrowed
+
+    if claimed.is_empty:
+        return None
+
+    lines = sum(len(v) for v in claimed.lines.values())
+    files = len({p for _, p in claimed.lines} | {a.path for a in claimed.files})
+    return Candidate(
+        kind="bulk", path=label,
+        digest=digest_of("bulk-commits", "\x1f".join(sorted(shas)), label, reason),
+        summary=f"{label} — {len(shas)} commit(s), {files} file(s), {lines} line(s), accepted wholesale",
+        claim=claimed, provenance="bulk", reason=reason,
+    )
+
+
 def shrinkage(git: Git, sha: str, candidates: list[Candidate], paths: list[str] | None = None) -> tuple[int, int]:
     """(lines the commit wrote, lines of those that still reach net space).
 

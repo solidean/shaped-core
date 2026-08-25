@@ -109,6 +109,7 @@ def test_id_extends_on_collision(root: Path) -> None:
     second = allocate(digest, {first})
     third = allocate(digest, {first, second})
 
+    assert len(first) == len("CHANGE-") + 5, f"a fresh id is five characters, got {first}"
     assert second.startswith(first), (first, second)
     assert third.startswith(second), (second, third)
     assert len({first, second, third}) == 3
@@ -273,6 +274,56 @@ def test_commit_local_claims_only_surviving_lines(root: Path) -> None:
     assert claimed.get(ADDED, "a.txt").contains(5), "the line first wrote and kept must be claimed"
     assert not claimed.get(ADDED, "a.txt").contains(25), "the line second rewrote must not be claimed by first"
     assert net.subtract(claimed), "the second commit's line must still be left for another change"
+
+
+def test_bulk_by_commit_claims_what_the_commit_contributed(root: Path) -> None:
+    """A mechanical commit becomes one claim, exact to the lines that still stand at head."""
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(20), "b.txt": numbered(20)})
+    sweep = commit(root, "sweep", {
+        "a.txt": numbered(20, mark="LINE"),
+        "b.txt": numbered(20),
+    })
+    head = commit(root, "later", {
+        "a.txt": numbered(20, mark="LINE"),
+        "b.txt": numbered(20).replace("line 9\n", "line 9 edited\n"),
+    })
+
+    net = build_net(git, base, head)
+    claimed = commit_ingest.commit_atoms(git, sweep, base=base, head=head, net=net)
+
+    assert claimed.get(ADDED, "a.txt"), "the sweep's own lines must be claimed"
+    assert not claimed.get(ADDED, "b.txt"), "a line another commit wrote must not be claimed by the sweep"
+    assert net.subtract(claimed), "the later edit must be left for another change"
+
+    candidate = commit_ingest.bulk_candidate_for_commits(
+        git, [sweep], base=base, head=head, net=net, reason="mechanical rename", label="sweep",
+    )
+    assert candidate is not None
+    assert candidate.kind == "bulk" and candidate.reason == "mechanical rename"
+    assert not candidate.body, "a bulk claim writes no hunk body, which is the point of it"
+    assert len(candidate.claim) == len(claimed)
+
+
+def test_bulk_by_commit_narrows_by_path(root: Path) -> None:
+    git = git_init(root)
+    base = commit(root, "base", {"src/a.txt": numbered(10), "docs/b.txt": numbered(10)})
+    sweep = commit(root, "sweep", {
+        "src/a.txt": numbered(10, mark="LINE"),
+        "docs/b.txt": numbered(10, mark="LINE"),
+    })
+
+    net = build_net(git, base, sweep)
+    everything = commit_ingest.bulk_candidate_for_commits(
+        git, [sweep], base=base, head=sweep, net=net, reason="all of it", label="sweep",
+    )
+    only_src = commit_ingest.bulk_candidate_for_commits(
+        git, [sweep], base=base, head=sweep, net=net, reason="src only", label="sweep",
+        matches=lambda p: p.startswith("src/"),
+    )
+    assert only_src is not None
+    assert len(only_src.claim) < len(everything.claim)
+    assert not only_src.claim.get(ADDED, "docs/b.txt")
 
 
 def test_commit_local_claims_stay_inside_net_space(root: Path) -> None:

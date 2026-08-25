@@ -15,7 +15,7 @@ import hashlib
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 PREFIX = "CHANGE-"
-_MIN_LEN = 4
+_MIN_LEN = 5
 _MAX_LEN = 8
 
 
@@ -29,7 +29,7 @@ def digest_of(*parts: str) -> str:
 
 
 # The digest bits an id is cut from, taken from the most significant end.
-# Cutting from the top is what makes a five-character id extend the four-character one rather than replace it,
+# Cutting from the top is what makes a longer id extend the shorter one rather than replace it,
 # so a lengthened id still reads as the same change.
 _BITS = 64
 
@@ -43,8 +43,10 @@ def _encode(digest: str, length: int) -> str:
 def allocate(digest: str, taken: set[str]) -> str:
     """The id for a digest not yet in the ledger, lengthened only as far as a collision forces.
 
-    Four characters is twenty bits, which collides at roughly two percent over two hundred changes,
-    so the extension path is ordinary rather than exceptional and is exercised by the self-test.
+    Five characters is twenty-five bits.
+    Four would have been twenty, which is about a one-in-five chance of a collision over a six-hundred-change review —
+    common enough that ids of mixed width would have been the normal case rather than the rare one.
+    The extension path still exists and is exercised by the self-test, since twenty-five bits is not a guarantee either.
     """
     for length in range(_MIN_LEN, _MAX_LEN + 1):
         candidate = PREFIX + _encode(digest, length)

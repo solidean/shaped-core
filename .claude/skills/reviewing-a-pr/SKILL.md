@@ -50,8 +50,10 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    Where a vendored drop or a mechanical sweep would eat your context for nothing, bulk it *with a real reason*, then `--rest`:
    ```bash
    uv run review.py ingest pr-<n> --bulk extern/zstd/ --reason "vendored 1.5.6 drop-in, matches the upstream tag"
+   uv run review.py ingest pr-<n> --bulk-commits <sha> --reason "clang-format sweep, no semantic change"
    uv run review.py ingest pr-<n> --rest
    ```
+   Scope a bulk by path when the change is confined to a subtree, and by commit when it is confined to an author's intent — a sweep, a vendored drop, a merged branch already reviewed elsewhere.
    The reason is the honest part.
    It is what makes "I did not read this" a decision the maintainer can see and overrule.
 

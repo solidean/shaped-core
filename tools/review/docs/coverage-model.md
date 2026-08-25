@@ -70,7 +70,14 @@ Both directions are one diff each, not a walk over the commits between.
 A line inside a region a later commit rewrote is **killed** rather than mapped, because that commit owns the line now.
 `--stats` reports the shrinkage per commit, so the mapping is never a black box.
 
-**Bulk** (`--bulk SEL --reason WHY`) — one id over everything a selector matches, with no hunk bodies on disk.
+A merge counts as everything it brought in, which is this repo's convention for naming a single commit.
+Its first-parent diff is what gets carried, so bulking a merge means accepting the branch it merged.
+
+**Bulk** (`--bulk SEL` or `--bulk-commits A..B`, with `--reason WHY`) — one id over a whole set of atoms, with no hunk bodies on disk.
+A path selector scopes it by where the change landed; a commit spec scopes it by who made it, which is the shape a formatting sweep or a vendored drop actually has.
+Both together intersect, so "the sweep, but only under `libs/`" is one claim rather than two.
+A commit's contribution is carried exactly the same way a commit-local hunk is, so a bulk claim is exact rather than approximate.
+
 The reason is mandatory, and that is the point.
 It forces the agent to say why it is not reading them, instead of quietly not reading them.
 
