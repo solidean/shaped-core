@@ -552,10 +552,39 @@ void viewer::finish_frame(frame& f)
     }
 
     // The root exists only to own the frame's layout; it holds no scene of its own and its target is the backbuffer.
+    //
+    // Which layout that is depends on what the caller put on the window's own root view.
+    // A window view carrying nothing but a layout is flattened away — the root adopts that layout directly, so the
+    // common case costs no second texture.
+    // A window view carrying content of its own — `f.add_scene()`, the shorthand that names no view at all — cannot be:
+    // it has to render into its own texture, so the root gets a layout of one leaf naming it.
     auto root = view_data{};
     root.id = im.id;
-    if (!def.nodes.empty())
+
+    auto const window_draws_itself = [&]
+    {
+        if (f._windows.empty())
+            return false;
+        for (auto const& l : def[f._windows.front()].layers)
+            if (l.kind != layer_kind::layout)
+                return true;
+        return false;
+    }();
+
+    if (window_draws_itself)
+    {
+        auto const window_view = f._windows.front();
+
+        // Appended, so every leaf the caller already filled keeps its node id.
+        auto const node = def.nodes.add_container(invalid_node);
+        auto leaf = layout_leaf{};
+        leaf.views.push_back(window_view);
+        (void)def.nodes.add_leaf(node, cc::move(leaf));
+        root.layers.push_back({.kind = layer_kind::layout, .blend = layer_blend::replace, .root_node = node});
+    }
+    else if (!def.nodes.empty())
         root.layers.push_back({.kind = layer_kind::layout, .blend = layer_blend::replace, .root_node = layout_node_id(0)});
+
     def.root_view = view_index(def.views.size());
     def.views.push_back(cc::move(root));
 

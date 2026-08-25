@@ -157,6 +157,11 @@ sc_add_shader_package(
         pt_hit.hlsl:miss:PtShadowMiss
 )
 
+# The examples corpus: the viewer as a caller actually reaches for it.
+# The subdirectory gates itself on the window + dx12 + DXC combination an example needs, and
+# sc_add_single_file_examples is a no-op when SC_BUILD_EXAMPLES is off.
+add_subdirectory(examples)
+
 # Test executable.
 # The vocabulary test needs no device and runs everywhere; the GPU tests drive a dx12 WARP/hardware context
 # and compile the ray-tracing shaders through DXC, so they need the dx12 backend and a compiler.
