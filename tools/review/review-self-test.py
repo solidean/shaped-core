@@ -25,7 +25,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
 from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, group_hunks, register  # noqa: E402
-from tools.review.lib.changeset.ledger import Ledger  # noqa: E402
+from tools.review.lib.changeset.ledger import Change, Ledger  # noqa: E402
 from tools.review.lib.entry.answers import AnswerFile  # noqa: E402
 from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
 from tools.review.lib.entry.grammar import ReviewParseError  # noqa: E402
@@ -464,6 +464,36 @@ def test_stamping_leaves_every_other_byte_alone(root: Path) -> None:
 
     # Stamping is idempotent: a block that already carries a round is not touched again.
     assert stamp_rounds(stamped, 3) is None
+
+
+def test_stamping_preserves_crlf(root: Path) -> None:
+    """A splice that silently converted the whole file's line endings would not be a splice."""
+    from tools.review.lib.entry.parse import parse_file
+    from tools.review.lib.core.atomic import write_atomic
+
+    for newline in ("\r\n", "\n"):
+        target = root / f"050-{'crlf' if newline == '\r\n' else 'lf'}.md"
+        target.write_bytes(ENTRY.replace("\n", newline).encode("utf-8"))
+
+        entry = parse_file(target)
+        assert entry.newline == newline, (newline, entry.newline)
+        write_atomic(target, stamp_rounds(entry, 1))
+
+        after = target.read_bytes()
+        assert b"round: 1" in after, "the stamp must still land"
+        assert (b"\r\n" in after) == (newline == "\r\n"), f"{newline!r} was not preserved"
+        assert after.count(b"\r") == after.count(b"\r\n"), "no stray carriage returns"
+
+
+def test_ledger_resolves_a_bare_code(root: Path) -> None:
+    """An entry may name a change by its code alone, which is what a person retypes."""
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        ledger.append(Change(id="CHANGE-ABCDE", digest="d", kind="hunk", path="a.txt"))
+
+        assert ledger.resolve("CHANGE-ABCDE") is not None
+        assert ledger.resolve("abcde") is not None, "the bare code, lowercased, must resolve"
+        assert ledger.resolve("CHANGE-NOPE1") is None, "an id that is not there must not resolve"
 
 
 def test_ask_hash_ignores_bookkeeping(root: Path) -> None:

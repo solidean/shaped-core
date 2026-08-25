@@ -66,11 +66,6 @@ class Block:
     def is_ask(self) -> bool:
         return self.type == "ask"
 
-    @property
-    def multi(self) -> bool:
-        """Whether an ask accepts several selections; a radio group is single by definition."""
-        return self.attrs.get("multi", "").strip().lower() in ("1", "true", "yes")
-
 
 @dataclass
 class Entry:
@@ -82,6 +77,7 @@ class Entry:
     blocks: list[Block] = field(default_factory=list)
     text: str = ""
     body_start: int = 0
+    newline: str = "\n"
 
     @property
     def id(self) -> str:
@@ -222,12 +218,18 @@ def _validate_block(block: Block, path: Path, seen_asks: set[str]) -> None:
 
 
 def parse_text(text: str, path: Path, slug: str = "") -> Entry:
-    """Parse entry text, raising ReviewParseError with a line number on anything malformed."""
+    """Parse entry text, raising ReviewParseError with a line number on anything malformed.
+
+    Offsets are computed against LF-normalized text, and the file's own line ending is remembered
+    so a write can put it back — a splice that silently converted the whole file would not be a splice.
+    """
+    newline = "\r\n" if "\r\n" in text else "\n"
     text = text.replace("\r\n", "\n")
     front, body_offset, body_line = _split_front(text, path)
     _validate_front(front, path)
 
-    entry = Entry(path=path, slug=slug or path.stem, front=front, text=text, body_start=body_offset)
+    entry = Entry(path=path, slug=slug or path.stem, front=front, text=text,
+                  body_start=body_offset, newline=newline)
 
     lines = text[body_offset:].splitlines(keepends=True)
     starts: list[tuple[int, int, str]] = []
@@ -262,4 +264,8 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
 
 
 def parse_file(path: Path) -> Entry:
-    return parse_text(path.read_text(encoding="utf-8"), path, slug=path.stem)
+    # `newline=""` disables universal-newline translation, so the file's own line ending reaches the parser
+    # and can be put back on write.
+    # Opened rather than `read_text`, whose `newline` argument only exists from 3.13.
+    with path.open(encoding="utf-8", newline="") as f:
+        return parse_text(f.read(), path, slug=path.stem)

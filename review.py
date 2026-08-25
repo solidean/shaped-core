@@ -31,20 +31,24 @@ from tools.review.cmd import (  # noqa: E402
     generate,
     ingest,
     init,
+    list_reviews,
     round as round_cmd,
     selftest,
     serve,
     show,
     sync,
+    validate,
 )
 
 # The map of the CLI: one module per command, in the order `review.py --help` lists them.
 COMMANDS = [
     init,
+    list_reviews,
     ingest,
     coverage,
     generate,
     show,
+    validate,
     serve,
     delta,
     round_cmd,

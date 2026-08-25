@@ -18,7 +18,7 @@ from ..core.config import ReviewConfig
 from ..git.run import Git
 from ..space.netspace import LineSpace
 from .parse import Entry, parse_file
-from .write import compose, write_entry
+from .write import compose, restore_newlines, write_entry
 
 OVERVIEW_SLUG = "010-overview"
 COVERAGE_SLUG = "990-coverage"
@@ -107,8 +107,9 @@ def _replace_generated(entry: Entry, key: str, body: str) -> str:
     for block in entry.blocks:
         if block.attrs.get("generated") == key:
             tail = "\n\n" if entry.text[block.end - 2:block.end] != "\n\n" else ""
-            return entry.text[:block.start] + body.strip() + "\n" + tail + entry.text[block.end:]
-    return entry.text.rstrip("\n") + "\n\n" + body.strip() + "\n"
+            spliced = entry.text[:block.start] + body.strip() + "\n" + tail + entry.text[block.end:]
+            return restore_newlines(entry, spliced)
+    return restore_newlines(entry, entry.text.rstrip("\n") + "\n\n" + body.strip() + "\n")
 
 
 def ensure(path: Path, front: dict[str, str], key: str, body: str) -> Entry:

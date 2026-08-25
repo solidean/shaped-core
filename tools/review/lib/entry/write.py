@@ -27,6 +27,15 @@ def _splice(text: str, edits: list[tuple[int, int, str]]) -> str:
     return out
 
 
+def restore_newlines(entry: Entry, text: str) -> str:
+    """Re-apply the entry file's own line ending to spliced text.
+
+    Offsets are computed against LF-normalized text, so without this a first stamp would convert
+    a CRLF file wholesale — which is exactly the re-serialization this module exists to avoid.
+    """
+    return text.replace("\n", entry.newline) if entry.newline != "\n" else text
+
+
 def stamp_rounds(entry: Entry, round_number: int) -> str | None:
     """Give every unstamped block a `round:`, returning the new text, or None when nothing needed one.
 
@@ -39,13 +48,13 @@ def stamp_rounds(entry: Entry, round_number: int) -> str | None:
         edits.append((block.heading_end, block.heading_end, f"round: {round_number}\n"))
     if not edits:
         return None
-    return _splice(entry.text, edits)
+    return restore_newlines(entry, _splice(entry.text, edits))
 
 
 def append_text(entry: Entry, addition: str) -> str:
     """Append blocks to an entry, keeping exactly one blank line before them."""
     body = entry.text.rstrip("\n")
-    return f"{body}\n\n{addition.strip()}\n"
+    return restore_newlines(entry, f"{body}\n\n{addition.strip()}\n")
 
 
 def immutability_violations(entry: Entry, finalized: dict[str, str]) -> list[str]:

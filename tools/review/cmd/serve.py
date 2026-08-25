@@ -58,8 +58,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     server, port = start(ctx, args.name, host=args.host, port=args.port)
     url = f"http://{args.host}:{port}/"
 
-    review.record(paths.log, "serve", url=url)
+    review.record(paths.log, "serve", url=url, host=args.host)
     print(f"review {cfg.name} at {url}")
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        # Reachable from the network is the point of --host, and there is no authentication of any kind.
+        print(review.console.yellow(
+            f"  warning: bound to {args.host}, so anyone who can reach this machine can read and answer this review"
+        ))
     print(f"  round {cfg.next_round}, {len(paths.entry_files())} entries")
     print("  answers save as you type; `Send to Claude` finalizes the round")
 

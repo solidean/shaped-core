@@ -39,6 +39,7 @@ from .lib.core.paths import (
     ReviewNameError,
     ReviewPaths,
     default_root,
+    reviews_root,
     entry_slug,
     validate_name,
 )
@@ -132,6 +133,7 @@ __all__ = [
     "coverage_body",
     "coverage_front",
     "default_root",
+    "reviews_root",
     "describe_group",
     "digest_of",
     "dump",

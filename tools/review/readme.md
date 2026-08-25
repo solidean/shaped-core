@@ -50,6 +50,8 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest --rest` | ids for whatever nothing claims yet |
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed |
+| `list` | the reviews in this repository, and where each one stands |
+| `validate <name>` | every entry parses, every change id resolves; run it before serving a round |
 | `generate <name>` | write or refresh the overview and coverage entries |
 | `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view |
 | `serve <name>` | the page the review is answered in; non-blocking |
@@ -103,6 +105,20 @@ tools/review/
   assets/                 the page: plain HTML, CSS and JS, no framework
   review-self-test.py     the suite
 ```
+
+## Not yet
+
+Named here rather than left to be discovered.
+
+- **Remote and mobile.** The page is a local server, so it is reachable from another device only on the same network,
+  via `serve --host 0.0.0.0` — which has no authentication, so it is a home-network answer rather than a general one.
+  The intended fix is publishing a review as a claude.ai Artifact that saves its own answers back, so a round can be
+  answered from a phone anywhere; nothing of it is built.
+- **`rank:` is accepted but not implemented.** The grammar takes it as an option kind and the page renders it as a checkbox,
+  so ordering is not actually captured.
+  Use `radio:` and `check:` until it is.
+- **The published page has no offline form.** `show --all` is the fallback for reading a review away from the machine,
+  and answers come back as chat text.
 
 ## Elsewhere
 

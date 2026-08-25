@@ -94,11 +94,33 @@ class Context:
             except review.ReviewParseError as e:
                 self.die(str(e))
 
+            # An ask deleted between rounds must not leave its answer keyed to a question nobody can see.
+            moved = answers.reconcile(entry)
+            if moved:
+                answers.save()
+                print(review.console.yellow(
+                    f"{entry.slug}: {', '.join(moved)} no longer exist as asks; their answers are kept as orphans"
+                ), file=sys.stderr)
+
             updated = review.stamp_rounds(entry, cfg.next_round)
             if updated is not None:
                 review.write_atomic(entry.path, updated)
                 stamped += 1
         return stamped
+
+    def check_references(self, paths: review.ReviewPaths, entries: list[review.Entry]) -> list[str]:
+        """Change ids an entry names that the ledger does not have.
+
+        A mistyped id is a discharge that silently does not discharge, which makes the coverage report lie —
+        the same failure class the block grammar refuses for a mistyped attribute.
+        """
+        ledger = self.ledger(paths)
+        problems = []
+        for entry in entries:
+            for change_id in sorted(set(entry.referenced_changes())):
+                if ledger.resolve(change_id) is None:
+                    problems.append(f"{entry.slug}: {change_id} is not in the ledger")
+        return problems
 
     def discharged(self, entries: list[review.Entry]) -> set[str]:
         """Every change id an ask discharges, across the whole review."""

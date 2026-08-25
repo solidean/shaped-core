@@ -41,10 +41,6 @@ class ReviewPaths:
         return self.root / "review.toml"
 
     @property
-    def index(self) -> Path:
-        return self.root / "index.md"
-
-    @property
     def changes_dir(self) -> Path:
         return self.root / "changes"
 
@@ -101,6 +97,11 @@ def entry_slug(entry_file: Path) -> str:
     return entry_file.stem
 
 
+def reviews_root(repo: Path) -> Path:
+    """The directory a repository's reviews live in, which is scratch space rather than tracked content."""
+    return repo / ".tmp" / "reviews"
+
+
 def default_root(repo: Path, name: str) -> Path:
     """Where a review lives unless `--dir` says otherwise."""
-    return repo / ".tmp" / "reviews" / name
+    return reviews_root(repo) / name
