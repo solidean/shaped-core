@@ -82,7 +82,7 @@ EXAMPLE("shaped-viewer/hello-cube")
         .geometry = sv::triangle_geometry::create_from_positions(cube_triangles(2.0f)),
         .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, face_colors())}};
 
-    for (auto f : sv::interactive("shaped-viewer/hello-cube", {.title = "shaped-viewer — hello cube"}))
+    for (auto f : sv::interactive("shaped-viewer/hello-cube"))
     {
         // The window's own view, which fills the window when nothing lays it out.
         auto view = f.window().view();
