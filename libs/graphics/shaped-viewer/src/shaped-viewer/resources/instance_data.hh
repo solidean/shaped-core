@@ -4,10 +4,9 @@
 
 /// One scene item as a closest-hit reads it, indexed by `InstanceID()` — mirrors `sv_instance` in shaders/material_runtime.hlsli.
 ///
-/// This is the table that retires "one mesh per view".
 /// Everything a hit needs to shade is reached from here: the material's parameter block, and the geometry the hit is on.
-/// Nothing is a global binding any more except the table itself, so a view may hold any number of meshes with any number of
-/// materials between them.
+/// Nothing the path tracer binds is per-mesh any more except the table itself, so a view may hold any number of meshes with any
+/// number of materials between them.
 ///
 /// Every field but `is_indexed` is a **pinned** bindless index.
 /// The table is rebuilt each frame while the resources it names are content-cached across frames, so an epoch-scoped index here

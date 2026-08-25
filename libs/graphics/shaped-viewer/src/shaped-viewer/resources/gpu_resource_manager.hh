@@ -8,7 +8,9 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/resources/instance_data.hh>
+#include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
+#include <shaped-viewer/scene/scene_item.hh>
 
 /// How much follow-up GPU work the manager may record per epoch.
 ///
@@ -74,9 +76,20 @@ public:
     /// The immutable binding group to bind, covering every table the manager declares.
     [[nodiscard]] sg::binding_group_handle const& group() const { return _group; }
 
+    /// The layout `group()` satisfies — what a pipeline composing the manager's tables as a group must be built over.
+    [[nodiscard]] sg::binding_group_layout_handle const& layout() const;
+
     /// Every element index acquired in this epoch for `table`, in acquire order — the access declaration's input.
     /// Empty means the table is unused this epoch, which is a perfectly good thing to declare.
     [[nodiscard]] cc::span<u32 const> elements(bindless_table table) const;
+
+    /// Declares this epoch's elements of every declared table for the **next `dispatch_rays` on `cmd`**, as shader reads.
+    ///
+    /// sg refuses a dispatch whose bound array bindings were not all declared, and a table nobody acquired from still
+    /// has to be declared — as empty — rather than skipped.
+    /// So this covers the whole group rather than the tables a caller believes it touched, which is the only version
+    /// that cannot silently under-declare.
+    void declare_raytracing_access(sg::command_list& cmd) const;
 
 private:
     friend class gpu_resource_manager;
@@ -210,10 +223,27 @@ public:
 
     /// The GPU record for one scene item: where its material parameters live, and where its geometry does.
     ///
-    /// This is what retires the "one mesh per view" seam — a view uploads one of these per item and the closest-hit reaches
-    /// everything it needs from `InstanceID()`, rather than the trace binding one mesh's buffers globally.
+    /// A view uploads one of these per item and the closest-hit reaches everything it needs from `InstanceID()`, rather than
+    /// the trace binding one mesh's buffers globally.
     /// Both ids must be resident.
     [[nodiscard]] instance_gpu describe_instance(mesh_id mesh, instance_id instance);
+
+    /// Everything placing `mesh` in a scene costs, as one `scene_item`: its geometry uploaded and BLAS-built, its
+    /// material resolved against it, and the parameter block that resolution fills acquired.
+    ///
+    /// The three fields have to come from ONE resolution — the block is filled at the layout the permutation's shader
+    /// reads at — which is why this is a single call rather than three the caller sequences.
+    /// A mesh naming `material_id::invalid` draws with `sv::default_material`, so a mesh always draws.
+    /// Every step is content-keyed, so re-adding an unchanged mesh every frame is lookups rather than uploads.
+    ///
+    /// The material library is the process-wide one `sv::acquire_material_library` answers with, and must carry the
+    /// material the mesh names.
+    [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
+
+    /// The layout of the staging group every bindless table is bound through.
+    /// A pipeline that traces against those tables composes this as one of its groups, which is what makes the
+    /// manager's contract a schema rather than a set of names a shader has to rediscover.
+    [[nodiscard]] sg::binding_group_layout_handle const& bindless_layout() const;
 
     /// Whether `table` was declared at all (a budget of 0 omits it).
     [[nodiscard]] bool has_table(bindless_table table) const;
@@ -226,6 +256,13 @@ public:
     texture_manager textures;
     attribute_manager attributes;
     instance_manager instances;
+
+    /// One generated closest-hit per material permutation, in the first format the context accepts.
+    ///
+    /// It lives here rather than next to the render path because a permutation is acquired where a mesh is *authored*
+    /// — `scene_ref::add_mesh` resolves the material and needs the layout back in the same breath — and this is the
+    /// one per-scene cache every other resource already hangs off.
+    material_shader_cache shaders;
 
     gpu_resource_manager(gpu_resource_manager&&) noexcept = default;
     gpu_resource_manager(gpu_resource_manager const&) = delete;
@@ -249,6 +286,7 @@ private:
                          texture_manager textures,
                          attribute_manager attributes,
                          instance_manager instances,
+                         material_shader_cache shaders,
                          sg::staging_binding_group_handle group,
                          cc::vector<table_entry> tables,
                          texture_policy texture_policy,

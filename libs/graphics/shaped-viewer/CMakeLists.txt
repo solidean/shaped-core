@@ -15,7 +15,6 @@ add_library(shaped-viewer
     src/shaped-viewer/shader_library.cc
     src/shaped-viewer/scene/light.cc
     src/shaped-viewer/scene/background.cc
-    src/shaped-viewer/scene/pbr_material.cc
     src/shaped-viewer/material/material_type.cc
     src/shaped-viewer/material/material.cc
     src/shaped-viewer/material/material_library.cc
@@ -43,7 +42,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/view_renderer.cc
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
-    src/shaped-viewer/rendering/material_shader_cache.cc
+    src/shaped-viewer/resources/material_shader_cache.cc
 )
 
 target_sources(shaped-viewer
@@ -104,7 +103,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/view_renderer.hh
     src/shaped-viewer/rendering/viewer_renderer.hh
     src/shaped-viewer/rendering/shaders.hh
-    src/shaped-viewer/rendering/material_shader_cache.hh
+    src/shaped-viewer/resources/material_shader_cache.hh
 )
 
 target_compile_features(shaped-viewer PUBLIC cxx_std_23)
@@ -156,7 +155,6 @@ sc_add_shader_package(
         pathtrace.hlsl:raygen:PathTraceRayGen
         pt_hit.hlsl:miss:PtMiss
         pt_hit.hlsl:miss:PtShadowMiss
-        pt_hit.hlsl:closest_hit:PtClosestHit
 )
 
 # Test executable.

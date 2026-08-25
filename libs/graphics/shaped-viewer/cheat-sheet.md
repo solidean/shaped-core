@@ -50,7 +50,8 @@ cam.basis()                      // -> camera_basis { vec3d right, up, forward }
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; } — view-wide integration controls (no light/sky: those are on the view)
-sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; material_set_id materials; tg::affine_transform3f transform; } — triangle_mesh only for now
+sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
+                                 //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
                                  //   default-constructs to the identity; the renderer packs its linear part + translation into the TLAS's row-major 3x4
 sv::area_light                   // { pos3f center; vec3f half_extent_u, half_extent_v; vec3f emission; } — a world-space rect emitting along cross(half_extent_u, half_extent_v); one typed list per light kind on the view
@@ -63,9 +64,8 @@ sv::background::sun(direction, radiance)       // -> background — soft lobe pe
 sv::background::daylight() / ::studio()        // -> background — presets: blue sky + warm ground + soft sun / neutral gray brighter overhead
 bg.combined_with(other) / bg.scaled(factor)    // -> background — SH is linear, so environments superpose and scale; how gradient + sun compose into a preset
 sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
-sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — flat, per-triangle
-sv::pbr_attribute::base_color / ::metallic / ::roughness / ::emissive   // the per_triangle attribute names per-face PBR travels under
-sv::pbr_material_attributes(materials) -> vector<mesh_attribute>        // scalarizes an AoS range into those four; TEMPORARY, until an attribute can hold a struct
+sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — pbr_raytrace_routine's vocabulary, flat per-triangle
+                                 //   the path tracer shades through sv::material instead; the same four fields are attributes of the builtin `pbr` type
 ```
 
 ## Layout — the tree a view is filled with
@@ -146,6 +146,8 @@ m.build_instance_parameters(resolved, layout)  // -> vector<byte>; uploads+pins 
 m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key
 m.instances.get(id)                    // -> instance_record {buffer<byte> parameters; element; hash128 permutation; size_bytes;}
 
+m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the material resolved, its permutation compiled, its block acquired
+                                       //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.describe_instance(mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv_instance
 m.meshes.get(id).vertices_index()      // -> u32; the mesh's positions as a bindless index (indices_index() likewise)
@@ -187,6 +189,7 @@ lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
 sv::builtin_material::pbr / unlit                    // the names the builtins register under
+sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
 sv::acquire_shader_library()     // -> result<slib::shader_library*>, process-wide — what a GENERATED permutation compiles through
@@ -224,14 +227,16 @@ Gotchas:
 `material/shader_generator.hh`; `shaders/material_runtime.hlsli` is the hand-authored half it is written against.
 
 ```cpp
-sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; material_parameter_layout layout; hash128 key;}
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; material_parameter_layout layout; vector<sg::sampler> samplers; hash128 key;}
+                                 //   samplers[i] is what `sv_sampler_i` must be bound to; the text names a register and nothing else records the state
 sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
 sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; }
                                  //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
 {.epilogue_include = "pt_material_hit.hlsli"}   // -> a full DXR closest-hit for this permutation, not just the material function
 
-sv::material_shader_cache::create(sg::shader_format::dxil)   // one compiled closest-hit per permutation
-cache.acquire(resolved)          // -> material_permutation const& {layout; async_compiled_shader shader; string source;}
+resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, in the context's preferred format
+sv::material_shader_cache::create(sg::shader_format::dxil)   // one compiled closest-hit per permutation, for a caller building their own
+cache.acquire(resolved)          // -> material_permutation const& {hash128 key; layout; vector<sg::sampler> samplers; async_compiled_shader shader; string source;}
 cache.find(permutation_key)      // -> material_permutation const*, null if nothing acquired it;  cache.count()
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
@@ -347,15 +352,13 @@ mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; el
 mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, but an indexed BLAS: PrimitiveIndex() order follows the index buffer
 sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas; }
 material_manager::acquire(material_data) -> material_set_id  // O(1) if resident; else uploads (one pbr_material_gpu per triangle)
-material_manager::acquire(attributes, triangle_count) -> material_set_id
-                                                             //   the same from a mesh's per_triangle sv::pbr_attribute lists — what scene_ref::add_mesh calls
-                                                             //   keyed by folding the attributes' own hashes, so it never re-hashes their bytes; a missing one falls back to pbr_material's default
+                                                             //   pbr_raytrace_routine's path only — the path tracer reads a per-instance block instead
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
 resources.advance_to(epoch)                         // reclaim + advance; IDEMPOTENT, so every window's draw path may call it and the first one pays
 resources.current_epoch()                           // -> sg::epoch — what it last advanced to
-sv::mesh_id / material_set_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
+sv::mesh_id / material_set_id / instance_id / attribute_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
 ```
 
 The managers ride on `sv::impl::lru_pool<Id, Record>`, the reusable id-pool.
@@ -381,8 +384,10 @@ m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for t
                                             //   a pin needs no unlock, and is recorded for the access declaration like an acquire
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
-bound.group()                               // -> sg::binding_group_handle const& — what to bind
+bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
 bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
+bound.declare_raytracing_access(cmd)        // declares EVERY declared table for the next dispatch_rays, empty ones included
+m.bindless_layout()                         // -> the same layout, without taking a snapshot
 m.has_table(table) / m.table_capacity(table)
 
 // textures + the follow-up work their policy asks for
@@ -428,6 +433,11 @@ sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // outp
 
 // The leaf routines they drive — each an sg::render_routine<> (everything that traces/draws is a routine):
 sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches the GI integrator into the UAV target (no-op if the shaders did not compile)
+sv::pathtrace_routine::is_ready(cmd)                 // -> whether the LAST execute dispatched; false before the first one
+sv::pt_trace_desc                                    // the trace's targets and constants, plus:
+                                                     //   instance_table — one sv::instance_gpu per TLAS instance, in that order
+                                                     //   hit_groups     — the permutations, in hit-group index order; tlas_instance::hit_group_offset indexes it
+                                                     //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
 sv::pt_frame_constants_gpu                           // { camera_gpu camera; area_light_gpu light; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; } — 256 bytes
 
 // Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
@@ -561,7 +571,8 @@ A view whose camera the caller set last frame is skipped, so the two never fight
 ```cpp
 // the whole loop
 auto const mesh = sv::mesh{.geometry = sv::triangle_geometry::create_from_positions(positions),  // once: this pins and hashes
-                           .attributes = sv::pbr_material_attributes(materials)};                // per-face PBR, scalarized
+                           .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colors)},
+                           .material = sv::default_material(*sv::acquire_material_library().value())};
 
 for (auto f : sv::interactive("main"))
 {
@@ -589,15 +600,14 @@ for (auto f : sv::interactive("simple"))
 ```cpp
 // setup (once): build the scene through the managers
 auto resources = sv::gpu_resource_manager::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
-auto mesh = resources.meshes.acquire(sv::triangle_data::create(positions));   // or indexed_triangle_data::create(positions, indices)
-auto mats = resources.materials.acquire(sv::material_data::create(materials));
+auto const item = resources.acquire_scene_item(mesh);   // geometry + BLAS, the material resolved, its permutation compiled
 
 // per frame: describe -> flatten -> record -> present, in one command list
 auto def = sv::viewer_definition{};
 
 auto v = sv::view_data{};
 v.id = sv::view_id::from_string("main");
-sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = mats});
+sv::ensure_scene_3d(v).items.push_back(item);
 def.views.push_back(cc::move(v));
 
 // a root view whose one layer is a layout naming that view — what sv::viewer synthesizes per frame
@@ -651,14 +661,12 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   ray reads only visibility) rather than reusing the surface payload.
 - **The frame-constants cbuffer is padded to 256 bytes** — a D3D12 CBV is sized in 256-byte multiples, so a
   smaller backing buffer overruns.
-- **One mesh per view for now** — the trace binds the first item's vertex/material buffers; multi-mesh needs
-  per-instance indexing (a flagged extension). The TLAS is still built from every item.
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
-  `mesh_record::is_indexed` says which a record is, and it must reach the closest-hit through `frame_constants_gpu::mesh_is_indexed` / `pt_frame_constants_gpu::mesh_is_indexed`.
-  That field is an `sr::gpu_boolean` (shaped-rendering owns it), so the plain `bool` off the record assigns straight into it.
-  The `view_renderer` sets it for you; a test driving a routine directly must set it, or the flat path will read `Indices` as if it were real.
+  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's closest-hit through `instance_gpu::is_indexed`, per instance.
+  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `sr::gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  A test driving that routine directly must set it, or it will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
   Seed with `initial_camera` / `initial_orbit` instead for a view that should converge.

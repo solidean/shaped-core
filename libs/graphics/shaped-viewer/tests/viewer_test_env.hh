@@ -5,8 +5,10 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/rendering/shaders.hh>
 #include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/shader_library.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -121,13 +123,66 @@ inline triangle_cloud make_triangle_cloud(int triangle_count, u64 seed = 0x5EED1
 namespace sv_test
 {
 
+/// The material library the tests author through — the process-wide one a viewer draws from.
+///
+/// Reached through `sv::acquire_material_library`, so a test resolves against exactly what the render path resolves
+/// against rather than against a second library assembled to look like it.
+inline sv::material_library& shared_material_library()
+{
+    auto lib = sv::acquire_material_library();
+    CC_ASSERT(lib.has_value(), "the default material library must come up for the tests");
+    return *lib.value();
+}
+
+/// The per-face values of `materials`, as the four `per_triangle` attributes the builtin `pbr` type declares by name.
+/// One attribute per field, because a `mesh_attribute` carries a scalar or a vector rather than a struct.
+inline cc::vector<sv::mesh_attribute> pbr_face_attributes(cc::span<sv::pbr_material const> materials)
+{
+    auto base_color = cc::vector<tg::vec3f>();
+    auto metallic = cc::vector<f32>();
+    auto roughness = cc::vector<f32>();
+    auto emissive = cc::vector<tg::vec3f>();
+
+    for (auto const& m : materials)
+    {
+        base_color.push_back(m.base_color);
+        metallic.push_back(m.metallic);
+        roughness.push_back(m.roughness);
+        emissive.push_back(m.emissive);
+    }
+
+    auto const frequency = sv::attribute_frequency::per_triangle;
+
+    auto out = cc::vector<sv::mesh_attribute>();
+    out.push_back(sv::mesh_attribute::create("base_color", frequency, cc::move(base_color)));
+    out.push_back(sv::mesh_attribute::create("metallic", frequency, cc::move(metallic)));
+    out.push_back(sv::mesh_attribute::create("roughness", frequency, cc::move(roughness)));
+    out.push_back(sv::mesh_attribute::create("emissive", frequency, cc::move(emissive)));
+    return out;
+}
+
 /// A raw triangle list plus its per-face materials, as the `sv::mesh` the authoring API takes.
-/// The materials are scalarized into per_triangle attributes, which is where per-face data belongs.
+///
+/// The mesh names the library's unbound `pbr` material, so each of the four attributes above wins over the type's own
+/// default and the generated closest-hit reads them per triangle.
 inline sv::mesh as_mesh(cc::string name, cc::span<tg::pos3f const> positions, cc::span<sv::pbr_material const> materials)
 {
     return {.name = cc::move(name),
             .geometry = sv::triangle_geometry::create_from_positions(positions),
-            .attributes = sv::pbr_material_attributes(materials)};
+            .attributes = pbr_face_attributes(materials),
+            .material = sv::default_material(shared_material_library())};
+}
+
+/// The same, over indexed geometry — triangle order follows the index buffer, so the per-face attributes still line up.
+inline sv::mesh as_indexed_mesh(cc::string name,
+                                cc::span<tg::pos3f const> positions,
+                                cc::span<u32 const> indices,
+                                cc::span<sv::pbr_material const> materials)
+{
+    return {.name = cc::move(name),
+            .geometry = sv::triangle_geometry::create_from_indexed_triangles(positions, indices),
+            .attributes = pbr_face_attributes(materials),
+            .material = sv::default_material(shared_material_library())};
 }
 
 } // namespace sv_test

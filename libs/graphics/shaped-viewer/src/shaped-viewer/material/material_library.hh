@@ -103,6 +103,14 @@ namespace impl
 /// Registers the builtin types into `lib` — `sv::builtin_material::pbr` and `unlit`.
 /// Public so a caller supplying their own library still gets them without reaching into the default.
 void register_builtin_material_types(material_library& lib);
+
+/// The material a mesh naming none draws with: an unbound instance of the builtin `pbr` type.
+///
+/// Every attribute is therefore left to the mesh — whatever it carries wins, and whatever it does not falls back to the
+/// type's own default — which is what makes "a mesh always draws" true without the caller authoring a material first.
+/// Registered on first call and content-addressed after, so every fallback in a scene shares one id and one permutation.
+/// `lib` must carry the builtin `pbr` type.
+[[nodiscard]] material_id default_material(material_library& lib);
 } // namespace sv
 
 /// The names the builtin material types are registered under.

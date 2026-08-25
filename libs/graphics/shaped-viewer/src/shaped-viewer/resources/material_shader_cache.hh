@@ -15,7 +15,14 @@
 /// reads from being two independent computations.
 struct sv::material_permutation
 {
+    /// the `permutation_key` this was generated from, which is also what the cache is keyed on
+    cc::hash128 key;
+
     material_parameter_layout layout;
+
+    /// The sampler states the source declares, in declaration order — `samplers[i]` is `sv_sampler_i`.
+    /// A pipeline built over this permutation has to bake them in by name; the generated text carries only the register.
+    cc::vector<sg::sampler> samplers;
 
     /// The compiled closest-hit, as a cold async node — nothing compiles until it is driven.
     /// Null value while in flight or on a compile error; `pathtrace_routine` treats an unfinished permutation the way it treats a

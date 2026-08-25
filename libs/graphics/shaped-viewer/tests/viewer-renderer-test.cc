@@ -67,8 +67,7 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     // An output split into a row of three cells; each view traces at its cell's size and knows where it sits.
     // The odd width is on purpose: the cells must not have to divide evenly.
@@ -86,7 +85,7 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
         v.resolution = tg::vec2i(x1 - x0, output_size[1]);
         v.camera = sv::camera::orbiting(tg::pos3d::zero, 4.0, tg::angle_d::make_from_degree(40.0 * i),
                                         tg::angle_d::make_from_degree(20.0));
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         def.views.push_back(cc::move(v));
     }
     (void)add_layout_root(def, {}, {.rows = 1});
@@ -123,7 +122,7 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
 
     // Every view resolved against the same two resources, so nothing was uploaded per view.
     CHECK(resources.meshes.count() == 1);
-    CHECK(resources.materials.count() == 1);
+    CHECK(resources.instances.count() == 1);
 }
 
 // No views at all: the pass still opens, so the output's clear lands and the target is defined.
@@ -181,8 +180,7 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
 
     auto const cloud = sv_test::make_triangle_cloud(16);
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     auto const output_size = tg::vec2i(96, 48);
 
@@ -193,7 +191,7 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
         // Half the target, so the frame pass really does leave a narrowed viewport behind it.
         v.resolution = tg::vec2i(output_size[0] / 2, output_size[1]);
         v.camera = sv::camera{.position = tg::pos3d(0, 0, -3.5)};
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         def.views.push_back(cc::move(v));
     }
     (void)add_layout_root(def);
@@ -256,8 +254,7 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
 
     auto const cloud = sv_test::make_triangle_cloud(16);
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     auto const output_size = tg::vec2i(128, 64);
 
@@ -268,7 +265,7 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
         auto v = sv::view_data{};
         v.id = sv::view_id::from_string(name);
         v.camera = sv::camera{.position = tg::pos3d(0, 0, -3.5)};
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         def.views.push_back(cc::move(v));
         return sv::view_index(def.views.size() - 1);
     };

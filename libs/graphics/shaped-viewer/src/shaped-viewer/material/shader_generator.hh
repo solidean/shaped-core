@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics/binding/sampler.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/material_attribute.hh>
 #include <shaped-viewer/material/resolve.hh>
@@ -53,6 +54,10 @@ struct sv::generated_material_shader
 {
     cc::string source;
     material_parameter_layout layout;
+
+    /// The sampler states this source declares, in declaration order — `samplers[i]` is what `sv_sampler_i` must be.
+    /// The generated text names a register, never a state, so nothing else can recover which state belongs to which register.
+    cc::vector<sg::sampler> samplers;
 
     /// equal to the `permutation_key` of the resolved material it came from — what the compile is cached on
     cc::hash128 key;

@@ -55,7 +55,9 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                   {.include_dir = include_dir, .label = cc::format("<material '{}'>", r.type->name)});
 
     auto entry = _by_key.entry(r.permutation_key);
-    return entry.get_or_emplace(material_permutation{.layout = cc::move(generated.layout),
+    return entry.get_or_emplace(material_permutation{.key = generated.key,
+                                                     .layout = cc::move(generated.layout),
+                                                     .samplers = cc::move(generated.samplers),
                                                      .shader = cc::move(shader),
                                                      .source = cc::move(generated.source)});
 }

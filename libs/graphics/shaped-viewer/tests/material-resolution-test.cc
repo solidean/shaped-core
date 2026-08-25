@@ -258,7 +258,14 @@ TEST("sv::material_library - content addressing, names and validation")
 TEST("sv::acquire_material_library - the library is created once and shared")
 {
     auto builds = 0;
-    static auto custom = sv::material_library::create();
+    static auto custom = []
+    {
+        // The builtins go in because this library may become the whole process's: whoever asks first wins, and
+        // everything else in this binary — every mesh a GPU test authors — resolves through the answer.
+        auto lib = sv::material_library::create();
+        sv::register_builtin_material_types(lib);
+        return lib;
+    }();
 
     sv::set_acquire_material_library(
         [&builds]
@@ -271,7 +278,10 @@ TEST("sv::acquire_material_library - the library is created once and shared")
     CHECK(first.has_value());
     auto const second = sv::acquire_material_library();
     CHECK(second.value() == first.value());
-    CHECK(builds == 1);
+
+    // At most once, not exactly once: another test may have asked before this one, and then the hook is never
+    // consulted at all — which is the same "asked once" property seen from the other side.
+    CHECK(builds <= 1);
 
     // Clearing the hook does not un-cache what it already answered with.
     sv::set_acquire_material_library({});

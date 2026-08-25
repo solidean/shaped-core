@@ -18,7 +18,8 @@ cbuffer FrameConstants : register(b0)
     // path-tracer controls (accum_frame drives progressive accumulation: 0 restarts, >0 blends in place)
     int  samples_per_pixel;  int max_bounces;  uint rng_seed;  uint accum_frame;
 
-    uint mesh_is_indexed; // 0 => the bound mesh is a plain triangle list; see mesh.hlsli
+    // A full lane held back, so prev_camera keeps its offset while the block has nothing else to say here.
+    uint4 _reserved0;
 
     Camera prev_camera;        // the previous recorded frame's camera; meaningless unless has_history
     uint   has_history;        // 0 => the history textures hold nothing; every pixel starts from scratch

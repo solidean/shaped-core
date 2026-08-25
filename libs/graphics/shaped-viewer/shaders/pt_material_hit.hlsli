@@ -14,7 +14,7 @@
 
 /// The per-item table, indexed by `InstanceID()` — mirrors `sv::instance_gpu`.
 /// An ordinary binding rather than a bindless one: there is exactly one table, and what varies per instance is what it *points* at.
-StructuredBuffer<sv_instance> Instances : register(t4, space0);
+StructuredBuffer<sv_instance> Instances : register(t1, space0);
 
 struct PtAttributes
 {

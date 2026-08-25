@@ -98,7 +98,8 @@ private:
 };
 
 /// One uploaded material set: a StructuredBuffer of `pbr_material_gpu`, one entry per triangle, indexed by
-/// `PrimitiveIndex()` in the closest-hit.
+/// `PrimitiveIndex()` in `sv::pbr_raytrace_routine`'s closest-hit.
+/// The path tracer reads none of this — a material there is a `sv::material` resolved into a per-instance parameter block.
 struct sv::material_record
 {
     sg::buffer<pbr_material_gpu> materials;
@@ -115,15 +116,6 @@ public:
     /// The material_set_id for `materials.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
     /// On a miss the set is packed to its GPU layout and uploaded into a read-only structured buffer on one command list submitted before returning.
     [[nodiscard]] material_set_id acquire(material_data const& materials);
-
-    /// The same, for per-face PBR carried as the `sv::pbr_attribute` attributes of a mesh.
-    ///
-    /// The cache key is folded from the attributes' own content hashes rather than recomputed over their bytes, so
-    /// re-acquiring an unchanged mesh every frame stays O(1) — which is what lets `scene_ref::add_mesh` do this for
-    /// the caller.
-    /// An attribute that is absent contributes `pbr_material`'s default for its field; one that is present must be
-    /// `per_triangle`, hold the element type its name documents, and carry `triangle_count` elements.
-    [[nodiscard]] material_set_id acquire(cc::span<mesh_attribute const> attributes, isize triangle_count);
 
 private:
     explicit material_manager(sg::context& ctx) : _ctx(ctx) {}

@@ -71,8 +71,11 @@ material data on the GPU                 [in progress]  attribute_manager upload
                                                         Every index written into a block is a PINNED one, since the block outlives the epoch that built it.
                                                         sv::instance_gpu is the per-item record a closest-hit reads by InstanceID() — its material's parameter block, and its own geometry, every index pinned.
                                                         Mesh geometry is pinned into the buffers table too, so a view is no longer limited to one mesh by its bindings.
-                                                        material_shader_cache compiles one closest-hit per permutation_key through sv::acquire_shader_library, so gold and copper are one compile and only a texture sample costs a second.
-                                                        Still to come: the view uploading that table, the DXR pipeline over the permutation set, and the trace reading both
+                                                        material_shader_cache — which gpu_resource_manager owns, so a mesh is authored and its shader acquired in one call — compiles one closest-hit per permutation_key through sv::acquire_shader_library.
+                                                        So gold and copper are one compile and only a texture sample costs a second.
+                                                        scene_ref::add_mesh resolves the material and acquires the block; view_renderer uploads one instance_gpu per item and pathtrace_routine builds a DXR pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
+                                                        The trace binds two groups: its own bindings, and the manager's bindless tables.
+                                                        Still to come: several parameter blocks per buffer, and a local root signature so two permutations may disagree about a sampler register
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

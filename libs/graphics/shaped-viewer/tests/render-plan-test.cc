@@ -21,7 +21,7 @@ namespace
 {
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string(name);
-    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
+    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
     def.views.push_back(cc::move(v));
     return sv::view_index(def.views.size() - 1);
 }
@@ -726,7 +726,7 @@ TEST("sv - a caller-declared temporal input rides alongside the implied one")
 
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("declared");
-    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
+    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
 
     // A caller's own resource: half resolution, its own format, and its own reset rule.
     v.temporal_inputs.push_back(

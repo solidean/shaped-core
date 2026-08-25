@@ -11,7 +11,7 @@
 #include <nexus/test.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
-#include <shaped-viewer/rendering/material_shader_cache.hh>
+#include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/linalg/vec.hh>
 

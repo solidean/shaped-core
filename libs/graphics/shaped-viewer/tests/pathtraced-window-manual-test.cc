@@ -204,14 +204,19 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
     // Build the Cornell box once; only the camera moves.
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(box.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(box.materials));
-    auto const* const mesh_rec = resources.meshes.get_ptr(mesh);
-    auto const* const mat_rec = resources.materials.get_ptr(materials);
-    CC_ASSERT(mesh_rec != nullptr && mat_rec != nullptr, "cornell box resources failed to resolve");
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cornell box", box.positions, box.materials));
+    auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
+    auto const* const permutation = resources.shaders.find(item.permutation);
+    CC_ASSERT(mesh_rec != nullptr && permutation != nullptr, "cornell box resources failed to resolve");
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0});
+    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+
+    auto hit_groups = cc::vector<sv::material_permutation const*>();
+    hit_groups.push_back(permutation);
+
+    auto records = cc::vector<sv::instance_gpu>();
+    records.push_back(resources.describe_instance(item.mesh, item.instance));
 
     auto controller = fly_camera{};
 
@@ -291,7 +296,6 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
         fc.max_bounces = 5;
         fc.accum_frame = accum;
         fc.seed = accum + 1;
-        fc.mesh_is_indexed = mesh_rec->is_indexed;
 
         fc.prev_camera = prev_camera;
         fc.has_history = has_history;
@@ -313,6 +317,12 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
                 1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
             trace_cmd->upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
 
+            auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+                records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+            trace_cmd->upload.data_to_buffer(instance_table, records);
+
+            auto const bindless = resources.freeze();
+
             auto const read = 1 - write;
             sv::pathtrace_routine::execute(*trace_cmd, {.frame = frame,
                                                         .background = background,
@@ -321,9 +331,9 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
                                                         .gbuffer = gbuffer[write],
                                                         .history_color = color[read],
                                                         .history_gbuffer = gbuffer[read],
-                                                        .materials = mat_rec->materials,
-                                                        .vertices = mesh_rec->vertices,
-                                                        .indices = mesh_rec->indices});
+                                                        .instance_table = instance_table,
+                                                        .hit_groups = hit_groups,
+                                                        .bindless = &bindless});
             ctx.submit_command_list(cc::move(trace_cmd));
         }
 

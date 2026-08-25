@@ -4,6 +4,13 @@
 
 namespace sv
 {
+material_id default_material(material_library& lib)
+{
+    auto const type = lib.acquire_type(builtin_material::pbr);
+    CC_ASSERT(type.has_value(), "the fallback material needs the builtin 'pbr' type — register_builtin_material_types");
+    return lib.acquire(material::create("default", type.value(), {}));
+}
+
 material_library material_library::create()
 {
     return {};

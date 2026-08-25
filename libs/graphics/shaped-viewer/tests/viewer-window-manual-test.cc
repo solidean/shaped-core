@@ -66,8 +66,7 @@ TEST("sv - viewer window (manual)", nx::config::manual)
     // Build the scene once; only the camera moves.
     auto const cloud = sv_test::make_triangle_cloud(96);
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     auto controller = sv::orbit_camera_controller{};
     controller.orbit = {.target = tg::pos3d(0, 1, 0), .distance = 6.0};
@@ -99,7 +98,7 @@ TEST("sv - viewer window (manual)", nx::config::manual)
         v.resolution = tg::vec2i(win->width(), win->height());
         // The camera is the only thing that changes, and the trace notices on its own — no restart to signal here.
         v.camera = controller.camera();
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         // an overhead rect facing down (cross(+x, +z) is -y)
         sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
                                                       .half_extent_u = tg::vec3f(0.75f, 0, 0),

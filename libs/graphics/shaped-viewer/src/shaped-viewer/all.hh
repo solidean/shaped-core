@@ -51,13 +51,13 @@
 // resources
 #include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
+#include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 
 // rendering
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
-#include <shaped-viewer/rendering/material_shader_cache.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/raytrace_routine.hh>
 #include <shaped-viewer/rendering/render_plan.hh>

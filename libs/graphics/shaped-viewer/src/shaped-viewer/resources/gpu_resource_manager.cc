@@ -2,9 +2,14 @@
 
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/binding/staging_binding_group.hh>
+#include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-viewer/material/material_library.hh>
+#include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/material/shader_generator.hh>
+#include <shaped-viewer/resources/resource_data.hh>
+#include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 
 namespace sv
@@ -18,6 +23,42 @@ bound_resources::~bound_resources()
 bound_resources::bound_resources(bound_resources&& rhs) noexcept : _manager(rhs._manager), _group(cc::move(rhs._group))
 {
     rhs._manager = nullptr;
+}
+
+sg::binding_group_layout_handle const& bound_resources::layout() const
+{
+    CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
+    return _manager->bindless_layout();
+}
+
+void bound_resources::declare_raytracing_access(sg::command_list& cmd) const
+{
+    CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
+
+    auto buffers = cc::vector<sg::array_buffer_access>();
+    auto textures = cc::vector<sg::array_texture_access>();
+
+    for (auto const& t : _manager->_tables)
+    {
+        if (t.table == bindless_table::buffers)
+        {
+            buffers.clear();
+            for (auto const e : t.acquired)
+                buffers.push_back({.index = i32(e),
+                                   .stages = sg::pipeline_stage_flag::raytracing,
+                                   .access = sg::access_flag::shader_read});
+            cmd.raytracing.declare_array_buffer_access(name_of(t.table), buffers);
+            continue;
+        }
+
+        textures.clear();
+        for (auto const e : t.acquired)
+            textures.push_back({.index = i32(e),
+                                .stages = sg::pipeline_stage_flag::raytracing,
+                                .access = sg::access_flag::shader_read,
+                                .layout = sg::texture_layout::shader_readonly});
+        cmd.raytracing.declare_array_texture_access(name_of(t.table), textures);
+    }
 }
 
 cc::span<u32 const> bound_resources::elements(bindless_table table) const
@@ -34,6 +75,7 @@ gpu_resource_manager::gpu_resource_manager(mesh_manager meshes,
                                            texture_manager textures,
                                            attribute_manager attributes,
                                            instance_manager instances,
+                                           material_shader_cache shaders,
                                            sg::staging_binding_group_handle group,
                                            cc::vector<table_entry> tables,
                                            texture_policy texture_policy,
@@ -43,6 +85,7 @@ gpu_resource_manager::gpu_resource_manager(mesh_manager meshes,
     textures(cc::move(textures)),
     attributes(cc::move(attributes)),
     instances(cc::move(instances)),
+    shaders(cc::move(shaders)),
     _group(cc::move(group)),
     _tables(cc::move(tables)),
     _texture_policy(texture_policy),
@@ -78,12 +121,17 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
     auto const* const buffers = _find_table(tables, bindless_table::buffers);
     CC_ASSERT(buffers != nullptr, "the buffers table must be declared — attributes and parameter blocks pin into it");
 
-    return gpu_resource_manager(mesh_manager::create(ctx, cfg.meshes, buffers->array),
-                                material_manager::create(ctx, cfg.materials),
-                                texture_manager::create(ctx, cfg.textures, textures_2d->array),
-                                attribute_manager::create(ctx, cfg.attributes, buffers->array),
-                                instance_manager::create(ctx, cfg.instances, buffers->array), cc::move(group),
-                                cc::move(tables), cfg.textures_policy, cfg.work);
+    // The first accepted format is the context's own preference, and a permutation is keyed by its source rather than
+    // by its format — so a cache producing anything else would be compiling for a device that cannot take it.
+    CC_ASSERT(!ctx.accepted_shader_formats().empty(), "a context accepts at least one shader format");
+    auto const format = ctx.accepted_shader_formats().front();
+
+    return gpu_resource_manager(
+        mesh_manager::create(ctx, cfg.meshes, buffers->array), material_manager::create(ctx, cfg.materials),
+        texture_manager::create(ctx, cfg.textures, textures_2d->array),
+        attribute_manager::create(ctx, cfg.attributes, buffers->array),
+        instance_manager::create(ctx, cfg.instances, buffers->array), material_shader_cache::create(format),
+        cc::move(group), cc::move(tables), cfg.textures_policy, cfg.work);
 }
 
 gpu_resource_manager::table_entry const* gpu_resource_manager::_find_table(cc::span<table_entry const> tables,
@@ -193,6 +241,28 @@ instance_gpu gpu_resource_manager::describe_instance(mesh_id mesh, instance_id i
             .vertices = m.vertices_index(),
             .indices = m.indices_index(),
             .is_indexed = m.is_indexed ? 1u : 0u};
+}
+
+scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
+{
+    CC_ASSERT(!mesh.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+
+    // Both bridges keep the geometry's own content key, so this resolves to a resident id rather than an upload
+    // whenever the mesh has not changed.
+    auto const geometry = mesh.geometry.is_indexed() ? meshes.acquire(indexed_triangle_data::from(mesh.geometry))
+                                                     : meshes.acquire(triangle_data::from(mesh.geometry));
+
+    auto const lib = acquire_material_library();
+    CC_ASSERT(lib.has_value(), "shaped-viewer: no material library to resolve a mesh's material through");
+
+    auto const material = mesh.material == material_id::invalid ? default_material(*lib.value()) : mesh.material;
+    auto const resolved = resolve_material(*lib.value(), material, mesh);
+    auto const& permutation = shaders.acquire(resolved);
+
+    return {.mesh = geometry,
+            .instance = acquire_instance(resolved, permutation.layout),
+            .permutation = resolved.permutation_key,
+            .transform = mesh.transform};
 }
 
 instance_id gpu_resource_manager::acquire_instance(resolved_material const& r, material_parameter_layout const& layout)
@@ -342,6 +412,11 @@ bound_resources gpu_resource_manager::freeze()
 {
     lock();
     return bound_resources(*this, _group->snapshot());
+}
+
+sg::binding_group_layout_handle const& gpu_resource_manager::bindless_layout() const
+{
+    return _group->layout();
 }
 
 bool gpu_resource_manager::has_table(bindless_table table) const

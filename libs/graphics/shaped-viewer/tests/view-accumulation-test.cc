@@ -35,8 +35,7 @@ TEST("sv - a view accumulates across frames under its id")
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     auto const view_named = [&](char const* name)
     {
@@ -44,7 +43,7 @@ TEST("sv - a view accumulates across frames under its id")
         v.id = sv::view_id::from_string(name);
         v.resolution = tg::vec2i(64, 64);
         v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)};
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         return v;
     };
 
@@ -201,8 +200,7 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     auto const output_size = tg::vec2i(64, 64);
     auto const traced_id = sv::view_id::from_string("planned");
@@ -213,7 +211,7 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
         auto v = sv::view_data{};
         v.id = traced_id;
         v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)};
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         def.views.push_back(cc::move(v));
 
         auto const root_node = def.nodes.add_container(sv::invalid_node);
@@ -243,10 +241,12 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
 
         // No history fed in: this asserts the store's own bookkeeping, not the refresh policy's.
         auto const plan = sv::build_render_plan(def, output_size, index, {});
-        REQUIRE(sv::pathtrace_routine::is_ready(*cmd)); // a dead shader traces nothing and would pass every check below
-
         sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
                                      output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+
+        // A dead shader traces nothing and would pass every check below; readiness is the last trace's, so it is
+        // only an answer once one has been recorded.
+        REQUIRE(sv::pathtrace_routine::is_ready(*cmd));
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch_and_wait_for_idle();
     };

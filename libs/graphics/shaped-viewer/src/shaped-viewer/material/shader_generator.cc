@@ -240,7 +240,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     auto const& bindless = opts.bindless != nullptr ? *opts.bindless : defaults;
 
     auto const layout = build_layout(r);
-    auto const samplers = distinct_samplers(r);
+    auto samplers = distinct_samplers(r);
 
     auto src = cc::string();
     cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
@@ -338,6 +338,6 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     if (!opts.epilogue_include.empty())
         cc::format_append(src, "\n#include \"{}\"\n", opts.epilogue_include);
 
-    return {.source = cc::move(src), .layout = cc::move(layout), .key = r.permutation_key};
+    return {.source = cc::move(src), .layout = cc::move(layout), .samplers = cc::move(samplers), .key = r.permutation_key};
 }
 } // namespace sv
