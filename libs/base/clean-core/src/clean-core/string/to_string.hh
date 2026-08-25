@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 
@@ -12,7 +13,20 @@
 //
 // Use cc::format to compose several values, and cc::to_debug_string for diagnostics.
 // libs/base/clean-core/docs/formatting.md contrasts the three.
+//
+// cc::to_chars is the same rendering without the cc::string: it writes into a caller-provided char buffer and
+// returns the length, so a stream writer can render straight into its window.
 // =========================================================================================================
+
+/// How a float is rendered: shortest round-trip, or one of the fixed-precision notations.
+/// `shortest` ignores the precision argument and produces the shortest text that reads back as the same value.
+enum class cc::float_notation : char
+{
+    shortest = 's',
+    fixed = 'f',
+    scientific = 'e',
+    general = 'g',
+};
 
 namespace cc
 {
@@ -52,5 +66,57 @@ using byte = std::byte;
 [[nodiscard]] string to_string(char const* s);
 [[nodiscard]] string to_string(string s);
 [[nodiscard]] string to_string(string_view s);
+
+// =========================================================================================================
+// cc::to_chars — the same numbers, written into a caller-provided buffer.
+//
+// Returns the number of chars written; nothing is null-terminated.
+// The buffer must be large enough — a short one asserts, since its size is the caller's to get right.
+//
+// to_chars_int_max always is, for every integer overload.
+// to_chars_float_max is for the SHORTEST form and the default precision; an explicit precision can outgrow it,
+// because a fixed-notation double carries up to 309 integer digits BEFORE the fraction the precision asks for.
+// Size off to_chars_size(notation, precision) whenever the precision is not a constant you picked yourself.
+// =========================================================================================================
+
+/// Buffer size that fits any result of the integer overloads.
+inline constexpr isize to_chars_int_max = 66;
+
+/// Buffer size that fits any float rendered `shortest`, or with the default precision.
+inline constexpr isize to_chars_float_max = 512;
+
+/// Buffer size that fits any float rendered with this notation and precision.
+/// An upper bound rather than the exact length: the integer part of a double is up to 309 digits and the fraction is
+/// the precision, so a large precision grows the requirement linearly and to_chars_float_max stops covering it.
+[[nodiscard]] constexpr isize to_chars_size(float_notation notation, int precision)
+{
+    if (notation == float_notation::shortest) // the precision does not apply, so the shortest bound holds
+        return to_chars_float_max;
+
+    return to_chars_float_max + 2 * isize(precision < 0 ? 6 : precision);
+}
+
+/// A precision below 0 means the notation's own default (6 digits for fixed / scientific / general).
+[[nodiscard]] isize to_chars(span<char> out,
+                             float v,
+                             float_notation notation = float_notation::shortest,
+                             int precision = -1);
+[[nodiscard]] isize to_chars(span<char> out,
+                             double v,
+                             float_notation notation = float_notation::shortest,
+                             int precision = -1);
+
+// integer types, in base 10
+// note: does not use the sized versions because this style is _complete_ for users
+[[nodiscard]] isize to_chars(span<char> out, signed char v);
+[[nodiscard]] isize to_chars(span<char> out, unsigned char v);
+[[nodiscard]] isize to_chars(span<char> out, signed short v);
+[[nodiscard]] isize to_chars(span<char> out, unsigned short v);
+[[nodiscard]] isize to_chars(span<char> out, signed int v);
+[[nodiscard]] isize to_chars(span<char> out, unsigned int v);
+[[nodiscard]] isize to_chars(span<char> out, signed long v);
+[[nodiscard]] isize to_chars(span<char> out, unsigned long v);
+[[nodiscard]] isize to_chars(span<char> out, signed long long v);
+[[nodiscard]] isize to_chars(span<char> out, unsigned long long v);
 
 } // namespace cc

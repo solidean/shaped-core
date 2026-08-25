@@ -26,7 +26,9 @@ One-liner per library:
   **Every library has a recording domain and logs its diagnostics** — a library never prints, and never writes its own `[lib]` prefix.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
-  Namespace `nx`. Depends on clean-core.
+  Namespace `nx`. Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
+  **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
+  It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
   The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
@@ -41,6 +43,9 @@ One-liner per library:
   Also PNG/JPEG codecs in `babel::png` / `babel::jpg`, with the `babel::image` aggregator on top (`image/`).
   Its [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
   Namespace `babel`. Depends on clean-core + typed-geometry.
+  **One namespace, several link targets**: `babel-data` is the externals-free base — base64, JSON and markdown over clean-core and nothing more.
+  `babel-serializer` is everything else on top of it, and the target to link when in doubt.
+  The split is by dependency rather than by topic, which is why `data/` itself spans both — see the [readme](libs/data/babel-serializer/readme.md).
   Early stage — see its [docs/structure.md](libs/data/babel-serializer/docs/structure.md) roadmap.
 * **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
   Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
@@ -96,6 +101,7 @@ Supporting directories:
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry points.
 
 A library depends only on lower libraries (plus its own external deps). No upward or cyclic dependencies.
+The one exception is **nexus**, the test and app harness: it is a leaf nothing links but test binaries, so it may depend on any library.
 Each entry above names what it depends on, and the `CMakeLists.txt` files are the ground truth.
 
 ---

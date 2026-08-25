@@ -30,6 +30,16 @@ struct node;
 class document;
 struct ref;
 
+enum class non_finite_policy : u8;
+enum class large_integer_policy : u8;
+enum class layout : u8;
+struct write_report;
+struct write_options;
+class writer;
+struct object_writer;
+struct array_writer;
+class string_writer;
+
 /// The domain every recording site in babel::json is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::json

@@ -200,13 +200,93 @@ So neither is a validation channel, and every slice site needs a bounds check th
 
 ---
 
-## The writer convention (established by images, babel's first writer)
+## The writer convention: stream first, blob only where the format forces it
 
-Images are babel's first format to **write**.
-The pair every future writer should mirror:
+**A format that can be written incrementally gets a streaming writer, and that writer is the primary API.**
+`babel::json::writer` is the shape: values go into a `cc::write_stream` as they arrive, nothing but a small scope stack is held in between, and there is no document to build first.
+A convenience type may own an in-memory sink on top — `json::string_writer` owns a `cc::string` and hands it over with no copy.
+It stays a wrapper over the stream writer, never a second implementation.
+
+**The imperative calls are the API, and RAII is sugar over them — never the other way round.**
+`begin_object` / `write` / `end_object` is what the writer offers; `object_writer` and friends add closing-on-destruction and nothing else.
+Scope handles cannot cross a function boundary, so a caller whose structure comes from a visitor, a state machine or a recursive walk cannot use them at all.
+An API offering only the sugar would simply be unusable there.
+The wrapper types expose the writer underneath (`string_writer::underlying()`) so the two layers mix on one document.
+It also puts the structural checks where they can be reached.
+At the RAII layer a key in an array scope is not expressible, so an API with no lower layer would be documenting a misuse nobody could commit.
+
+**The whole-value-in, bytes-out pair is the fallback**, for a format whose encoder genuinely needs the complete value before it can emit anything.
+Images are that case, and established the pair:
 
 - `encode(...) -> cc::result<cc::vector<cc::byte>>` — encode to an in-memory blob;
 - `write(cc::write_stream& out, ...) -> cc::result<cc::unit>` — encode, then write to a stream (`write` is `encode` + `out.write(...)`, so the two never diverge).
 
-Encoder tuning travels in a per-format `write_options` struct (e.g. `jpg::write_options{ int quality }`), passed by value with sensible defaults.
-A writer never reuses the reader's native structure as an input contract beyond the fields it needs; metadata the backend cannot emit is silently ignored and documented.
+Reach for it when streaming is impossible, not when it is inconvenient.
+
+Whichever shape a format takes, three rules bind it:
+
+- **Encoder tuning travels in a per-format `write_options` struct**, passed by value with sensible defaults (`jpg::write_options{ int quality }`, `json::write_options{ i32 indent }`).
+- **A writer never reuses the reader's native structure as an input contract** beyond the fields it needs; metadata the backend cannot emit is silently ignored and documented.
+- **A streaming writer's errors are sticky, with one place to check them.**
+  Checking a `cc::result` per value would cost more than the write, so the first failure is recorded, every later write becomes a no-op, and `finish()` reports it.
+  **Structural misuse is sticky too, AND asserts**: an assert alone stops a debug run at the site, which is worth having, but it leaves a release build emitting a document that is silently malformed.
+  The check is a compare the caller already has the operands for, so the cost is a predictable branch and the failure path stays out of line.
+  A misused call then does nothing rather than corrupting what follows, and the scope handles it hands back stay valid — a null handle would turn a recoverable mistake into a crash.
+  **Start strict on that assert, because only one direction is free.**
+  Dropping it later leaves every caller written against it working; adding it back kills programs that had come to rely on the error being survivable.
+  So a misuse we are unsure about asserts today and may be widened into a plain reported error once we know, never the reverse.
+- **An error nobody can see at the call site is reported rather than asserted.**
+  `finish()` with a scope still open is the case: an assert has to fire where the mistake is, and this one is only observable somewhere else.
+  On the destructor's path, at that, where an early return must not take the program down.
+  The brackets go out anyway, so what reached the sink still parses, and `finish()` says the document stops short.
+- **A writer that is never finished logs its error rather than losing it.**
+  `CC_LOG_ERROR` from the destructor, not an assert: skipping `finish()` on an early return is ordinary, and tearing the program down for it is the wrong tool.
+
+---
+
+## A writer reports what it changed, where a reader reports what it could not use
+
+The [issue list](#a-complex-formats-result-carries-an-issue-list-not-just-a-ccresult) above says a JSON-shaped format needs none.
+On the READ side that is right: every input is either understood or an error.
+
+**Writing is the asymmetric case.**
+A format narrower than the values handed to it produces a document that is valid, succeeds, and is not what the caller wrote.
+A NaN that became `null`; an id past 2^53 that will round in any reader parsing into a double.
+Neither is an error (the output is well-formed, and the caller chose the policy), so a writer that only had `cc::result` would have nowhere to say it.
+
+So a **lossy** writer returns a `report`: a flat struct of **counts**, readable at any point and not consumed by `finish()`.
+`babel::json::write_report` is the first — `non_finite`, `large_integers`, `undecodable_bytes`, plus `is_clean()`.
+
+Two rules keep it honest, and they mirror the issue list's:
+
+- **A report and an error are mutually exclusive per value.**
+  Anything that would make the document *wrong* stays a `cc::result` error; anything the caller can act on but survive without is a count.
+  A policy set to `error` produces the error, and the count as well — one value, one outcome, recorded once.
+- **Counts, not sites.**
+  A reader holds the whole input and can name a byte offset; a streaming writer knows the value it is writing and nothing about the path to it.
+  Keeping that path would cost a key per open scope on *every* write, which is the cost the streaming shape exists to avoid.
+  Reach for a `cc::result` error when the caller must know *which* value, and a count when "did anything change?" is the real question.
+
+**Where the loss is a choice, make it a policy rather than a report-only surprise** — `non_finite_policy`, `large_integer_policy`.
+Both were open-coded in the first two callers before they existed, which is the usual sign.
+
+---
+
+## JSON numbers are narrower than the JSON grammar, and the writer cannot fix that
+
+The grammar puts no precision limit on a number.
+`JSON.parse` is specified to produce an IEEE double, so the de-facto format every JS consumer speaks is narrower than the one on paper.
+A producer therefore has to guess which of the two its reader implements.
+That is a defect in JSON, inherited from JS — not something a writer gets to resolve.
+
+What follows for us:
+
+- **Never make the decision value-dependent.**
+  A policy that stringifies an integer once it passes 2^53 changes a field's *type* for exactly the data that got large.
+  A consumer written against small values then breaks in production and nowhere else.
+  Protobuf's canonical JSON mapping stringifies int64 unconditionally and Twitter shipped `id` next to `id_str`; both are ugly, and both are type-level for this reason.
+- **Decide per field, at the call site.**
+  A field that is an opaque id has precision as its only content and belongs in quotes always; a field that is a quantity a reader does arithmetic on belongs in a number always.
+  `large_integer_policy` is document-wide and therefore right only where the writer genuinely cannot tell — `chrome_trace`'s generic payload loop, emitting whatever a recording declared as a `u64`.
+- **Count it either way.**
+  `write_report::large_integers` answers "did anything here land past what a double carries", which is the question a caller can act on without the writer guessing.
