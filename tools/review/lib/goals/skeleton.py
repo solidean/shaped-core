@@ -18,6 +18,7 @@ _CHANGE_GROUPS = (
     "docs",
     "nits",
     "lgtm",
+    "tooling",
     "finalize",
 )
 
@@ -25,6 +26,7 @@ _DESIGN_GROUPS = (
     "framing",
     "topics",
     "open-questions",
+    "tooling",
     "finalize",
 )
 
@@ -37,6 +39,7 @@ _DESCRIPTIONS = {
     "docs": "claims the branch no longer supports",
     "nits": "everything that costs a minute",
     "lgtm": "fine as it stands, here to be skimmed and discharged",
+    "tooling": "friction in the review tool itself rather than in what is being reviewed",
     "finalize": "the round's end artifact",
     "framing": "what problem this is, and what would count as solved",
     "topics": "one group per area under discussion",

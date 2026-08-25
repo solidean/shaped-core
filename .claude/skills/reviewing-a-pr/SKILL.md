@@ -19,6 +19,34 @@ Chat is fine for a one-line fix; the moment you would be tempted to write "and a
 The tool exists because a chat review is a narrative, and a narrative silently skips a file.
 It does not carry any taste — that is still yours and the guide's.
 
+### It is new, and it will misbehave
+
+The tool landed recently and is under active development.
+Assume it has bugs you will be the first to hit, and treat anything surprising as the tool's fault before assuming you drove it wrong.
+
+**Surface problems in chat, immediately, and keep going.**
+Do not quietly work around a broken command, and above all do not silently narrow the review because something did not work —
+a review that skipped a file because `ingest` misbehaved is exactly the failure the tool was built to prevent, now wearing the tool's authority.
+
+Say what you ran, what you expected, and what happened.
+If a workaround is needed to finish the round, use it and name it as a workaround.
+
+What is worth reporting, roughly in order:
+
+- **A wrong number.** Coverage that does not add up, a claim that looks too big or too small, an id that changed when nothing did.
+- **A refusal you think is wrong** — the immutability guard, the attribute whitelist, an out-of-range commit.
+- **A crash or a traceback**, with the command.
+- **Friction**: something that took four commands and should have taken one, or output you had to squint at.
+
+### Leave feedback in the `tooling` group
+
+Both goal skeletons carry a `tooling` group, for friction in the review tool rather than in what is being reviewed.
+Use it for anything worth fixing later but not worth derailing the round over, and write it as a normal entry —
+context, what happened, and an `ask` whose options are the fixes you would consider.
+
+It discharges nothing, so it costs the coverage gate nothing.
+One entry per round is plenty; if there is nothing to say, leave the group empty rather than inventing something.
+
 ## Ask for the goal before anything else
 
 `init` refuses without one, and you should refuse too rather than guess.

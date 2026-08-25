@@ -82,6 +82,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 - **A finalized question is immutable.** Reword it and the tool refuses, naming the follow-up ask to write instead.
 - **The tool never re-serializes an entry you wrote.** Every write is a splice, so your formatting survives exactly.
 - **`entries/` belongs to the agent and `answers/` to the server**, which is why an entry can gain a paragraph while an answer to it is being typed.
+- **The `tooling` group is for friction in this tool**, not in what is being reviewed.
+  It discharges nothing, so filing there costs the coverage gate nothing.
 - The first run pays a `uv` resolve for `pygments` and `markdown-it-py`. That is the dependency cost, and it is cached afterwards.
 
 ## Layout
