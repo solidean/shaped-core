@@ -84,12 +84,32 @@ What is left is narrower than it was:
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
 - **Two permutations may not disagree about a sampler register.**
-  A generated source names `sv_sampler_0` at `s0` and the pipeline bakes the states in as name-matched static samplers, so the first permutation to claim a register decides it for the whole pipeline.
+  A generated source names `sv_sampler_0` at `s0` and the pipeline bakes the states in as name-matched static samplers, so one register is one state for the whole pipeline.
   The DXR-native answer is a per-hit-group *local* root signature, which sg's shader table does not carry yet.
-  Until it does, two materials sampling with different filters in one scene silently share the first one's sampler.
+  Until it does, `collect_samplers` asserts when two materials claim one register with different states — loudly on the dev box, rather than an image nobody can explain.
+  Two materials sampling the same way still share it silently, which is the case that is actually fine.
+
+- **A generated permutation does not hot-reload when an `.hlsli` it includes is edited.**
+  The generated source carries a literal `#include` line whose bytes never change when the file does.
+  `material_shader_key` hashes the resolution and the generation options, never the include's contents.
+  Folding `slib::current_reload_generation()` in is not the fix: it is bumped for any watched file, so it would rebuild every permutation rather than the ones that changed.
+  What is needed is for `shader_library::compile_source` to return its `outcome.dependencies`, which it already computes and discards.
+  The cache can then hash the resolved include contents and rebuild precisely what moved.
+
+- **A sampled attribute cannot say what it is sampled THROUGH.**
+  `resolved_attribute::uv` is one hardcoded field: a `float2` mesh attribute, found by name, and nothing else may play that role.
+  The generalization is a *dependent* attribute: one that declares which other attribute supplies its coordinate.
+  A 1D coordinate into a 1D texture, a second uv set and triplanar then become the same mechanism rather than three special cases.
+  It is a change to `resolved_attribute`, to the two shape-side hashes in `resolve_material`, and to the slot the generator emits for it.
 - **One buffer per parameter block.**
   That is one bindless slot per distinct (material, mesh) pairing rather than per instance, which is affordable but not free.
   Packing many blocks into one buffer is invisible to the shader — it already takes an offset — so it is an optimization rather than a change of contract.
+- **A parameter block is rebuilt every epoch, per distinct (material, mesh) pair.**
+  That is tens of bytes and one transient buffer per pair per frame.
+  What it buys is an access declaration correct by construction: every index a hit reads is minted by the call that writes it.
+  It also raises the floor the `buffers` table has to fit: the transient working set now holds every attribute buffer, mesh buffer and parameter block a scene draws, at once.
+  The default budget has not been measured against real content, and a transient acquire asserts once the working set exceeds capacity.
+
 - **A pipeline is keyed on the whole permutation SET, in scene order.**
   Two views whose scenes hold the same materials in a different order build two pipelines over the same shaders.
   Sorting the set before keying it would collapse them, at the cost of a `hit_group_offset` that no longer follows first use — worth doing once a scene has enough materials for it to matter.

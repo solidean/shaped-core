@@ -34,7 +34,7 @@ TEST("sv - view renderer end to end (headless)")
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
     REQUIRE(resources.meshes.contains(item.mesh));
-    REQUIRE(resources.instances.contains(item.instance));
+    REQUIRE(resources.contains_instance(item.instance));
 
     auto const size = tg::vec2i(128, 128);
 

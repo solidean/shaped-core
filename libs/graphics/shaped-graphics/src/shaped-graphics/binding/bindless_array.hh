@@ -15,7 +15,7 @@ public:
     /// Never store the result where it outlives the epoch; that is what `persistent` is for.
     [[nodiscard]] bindless_index acquire(raw_view const& view) { return bindless_index(_state.acquire(view)); }
 
-    // Pinned to its array, which rebinds it on copy or move.
+    // Pinned to its array, which rebinds it on move.
     bindless_array_transient_scope(bindless_array_transient_scope const&) = delete;
     bindless_array_transient_scope(bindless_array_transient_scope&&) = delete;
     bindless_array_transient_scope& operator=(bindless_array_transient_scope const&) = delete;
@@ -36,7 +36,7 @@ public:
     /// Acquiring a view that is already held returns the *same* handle, so one element is never pinned twice.
     [[nodiscard]] bindless_element_handle acquire(raw_view const& view);
 
-    // Pinned to its array, which rebinds it on copy or move.
+    // Pinned to its array, which rebinds it on move.
     bindless_array_persistent_scope(bindless_array_persistent_scope const&) = delete;
     bindless_array_persistent_scope(bindless_array_persistent_scope&&) = delete;
     bindless_array_persistent_scope& operator=(bindless_array_persistent_scope const&) = delete;
@@ -51,6 +51,7 @@ private:
 
 /// A bindless view over ONE array binding of a staging_binding_group: the key → element-index map that turns
 /// a view into the index a shader uses into that array.
+/// Exactly one array may exist over a given binding, and it is move-constructible only — see below.
 /// It shares the group's handle, so the group cannot go out from under it — but it owns no descriptor of its
 /// own and nothing here binds or snapshots; the context lives outside and must outlive it.
 /// Several arrays over different bindings of one group are independent of each other.
@@ -115,25 +116,20 @@ public:
     /// How many elements are pinned by a live handle — the floor a transient working set fits above.
     [[nodiscard]] u32 pinned_count() const { return u32(_state->table.pinned_count()); }
 
-    /// Copies and moves alike share one table, so two arrays over one binding agree rather than minting
-    /// conflicting descriptors from two of them — which is what the old pinning prohibition guarded against.
-    /// The scopes are rebound rather than copied, since each names the state it is reached through.
-    bindless_array(bindless_array const& rhs) : transient(*rhs._state), persistent(*rhs._state), _state(rhs._state) {}
+    /// **Move-constructible only.**
+    /// `transient` and `persistent` hold a reference to the state they are reached through, so an assignment would have to
+    /// rebind them and cannot — an assigned-to array would keep writing into the state it used to name.
+    /// Construction is all `for_binding` returning by value and a `cc::vector` growing need, so nothing is lost, and an
+    /// assignment now fails to compile at the call site rather than dangling at run time.
+    /// There must be at most one array per binding regardless: the invariant spans every array over one staging group, so
+    /// whoever owns the group owns them all.
     bindless_array(bindless_array&& rhs) noexcept
       : transient(*rhs._state), persistent(*rhs._state), _state(cc::move(rhs._state))
     {
     }
-    bindless_array& operator=(bindless_array const& rhs)
-    {
-        if (this != &rhs)
-            _state = rhs._state;
-        return *this;
-    }
-    bindless_array& operator=(bindless_array&& rhs) noexcept
-    {
-        _state = cc::move(rhs._state);
-        return *this;
-    }
+    bindless_array(bindless_array const&) = delete;
+    bindless_array& operator=(bindless_array const&) = delete;
+    bindless_array& operator=(bindless_array&&) = delete;
     ~bindless_array() = default;
 
 private:

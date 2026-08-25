@@ -1,6 +1,7 @@
 #include "shader_generator.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/material/impl/material_hash.hh>
@@ -191,6 +192,27 @@ constexpr i32 attribute_desc_size = 12; ///< sv_attribute_desc: buffer, offset, 
 }
 } // namespace
 
+cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_options const& opts)
+{
+    auto const defaults = bindless_config();
+    auto const& bindless = opts.bindless != nullptr ? *opts.bindless : defaults;
+
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(permutation_key);
+    b.add_string(opts.entry_point);
+    b.add_string(opts.runtime_include);
+    b.add_string(opts.epilogue_include);
+
+    // Each table's own enumerator alongside its count, so omitting a table and declaring it empty stay distinct.
+    b.add_pod(i64(bindless.tables.size()));
+    for (auto const& t : bindless.tables)
+    {
+        b.add_pod(t.table);
+        b.add_pod(t.count);
+    }
+    return cc::hash128::create(b.written_bytes(), impl::material_permutation_hash_seed);
+}
+
 cc::string_view hlsl_type_of(attribute_format format)
 {
     if (!format.is_scalar() && !format.is_vector())
@@ -338,6 +360,9 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     if (!opts.epilogue_include.empty())
         cc::format_append(src, "\n#include \"{}\"\n", opts.epilogue_include);
 
-    return {.source = cc::move(src), .layout = cc::move(layout), .samplers = cc::move(samplers), .key = r.permutation_key};
+    return {.source = cc::move(src),
+            .layout = cc::move(layout),
+            .samplers = cc::move(samplers),
+            .key = material_shader_key(r.permutation_key, opts)};
 }
 } // namespace sv

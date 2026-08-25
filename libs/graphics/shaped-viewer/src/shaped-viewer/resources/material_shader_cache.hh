@@ -7,6 +7,7 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/shader_generator.hh>
+#include <shaped-viewer/resources/bindless_tables.hh>
 
 /// One material permutation, generated and compiled: the closest-hit the path tracer traces with, and the parameter layout an
 /// instance block is filled from.
@@ -15,7 +16,7 @@
 /// reads from being two independent computations.
 struct sv::material_permutation
 {
-    /// the `permutation_key` this was generated from, which is also what the cache is keyed on
+    /// what this was generated from and how — `material_shader_key`, which is also what the cache is keyed on
     cc::hash128 key;
 
     material_parameter_layout layout;
@@ -33,14 +34,20 @@ struct sv::material_permutation
     cc::string source;
 };
 
-/// Generates and compiles one closest-hit per material permutation, deduplicated on `permutation_key`.
+/// Generates and compiles one closest-hit per material permutation, deduplicated on `material_shader_key`.
 ///
 /// This is where the two keys pay off.
 /// Gold and copper resolve to the same `permutation_key`, so they generate the same source and share this one compile.
 /// Only a texture sample — the one thing that changes the generated text — forces a second.
 ///
+/// The generation options are fixed per cache and fold into that key, so a cache built over different bindless budgets cannot
+/// collide with another's entry for the same resolution.
+///
 /// Compiles go through `sv::acquire_shader_library`, so a generated source resolves its `#include`s against the same mounts a
-/// hand-authored shader does, and an edit to `material_runtime.hlsli` changes the generated text and therefore the key.
+/// hand-authored shader does.
+/// **A generated permutation does not hot-reload when an include is edited.**
+/// The generated text carries a literal `#include` line whose bytes never change when the file does, and the key hashes the
+/// resolution and the options rather than the include's contents — see [docs/TODO.md](../../../docs/TODO.md).
 ///
 /// **Nothing is evicted.** A permutation is a compiled shader a live pipeline may hold, and the set is bounded by the material
 /// types a scene uses rather than by its instance count.
@@ -48,14 +55,26 @@ struct sv::material_permutation
 class sv::material_shader_cache
 {
 public:
-    /// A cache producing shaders in `format`, which must be one the context they are traced on accepts.
-    /// The format is fixed per cache rather than per acquire: a permutation is keyed by its source, so two formats of one
-    /// permutation would collide on that key.
-    [[nodiscard]] static material_shader_cache create(sg::shader_format format);
+    /// The closest-hit entry point every generated permutation defines, in `shaders/pt_material_hit.hlsli`.
+    static constexpr cc::string_view hit_entry_point = "PtClosestHit";
+
+    /// The epilogue that defines it — what `gpu_resource_manager` hands `create` as `epilogue_include`.
+    static constexpr cc::string_view hit_epilogue_include = "pt_material_hit.hlsli";
+
+    /// A cache producing shaders in `format`, which must be one the context they are traced on accepts, generated under `opts`.
+    /// The format is fixed per cache rather than per acquire: it is not part of the key, so two formats of one permutation
+    /// would collide on it.
+    /// `opts` IS part of the key, and is copied — a `material_shader_options` borrows its strings and its budgets, and nothing
+    /// says the caller's outlive the cache.
+    [[nodiscard]] static material_shader_cache create(sg::shader_format format, material_shader_options const& opts = {});
+
+    /// The options every generation here runs under, as `material_shader_key` and `generate_material_shader` take them.
+    /// They borrow from the cache, so they are only valid while it is.
+    [[nodiscard]] material_shader_options generation_options() const;
 
     [[nodiscard]] sg::shader_format format() const { return _format; }
 
-    /// The permutation for `r`, generated and compiled on a miss, or the resident one (O(1) on `r.permutation_key`).
+    /// The permutation for `r`, generated and compiled on a miss, or the resident one (O(1) on its key).
     /// The returned reference is stable across later acquires.
     material_permutation const& acquire(resolved_material const& r);
 
@@ -69,4 +88,10 @@ private:
     // those valid across every later insert.
     cc::map<cc::hash128, material_permutation> _by_key;
     sg::shader_format _format = sg::shader_format::dxil;
+
+    // Owned copies of what `create` was handed, since `generation_options` hands out views onto them.
+    cc::string _entry_point;
+    cc::string _runtime_include;
+    cc::string _epilogue_include;
+    bindless_config _bindless;
 };

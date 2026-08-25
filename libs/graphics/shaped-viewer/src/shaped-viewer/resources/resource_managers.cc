@@ -1,7 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
@@ -9,9 +8,9 @@
 
 namespace sv
 {
-mesh_manager mesh_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
+mesh_manager mesh_manager::create(sg::context& ctx, manager_config const& cfg)
 {
-    auto manager = mesh_manager(ctx, cc::move(table));
+    auto manager = mesh_manager(ctx);
     manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
     return manager;
 }
@@ -46,14 +45,9 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
     auto blas = build->raytracing.build_blas({{.vertices = vertices.raw(), .vertex_count = positions.size()}});
     _ctx.submit_command_list(cc::move(build));
 
-    auto vertices_element = _table.persistent.acquire(vertices.raw()->as_raw_readonly());
-    auto indices_element = _table.persistent.acquire(stand_in.raw()->as_raw_readonly());
-
     auto const size_in_bytes = vertices.size_in_bytes() + blas->size_in_bytes();
     return insert(mesh.hash,
                   {.vertices = cc::move(vertices),
-                   .vertices_element = cc::move(vertices_element),
-                   .indices_element = cc::move(indices_element),
                    .indices = cc::move(stand_in),
                    .is_indexed = false,
                    .triangle_count = positions.size() / 3,
@@ -87,14 +81,9 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
                                                .index_count = indices.size()}});
     _ctx.submit_command_list(cc::move(build));
 
-    auto vertices_element = _table.persistent.acquire(vertices.raw()->as_raw_readonly());
-    auto indices_element = _table.persistent.acquire(index_buffer.raw()->as_raw_readonly());
-
     auto const size_in_bytes = vertices.size_in_bytes() + index_buffer.size_in_bytes() + blas->size_in_bytes();
     return insert(mesh.hash,
                   {.vertices = cc::move(vertices),
-                   .vertices_element = cc::move(vertices_element),
-                   .indices_element = cc::move(indices_element),
                    .indices = cc::move(index_buffer),
                    .is_indexed = true,
                    .triangle_count = indices.size() / 3,
@@ -146,9 +135,9 @@ material_set_id material_manager::acquire(material_data const& materials)
     return insert(materials.hash, {.materials = cc::move(buffer), .count = mats.size()}, size_in_bytes);
 }
 
-texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
+texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg)
 {
-    auto m = texture_manager(ctx, cc::move(table));
+    auto m = texture_manager(ctx);
     m.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
     return m;
 }
@@ -171,8 +160,7 @@ texture_id texture_manager::acquire(texture_data const& texture)
     CC_ASSERT(texture.mip_count >= 1, "a texture carries at least its base level");
 
     // The full chain is allocated up front even when only the base level is supplied, so generating the rest
-    // later fills this texture in place rather than replacing it — which would invalidate the pinned index a
-    // material buffer already stored.
+    // later fills this texture in place rather than replacing it.
     auto const total_mips = impl::mip_count_of(texture.width, texture.height);
     CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
 
@@ -199,19 +187,14 @@ texture_id texture_manager::acquire(texture_data const& texture)
     }
     _ctx.submit_command_list(cc::move(cmd));
 
-    auto element = _table.persistent.acquire(gpu.as_readonly_view());
-
     // Whether it is done is the shape's answer, not the upload's: a texture given every level it has room for
     // needs no follow-up, one given fewer is waiting on mip generation.
     auto const state = texture.mip_count == total_mips ? residency::complete : residency::base_resident;
 
-    return insert(texture.hash,
-                  {.texture = cc::move(gpu),
-                   .element = cc::move(element),
-                   .state = state,
-                   .uploaded_mips = texture.mip_count,
-                   .total_mips = total_mips},
-                  uploaded_bytes);
+    return insert(
+        texture.hash,
+        {.texture = cc::move(gpu), .state = state, .uploaded_mips = texture.mip_count, .total_mips = total_mips},
+        uploaded_bytes);
 }
 
 namespace
@@ -220,9 +203,9 @@ namespace
 constexpr auto bindless_bytes_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
 
-attribute_manager attribute_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
+attribute_manager attribute_manager::create(sg::context& ctx, manager_config const& cfg)
 {
-    auto manager = attribute_manager(ctx, cc::move(table));
+    auto manager = attribute_manager(ctx);
     manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
     return manager;
 }
@@ -241,46 +224,12 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
     up->upload.data_to_buffer(data, bytes);
     _ctx.submit_command_list(cc::move(up));
 
-    auto element = _table.persistent.acquire(data.as_readonly_buffer());
-
     return insert(attribute.hash,
                   {.data = cc::move(data),
-                   .element = cc::move(element),
                    .format = attribute.format,
                    .frequency = attribute.frequency,
                    .element_count = attribute.element_count()},
                   bytes.size());
 }
 
-instance_manager instance_manager::create(sg::context& ctx, manager_config const& cfg, sg::bindless_array table)
-{
-    auto manager = instance_manager(ctx, cc::move(table));
-    manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
-    return manager;
-}
-
-instance_id instance_manager::acquire(cc::hash128 key, cc::hash128 permutation, cc::span<byte const> bytes)
-{
-    if (auto const resident = find_by_hash(key); resident.has_value())
-        return resident.value();
-
-    // A material whose every attribute is sourced from somewhere needing no parameter would have an empty block, and a zero-sized buffer has no descriptor to pin.
-    // Four bytes keep the shape uniform rather than making the shader branch on whether it has a block at all.
-    auto const size = bytes.empty() ? isize(4) : bytes.size();
-    auto parameters = _ctx.persistent.create_buffer<byte>(size, bindless_bytes_usage);
-
-    auto up = _ctx.create_command_list();
-    if (!bytes.empty())
-        up->upload.data_to_buffer(parameters, bytes);
-    _ctx.submit_command_list(cc::move(up));
-
-    auto element = _table.persistent.acquire(parameters.as_readonly_buffer());
-
-    return insert(key,
-                  {.parameters = cc::move(parameters),
-                   .element = cc::move(element),
-                   .permutation = permutation,
-                   .size_bytes = i32(bytes.size())},
-                  size);
-}
 } // namespace sv

@@ -82,6 +82,7 @@ public:
         CC_ASSERT(entry.pinned, "unpin without a matching pin");
 
         entry.pinned = false;
+        --_pinned_count;
         if (entry.last_acquired != e)
             _free_slot(slot, on_reclaimed);
     }
@@ -91,14 +92,8 @@ public:
     [[nodiscard]] isize occupied_count() const { return _entries.size() - _free.size(); }
 
     /// How many slots are currently pinned — the floor the transient working set has to fit above.
-    [[nodiscard]] isize pinned_count() const
-    {
-        auto n = isize(0);
-        for (auto const& e : _entries)
-            if (e.occupied && e.pinned)
-                ++n;
-        return n;
-    }
+    /// Tracked rather than scanned, since it sits on `bindless_array`'s public surface where it reads as cheap.
+    [[nodiscard]] isize pinned_count() const { return _pinned_count; }
 
     [[nodiscard]] bool is_pinned(u32 slot) const
     {
@@ -121,7 +116,11 @@ private:
         if (auto const* slot = _by_key.get_ptr(key))
         {
             _entries[*slot].last_acquired = e;
-            _entries[*slot].pinned |= pin;
+            if (pin && !_entries[*slot].pinned)
+            {
+                _entries[*slot].pinned = true;
+                ++_pinned_count;
+            }
             return {.index = *slot, .inserted = false};
         }
 
@@ -131,12 +130,14 @@ private:
         auto const slot = _free.pop_back();
 
         _entries[slot] = {.key = key, .last_acquired = e, .pinned = pin, .occupied = true};
+        _pinned_count += pin ? 1 : 0;
         _by_key[key] = slot;
         return {.index = slot, .inserted = true};
     }
 
     void _free_slot(u32 slot, auto&& on_reclaimed)
     {
+        _pinned_count -= _entries[slot].pinned ? 1 : 0;
         _by_key.erase(_entries[slot].key);
         _entries[slot] = {};
         _free.push_back(slot);
@@ -161,5 +162,8 @@ private:
     cc::vector<entry> _entries;
     cc::map<Key, u32> _by_key;
     cc::vector<u32> _free;
+
+    /// Occupied-and-pinned slots, kept in step by every `_acquire`, `unpin` and `_free_slot`.
+    isize _pinned_count = 0;
 };
 } // namespace sg::impl

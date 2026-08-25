@@ -1,6 +1,8 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/binding/bindless_array.hh>
@@ -46,7 +48,6 @@ struct sv::gpu_resource_manager_config
     manager_config materials = {};
     manager_config textures = {};
     manager_config attributes = {};
-    manager_config instances = {};
     bindless_config bindless = {};
     texture_policy textures_policy = {};
     work_budget work = {};
@@ -118,10 +119,11 @@ private:
 /// That is what makes the lock enforceable at all: an array cannot refuse an acquire on behalf of its siblings,
 /// because the invariant spans the whole group.
 ///
-/// **An index that outlives its epoch must be pinned, not acquired.**
-/// `acquire_texture` hands out a `sg::bindless_index` good for this epoch only, and the type says so — writing
-/// one into a buffer that is cached across epochs does not compile.
-/// `pin_texture` is what a material buffer holds, and the element stays resident for as long as the handle does.
+/// **Nothing sv binds is pinned.**
+/// Every index a hit reads — a mesh's buffers, an attribute's, a texture's, the parameter block's own — is acquired for the
+/// epoch that records with it, which is what makes the access declaration correct by construction rather than by remembering.
+/// `pin_texture` / `pin_buffer` are still here for an index that must outlive its epoch, and the type system is what keeps the
+/// two apart: a `sg::bindless_index` cannot be written where a `sg::bindless_element_handle` is wanted.
 ///
 /// TODO: the lock is sound but conservative, and it is not what makes an index valid.
 /// What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not
@@ -134,14 +136,18 @@ private:
 class sv::gpu_resource_manager
 {
 public:
-    /// Creates the five managers, the staging group over `cfg.bindless`'s layout, and one array per table.
+    /// Creates the four managers, the staging group over `cfg.bindless`'s layout, and one array per table.
     ///
-    /// `cfg.bindless` must declare `textures_2d` and `buffers`, whatever else it declares or omits: the texture manager pins into
-    /// the first and the attribute and instance managers pin into the second, so a config without them has no manager to build.
+    /// `cfg.bindless` must declare `textures_2d` and `buffers`, whatever else it declares or omits: a sampled texture is
+    /// acquired into the first, and every buffer a hit reads — geometry, attributes, the parameter block — into the second.
     /// Both assert.
     [[nodiscard]] static gpu_resource_manager create(sg::context& ctx, gpu_resource_manager_config const& cfg = {});
 
     /// Reclaim and advance to epoch `e`, if not already there.
+    ///
+    /// `e` must not be behind the epoch already reached: a stale window handing in an older one would run a full eviction pass
+    /// and walk `_epoch` backwards.
+    /// Whether clamping would be better than refusing is unsettled, so this asserts rather than deciding it quietly.
     ///
     /// Evicts what the budgets say to evict — judged against the just-finished epoch's usage, so the work about
     /// to be recorded keeps its working set — and clears the per-table acquired-element lists.
@@ -171,8 +177,8 @@ public:
 
     /// The texture_id for `texture.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
     ///
-    /// Prefer this over reaching `textures` directly: it also notes the texture's element for this epoch's
-    /// access declaration, which a dispatch reading it through a material buffer would otherwise miss.
+    /// Prefer this over reaching `textures` directly: it also queues whatever follow-up work the policy asks for, which is
+    /// what `record_pending_work` later drains at a bounded rate.
     [[nodiscard]] texture_id acquire_texture(texture_data const& texture);
 
     /// Refuses acquires until `unlock`.
@@ -199,34 +205,50 @@ public:
     /// How many resources are still waiting for their follow-up work.
     [[nodiscard]] isize pending_work_count() const { return _pending.size(); }
 
-    /// The parameter block `r` resolves to, uploaded and pinned — what a generated shader reads per instance.
+    /// `r` resolved down to ids — the durable half of what a generated shader reads per instance.
     ///
-    /// `layout` must be the one `generate_material_shader` produced for `r`; the two are filled and read at the same offsets, and
-    /// handing them in together is what keeps that from being two independent computations of the same thing.
+    /// `layout` and `shader_key` must come from ONE `generate_material_shader` over `r` — `material_permutation`'s two
+    /// fields, or a `generated_material_shader`'s.
+    /// The layout is what the slots are laid out at and the key is what the record carries forward, and taking them together
+    /// is what keeps the CPU's offsets and the shader's from being two independent computations.
+    /// They are taken as two values rather than as the permutation so that resolving a block never forces its compile.
     ///
-    /// This is where the chain finally reaches the GPU: a constant is copied inline, a mesh-sourced attribute is uploaded through
-    /// `attributes` and enters as an `sv_attribute_desc`, and a sampled texture enters as the bindless index of an already-acquired
-    /// `texture_id`.
-    /// Every index written into the block is a PINNED one, since the block outlives the epoch that built it.
+    /// This is where the chain resolves: a constant is copied out, a mesh-sourced attribute is uploaded through `attributes`,
+    /// and a sampled texture is named by an already-resident `texture_id`.
+    /// No bindless index is minted here — the block's bytes are this epoch's, and `describe_instance` is what builds them.
     ///
     /// Content-cached on `r.parameter_key`, so re-acquiring an unchanged mesh every frame is a lookup.
-    [[nodiscard]] instance_id acquire_instance(resolved_material const& r, material_parameter_layout const& layout);
+    /// Nothing is evicted: a record is ids and tens of bytes, bounded by the distinct (material, mesh) pairs a scene draws.
+    [[nodiscard]] instance_id acquire_instance(resolved_material const& r,
+                                               material_parameter_layout const& layout,
+                                               cc::hash128 shader_key);
 
-    /// The bytes of `r`'s parameter block, in `layout`'s order — what `acquire_instance` uploads.
+    /// Whether `id` names a record this manager minted.
+    [[nodiscard]] bool contains_instance(instance_id id) const;
+
+    /// The record `id` names, which must be resident.
+    [[nodiscard]] instance_record const& get_instance(instance_id id) const;
+
+    /// How many distinct parameter blocks have been resolved.
+    [[nodiscard]] isize instance_count() const { return _instances.size(); }
+
+    /// The bytes of `r`'s parameter block, for THIS epoch — what `describe_instance` uploads.
     ///
     /// Public because the layout is a contract rather than an internal detail: a caller packing several blocks into one buffer
     /// itself needs exactly this, and it is what a test can check without reading GPU memory back.
-    /// It has the side effect `acquire_instance` has — a mesh-sourced attribute is uploaded and pinned here, since the descriptor
-    /// it writes is that upload's index.
-    [[nodiscard]] cc::vector<byte> build_instance_parameters(resolved_material const& r,
-                                                             material_parameter_layout const& layout);
+    /// Every descriptor and texture index it writes is acquired here, so calling it is what puts those elements into this
+    /// epoch's access declaration.
+    [[nodiscard]] cc::vector<byte> build_instance_parameters(instance_record const& r);
 
     /// The GPU record for one scene item: where its material parameters live, and where its geometry does.
     ///
     /// A view uploads one of these per item and the closest-hit reaches everything it needs from `InstanceID()`, rather than
     /// the trace binding one mesh's buffers globally.
     /// Both ids must be resident.
-    [[nodiscard]] instance_gpu describe_instance(mesh_id mesh, instance_id instance);
+    ///
+    /// The block is built and uploaded into a transient buffer on `cmd`, so this must be called on the list that traces with
+    /// it and before `freeze()` — every index it returns is minted here.
+    [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
 
     /// Everything placing `mesh` in a scene costs, as one `scene_item`: its geometry uploaded and BLAS-built, its
     /// material resolved against it, and the parameter block that resolution fills acquired.
@@ -255,7 +277,6 @@ public:
     material_manager materials;
     texture_manager textures;
     attribute_manager attributes;
-    instance_manager instances;
 
     /// One generated closest-hit per material permutation, in the first format the context accepts.
     ///
@@ -285,7 +306,6 @@ private:
                          material_manager materials,
                          texture_manager textures,
                          attribute_manager attributes,
-                         instance_manager instances,
                          material_shader_cache shaders,
                          sg::staging_binding_group_handle group,
                          cc::vector<table_entry> tables,
@@ -294,7 +314,6 @@ private:
 
     /// The entry for `table` in a freshly built list, before `_slot_of` exists to index it.
     [[nodiscard]] static table_entry const* _find_table(cc::span<table_entry const> tables, bindless_table table);
-
 
     /// The position of `table` in `_tables`, asserting that it was declared at all.
     [[nodiscard]] i32 _declared_slot_of(bindless_table table) const;
@@ -329,6 +348,10 @@ private:
         i32 dispatches = 0; ///< what it will cost, counted when it was queued
     };
     cc::vector<pending_work> _pending;
+
+    /// Every resolved parameter block, indexed by `instance_id`, plus the `parameter_key` index onto it.
+    cc::vector<instance_record> _instances;
+    cc::map<cc::hash128, instance_id> _instances_by_key;
 
     texture_policy _texture_policy;
     work_budget _work_budget;

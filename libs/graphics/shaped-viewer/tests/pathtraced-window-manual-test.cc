@@ -206,7 +206,7 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cornell box", box.positions, box.materials));
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
-    auto const* const permutation = resources.shaders.find(item.permutation);
+    auto const* const permutation = resources.shaders.find(item.shader_key);
     CC_ASSERT(mesh_rec != nullptr && permutation != nullptr, "cornell box resources failed to resolve");
 
     auto instances = cc::vector<sg::tlas_instance>();
@@ -214,9 +214,6 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
-
-    auto records = cc::vector<sv::instance_gpu>();
-    records.push_back(resources.describe_instance(item.mesh, item.instance));
 
     auto controller = fly_camera{};
 
@@ -256,6 +253,9 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
             continue;
 
         auto const moved = controller.update(dt);
+
+        // Reclaim and advance before anything resolves an id, exactly as a viewer's frame does.
+        resources.advance_to(ctx.current_epoch());
 
         // (Re)create both pairs on a size change.
         // Nothing survives a resize to reproject, so this is the one thing that still restarts the whole image — a
@@ -316,6 +316,10 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
             auto const background = ctx.transient.create_buffer<sv::background_gpu>(
                 1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
             trace_cmd->upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
+
+            // Rebuilt every frame, on the list that traces with it: a record holds this epoch's bindless indices.
+            auto records = cc::vector<sv::instance_gpu>();
+            records.push_back(resources.describe_instance(*trace_cmd, item.mesh, item.instance));
 
             auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
                 records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);

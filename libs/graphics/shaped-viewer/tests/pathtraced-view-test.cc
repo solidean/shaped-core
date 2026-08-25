@@ -42,7 +42,7 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cornell box", box.positions, box.materials));
     REQUIRE(resources.meshes.contains(item.mesh));
-    REQUIRE(resources.instances.contains(item.instance));
+    REQUIRE(resources.contains_instance(item.instance));
 
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
@@ -52,9 +52,9 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     auto const again = resources.acquire_scene_item(sv_test::as_mesh("cornell box", box.positions, box.materials));
     CHECK(again.mesh == item.mesh);
     CHECK(again.instance == item.instance);
-    CHECK(again.permutation == item.permutation);
+    CHECK(again.shader_key == item.shader_key);
 
-    auto const* const permutation = resources.shaders.find(item.permutation);
+    auto const* const permutation = resources.shaders.find(item.shader_key);
     REQUIRE(permutation != nullptr);
 
     // One instance at identity — the Cornell box geometry is already in world space.
@@ -64,9 +64,6 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
-
-    auto records = cc::vector<sv::instance_gpu>();
-    records.push_back(resources.describe_instance(item.mesh, item.instance));
 
     // A pinhole camera outside the open front, looking down the +z axis into the box.
     auto const size = tg::vec2i(96, 96);
@@ -93,6 +90,10 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     auto const bg = sv::background{};
 
     auto cmd = ctx.create_command_list();
+
+    // Built on the list that traces with it: every bindless index it names is minted here, for this epoch.
+    auto records = cc::vector<sv::instance_gpu>();
+    records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
 
     auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
         1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);

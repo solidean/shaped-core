@@ -12,9 +12,6 @@ namespace sv
 {
 namespace
 {
-/// The entry point every generated closest-hit defines, in `shaders/pt_material_hit.hlsli`.
-constexpr cc::string_view hit_entry_point = "PtClosestHit";
-
 /// Where a generated source looks for its includes: sv's own package mount, which is what carries
 /// `material_runtime.hlsli` and `pt_material_hit.hlsli`.
 constexpr cc::string_view include_dir = "sv_shaders";
@@ -25,11 +22,24 @@ constexpr cc::string_view include_dir = "sv_shaders";
 }
 } // namespace
 
-material_shader_cache material_shader_cache::create(sg::shader_format format)
+material_shader_cache material_shader_cache::create(sg::shader_format format, material_shader_options const& opts)
 {
     auto cache = material_shader_cache();
     cache._format = format;
+    cache._entry_point = cc::string(opts.entry_point);
+    cache._runtime_include = cc::string(opts.runtime_include);
+    cache._epilogue_include = cc::string(opts.epilogue_include);
+    if (opts.bindless != nullptr)
+        cache._bindless = *opts.bindless;
     return cache;
+}
+
+material_shader_options material_shader_cache::generation_options() const
+{
+    return {.entry_point = _entry_point,
+            .runtime_include = _runtime_include,
+            .epilogue_include = _epilogue_include,
+            .bindless = &_bindless};
 }
 
 material_permutation const* material_shader_cache::find(cc::hash128 key) const
@@ -39,12 +49,14 @@ material_permutation const* material_shader_cache::find(cc::hash128 key) const
 
 material_permutation const& material_shader_cache::acquire(resolved_material const& r)
 {
-    if (auto const* const resident = _by_key.get_ptr(r.permutation_key); resident != nullptr)
+    // Computed rather than generated-then-read: a miss is what has to generate, and the key does not need the text.
+    auto const opts = generation_options();
+    auto const key = material_shader_key(r.permutation_key, opts);
+    if (auto const* const resident = _by_key.get_ptr(key); resident != nullptr)
         return *resident;
 
     // The epilogue is what makes this a shader rather than a function: it defines the closest-hit that calls the material.
-    auto generated = generate_material_shader(r, {.epilogue_include = "pt_material_hit.hlsli"});
-    CC_ASSERT(generated.key == r.permutation_key, "a generated permutation is keyed by the resolution it came from");
+    auto generated = generate_material_shader(r, opts);
 
     auto lib = acquire_shader_library();
     auto shader
@@ -54,7 +66,7 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                   generated.source, sg::shader_stage::closest_hit, hit_entry_point, _format,
                   {.include_dir = include_dir, .label = cc::format("<material '{}'>", r.type->name)});
 
-    auto entry = _by_key.entry(r.permutation_key);
+    auto entry = _by_key.entry(key);
     return entry.get_or_emplace(material_permutation{.key = generated.key,
                                                      .layout = cc::move(generated.layout),
                                                      .samplers = cc::move(generated.samplers),

@@ -579,6 +579,7 @@ sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle c
 // sg::bindless_array — a bindless view over ONE array binding of a staging group: view identity -> element index. Owns no descriptor.
 #include <shaped-graphics/binding/bindless_array.hh>
 sg::bindless_array::for_binding(ctx, sbg_handle, name)  // -> bindless_array (by value); KEEPS the group handle; asserts the binding exists and is an ARRAY; CLEARS it (which also counts as setting it)
+//   MOVE-CONSTRUCTIBLE ONLY: no copy, no assignment — the scopes hold a reference to their state and an assignment could not rebind them. One array per binding.
 // TWO scopes, picked by HOW LONG the index must stay true (state is shared, so copies/moves agree — no aliasing hazard):
 arr.transient.acquire(raw_view)   // -> sg::bindless_index (enum class : u32) — valid ONLY for the epoch it was acquired in; re-acquire the working set every epoch
                                   //   same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor

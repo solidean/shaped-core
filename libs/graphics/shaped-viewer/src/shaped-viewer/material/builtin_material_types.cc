@@ -41,22 +41,22 @@ constexpr cc::string_view unlit_shader = R"hlsl(
 
 [[nodiscard]] material_type make_pbr()
 {
-    auto signature = cc::vector<material_attribute_decl>();
-    signature.push_back(material_attribute_decl::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
-    signature.push_back(material_attribute_decl::of("metallic", 0.0f));
-    signature.push_back(material_attribute_decl::of("roughness", 0.5f));
-    signature.push_back(material_attribute_decl::of("emissive", tg::vec3f(0.0f, 0.0f, 0.0f)));
+    auto signature = cc::vector<material_signature_entry>();
+    signature.push_back(material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(material_signature_entry::of("metallic", 0.0f));
+    signature.push_back(material_signature_entry::of("roughness", 0.5f));
+    signature.push_back(material_signature_entry::of("emissive", tg::vec3f(0.0f, 0.0f, 0.0f)));
     // Tangent space, so the default is the geometric normal rather than any particular direction in world space.
-    signature.push_back(material_attribute_decl::of("normal", tg::vec3f(0.0f, 0.0f, 1.0f)));
-    signature.push_back(material_attribute_decl::of("occlusion", 1.0f));
+    signature.push_back(material_signature_entry::of("normal", tg::vec3f(0.0f, 0.0f, 1.0f)));
+    signature.push_back(material_signature_entry::of("occlusion", 1.0f));
     return material_type::create(cc::string(builtin_material::pbr), cc::move(signature), cc::string(pbr_shader));
 }
 
 [[nodiscard]] material_type make_unlit()
 {
-    auto signature = cc::vector<material_attribute_decl>();
-    signature.push_back(material_attribute_decl::of("color", tg::vec3f(0.8f, 0.8f, 0.8f)));
-    signature.push_back(material_attribute_decl::of("opacity", 1.0f));
+    auto signature = cc::vector<material_signature_entry>();
+    signature.push_back(material_signature_entry::of("color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(material_signature_entry::of("opacity", 1.0f));
     return material_type::create(cc::string(builtin_material::unlit), cc::move(signature), cc::string(unlit_shader));
 }
 } // namespace

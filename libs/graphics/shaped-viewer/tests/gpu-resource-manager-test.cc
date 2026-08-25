@@ -16,8 +16,8 @@ using namespace cc::primitive_defines;
 namespace
 {
 /// `table` at `count`, plus the two tables the manager requires whatever else is configured.
-/// textures_2d is what the texture manager pins into and buffers is what attributes and parameter blocks pin into, so a config
-/// omitting either has no manager to build — see gpu_resource_manager::create.
+/// A sampled texture is acquired into textures_2d, and geometry, attributes and parameter blocks into buffers, so a config
+/// omitting either has nothing to build — see gpu_resource_manager::create.
 [[nodiscard]] sv::bindless_config only(sv::bindless_table table, u32 count)
 {
     auto tables = cc::vector<sv::bindless_table_budget>{{.table = sv::bindless_table::textures_2d, .count = 2},
@@ -30,6 +30,12 @@ namespace
         }
     tables.push_back({.table = table, .count = count});
     return {.tables = cc::move(tables)};
+}
+
+/// This epoch's bindless element for `id`'s texture — what a parameter block naming it would carry.
+[[nodiscard]] u32 element_of(sv::gpu_resource_manager& m, sv::texture_id id)
+{
+    return u32(m.acquire_texture(sv::bindless_table::textures_2d, m.textures.get(id).texture.as_readonly_view()));
 }
 
 [[nodiscard]] sg::texture_2d make_texture(sg::context& ctx)
@@ -247,7 +253,7 @@ TEST("sv - a texture acquire is content-addressed and pins its element")
     CHECK(record->total_mips == sv::impl::mip_count_of(16, 16));
     CHECK(record->uploaded_mips == 1);
     CHECK(record->state == sv::residency::base_resident);
-    CHECK(record->element != nullptr);
+    CHECK(record->texture.raw() != nullptr);
 
     // Same content, same id, no second upload.
     auto const again = sv::texture_data::create(make_pixels(16, 16, 1, false), sg::pixel_format::rgba8_unorm, 16, 16);
@@ -258,7 +264,7 @@ TEST("sv - a texture acquire is content-addressed and pins its element")
     auto const other = sv::texture_data::create(make_pixels(16, 16, 2, false), sg::pixel_format::rgba8_unorm, 16, 16);
     auto const other_id = m.acquire_texture(other);
     CHECK(other_id != id);
-    CHECK(m.textures.get_ptr(other_id)->index() != record->index());
+    CHECK(element_of(m, other_id) != element_of(m, id));
 
     ctx.advance_epoch_and_wait_for_idle();
 }
@@ -309,7 +315,7 @@ TEST("sv - a texture given every mip is complete")
     ctx.advance_epoch_and_wait_for_idle();
 }
 
-TEST("sv - a texture's element is declared for the epoch that acquired it")
+TEST("sv - a texture's element is declared for the epoch that acquired it, and only that one")
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
@@ -322,7 +328,7 @@ TEST("sv - a texture's element is declared for the epoch that acquired it")
 
     auto const id
         = m.acquire_texture(sv::texture_data::create(make_pixels(8, 8, 5, false), sg::pixel_format::rgba8_unorm, 8, 8));
-    auto const index = m.textures.get_ptr(id)->index();
+    auto const index = element_of(m, id);
 
     {
         auto const bound = m.freeze();
@@ -330,10 +336,15 @@ TEST("sv - a texture's element is declared for the epoch that acquired it")
         CHECK(bound.elements(sv::bindless_table::textures_2d)[0] == index);
     }
 
-    // Its index is pinned, so it survives an epoch nobody re-acquired it in — that is the whole point of the pin.
+    // The declaration is the epoch's, so the next one starts empty — and re-acquiring the same view lands on the same index,
+    // which is what keeps an unchanged working set from churning descriptors.
     ctx.advance_epoch_and_wait_for_idle();
     m.advance_to(ctx.current_epoch());
-    CHECK(m.textures.get_ptr(id)->index() == index);
+    {
+        auto const bound = m.freeze();
+        CHECK(bound.elements(sv::bindless_table::textures_2d).empty());
+    }
+    CHECK(element_of(m, id) == index);
 
     ctx.advance_epoch_and_wait_for_idle();
 }
@@ -470,7 +481,7 @@ namespace
 }
 } // namespace
 
-TEST("sv - an attribute is uploaded once and pinned")
+TEST("sv - an attribute is uploaded once and content-keyed")
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
@@ -496,14 +507,14 @@ TEST("sv - an attribute is uploaded once and pinned")
     CHECK(record.format == sv::attribute_format_of<f32>);
     CHECK(record.frequency == sv::attribute_frequency::per_vertex);
 
-    // The element is pinned rather than acquired, and that is the whole point: its index has to stay true across the epochs a
-    // parameter block holding it is cached over.
-    REQUIRE(record.element != nullptr);
-    auto const index = record.index();
+    // The record owns the buffer and nothing else; the index a block carries is acquired per epoch, and an unchanged view
+    // acquires back onto the element it already had.
+    REQUIRE(record.data.raw() != nullptr);
+    auto const index = u32(m.acquire_buffer(record.data.as_readonly_buffer()));
 
     ctx.advance_epoch_and_wait_for_idle();
     m.advance_to(ctx.current_epoch());
-    CHECK(m.attributes.get(id).index() == index);
+    CHECK(u32(m.acquire_buffer(m.attributes.get(id).data.as_readonly_buffer())) == index);
 
     ctx.advance_epoch_and_wait_for_idle();
 }
@@ -541,7 +552,8 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
 
     auto const resolved = sv::resolve_material(lib, gold, mesh);
     auto const generated = sv::generate_material_shader(resolved);
-    auto const bytes = m.build_instance_parameters(resolved, generated.layout);
+    auto const instance = m.acquire_instance(resolved, generated.layout, generated.key);
+    auto const bytes = m.build_instance_parameters(m.get_instance(instance));
     CHECK(bytes.size() == generated.layout.size_bytes);
     auto const block = cc::span<byte const>(bytes);
 
@@ -564,19 +576,22 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     // The mesh-sourced attribute enters as a descriptor: its buffer's bindless index, offset 0, its element stride.
     auto const& metallic = slot_of("metallic");
     CHECK(metallic.kind == sv::material_slot_kind::attribute_descriptor);
-    CHECK(u32_at(block, metallic.offset) == m.attributes.get(m.attributes.acquire(mesh.attributes[0])).index());
+    auto const metallic_buffer = m.attributes.get(m.attributes.acquire(mesh.attributes[0])).data.as_readonly_buffer();
+    CHECK(u32_at(block, metallic.offset) == u32(m.acquire_buffer(metallic_buffer)));
     CHECK(u32_at(block, metallic.offset + 4) == 0u);
     CHECK(u32_at(block, metallic.offset + 8) == u32(sizeof(f32)));
 
-    // The sampled attribute enters as the texture's PINNED index, plus a descriptor for the uv set it samples through.
-    CHECK(u32_at(block, slot_of("base_color").offset) == m.textures.get(texture).index());
+    // The sampled attribute enters as this epoch's texture index, plus a descriptor for the uv set it samples through.
+    CHECK(u32_at(block, slot_of("base_color").offset) == element_of(m, texture));
     CHECK(u32_at(block, slot_of("base_color.uv").offset + 8) == u32(sizeof(tg::vec2f)));
 
-    // The block is content-cached on parameter_key, so an unchanged mesh re-acquired every frame is a lookup.
-    auto const instance = m.acquire_instance(resolved, generated.layout);
-    CHECK(m.acquire_instance(resolved, generated.layout) == instance);
-    CHECK(m.instances.count() == 1);
-    CHECK(m.instances.get(instance).permutation == resolved.permutation_key);
+    // The record is content-cached on parameter_key, so an unchanged mesh re-acquired every frame is a lookup.
+    CHECK(m.acquire_instance(resolved, generated.layout, generated.key) == instance);
+    CHECK(m.instance_count() == 1);
+    CHECK(m.get_instance(instance).shader_key == generated.key);
+
+    // Building it again mints nothing new: every index it writes is one this epoch already handed out.
+    CHECK(cc::memcmp(m.build_instance_parameters(m.get_instance(instance)).data(), bytes.data(), bytes.size()) == 0);
 
     ctx.advance_epoch_and_wait_for_idle();
 }
@@ -604,13 +619,30 @@ TEST("sv - an instance record names its own geometry and parameters")
     auto const generated = sv::generate_material_shader(resolved);
 
     auto const mesh_id = m.meshes.acquire(sv::triangle_data::from(mesh.geometry));
-    auto const instance = m.acquire_instance(resolved, generated.layout);
-    auto const record = m.describe_instance(mesh_id, instance);
+    auto const instance = m.acquire_instance(resolved, generated.layout, generated.key);
 
-    CHECK(record.param_buffer == m.instances.get(instance).index());
+    auto cmd = ctx.create_command_list();
+    auto const record = m.describe_instance(*cmd, mesh_id, instance);
+
     CHECK(record.param_offset == 0u);
-    CHECK(record.vertices == m.meshes.get(mesh_id).vertices_index());
-    CHECK(record.indices == m.meshes.get(mesh_id).indices_index());
+    CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(mesh_id).vertices.raw()->as_raw_readonly())));
+    CHECK(record.indices == u32(m.acquire_buffer(m.meshes.get(mesh_id).indices.raw()->as_raw_readonly())));
+
+    // Every element the record names was acquired by building it, which is what makes the access declaration complete.
+    {
+        auto const bound = m.freeze();
+        auto const declared = bound.elements(sv::bindless_table::buffers);
+        auto const holds = [&](u32 e)
+        {
+            for (auto const d : declared)
+                if (d == e)
+                    return true;
+            return false;
+        };
+        CHECK(holds(record.param_buffer));
+        CHECK(holds(record.vertices));
+        CHECK(holds(record.indices));
+    }
 
     // Geometry layout is a property of the mesh, which is what lets a view hold an indexed and a non-indexed one at once.
     CHECK(record.is_indexed == 0u);
@@ -618,18 +650,11 @@ TEST("sv - an instance record names its own geometry and parameters")
     auto const indexed_geometry
         = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 1, 2});
     auto const indexed = m.meshes.acquire(sv::indexed_triangle_data::from(indexed_geometry));
-    CHECK(m.describe_instance(indexed, instance).is_indexed == 1u);
-
-    // Every index in the record is pinned, so a table built this frame still names the right resources the next one.
-    ctx.advance_epoch_and_wait_for_idle();
-    m.advance_to(ctx.current_epoch());
-    auto const again = m.describe_instance(mesh_id, instance);
-    CHECK(again.param_buffer == record.param_buffer);
-    CHECK(again.vertices == record.vertices);
-    CHECK(again.indices == record.indices);
+    CHECK(m.describe_instance(*cmd, indexed, instance).is_indexed == 1u);
 
     // Two meshes are two distinct geometry slots — which is the thing "one mesh per view" made impossible.
-    CHECK(m.describe_instance(indexed, instance).vertices != record.vertices);
+    CHECK(m.describe_instance(*cmd, indexed, instance).vertices != record.vertices);
 
+    ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
 }

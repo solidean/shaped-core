@@ -23,6 +23,7 @@ struct mesh_record;
 struct material_record;
 struct texture_record;
 struct attribute_record;
+struct instance_slot;
 struct instance_record;
 struct instance_gpu;       // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
 enum class residency : u8; // how much of a resource has reached the GPU (resource_managers.hh)
@@ -68,7 +69,7 @@ struct mesh;
 // the material system (see material/)
 enum class material_frequency : u8;   // where an attribute's value came from; the ORDER is the precedence
 enum class material_source_kind : u8; // a constant, or a uv-sampled texture
-struct material_attribute_decl;       // one attribute a material type requires
+struct material_signature_entry;      // one attribute a material type requires
 struct material_attribute_binding;    // one attribute a material overrides
 struct material_type;                 // a family of materials: signature + shader fragment
 struct material;                      // one instance of a type, with some attributes bound
@@ -120,7 +121,6 @@ class mesh_manager;
 class material_manager;
 class texture_manager;
 class attribute_manager;
-class instance_manager;
 // The class-key must match the definition: the Microsoft ABI mangles struct and class differently, so a
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
 class gpu_resource_manager;

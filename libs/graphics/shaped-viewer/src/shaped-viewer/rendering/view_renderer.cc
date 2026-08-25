@@ -42,13 +42,17 @@ struct resolved_view
 {
     cc::vector<sg::tlas_instance> instances;
     cc::vector<instance_gpu> records;
+
+    /// the parameter block each item shades with, parallel to `records` — its CONTENT identity, for the trace hash
+    cc::vector<instance_id> parameter_blocks;
     cc::vector<material_permutation const*> hit_groups;
 
-    /// the permutation key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
+    /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
     cc::vector<cc::hash128> permutations;
 };
 
-/// The hit-group index for `key` in `out`, appending it on first use — so the order is the scene's own.
+/// The hit-group index for `key` — a `scene_item::shader_key` — in `out`, appending it on first use, so the order is the
+/// scene's own.
 [[nodiscard]] u32 hit_group_of(resolved_view& out, cc::hash128 key, gpu_resource_manager& resources)
 {
     for (auto i = isize(0); i < out.permutations.size(); ++i)
@@ -62,7 +66,7 @@ struct resolved_view
     return u32(out.hit_groups.size() - 1);
 }
 
-resolved_view resolve_scene(layer const& l, gpu_resource_manager& resources)
+resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources)
 {
     auto out = resolved_view{};
 
@@ -73,15 +77,18 @@ resolved_view resolve_scene(layer const& l, gpu_resource_manager& resources)
 
         auto const* const mesh = resources.meshes.get_ptr(item.mesh);
         CC_ASSERT(mesh != nullptr, "scene_item references an unknown mesh_id");
-        CC_ASSERT(resources.instances.contains(item.instance), "scene_item references an unknown instance_id");
+        CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
 
-        // `instance_id` is the row of the instance table this item occupies, which is what `InstanceID()` reads.
+        // The TLAS instance's own id is the row of the instance table this item occupies, which is what `InstanceID()` reads.
         auto inst = sg::tlas_instance{.blas = mesh->blas,
                                       .instance_id = u32(out.instances.size()),
-                                      .hit_group_offset = hit_group_of(out, item.permutation, resources)};
+                                      .hit_group_offset = hit_group_of(out, item.shader_key, resources)};
         pack_transform(inst, item.transform);
         out.instances.push_back(cc::move(inst));
-        out.records.push_back(resources.describe_instance(item.mesh, item.instance));
+
+        // This is where every index a hit reads is minted, so it must stay ahead of `freeze()` and on the list that traces.
+        out.records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
+        out.parameter_blocks.push_back(item.instance);
     }
 
     CC_ASSERT(!out.instances.empty(), "a view needs at least one triangle-mesh item to render");
@@ -180,7 +187,19 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 
     // The instance table is the whole of what a hit reads, geometry and material parameters alike, so hashing the
     // records covers content identity for both: a re-upload under one id lands on a different bindless element.
-    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<instance_gpu const>(r.records).as_bytes()));
+    //
+    // `param_buffer` is the one field taken out.
+    // The block lives in a transient buffer rebuilt every epoch, so its index is new every frame and says nothing about the
+    // image; leaving it in would restart the estimator forever.
+    // The `instance_id` beside it is the content identity that field stood for, since one is minted per `parameter_key`.
+    for (auto const& rec : r.records)
+    {
+        auto anonymized = rec;
+        anonymized.param_buffer = 0;
+        h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<instance_gpu const>(&anonymized, 1).as_bytes()));
+    }
+    for (auto const block : r.parameter_blocks)
+        h = cc::combine_hash(h, cc::make_hash(u32(block)));
 
     // Which shader reads those records is not in them, and a different permutation is a different image.
     for (auto const& key : r.permutations)
@@ -419,7 +438,7 @@ void view_renderer::trace(sg::command_list& cmd,
     // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
     auto self = acquire_exclusive(cmd);
 
-    auto const resolved = resolve_scene(l, resources);
+    auto const resolved = resolve_scene(cmd, l, resources);
 
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
@@ -495,8 +514,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
     auto self = acquire_exclusive(cmd);
 
-    // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident.
-    auto const resolved = resolve_scene(*scene, resources);
+    // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
+    // bindless index this trace reads.
+    auto const resolved = resolve_scene(cmd, *scene, resources);
 
     auto fc = make_pt_frame_constants_gpu(v, *scene, primary_light(*scene), v.resolution);
     auto const bg = background_gpu::from(scene->background);

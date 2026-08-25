@@ -143,6 +143,30 @@ The worked example is sg's transfer completion.
 A stream to one buffer finishing therefore reported an older upload to a different buffer complete, and a reader stopped waiting for a copy that had not run.
 `dx12_completion_group` is the split: one fence per resource per direction, pooled and recycled.
 
+### A named owner is a claim to verify, not a fact to accept
+
+When a change introduces one owner for an invariant, check that **every participant actually routes through it**.
+A manager holding the lock, a single object taking the snapshot, one type minting every id — each is a claim about call sites, not about types.
+The header says who owns it; only the call sites say whether anyone bypassed them.
+A participant handed a *copy* of the owned thing rather than a reference to the owner is the shape to look for, because it type-checks and reads as sharing.
+
+The worked example is sv's bindless tables.
+`gpu_resource_manager` documents itself as the sole owner of the arrays, the epoch tick and the access-declaration list, and its `_record` is what makes a dispatch's declaration complete.
+Four resource managers were each handed their own `sg::bindless_array` over the same binding and pinned through it.
+`_record` was therefore never reached for any buffer, and every trace declared its bindless buffer table as empty.
+The bug was invisible in the diff and invisible in the docs; it was only visible by listing the callers of `_record`.
+
+### A derived artifact's cache key must cover everything that varies it
+
+Whenever a change caches something *generated* — a shader, a layout, a packed buffer — enumerate every input to the generator and check each one is in the key.
+The inputs that get missed are the ones passed as options rather than as data: a config struct, an entry-point name, an include path.
+Two callers generating from the same data under different options then collide on one entry, and the second one silently gets the first one's artifact.
+
+The worked example is sv's `generate_material_shader`.
+Its key was `resolved_material::permutation_key`, which covers the resolution's shape and nothing about how it was spelled.
+The emitted text also depends on the bindless table counts, the entry point and both include paths.
+A `gpu_resource_manager` configured with non-default budgets generated a shader declaring the *default* array sizes against a group layout of a different size.
+
 ### "No callers in the repo" is not evidence of dead code
 
 It is evidence only for something the repo alone can use.
@@ -169,6 +193,17 @@ Two corollaries a review should check:
 
 - **Keep the code paths.** Rejecting the feature at the API door is not the same as deleting the plumbing; the point is that conditional or full support later needs no redesign.
 - **Say why, and where.** The rejection must point at the portability reason in a doc, not just assert "not supported yet".
+
+**A known issue recorded in a TODO is not an accepted failure mode**, and finding it already written down does not close the question.
+What the entry settles is that the *capability* is missing; what it usually leaves open is what happens when someone hits it.
+Silent wrong output is the wrong answer whether or not it was foreseen.
+So read a TODO entry for the failure shape, and file the assert when the recorded behavior degrades quietly.
+
+The worked example is sv's per-permutation samplers.
+`pathtrace_routine::collect_samplers` lets the first permutation to claim `sv_sampler_0` decide that register for the whole pipeline.
+The viewer's TODO records it honestly: two materials sampling with different filters silently share the first one's sampler.
+The missing capability is a per-hit-group local root signature, and that genuinely waits for sg.
+Asserting on a *conflicting* state for an already-claimed register does not, costs nothing, and turns an unexplainable image into a message.
 
 ### Commit messages are not evidence
 

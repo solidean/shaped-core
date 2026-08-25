@@ -16,8 +16,10 @@ enum class sv::scene_item_kind : sv::u8
 ///
 /// It names its resources by id — `mesh` (geometry + BLAS) and `instance` (the material parameter block a generated
 /// closest-hit reads through `InstanceID()`).
-/// `permutation` is the `permutation_key` of the resolved material behind that block, which is what decides the hit
-/// group the TLAS instance selects.
+/// `shader_key` names the generated permutation that block is read by, which is what decides the hit group the TLAS instance
+/// selects.
+/// It is `material_shader_key`'s, NOT `resolved_material::permutation_key` — the resolution's shape plus how the cache spells
+/// it — so the two are deliberately not spelled alike.
 /// `gpu_resource_manager::acquire_scene_item` is what fills all three; nothing else should mint one by hand, since the
 /// three have to come from one resolution.
 ///
@@ -31,7 +33,7 @@ struct sv::scene_item
     mesh_id mesh = mesh_id::invalid;
     instance_id instance = instance_id::invalid;
 
-    cc::hash128 permutation;
+    cc::hash128 shader_key;
 
     tg::affine_transform3f transform = {};
 };

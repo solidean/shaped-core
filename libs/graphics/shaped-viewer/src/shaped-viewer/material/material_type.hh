@@ -27,7 +27,7 @@ struct sv::material_type
     cc::string name;
 
     /// every attribute this type reads, in the order a generated shader declares them
-    cc::vector<material_attribute_decl> signature;
+    cc::vector<material_signature_entry> signature;
 
     cc::string shader;
 
@@ -36,9 +36,9 @@ struct sv::material_type
     /// Hashes `name`, `signature` and `shader` into the content key.
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
     [[nodiscard]] static material_type create(cc::string name,
-                                              cc::vector<material_attribute_decl> signature,
+                                              cc::vector<material_signature_entry> signature,
                                               cc::string shader);
 
     /// The declaration of `name`, or null if this type does not read it.
-    [[nodiscard]] material_attribute_decl const* find(cc::string_view name) const;
+    [[nodiscard]] material_signature_entry const* find(cc::string_view name) const;
 };

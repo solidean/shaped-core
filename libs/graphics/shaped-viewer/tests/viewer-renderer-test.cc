@@ -122,7 +122,7 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
 
     // Every view resolved against the same two resources, so nothing was uploaded per view.
     CHECK(resources.meshes.count() == 1);
-    CHECK(resources.instances.count() == 1);
+    CHECK(resources.instance_count() == 1);
 }
 
 // No views at all: the pass still opens, so the output's clear lands and the target is defined.

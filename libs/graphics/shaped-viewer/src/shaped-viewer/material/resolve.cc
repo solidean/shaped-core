@@ -52,7 +52,7 @@ namespace
 
 /// One declaration walked down the chain, coarsest rank first.
 /// Every step overwrites the winner, and a `final` one stops the walk — so the last rank that supplied a value is what comes back.
-[[nodiscard]] resolved_attribute resolve_one(material_attribute_decl const& d, material const& m, sv::mesh const& mesh)
+[[nodiscard]] resolved_attribute resolve_one(material_signature_entry const& d, material const& m, sv::mesh const& mesh)
 {
     auto winner = resolved_attribute{.name = d.name,
                                      .format = d.format,
@@ -85,16 +85,20 @@ namespace
         winner = {.name = d.name, .format = d.format, .frequency = material_frequency::mesh_attribute, .attribute = a};
 
     if (binds_texture)
+    {
         if (auto const* const uv = find_uv_attribute(mesh, binding->sample.uv_attribute); uv != nullptr)
-        {
             winner = {.name = d.name,
                       .format = d.format,
                       .frequency = material_frequency::material_texture,
                       .sample = &binding->sample,
                       .uv = uv};
-            if (binding->is_final)
-                return winner;
-        }
+
+        // `final` stops the walk whether or not the sample itself was usable.
+        // A binding the mesh carries no uv set for still refuses the mesh's texture, and what stands is the coarser rank that
+        // had won — which is the whole point of refusing a texture we know to be bad.
+        if (binding->is_final)
+            return winner;
+    }
 
     if (auto const* const t = find_mesh_texture(mesh, d.name); t != nullptr)
         if (auto const* const uv = find_uv_attribute(mesh, t->uv_attribute); uv != nullptr)

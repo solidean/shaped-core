@@ -138,19 +138,20 @@ Three properties worth knowing:
 ## Material data on the GPU — attributes, and the block a permutation reads
 
 ```cpp
-m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes, pins a bindless element, keyed on attribute.hash
-m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; bindless_element_handle element; format; frequency; element_count;}
-record.index()                         // -> u32, the bindless index a descriptor names; `element` is what keeps it true
+m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes into a persistent buffer, keyed on attribute.hash
+m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; attribute_format format; attribute_frequency frequency; element_count;}
 
-m.build_instance_parameters(resolved, layout)  // -> vector<byte>; uploads+pins any mesh attribute it needs on the way
-m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key
-m.instances.get(id)                    // -> instance_record {buffer<byte> parameters; element; hash128 permutation; size_bytes;}
+m.acquire_instance(resolved, layout, shader_key)  // -> instance_id, content-keyed on resolved.parameter_key; layout + key from ONE generation
+m.get_instance(id)                     // -> instance_record {hash128 shader_key; i32 size_bytes; vector<instance_slot> slots;}
+m.contains_instance(id) / m.instance_count()
+sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
+m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
 
-m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the material resolved, its permutation compiled, its block acquired
+m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the material resolved, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
-m.describe_instance(mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
+m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
+                                       //   builds + uploads the block into a TRANSIENT buffer on cmd, and mints all four indices
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv_instance
-m.meshes.get(id).vertices_index()      // -> u32; the mesh's positions as a bindless index (indices_index() likewise)
 ```
 
 A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv_attribute_desc`
@@ -159,10 +160,12 @@ A block holds, at the offsets `material_parameter_layout` names: a constant inli
 Gotchas:
 
 - **`gpu_resource_manager::create` requires `textures_2d` and `buffers`** in the bindless config, whatever else it declares.
-  The texture manager pins into the first; attributes and parameter blocks pin into the second.
-- **Every index in a block is a PINNED one**, never an epoch-scoped `acquire_*` — the block is content-cached across epochs.
-  The two types make storing the wrong one not compile.
-- **The layout must be the one `generate_material_shader` returned for that same resolved material**, or the block is filled at offsets the shader does not read.
+  A sampled texture is acquired into the first; geometry, attributes and parameter blocks into the second.
+- **Every index in a block is THIS EPOCH's**, never a pinned one — which is why a block is rebuilt per frame rather than cached across frames.
+  That is what makes the access declaration correct by construction: nothing a hit reads reached the GPU without an acquire.
+- **`describe_instance` must be called on the list that traces with it, and before `freeze()`** — it is where those indices are minted.
+- **An `instance_record` is ids, not bytes.** It survives an epoch because nothing in it is epoch-scoped; the bytes are `build_instance_parameters`'s, per epoch.
+- **The layout and shader key must come from ONE `generate_material_shader`** over that same resolved material, or the block is filled at offsets the shader does not read.
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
 - **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
@@ -173,11 +176,11 @@ Gotchas:
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_attribute_decl> signature; string shader; hash128 hash; }
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; hash128 hash; }
 sv::material_type::create(name, signature, shader)   // -> hashes all three; asserts a name declared twice, and a default that is not its format's size
-t.find("roughness")              // -> material_attribute_decl const*, null if the type does not read it
-sv::material_attribute_decl      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
-sv::material_attribute_decl::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
+t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
+sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
+sv::material_signature_entry::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
 sv::material                     // { string name; material_type_id type; vector<material_attribute_binding> overrides; hash128 hash; }
 sv::material::create(name, type, overrides)          // -> hashes type + overrides; validates NOTHING (it cannot see the type)
 sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
@@ -199,12 +202,15 @@ sv::resolve_material(type, material, mesh)           // -> resolved_material; th
 sv::resolve_material(lib, material_id, mesh)         // -> the same, resolving the id through the library
 sv::resolved_material            // { material_type const*; material const*; vector<resolved_attribute>; hash128 permutation_key, parameter_key; }
 sv::resolved_attribute           // { string_view name; attribute_format format; material_frequency frequency;
-                                 //   span<byte const> constant; mesh_attribute const* attribute; texture_sample_source const* sample; }
+                                 //   span<byte const> constant; mesh_attribute const* attribute;
+                                 //   texture_sample_source const* sample; mesh_attribute const* uv; }
+                                 //   exactly one payload is live, `frequency` says which; `uv` rides along with `sample` and is never null when it isn't
 sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture
 ```
 
 **The enum order IS the precedence** — a value varying more finely beats one varying more coarsely, and `resolve_material` compares nothing else.
 `is_final`, on a declaration or a binding, stops the walk there so no finer frequency overrides it — which is how a material refuses a mesh's roughness texture.
+A `final` texture binding stops it even when its own sample was skipped, so the mesh's texture never wins by the back door.
 A candidate that cannot be used is skipped rather than fatal: a mesh attribute at the wrong format, or a texture whose `uv_attribute` the mesh does not carry, simply loses its turn.
 So every declaration resolves to something and a mesh carrying none of what a type asks for still draws.
 
@@ -212,6 +218,7 @@ So every declaration resolves to something and a mesh carrying none of what a ty
 `permutation_key` covers only the SHAPE of the resolution (which rank won, the geometric frequency, the uv attribute and sampler) plus the type's hash, so gold and copper share one generated shader.
 `parameter_key` covers the resolved values (constant bytes, texture ids, each mesh attribute's own hash), and keys the per-instance slot they are written into.
 Only a texture sample forces a second permutation, which is what makes "the shader stays the same" mechanical rather than aspirational.
+Neither is what a shader cache is keyed on: `material_shader_key` folds `permutation_key` together with the options it is generated under, and a `scene_item::shader_key` is that.
 
 Gotchas:
 
@@ -233,11 +240,14 @@ sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY
 sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; }
                                  //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
 {.epilogue_include = "pt_material_hit.hlsli"}   // -> a full DXR closest-hit for this permutation, not just the material function
+sv::material_shader_key(permutation_key, opts)  // -> hash128 — what `g.key` is, without generating anything
 
-resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, in the context's preferred format
-sv::material_shader_cache::create(sg::shader_format::dxil)   // one compiled closest-hit per permutation, for a caller building their own
+resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, in the context's preferred format, over cfg.bindless
+sv::material_shader_cache::create(format, opts = {})   // one compiled closest-hit per permutation; `opts` is COPIED and is part of the key
+sv::material_shader_cache::hit_entry_point / hit_epilogue_include   // "PtClosestHit" / "pt_material_hit.hlsli"
+cache.generation_options()       // -> material_shader_options borrowing from the cache — what to pass material_shader_key
 cache.acquire(resolved)          // -> material_permutation const& {hash128 key; layout; vector<sg::sampler> samplers; async_compiled_shader shader; string source;}
-cache.find(permutation_key)      // -> material_permutation const*, null if nothing acquired it;  cache.count()
+cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
 sv::material_slot_kind           // constant | attribute_descriptor (an sv_attribute_desc) | texture_index (a u32 into the 2D table)
@@ -249,7 +259,8 @@ The generated source is, in order: the runtime include, only the bindless tables
 distinct sampler, then the entry function.
 That function declares one local per signature attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
 and then runs the type's fragment verbatim over them.
-`g.key == resolved.permutation_key`, so two resolved materials with equal keys generate byte-identical source.
+`g.key` is `material_shader_key(resolved.permutation_key, opts)`: the resolution's shape AND how these options spell it.
+Two calls agreeing on that pair generate byte-identical source, and nothing else may share their cache entry — a second cache over different bindless budgets gets its own.
 
 Gotchas:
 
@@ -261,6 +272,9 @@ Gotchas:
 - **`SampleLevel`, never `Sample`** — a ray tracing hit shader has no derivatives to pick a mip from.
 - **Every bindless index is wrapped in `NonUniformResourceIndex`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
+- **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier, is an HLSL keyword or builtin type, starts with `sv_`, or is `surface` / `ctx`.
+  Rejected rather than sanitized: the type's own fragment is written against the declared name.
+- **A generated permutation does not hot-reload on an include edit** — the key hashes the resolution and the options, not the include's contents.
 
 ## Mesh authoring — geometry + what a material reads
 
@@ -379,7 +393,7 @@ sv::make_bindless_bindings(cfg)  // -> cc::vector<sg::binding> — the hand-decl
 
 m.acquire_texture(table, raw_view) -> sg::bindless_index   // THIS EPOCH ONLY; asserts when frozen or when the table is not declared
 m.acquire_buffer(raw_view) -> sg::bindless_index           // the same for the byte-address table
-m.pin_texture(table, raw_view) -> sg::bindless_element_handle  // pinned; h->index() outlives the epoch — what a material buffer stores
+m.pin_texture(table, raw_view) -> sg::bindless_element_handle  // pinned; h->index() outlives the epoch. NOTHING in sv uses one
 m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for the byte-address table
                                             //   a pin needs no unlock, and is recorded for the access declaration like an acquire
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
@@ -392,8 +406,8 @@ m.has_table(table) / m.table_capacity(table)
 
 // textures + the follow-up work their policy asks for
 sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
-m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, pins its element
-m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; bindless_element_handle element; residency state; uploaded_mips; total_mips; index() }
+m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, queues the rest
+m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; residency state; i32 uploaded_mips, total_mips; }
 sv::residency                // pending | base_resident | complete — an id never blocks, so what varies is how good it is yet
 m.record_pending_work(cmd) -> i32   // records what THIS epoch's budget allows, oldest first; returns dispatches spent
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
@@ -409,6 +423,7 @@ The lock lives here rather than on `sg::bindless_array` because the invariant sp
 What keeps an index valid is sg's reclaim rule, not the lock: a full array reclaims only what was NOT acquired this epoch, and never a pinned element.
 See the header's TODO block for what that leaves open.
 An index that must outlive its epoch is *pinned*, and the type system enforces it: a `bindless_index` cannot be stored where a persistent one belongs.
+**sv pins nothing.** Every index a hit reads is acquired for the epoch that records with it, which is what makes `bound.declare_raytracing_access` complete by construction rather than by remembering.
 
 ## Rendering — the view_renderer + routines
 

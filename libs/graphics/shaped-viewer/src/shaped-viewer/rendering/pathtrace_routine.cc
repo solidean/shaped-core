@@ -31,8 +31,9 @@ namespace
 ///
 /// The generated text names `sv_sampler_i` at `s{i}` and nothing else records which sampler STATE that is, which is why
 /// a permutation carries the states alongside its source.
-/// A name already claimed keeps its first state: two permutations disagreeing about `sv_sampler_0` is the register
-/// collision a per-permutation local root signature would resolve, and sg's shader table carries none yet
+/// Two permutations claiming one name with the SAME state share it silently; disagreeing about it asserts, because the
+/// alternative is an image shaded through the wrong filter with nothing to point at.
+/// A per-hit-group local root signature is what resolves the collision, and sg's shader table carries none yet
 /// (libs/graphics/shaped-viewer/docs/TODO.md).
 [[nodiscard]] cc::vector<sg::named_sampler> collect_samplers(cc::span<material_permutation const* const> hit_groups)
 {
@@ -44,7 +45,15 @@ namespace
             auto name = cc::format("sv_sampler_{}", i);
             auto taken = false;
             for (auto const& s : out)
-                taken |= s.name == name;
+            {
+                if (s.name != name)
+                    continue;
+                CC_ASSERT(s.sampler == p->samplers[i],
+                          "two materials in one scene claim the same sampler register with "
+                          "different states — a per-hit-group local root signature is what "
+                          "would give each its own (libs/graphics/shaped-viewer/docs/TODO.md)");
+                taken = true;
+            }
             if (!taken)
                 out.push_back({.name = cc::move(name), .sampler = p->samplers[i]});
         }

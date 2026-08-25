@@ -13,6 +13,9 @@
 /// So a per-pixel texture beats a per-corner attribute, which beats a constant on the material, which beats the type's own default.
 /// Comparing two frequencies is comparing the enumerators, and `resolve_material` does nothing cleverer than that.
 ///
+/// It is HOW FINELY a value varies that ranks it, never who owns it: a material's texture outranks a mesh's attribute, and only
+/// the two texture ranks are settled by ownership at all.
+///
 /// The three geometric mesh frequencies (`per_vertex` / `per_corner` / `per_triangle`) collapse into the single `mesh_attribute` rank on purpose.
 /// They are not orderable against one another, and a mesh carrying one name at two of them is an authoring error rather than a precedence question.
 ///
@@ -51,7 +54,7 @@ template <class T>
 /// Every signature entry resolves to something, so a mesh carrying none of the data a type asks for still draws rather than failing.
 ///
 /// `is_final` pins the default against every finer frequency, which is how a type declares an attribute it derives itself and no caller may replace.
-struct sv::material_attribute_decl
+struct sv::material_signature_entry
 {
     cc::string name;
     attribute_format format = attribute_format::of_scalar(scalar_type::f32);
@@ -64,7 +67,7 @@ struct sv::material_attribute_decl
     /// The declaration of `name` defaulting to `value`, deducing `format` from its type.
     /// The type must be a scalar or a tg vector / matrix over one — whatever `attribute_format_of` names.
     template <class T>
-    [[nodiscard]] static material_attribute_decl of(cc::string name, T const& value, bool is_final = false)
+    [[nodiscard]] static material_signature_entry of(cc::string name, T const& value, bool is_final = false)
     {
         return {.name = cc::move(name),
                 .format = attribute_format_of<T>,
@@ -78,6 +81,7 @@ struct sv::material_attribute_decl
 /// A binding names an attribute the type declares; one naming anything else is rejected when the material is registered, not silently ignored.
 /// `is_final` stops every FINER frequency from overriding this value — a mesh's roughness texture we know to be bad is refused by
 /// binding roughness `final` on the material.
+/// A `final` texture binding refuses them unconditionally, including when the mesh carries no uv set for its own sample.
 struct sv::material_attribute_binding
 {
     cc::string name;

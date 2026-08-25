@@ -58,7 +58,8 @@ TEST("sv::material_shader_cache - two materials of one permutation are one compi
     auto const gold = lib.acquire(sv::material::create("gold", pbr, gold_b));
     auto const copper = lib.acquire(sv::material::create("copper", pbr, copper_b));
 
-    auto cache = sv::material_shader_cache::create(sg::shader_format::dxil);
+    auto cache = sv::material_shader_cache::create(
+        sg::shader_format::dxil, {.epilogue_include = sv::material_shader_cache::hit_epilogue_include});
     auto const mesh = make_mesh();
 
     auto const& first = cache.acquire(sv::resolve_material(lib, gold, mesh));
@@ -97,7 +98,8 @@ TEST("sv::material_shader_cache - every builtin type compiles as a closest-hit")
     auto lib = sv::material_library::create();
     sv::register_builtin_material_types(lib);
 
-    auto cache = sv::material_shader_cache::create(sg::shader_format::dxil);
+    auto cache = sv::material_shader_cache::create(
+        sg::shader_format::dxil, {.epilogue_include = sv::material_shader_cache::hit_epilogue_include});
     auto const mesh = make_mesh();
 
     for (auto const& name : {sv::builtin_material::pbr, sv::builtin_material::unlit})
@@ -113,7 +115,10 @@ TEST("sv::material_shader_cache - every builtin type compiles as a closest-hit")
     auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();
     auto const gold = lib.acquire(sv::material::create("gold", pbr, {}));
     auto const resolved = sv::resolve_material(lib, gold, mesh);
-    CHECK(cache.find(resolved.permutation_key) != nullptr);
+    CHECK(cache.find(sv::material_shader_key(resolved.permutation_key, cache.generation_options())) != nullptr);
+
+    // The resolution's shape alone is NOT the key — the options it was generated under are part of it.
+    CHECK(cache.find(resolved.permutation_key) == nullptr);
     CHECK(cache.find(cc::hash128{}) == nullptr);
 }
 

@@ -150,7 +150,11 @@ There are two ways in, reached through scopes as elsewhere in sg, and **which on
   The last one out frees the slot and clears its descriptor, so a stale index reads vacant rather than reading whatever moved in.
   Pins raise the floor the transient working set has to fit above, so capacity must cover both.
 - **The two types differ on purpose.** Storing a transient index somewhere persistent is the one mistake the array cannot catch at runtime, so it is made not to compile.
-- **Copies and moves share one table**, so two arrays over one binding agree rather than minting conflicting descriptors, and an element handle may outlive every array naming its binding.
+- **An array is move-constructible only**, and there must be at most one over a binding.
+  `transient` and `persistent` hold a reference to the state they are reached through, so an assignment would have to rebind them and cannot.
+  An assigned-to array would keep writing into the state it used to name.
+  Construction covers everything real code does (`for_binding` returns by value, a vector grows), so an assignment now fails to compile rather than dangling.
+  An element handle may still outlive every array naming its binding: it keeps the state alive itself.
 
 **Guarding the window between a mint and the snapshot that must contain it is not the array's job**, and there is nothing here to do it with.
 One array cannot enforce that invariant, because it spans every array over a group: the owner is whoever holds the group and all its arrays, and taking the snapshot is that owner's too.

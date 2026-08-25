@@ -41,11 +41,11 @@ input routing + key-bound zoom           [done]         picks the leaf under the
 mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh: triangle_geometry (raw or indexed, pinned + hashed) plus named attributes (per element, or per instance for a per-mesh value), a material id, flags and textures
 resource managers (mesh / material)      [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
 resource data (triangle / indexed / material)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
-gpu_resource_manager                     [in progress]  where resource management comes together: the three managers, the staging binding group, and one sg::bindless_array per table.
+gpu_resource_manager                     [in progress]  where resource management comes together: the four managers, the staging binding group, and one sg::bindless_array per table.
                                                         Its tick is `advance_to(epoch)` — idempotent, so N windows drawing at N rates each call it and the first one pays.
                                                         It holds the bindless lock too, since that invariant spans every array over one group rather than any single one
 bindless tables                          [in progress]  sv hand-declares the layout (resources/bindless_tables.hh): one table per view dimension, byte-address buffers, budgets from the config.
-                                                        Declared and owned; nothing SAMPLES one yet — the per-instance mesh table is the first consumer
+                                                        Every generated permutation samples gBindlessTextures2D and reads gBindlessBuffers, bound as the trace's second group
 pathtrace_routine                        [in progress]  the DXR GI trace view_renderer drives: TLAS + dispatch_rays into a UAV target
 pbr_raytrace_routine                     [in progress]  the flat single-bounce IBL DXR trace (SH environment), driven directly
 sv_shaders package                       [in progress]  raygen / miss+closest-hit, plus layout.hlsl (border / view / wipe), via slib
@@ -66,14 +66,14 @@ material shader generation               [in progress]  generate_material_shader
                                                         Emits only the bindless tables the permutation touches (names and spaces from bindless_tables.hh), one SamplerState per distinct sampler, and one initializer per attribute — a parameter-block load, a barycentric interpolation, or a uv sample.
                                                         The type's fragment then runs verbatim over those locals; shaders/material_runtime.hlsli is the hand-authored half it is written against.
                                                         Compiled through slib::shader_library::compile_source
-material data on the GPU                 [in progress]  attribute_manager uploads any mesh_attribute to a byte-address buffer keyed on its own hash and pins a bindless element, which is what makes the mesh_attribute rank of the chain reachable at all.
-                                                        instance_manager owns the parameter blocks a generated shader reads, content-keyed on parameter_key; gpu_resource_manager::build_instance_parameters fills one from the layout the generator handed back.
-                                                        Every index written into a block is a PINNED one, since the block outlives the epoch that built it.
-                                                        sv::instance_gpu is the per-item record a closest-hit reads by InstanceID() — its material's parameter block, and its own geometry, every index pinned.
-                                                        Mesh geometry is pinned into the buffers table too, so a view is no longer limited to one mesh by its bindings.
-                                                        material_shader_cache — which gpu_resource_manager owns, so a mesh is authored and its shader acquired in one call — compiles one closest-hit per permutation_key through sv::acquire_shader_library.
+material data on the GPU                 [in progress]  attribute_manager uploads any mesh_attribute to a byte-address buffer keyed on its own hash, which is what makes the mesh_attribute rank of the chain reachable at all.
+                                                        gpu_resource_manager::acquire_instance resolves a parameter block down to ids, content-keyed on parameter_key; build_instance_parameters turns one into bytes for THIS epoch.
+                                                        Every index in a block is that epoch's, minted where it is written — which is what makes the trace's access declaration complete by construction rather than by remembering.
+                                                        sv::instance_gpu is the per-item record a closest-hit reads by InstanceID() — its material's parameter block, and its own geometry, all four indices acquired by describe_instance.
+                                                        Mesh geometry is acquired into the buffers table too, so a view is no longer limited to one mesh by its bindings.
+                                                        material_shader_cache — which gpu_resource_manager owns, so a mesh is authored and its shader acquired in one call — compiles one closest-hit per material_shader_key through sv::acquire_shader_library.
                                                         So gold and copper are one compile and only a texture sample costs a second.
-                                                        scene_ref::add_mesh resolves the material and acquires the block; view_renderer uploads one instance_gpu per item and pathtrace_routine builds a DXR pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
+                                                        scene_ref::add_mesh resolves the material and the block; view_renderer builds one instance_gpu per item on its own command list, and pathtrace_routine builds a DXR pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
                                                         The trace binds two groups: its own bindings, and the manager's bindless tables.
                                                         Still to come: several parameter blocks per buffer, and a local root signature so two permutations may disagree about a sampler register
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next

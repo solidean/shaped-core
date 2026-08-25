@@ -59,7 +59,7 @@ struct sv::generated_material_shader
     /// The generated text names a register, never a state, so nothing else can recover which state belongs to which register.
     cc::vector<sg::sampler> samplers;
 
-    /// equal to the `permutation_key` of the resolved material it came from — what the compile is cached on
+    /// What the compile is cached on: the resolution's shape and how these options spell it (see `material_shader_key`).
     cc::hash128 key;
 };
 
@@ -96,8 +96,8 @@ namespace sv
 /// Only what the permutation touches is declared: a material sampling no texture emits no texture table, so the reflection a
 /// caller binds against stays as small as the material is.
 ///
-/// The generated text depends on exactly what `permutation_key` covers, which is why `key` comes back equal to it — two resolved
-/// materials with the same key generate the same source, byte for byte.
+/// The generated text depends on `r.permutation_key` AND on `opts`, so `key` covers both — two calls agreeing on the pair
+/// generate the same source, byte for byte, and nothing else may share their cache entry.
 ///
 /// Every attribute must be a scalar or vector of `f32`, `i32` or `u32`; a matrix or a 64-bit / narrow scalar asserts, since
 /// neither has a settled `ByteAddressBuffer` layout here yet.
@@ -107,4 +107,12 @@ namespace sv
 /// The HLSL type `format` maps to — `float`, `float3`, `uint2`, ...
 /// Empty for a format the generator does not support, which is what `generate_material_shader` asserts on.
 [[nodiscard]] cc::string_view hlsl_type_of(attribute_format format);
+
+/// The key `generate_material_shader` would return for `permutation_key` under `opts`, without generating anything.
+///
+/// `permutation_key` is the resolution's shape; `opts` is how that shape is spelled — the entry point, the two includes, and
+/// the bindless budgets the tables are declared with.
+/// A cache computes this first and only generates on a miss, which is also why the budgets enter by value rather than as the
+/// `bindless_config const*` the caller happened to pass.
+[[nodiscard]] cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_options const& opts);
 } // namespace sv

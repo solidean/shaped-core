@@ -31,9 +31,9 @@ namespace
 /// A type with one f32 and one vec3f attribute, so both the scalar and the vector paths are covered.
 [[nodiscard]] sv::material_type make_type()
 {
-    auto signature = cc::vector<sv::material_attribute_decl>();
-    signature.push_back(sv::material_attribute_decl::of("roughness", 0.5f));
-    signature.push_back(sv::material_attribute_decl::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
+    signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     return sv::material_type::create("test", cc::move(signature),
                                      "    surface.roughness = roughness;\n    surface.albedo = base_color;");
 }
@@ -97,7 +97,17 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
     CHECK(slot_named(g.layout, "base_color").size_bytes == 12);
     CHECK(g.layout.size_bytes == 16);
 
-    CHECK(g.key == sv::resolve_material(type, bare_material(), make_mesh()).permutation_key);
+    // The key covers the resolution's shape AND how these options spell it, so it is deliberately not the permutation key.
+    auto const resolved = sv::resolve_material(type, bare_material(), make_mesh());
+    CHECK(g.key != resolved.permutation_key);
+    CHECK(g.key == sv::material_shader_key(resolved.permutation_key, {}));
+
+    // Same resolution, different spelling, different entry: two callers cannot collide on one cache entry.
+    CHECK(sv::generate_material_shader(resolved, {.entry_point = "other"}).key != g.key);
+    CHECK(sv::generate_material_shader(resolved, {.epilogue_include = "epilogue.hlsli"}).key != g.key);
+    auto const smaller = sv::bindless_config{.tables = {{.table = sv::bindless_table::textures_2d, .count = 2},
+                                                        {.table = sv::bindless_table::buffers, .count = 2}}};
+    CHECK(sv::generate_material_shader(resolved, {.bindless = &smaller}).key != g.key);
 }
 
 TEST("sv::generate_material_shader - a mesh attribute is loaded through its descriptor")
@@ -201,9 +211,9 @@ TEST("sv::generate_material_shader - the permutation split holds at the level of
 
 TEST("sv::generate_material_shader - two attributes sampled alike share one sampler")
 {
-    auto signature = cc::vector<sv::material_attribute_decl>();
-    signature.push_back(sv::material_attribute_decl::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
-    signature.push_back(sv::material_attribute_decl::of("emissive", tg::vec3f(0.0f, 0.0f, 0.0f)));
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(sv::material_signature_entry::of("emissive", tg::vec3f(0.0f, 0.0f, 0.0f)));
     auto const type = sv::material_type::create("two", cc::move(signature), "    surface.albedo = base_color;");
 
     auto mesh = make_mesh();

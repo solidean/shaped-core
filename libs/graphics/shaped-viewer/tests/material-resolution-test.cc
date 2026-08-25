@@ -36,8 +36,8 @@ constexpr auto uv_format = sv::attribute_format::of_vector(sv::scalar_type::f32,
 /// A type with one f32 attribute, which is all the chain needs to be exercised.
 [[nodiscard]] sv::material_type make_type(bool final_default = false)
 {
-    auto signature = cc::vector<sv::material_attribute_decl>();
-    signature.push_back(sv::material_attribute_decl::of("roughness", 0.5f, final_default));
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("roughness", 0.5f, final_default));
     return sv::material_type::create("test", cc::move(signature), "surface.roughness = roughness;");
 }
 
@@ -55,6 +55,38 @@ constexpr auto uv_format = sv::attribute_format::of_vector(sv::scalar_type::f32,
     return values.value()[0];
 }
 } // namespace
+
+TEST("sv::material_type - a name the generator cannot emit is rejected")
+{
+    auto const one = [](cc::string name)
+    {
+        auto signature = cc::vector<sv::material_signature_entry>();
+        signature.push_back(sv::material_signature_entry::of(cc::move(name), 0.5f));
+        return sv::material_type::create("test", cc::move(signature), "");
+    };
+
+    // The name is pasted into generated HLSL as a local, and the type's own fragment is written against it — so a name that
+    // would not parse, or would collide, is refused rather than mangled.
+    CHECK_ASSERTS(one("has space"));
+    CHECK_ASSERTS(one("has-hyphen"));
+    CHECK_ASSERTS(one("0leading"));
+    CHECK_ASSERTS(one(""));
+    CHECK_ASSERTS(one("float"));
+    CHECK_ASSERTS(one("float3"));
+    CHECK_ASSERTS(one("min16uint4x4"));
+    CHECK_ASSERTS(one("Texture2D"));
+    CHECK_ASSERTS(one("return"));
+    CHECK_ASSERTS(one("sv_params")); // the whole sv_ prefix is the generator's
+    CHECK_ASSERTS(one("sv_anything"));
+    CHECK_ASSERTS(one("surface")); // the entry function's own two locals
+    CHECK_ASSERTS(one("ctx"));
+
+    // An ordinary name still goes through, prefix-adjacent spellings included.
+    CHECK(one("roughness").signature[0].name == "roughness");
+    CHECK(one("_private").signature[0].name == "_private");
+    CHECK(one("svelte").signature[0].name == "svelte");
+    CHECK(one("float5").signature[0].name == "float5");
+}
 
 TEST("sv::resolve_material - each frequency overrides its parent")
 {
@@ -144,6 +176,34 @@ TEST("sv::resolve_material - final blocks every finer frequency")
     loose.push_back(sv::material_attribute_binding::of("roughness", 0.25f));
     auto const open = sv::material::create("open", sv::material_type_id(0), loose);
     CHECK(sv::resolve_material(type, open, mesh).attributes[0].frequency == sv::material_frequency::mesh_texture);
+}
+
+TEST("sv::resolve_material - a final texture binding blocks even when its own sample is unusable")
+{
+    // The mesh carries the roughness texture but not the uv set the material samples through, so the material's own candidate
+    // is skipped.
+    // `final` still has to refuse the mesh's texture — otherwise the binding that exists to say "not that one" silently loses
+    // to exactly the one it refused.
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(make_uvs("uv"));
+    mesh.textures.push_back({.name = "roughness", .source = make_sample(sv::texture_id(9))});
+
+    auto const type = make_type();
+
+    auto pinned = cc::vector<sv::material_attribute_binding>();
+    pinned.push_back(sv::material_attribute_binding::of_texture("roughness", make_sample(sv::texture_id(4), "uv2"), true));
+    auto const m = sv::material::create("pinned", sv::material_type_id(0), pinned);
+
+    // What stands is the coarsest rank that had won — the declaration's own default.
+    auto const r = sv::resolve_material(type, m, mesh);
+    CHECK(r.attributes[0].frequency == sv::material_frequency::material_type);
+    CHECK(constant_of(r) == 0.5f);
+
+    // With the uv set present the binding wins outright, which is the same rule seen from the other side.
+    mesh.attributes.push_back(make_uvs("uv2"));
+    auto const with_uvs = sv::resolve_material(type, m, mesh);
+    CHECK(with_uvs.attributes[0].frequency == sv::material_frequency::material_texture);
+    CHECK(with_uvs.attributes[0].sample->texture == sv::texture_id(4));
 }
 
 TEST("sv::resolve_material - a final declaration cannot be overridden at all")

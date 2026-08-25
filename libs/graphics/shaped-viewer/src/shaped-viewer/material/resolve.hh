@@ -84,6 +84,8 @@ namespace sv
 ///
 /// `is_final` on the declaration or on a binding stops the walk there, so no FINER frequency overrides it.
 /// That is how a material refuses a mesh's roughness texture: bind roughness final, and the texture never gets its turn.
+/// It stops the walk even when its own candidate was skipped — a `final` texture binding whose uv set the mesh lacks leaves the
+/// coarser winner standing rather than falling through to the mesh's texture.
 ///
 /// `material.type` is not checked against `type` — the library is what pairs them, and it validates once at registration rather
 /// than on every resolve.

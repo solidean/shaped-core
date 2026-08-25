@@ -155,7 +155,11 @@ public:
     /// This is the door for shader text that was never authored: generated, downloaded, or typed into a UI.
     /// `compile_shader` cannot serve it — that one resolves the package owning a path, and a generated source is under none.
     /// Includes still resolve against the mount table, so generated code may pull in the hand-authored `.hlsli` files a package
-    /// mounted; an edit to one changes the generated text, which is what makes a caller's own cache key move.
+    /// mounted.
+    /// **An edit to one of those does NOT move a caller's cache key.** The generated source carries a literal `#include` line
+    /// whose bytes never change when the file does, and `outcome.dependencies` — the only thing that knows what was pulled in —
+    /// is not returned from here.
+    /// So a generated permutation does not hot-reload on an include edit — see [shaped-viewer's TODO](../../../shaped-viewer/docs/TODO.md).
     ///
     /// **Nothing is cached here.** A generated source is produced by a caller that already has a key for it — a material
     /// permutation, say — and that key is a better one than a hash of the text, so the dedup belongs there rather than behind a
