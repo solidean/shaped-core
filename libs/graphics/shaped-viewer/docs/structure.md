@@ -71,7 +71,8 @@ material data on the GPU                 [in progress]  attribute_manager upload
                                                         Every index written into a block is a PINNED one, since the block outlives the epoch that built it.
                                                         sv::instance_gpu is the per-item record a closest-hit reads by InstanceID() — its material's parameter block, and its own geometry, every index pinned.
                                                         Mesh geometry is pinned into the buffers table too, so a view is no longer limited to one mesh by its bindings.
-                                                        Still to come: the view uploading that table, one hit group per permutation, and the trace reading both
+                                                        material_shader_cache compiles one closest-hit per permutation_key through sv::acquire_shader_library, so gold and copper are one compile and only a texture sample costs a second.
+                                                        Still to come: the view uploading that table, the DXR pipeline over the permutation set, and the trace reading both
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

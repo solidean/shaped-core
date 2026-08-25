@@ -57,6 +57,7 @@
 // rendering
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
+#include <shaped-viewer/rendering/material_shader_cache.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/raytrace_routine.hh>
 #include <shaped-viewer/rendering/render_plan.hh>

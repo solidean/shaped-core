@@ -82,8 +82,8 @@ What is not yet built, in dependency order:
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
 - **Nothing builds the per-permutation pipeline yet.**
-  `shaders/pt_material_hit.hlsli` is the closest-hit, emitted as a generated permutation's epilogue, and it compiles — that much is pinned by a DXC-gated test.
-  What is missing is `pathtrace_routine` building a DXR pipeline with one hit group per `permutation_key`, and `tlas_instance::hit_group_offset` selecting among them.
+  The shaders exist: `sv::material_shader_cache` compiles one closest-hit per `permutation_key` and hands back its parameter layout with it.
+  What is missing is `pathtrace_routine` building a DXR pipeline over that set — one hit group per permutation, with `tlas_instance::hit_group_offset` selecting among them.
   It also needs a second binding group for the manager's bindless tables.
   That two-group shape is what the reflection asks for: a generated hit shader reflects the tables in their own spaces.
   `sg::binding::space` is a register namespace and never constrains which slot a group binds at, so nothing stands in the way.

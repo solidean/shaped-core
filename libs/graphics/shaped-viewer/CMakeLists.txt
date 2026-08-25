@@ -43,6 +43,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/view_renderer.cc
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
+    src/shaped-viewer/rendering/material_shader_cache.cc
 )
 
 target_sources(shaped-viewer
@@ -103,6 +104,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/view_renderer.hh
     src/shaped-viewer/rendering/viewer_renderer.hh
     src/shaped-viewer/rendering/shaders.hh
+    src/shaped-viewer/rendering/material_shader_cache.hh
 )
 
 target_compile_features(shaped-viewer PUBLIC cxx_std_23)
@@ -174,6 +176,7 @@ if(SC_BUILD_TESTS)
         tests/material-resolution-test.cc
         tests/material-shader-generator-test.cc
         tests/material-shader-compile-test.cc
+        tests/material-shader-cache-test.cc
     )
 
     target_link_libraries(shaped-viewer-test

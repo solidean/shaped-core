@@ -157,6 +157,8 @@ struct layout_pipeline_key;
 } // namespace impl
 
 // rendering
+struct material_permutation; // one permutation generated + compiled (rendering/material_shader_cache.hh)
+class material_shader_cache;
 struct trace_desc;
 class pbr_raytrace_routine;
 struct pt_frame_constants_gpu;

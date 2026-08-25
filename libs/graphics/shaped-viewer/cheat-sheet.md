@@ -229,6 +229,10 @@ sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY
 sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; }
                                  //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
 {.epilogue_include = "pt_material_hit.hlsli"}   // -> a full DXR closest-hit for this permutation, not just the material function
+
+sv::material_shader_cache::create(sg::shader_format::dxil)   // one compiled closest-hit per permutation
+cache.acquire(resolved)          // -> material_permutation const& {layout; async_compiled_shader shader; string source;}
+cache.find(permutation_key)      // -> material_permutation const*, null if nothing acquired it;  cache.count()
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
 sv::material_slot_kind           // constant | attribute_descriptor (an sv_attribute_desc) | texture_index (a u32 into the 2D table)
