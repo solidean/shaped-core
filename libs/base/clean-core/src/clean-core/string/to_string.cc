@@ -1,5 +1,7 @@
 #include "to_string.hh"
 
+#include <clean-core/common/assert.hh>
+
 #include <charconv>
 
 using namespace cc::primitive_defines;
@@ -127,4 +129,94 @@ cc::string cc::to_string(string s)
 cc::string cc::to_string(string_view s)
 {
     return cc::string(s.data(), s.size());
+}
+
+// -----------------------------------------------------------------------------------------------------
+// cc::to_chars — the same std::to_chars calls, straight into the caller's buffer.
+
+namespace
+{
+template <class T>
+isize float_to_chars(cc::span<char> out, T v, cc::float_notation notation, int precision)
+{
+    auto* const first = out.data();
+    auto* const last = first + out.size();
+
+    std::to_chars_result r;
+    if (notation == cc::float_notation::shortest)
+        r = std::to_chars(first, last, v); // shortest round-trip; precision does not apply
+    else
+    {
+        auto const fmt = notation == cc::float_notation::fixed      ? std::chars_format::fixed
+                       : notation == cc::float_notation::scientific ? std::chars_format::scientific
+                                                                    : std::chars_format::general;
+        r = std::to_chars(first, last, v, fmt, precision < 0 ? 6 : precision); // 6 digits, matching std::format
+    }
+
+    // A failed to_chars leaves the buffer unspecified and reports `last` as its end, so returning the distance would
+    // hand back that many unspecified chars rather than a short write.
+    CC_ASSERT(r.ec == std::errc(), "cc::to_chars: buffer too small; size it off cc::to_chars_size(notation, "
+                                   "precision)");
+    return isize(r.ptr - first);
+}
+
+template <class T>
+isize integer_to_chars(cc::span<char> out, T v)
+{
+    auto* const first = out.data();
+    auto const r = std::to_chars(first, first + out.size(), v);
+    CC_ASSERT(r.ec == std::errc(), "cc::to_chars: buffer too small");
+    return isize(r.ptr - first);
+}
+} // namespace
+
+isize cc::to_chars(span<char> out, float v, float_notation notation, int precision)
+{
+    return float_to_chars(out, v, notation, precision);
+}
+
+isize cc::to_chars(span<char> out, double v, float_notation notation, int precision)
+{
+    return float_to_chars(out, v, notation, precision);
+}
+
+isize cc::to_chars(span<char> out, signed char v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, unsigned char v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, signed short v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, unsigned short v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, signed int v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, unsigned int v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, signed long v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, unsigned long v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, signed long long v)
+{
+    return integer_to_chars(out, v);
+}
+isize cc::to_chars(span<char> out, unsigned long long v)
+{
+    return integer_to_chars(out, v);
 }

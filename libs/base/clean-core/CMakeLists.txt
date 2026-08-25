@@ -79,6 +79,7 @@ add_library(clean-core
     src/clean-core/thread/async_ambient.cc
     src/clean-core/thread/async_thread_pool.cc
     src/clean-core/streams/span_stream.cc
+    src/clean-core/streams/growing_stream.cc
     src/clean-core/streams/file_stream.cc
     src/clean-core/streams/impl/native_file.cc
 )
@@ -241,6 +242,7 @@ target_sources(clean-core
     src/clean-core/streams/stream_flush.hh
     src/clean-core/streams/stream.hh
     src/clean-core/streams/span_stream.hh
+    src/clean-core/streams/growing_stream.hh
     src/clean-core/streams/file_stream.hh
     src/clean-core/streams/impl/stream.hh
     src/clean-core/streams/impl/native_file.hh
@@ -480,6 +482,7 @@ if(SC_BUILD_TESTS)
         tests/string/print-test.cc
         tests/string/string-test.cc
         tests/string/string_view-test.cc
+        tests/string/to_chars-test.cc
         tests/string/to_debug_string-test.cc
 
         tests/function/function_ref-test.cc
@@ -490,6 +493,7 @@ if(SC_BUILD_TESTS)
 
         tests/streams/stream-test.cc
         tests/streams/span_stream-test.cc
+        tests/streams/growing_stream-test.cc
         tests/streams/file_stream-test.cc
         tests/streams/read_line-test.cc
 

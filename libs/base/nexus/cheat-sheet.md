@@ -1,7 +1,7 @@
 # nexus cheat sheet
 
 Lightweight C++23 test framework, Catch2 v3 CLI–compatible so IDE test integration works out of the box.
-Namespace `nx`, depends on clean-core.
+Namespace `nx`, depends on clean-core (plus babel-data privately, for the JSON sidecars).
 
 You almost never call `nx::` directly — you write `TEST` / `CHECK` / `SECTION` macros and run them through `dev.py`.
 Headers are included by full path: `#include <nexus/...>`.

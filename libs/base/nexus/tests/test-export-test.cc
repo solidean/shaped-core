@@ -1,15 +1,20 @@
+#include <babel-serializer/data/json.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/guide.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
+#include <nexus/tests/export/perf_json.hh>
 #include <nexus/tests/export/xml.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
 namespace
 {
+using namespace cc::primitive_defines;
+
 // A registry with one test per interesting axis: a plain normal test, a disabled test, and a manual-bucket test.
 // Used to exercise the eligibility predicates and the JSON listing.
 nx::test_registry make_axis_registry()
@@ -19,6 +24,16 @@ nx::test_registry make_axis_registry()
     reg.add_declaration("beta", {.enabled = false}, [] {});
     reg.add_declaration("gamma", {.bucket = nx::config::test_bucket::manual}, [] {});
     return reg;
+}
+
+/// The entry of `array` whose "name" is `name`, or an invalid ref.
+/// The listing is read for its CONTENT, so the tests never assert on how it is spelled.
+babel::json::ref entry_named(babel::json::ref array, cc::string_view name)
+{
+    for (isize i = 0; i < array.size(); ++i)
+        if (array[i]["name"].as_string() == name)
+            return array[i];
+    return babel::json::ref();
 }
 
 nx::test_schedule_config config_from(cc::span<char const* const> args)
@@ -226,19 +241,20 @@ TEST("export - test listing JSON reports eligibility and metadata for every test
 
     char const* const args[] = {"prog"};
     auto const cfg = config_from(args);
-    cc::string const json = nx::write_test_listing_json("my-suite", cfg, reg);
+    auto const doc = babel::json::read(nx::write_test_listing_json("my-suite", cfg, reg)).value();
+    auto const root = doc.root();
 
     // Top-level: suite name, the bucket the sweep selected, and the eligible count (only the normal test).
-    CHECK(json.contains("\"suite\": \"my-suite\""));
-    CHECK(json.contains("\"selected_bucket\": \"normal\""));
-    CHECK(json.contains("\"eligible_count\": 1"));
+    CHECK(root["suite"].as_string() == "my-suite");
+    CHECK(root["selected_bucket"].as_string() == "normal");
+    CHECK(root["eligible_count"].as_double() == 1);
 
     // Every registered test is listed regardless of eligibility, with its bucket and enabled flag.
-    CHECK(json.contains("\"name\": \"alpha\""));
-    CHECK(json.contains("\"name\": \"beta\""));
-    CHECK(json.contains("\"name\": \"gamma\""));
-    CHECK(json.contains("\"bucket\": \"manual\""));
-    CHECK(json.contains("\"enabled\": false"));
+    auto const tests = root["tests"];
+    CHECK(tests.size() == 3);
+    CHECK(entry_named(tests, "alpha")["eligible"].as_bool());
+    CHECK(entry_named(tests, "beta")["enabled"].as_bool(true) == false);
+    CHECK(entry_named(tests, "gamma")["bucket"].as_string() == "manual");
 }
 
 TEST("export - test listing JSON reports aliases and counts a filter-matched alias as eligible")
@@ -251,20 +267,56 @@ TEST("export - test listing JSON reports aliases and counts a filter-matched ali
     // No filter: the alias is listed but not counted as an eligible match (a full sweep runs drivers directly).
     {
         char const* const args[] = {"prog"};
-        cc::string const json = nx::write_test_listing_json("s", config_from(args), reg);
-        CHECK(json.contains("\"aliases\": ["));
-        CHECK(json.contains("\"name\": \"api thing\""));
-        CHECK(json.contains("\"fragment_count\": 1"));
-        CHECK(json.contains("\"eligible_alias_count\": 0"));
+        auto const doc = babel::json::read(nx::write_test_listing_json("s", config_from(args), reg)).value();
+        auto const root = doc.root();
+
+        CHECK(root["aliases"].size() == 1);
+        CHECK(entry_named(root["aliases"], "api thing")["fragment_count"].as_double() == 1);
+        CHECK(root["eligible_alias_count"].as_double() == 0);
     }
 
     // A filter matching the alias name marks it eligible, so dev.py keeps this binary even with no plain match.
     {
         char const* const args[] = {"prog", "api thing"};
-        cc::string const json = nx::write_test_listing_json("s", config_from(args), reg);
-        CHECK(json.contains("\"eligible_count\": 0"));
-        CHECK(json.contains("\"eligible_alias_count\": 1"));
+        auto const doc = babel::json::read(nx::write_test_listing_json("s", config_from(args), reg)).value();
+        auto const root = doc.root();
+
+        CHECK(root["eligible_count"].as_double() == 0);
+        CHECK(root["eligible_alias_count"].as_double() == 1);
     }
+}
+
+TEST("export - perf JSON carries every metric a run recorded", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("bench", {},
+                        []
+                        {
+                            nx::guide::report_elements_per_sec("keys", 1250.5);
+                            nx::guide::report_time_for("per_op", 0.25);
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    auto const doc = babel::json::read(nx::write_perf_json("my-suite", exec)).value();
+    auto const root = doc.root();
+
+    CHECK(root["suite"].as_string() == "my-suite");
+
+    // The four fields dev.py matches on: test, name, value, and the orientation that makes a delta readable.
+    auto const metrics = root["metrics"];
+    REQUIRE(metrics.size() == 2);
+
+    auto const keys = entry_named(metrics, "keys");
+    CHECK(keys["test"].as_string() == "bench");
+    CHECK(keys["value"].as_double() == 1250.5);
+    CHECK(keys["unit"].as_string() == "1/s");
+    CHECK(keys["higher_is_better"].as_bool());
+
+    auto const per_op = entry_named(metrics, "per_op");
+    CHECK(per_op["value"].as_double() == 0.25);
+    CHECK(per_op["higher_is_better"].as_bool(true) == false);
 }
 
 TEST("export - junit report for an all-pass run has no failure elements", no_scheduler)

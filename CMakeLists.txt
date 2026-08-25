@@ -127,9 +127,8 @@ include(libs/base/nexus/cmake/Examples.cmake)
 # library whose *test* declares a package, like shaped-graphics — can call it.
 include(libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake)
 
-# clean-core must come first: nexus depends on it.
+# clean-core must come first: everything depends on it.
 add_subdirectory(libs/base/clean-core)
-add_subdirectory(libs/base/nexus)
 add_subdirectory(libs/base/typed-geometry)
 
 # data stack: babel-serializer (babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
@@ -157,6 +156,11 @@ endif()
 # shaped-shader-library (slib): shader packages + hot reload, over sg. Added after ssc so its optional
 # dxc compiler adapter can see that target; the packages themselves work without any compiler.
 add_subdirectory(libs/graphics/shaped-shader-library)
+
+# nexus goes LAST among the libraries even though it lives in libs/base: nothing here links it but test binaries, so
+# the harness sits on top of everything it tests. It may therefore depend on any library — today babel-data, for the
+# JSON sidecars — and the add order is what makes that direction readable.
+add_subdirectory(libs/base/nexus)
 
 # Developer tools. instruction-tracer needs the Win32 debug API, dbghelp and the fetched Zydis
 # decoder (extern/zydis); it gates itself on the `zydis` target existing, so a checkout that has
