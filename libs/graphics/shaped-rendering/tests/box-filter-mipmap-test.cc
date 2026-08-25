@@ -56,8 +56,8 @@ TEST("sr - box filter mipmap generates every shape's chain", exclusive("slib-sha
     auto const tex_2d_array = ctx.persistent.create_texture_2d_array({.format = sg::pixel_format::rgba8_unorm,
                                                                       .width = 16,
                                                                       .height = 16,
-                                                                      .array_layers = 3,
                                                                       .mip_levels = 5,
+                                                                      .array_layers = 3,
                                                                       .usage = mip_usage});
 
     // The count is the chain's, whatever the shape: a 3D texture halving in z still has one dispatch per level,
