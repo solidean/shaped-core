@@ -246,8 +246,10 @@ public:
     /// the trace binding one mesh's buffers globally.
     /// Both ids must be resident.
     ///
-    /// The block is built and uploaded into a transient buffer on `cmd`, so this must be called on the list that traces with
-    /// it and before `freeze()` — every index it returns is minted here.
+    /// The block is rebuilt for this epoch and uploaded on `cmd` if it changed, so this must be called on the list that
+    /// traces with it and before `freeze()` — every index it returns is minted here.
+    /// The buffer it is uploaded into is the record's own and persistent, which is what lets an unchanged working set leave
+    /// the staging group clean and its snapshot cached.
     [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
 
     /// Everything placing `mesh` in a scene costs, as one `scene_item`: its geometry uploaded and BLAS-built, its

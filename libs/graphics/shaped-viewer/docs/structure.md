@@ -67,7 +67,7 @@ material shader generation               [in progress]  generate_material_shader
                                                         The type's fragment then runs verbatim over those locals; shaders/material_runtime.hlsli is the hand-authored half it is written against.
                                                         Compiled through slib::shader_library::compile_source
 material data on the GPU                 [in progress]  attribute_manager uploads any mesh_attribute to a byte-address buffer keyed on its own hash, which is what makes the mesh_attribute rank of the chain reachable at all.
-                                                        gpu_resource_manager::acquire_instance resolves a parameter block down to ids, content-keyed on parameter_key; build_instance_parameters turns one into bytes for THIS epoch.
+                                                        gpu_resource_manager::acquire_instance resolves a parameter block down to ids, content-keyed on parameter_key; build_instance_parameters turns one into bytes for THIS epoch, into the record's own persistent buffer.
                                                         Every index in a block is that epoch's, minted where it is written — which is what makes the trace's access declaration complete by construction rather than by remembering.
                                                         sv::instance_gpu is the per-item record a closest-hit reads by InstanceID() — its material's parameter block, and its own geometry, all four indices acquired by describe_instance.
                                                         Mesh geometry is acquired into the buffers table too, so a view is no longer limited to one mesh by its bindings.

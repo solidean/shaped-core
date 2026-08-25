@@ -105,10 +105,15 @@ What is left is narrower than it was:
   That is one bindless slot per distinct (material, mesh) pairing rather than per instance, which is affordable but not free.
   Packing many blocks into one buffer is invisible to the shader — it already takes an offset — so it is an optimization rather than a change of contract.
 - **A parameter block is rebuilt every epoch, per distinct (material, mesh) pair.**
-  That is tens of bytes and one transient buffer per pair per frame.
-  What it buys is an access declaration correct by construction: every index a hit reads is minted by the call that writes it.
-  It also raises the floor the `buffers` table has to fit: the transient working set now holds every attribute buffer, mesh buffer and parameter block a scene draws, at once.
-  The default budget has not been measured against real content, and a transient acquire asserts once the working set exceeds capacity.
+  That is tens of bytes of CPU work per pair per frame, and it buys an access declaration correct by construction: every index a hit reads is minted by the call that writes it.
+  The buffer it is written into stays *persistent*, and is re-uploaded only when the bytes change.
+  A fresh transient buffer per frame mints a descriptor per frame, which leaves the staging group permanently dirty and re-mints the whole bindless table on every trace.
+  That exhausted the descriptor heap within a second of `interactive-showcase-manual-test`, so the persistence is load-bearing rather than incidental.
+
+- **Nothing evicts a parameter block.**
+  The LRU pool went away with the pin it existed to hold, so the set is bounded by the distinct (material, mesh) pairs a process ever draws rather than by a budget.
+  Each is one small buffer plus its slots; a long-lived session cycling through materials would grow without bound.
+  Folding the records onto `impl::keyed_cache` alongside the other managers is what would bound it.
 
 - **A pipeline is keyed on the whole permutation SET, in scene order.**
   Two views whose scenes hold the same materials in a different order build two pipelines over the same shaders.

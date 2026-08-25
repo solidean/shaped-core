@@ -2,6 +2,7 @@
 
 #include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/vector.hh>
+#include <shaped-graphics/resource/buffer.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/shader_generator.hh> // material_slot_kind, which a slot carries
 
@@ -61,11 +62,17 @@ struct sv::instance_slot
     texture_id texture = texture_id::invalid;
 };
 
-/// One instance's material parameter block, resolved down to ids — everything about it that survives an epoch.
+/// One instance's material parameter block: the slots it is built from, and the buffer it is built into.
 ///
 /// `shader_key` says which generated permutation reads it, which is what a hit-group assignment is keyed on.
 /// Minted by `gpu_resource_manager::acquire_instance` and content-cached on the resolved material's `parameter_key`, so two
 /// meshes drawn identically share one.
+///
+/// **The buffer is persistent and the bytes in it are not.**
+/// Every index a block holds is the epoch's that wrote it, so `describe_instance` rebuilds the bytes each epoch — but into the
+/// same buffer, and it uploads only when they actually differ from `uploaded`.
+/// A stable working set therefore writes no descriptor, which is what keeps the staging group clean and its snapshot cached;
+/// a fresh transient buffer per frame would re-mint the whole bindless table on every trace.
 struct sv::instance_record
 {
     cc::hash128 shader_key;
@@ -74,4 +81,11 @@ struct sv::instance_record
     i32 size_bytes = 0;
 
     cc::vector<instance_slot> slots;
+
+    /// Where the block lives, created on the first `describe_instance`.
+    /// At least 4 bytes even for an empty block: a zero-sized buffer has no descriptor to acquire.
+    sg::buffer<byte> parameters;
+
+    /// what was last uploaded into `parameters`, so an unchanged block costs a compare rather than a copy
+    cc::vector<byte> uploaded;
 };

@@ -142,7 +142,7 @@ m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes int
 m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; attribute_format format; attribute_frequency frequency; element_count;}
 
 m.acquire_instance(resolved, layout, shader_key)  // -> instance_id, content-keyed on resolved.parameter_key; layout + key from ONE generation
-m.get_instance(id)                     // -> instance_record {hash128 shader_key; i32 size_bytes; vector<instance_slot> slots;}
+m.get_instance(id)                     // -> instance_record {hash128 shader_key; i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded;}
 m.contains_instance(id) / m.instance_count()
 sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
@@ -150,7 +150,7 @@ m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquir
 m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the material resolved, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
-                                       //   builds + uploads the block into a TRANSIENT buffer on cmd, and mints all four indices
+                                       //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv_instance
 ```
 
@@ -164,7 +164,9 @@ Gotchas:
 - **Every index in a block is THIS EPOCH's**, never a pinned one — which is why a block is rebuilt per frame rather than cached across frames.
   That is what makes the access declaration correct by construction: nothing a hit reads reached the GPU without an acquire.
 - **`describe_instance` must be called on the list that traces with it, and before `freeze()`** — it is where those indices are minted.
-- **An `instance_record` is ids, not bytes.** It survives an epoch because nothing in it is epoch-scoped; the bytes are `build_instance_parameters`'s, per epoch.
+- **The block's bytes are the epoch's; its buffer is not.** The record owns a persistent buffer and re-uploads only when the bytes actually differ.
+  A fresh transient buffer per frame would mint a new descriptor every frame, leaving the staging group permanently dirty.
+  Every trace then re-mints the whole 8752-descriptor table, which exhausts the heap in seconds.
 - **The layout and shader key must come from ONE `generate_material_shader`** over that same resolved material, or the block is filled at offsets the shader does not read.
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.

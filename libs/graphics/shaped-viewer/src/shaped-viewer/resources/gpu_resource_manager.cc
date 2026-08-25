@@ -1,6 +1,7 @@
 #include "gpu_resource_manager.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh> // cc::memcmp
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -226,22 +227,33 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance)
 {
     auto const& m = meshes.get(mesh);
-    auto const& r = get_instance(instance);
 
-    auto const bytes = build_instance_parameters(r);
+    CC_ASSERT(contains_instance(instance), "no such instance_id");
+    auto& r = _instances[isize(u32(instance))];
+
+    auto bytes = build_instance_parameters(r);
 
     // A material whose every attribute is sourced from somewhere needing no parameter has an empty block, and a zero-sized
     // buffer has no descriptor to acquire.
     // Four bytes keep the shape uniform rather than making the shader branch on whether it has a block at all.
-    auto const size = bytes.empty() ? isize(4) : bytes.size();
-    auto const parameters = cmd.context().transient.create_buffer<byte>(
-        size, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    if (!bytes.empty())
-        cmd.upload.data_to_buffer(parameters, bytes);
+    if (r.parameters.raw() == nullptr)
+        r.parameters = cmd.context().persistent.create_buffer<byte>(
+            bytes.empty() ? isize(4) : bytes.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+
+    // The bytes are the epoch's, the buffer is not.
+    // In the steady state they come out identical, and skipping the copy is what keeps the upload path quiet — the buffer's
+    // own descriptor never moves either way, which is the part that matters for the group's snapshot.
+    auto const unchanged = bytes.size() == r.uploaded.size()
+                        && (bytes.empty() || cc::memcmp(bytes.data(), r.uploaded.data(), size_t(bytes.size())) == 0);
+    if (!bytes.empty() && !unchanged)
+    {
+        cmd.upload.data_to_buffer(r.parameters, bytes);
+        r.uploaded = cc::move(bytes);
+    }
 
     // Every index here is this epoch's, minted right where it is written — which is what puts all four into the access
     // declaration `freeze()` hands the trace.
-    return {.param_buffer = u32(acquire_buffer(parameters.as_readonly_buffer())),
+    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
             .vertices = u32(acquire_buffer(m.vertices.raw()->as_raw_readonly())),
             .indices = u32(acquire_buffer(m.indices.raw()->as_raw_readonly())),
