@@ -1,7 +1,8 @@
 # Reviewing PRs
 
 What we look for in a shaped-core review, and how we weigh the calls that have no right answer.
-The mechanics — fetching the branch, the report structure, feeding this document — belong to the `reviewing-a-pr` skill; this is the taste behind them.
+The mechanics — fetching the branch, accounting for every change, the entry structure — belong to the `reviewing-a-pr` skill and to [the review tool](../../tools/review/readme.md);
+this is the taste behind them.
 
 **This document is alive.**
 It is written from actual reviews, and every entry that reads like a rule earned that status by being said out loud in one.
@@ -200,4 +201,5 @@ Each becomes a rule above, an example, or a deletion.
 - [docs/coding-guidelines.md](../coding-guidelines.md) — design conventions and the prose rule.
 - [docs/error-handling.md](../error-handling.md) — the assert / `cc::result` / exception split a review applies.
 - [docs/guides/prose.md](prose.md) — the lint workflow behind the prose findings.
-- the `reviewing-a-pr` skill — the flow and the report structure.
+- the `reviewing-a-pr` skill — the flow and the entry structure.
+- [tools/review/readme.md](../../tools/review/readme.md) — the tool the flow drives: the change ledger, the entries, and the rounds.

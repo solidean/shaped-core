@@ -49,7 +49,7 @@ class IngestResult:
         return len(self.created) + len(self.reused)
 
 
-def _group_hunks(hunks: list[Hunk], gap: int) -> list[list[Hunk]]:
+def group_hunks(hunks: list[Hunk], gap: int) -> list[list[Hunk]]:
     """Group a file's hunks into the units a reader should see as one change."""
     groups: list[list[Hunk]] = []
     for hunk in hunks:
@@ -90,7 +90,7 @@ def candidates_for(
 
     for file in display:
         path = file.path
-        for group in _group_hunks(file.hunks, gap):
+        for group in group_hunks(file.hunks, gap):
             claim = _claim_of(group, file, net)
             if claim.is_empty:
                 continue

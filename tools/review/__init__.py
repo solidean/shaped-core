@@ -11,6 +11,8 @@ from __future__ import annotations
 # Colours are the only thing worth sharing, and keeping the import here means a downstream fork edits one line.
 from tools.dev.lib.core import console
 
+from .lib.changeset.commits import candidates_for_commit
+from .lib.changeset.commits import collect as collect_commit_candidates
 from .lib.changeset.ids import allocate, allocate_many, digest_of
 from .lib.changeset.ingest import (
     Candidate,
@@ -71,6 +73,7 @@ from .lib.git.run import Commit, Git, GitError
 from .lib.space.intervals import IntervalList
 from .lib.space.netspace import ADDED, REMOVED, FileAtom, LineSpace
 from .lib.space.netspace import build as build_net_space
+from .lib.goals.finalize import ARTIFACTS
 from .lib.goals.skeleton import describe as describe_group
 from .lib.goals.skeleton import finalizer_for, groups_for
 from .lib.render.text import render_entry, render_summary
@@ -78,6 +81,7 @@ from .lib.space.netspace import space_of
 
 __all__ = [
     "ADDED",
+    "ARTIFACTS",
     "Answer",
     "AnswerFile",
     "BLOCK_TYPES",
@@ -117,6 +121,8 @@ __all__ = [
     "ask_canonical",
     "build_net_space",
     "bulk_candidate",
+    "candidates_for_commit",
+    "collect_commit_candidates",
     "candidates_for",
     "check_immutable",
     "compose",

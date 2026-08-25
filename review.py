@@ -27,12 +27,15 @@ from tools.review import cmd  # noqa: E402
 from tools.review.cmd import (  # noqa: E402
     coverage,
     delta,
+    finalize,
     generate,
     ingest,
     init,
     round as round_cmd,
+    selftest,
     serve,
     show,
+    sync,
 )
 
 # The map of the CLI: one module per command, in the order `review.py --help` lists them.
@@ -45,6 +48,9 @@ COMMANDS = [
     serve,
     delta,
     round_cmd,
+    sync,
+    finalize,
+    selftest,
 ]
 
 

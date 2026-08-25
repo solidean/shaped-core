@@ -25,6 +25,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.review_name(p)
     p.add_argument("--paths", action="append", default=[], metavar="SEL",
                    help="restrict to these paths (repeatable, comma-separated)")
+    p.add_argument("--commits", metavar="A..B",
+                   help="take hunks from these commits individually, instead of from the net diff")
     p.add_argument("--bulk", metavar="SEL",
                    help="one change covering everything under SEL, with no hunk bodies written")
     p.add_argument("--reason", default="",
@@ -56,6 +58,40 @@ def matcher(selector: str):
     return matches
 
 
+def _commit_candidates(ctx: Context, cfg: review.ReviewConfig, net: review.LineSpace, args) -> list:
+    """Hunks taken from individual commits, with the merges that cannot be mapped refused up front."""
+    spec = args.commits
+    spec_base, _, spec_head = spec.partition("..")
+    spec_head = spec_head.lstrip(".").strip() or cfg.head
+    spec_base = spec_base.strip() or cfg.base
+
+    try:
+        base_sha = ctx.git.require_rev(spec_base)
+        head_sha = ctx.git.require_rev(spec_head)
+        merges = ctx.git.has_merges(base_sha, head_sha)
+        commits = ctx.git.commits(base_sha, head_sha)
+    except review.GitError as e:
+        ctx.die(str(e))
+
+    if merges:
+        ctx.die(
+            f"{len(merges)} merge commit(s) in {spec} ({', '.join(m[:8] for m in merges)}); "
+            "a merge has no single parent to map lines from, so ingest those with --bulk or from the net diff"
+        )
+    if not commits:
+        ctx.die(f"{spec} selects no commits")
+
+    selectors = _split(args.paths)
+    found, notes = review.collect_commit_candidates(
+        ctx.git, [c.sha for c in commits],
+        base=cfg.base, head=cfg.head, context=cfg.context, gap=cfg.coalesce_gap,
+        net=net, paths=selectors or None,
+    )
+    for note in notes:
+        print(review.console.dim(note))
+    return found
+
+
 def _print_stats(cfg: review.ReviewConfig, net: review.LineSpace, candidates: list) -> None:
     by_path: dict[str, int] = {}
     for candidate in candidates:
@@ -77,7 +113,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     net = ctx.net_space(cfg)
     ledger = ctx.ledger(paths)
 
-    if args.bulk:
+    if args.commits:
+        candidates = _commit_candidates(ctx, cfg, net, args)
+    elif args.bulk:
         candidate = review.bulk_candidate(net, selector=args.bulk, reason=args.reason, matches=matcher(args.bulk))
         if candidate is None:
             ctx.die(f"--bulk {args.bulk!r} matches nothing in this range")
