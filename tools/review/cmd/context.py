@@ -79,6 +79,27 @@ class Context:
     def answers(self, paths: review.ReviewPaths, entry: review.Entry) -> review.AnswerFile:
         return review.AnswerFile.load(paths.answers_for(entry.path), entry.slug)
 
+    def stamp(self, paths: review.ReviewPaths, cfg: review.ReviewConfig) -> int:
+        """Give every unstamped block the current round, and refuse a reworded finalized question.
+
+        Stamping happens whenever the tool touches a review, so a block carries the round it was *written* in
+        rather than the round it happened to be read in.
+        """
+        stamped = 0
+        for entry in self.entries(paths):
+            answers = self.answers(paths, entry)
+            finalized = {name: a.prompt_hash for name, a in answers.answers.items() if not a.tentative}
+            try:
+                review.check_immutable(entry, finalized)
+            except review.ReviewParseError as e:
+                self.die(str(e))
+
+            updated = review.stamp_rounds(entry, cfg.next_round)
+            if updated is not None:
+                review.write_atomic(entry.path, updated)
+                stamped += 1
+        return stamped
+
     def discharged(self, entries: list[review.Entry]) -> set[str]:
         """Every change id an ask discharges, across the whole review."""
         out: set[str] = set()

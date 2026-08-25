@@ -26,9 +26,12 @@ import tools.review as review  # noqa: E402
 from tools.review import cmd  # noqa: E402
 from tools.review.cmd import (  # noqa: E402
     coverage,
+    delta,
     generate,
     ingest,
     init,
+    round as round_cmd,
+    serve,
     show,
 )
 
@@ -39,6 +42,9 @@ COMMANDS = [
     coverage,
     generate,
     show,
+    serve,
+    delta,
+    round_cmd,
 ]
 
 

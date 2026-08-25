@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>review</title>
+<link rel="stylesheet" href="/assets/highlight.css">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div id="shell">
+  <nav id="nav">
+    <div id="nav-head">
+      <div id="review-name">review</div>
+      <div id="review-range"></div>
+      <div id="review-goals"></div>
+    </div>
+    <div id="progress">
+      <div class="bar"><div id="bar-asks"></div></div>
+      <div id="progress-text"></div>
+    </div>
+    <input id="filter" type="search" placeholder="filter (/)" autocomplete="off">
+    <div id="nav-list"></div>
+  </nav>
+  <main id="main">
+    <div id="topbar">
+      <button id="prev" title="previous entry (k)">&#8593;</button>
+      <button id="next" title="next entry (j)">&#8595;</button>
+      <button id="next-open" title="next unanswered entry (n)">next unanswered</button>
+      <div id="topbar-spacer"></div>
+      <span id="save-state"></span>
+      <button id="send" title="finalize this round and hand it back (s)">Send to Claude</button>
+      <button id="pause" title="stop waiting, keep everything (p)">Pause</button>
+      <button id="help-toggle" title="shortcuts (?)">?</button>
+    </div>
+    <div id="content"></div>
+  </main>
+</div>
+
+<div id="help" hidden>
+  <div class="help-card">
+    <h2>Shortcuts</h2>
+    <table>
+      <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>next / previous entry</td></tr>
+      <tr><td><kbd>n</kbd></td><td>next entry with an unanswered question</td></tr>
+      <tr><td><kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>pick that option in the entry's first open question</td></tr>
+      <tr><td><kbd>/</kbd></td><td>filter the navigation</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>save this answer and jump to the next unanswered</td></tr>
+      <tr><td><kbd>s</kbd></td><td>finalize the round and hand it back</td></tr>
+      <tr><td><kbd>p</kbd></td><td>pause: stop the agent waiting, keep every answer</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this card</td></tr>
+    </table>
+    <p>Answers save themselves as you type. Nothing is handed back until you send.</p>
+  </div>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
