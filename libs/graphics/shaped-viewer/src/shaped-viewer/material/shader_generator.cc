@@ -334,6 +334,10 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     src += r.type->shader;
     cc::format_append(src, "\n    return surface;\n}}\n");
 
+    // After the entry function, so whatever it holds may call it.
+    if (!opts.epilogue_include.empty())
+        cc::format_append(src, "\n#include \"{}\"\n", opts.epilogue_include);
+
     return {.source = cc::move(src), .layout = cc::move(layout), .key = r.permutation_key};
 }
 } // namespace sv

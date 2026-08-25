@@ -67,6 +67,13 @@ struct sv::material_shader_options
     /// the runtime contract to include; must be resolvable by whatever compiles the result
     cc::string_view runtime_include = "material_runtime.hlsli";
 
+    /// Emitted AFTER the entry function, for code that calls it — the path tracer's closest-hit above all.
+    ///
+    /// It has to be an epilogue rather than an ordinary include: HLSL needs `sv_evaluate_material` defined before anything calls
+    /// it, and this file is where that definition lands.
+    /// Empty emits nothing, which is what a caller wanting only the material function asks for.
+    cc::string_view epilogue_include = {};
+
     /// how many elements each bindless table is declared with; must match the `gpu_resource_manager`'s budgets
     bindless_config const* bindless = nullptr;
 };

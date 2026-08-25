@@ -224,7 +224,9 @@ Gotchas:
 ```cpp
 sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; material_parameter_layout layout; hash128 key;}
 sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
-sv::material_shader_options      // { string_view entry_point = "sv_evaluate_material"; string_view runtime_include; bindless_config const*; }
+sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; }
+                                 //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
+{.epilogue_include = "pt_material_hit.hlsli"}   // -> a full DXR closest-hit for this permutation, not just the material function
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
 sv::material_slot_kind           // constant | attribute_descriptor (an sv_attribute_desc) | texture_index (a u32 into the 2D table)

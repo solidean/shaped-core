@@ -13,6 +13,7 @@
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/material/shader_generator.hh>
+#include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/linalg/vec.hh>
 
@@ -135,6 +136,64 @@ TEST("sv - a sampled permutation compiles, at either uv frequency")
         mesh.textures.push_back({.name = "roughness", .source = {.texture = sv::texture_id(2), .uv_attribute = "uv"}});
         check_compiles(sv::resolve_material(materials, gold, mesh));
     }
+}
+
+
+TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
+{
+    if (!sv_test::shared_env().has_compiler)
+        return;
+
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+    auto const pbr = materials.acquire_type(sv::builtin_material::pbr).value();
+    auto const gold = materials.acquire(sv::material::create("gold", pbr, {}));
+
+    // A mesh exercising both the interpolated and the sampled path, so the hit shader is the real shape rather than a trivial one.
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(make_uvs());
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex, cc::array<f32>{0.1f, 0.2f, 0.3f}));
+    mesh.textures.push_back({.name = "base_color", .source = {.texture = sv::texture_id(1), .uv_attribute = "uv"}});
+
+    auto const resolved = sv::resolve_material(materials, gold, mesh);
+    auto const g = sv::generate_material_shader(resolved, {.epilogue_include = "pt_material_hit.hlsli"});
+
+    // The epilogue lands after the function it calls, which is the whole reason it is an epilogue.
+    CHECK(g.source.find("sv_surface sv_evaluate_material") < g.source.find("#include \"pt_material_hit.hlsli\""));
+
+    auto const& lib = *sv_test::shared_env().lib;
+    auto const shader
+        = lib.compile_source(g.source, sg::shader_stage::closest_hit, "PtClosestHit", sg::shader_format::dxil,
+                             {.include_dir = "sv_shaders", .label = "<generated closest-hit>"});
+
+    REQUIRE(shader != nullptr);
+    (void)cc::try_async_blocking_get(shader);
+    if (shader->has_error())
+        FAIL(cc::format("{}\n--- source ---\n{}", shader->try_error()->underlying().to_string(), g.source));
+    REQUIRE(shader->has_value());
+
+    auto const& compiled = shader->try_value();
+    CHECK(compiled->stage == sg::shader_stage::closest_hit);
+    CHECK(compiled->bytecode.size() > 0);
+
+    // The instance table and the bindless buffers must both reflect: they are what the hit reads everything else through.
+    auto saw_instances = false;
+    auto saw_buffers = false;
+    for (auto const& b : compiled->bindings)
+    {
+        if (b.name == "Instances")
+            saw_instances = true;
+        if (b.name == sv::name_of(sv::bindless_table::buffers))
+        {
+            saw_buffers = true;
+            // Reflection must agree with the layout the manager declares, or the two groups cannot be bound together.
+            CHECK(b.space.value() == sv::space_of(sv::bindless_table::buffers));
+            CHECK(b.is_array());
+        }
+    }
+    CHECK(saw_instances);
+    CHECK(saw_buffers);
 }
 
 #endif // SLIB_HAS_DXC
