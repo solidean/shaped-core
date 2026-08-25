@@ -188,6 +188,8 @@ lib.acquire(material)            // -> material_id, content-addressed; HERE ever
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
 sv::builtin_material::pbr / unlit                    // the names the builtins register under
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
+sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
+sv::acquire_shader_library()     // -> result<slib::shader_library*>, process-wide — what a GENERATED permutation compiles through
 sv::acquire_material_library()   // -> result<material_library*>, created once per process and shared
 
 sv::resolve_material(type, material, mesh)           // -> resolved_material; the pure form

@@ -4,11 +4,11 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/rendering/shaders.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
+#include <shaped-viewer/shader_library.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
@@ -52,23 +52,19 @@ struct sv_test::env
 namespace sv_test
 {
 
-/// The one shader library for this test binary, with sv's and sr's packages registered.
+/// The one shader library for this test binary — sv's own, reached through the same hook a viewer uses.
 /// `has_compiler` is false when DXC is not installed — a caller SKIPs, since nothing will compile.
 ///
-/// sr's package carries the blit shader (sr::blit_routine), which the viewer_renderer drives to place each view — so both packages
-/// must be registered, or acquiring the blit shader faults.
+/// Built by `sv::impl::acquire_default_shader_library`, so a test compiles through exactly what a viewer compiles through rather
+/// than through a second library assembled to look like it.
 inline env const& shared_env()
 {
     static env const e = []
     {
-        auto* const lib = new slib::shader_library();
-        auto compiler = slib::create_dxc_compiler();
-        auto const has_compiler = compiler.has_value();
-        if (has_compiler)
-            lib->add_compiler(cc::move(compiler.value()));
-        lib->add_package(sv::shader_package());
-        lib->add_package(sr::shader_package());
-        return env{.lib = lib, .has_compiler = has_compiler};
+        auto lib = sv::acquire_shader_library();
+        CC_ASSERT(lib.has_value(), "the default shader library must come up for the GPU tests");
+        return env{.lib = lib.value(),
+                   .has_compiler = lib.value()->can_compile(slib::shader_language::hlsl, sg::shader_format::dxil)};
     }();
     return e;
 }

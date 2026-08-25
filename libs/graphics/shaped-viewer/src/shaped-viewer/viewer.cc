@@ -8,8 +8,6 @@
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/shaders.hh> // sr::shader_package (blit)
 #include <shaped-rendering/window.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh> // slib::create_dxc_compiler
-#include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
@@ -19,6 +17,7 @@
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
+#include <shaped-viewer/shader_library.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
@@ -115,7 +114,6 @@ struct viewer::impl
     cc::unique_ptr<sr::window> window;
     sg::swapchain_handle swapchain;
 
-    cc::unique_ptr<slib::shader_library> shader_library; // the viewer owns its shader library
 
     gpu_resource_manager resources;
 
@@ -207,16 +205,11 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
         return cc::error("shaped-viewer: could not create a swapchain for the window");
     auto sc = sc_r.value();
 
-    // The viewer creates and owns its shader library, registering sv's and sr's packages plus a DXC compiler when available.
-    // Only one library may exist per process.
-    auto shader_library = cc::make_unique<slib::shader_library>();
-#if SLIB_HAS_DXC
-    auto compiler = slib::create_dxc_compiler();
-    if (compiler.has_value())
-        shader_library->add_compiler(cc::move(compiler.value()));
-#endif
-    shader_library->add_package(sv::shader_package());
-    shader_library->add_package(sr::shader_package());
+    // The library is process-wide rather than the viewer's, because a *generated* material permutation is compiled from the
+    // render path, which has no viewer to reach back to.
+    // A caller wanting their own registers it through set_acquire_shader_library before the first viewer.
+    if (acquire_shader_library().has_error())
+        return cc::error("shaped-viewer: could not bring up a shader library");
 
     auto im = cc::make_unique<viewer::impl>(ctx, gpu_resource_manager::create(ctx, config.resources));
     im->id = view_id::from_string(id_str);
@@ -224,7 +217,6 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     im->window_system = cc::move(ws);
     im->window = cc::move(win);
     im->swapchain = cc::move(sc);
-    im->shader_library = cc::move(shader_library);
 
     im->start_time = std::chrono::steady_clock::now();
     return viewer(cc::move(im));

@@ -12,6 +12,7 @@ project(shaped-viewer LANGUAGES CXX)
 add_library(shaped-viewer
     src/shaped-viewer/shaped-viewer.cc
     src/shaped-viewer/context.cc
+    src/shaped-viewer/shader_library.cc
     src/shaped-viewer/scene/light.cc
     src/shaped-viewer/scene/background.cc
     src/shaped-viewer/scene/pbr_material.cc
@@ -57,6 +58,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/interactive.hh
     src/shaped-viewer/viewer.hh
     src/shaped-viewer/context.hh
+    src/shaped-viewer/shader_library.hh
     src/shaped-viewer/scene/pbr_material.hh
     src/shaped-viewer/scene/light.hh
     src/shaped-viewer/scene/background.hh
