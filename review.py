@@ -26,8 +26,10 @@ import tools.review as review  # noqa: E402
 from tools.review import cmd  # noqa: E402
 from tools.review.cmd import (  # noqa: E402
     coverage,
+    generate,
     ingest,
     init,
+    show,
 )
 
 # The map of the CLI: one module per command, in the order `review.py --help` lists them.
@@ -35,6 +37,8 @@ COMMANDS = [
     init,
     ingest,
     coverage,
+    generate,
+    show,
 ]
 
 

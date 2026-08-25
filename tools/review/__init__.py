@@ -40,25 +40,58 @@ from .lib.core.paths import (
     entry_slug,
     validate_name,
 )
+from .lib.entry.answers import Answer, AnswerFile
+from .lib.entry.askhash import canonical as ask_canonical
+from .lib.entry.askhash import hash_ask
+from .lib.entry.generate import COVERAGE_SLUG, OVERVIEW_SLUG
+from .lib.entry.generate import coverage_body, coverage_front, ensure as ensure_entry, overview_body, overview_front
+from .lib.entry.grammar import (
+    BLOCK_TYPES,
+    CONTEXT_TIERS,
+    OPTION_KINDS,
+    SEVERITIES,
+    STATES,
+    Option,
+    ReviewParseError,
+)
+from .lib.entry.parse import Block, Entry
+from .lib.entry.parse import parse_file as parse_entry_file
+from .lib.entry.parse import parse_text as parse_entry_text
+from .lib.entry.write import (
+    append_text,
+    check_immutable,
+    compose,
+    stamp_rounds,
+    word_warnings,
+    write_entry,
+)
 from .lib.git.diffparse import FileDiff, Hunk
 from .lib.git.diffparse import parse as parse_diff
 from .lib.git.run import Commit, Git, GitError
 from .lib.space.intervals import IntervalList
 from .lib.space.netspace import ADDED, REMOVED, FileAtom, LineSpace
 from .lib.space.netspace import build as build_net_space
+from .lib.goals.skeleton import describe as describe_group
+from .lib.goals.skeleton import finalizer_for, groups_for
+from .lib.render.text import render_entry, render_summary
 from .lib.space.netspace import space_of
 
 __all__ = [
     "ADDED",
-    "GOALS",
-    "REMOVED",
-    "TOOL_VERSION",
+    "Answer",
+    "AnswerFile",
+    "BLOCK_TYPES",
+    "Block",
+    "CONTEXT_TIERS",
+    "COVERAGE_SLUG",
     "Candidate",
     "Change",
     "Commit",
     "ConfigError",
+    "Entry",
     "FileAtom",
     "FileDiff",
+    "GOALS",
     "Git",
     "GitError",
     "Hunk",
@@ -66,32 +99,60 @@ __all__ = [
     "IntervalList",
     "Ledger",
     "LineSpace",
+    "OPTION_KINDS",
+    "OVERVIEW_SLUG",
+    "Option",
+    "REMOVED",
     "ReviewConfig",
     "ReviewNameError",
+    "ReviewParseError",
     "ReviewPaths",
+    "SEVERITIES",
+    "STATES",
+    "TOOL_VERSION",
     "allocate",
     "allocate_many",
     "append_jsonl",
+    "append_text",
+    "ask_canonical",
     "build_net_space",
     "bulk_candidate",
     "candidates_for",
+    "check_immutable",
+    "compose",
     "console",
+    "coverage_body",
+    "coverage_front",
     "default_root",
+    "describe_group",
     "digest_of",
     "dump",
+    "ensure_entry",
     "entry_slug",
+    "finalizer_for",
     "goal_help",
+    "groups_for",
+    "hash_ask",
     "load",
     "now",
+    "overview_body",
+    "overview_front",
     "parse_diff",
+    "parse_entry_file",
+    "parse_entry_text",
     "read_json",
     "read_jsonl",
     "record",
     "register",
+    "render_entry",
+    "render_summary",
     "save",
     "space_of",
+    "stamp_rounds",
     "stat_key",
     "validate_name",
+    "word_warnings",
     "write_atomic",
+    "write_entry",
     "write_json",
 ]

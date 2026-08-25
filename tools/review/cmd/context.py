@@ -66,6 +66,27 @@ class Context:
         except review.GitError as e:
             self.die(str(e))
 
+    def entries(self, paths: review.ReviewPaths) -> list[review.Entry]:
+        """Every entry in navigation order, dying with the file and line on the first malformed one."""
+        out = []
+        for file in paths.entry_files():
+            try:
+                out.append(review.parse_entry_file(file))
+            except review.ReviewParseError as e:
+                self.die(str(e))
+        return out
+
+    def answers(self, paths: review.ReviewPaths, entry: review.Entry) -> review.AnswerFile:
+        return review.AnswerFile.load(paths.answers_for(entry.path), entry.slug)
+
+    def discharged(self, entries: list[review.Entry]) -> set[str]:
+        """Every change id an ask discharges, across the whole review."""
+        out: set[str] = set()
+        for entry in entries:
+            if entry.state == "open":
+                out.update(entry.discharged_changes())
+        return out
+
     def warn_gitignore(self, paths: review.ReviewPaths) -> None:
         """Warn when the review folder would be committed.
 
