@@ -55,15 +55,6 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
 {
     return (id >> kind_shift) == 1;
 }
-
-/// The traced layer's primary-hit geometry: `float4(normal.xyz, hit_t)`, with `hit_t < 0` where the ray escaped.
-///
-/// Written fresh every recorded frame rather than accumulated, and kept alongside the accumulator so a later frame
-/// can ask where this frame's pixels were — which is what reprojecting the history needs.
-[[nodiscard]] constexpr u64 gbuffer(u8 layer)
-{
-    return (u64(2) << kind_shift) | u64(layer);
-}
 } // namespace sv::temporal_id
 
 /// How often a view re-renders, as a fraction of the frame loop's rate.

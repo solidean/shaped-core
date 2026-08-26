@@ -17,14 +17,6 @@ cbuffer FrameConstants : register(b0)
 
     // path-tracer controls (accum_frame drives progressive accumulation: 0 restarts, >0 blends in place)
     int  samples_per_pixel;  int max_bounces;  uint rng_seed;  uint accum_frame;
-
-    // A full lane held back, so prev_camera keeps its offset while the block has nothing else to say here.
-    uint4 _reserved0;
-
-    Camera prev_camera;        // the previous recorded frame's camera; meaningless unless has_history
-    uint   has_history;        // 0 => the history textures hold nothing; every pixel starts from scratch
-    uint   history_max_frames; // ceiling on a reprojected pixel's carried sample count (u32(-1) => uncapped)
-    uint   debug_view;         // 1 => write a false-color of the carried sample count instead of the image
 };
 
 // One path segment, in and out.
@@ -33,22 +25,20 @@ cbuffer FrameConstants : register(b0)
 // continuation direction. So the payload carries the segment's RESULT rather than its surface, which is what lets a layered
 // BSDF stay on the hit shader's stack instead of being squeezed through here.
 //
-// `shade` and `rng` travel the other way, written by the caller. The random state round-trips so the whole path pulls from one
-// stream, and `shade` 0 asks for the geometry fields alone — the G-buffer prepass wants no shading done.
+// `rng` travels the other way, written by the caller. The random state round-trips so the whole path pulls from one stream.
 //
 // Every result field is written by both the closest-hit and the miss (the miss writes zeros plus hit_t < 0), so the caller can
 // read them all unconditionally right after TraceRay without the access analyzer flagging an undefined read; it then branches
 // on hit_t. SM 6.8 wants the DXR 1.1 [raypayload] annotation with per-field read/write stage qualifiers.
 struct [raypayload] PtPayload
 {
-    uint shade : read(closesthit) : write(caller);
-    uint rng   : read(caller, closesthit) : write(caller, closesthit);
+    uint rng : read(caller, closesthit) : write(caller, closesthit);
 
     float3 direct     : read(caller) : write(closesthit, miss); // next-event estimate at this hit, BSDF folded in
     float3 emission   : read(caller) : write(closesthit, miss); // the surface's own emission, or the sky on a miss
     float3 throughput : read(caller) : write(closesthit, miss); // f * cos / pdf for the sampled continuation
     float3 direction  : read(caller) : write(closesthit, miss); // where the path goes next
-    float3 normal     : read(caller) : write(closesthit, miss); // shading normal, for the G-buffer and the ray offset
+    float3 normal     : read(caller) : write(closesthit, miss); // shading normal, for the ray offset off the surface
 
     float bsdf_pdf : read(caller) : write(closesthit, miss); // pdf of `direction`, for the escaped-environment MIS weight
     float hit_t    : read(caller) : write(closesthit, miss); // < 0 => the ray escaped (miss)

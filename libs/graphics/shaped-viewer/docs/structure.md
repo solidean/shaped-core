@@ -57,7 +57,7 @@ camera / controls                        [in progress]  dev-friendly pinhole cam
 persistent per-view state                [in progress]  view_id keys what a view keeps — camera, controller, zoom, display name, last rect, composite target and accumulators — all in one sv::view_store the frame owns
 id stack (push_id / scoped_id)           [done]         seeds view_id so one name under N scopes names N views; independent of layout nesting, and a duplicate within a frame asserts.
                                                         Ids are formattable and take an ImGui-style ## suffix, which separates two views without changing what a human reads
-temporal accumulation                    [in progress]  a traced layer reprojects its history through the previous camera and blends per pixel; only a scene change restarts the whole image
+temporal accumulation                    [in progress]  a traced layer blends into one rgba32_float target in place, uncapped; the camera or the scene changing restarts it, nothing else does
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through sr::box_filter_mipmap_routine) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
                                                         Still to come: async streaming, placeholders while pending, and mapping visibility onto sg's stream priorities

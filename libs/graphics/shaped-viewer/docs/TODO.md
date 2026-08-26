@@ -35,13 +35,17 @@ What is left is the interaction on top of it, in dependency order:
 - **A traced layer has no alpha.** `pathtrace.hlsl`'s raygen writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.
-- **The reprojection is unverified at the pixel level.** The temporal reuse landed — G-buffer, ping-pong pair,
-  disocclusion rejection, per-pixel estimator — and the tests pin the *policy* (a camera move keeps its counter, a
-  scene change resets it), but nothing checks that `reproject()` lands on the right texel.
-  A wrong sign or a transposed basis would still pass the suite and simply look smeared.
-  The cheap check is a readback test: converge a static view, translate the camera along its own right axis by
-  exactly one pixel's worth at the focal distance, and assert the image shifts by one texel.
+- **The accumulated image is never read back.** The tests pin the *policy* — a camera or scene change restarts the
+  counter, a relayout does not — but nothing checks that the blend itself produces the running mean it claims to.
+  The cheap check is a readback test: trace a converging static view twice at a known constant color and assert the
+  target holds the mean rather than the last frame.
   Until that exists, `pathtraced-window-manual-test` is the only real confirmation.
+- **A camera move throws the whole estimate away**, which is the deliberate trade behind an uncapped exact mean, and
+  it is what makes flying noisy.
+  Reprojecting the history through the previous camera and rejecting per pixel is the classical answer and was tried;
+  it cost a G-buffer, a ping-pong pair, a disocclusion heuristic and a per-pixel sample count, and it capped the mean.
+  A spatial filter over a moving frame (A-trous / SVGF) buys the same smoothness without touching the estimator, and
+  is the direction to take this if flying needs to look better.
 - **The GPU tests may still be passing vacuously.** `pathtrace_routine::init_declare` used to drive its shader compiles
   with a throwaway single-threaded scheduler, which could not complete a node the ambient pool already owned — so the
   routine ended up with no pipeline and `execute` silently no-opped.
@@ -50,10 +54,6 @@ What is left is the interaction on top of it, in dependency order:
   facts, so none of them would notice tracing nothing at all.
   Until then, a tracing test that means anything needs `nx::config::main_thread` *and* an `is_ready` assertion.
   That assertion now reports the last trace rather than the routine, so it belongs AFTER the execute rather than before it.
-- **The disocclusion thresholds are guesses**: 1% of view depth on position, 0.9 on the normal dot.
-  They want tuning against real content, and probably want to be per-view rather than constants in the raygen.
-- **No spatial filter.** Reuse is purely temporal, so a freshly disoccluded pixel shows its raw estimate until it accumulates.
-  An A-trous / SVGF pass over the low-count pixels is the usual companion, and is not here.
 - **One traced layer per view is still assumed** in `view_renderer::execute`, the single-view convenience the GPU tests
   drive.
   The plan and `trace` are already per `(view, layer)`.
@@ -179,7 +179,7 @@ importance-samples the continuation — so what is left is coverage of the model
   runs; nothing checks what the BSDF returns.
   The cheap first assertions are a white-furnace test — a rough metal under a uniform environment must return roughly its own
   albedo — and a reciprocity check over sampled direction pairs.
-  Both need the pixel readback the reprojection entry above also wants, which is the one piece of test infrastructure sv has
+  Both need the pixel readback the accumulation entry above also wants, which is the one piece of test infrastructure sv has
   none of.
 - **The environment cannot produce a sharp reflection.** The background is an order-3 SH probe, so a smooth specular lobe
   reflects a blur whatever the roughness says; only the analytic area light gives a real highlight.

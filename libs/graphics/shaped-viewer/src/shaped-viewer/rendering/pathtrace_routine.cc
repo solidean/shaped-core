@@ -142,13 +142,13 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto const pipeline_layout
         = ctx.cached.acquire_pipeline_layout({.groups = {variant.group_layout, d.bindless->layout()}});
 
-    // Payload is PtPayload from pt_common.hlsli: shade + rng, five float3 results, and bsdf_pdf + hit_t = 19 lanes.
+    // Payload is PtPayload from pt_common.hlsli: rng, five float3 results, and bsdf_pdf + hit_t = 18 lanes.
     //
     // Depth 2 rather than 1, because the shading moved into the closest-hit: the raygen's trace is the first level and the
     // shadow rays that hit shader casts for next-event estimation are the second.
     auto rpd = sg::raytracing_pipeline_description{.layout = pipeline_layout,
                                                    .max_recursion_depth = 2,
-                                                   .max_payload_size = isize(sizeof(u32) * 19)};
+                                                   .max_payload_size = isize(sizeof(u32) * 18)};
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
     auto const shadow_miss_h = rpd.add_miss_shader(*compiled_sms);
@@ -199,16 +199,12 @@ void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
 
     self->_traced = false;
 
-    // The raygen writes both unconditionally, so a missing one faults inside the binding group rather than here.
     CC_ASSERT(d.output.raw() != nullptr, "pathtrace_routine: no output target bound");
-    CC_ASSERT(d.gbuffer.raw() != nullptr, "pathtrace_routine: no gbuffer bound");
-    CC_ASSERT(d.gbuffer.width() == d.output.width() && d.gbuffer.height() == d.output.height(),
-              "pathtrace_routine: the gbuffer must match the output's extent — the raygen writes both at its own "
-              "pixel");
-    CC_ASSERT(d.history_color.raw() != nullptr && d.history_gbuffer.raw() != nullptr,
-              "pathtrace_routine: both history textures must be bound, even with has_history false");
-    CC_ASSERT(d.history_color.raw() != d.output.raw() && d.history_gbuffer.raw() != d.gbuffer.raw(),
-              "pathtrace_routine: history must not alias what this dispatch writes — reprojection reads another pixel");
+
+    // The raygen reads the target back to blend into it, and a half float would stop moving the mean long before
+    // the estimate is done converging.
+    CC_ASSERT(d.output.raw()->description().format == sg::pixel_format::rgba32_float,
+              "pathtrace_routine: the accumulator must be rgba32_float — the blend weight is 1 / (accum_frame + 1)");
     CC_ASSERT(d.instance_table.raw() != nullptr, "pathtrace_routine: no instance table bound");
     CC_ASSERT(!d.hit_groups.empty(), "pathtrace_routine: a trace needs at least one hit group to shade with");
 
@@ -222,9 +218,6 @@ void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
     auto const group = ctx.transient.create_binding_group(
         variant->group_layout, {{.name = "scene", .view = tlas->as_view()},
                                 {.name = "Output", .view = d.output.as_readwrite_view()},
-                                {.name = "GBuffer", .view = d.gbuffer.as_readwrite_view()},
-                                {.name = "HistoryColor", .view = d.history_color.as_readonly_view()},
-                                {.name = "HistoryGBuffer", .view = d.history_gbuffer.as_readonly_view()},
                                 {.name = "FrameConstants", .view = d.frame.as_uniform_buffer()},
                                 {.name = "background", .view = d.background.as_uniform_buffer()},
                                 {.name = "Instances", .view = d.instance_table.as_readonly_buffer()}});

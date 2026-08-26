@@ -10,7 +10,6 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/gpu_types.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
@@ -33,39 +32,17 @@ struct sv::pt_frame_constants_gpu
     i32 samples_per_pixel = 16; // primary rays integrated per pixel, accumulated in the one dispatch
     i32 max_bounces = 5;        // path length: primary hit + this many diffuse bounces
     u32 seed = 1;               // per-frame RNG seed; vary it to decorrelate accumulated frames
-    u32 accum_frame = 0;        // progressive accumulation index: 0 restarts, >0 blends into the output in place
 
-    // A whole 16-byte lane held back, so `prev_camera` keeps the offset the cbuffer gives it.
-    // Geometry layout used to ride here; it is per-instance state, and lives in the instance table now.
-    f32 _reserved0[4] = {};
-
-    /// The camera the previous recorded frame traced from, which is what this frame reprojects its history through.
-    /// Meaningless unless `has_history`.
-    camera_gpu prev_camera;
-
-    /// Whether the bound history textures hold a previous frame at all.
-    /// False on the first frame after any reset, where every pixel starts its estimate from nothing.
-    sr::gpu_boolean has_history = false;
-
-    /// Ceiling on the per-pixel sample count a reprojected pixel may carry forward.
+    /// How many frames the target's running mean already holds, which is this frame's weight: 1 / (accum_frame + 1).
     ///
-    /// The hybrid the viewer wants: left at `u32(-1)` while the camera is still, so a static view keeps the exact
-    /// running mean and converges to ground truth; lowered once it moves, so a sample dragged along by reprojection
-    /// ages out instead of smearing indefinitely.
-    u32 history_max_frames = u32(-1);
-
-    /// 0 renders normally; 1 replaces the written color with a false-color of each pixel's carried sample count.
-    ///
-    /// The one direct way to tell a *rejected* pixel from a merely high-variance one: rejection pins a pixel at
-    /// zero carried samples forever and reads as permanent noise, while a converging pixel just converges slowly.
-    /// Red is "kept nothing this frame", ramping through to green as the count climbs.
-    ///
-    /// It deliberately poisons the accumulated color while enabled, since that color is what the history stores.
-    /// The count itself keeps evolving untouched, which is what is being inspected; turning it off recovers.
-    u32 debug_view = 0;
+    /// 0 overwrites the target, anything above it blends in place, and nothing caps it — the estimate is exact and
+    /// converges as long as it is left alone.
+    /// The caller restarts it by sending 0, which it does whenever the image the target holds stopped describing
+    /// what this frame renders — the scene, the camera or the shaders having moved.
+    u32 accum_frame = 0;
 
     // Pad the block to a full 256-byte CBV range (see frame_constants.hh).
-    f32 _reserved[1] = {};
+    f32 _reserved[24] = {};
 };
 
 namespace sv
@@ -82,19 +59,13 @@ struct sv::pt_trace_desc
     sg::buffer<pt_frame_constants_gpu> frame;    // the FrameConstants cbuffer (camera + light + sample controls)
     sg::buffer<background_gpu> background;       // the Background cbuffer (SH environment probe) the miss reads
     cc::span<sg::tlas_instance const> instances; // one per scene item; the TLAS is (re)built from these
-    sg::texture_2d output;                       // rgba16f UAV the raygen writes the integrated color into
 
-    /// rgba16f UAV taking this frame's primary-hit geometry: `float4(normal.xyz, hit_t)`, `hit_t < 0` where the ray escaped.
-    /// Same extent as `output` — the raygen writes both at the dispatch's own pixel.
-    sg::texture_2d gbuffer;
-
-    /// The previous recorded frame's `output` and `gbuffer`, sampled to reproject the history onto this frame.
+    /// The accumulator the raygen blends into: read back and rewritten at the dispatch's own pixel.
     ///
-    /// Must not alias `output` / `gbuffer`: the raygen reads them at a *different* pixel than it writes.
-    /// Both must be bound even when `pt_frame_constants_gpu::has_history` is false — the shader ignores their
-    /// contents, but the binding group still needs a view.
-    sg::texture_2d history_color;
-    sg::texture_2d history_gbuffer;
+    /// rgba32_float, and that is a requirement rather than a preference.
+    /// The blend weight is 1 / (`accum_frame` + 1), so a half float stops moving the mean a couple of thousand
+    /// frames in — which is exactly where an uncapped estimate is supposed to still be converging.
+    sg::texture_2d output;
 
     /// One `sv::instance_gpu` per entry of `instances`, in that same order — the closest-hit's `Instances`, read by `InstanceID()`.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.

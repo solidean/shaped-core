@@ -155,18 +155,6 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
     // The random state round-trips through every path out of here, so a stream is never left half-advanced.
     uint rng = payload.rng;
 
-    // The geometry prepass wants where this pixel's surface is and nothing else, so it pays for no material and no rays.
-    if (payload.shade == 0)
-    {
-        payload.direct = float3(0, 0, 0);
-        payload.emission = float3(0, 0, 0);
-        payload.throughput = float3(0, 0, 0);
-        payload.direction = float3(0, 0, 0);
-        payload.bsdf_pdf = 0.0;
-        payload.rng = rng;
-        return;
-    }
-
     sv::surface surface = sv_evaluate_material(ctx);
     sv::bsdf bsdf = sv::bsdf_prepare(surface);
 

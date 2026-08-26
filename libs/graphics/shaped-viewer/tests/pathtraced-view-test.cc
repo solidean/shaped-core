@@ -103,23 +103,12 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
         1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
     cmd->upload.pod_to_buffer(background, sv::background_gpu::from(bg));
 
+    // rgba32_float, which the routine asserts on: the raygen reads the target back to blend into it.
     auto const target = ctx.transient.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, // UAV-writable by the raygen
+        {.format = sg::pixel_format::rgba32_float,
          .width = size[0],
          .height = size[1],
          .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
-
-    // The raygen writes its primary-hit geometry and samples its history unconditionally, so all three are bound
-    // even here, where a single dispatch reprojects nothing (`has_history` is false, so their contents are ignored).
-    // Transient rather than persistent: nothing outlives this frame.
-    auto const aux = [&]
-    {
-        return ctx.transient.create_texture_2d(
-            {.format = sg::pixel_format::rgba16_float,
-             .width = size[0],
-             .height = size[1],
-             .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
-    };
 
     // One `sv::instance` per TLAS instance: where this item's material parameters live, and where its geometry does.
     auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
@@ -133,9 +122,6 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
                                           .background = background,
                                           .instances = instances,
                                           .output = target,
-                                          .gbuffer = aux(),
-                                          .history_color = aux(),
-                                          .history_gbuffer = aux(),
                                           .instance_table = instance_table,
                                           .hit_groups = hit_groups,
                                           .bindless = &bindless});

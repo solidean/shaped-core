@@ -35,7 +35,7 @@ sv::layer_blend                  // replace | over (premultiplied) — scene_3d 
 sv::primary_scene_3d(v) / sv::ensure_scene_3d(v)  // -> layer const* / layer& — the view's first traced layer, appended on demand
 sv::refresh_policy               // { float rate; } — fraction of the loop's rate: 1 every frame, 0.5 every second, 0 only on invalidation
 sv::temporal_input               // { u64 id; optional<vec2i> resolution; pixel_format; u64 reset_hash; } — unset resolution = the view's own
-sv::temporal_inputs_of(view_data) -> vector<temporal_input>  // what the view declared, PLUS one accumulator per scene_3d layer
+sv::temporal_inputs_of(view_data) -> vector<temporal_input>  // what the view declared, PLUS one rgba32_float accumulator per scene_3d layer
 sv::temporal_id::accumulation(layer) -> u64   // the id a traced layer accumulates under; >= caller_range_end, so a caller cannot collide
 sv::view_id                      // stable identity across frames; view_id::from_string("main", seed=0) — keys everything a view keeps
                                  //   the WHOLE string is hashed, `##` included, so "angle##0" and "angle##1" are two views
@@ -487,9 +487,11 @@ That is unlike a Cornell box, whose light rect must match the emitter.
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 
-**Temporal accumulation** rides on that persistent target: `accum_frame == 0` overwrites, anything above blends in place, capped at 4096 frames so the running mean stays inside half-float precision.
-The restart signal is a hash of the bytes the trace uploads — camera, size, lights, background, settings, every instance transform, geometry identity.
+**Temporal accumulation** rides on that persistent target: `accum_frame == 0` overwrites, anything above blends into it in place at a weight of `1 / (accum_frame + 1)`.
+Nothing caps it — the target is `rgba32_float` and the mean is exact, so a view left alone converges to ground truth rather than settling near it.
+Restarting is therefore the whole policy, and the signal is a hash of the bytes the trace uploads — camera, size, lights, background, settings, every instance transform, geometry identity.
 Hashing what is uploaded rather than what the view holds is what keeps it from drifting away from the shader.
+The camera is in it deliberately: every sample the target holds was drawn through one eye, which is what makes the mean the image this frame is asking for.
 `view::position` is deliberately outside it: it only decides where `viewer_renderer` blits, so relayout must not discard a converged image.
 
 ## Persistent per-view state
