@@ -20,7 +20,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
-    root = ctx.dir_override.parent if ctx.dir_override is not None else review.reviews_root(ctx.repo)
+    root = ctx.dir_override.parent if ctx.dir_override is not None else review.reviews_root(ctx.home)
     if not root.is_dir():
         print(f"no reviews under {ctx.rel(root)}")
         return

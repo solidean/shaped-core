@@ -2,6 +2,7 @@
 
 Everything a review is, on disk.
 Default location is `<repo>/.tmp/reviews/<name>/`, which is scratch space; `--dir` puts it elsewhere.
+Here `<repo>` is the repository the tool runs from, which is not necessarily the one under review — `review.toml` records that one, and every command reads it from there.
 The tool warns when that path is not gitignored, because the first thing a fresh repo does wrong is commit a review.
 
 ```

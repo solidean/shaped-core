@@ -7,13 +7,18 @@ Two things it buys over reviewing in chat.
 **Every change in the range is accounted for**, because the ledger says which ones are not.
 And **answering is clicking**, in a local page, instead of composing prose keyed by point number.
 
-It ships from shaped-core and is dogfooded here, but it reviews any git repository — `--repo <path>`.
+It ships from shaped-core and is dogfooded here, but it reviews any git repository — `init --repo <path>`.
 Git only; no forge concepts beyond an optional PR-body fetch.
+
+**`init` is the only command you point anywhere.**
+It writes the checkout and its upstream into `review.toml`, and every later command reads them from there.
+Reviews themselves live under the repository you run the tool from, `.tmp/reviews/<name>`, whatever they are reviews *of*.
 
 **A checkout made to review something is temporary, so put it somewhere temporary.**
 `.tmp/worktrees/<name>` under the repo you are working in is the default, and a scratchpad or a directory the user names are the other two.
 Never a sibling folder next to the user's projects: that is where real work lives, and a review worktree left there reads as one.
-`git worktree move` relocates one that is already in the wrong place, and the review folder travels with it — nothing in `review.toml` is an absolute path.
+`git worktree move` relocates one that is already in the wrong place, and the review folder travels with it.
+`repo` is recorded relative to the review folder, and nothing else in `review.toml` is a path at all.
 
 ## Quick start
 

@@ -3,6 +3,10 @@
 The file is TOML because a human edits it: retargeting a review, or widening its goals, should not need the CLI.
 Reading uses `tomllib`; writing is the small emitter below, since the standard library has no writer and the schema is flat.
 
+A review also records **where the checkout it reviews lives**, so no command has to be told again.
+That is what lets a review of a worktree — the usual shape, since the branch under review and the review tool are rarely the same checkout —
+be driven from wherever the tool runs, with `init` the only command that ever needs to be pointed somewhere.
+
 The base is stored as a **commit sha, resolved once at init**.
 A three-dot range re-resolves its merge base on every run, so once the integration branch moves the net diff silently changes underneath every change id already handed out.
 Pinning is what makes a review reproducible across days.
@@ -42,11 +46,14 @@ class ReviewConfig:
     """A review's pinned inputs and its progress.
 
     `base` and `head` are commit shas; `base_spec` and `head_spec` are what the user typed, kept for messages only.
+    `repo` is the checkout under review, relative to the review folder when the two can be expressed that way, so moving the pair keeps it valid.
     `watermark` is the last finalized round, so the next one is `watermark + 1`.
     """
 
     name: str
     goals: list[str]
+    repo: str = ""
+    upstream: str = ""
     base: str = ""
     head: str = ""
     base_spec: str = ""
@@ -105,6 +112,11 @@ def dump(cfg: ReviewConfig) -> str:
         _emit("created", cfg.created),
         _emit("tool_version", cfg.tool_version),
         "",
+        "# The checkout under review, and where it came from.",
+        "# Relative paths resolve against this folder, so moving the two together keeps the link.",
+        _emit("repo", cfg.repo),
+        _emit("upstream", cfg.upstream),
+        "",
         "# The pinned range. base is the merge-base resolved once, at init.",
         _emit("base", cfg.base),
         _emit("head", cfg.head),
@@ -125,6 +137,7 @@ def dump(cfg: ReviewConfig) -> str:
 
 _KNOWN = {
     "name", "title", "goals", "created", "tool_version",
+    "repo", "upstream",
     "base", "head", "base_spec", "head_spec",
     "context", "coalesce_gap", "watermark",
 }
@@ -156,6 +169,8 @@ def load(path: Path) -> ReviewConfig:
         name=str(raw.get("name", path.parent.name)),
         title=str(raw.get("title", "")),
         goals=goals,
+        repo=str(raw.get("repo", "")),
+        upstream=str(raw.get("upstream", "")),
         base=str(raw.get("base", "")),
         head=str(raw.get("head", "")),
         base_spec=str(raw.get("base_spec", "")),

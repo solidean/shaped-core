@@ -1,11 +1,16 @@
 """Per-command execution context: the repository under review and the folder the review lives in.
 
 review.py builds one and hands it to each command's `run(args, ctx)`, so a command never reaches back into review.py.
+
+Two repositories, not one.
+`home` is where the tool runs and where reviews are kept; `repo` is the checkout being read, which `open()` takes from the review's own config.
+They differ whenever the branch under review sits in a worktree, which is the usual shape — and the reason no command but `init` needs to be told a path.
 The repository is a parameter rather than an assumption: this tool reviews any git repo, and shaped-core is only the one it ships from.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,28 +20,56 @@ import tools.review as review
 
 @dataclass
 class Context:
-    """Everything a command needs: the repo, a git handle, and where reviews are kept."""
+    """Everything a command needs: the repo under review, a git handle on it, and where reviews are kept.
 
+    `repo` starts as `home` and is retargeted by `open()` to whatever the review records, so a command sees one repository and never chooses.
+    """
+
+    home: Path
     repo: Path
     git: review.Git
     dir_override: Path | None = None
+
+    @classmethod
+    def at(cls, home: Path, *, dir_override: Path | None = None) -> "Context":
+        return cls(home=home, repo=home, git=review.Git(home), dir_override=dir_override)
 
     def die(self, msg: str) -> None:
         print(review.console.red(f"ERROR: {msg}"), file=sys.stderr)
         sys.exit(1)
 
     def rel(self, p: Path) -> str:
+        for base in (self.repo, self.home):
+            try:
+                return p.relative_to(base).as_posix()
+            except ValueError:
+                continue
+        return str(p)
+
+    def target(self, path: Path) -> None:
+        """Point at the checkout to read, dying with an actionable message when it is not one."""
+        resolved = path.expanduser().resolve()
+        if not resolved.is_dir():
+            self.die(f"{resolved} is not a directory")
         try:
-            return p.relative_to(self.repo).as_posix()
+            self.repo = review.Git(resolved).toplevel()
+        except review.GitError as e:
+            self.die(f"{resolved} is not inside a git repository ({e})")
+        self.git = review.Git(self.repo)
+
+    def record_repo(self, root: Path) -> str:
+        """How `repo` should be written into a review at `root`: relative when both sit on one drive, absolute otherwise."""
+        try:
+            return Path(os.path.relpath(self.repo, root)).as_posix()
         except ValueError:
-            return str(p)
+            return self.repo.as_posix()
 
     def paths_for(self, name: str) -> review.ReviewPaths:
         try:
             review.validate_name(name)
         except review.ReviewNameError as e:
             self.die(str(e))
-        root = self.dir_override if self.dir_override is not None else review.default_root(self.repo, name)
+        root = self.dir_override if self.dir_override is not None else review.default_root(self.home, name)
         return review.ReviewPaths(root)
 
     def open(self, name: str) -> tuple[review.ReviewPaths, review.ReviewConfig]:
@@ -46,6 +79,8 @@ class Context:
             cfg = review.load(paths.config)
         except review.ConfigError as e:
             self.die(str(e))
+        if cfg.repo:
+            self.target(paths.root / cfg.repo)
         return paths, cfg
 
     def open_changeset(self, name: str) -> tuple[review.ReviewPaths, review.ReviewConfig]:
@@ -133,10 +168,10 @@ class Context:
     def warn_gitignore(self, paths: review.ReviewPaths) -> None:
         """Warn when the review folder would be committed.
 
-        A review folder is scratch space, and the first thing a fresh repo does wrong is track it.
+        The question is about the repository the folder sits in, which is `home` rather than whatever is under review.
         """
         try:
-            ignored = self.git.run(["check-ignore", str(paths.root)], timeout=15, check=False)
+            ignored = review.Git(self.home).run(["check-ignore", str(paths.root)], timeout=15, check=False)
         except review.GitError:
             return
         if not ignored.strip():

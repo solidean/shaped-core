@@ -69,7 +69,7 @@ def _warn_about_other_servers(ctx: Context, name: str) -> None:
 
 
 def _served_elsewhere(ctx: Context, name: str) -> list:
-    root = review.reviews_root(ctx.repo)
+    root = review.reviews_root(ctx.home)
     if not root.is_dir():
         return []
     out = []

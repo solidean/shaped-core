@@ -3,6 +3,10 @@
 The base is resolved to the merge base and stored as a sha.
 Re-resolving a three-dot range on every run would let the integration branch move the review's obligation underneath ids already handed out.
 
+`init` is the one command that takes a `--repo`.
+It writes what it resolved into `review.toml`, so every later command finds the checkout without being told —
+which matters most for the usual shape, a branch checked out as a worktree somewhere else entirely.
+
 A goal is mandatory because it decides what the review is *for* — a comment for someone else, changes landed in this session, or agreement on a design.
 Those produce different entries and different end artifacts, so guessing one would be worse than asking.
 """
@@ -10,6 +14,7 @@ Those produce different entries and different end artifacts, so guessing one wou
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import tools.review as review
 
@@ -24,6 +29,8 @@ _DEFAULT_BASES = ("origin/main", "origin/master", "main", "master")
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Start a review of a commit range")
     a.review_name(p)
+    p.add_argument("--repo", default=None, metavar="PATH",
+                   help="the checkout to review (default: the repository this runs from); recorded, so no later command needs it")
     p.add_argument("--range", dest="range_spec", metavar="A..B",
                    help="the range to review; defaults to the integration branch against HEAD")
     p.add_argument("--goal", action="append", default=[], metavar="GOAL",
@@ -68,6 +75,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         if g not in review.GOALS:
             ctx.die(f"unknown goal {g!r}. Known goals: {', '.join(review.GOALS)}")
 
+    if args.repo:
+        ctx.target(Path(args.repo))
+
     paths = ctx.paths_for(args.name)
     if paths.exists() and not args.force:
         ctx.die(f"{ctx.rel(paths.root)} already holds a review; --force re-initializes it")
@@ -79,6 +89,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     cfg = review.ReviewConfig(
         name=args.name, title=args.title, goals=goals,
+        repo=ctx.record_repo(paths.root), upstream=ctx.git.remote_url(),
         base=base, head=head, base_spec=base_spec, head_spec=head_spec,
         context=args.context, coalesce_gap=args.gap, created=review.now(),
     )
@@ -90,6 +101,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     print(f"review {args.name} at {ctx.rel(paths.root)}")
     print(f"  goals   {', '.join(goals)}")
+    print(f"  repo    {cfg.repo}")
     if base:
         commits = ctx.git.commits(base, head)
         print(f"  range   {base_spec}..{head_spec}  ({base[:12]}..{head[:12]})")

@@ -60,6 +60,10 @@ class Git:
     def toplevel(self) -> Path:
         return Path(self.run(["rev-parse", "--show-toplevel"]).strip())
 
+    def remote_url(self, remote: str = "origin") -> str:
+        """The remote's fetch URL, or empty when there is no such remote — a repo with no forge is a valid thing to review."""
+        return self.run(["remote", "get-url", remote], timeout=15, check=False).strip()
+
     def rev_parse(self, rev: str) -> str | None:
         """Resolve `rev` to a commit sha, or None if it does not name one."""
         out = self.run(["rev-parse", "--verify", "--quiet", rev + "^{commit}"], timeout=30, check=False)
