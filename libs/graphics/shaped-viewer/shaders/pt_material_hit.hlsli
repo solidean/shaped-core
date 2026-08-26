@@ -62,10 +62,13 @@ bool pt_occluded(float3 origin, float3 dir, float dist)
     return sp.visible < 0.5;
 }
 
-/// Direct light from the rectangular area light, with the BSDF folded in.
+/// Direct light from the rectangular area light, with the BSDF folded in and weighted against the BSDF sampler.
 ///
-/// No multiple-importance weight is needed here: the light is analytic rather than geometry, so a BSDF-sampled ray can never
-/// hit it and there is no second strategy to balance against.
+/// The second strategy is the raygen's continuation ray reaching the rect analytically, which is what makes this bounded on a
+/// near-smooth surface.
+/// Without it, light sampling alone has to carry the whole GGX peak: `bsdf_eval` at a uniformly picked point on the rect is
+/// ~1/(pi*alpha^2) where the half-vector lines up and near zero everywhere else, so a mirror lit by a small light produces a
+/// huge value at a tiny probability — one bright pixel per few thousand samples, which is what a firefly is.
 float3 pt_estimate_area_light(sv::bsdf bsdf, sv::frame frame, float3 wo_local, float3 p, float3 n_geom, inout uint rng)
 {
     // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
@@ -94,12 +97,13 @@ float3 pt_estimate_area_light(sv::bsdf bsdf, sv::frame frame, float3 wo_local, f
     if (pt_occluded(p + n_geom * 1e-3, wi, dist - 2e-3))
         return float3(0, 0, 0);
 
-    // Solid-angle pdf of uniform area sampling; the rect's full edges are 2*light.u and 2*light.v, so its area is
-    // |cross(2u, 2v)| = 4 |cross(u, v)|.
-    float area = 4.0 * length(cross(light.u, light.v));
-    float pdf = dist2 / max(area * cos_light, 1e-9);
+    // Formed in pt_common.hlsli, because the raygen's half of this weighting has to arrive at the same number.
+    float pdf = pt_light_pdf(dist2, cos_light);
 
-    return light.emission * f * (wi_local.z / pdf);
+    // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
+    float w = pt_mis_weight(pdf, sv::bsdf_pdf(bsdf, wo_local, wi_local));
+
+    return light.emission * f * (wi_local.z / pdf) * w;
 }
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.

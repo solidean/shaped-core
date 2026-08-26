@@ -479,6 +479,7 @@ sv::shader_package()                                 // register once on an slib
 ```
 
 [`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward both the area light and the SH environment.
+Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
 What a caller supplies is a view.
 The `view_renderer` builds `pt_frame_constants_gpu` from the view's first `area_light` plus `render_settings::samples_per_pixel` / `max_bounces`.

@@ -8,9 +8,10 @@
 // direction from it; see pt_material_hit.hlsli. What is left for this file is the loop: accumulate what a hit
 // reports, carry the throughput, and decide when a path ends.
 //
-// The environment is gathered by two strategies combined with balance-heuristic multiple importance sampling: the
-// hit's own next-event ray (uniform-hemisphere) and the BSDF-sampled bounce ray when it escapes. The weight for
-// the second is applied here, because only the caller knows the bounce escaped.
+// Both light sources are gathered by two strategies combined with balance-heuristic multiple importance sampling: the
+// hit's own next-event ray, and the BSDF-sampled bounce ray when it reaches the same source.
+// The weight for the second is applied here, because only the caller knows where the bounce went — escaping to the
+// environment, or crossing the area light's rect, which is analytic and so is intersected rather than traced.
 
 RaytracingAccelerationStructure scene : register(t0);
 
@@ -67,6 +68,24 @@ void PathTraceRayGen()
             float3 N = p.normal;
             float pdf = p.bsdf_pdf;
 
+            // The BSDF strategy for the area light: the continuation this ray came from may have aimed at the rect.
+            //
+            // Only from b >= 1, because that is what pairs with a next-event estimate — the primary ray has none to
+            // balance against, and weighting it here would make the light visible to the camera, which it is not.
+            // The rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer
+            // than the light blocks it, and nothing else can.
+            if (b > 0)
+            {
+                float t_light = 0.0;
+                float cos_light = 0.0;
+                if (pt_light_intersect(origin, dir, t_light, cos_light) && (hit_t < 0.0 || t_light < hit_t))
+                {
+                    // `dir` is unit, so the distance along it is the distance to the rect.
+                    float w = pt_mis_weight(prev_pdf, pt_light_pdf(t_light * t_light, cos_light));
+                    radiance += throughput * light.emission * w;
+                }
+            }
+
             if (hit_t < 0.0)
             {
                 // Escaped to the SH environment (PtMiss wrote its radiance back in `emission`). The primary ray
@@ -77,8 +96,12 @@ void PathTraceRayGen()
                 break;
             }
 
-            // Count a hit emitter directly only on the primary ray; deeper bounces already get emitters through
-            // NEE at the previous hit, so adding emission again would double-count.
+            // A surface's own emission reaches the camera directly and contributes nothing indirectly.
+            //
+            // Not a double-count guard: next-event estimation samples the analytic area light alone, so an emissive
+            // MESH is never picked as a light and a deeper bounce has nothing to double-count against.
+            // Emissive geometry lighting a scene needs light sampling over emissive triangles, which is a feature
+            // this tracer does not have — see the viewer TODO.
             if (b == 0)
                 radiance += throughput * emission;
 
@@ -95,7 +118,11 @@ void PathTraceRayGen()
             dir = next_dir;
         }
 
-        accum += radiance;
+        // One non-finite path would poison this pixel forever: the mean is blended in place, so a NaN carried into
+        // the target keeps reproducing itself and no later frame can wash it out.
+        // Dropping the path costs one sample out of `spp`; keeping it costs the pixel.
+        if (pt_is_finite(radiance))
+            accum += radiance;
     }
 
     float3 color = accum / float(spp);

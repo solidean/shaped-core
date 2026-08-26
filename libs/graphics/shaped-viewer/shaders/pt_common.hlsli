@@ -54,6 +54,69 @@ float pt_mis_weight(float pdf_this, float pdf_other)
     return pdf_this / max(pdf_this + pdf_other, 1e-9);
 }
 
+// The area light's two estimators — the closest-hit's next-event sample and the raygen's continuation ray reaching the
+// rect — balance against each other, so both must form the light's pdf from THIS function.
+// A pdf the two disagree about is not a weighting error that shows up as noise; the two weights stop summing to one and
+// the estimate is simply wrong.
+
+// The rect's area. Its full edges are 2u and 2v, so the parallelogram is |cross(2u, 2v)| = 4 |cross(u, v)|.
+float pt_light_area()
+{
+    return 4.0 * length(cross(light.u, light.v));
+}
+
+// The solid-angle pdf of reaching the light along a direction, given the squared distance to the point reached and the
+// cosine at the light's own face — uniform area sampling, reprojected onto the sphere of directions.
+float pt_light_pdf(float dist2, float cos_light)
+{
+    return dist2 / max(pt_light_area() * cos_light, 1e-9);
+}
+
+// Where a ray crosses the light's rect, if it does at all.
+//
+// `t_hit` is the distance along a UNIT `dir` and `cos_light` the cosine at the emitting face; false leaves both zeroed
+// and means the ray misses the rect, runs parallel to its plane, or arrives at its back.
+//
+// The rect spans center +/- u +/- v, and u and v need not be perpendicular — only non-parallel — so the in-plane
+// coordinates come from the reciprocal basis rather than from two dot products.
+bool pt_light_intersect(float3 origin, float3 dir, out float t_hit, out float cos_light)
+{
+    t_hit = 0.0;
+    cos_light = 0.0;
+
+    float denom = dot(dir, light.normal);
+    if (denom >= -1e-9)
+        return false; // parallel to the plane, or arriving at the face the light does not emit from
+
+    float t = dot(light.center - origin, light.normal) / denom;
+    if (t <= 1e-3)
+        return false; // behind the ray, or inside the origin's own offset
+
+    // d = s*u + t*v with both in [-1, 1]; cross(d, v) = s*cross(u, v) and cross(u, d) = t*cross(u, v), which inverts
+    // the pair exactly for any non-parallel u and v.
+    float3 d = origin + dir * t - light.center;
+    float3 n_uv = cross(light.u, light.v);
+    float inv = 1.0 / max(dot(n_uv, n_uv), 1e-18);
+    float s_uv = dot(cross(d, light.v), n_uv) * inv;
+    float t_uv = dot(cross(light.u, d), n_uv) * inv;
+    if (abs(s_uv) > 1.0 || abs(t_uv) > 1.0)
+        return false;
+
+    t_hit = t;
+    cos_light = -denom;
+    return true;
+}
+
+// Whether every component of `v` is an ordinary finite number.
+//
+// Written as a magnitude comparison rather than `isnan` / `isinf` on purpose: a NaN compares false against everything,
+// so this rejects one either way, and it survives the relaxed float math a compiler may assume where the intrinsics
+// can fold to a constant false.
+bool pt_is_finite(float3 v)
+{
+    return all(abs(v) < 1e30);
+}
+
 // A separate, minimal payload for shadow rays. A shadow ray reads only visibility, so giving it its own type
 // keeps the payload-access qualifiers exact (the surface payload's fields would otherwise be flagged as
 // declared-but-unread on the shadow trace). The caller seeds `visible` to 0 (assume occluded) and the shadow

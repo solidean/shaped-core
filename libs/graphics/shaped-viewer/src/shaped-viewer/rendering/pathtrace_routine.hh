@@ -96,7 +96,10 @@ struct sv::pt_trace_desc
 /// group 0 is the trace's own (the TLAS, the targets, the constants, the instance table), group 1 is the manager's bindless tables, which sv owns as a schema and no shader gets to redeclare.
 /// Where the tracer shades a surface is the generated hit group; how it integrates is `shaders/pathtrace.hlsl`, which is shared.
 /// The raygen bounces each ray diffusely and estimates direct light at every hit by next-event estimation toward two sources: the rectangular area light and the SH environment.
-/// The environment is gathered by multiple importance sampling (balance heuristic) between that NEE ray and the escaped bounce ray, keeping a bright, non-uniform sky low-variance.
+/// **Both are gathered by balance-heuristic multiple importance sampling** against the BSDF-sampled bounce ray.
+/// The environment pairs with that ray escaping, the light with it crossing the rect, which is analytic and so is intersected rather than traced.
+/// The light half is what keeps a near-smooth surface usable.
+/// Light sampling alone has to carry the whole GGX peak there — a huge value at a tiny probability, which is a firefly per few thousand samples rather than a converging estimate.
 /// `samples_per_pixel` paths per pixel accumulate in one dispatch.
 /// `execute` may build a pipeline, so it takes the exclusive acquire — two traces on one context serialize on this routine.
 class sv::pathtrace_routine : public sg::render_routine<pathtrace_routine>

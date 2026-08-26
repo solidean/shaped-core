@@ -185,6 +185,11 @@ importance-samples the continuation — so what is left is coverage of the model
   reflects a blur whatever the roughness says; only the analytic area light gives a real highlight.
   An equirect HDR environment with 2D-CDF importance sampling is the fix, and it needs a Radiance `.hdr` reader in babel first —
   `babel::image` has PNG and JPEG only.
+- **An emissive mesh lights nothing but the camera.** `emission_luminance` is authored and shaded, but next-event
+  estimation samples the analytic area light alone, so emissive geometry is direct-visibility only and contributes no
+  indirect light.
+  What it needs is light sampling over emissive triangles — an emitter list built per trace with its own area pdf,
+  balanced against the BSDF sampler the way `pt_light_intersect` already balances the rect.
 - **`geometry_opacity` is parsed and ignored.** Nothing in the trace has an any-hit shader, so a cutout is not expressible yet.
 
 ## Everything else
