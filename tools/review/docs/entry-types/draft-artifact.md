@@ -41,6 +41,17 @@ The cuts are the editorial judgement, and they are what the maintainer is really
 **Keep it in the review's own voice, addressed to the author.**
 It is going on their branch, not into the review folder.
 
+**Write it for someone holding the diff and nothing else.**
+The author never sees the entries, the answers, or the rounds that produced them.
+Anything the review *decided* has to arrive as an instruction they could carry out today — what to derive a value from, which symbol to add, which call site to change.
+A conclusion that was obvious after three rounds of discussion reads as a hand-wave to the one person who was not in them.
+The reviewer is the last one able to notice, being still full of the context that is about to be dropped.
+
+**Check it with an agent that has only what the author will have.**
+Give a subagent the branch and the comment, withhold everything else, and ask per item whether it could implement the change or would have to come back and ask.
+Have it look up every symbol the comment names.
+The two things it catches are a decision that lost its specifics on the way out, and a claim about the code that stopped being true.
+
 **Group it `finalize`**, which exempts it from the three context tiers.
 A draft comment needs no cold tier: it is not a finding, and the reader has been in the review for several rounds by the time it appears.
 

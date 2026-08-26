@@ -147,6 +147,19 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    The maintainer approves the exact text rather than a summary of it, which is the last thing they cannot check any other way.
    See [entry-types/draft-artifact.md](../../../tools/review/docs/entry-types/draft-artifact.md).
 
+   **The comment has to stand on its own.**
+   Its reader has the final diff and the comment, and nothing else — not the entries, not the maintainer's answers, not the rounds that produced them.
+   So a decision the review *settled* has to arrive as an instruction the author could carry out today.
+   Name what to derive a value from, which symbol to add, which call site to change.
+   "Use a content hash" is a conclusion; "the hash `mesh_manager::acquire` was given, reachable through an accessor `lru_pool` does not have yet" is an instruction.
+   This is the most common way a good review lands as a vague one: the reviewer is still carrying three rounds of shared context and cannot feel its absence.
+
+   **Then check it with an agent that has only what the author will have.**
+   Once the comment is non-trivial, spawn a subagent and give it the branch and the comment text and nothing else.
+   Ask one question per item: could you implement this from the comment alone, or would you have to come back and ask?
+   Have it verify every symbol, file and line the comment names, since a wrong reference costs the review its credibility.
+   It catches two things reliably — a decision that lost its detail on the way out of the review, and a claim about the code that no longer holds.
+
 9. **Finalize.** `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
    It is a draft: the tool gathered what was decided, it did not decide which points are worth an afternoon.
    Post only on an explicit go-ahead, as one comment.
