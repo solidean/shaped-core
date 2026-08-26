@@ -10,6 +10,7 @@ so refreshing the overview after a `sync` never costs a sentence anyone wrote.
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 
@@ -24,25 +25,119 @@ OVERVIEW_SLUG = "015-changes"
 COVERAGE_SLUG = "990-coverage"
 
 _MAX_COMMITS = 40
-_MAX_DIRS = 25
+
+# Where the tree stops being an overview.
+# Past this the leaves of the largest directories fold into a count, and the tail says what it dropped —
+# a silent truncation reads as "that is the whole change" when it is not.
+_MAX_ROWS = 100
 
 
-def _tree(paths: list[str]) -> list[str]:
-    """The touched files folded to a directory count, which is the shape of a change at a glance."""
-    counts: dict[str, int] = {}
-    for path in paths:
-        directory = path.rsplit("/", 1)[0] if "/" in path else "."
-        counts[directory] = counts.get(directory, 0) + 1
-    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    lines = [f"  {count:>4}  {directory}/" for directory, count in ordered[:_MAX_DIRS]]
-    if len(ordered) > _MAX_DIRS:
-        lines.append(f"  ...   and {len(ordered) - _MAX_DIRS} more directories")
-    return lines
+def _esc(text: str) -> str:
+    return html.escape(text, quote=True)
+
+
+def _counts(net: LineSpace) -> dict[str, tuple[int, int]]:
+    """Added and removed lines per path, which net line space already has keyed by side."""
+    out: dict[str, tuple[int, int]] = {}
+    for (side, path), lines in net.lines.items():
+        added, removed = out.get(path, (0, 0))
+        out[path] = (added + len(lines), removed) if side == "+" else (added, removed + len(lines))
+    return out
+
+
+def _fold(paths: list[str]) -> dict:
+    """The touched files as a tree, with single-child directory chains folded onto one node.
+
+    `libs/base/clean-core/src` is one row rather than four.
+    A change is located by its path, so the tree is in path order rather than sorted by size — a tree ordered
+    by how much changed is a chart, and a reader is looking for a place.
+    """
+    root: dict = {"dirs": {}, "files": []}
+    for path in sorted(paths):
+        parts = path.split("/")
+        node = root
+        for part in parts[:-1]:
+            node = node["dirs"].setdefault(part, {"dirs": {}, "files": []})
+        node["files"].append(parts[-1])
+
+    def collapse(node: dict, name: str) -> tuple[str, dict]:
+        while not node["files"] and len(node["dirs"]) == 1:
+            child_name, child = next(iter(node["dirs"].items()))
+            name, node = f"{name}/{child_name}" if name else child_name, child
+        node["dirs"] = dict(collapse(child, child_name) for child_name, child in node["dirs"].items())
+        return name, node
+
+    _, folded = collapse(root, "")
+    return folded
+
+
+def _tree_html(paths: list[str], counts: dict[str, tuple[int, int]]) -> str:
+    """The tree as rows: a row shows its own segment, and a file row is the link into it.
+
+    Linked here rather than by the annotation pass.
+    A tree row shows a basename while the link needs the whole path, and the pass matches on the literal text
+    it can see — so the one place that knows both is the one that emits the row.
+    """
+    rows: list[str] = []
+    dropped = [0, 0]  # files, directories
+
+    def walk(node: dict, prefix: str, depth: int) -> None:
+        indent = "  " * depth
+        for name, child in node["dirs"].items():
+            full = f"{prefix}{name}/"
+            rows.append(f'<div class="tree-dir">{indent}<span>{_esc(name)}/</span></div>')
+            walk(child, full, depth + 1)
+        if len(rows) > _MAX_ROWS and node["files"]:
+            dropped[0] += len(node["files"])
+            dropped[1] += 1
+            return
+        for name in node["files"]:
+            path = f"{prefix}{name}"
+            added, removed = counts.get(path, (0, 0))
+            rows.append(
+                f'<div class="tree-file">{indent}'
+                f'<a class="annot ref" href="/file/{_esc(path)}" target="_blank" rel="noopener"'
+                f' data-path="{_esc(path)}" data-line="0" title="{_esc(path)}">{_esc(name)}</a>'
+                f'<span class="tree-delta"><span class="add">+{added}</span>'
+                f'<span class="del">-{removed}</span></span></div>'
+            )
+
+    walk(_fold(paths), "", 0)
+    tail = ""
+    if dropped[0]:
+        tail = (f'<div class="tree-tail">… and {dropped[0]} more files under '
+                f'{dropped[1]} director{"y" if dropped[1] == 1 else "ies"}</div>')
+    return f'<div class="tree">{"".join(rows)}{tail}</div>'
+
+
+def _commits_html(commits: list, merges: set[str]) -> str:
+    """The commits as rows.
+
+    Bare shas: the annotation pass links them and carries the popover.
+    """
+    rows = []
+    for commit in commits[:_MAX_COMMITS]:
+        merge = '<span class="commit-merge">merge</span>' if commit.sha in merges else ""
+        rows.append(
+            f'<div class="commit-row"><code class="commit-sha">{_esc(commit.short)}</code>'
+            f'<span class="commit-subject">{_esc(commit.subject)}</span>{merge}'
+            f'<span class="commit-who">{_esc(commit.author)}</span>'
+            f'<span class="commit-when">{_esc(commit.date)}</span></div>'
+        )
+    if len(commits) > _MAX_COMMITS:
+        rows.append(f'<div class="tree-tail">… and {len(commits) - _MAX_COMMITS} more commits</div>')
+    return f'<div class="commits">{"".join(rows)}</div>'
 
 
 def overview_body(git: Git, cfg: ReviewConfig, net: LineSpace) -> str:
-    """The generated half of the overview: the range, its commits, and where the change lands."""
+    """The generated half of the overview: the range, its commits, and where the change lands.
+
+    Emitted as HTML rather than as markdown.
+    `generated:` already means the tool owns the block end to end — regeneration replaces it wholesale and nobody
+    is expected to edit it — so it is the one place in the format where hand-readability is not the point.
+    """
     commits = git.commits(cfg.base, cfg.head)
+    merges = set(git.has_merges(cfg.base, cfg.head))
     paths = net.paths()
     added = sum(len(v) for (side, _), v in net.lines.items() if side == "+")
     removed = sum(len(v) for (side, _), v in net.lines.items() if side == "-")
@@ -54,19 +149,17 @@ def overview_body(git: Git, cfg: ReviewConfig, net: LineSpace) -> str:
         f"**{cfg.base_spec}..{cfg.head_spec}** — `{cfg.base[:12]}..{cfg.head[:12]}`",
         "",
         f"{len(commits)} commits, {len(paths)} files, +{added} / -{removed} lines"
-        + (f", {len(net.files)} file-level changes" if net.files else ""),
+        + (f", {len(net.files)} file-level changes" if net.files else "")
+        + (f", {len(merges)} of them merges" if merges else ""),
         "",
         "### Commits",
         "",
+        _commits_html(commits, merges),
+        "",
+        "### Where it lands",
+        "",
+        _tree_html(paths, _counts(net)),
     ]
-    for commit in commits[:_MAX_COMMITS]:
-        lines.append(f"- `{commit.short}` {commit.subject}  <sub>{commit.author}, {commit.date}</sub>")
-    if len(commits) > _MAX_COMMITS:
-        lines.append(f"- ... and {len(commits) - _MAX_COMMITS} more")
-
-    lines += ["", "### Where it lands", "", "```"]
-    lines += _tree(paths)
-    lines += ["```"]
     return "\n".join(lines)
 
 

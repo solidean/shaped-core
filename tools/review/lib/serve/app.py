@@ -29,6 +29,7 @@ from ..entry.answers import AnswerFile
 from ..entry.askhash import hash_ask
 from ..entry.grammar import ReviewParseError
 from ..entry.parse import Entry, parse_file
+from ..git.run import Git
 from ..goals.skeleton import describe, groups_for
 from ..render.entryview import render_entry
 from ..render.highlight import css as highlight_css, highlight_code
@@ -144,7 +145,8 @@ class ReviewApp:
                 entry, answers,
                 repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
             )
-            tokens = build_tokens(entry, self.index(), answers=answers)
+            tokens = build_tokens(entry, self.index(), answers=answers,
+                                  confirm_shas=Git(self.repo).which_are_commits)
             return 200, {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
         return 404, {"error": f"no entry {slug!r}"}
 
@@ -182,6 +184,17 @@ class ReviewApp:
             "start": start, "end": end, "lines": len(lines),
             "html": highlight_code(body, path=resolution.path),
         }
+
+    def commit_view(self, sha: str) -> tuple[int, dict]:
+        """One commit's message and diffstat, for the popover its sha carries."""
+        if not sha or not all(c in "0123456789abcdef" for c in sha.lower()):
+            return 404, {"error": "not a commit id"}
+        details = Git(self.repo).commit_details(sha)
+        if not details:
+            return 404, {"error": f"{sha} does not name a commit here"}
+        cfg = self.config()
+        details["forge"] = _forge_commit_url(cfg.upstream, details["sha"])
+        return 200, details
 
     def save_answer(self, payload: dict) -> tuple[int, dict]:
         slug = str(payload.get("entry", ""))
@@ -322,6 +335,22 @@ class ReviewApp:
         return 200, {"action": action, "round": cfg.next_round}
 
 
+def _forge_commit_url(upstream: str, sha: str) -> str:
+    """A web URL for a commit, or empty where the remote is not one this can be derived from.
+
+    A repository with no forge is a valid thing to review, so this degrades to no link rather than to a broken one.
+    """
+    if not upstream or not sha:
+        return ""
+    url = upstream.strip()
+    if url.startswith("git@") and ":" in url:
+        host, _, path = url[len("git@"):].partition(":")
+        url = f"https://{host}/{path}"
+    if not url.startswith(("http://", "https://")):
+        return ""
+    return url.removesuffix(".git").rstrip("/") + f"/commit/{sha}"
+
+
 # A preprocessor directive is not a comment, however much `#` looks like one.
 # Without this a peek at any line near the top of a C++ header walks up through the whole include block.
 _DIRECTIVES = ("include", "pragma", "define", "undef", "if", "ifdef", "ifndef", "else", "elif", "endif", "error")
@@ -429,6 +458,10 @@ class Handler(BaseHTTPRequestHandler):
                 code, payload = self.app.file_view(
                     query.get("path", [""])[0], int(query.get("line", ["0"])[0] or 0),
                     whole=bool(query.get("whole")))
+                self._json(code, payload)
+            elif route == "/api/commit":
+                query = parse_qs(urlparse(self.path).query)
+                code, payload = self.app.commit_view(query.get("sha", [""])[0])
                 self._json(code, payload)
             elif route.startswith("/file/"):
                 self._asset("file.html")

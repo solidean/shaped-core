@@ -28,6 +28,9 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.review.lib.annotate.index import RepoIndex  # noqa: E402
 from tools.review.lib.annotate.table import build as build_tokens  # noqa: E402
+from tools.review.lib.annotate.providers import CommitProvider  # noqa: E402
+from tools.review.lib.entry.generate import _tree_html as tree_html  # noqa: E402
+from tools.review.lib.serve.app import _forge_commit_url as forge_url  # noqa: E402
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
 from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, group_hunks, register  # noqa: E402
@@ -1045,6 +1048,47 @@ def test_a_missing_path_is_a_problem(root: Path) -> None:
 def test_a_line_reference_carries_its_line(root: Path) -> None:
     token = _tokens(root, "See `markdown.py:63`.")[0]
     assert token.line == 63 and token.href.endswith("#L63"), token
+
+
+def test_the_tree_folds_single_child_chains(root: Path) -> None:
+    """`a/b` on one line with `c` and `d` under it, and `e` back at the root — a location, not a histogram."""
+    html = tree_html(["a/b/c.txt", "a/b/d.txt", "e.txt"], {"a/b/c.txt": (3, 1)})
+    rows = re.findall(r'<div class="tree-(dir|file)">((?:(?!</div>).)*)', html)
+    shown = [(kind, re.sub("<[^>]+>", "", body).strip()) for kind, body in rows]
+    assert shown[0] == ("dir", "a/b/"), shown
+    assert [s for k, s in shown if k == "file"] == ["c.txt+3-1", "d.txt+0-0", "e.txt+0-0"], shown
+
+
+def test_the_tree_says_what_it_dropped(root: Path) -> None:
+    """A silent truncation reads as 'that is the whole change' when it is not."""
+    many = [f"pkg/dir{n // 20}/file{n}.txt" for n in range(400)]
+    html = tree_html(many, {})
+    assert "more files under" in html, "a capped tree has to name what it left out"
+
+
+def test_a_commit_sha_is_confirmed_against_git(root: Path) -> None:
+    """Asking git rather than writing a better regex is what drops a blob id out of a lockfile diff."""
+    asked = []
+
+    def confirm(candidates):
+        asked.append(list(candidates))
+        return {"cefb3b9a"}
+
+    provider = CommitProvider(confirm=confirm)
+    tokens = provider.tokens("landed in cefb3b9a, unlike deadbeef, and short ab12 is a word")
+    assert [t.text for t in tokens] == ["cefb3b9a"], tokens
+    assert "ab12" not in asked[0], "fewer than seven hex characters is a word, not a candidate"
+    assert "deadbeef" in asked[0], "git decides, not the length"
+
+
+def test_a_forge_url_is_derived_or_absent(root: Path) -> None:
+    """A repository with no forge is a valid thing to review, so this degrades to no link."""
+    assert forge_url("git@github.com:solidean/shaped-core.git", "abc") == \
+        "https://github.com/solidean/shaped-core/commit/abc"
+    assert forge_url("https://github.com/solidean/shaped-core.git", "abc") == \
+        "https://github.com/solidean/shaped-core/commit/abc"
+    assert forge_url("", "abc") == ""
+    assert forge_url("/srv/git/bare.git", "abc") == ""
 
 
 def test_a_superseded_block_leaves_the_live_ones(root: Path) -> None:

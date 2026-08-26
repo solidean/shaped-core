@@ -348,6 +348,12 @@ function regionOf(node) {
 }
 
 function annotate(root, tokens) {
+  // The overview's tree emits its own links: a row shows a basename while the link needs the whole path, so the
+  // pass has no literal to match on. They still want the same peek.
+  for (const el of root.querySelectorAll("a.annot[data-path]")) {
+    el.addEventListener("mouseenter", () => peek(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
   if (!tokens || !tokens.length) return;
   const live = tokens.filter((t) => ANNOTATE[t.kind] !== false);
   if (!live.length) return;
@@ -413,6 +419,11 @@ function decorate(token) {
     el.addEventListener("mouseenter", () => peek(el));
     el.addEventListener("mouseleave", schedulePopoverClose);
   }
+  if (token.kind === "commit") {
+    el.dataset.sha = token.text;
+    el.addEventListener("mouseenter", () => peekCommit(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
   return el;
 }
 
@@ -465,6 +476,27 @@ async function peek(el) {
   showPopover(el,
     `<div class="pop-head">${_esc(body.path)}  <span>lines ${body.start}-${body.end} of ${body.lines}</span></div>` +
     `<pre class="pg"><code>${body.html}</code></pre>`);
+}
+
+const commitCache = new Map();
+
+async function peekCommit(el) {
+  const sha = el.dataset.sha;
+  if (!commitCache.has(sha)) {
+    const result = await getJSON("/api/commit?sha=" + encodeURIComponent(sha));
+    if (!result.ok) return;
+    commitCache.set(sha, result.body);
+  }
+  const c = commitCache.get(sha);
+  // The forge link lives in the popover rather than on the sha: `upstream` is not always there, and a popover
+  // can lose a line without the reference losing its link.
+  const forge = c.forge ? `<a href="${_esc(c.forge)}" target="_blank" rel="noopener">open on the forge</a>` : "";
+  showPopover(el,
+    `<div class="pop-head"><code>${_esc(c.short)}</code><span>${_esc(c.author)} · ${_esc(c.date)}</span></div>` +
+    `<div class="pop-subject">${_esc(c.subject)}</div>` +
+    (c.body ? `<pre class="pop-body">${_esc(c.body)}</pre>` : "") +
+    (c.stat ? `<div class="pop-stat">${_esc(c.stat)}</div>` : "") +
+    (forge ? `<div class="pop-link">${forge}</div>` : ""));
 }
 
 // ---- comments ---------------------------------------------------------------

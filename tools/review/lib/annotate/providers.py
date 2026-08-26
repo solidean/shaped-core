@@ -136,4 +136,40 @@ class FileProvider:
         )
 
 
-__all__ = ["CODE", "DIFF", "PROSE", "FileProvider", "Token", "AMBIGUOUS", "MISSING", "RESOLVED"]
+# Seven or more hex characters at a word boundary.
+# Everything narrower is a word, and everything wider is still checked against git before it is decorated.
+_SHA_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
+
+
+@dataclass
+class CommitProvider:
+    """Commit shas, confirmed against the repository rather than against a better regex.
+
+    The safest of the providers, and the reason is that there is no ambiguity case: a hash either names a commit
+    in this repository or it does not.
+    So an unresolved candidate stays plain text with no diagnostic at all — a sha quoted from somewhere else is
+    a normal thing for an entry to carry, not a mistake.
+    """
+
+    confirm: object
+    regions: tuple[str, ...] = (PROSE, CODE, DIFF)
+    kind: str = "commit"
+    seen: set[str] = field(default_factory=set)
+
+    def tokens(self, text: str) -> list[Token]:
+        candidates = [m.group(1) for m in _SHA_RE.finditer(text) if m.group(1) not in self.seen]
+        if not candidates:
+            return []
+        # Deduplicated before asking, since one sha usually appears several times in a paragraph about it.
+        unique = list(dict.fromkeys(candidates))
+        real = self.confirm(unique)
+        out = []
+        for sha in unique:
+            self.seen.add(sha)
+            if sha in real:
+                out.append(Token(text=sha, kind=self.kind, label=sha, css="ref-commit", regions=self.regions))
+        return out
+
+
+__all__ = ["CODE", "DIFF", "PROSE", "CommitProvider", "FileProvider", "Token",
+           "AMBIGUOUS", "MISSING", "RESOLVED"]

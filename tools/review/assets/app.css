@@ -574,3 +574,46 @@ body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
 }
 
 .src-focus { background: rgba(110, 168, 254, 0.12); }
+
+/* ---- the overview -------------------------------------------------------- */
+/* Emitted as HTML by the generated block, because `generated:` already means the tool owns it end to end. */
+
+.commits { margin: 8px 0 16px; }
+
+.commit-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--bg-sunken);
+}
+
+.commit-sha { color: var(--accent); flex: none; }
+.commit-subject { flex: 1; min-width: 0; }
+.commit-merge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--warn);
+  font-size: 0.75rem;
+}
+.commit-who, .commit-when { flex: none; color: var(--text-dim); font-size: 0.82rem; }
+
+.tree { font-family: ui-monospace, monospace; font-size: 0.88rem; margin: 8px 0; }
+
+.tree-dir { color: var(--text-dim); white-space: pre; }
+.tree-file { display: flex; gap: 10px; align-items: baseline; white-space: pre; }
+.tree-file code { background: none; padding: 0; }
+.tree-delta { margin-left: auto; display: flex; gap: 8px; flex: none; }
+.tree-delta .add { color: var(--good); }
+.tree-delta .del { color: var(--bad); }
+
+.tree-tail { color: var(--text-dim); font-style: italic; padding-top: 4px; }
+
+.annot.ref-commit { text-decoration-color: var(--text-dim); }
+
+.pop-subject { margin-top: 4px; font-weight: 600; }
+.pop-body { margin: 6px 0 0; white-space: pre-wrap; color: var(--text-dim); font-size: 0.85rem; }
+.pop-stat { margin-top: 6px; color: var(--text-dim); font-size: 0.82rem; }
+.pop-link { margin-top: 6px; font-size: 0.82rem; }

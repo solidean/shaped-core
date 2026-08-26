@@ -21,7 +21,7 @@ from pathlib import Path
 from ..entry.answers import AnswerFile
 from ..entry.parse import Entry
 from .index import RepoIndex
-from .providers import FileProvider, Token
+from .providers import CommitProvider, FileProvider, Token
 
 # Where a file name is actually written: a code span, a markdown link's destination, or inside a fenced block.
 # Bare prose is deliberately not scanned.
@@ -42,19 +42,25 @@ def _referencing_text(text: str) -> list[str]:
     return out
 
 
-def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None) -> list[Token]:
+def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, confirm_shas=None) -> list[Token]:
     """Every token this entry's text carries, deduplicated by literal.
 
     The maintainer's own answers are scanned too.
     They are prose about the change, they use the same vocabulary, and a path they name should reach the code
     exactly as one the agent named does.
+
+    Each provider sees the regions its own kind belongs in.
+    A path means the same thing in a code comment as in prose; a sha is safe everywhere; a term is not.
     """
-    provider = FileProvider(index=index)
+    files = FileProvider(index=index)
+    commits = CommitProvider(confirm=confirm_shas) if confirm_shas is not None else None
     tokens: list[Token] = []
 
     def scan(text: str) -> None:
         for fragment in _referencing_text(text):
-            tokens.extend(provider.tokens(fragment))
+            tokens.extend(files.tokens(fragment))
+        if commits is not None:
+            tokens.extend(commits.tokens(text))
 
     for block in entry.blocks:
         scan(block.prose)
