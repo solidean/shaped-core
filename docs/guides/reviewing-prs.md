@@ -204,6 +204,12 @@ Both readings damage the review twice.
 They say the reviewer did not read the docs *in the diff they are reviewing*, which is the one place a reader assumes they looked.
 And they silently overrule a recorded decision to defer, without arguing against it — see [A gap the author names](#a-gap-the-author-names-is-where-to-look-and-often-where-to-defer).
 
+**A test counts as recording it.**
+A test asserting the current behaviour is the author saying "this is deliberate" as loudly as a TODO does, and it is easier to miss because it sits nowhere near the code it pins.
+pr-146 again: the acquire hooks' "setting a provider after the first acquire is silently ignored" was raised as a defect.
+`material-resolution-test.cc` already carried a CHECK under the comment "Clearing the hook does not un-cache what it already answered with."
+Three of that review's nine findings turned out to be already recorded — one TODO, one doc comment, one test.
+
 When the branch already records it, there are only two honest moves.
 **Drop it**, if the author's call stands.
 Or **raise it as a disagreement with the recorded judgement**, quoting what they wrote and saying why this branch should not ship with it.
