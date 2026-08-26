@@ -1,0 +1,401 @@
+/* The review page. Two columns: what to read next on the left, what you are reading on the right.
+   Dark by default because it sits next to an editor, and the diff colours are picked to survive that. */
+
+:root {
+  --bg: #16181d;
+  --bg-raised: #1d2026;
+  --bg-sunken: #111317;
+  --line: #2b3038;
+  --text: #d6dae1;
+  --text-dim: #8b93a1;
+  --accent: #6ea8fe;
+  --good: #5fd07a;
+  --warn: #e0b341;
+  --bad: #e86a6a;
+  --add-bg: rgba(70, 160, 90, 0.14);
+  --del-bg: rgba(210, 80, 80, 0.14);
+  --nav-width: 21rem;
+  --reading: 58rem;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.65 -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+code, pre, kbd, .difflines { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; font-size: 13px; }
+
+#shell { display: flex; min-height: 100vh; }
+
+/* ---- navigation ---------------------------------------------------------- */
+
+#nav {
+  width: var(--nav-width);
+  flex: 0 0 var(--nav-width);
+  border-right: 1px solid var(--line);
+  background: var(--bg-sunken);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 1rem 0.75rem 3rem;
+}
+
+#review-name { font-weight: 600; font-size: 1.05rem; }
+#review-range, #review-goals { color: var(--text-dim); font-size: 0.8rem; }
+#review-goals { margin-top: 0.15rem; }
+
+#progress { margin: 0.9rem 0 0.6rem; }
+.bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--good); width: 0; transition: width 0.25s; }
+#progress-text { color: var(--text-dim); font-size: 0.78rem; margin-top: 0.35rem; }
+
+#filter {
+  width: 100%;
+  margin-bottom: 0.6rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+}
+
+.nav-group { margin-top: 0.9rem; }
+.nav-group-name {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  padding: 0 0.35rem 0.25rem;
+}
+
+.nav-entry {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.3rem 0.45rem;
+  border-radius: 5px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.nav-entry:hover { background: var(--bg-raised); }
+.nav-entry.current { background: var(--bg-raised); border-left-color: var(--accent); }
+.nav-entry.done { color: var(--text-dim); }
+.nav-entry.obsolete .nav-title { text-decoration: line-through; opacity: 0.6; }
+.nav-entry.broken { color: var(--bad); }
+
+.nav-id { color: var(--text-dim); font-size: 0.75rem; min-width: 2.2rem; }
+.nav-title { flex: 1; font-size: 0.87rem; }
+/* The group rides on the row rather than heading a section, so the navigation can keep the agent's reading order. */
+.nav-group-tag { color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.nav-mark { font-size: 0.8rem; }
+.nav-mark.ok { color: var(--good); }
+.nav-mark.partial { color: var(--warn); }
+
+/* ---- main ---------------------------------------------------------------- */
+
+#main { flex: 1; min-width: 0; }
+
+#topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.55rem 1.2rem;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--line);
+}
+#topbar-spacer { flex: 1; }
+#save-state { color: var(--text-dim); font-size: 0.8rem; margin-right: 0.5rem; }
+
+button {
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 0.3rem 0.65rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+button:hover { border-color: var(--accent); }
+#send { border-color: var(--good); color: var(--good); }
+/* Armed but not yet sent: the second press is the one that hands the round back. */
+#send.armed { border-color: var(--warn); color: var(--warn); }
+#send.armed .btn-key { color: var(--warn); }
+/* Quiet by default, because closing the server is rarely what you came here to do — and armed before it acts. */
+#shutdown { color: var(--text-dim); }
+#shutdown.armed { border-color: var(--bad); color: var(--bad); }
+
+/* Every control is dead once the server is gone, and the page has to say so rather than look merely unresponsive. */
+#stopped-veil { position: fixed; inset: 0; background: rgba(0,0,0,0.72); display: flex; align-items: center; justify-content: center; z-index: 30; }
+#stopped-veil[hidden] { display: none; }
+.stopped-card { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; padding: 1.2rem 1.6rem; max-width: 34rem; }
+.stopped-card code { color: var(--accent); }
+
+/* The shortcut a button is also reachable by, so the keys are learned from the toolbar rather than from the help card. */
+.btn-key { color: var(--accent); opacity: 0.7; margin-left: 0.45em; font-size: 0.8em; }
+#send .btn-key { color: var(--good); }
+
+#content { padding: 1.5rem 1.2rem 6rem; max-width: var(--reading); }
+
+.entry-head { border-bottom: 1px solid var(--line); padding-bottom: 0.7rem; margin-bottom: 1.2rem; }
+.entry-id { color: var(--text-dim); font-size: 0.8rem; }
+.entry-head h1 { margin: 0.15rem 0 0.4rem; font-size: 1.45rem; line-height: 1.3; }
+.entry-meta { display: flex; gap: 0.5rem; font-size: 0.75rem; }
+.entry-meta > span { padding: 0.08rem 0.45rem; border-radius: 999px; border: 1px solid var(--line); color: var(--text-dim); }
+.sev-bug, .sev-api { color: var(--bad); border-color: var(--bad); }
+.sev-design { color: var(--warn); border-color: var(--warn); }
+.sev-lgtm { color: var(--good); border-color: var(--good); }
+
+/* ---- context tiers ------------------------------------------------------- */
+
+.tier { margin: 0 0 1.1rem; border-left: 3px solid var(--line); padding: 0.1rem 0 0.1rem 0.85rem; }
+.tier summary { cursor: pointer; color: var(--text-dim); font-size: 0.82rem; }
+.tier-body { margin-top: 0.4rem; color: var(--text-dim); }
+.tier-delta { border-left-color: var(--accent); }
+.tier-label { color: var(--accent); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+/* Where a round's new material starts. Same shape as the round divider, in the accent colour, because it is the same question:
+   what have I not read yet. */
+.tier-delta-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 1.8rem 0 0.9rem;
+  color: var(--accent);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tier-delta-rule::before, .tier-delta-rule::after { content: ""; flex: 1; height: 2px; background: var(--accent); opacity: 0.45; }
+
+.recommendation {
+  margin: 1.1rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--bg-raised);
+  border-left: 3px solid var(--warn);
+  border-radius: 0 5px 5px 0;
+}
+.rec-label { color: var(--warn); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+.round-divider { display: flex; align-items: center; gap: 0.7rem; margin: 1.8rem 0; color: var(--text-dim); font-size: 0.75rem; }
+.round-divider::before, .round-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* ---- changes ------------------------------------------------------------- */
+
+.changes { margin: 1.1rem 0; }
+.change { margin: 0.5rem 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg-sunken); }
+.change-head { display: flex; gap: 0.6rem; align-items: baseline; padding: 0.4rem 0.7rem; background: var(--bg-raised); cursor: pointer; }
+.change-sum { color: var(--text-dim); font-size: 0.82rem; }
+.change-reason { padding: 0.4rem 0.7rem; color: var(--text-dim); font-size: 0.85rem; }
+.change.missing { color: var(--bad); padding: 0.4rem 0.7rem; }
+
+.difflines { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
+.difflines td { padding: 0 0.4rem; white-space: pre; vertical-align: top; }
+.dl-no { color: var(--text-dim); text-align: right; user-select: none; width: 3.2rem; opacity: 0.55; }
+.dl-mark { display: inline-block; width: 1ch; color: var(--text-dim); }
+.dl-add { background: var(--add-bg); }
+.dl-del { background: var(--del-bg); }
+.dl-hunk td { background: var(--bg-raised); color: var(--text-dim); }
+.dl-src { width: 100%; }
+
+pre.pg { background: var(--bg-sunken); border: 1px solid var(--line); border-radius: 6px; padding: 0.65rem 0.85rem; overflow-x: auto; }
+.code-label { color: var(--text-dim); font-size: 0.75rem; margin-bottom: 0.2rem; }
+:not(pre) > code { background: var(--bg-raised); padding: 0.05rem 0.3rem; border-radius: 3px; }
+a.coderef { text-decoration: none; }
+a.coderef code { color: var(--accent); border-bottom: 1px dotted var(--accent); }
+
+/* ---- asks ---------------------------------------------------------------- */
+
+.ask {
+  margin: 1.4rem 0;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+.ask.focus { border-color: var(--accent); }
+.follows, .discharges { color: var(--text-dim); font-size: 0.75rem; margin-bottom: 0.3rem; }
+.ask-prose p:first-child { margin-top: 0; }
+
+.opts { display: flex; flex-direction: column; gap: 0.25rem; margin: 0.6rem 0; }
+.opt { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.3rem 0.45rem; border-radius: 5px; cursor: pointer; }
+.opt:hover { background: var(--bg-sunken); }
+.opt-label { flex: 1; }
+.rec { color: var(--good); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.opt-key { color: var(--text-dim); font-size: 0.72rem; min-width: 1rem; }
+
+.freeform {
+  width: 100%;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  resize: vertical;
+}
+.freeform:focus { outline: none; border-color: var(--accent); }
+.ask-status { font-size: 0.75rem; color: var(--text-dim); min-height: 1.1rem; margin-top: 0.3rem; }
+.ask-status.warn { color: var(--warn); }
+.ask-status.bad { color: var(--bad); }
+
+.answer-card { margin-top: 0.6rem; border-left: 3px solid var(--good); padding: 0.5rem 0.8rem; background: var(--bg-sunken); border-radius: 0 5px 5px 0; }
+.answer-head { color: var(--good); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.answer-state { color: var(--text-dim); }
+.answer-choices { margin: 0.3rem 0; padding-left: 1.1rem; }
+.answer-text { white-space: pre-wrap; color: var(--text-dim); margin-top: 0.3rem; }
+
+.orphans { margin-top: 2rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+.parse-error { color: var(--bad); white-space: pre-wrap; }
+
+/* ---- help ---------------------------------------------------------------- */
+
+/* The `display: flex` below outranks the `hidden` attribute's UA rule, so the attribute needs its own. */
+#help { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 20; }
+#help[hidden] { display: none; }
+.help-card { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; padding: 1.2rem 1.6rem; max-width: 32rem; }
+.help-card td { padding: 0.15rem 0.8rem 0.15rem 0; }
+.help-dismiss { color: var(--text-dim); }
+kbd { background: var(--bg-sunken); border: 1px solid var(--line); border-radius: 4px; padding: 0.05rem 0.35rem; }
+
+.hidden { display: none !important; }
+
+/* ---- when a save does not land ---------------------------------------------
+   Typed text that never reached disk is the one failure this page must not lose quietly,
+   so after a few seconds it stops being a line in the corner and becomes the colour of the whole window. */
+
+#save-alarm-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 40;
+  padding: 10px 16px;
+  background: #b4232a;
+  color: #fff;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+
+body.save-alarm #shell {
+  /* A tint rather than an overlay: everything stays readable and usable, because the answers are still in these boxes. */
+  background: rgba(180, 35, 42, 0.14);
+  box-shadow: inset 0 0 0 4px #b4232a;
+}
+
+body.save-alarm #main {
+  padding-top: 44px;
+}
+
+/* ---- when the window itself is history --------------------------------------
+   Unlike an unsaved save, nothing about this is recoverable in this tab, so it is sealed rather than tinted. */
+
+#stale-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 8, 9, 0.82);
+  backdrop-filter: blur(3px);
+}
+
+/* An id selector's `display` outranks the user agent's `[hidden] { display: none }`, so a `hidden` attribute alone does nothing here.
+   Every element the page toggles by `hidden` needs this line whenever it is given a `display` of its own. */
+#stale-veil[hidden] { display: none; }
+#save-alarm-bar[hidden] { display: none; }
+
+.stale-card {
+  max-width: 34rem;
+  padding: 28px 32px;
+  border: 2px solid #b4232a;
+  border-radius: 10px;
+  background: var(--bg, #fff);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.stale-card h2 {
+  margin-top: 0;
+  color: #b4232a;
+}
+
+.stale-card button {
+  margin-top: 8px;
+  padding: 8px 18px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+body.is-stale #shell {
+  filter: grayscale(0.7);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ---- the round, before it is handed back ------------------------------------
+   An ask counts as answered on its first selection, so an untaken checkbox reads the same as one nobody saw.
+   This is where that difference is still catchable, which is why it is a panel rather than a second keypress. */
+
+#send-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+#send-veil[hidden] { display: none; }
+
+.send-card {
+  display: flex;
+  flex-direction: column;
+  width: min(46rem, 92vw);
+  max-height: 86vh;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
+}
+
+.send-card h2 { margin: 0 0 4px; }
+
+.send-note { margin: 0 0 14px; color: var(--text-dim); }
+
+#send-body { overflow-y: auto; flex: 1; }
+
+.send-entry { margin-bottom: 16px; }
+.send-entry h3 { margin: 0 0 6px; font-size: 0.95rem; }
+
+.send-ask {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.send-ask-head { display: flex; gap: 10px; align-items: baseline; }
+.send-old { color: var(--text-dim); font-size: 0.85em; }
+
+.send-chosen { margin: 6px 0 0; padding-left: 18px; }
+.send-text { margin-top: 6px; color: var(--text-dim); white-space: pre-wrap; }
+
+.send-flag { margin-top: 6px; font-size: 0.85em; }
+.send-flag.warn { color: var(--warn); }
+.send-flag.bad { color: var(--bad); }
+.send-flag.ok { color: var(--good); }
+
+.send-empty { color: var(--text-dim); }
+
+.send-actions { display: flex; gap: 10px; margin-top: 16px; }
+.send-actions button { padding: 8px 18px; font: inherit; font-weight: 600; cursor: pointer; }

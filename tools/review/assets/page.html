@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>review</title>
+<link rel="stylesheet" href="/assets/highlight.css">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div id="shell">
+  <nav id="nav">
+    <div id="nav-head">
+      <div id="review-name">review</div>
+      <div id="review-range"></div>
+      <div id="review-goals"></div>
+    </div>
+    <div id="progress">
+      <div class="bar"><div id="bar-asks"></div></div>
+      <div id="progress-text"></div>
+    </div>
+    <input id="filter" type="search" placeholder="filter (/)" autocomplete="off">
+    <div id="nav-list"></div>
+  </nav>
+  <main id="main">
+    <div id="topbar">
+      <button id="prev" title="previous entry (k)">&#8593;<span class="btn-key">k</span></button>
+      <button id="next" title="next entry (j)">&#8595;<span class="btn-key">j</span></button>
+      <button id="next-open" title="next unanswered entry (n)">next unanswered<span class="btn-key">n</span></button>
+      <div id="topbar-spacer"></div>
+      <span id="save-state"></span>
+      <button id="send" title="finalize this round and hand it back (s)">Send to Claude<span class="btn-key">s</span></button>
+      <button id="pause" title="stop waiting, keep everything (p)">Pause<span class="btn-key">p</span></button>
+      <button id="shutdown" title="close the server and free the port; the review folder is untouched">Close server</button>
+      <button id="help-toggle" title="shortcuts (?)">?</button>
+    </div>
+    <div id="content"></div>
+  </main>
+</div>
+
+<div id="send-veil" hidden>
+  <div class="send-card">
+    <h2 id="send-title">Hand this round back?</h2>
+    <p class="send-note">This is everything the agent will see. Nothing is sent until you confirm.</p>
+    <div id="send-body"></div>
+    <div class="send-actions">
+      <button id="send-confirm">Hand it back</button>
+      <button id="send-cancel">Back</button>
+    </div>
+  </div>
+</div>
+
+<div id="save-alarm-bar" hidden>
+  <span id="save-alarm-text"></span>
+</div>
+
+<div id="stale-veil" hidden>
+  <div class="stale-card">
+    <h2>This window is out of date</h2>
+    <p id="stale-reason"></p>
+    <p>Everything you answered was saved and handed back. Nothing here can be edited any more, and nothing you type below will be kept.</p>
+    <p><button onclick="location.reload()">Reload for the current round</button></p>
+  </div>
+</div>
+
+<div id="stopped-veil" hidden>
+  <div class="stopped-card">
+    <h2>Server stopped</h2>
+    <p>Every answer is saved in the review folder. Nothing was lost, and nothing was handed back that you had not sent.</p>
+    <p>Bring it back with <code>uv run review.py serve &lt;name&gt;</code>.</p>
+  </div>
+</div>
+
+<div id="help" hidden>
+  <div class="help-card">
+    <h2>Shortcuts</h2>
+    <table>
+      <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>next / previous entry</td></tr>
+      <tr><td><kbd>n</kbd></td><td>next entry with an unanswered question</td></tr>
+      <tr><td><kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>pick that option in the entry's first open question</td></tr>
+      <tr><td><kbd>/</kbd></td><td>filter the navigation</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>save this answer and jump to the next unanswered</td></tr>
+      <tr><td><kbd>s</kbd></td><td>finalize the round and hand it back</td></tr>
+      <tr><td><kbd>p</kbd></td><td>pause: stop the agent waiting, keep every answer</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this card</td></tr>
+      <tr><td>Close server</td><td>shuts the server down; <code>review serve</code> brings it back, answers and all</td></tr>
+    </table>
+    <p>Answers save themselves as you type. Nothing is handed back until you send.</p>
+    <p class="help-dismiss">Click anywhere, or press <kbd>Esc</kbd>, to close this.</p>
+  </div>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
