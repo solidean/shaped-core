@@ -43,6 +43,14 @@ struct probe_surface
     float transmission_weight = 0.0f;
     tg::vec3f transmission_color = tg::vec3f(1, 1, 1);
     float transmission_depth = 0.0f;
+    float transmission_dispersion_scale = 0.0f;
+    float transmission_dispersion_abbe_number = 20.0f;
+
+    float subsurface_weight = 0.0f;
+    tg::vec3f subsurface_color = tg::vec3f(0.8f, 0.8f, 0.8f);
+    tg::vec3f subsurface_radius = tg::vec3f(1.0f, 0.5f, 0.25f);
+    float subsurface_radius_scale = 0.1f;
+    float subsurface_scatter_anisotropy = 0.0f;
 
     float coat_weight = 0.0f;
     tg::vec3f coat_color = tg::vec3f(1, 1, 1);
@@ -71,7 +79,7 @@ struct probe_surface
     float geometry_handedness = 1.0f;
 };
 
-static_assert(sizeof(probe_surface) == 54 * 4, "probe_surface must match sv::surface in shaders/openpbr.hlsli");
+static_assert(sizeof(probe_surface) == 65 * 4, "probe_surface must match sv::surface in shaders/openpbr.hlsli");
 
 /// Which estimator a case runs — mirrors the `probe_*` constants in shaders/bsdf_probe.hlsl.
 enum class probe_mode : u32
@@ -80,6 +88,7 @@ enum class probe_mode : u32
     pdf_norm = 1,
     reciprocity = 2,
     echo = 3,
+    medium = 4,
 };
 
 /// `sv::probe_case` from shaders/bsdf_probe.hlsl, lane-for-lane.
@@ -97,9 +106,10 @@ struct probe_case
 
     float pad2 = 0.0f;
     float pad3 = 0.0f;
+    float pad4 = 0.0f;
 };
 
-static_assert(sizeof(probe_case) == 256, "probe_case must match sv::probe_case in shaders/bsdf_probe.hlsl");
+static_assert(sizeof(probe_case) == 304, "probe_case must match sv::probe_case in shaders/bsdf_probe.hlsl");
 
 /// How many work items share one case, and how many samples each draws.
 ///
@@ -279,6 +289,33 @@ cc::vector<named_surface> surfaces_under_test()
                     .coat_weight = 1.0f,
                     .coat_roughness = 0.1f}});
 
+    // The subsurface base, which refracts through the same interface the transparent one does and differs only in the
+    // interior beyond it — so what the closure has to get right here is the split, not the walk.
+    out.push_back({"subsurface", {.specular_roughness = 0.4f, .subsurface_weight = 1.0f}});
+    out.push_back({"subsurface, saturated",
+                   {.specular_roughness = 0.3f,
+                    .subsurface_weight = 1.0f,
+                    .subsurface_color = tg::vec3f(0.9f, 0.35f, 0.28f),
+                    .subsurface_radius = tg::vec3f(1.0f, 0.35f, 0.18f),
+                    .subsurface_radius_scale = 0.25f,
+                    .subsurface_scatter_anisotropy = 0.6f}});
+    out.push_back({"half subsurface over diffuse",
+                   {.base_color = tg::vec3f(0.5f, 0.45f, 0.4f), .specular_roughness = 0.35f, .subsurface_weight = 0.5f}});
+    out.push_back({"subsurface under a coat",
+                   {.specular_roughness = 0.3f,
+                    .subsurface_weight = 1.0f,
+                    .subsurface_color = tg::vec3f(0.85f, 0.6f, 0.5f),
+                    .coat_weight = 1.0f,
+                    .coat_roughness = 0.12f}});
+
+    // Dispersion, which changes only the angle a wavelength refracts through — the probe carries all three, so what it
+    // pins is that turning it on breaks neither the energy nor the pdf.
+    out.push_back({"dispersive glass",
+                   {.specular_roughness = 0.1f,
+                    .transmission_weight = 1.0f,
+                    .transmission_dispersion_scale = 1.0f,
+                    .transmission_dispersion_abbe_number = 20.0f}});
+
     out.push_back({"anisotropic, tangent rotated",
                    {.specular_roughness = 0.4f,
                     .specular_roughness_anisotropy = 0.9f,
@@ -357,13 +394,14 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
     auto cases = cc::vector<probe_case>();
     for (auto const& ns : surfaces)
         for (auto const& wo : probe_directions)
-            for (auto const mode : {probe_mode::albedo, probe_mode::pdf_norm, probe_mode::reciprocity})
+            for (auto const mode :
+                 {probe_mode::albedo, probe_mode::pdf_norm, probe_mode::reciprocity, probe_mode::medium})
                 cases.push_back({.wo = wo, .mode = mode, .samples = samples_per_block, .seed = 7u, .s = ns.s});
 
     auto const results = run_probe(ctx, cases);
     REQUIRE(results.size() == cases.size());
 
-    auto const modes_per_direction = 3;
+    auto const modes_per_direction = 4;
     auto const directions = isize(sizeof(probe_directions) / sizeof(probe_directions[0]));
 
     for (auto si = isize(0); si < surfaces.size(); ++si)
@@ -377,6 +415,7 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
             auto const& albedo = results[base + 0];
             auto const& pdf_norm = results[base + 1];
             auto const& reciprocity = results[base + 2];
+            auto const& medium = results[base + 3];
 
             // A message per case, because a bare failing CHECK in a triple loop says nothing about which surface broke.
             auto const where = cc::format("{} @ wo.z = {}", ns.name, probe_directions[di][2]);
@@ -415,6 +454,24 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
             // The floor is a sanity bound: a pdf that collapsed entirely would sit near zero.
             CHECK(pdf_norm.mean[0] <= 1.02f).context(where).dump("pdf mass", pdf_norm.mean[0]);
             CHECK(pdf_norm.mean[0] >= 0.85f).context(where).dump("pdf mass", pdf_norm.mean[0]);
+
+            // A lobe that returns nothing at all passes every bound above, so this is what separates "conserves energy"
+            // from "was never wired up".
+            auto const brightness = albedo.mean[0] + albedo.mean[1] + albedo.mean[2];
+            CHECK(brightness > 0.02f).context(where).dump("albedo", albedo.mean);
+
+            // Which interior the sampled directions crossed into, which is what the integrator switches its medium on.
+            // A surface that transmits must reach one, and must reach the one it actually described.
+            auto const& probe_s = ns.s;
+            if (probe_s.transmission_weight > 0.0f && probe_s.geometry_thin_walled == 0.0f)
+                CHECK(medium.mean[1] > 0.0f).context(where).dump("into transmission", medium.mean[1]);
+            else
+                CHECK(medium.mean[1] == 0.0f).context(where).dump("into transmission", medium.mean[1]);
+
+            if (probe_s.subsurface_weight > 0.0f && probe_s.transmission_weight < 1.0f)
+                CHECK(medium.mean[2] > 0.0f).context(where).dump("into subsurface", medium.mean[2]);
+            else
+                CHECK(medium.mean[2] == 0.0f).context(where).dump("into subsurface", medium.mean[2]);
 
             // Helmholtz reciprocity, as a fraction of the magnitudes compared — an absolute difference would be
             // dominated by whichever surface happens to be brightest.

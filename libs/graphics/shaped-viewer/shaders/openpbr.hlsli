@@ -221,8 +221,37 @@ float3 ggx_energy_compensation(float mu, float2 alpha, float3 f0)
 // its first interference order faithfully and its higher orders alias into colors the spectrum would have averaged away, so
 // a film past roughly a micron drifts from what it should be.
 
+/// The wavelengths in nanometres a channel stands for, shared by the thin film and by dispersion.
+/// Three samples is what an RGB pipeline has to say about a spectrum, and both features are limited by it the same way.
+static const float3 channel_wavelengths = float3(620.0, 550.0, 450.0);
+
 /// The wavelengths in nanometres the film is evaluated at, one per channel.
-static const float3 thin_film_wavelengths = float3(620.0, 550.0, 450.0);
+static const float3 thin_film_wavelengths = channel_wavelengths;
+
+/// The index of refraction at one wavelength, from the index at the sodium D line and an Abbe number.
+///
+/// Cauchy's two-term relation, with the B coefficient solved so the spread between the F and C lines is exactly what the
+/// Abbe number states — which is what makes `transmission_dispersion_abbe_number` mean the thing opticians print on a glass.
+/// `scale` multiplies that spread, so 0 collapses every wavelength back onto the base index and 2 doubles the fan.
+///
+/// Smaller Abbe numbers disperse MORE, which is the opposite of how the parameter reads.
+float dispersive_ior(float base_ior, float abbe, float scale, float wavelength)
+{
+    if (scale <= 0.0 || abbe <= 0.0)
+        return base_ior;
+
+    const float lambda_d = 587.6; // the sodium D line, where `base_ior` is defined
+    const float lambda_f = 486.1;
+    const float lambda_c = 656.3;
+
+    float inv_f2 = 1.0 / (lambda_f * lambda_f);
+    float inv_c2 = 1.0 / (lambda_c * lambda_c);
+
+    float b = scale * (base_ior - 1.0) / (abbe * (inv_f2 - inv_c2));
+    float a = base_ior - b / (lambda_d * lambda_d);
+
+    return max(1.0 + 1e-3, a + b / max(wavelength * wavelength, 1e-6));
+}
 
 /// The SIGNED amplitude reflectances at one interface, s and p polarization, for a real relative index `eta`.
 ///
@@ -381,10 +410,22 @@ struct bsdf
     float trans_eta;
     float thin_walled;
 
-    /// The interior's absorption coefficient, which the INTEGRATOR applies over the distance travelled.
-    /// Zero unless `transmission_depth` is positive, because that is the only case where the color is a property of a volume
-    /// rather than of the crossing.
-    float3 medium_sigma;
+    /// The interior the transparent base refracts into, which the INTEGRATOR walks rather than the closure.
+    ///
+    /// `sigma_t` is extinction per unit length and `albedo` the fraction of it that scatters rather than absorbs, so an
+    /// albedo of 0 is the pure Beer-Lambert interior `transmission_depth` describes and anything above it is a random walk.
+    /// Zero extinction is vacuum, which is every surface that does not transmit.
+    float3 medium_sigma_t;
+    float3 medium_albedo;
+    float medium_g;
+
+    /// The subsurface interior, and how much of the OPAQUE base is it rather than the diffuse substrate.
+    /// A separate medium because the two are chosen between per sample: they refract through the same interface and differ
+    /// only in what lies beyond it.
+    float sss_weight;
+    float3 sss_sigma_t;
+    float3 sss_albedo;
+    float sss_g;
 
     float coat_f0;
     float2 coat_alpha;
@@ -433,7 +474,17 @@ struct bsdf_sample
     float3 value;     ///< the BSDF at (wo, direction), cosine NOT folded in
     float pdf;
     bool valid; ///< false when the direction grazed the surface, total internal reflection ended it, or the pdf collapsed
+
+    /// Which interior the direction crossed into: `medium_none`, `medium_transmission` or `medium_subsurface`.
+    ///
+    /// The two refracting bases share one lobe, so this is the only thing that says which of them a sample belongs to —
+    /// and the integrator needs it, because what happens beyond the interface is entirely a property of the medium.
+    uint medium;
 };
+
+static const uint medium_none = 0;
+static const uint medium_transmission = 1;
+static const uint medium_subsurface = 2;
 
 /// The perceptual-to-microfacet roughness mapping OpenPBR specifies, floored so no lobe becomes a delta.
 ///
@@ -489,6 +540,21 @@ struct surface
     float transmission_weight;
     float3 transmission_color;
     float transmission_depth; ///< the distance `transmission_color` is the color AT; 0 tints the interface instead
+
+    /// How far apart the wavelengths are bent, as a multiple of what `transmission_dispersion_abbe_number` implies.
+    /// 0 is no dispersion at all, which is what keeps a path from being collapsed onto one wavelength for nothing.
+    float transmission_dispersion_scale;
+
+    /// The Abbe number: how little a real glass disperses, so SMALLER means more.
+    /// Around 64 for crown glass and 30 for flint; 0 is treated as no dispersion.
+    float transmission_dispersion_abbe_number;
+
+    // subsurface
+    float subsurface_weight;
+    float3 subsurface_color;  ///< the albedo the random walk is inverted to reproduce
+    float3 subsurface_radius; ///< the mean free path per channel, before `subsurface_radius_scale`
+    float subsurface_radius_scale;
+    float subsurface_scatter_anisotropy; ///< the Henyey-Greenstein g: forward at +1, back at -1, isotropic at 0
 
     // coat
     float coat_weight;
@@ -574,6 +640,14 @@ surface default_surface()
     s.transmission_weight = 0.0;
     s.transmission_color = float3(1, 1, 1);
     s.transmission_depth = 0.0;
+    s.transmission_dispersion_scale = 0.0;
+    s.transmission_dispersion_abbe_number = 20.0;
+
+    s.subsurface_weight = 0.0;
+    s.subsurface_color = float3(0.8, 0.8, 0.8);
+    s.subsurface_radius = float3(1.0, 0.5, 0.25);
+    s.subsurface_radius_scale = 0.1;
+    s.subsurface_scatter_anisotropy = 0.0;
 
     s.coat_weight = 0.0;
     s.coat_color = float3(1, 1, 1);
@@ -610,7 +684,11 @@ surface default_surface()
 /// The shading frame is always turned to face the incoming ray, so the closure cannot read that off the geometry — and it
 /// changes the direction of every refraction, which is why it is a parameter rather than something inferred.
 /// It means nothing for a surface that does not transmit.
-bsdf bsdf_prepare(surface s, bool exiting)
+///
+/// `channel` is which wavelength the path has been collapsed onto, or 3 for one that still carries all of them.
+/// It only reaches the refraction index, and only when the material actually disperses — a path that never met a dispersive
+/// interface keeps its three channels and pays nothing.
+bsdf bsdf_prepare(surface s, bool exiting, uint channel)
 {
     bsdf b;
 
@@ -652,6 +730,13 @@ bsdf bsdf_prepare(surface s, bool exiting)
 
     {
         float interface_ior = max(1.0 + 1e-3, s.specular_ior);
+
+        // A collapsed path refracts at ITS wavelength's index, which is the whole of dispersion: the lobe is unchanged and
+        // only the angle it bends through differs between the channels.
+        if (channel < 3u && s.transmission_dispersion_scale > 0.0)
+            interface_ior = dispersive_ior(interface_ior, s.transmission_dispersion_abbe_number,
+                                           s.transmission_dispersion_scale, channel_wavelengths[channel]);
+
         b.trans_eta = exiting ? 1.0 / interface_ior : interface_ior;
 
         // A positive depth makes the color a property of the VOLUME, so the crossing costs nothing and the integrator
@@ -662,8 +747,26 @@ bsdf bsdf_prepare(surface s, bool exiting)
         b.trans_tint = volumetric ? float3(1, 1, 1) : saturate(s.transmission_color);
 
         // Beer-Lambert, solved so that `transmission_color` is what survives exactly `transmission_depth` of travel.
+        // It only absorbs, so its albedo is zero and the integrator needs no walk through it.
         float3 c = clamp(saturate(s.transmission_color), 1e-4, 1.0);
-        b.medium_sigma = volumetric ? -log(c) / max(s.transmission_depth, 1e-6) : float3(0, 0, 0);
+        b.medium_sigma_t = volumetric ? -log(c) / max(s.transmission_depth, 1e-6) : float3(0, 0, 0);
+        b.medium_albedo = float3(0, 0, 0);
+        b.medium_g = 0.0;
+    }
+
+    // The subsurface interior: a dense scattering medium under the same interface, which the integrator random-walks.
+    b.sss_weight = b.thin_walled != 0.0 ? 0.0 : saturate(s.subsurface_weight);
+    {
+        // The mean free path is what `subsurface_radius` states, scaled — so extinction is its reciprocal.
+        float3 mfp = max(saturate(s.subsurface_radius) * max(s.subsurface_radius_scale, 0.0), float3(1e-4, 1e-4, 1e-4));
+        b.sss_sigma_t = 1.0 / mfp;
+
+        // Chiang's inversion: the single-scattering albedo whose random walk comes back out the color that was ASKED for.
+        // Without it `subsurface_color` would be the albedo of one scattering event, and a walk of dozens of them would
+        // return something far darker than the value the author typed.
+        float3 a = saturate(s.subsurface_color);
+        b.sss_albedo = saturate(1.0 - exp(-5.09406 * a + 2.61188 * a * a - 4.31805 * a * a * a));
+        b.sss_g = clamp(s.subsurface_scatter_anisotropy, -0.95, 0.95);
     }
 
     float cior = max(1.0 + 1e-3, s.coat_ior);
@@ -767,7 +870,10 @@ float coat_crossing(bsdf b, float3 wo, float3 wi)
     return coat_transmission(b, mu_o) * coat_transmission(b, mu_i);
 }
 
-/// The rough-refraction BTDF through the dielectric interface (Walter 2007), Fresnel included.
+/// The rough-refraction BTDF through the dielectric interface (Walter 2007), Fresnel included and UNTINTED.
+///
+/// The tint belongs to the caller because the transparent base and the subsurface base refract through this same interface
+/// and differ only in what lies beyond it — one tints at the crossing, the other does not.
 ///
 /// The radiance-compression factor is deliberately ABSENT.
 ///
@@ -780,7 +886,7 @@ float coat_crossing(bsdf b, float3 wo, float3 wi)
 ///
 /// A BTDF is not reciprocal either way: `f(wo, wi)` and `f(wi, wo)` differ by that same ratio, which is a property of
 /// radiance rather than an error — so the probe compares only directions on one side.
-float3 transmission_eval(bsdf b, float3 wo, float3 wi)
+float3 transmission_btdf(bsdf b, float3 wo, float3 wi)
 {
     // A thin wall has no interior to refract into: light goes straight on through, spread by the interface's roughness.
     // So the lobe is the reflection lobe mirrored about the surface, which is what `-wi` recovers.
@@ -793,7 +899,7 @@ float3 transmission_eval(bsdf b, float3 wo, float3 wi)
         float g = ggx_g2(wo, wi_mirror, b.spec_alpha);
         float3 f = float3(1, 1, 1) - b.spec_weight * fresnel_schlick(mu_h, b.spec_f0);
 
-        return b.trans_tint * f * (d * g / (4.0 * wo.z * max(wi_mirror.z, 1e-6)));
+        return f * (d * g / (4.0 * wo.z * max(wi_mirror.z, 1e-6)));
     }
 
     float eta = b.trans_eta;
@@ -811,7 +917,7 @@ float3 transmission_eval(bsdf b, float3 wo, float3 wi)
     float denom = dot_o + eta * dot_i;
     float scale = abs(dot_o) * abs(dot_i) / max(wo.z * abs(wi.z) * denom * denom, 1e-9);
 
-    return b.trans_tint * (1.0 - f_r) * d * g * scale;
+    return (1.0 - f_r) * d * g * scale;
 }
 
 /// The full BSDF at (`wo`, `wi`), with the cosine NOT folded in.
@@ -826,14 +932,17 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
     // for both again on the way out.
     if (wi.z < 0.0)
     {
-        if (b.trans_weight <= 0.0)
+        // What the two refracting bases weigh between them. The transparent one pays its tint at the crossing; the
+        // subsurface one pays nothing here, because everything it costs happens inside.
+        float3 tint = b.trans_weight * b.trans_tint + (1.0 - b.trans_weight) * b.sss_weight * float3(1, 1, 1);
+        if (all(tint <= float3(0, 0, 0)))
             return float3(0, 0, 0);
 
-        float3 f_trans = transmission_eval(b, wo, wi);
+        float3 f_btdf = transmission_btdf(b, wo, wi);
         float t_coat_x = coat_crossing(b, wo, wi);
         float t_fuzz_x = fuzz_transmission(b, wo.z) * fuzz_transmission(b, abs(wi.z));
 
-        return f_trans * t_coat_x * t_fuzz_x * (1.0 - b.metalness) * b.trans_weight;
+        return f_btdf * tint * t_coat_x * t_fuzz_x * (1.0 - b.metalness);
     }
 
     if (wi.z <= 0.0)
@@ -875,8 +984,8 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
 
     // The diffuse substrate takes what the specular layer let through, both on the way in and on the way out.
     float3 t_spec = spec_transmission(b, mu_o) * spec_transmission(b, mu_i);
-    float3 f_diffuse
-        = (1.0 - b.trans_weight) * b.diffuse_albedo * (oren_nayar(wo, wi, b.diffuse_roughness) / pi) * t_spec;
+    float3 f_diffuse = (1.0 - b.trans_weight) * (1.0 - b.sss_weight) * b.diffuse_albedo
+                     * (oren_nayar(wo, wi, b.diffuse_roughness) / pi) * t_spec;
 
     float3 f_base = lerp(f_spec + f_diffuse, f_metal, b.metalness);
 
@@ -936,11 +1045,14 @@ lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
     p.spec = below * (1.0 - b.metalness) * b.spec_weight * luminance(ggx_albedo(mu, b.spec_alpha, b.spec_f0));
 
     float3 t_spec = spec_transmission(b, mu);
-    p.diffuse = below * (1.0 - b.metalness) * (1.0 - b.trans_weight) * luminance(b.diffuse_albedo * t_spec);
+    float opaque = (1.0 - b.trans_weight);
+    p.diffuse = below * (1.0 - b.metalness) * opaque * (1.0 - b.sss_weight) * luminance(b.diffuse_albedo * t_spec);
 
-    // The transparent base is ranked by what the interface lets THROUGH, which is what the diffuse substrate would
-    // otherwise have received — the two split exactly the same budget.
-    p.transmission = below * (1.0 - b.metalness) * b.trans_weight * luminance(t_spec * b.trans_tint);
+    // Both refracting bases share ONE sampling lobe: they cross the same interface at the same roughness and differ only
+    // in what lies beyond it, so giving them separate lobes would be two names for one distribution.
+    // Which interior a drawn direction entered is decided after the fact, in `bsdf_sample_direction`.
+    float3 through = t_spec * (b.trans_weight * b.trans_tint + opaque * b.sss_weight);
+    p.transmission = below * (1.0 - b.metalness) * luminance(through);
 
     float sum = p.fuzz + p.coat + p.metal + p.spec + p.diffuse + p.transmission;
     if (sum <= 1e-6)
@@ -1013,6 +1125,7 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     r.value = float3(0, 0, 0);
     r.pdf = 0.0;
     r.valid = false;
+    r.medium = medium_none;
 
     if (wo.z <= 0.0)
         return r;
@@ -1054,7 +1167,26 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else
     {
-        // The transparent base. Refracted about a visible microfacet, or straight through when the wall is thin.
+        // A refracting base. Which of the two is decided here, in proportion to what each contributes — the direction is
+        // the same either way, so the pick costs no extra distribution and changes only the interior reported.
+        float w_trans = b.trans_weight * luminance(b.trans_tint);
+        float w_sss = (1.0 - b.trans_weight) * b.sss_weight;
+        float w_sum = w_trans + w_sss;
+
+        // The lobe pick already consumed `u.x`; reusing where it landed INSIDE the transmission slice keeps this free of a
+        // fourth uniform, and the two choices are independent of the direction the slice goes on to draw.
+        float slice_lo = p.fuzz + p.coat + p.metal + p.spec + p.diffuse;
+        float slice = max(p.transmission, 1e-9);
+        float within = saturate((pick - slice_lo) / slice);
+
+        // A thin wall encloses nothing, so passing through one enters no interior at all — and saying so here is what
+        // keeps that fact in the closure, which is the only thing that knows it.
+        if (b.thin_walled != 0.0)
+            r.medium = medium_none;
+        else
+            r.medium = (w_sum <= 0.0 || within * w_sum < w_trans) ? medium_transmission : medium_subsurface;
+
+        // Refracted about a visible microfacet, or straight through when the wall is thin.
         float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
         if (b.thin_walled != 0.0)
         {
@@ -1078,6 +1210,9 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
 
     if (wi.z > -1e-6 && wi.z <= 1e-6)
         return r;
+
+    if (wi.z > 0.0)
+        r.medium = medium_none; // a reflected direction crossed nothing, whichever lobe produced it
 
     r.direction = wi;
     r.value = bsdf_eval(b, wo, wi);

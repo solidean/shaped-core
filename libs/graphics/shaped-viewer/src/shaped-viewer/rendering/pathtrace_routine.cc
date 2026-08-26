@@ -159,13 +159,14 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto const pipeline_layout
         = ctx.cached.acquire_pipeline_layout({.groups = {variant.group_layout, d.bindless->layout()}});
 
-    // Payload is PtPayload from pt_common.hlsli: rng, the medium, five float3 results, and bsdf_pdf + hit_t = 21 lanes.
+    // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel, five
+    // float3 results, and bsdf_pdf + hit_t = 26 lanes.
     //
     // Depth 2 rather than 1, because the shading moved into the closest-hit: the raygen's trace is the first level and the
     // shadow rays that hit shader casts for next-event estimation are the second.
     auto rpd = sg::raytracing_pipeline_description{.layout = pipeline_layout,
                                                    .max_recursion_depth = 2,
-                                                   .max_payload_size = isize(sizeof(u32) * 21)};
+                                                   .max_payload_size = isize(sizeof(u32) * 26)};
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
     auto const shadow_miss_h = rpd.add_miss_shader(*compiled_sms);

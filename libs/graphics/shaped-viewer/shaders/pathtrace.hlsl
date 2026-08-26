@@ -45,16 +45,32 @@ void PathTraceRayGen()
         float3 radiance = float3(0, 0, 0);
         float prev_pdf = 0.0; // pdf of the direction the last hit sampled, for the escaped-environment MIS
 
-        // What the next segment travels through: zero until the path refracts into a transmissive solid.
-        // Tracked here rather than in the hit because absorption is a property of the DISTANCE travelled, and the distance
-        // is not known until the segment ends.
-        float3 medium = float3(0, 0, 0);
+        // What the next segment travels through: vacuum until the path refracts into a solid.
+        // Tracked here rather than in the hit because what a medium does is a property of the DISTANCE travelled, and the
+        // distance is not known until the segment ends.
+        float3 medium_sigma_t = float3(0, 0, 0);
+        float3 medium_albedo = float3(0, 0, 0);
+        float medium_g = 0.0;
 
-        for (int b = 0; b < max_bounces; ++b)
+        // Which wavelength this path has been collapsed onto, or 3 while it still carries all three.
+        uint channel = 3u;
+
+        // Scattering events do not count against `max_bounces`.
+        //
+        // A random walk through skin or marble takes dozens of them before it comes back out, and a budget shared with the
+        // surface bounces would make a dense medium simply black — the walk would run out before it ever escaped.
+        // They get their own, much larger cap, which is a termination guard rather than a quality control.
+        int scatters = 0;
+
+        int b = 0;
+        while (b < max_bounces)
         {
             PtPayload p;
             p.rng = rng;
-            p.medium = medium;
+            p.medium_sigma_t = medium_sigma_t;
+            p.medium_albedo = medium_albedo;
+            p.medium_g = medium_g;
+            p.channel = channel;
 
             RayDesc ray;
             ray.Origin = origin;
@@ -66,7 +82,10 @@ void PathTraceRayGen()
             // Read every payload field into locals right away, so the payload-access analyzer sees them consumed,
             // then branch on the hit. The random state comes back advanced by whatever the hit drew from it.
             rng = p.rng;
-            float3 next_medium = p.medium;
+            float3 next_sigma_t = p.medium_sigma_t;
+            float3 next_albedo = p.medium_albedo;
+            float next_g = p.medium_g;
+            uint next_channel = p.channel;
             float hit_t = p.hit_t;
             float3 direct = p.direct;
             float3 emission = p.emission;
@@ -81,11 +100,57 @@ void PathTraceRayGen()
             // balance against, and weighting it here would make the light visible to the camera, which it is not.
             // The rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer
             // than the light blocks it, and nothing else can.
-            // Beer-Lambert over the segment just travelled, applied BEFORE anything this hit contributes: the next-event
-            // estimate and the emission both happen at the far end of it, so they are attenuated by the whole crossing.
-            bool const inside = any(medium > float3(0, 0, 0));
-            if (inside && hit_t > 0.0)
-                throughput *= exp(-medium * hit_t);
+            bool const inside = any(medium_sigma_t > float3(0, 0, 0));
+            bool const scattering = inside && any(medium_albedo > float3(0, 0, 0));
+
+            if (scattering)
+            {
+                // A scattering interior is walked rather than crossed: the segment may end at a particle instead of at the
+                // surface the trace found, and it usually does — that is what makes light spread sideways through skin.
+                //
+                // Distance is drawn against ONE channel's extinction and the estimate is corrected for all three, so a
+                // medium whose channels differ (which is every interesting one) stays unbiased rather than needing three
+                // separate walks.
+                uint dc = min(uint(pt_rand(rng) * 3.0), 2u);
+                float sigma_pick = max(medium_sigma_t[dc], 1e-6);
+                float t = -log(max(1.0 - pt_rand(rng), 1e-9)) / sigma_pick;
+
+                bool const reaches_surface = hit_t >= 0.0 && t >= hit_t;
+                float const travelled = reaches_surface ? hit_t : t;
+
+                float3 transmittance = exp(-medium_sigma_t * travelled);
+
+                // The pdf of what actually happened, averaged over the channel the distance could have been drawn against.
+                float3 pdf3 = reaches_surface ? transmittance : (medium_sigma_t * transmittance);
+                float pdf = (pdf3.x + pdf3.y + pdf3.z) / 3.0;
+                if (pdf <= 1e-12)
+                    break;
+
+                if (!reaches_surface)
+                {
+                    // A real scattering event: the path turns here and never reaches the surface the trace found.
+                    // The phase function is its own pdf, so the turn itself carries no weight beyond the albedo.
+                    throughput *= (transmittance * medium_sigma_t * medium_albedo) / pdf;
+
+                    origin = origin + dir * t;
+                    dir = pt_sample_hg(dir, medium_g, pt_rand(rng), pt_rand(rng));
+                    prev_pdf = pt_hg_phase(1.0, medium_g); // the density at the direction actually drawn
+
+                    ++scatters;
+                    if (scatters > 256 || !pt_is_finite(throughput))
+                        break;
+                    continue; // NOT a bounce: the surface budget is untouched
+                }
+
+                throughput *= transmittance / pdf;
+            }
+            else if (inside && hit_t > 0.0)
+            {
+                // A purely absorbing interior, which needs no walk: Beer-Lambert over the whole segment.
+                // Applied BEFORE anything this hit contributes, since the estimate and the emission both happen at the far
+                // end of it and are attenuated by the whole crossing.
+                throughput *= exp(-medium_sigma_t * hit_t);
+            }
 
             if (b > 0)
             {
@@ -138,7 +203,11 @@ void PathTraceRayGen()
             // pushing it along +N would start it back inside the surface it just crossed.
             origin = origin + dir * hit_t + N * (dot(next_dir, N) < 0.0 ? -1e-3 : 1e-3);
             dir = next_dir;
-            medium = next_medium;
+            medium_sigma_t = next_sigma_t;
+            medium_albedo = next_albedo;
+            medium_g = next_g;
+            channel = next_channel;
+            ++b;
         }
 
         // One non-finite path would poison this pixel forever: the mean is blended in place, so a NaN carried into

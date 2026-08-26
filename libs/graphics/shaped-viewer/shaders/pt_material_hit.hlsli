@@ -196,7 +196,18 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
     uint rng = payload.rng;
 
     sv::surface surface = sv_evaluate_material(ctx);
-    sv::bsdf bsdf = sv::bsdf_prepare(surface, exiting);
+
+    // A dispersive interface collapses the path onto ONE wavelength, because three channels bent through three different
+    // angles are no longer one ray and nothing downstream may treat them as one.
+    // Drawn here, before the closure is prepared, since the index it refracts at is what the choice decides.
+    // A path that already collapsed keeps its wavelength — collapsing twice would mask it twice over.
+    uint channel = payload.channel;
+    bool const collapsing = channel >= 3u && surface.transmission_dispersion_scale > 0.0
+                          && surface.transmission_weight > 0.0;
+    if (collapsing)
+        channel = min(uint(pt_rand(rng) * 3.0), 2u);
+
+    sv::bsdf bsdf = sv::bsdf_prepare(surface, exiting, channel);
 
     // The shading frame, in three steps: the authored one if there is one, faced toward the ray, then the normal map on top.
     //
@@ -252,6 +263,11 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
 
     payload.emission = bsdf.emission;
 
+    // What the medium was on the way in, so a continuation that stays on this side keeps travelling through it.
+    float3 const in_sigma_t = payload.medium_sigma_t;
+    float3 const in_albedo = payload.medium_albedo;
+    float const in_g = payload.medium_g;
+
     // A grazing hit whose shading frame turned away has no hemisphere to integrate over.
     if (wo_local.z <= 0.0)
     {
@@ -260,12 +276,12 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
         payload.direction = float3(0, 0, 0);
         payload.bsdf_pdf = 0.0;
         payload.rng = rng;
-        payload.medium = float3(0, 0, 0);
+        payload.medium_sigma_t = in_sigma_t;
+        payload.medium_albedo = in_albedo;
+        payload.medium_g = in_g;
+        payload.channel = payload.channel;
         return;
     }
-
-    // What the medium was on the way in, so a continuation that stays on this side keeps travelling through it.
-    float3 const medium_in = payload.medium;
 
     payload.direct = pt_estimate_area_light(bsdf, frame, wo_local, p, N, rng)
                    + pt_estimate_environment(bsdf, frame, wo_local, p, N, rng);
@@ -278,25 +294,58 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
     {
         // The cosine is the one at the SURFACE, so a refracted direction contributes its own magnitude rather than a
         // negative weight — which direction it left on is the offset's business, not the estimator's.
-        payload.throughput = s.value * (abs(s.direction.z) / s.pdf);
+        float3 weight = s.value * (abs(s.direction.z) / s.pdf);
+
+        // Collapsing onto one wavelength means keeping one channel of three, so what survives is scaled back up by three —
+        // the estimate stays unbiased and the other two channels are carried by other samples of the same pixel.
+        if (collapsing)
+        {
+            float3 mask = float3(channel == 0u ? 1.0 : 0.0, channel == 1u ? 1.0 : 0.0, channel == 2u ? 1.0 : 0.0);
+            weight *= mask * 3.0;
+        }
+
+        payload.throughput = weight;
         payload.direction = sv::to_world(frame, s.direction);
         payload.bsdf_pdf = s.pdf;
+        payload.channel = channel;
 
-        // A continuation that crossed the surface changes which medium it travels in: into this material's interior when
-        // it entered, and back out to whatever lay outside when it left.
-        // A thin wall encloses nothing, so crossing one changes no medium at all.
-        bool const crossed = s.direction.z < 0.0;
-        if (!crossed || surface.geometry_thin_walled != 0.0)
-            payload.medium = medium_in;
+        // A continuation that crossed the surface changes which medium it travels in: into the interior the closure says it
+        // entered, or back out to vacuum when it left.
+        // `medium_none` covers a reflection and a thin wall alike — the closure is what knows the difference.
+        if (s.medium == sv::medium_none)
+        {
+            payload.medium_sigma_t = in_sigma_t;
+            payload.medium_albedo = in_albedo;
+            payload.medium_g = in_g;
+        }
+        else if (exiting)
+        {
+            payload.medium_sigma_t = float3(0, 0, 0);
+            payload.medium_albedo = float3(0, 0, 0);
+            payload.medium_g = 0.0;
+        }
+        else if (s.medium == sv::medium_subsurface)
+        {
+            payload.medium_sigma_t = bsdf.sss_sigma_t;
+            payload.medium_albedo = bsdf.sss_albedo;
+            payload.medium_g = bsdf.sss_g;
+        }
         else
-            payload.medium = exiting ? float3(0, 0, 0) : bsdf.medium_sigma;
+        {
+            payload.medium_sigma_t = bsdf.medium_sigma_t;
+            payload.medium_albedo = bsdf.medium_albedo;
+            payload.medium_g = bsdf.medium_g;
+        }
     }
     else
     {
         payload.throughput = float3(0, 0, 0);
         payload.direction = float3(0, 0, 0);
         payload.bsdf_pdf = 0.0;
-        payload.medium = medium_in;
+        payload.medium_sigma_t = in_sigma_t;
+        payload.medium_albedo = in_albedo;
+        payload.medium_g = in_g;
+        payload.channel = payload.channel;
     }
 
     payload.rng = rng;

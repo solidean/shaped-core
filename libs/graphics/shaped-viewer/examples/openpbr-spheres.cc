@@ -220,6 +220,29 @@ struct sweep_row
                     .from = 0.06f,
                     .to = 2.5f});
 
+    // Dispersion, swept by how far apart the wavelengths are bent.
+    // Only a channel-collapsed path shows it, so the fringes resolve as the accumulation converges rather than appearing
+    // on the first frame — and they need a SMOOTH interface, since roughness blurs the three apart into grey again.
+    rows.push_back(
+        {.name = "dispersion",
+         .shared = {binding::of("transmission_weight", 1.0f), binding::of("specular_roughness", 0.03f),
+                    binding::of("specular_ior", 1.6f), binding::of("transmission_dispersion_abbe_number", 18.0f)},
+         .swept = "transmission_dispersion_scale",
+         .from = 0.0f,
+         .to = 3.0f});
+
+    // The subsurface base, swept by how far light travels inside before it comes back out.
+    // The near columns are nearly opaque and the far ones are waxy, which is the whole range the parameter covers — and
+    // the radius is per channel, red reaching furthest, which is what makes it read as flesh rather than as paint.
+    rows.push_back(
+        {.name = "subsurface",
+         .shared
+         = {binding::of("subsurface_weight", 1.0f), binding::of("subsurface_color", tg::vec3f(0.88f, 0.52f, 0.42f)),
+            binding::of("subsurface_radius", tg::vec3f(1.0f, 0.35f, 0.20f)), binding::of("specular_roughness", 0.35f)},
+         .swept = "subsurface_radius_scale",
+         .from = 0.01f,
+         .to = 0.8f});
+
     // Coverage, which the any-hit turns into a stochastic cutout — so these resolve as the accumulation converges rather
     // than as a blend.
     rows.push_back(

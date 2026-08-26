@@ -27,6 +27,7 @@ static const uint probe_albedo = 0;
 static const uint probe_pdf_norm = 1;
 static const uint probe_reciprocity = 2;
 static const uint probe_echo = 3;
+static const uint probe_medium = 4;
 
 /// One measurement to make — mirrors `sv_test::probe_case` lane-for-lane, so keep the two in lockstep.
 ///
@@ -47,6 +48,7 @@ struct probe_case
 
     float pad2;
     float pad3;
+    float pad4;
 };
 
 StructuredBuffer<probe_case> Cases : register(t0);
@@ -56,6 +58,7 @@ StructuredBuffer<probe_case> Cases : register(t0);
 ///   - `probe_albedo`: `xyz` is the summed estimate and `w` the samples that produced it.
 ///   - `probe_pdf_norm`: `x` is the summed estimate, `w` the sample count.
 ///   - `probe_reciprocity`: `x` is the summed absolute difference and `y` the summed magnitude it is relative to.
+///   - `probe_medium`: how many samples crossed into nothing, into the transmissive interior, and into the subsurface one.
 ///   - `probe_echo`: the decoded fields the CPU checks its own packing against.
 RWStructuredBuffer<float4> Results : register(u0);
 
@@ -105,7 +108,7 @@ float probe_consistency_weight(float3 wi, float claimed_pdf)
 /// The estimate one work item contributes, which the CPU sums with its siblings.
 float4 probe_run(probe_case c, uint item)
 {
-    bsdf b = bsdf_prepare(c.s, false); // measured from outside, which is the side every case here describes
+    bsdf b = bsdf_prepare(c.s, false, 3u); // from outside, and carrying all three wavelengths
     uint rng = item * 9781u + c.seed * 26699u + 1u;
 
     if (c.mode == probe_echo)
@@ -144,6 +147,18 @@ float4 probe_run(probe_case c, uint item)
                 bsdf_sample s = bsdf_sample_direction(b, wo, float3(probe_rand(rng), u));
                 if (s.valid)
                     sum.x += probe_consistency_weight(s.direction, s.pdf);
+            }
+        }
+        else if (c.mode == probe_medium)
+        {
+            // Which interior each drawn direction entered, as three running counts.
+            float3 u = float3(probe_rand(rng), probe_rand(rng), probe_rand(rng));
+            bsdf_sample s = bsdf_sample_direction(b, wo, u);
+            if (s.valid)
+            {
+                sum.x += s.medium == medium_none ? 1.0 : 0.0;
+                sum.y += s.medium == medium_transmission ? 1.0 : 0.0;
+                sum.z += s.medium == medium_subsurface ? 1.0 : 0.0;
             }
         }
         else // probe_reciprocity

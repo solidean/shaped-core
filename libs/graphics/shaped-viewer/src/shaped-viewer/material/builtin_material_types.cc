@@ -39,6 +39,14 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.transmission_weight = saturate(transmission_weight);
     surface.transmission_color = saturate(transmission_color);
     surface.transmission_depth = max(0.0, transmission_depth);
+    surface.transmission_dispersion_scale = max(0.0, transmission_dispersion_scale);
+    surface.transmission_dispersion_abbe_number = max(0.0, transmission_dispersion_abbe_number);
+
+    surface.subsurface_weight = saturate(subsurface_weight);
+    surface.subsurface_color = saturate(subsurface_color);
+    surface.subsurface_radius = saturate(subsurface_radius);
+    surface.subsurface_radius_scale = max(0.0, subsurface_radius_scale);
+    surface.subsurface_scatter_anisotropy = clamp(subsurface_scatter_anisotropy, -1.0, 1.0);
 
     surface.coat_weight = saturate(coat_weight);
     surface.coat_color = saturate(coat_color);
@@ -121,6 +129,17 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("transmission_weight", 0.0f));
     signature.push_back(material_signature_entry::of("transmission_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("transmission_depth", 0.0f));
+
+    // A smaller Abbe number disperses MORE; the scale is what turns it on at all, so its default is off.
+    signature.push_back(material_signature_entry::of("transmission_dispersion_scale", 0.0f));
+    signature.push_back(material_signature_entry::of("transmission_dispersion_abbe_number", 20.0f));
+
+    // `subsurface_radius` is the mean free path per channel — red travelling furthest is what makes skin read as skin.
+    signature.push_back(material_signature_entry::of("subsurface_weight", 0.0f));
+    signature.push_back(material_signature_entry::of("subsurface_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(material_signature_entry::of("subsurface_radius", tg::vec3f(1.0f, 0.5f, 0.25f)));
+    signature.push_back(material_signature_entry::of("subsurface_radius_scale", 0.1f));
+    signature.push_back(material_signature_entry::of("subsurface_scatter_anisotropy", 0.0f));
 
     signature.push_back(material_signature_entry::of("coat_weight", 0.0f));
     signature.push_back(material_signature_entry::of("coat_color", tg::vec3f(1.0f, 1.0f, 1.0f)));

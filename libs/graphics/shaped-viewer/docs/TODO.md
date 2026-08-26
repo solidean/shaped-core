@@ -167,15 +167,35 @@ importance-samples the continuation — so what is left is coverage of the model
 - **A normal map is still untested.** `geometry_normal` is applied through `sv::perturb_frame` now, so it has somewhere to land,
   but no material in the tree binds it to a texture.
   The same is true of `geometry_coat_normal`, which lands through the authored frame beside it.
-- **Subsurface and dispersion are absent**, not defaulted — `sv::surface` does not carry them, so a material cannot ask for
-  one and silently get something else.
-  Dispersion is the near one: it needs hero-wavelength sampling in the raygen, which is also what the thin film wants to stop
-  aliasing its higher orders.
-  Subsurface is a random walk in a dense medium, so it wants `transmission_scatter` first.
-- **`transmission_scatter` and `transmission_scatter_anisotropy` are absent.**
-  The interior absorbs but does not scatter, so it is clear glass with a color rather than something milky.
-  Adding them means a random walk with a phase function inside the medium the integrator already tracks, which is most of
-  what subsurface needs too.
+- **`transmission_scatter` and `transmission_scatter_anisotropy` are absent**, which is now the ONLY missing parameter
+  group.
+  The machinery is all there — the integrator walks the subsurface interior with a phase function already — so this is
+  giving the transmissive interior a scattering albedo of its own rather than building anything.
+- **The thin film could stop aliasing now.**
+  Its higher orders alias because it samples three wavelengths, and the path can be collapsed onto one wavelength since
+  dispersion landed.
+  Evaluating the film at the collapsed wavelength instead of at all three is most of what Belcour and Barla's spectral
+  formulation would buy, for a path that has already paid the collapse.
+- **Nothing tests the WALK.**
+  The probe pins which interior a sample enters, which is the seam the integrator switches on — but the distance sampling,
+  the phase function and the channel-averaged weighting all live in `pathtrace.hlsl` and are exercised only by running an
+  example.
+  A furnace test for a medium is the analogue of the one for the closure: a non-absorbing scattering sphere under a uniform
+  environment must return the environment, whatever its albedo and mean free path.
+- **A scattering walk is capped at 256 events and has no Russian roulette.**
+  The cap is a termination guard rather than a quality control, and a dense medium with a high albedo will reach it — which
+  is energy lost rather than a path fairly ended.
+  Roulette is what would end those paths without bias, and it is the same mechanism the surface bounces want.
+- **Next-event estimation never happens inside a medium.**
+  A scattering event turns and continues, picking up light only when it eventually exits, so a lit interior converges far
+  more slowly than a lit surface does.
+  It is the same gap as the shadow ray that cannot pass through glass, and equidistant sampling toward the light is the
+  usual answer.
+- **Dispersion collapses the whole path onto one wavelength**, and keeps it collapsed.
+  Everything after the collapse costs three times the samples for the same noise, including surfaces that have nothing to
+  do with the dispersive one.
+  Collapsing only the transmitted lobe's continuation — leaving a reflected one carrying all three — is what would bound
+  that, and it needs the closure to say which lobe a sample came from beyond the interior it entered.
 - **Next-event estimation does not pass through glass.**
   A shadow ray is a visibility test with no closure on it, so a point inside a transmissive solid — or behind one — is lit
   by BSDF sampling alone.

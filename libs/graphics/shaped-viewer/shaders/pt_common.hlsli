@@ -34,13 +34,21 @@ struct [raypayload] PtPayload
 {
     uint rng : read(caller, closesthit) : write(caller, closesthit);
 
-    // The absorption coefficient of the medium the ray is travelling through, round-tripping like `rng`.
+    // The medium the ray is travelling through, round-tripping like `rng`.
     //
     // The caller writes what the CURRENT segment travelled in and the hit writes what the CONTINUATION will, because only
     // the hit knows whether the direction it sampled crossed the surface — and only the caller knows how far the segment it
     // is about to take actually goes.
-    // Zero is vacuum, which is every path that never entered a transmissive solid.
-    float3 medium : read(caller, closesthit) : write(caller, closesthit);
+    // Zero extinction is vacuum, which is every path that never entered a solid.
+    float3 medium_sigma_t : read(caller, closesthit) : write(caller, closesthit);
+    float3 medium_albedo  : read(caller, closesthit) : write(caller, closesthit);
+    float  medium_g       : read(caller, closesthit) : write(caller, closesthit);
+
+    // Which wavelength this path has been collapsed onto, or 3 while it still carries all three.
+    //
+    // A dispersive refraction is what collapses it, and it stays collapsed: once the three channels have been bent apart
+    // they no longer describe one ray, so nothing downstream may treat them as one again.
+    uint channel : read(caller, closesthit) : write(caller, closesthit);
 
     float3 direct     : read(caller) : write(closesthit, miss); // next-event estimate at this hit, BSDF folded in
     float3 emission   : read(caller) : write(closesthit, miss); // the surface's own emission, or the sky on a miss
@@ -147,6 +155,42 @@ float pt_rand(inout uint state)
     state = state * 747796405u + 2891336453u;
     uint w = ((state >> ((state >> 28) + 4u)) ^ state) * 277803737u;
     return float((w >> 22) ^ w) * (1.0 / 4294967296.0);
+}
+
+// The Henyey-Greenstein phase function at cosine `mu` between the incoming and outgoing directions, normalized over the
+// sphere so it doubles as its own pdf.
+// `g` is forward at +1 and back at -1; 0 is isotropic and reduces this to 1 / (4 pi).
+float pt_hg_phase(float mu, float g)
+{
+    float g2 = g * g;
+    float d = 1.0 + g2 - 2.0 * g * mu;
+    return (1.0 - g2) / max(4.0 * PT_PI * d * sqrt(max(d, 1e-9)), 1e-9);
+}
+
+// A direction drawn from the Henyey-Greenstein phase function around `w`, whose pdf is `pt_hg_phase` at the cosine between
+// them — so a scattering event needs no separate weight.
+float3 pt_sample_hg(float3 w, float g, float u1, float u2)
+{
+    float mu = 0.0;
+    if (abs(g) < 1e-3)
+    {
+        mu = 1.0 - 2.0 * u1; // isotropic: the cosine is uniform
+    }
+    else
+    {
+        float t = (1.0 - g * g) / (1.0 - g + 2.0 * g * u1);
+        mu = (1.0 + g * g - t * t) / (2.0 * g);
+    }
+
+    float sin_theta = sqrt(max(0.0, 1.0 - mu * mu));
+    float phi = 2.0 * PT_PI * u2;
+
+    // A basis around w, avoiding the degenerate up when w is near +/-z.
+    float3 up = abs(w.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
+    float3 t1 = normalize(cross(up, w));
+    float3 t2 = cross(w, t1);
+
+    return normalize(t1 * (sin_theta * cos(phi)) + t2 * (sin_theta * sin(phi)) + w * mu);
 }
 
 // A cosine-weighted direction in the hemisphere around N (pdf = cos(theta) / PI). u1, u2 are uniforms in [0, 1).
