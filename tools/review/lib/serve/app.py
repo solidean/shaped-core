@@ -16,11 +16,13 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
+from ..annotate.index import RepoIndex
+from ..annotate.table import build as build_tokens, to_json as tokens_to_json
 from ..changeset.ledger import Ledger
 from ..core import config as config_module
-from ..core.atomic import write_json
+from ..core.atomic import stat_key, write_json
 from ..core.log import record
 from ..core.paths import ReviewPaths
 from ..entry.answers import AnswerFile
@@ -29,7 +31,7 @@ from ..entry.grammar import ReviewParseError
 from ..entry.parse import Entry, parse_file
 from ..goals.skeleton import describe, groups_for
 from ..render.entryview import render_entry
-from ..render.highlight import css as highlight_css
+from ..render.highlight import css as highlight_css, highlight_code
 from .watch import Watcher, compute_digest
 
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
@@ -51,6 +53,8 @@ class ReviewApp:
         self.repo = repo
         self.paths = paths
         self.watcher = watcher
+        self._index: RepoIndex | None = None
+        self._index_key: tuple | None = None
 
     def config(self):
         return config_module.load(self.paths.config)
@@ -117,6 +121,18 @@ class ReviewApp:
             "digest": self.watcher.digest,
         }
 
+    def index(self) -> RepoIndex:
+        """The paths an entry can refer to, rebuilt when the tracked set actually changes.
+
+        Keyed on git's own index file rather than on the watcher's digest: the watcher sees the review folder,
+        and the set of tracked files changes when someone stages something in the repository under review —
+        two different events, and using the wrong one leaves a newly tracked file unresolvable until a restart.
+        """
+        key = (stat_key(self.repo / ".git" / "index"), stat_key(self.paths.root))
+        if self._index is None or self._index_key != key:
+            self._index, self._index_key = RepoIndex.build(self.repo, self.paths.root), key
+        return self._index
+
     def entry_html(self, slug: str) -> tuple[int, dict]:
         for file, entry, error in self.entries():
             if file.stem != slug:
@@ -128,8 +144,44 @@ class ReviewApp:
                 entry, answers,
                 repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
             )
-            return 200, {"slug": slug, "html": html, "broken": False}
+            tokens = build_tokens(entry, self.index(), answers=answers)
+            return 200, {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
         return 404, {"error": f"no entry {slug!r}"}
+
+    def file_view(self, path: str, line: int, *, whole: bool = False) -> tuple[int, dict]:
+        """A window into one file: a peek by default, the whole thing for the page a click opens.
+
+        Only paths the index resolves are served, so a path outside the tree is a lookup miss rather than
+        a case to defend against.
+        """
+        resolution = self.index().resolve(path)
+        if not resolution.ok:
+            return 404, {"error": f"{path!r} is not a tracked file in the repository under review"}
+        target = self.index().absolute(resolution.path)
+        if target is None:
+            return 404, {"error": f"{resolution.path} left the index"}
+        try:
+            lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as e:
+            return 404, {"error": f"{resolution.path} could not be read: {e}"}
+
+        context = self.config().context
+        if whole:
+            start, end = 1, len(lines)
+        elif line <= 0:
+            # No line given means "what is this file", and the answer is its header comment plus the first
+            # declarations under it — which is the "get a feel for it" the peek exists for.
+            start, end = 1, min(len(lines), context * 3)
+        else:
+            # Up through the comment block above the line, then down by the review's own context setting —
+            # already the number the maintainer chose for how much of a hunk they want to see.
+            start, end = _walk_up_through_comments(lines, line), min(len(lines), line + context)
+        body = "\n".join(lines[start - 1:end])
+        return 200, {
+            "path": resolution.path, "absolute": target.resolve().as_posix(),
+            "start": start, "end": end, "lines": len(lines),
+            "html": highlight_code(body, path=resolution.path),
+        }
 
     def save_answer(self, payload: dict) -> tuple[int, dict]:
         slug = str(payload.get("entry", ""))
@@ -270,6 +322,47 @@ class ReviewApp:
         return 200, {"action": action, "round": cfg.next_round}
 
 
+# A preprocessor directive is not a comment, however much `#` looks like one.
+# Without this a peek at any line near the top of a C++ header walks up through the whole include block.
+_DIRECTIVES = ("include", "pragma", "define", "undef", "if", "ifdef", "ifndef", "else", "elif", "endif", "error")
+
+# How far a peek may walk.
+# A window that runs away is not a peek, and the comment block a reference points at
+# is a few lines, never dozens.
+_WALK_LIMIT = 12
+
+
+def _is_comment(text: str) -> bool:
+    if text.startswith("#"):
+        return not text[1:].lstrip().split(" ")[0].split("(")[0] in _DIRECTIVES
+    return text.startswith(("//", "*", "/*", '"""', "'''", "--", ";"))
+
+
+def _walk_up_through_comments(lines: list[str], line: int) -> int:
+    """Where a peek at `line` starts: the top of the comment block above it.
+
+    In this repository that block is where the load-bearing sentence lives, so a window that starts below it
+    shows the declaration and hides what a reader came for.
+    Blank lines are walked through too, since a doc comment separated by one is still that declaration's comment.
+    """
+    start = min(line, len(lines))
+    probe = start - 1
+    while probe >= 1 and start - probe <= _WALK_LIMIT:
+        text = lines[probe - 1].strip()
+        if not text or _is_comment(text):
+            probe -= 1
+            continue
+        break
+    # Only the comment run itself, not the blank lines above it.
+    while probe + 1 < start and not lines[probe].strip():
+        probe += 1
+    # One line further up when a comment run was actually found, because a docstring sits *below* the `def` it
+    # documents while a `///` block sits above the declaration — this catches the declaration in both languages.
+    if probe + 1 < start:
+        probe -= 1
+    return max(probe + 1, 1)
+
+
 def _error_panel(error: ReviewParseError) -> str:
     from html import escape
     return (
@@ -331,6 +424,14 @@ class Handler(BaseHTTPRequestHandler):
             elif route.startswith("/api/entry/"):
                 code, payload = self.app.entry_html(unquote(route[len("/api/entry/"):]))
                 self._json(code, payload)
+            elif route == "/api/file":
+                query = parse_qs(urlparse(self.path).query)
+                code, payload = self.app.file_view(
+                    query.get("path", [""])[0], int(query.get("line", ["0"])[0] or 0),
+                    whole=bool(query.get("whole")))
+                self._json(code, payload)
+            elif route.startswith("/file/"):
+                self._asset("file.html")
             elif route == "/events":
                 self._events()
             else:

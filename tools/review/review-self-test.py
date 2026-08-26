@@ -26,6 +26,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from tools.review.lib.annotate.index import RepoIndex  # noqa: E402
+from tools.review.lib.annotate.table import build as build_tokens  # noqa: E402
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
 from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, group_hunks, register  # noqa: E402
@@ -965,6 +967,84 @@ supersedes: prose
 
 The ==corrected== telling.
 """
+
+
+def _index_of(root: Path, paths: list[str]) -> RepoIndex:
+    """An index over exactly these paths, without needing a repository behind them."""
+    return RepoIndex({p: root for p in paths})
+
+
+REPO_FILES = [
+    "tools/review/lib/render/markdown.py",
+    "tools/review/lib/entry/parse.py",
+    "libs/base/clean-core/src/clean-core/container/vector.hh",
+    "libs/base/clean-core/docs/TODO.md",
+    "tools/review/TODO.md",
+]
+
+
+def _tokens(root: Path, body: str, paths: list[str] = REPO_FILES):
+    entry = parse_text(ENTRY + "\n## prose\n\n" + body + "\n", Path("entry.md"))
+    return build_tokens(entry, _index_of(root, paths))
+
+
+def test_a_reference_resolves_three_ways(root: Path) -> None:
+    """The exact path, a unique suffix, and a bare basename — the last two are how people actually write one."""
+    for written in ("tools/review/lib/render/markdown.py", "lib/render/markdown.py", "markdown.py"):
+        tokens = _tokens(root, f"See `{written}` for it.")
+        assert len(tokens) == 1, (written, tokens)
+        assert tokens[0].path == "tools/review/lib/render/markdown.py", (written, tokens[0])
+        assert not tokens[0].problem
+
+
+def test_an_ambiguous_reference_is_a_problem(root: Path) -> None:
+    """Always fixable by writing a longer path, so failing on it costs nothing and buys a guarantee."""
+    tokens = _tokens(root, "See `TODO.md`.")
+    assert tokens[0].problem and "names 2 files" in tokens[0].problem, tokens[0].problem
+
+
+def test_prose_that_merely_holds_a_dot_is_not_a_reference(root: Path) -> None:
+    """`git.has_merges` is prose about code.
+
+    Only the repository can say which dotted words are file names.
+    """
+    assert not _tokens(root, "`git.has_merges` already knows, and `sr::window.headless` does too.")
+    assert not _tokens(root, "The route is `/favicon.ico`, and the scheme is `vscode://file/x`.")
+
+
+def test_bare_prose_is_not_scanned(root: Path) -> None:
+    """The repo's convention backticks a path; scanning running text makes every sentence a candidate."""
+    assert not _tokens(root, "The file markdown.py is where it lives.")
+    assert _tokens(root, "The file `markdown.py` is where it lives.")
+
+
+def test_a_fenced_block_is_scanned(root: Path) -> None:
+    """A path in a code comment is exactly the case the round asked for."""
+    tokens = _tokens(root, "```cpp\n// see libs/base/clean-core/src/clean-core/container/vector.hh\nint x;\n```")
+    assert len(tokens) == 1 and tokens[0].path.endswith("vector.hh"), tokens
+
+
+def test_new_and_old_say_what_a_path_asserts(root: Path) -> None:
+    """A single 'might not exist' marker would let a stale `new:` sit forever, which is what the strictness is for."""
+    fresh = _tokens(root, "It becomes `new:tools/review/lib/refs/index.py`.")[0]
+    assert fresh.css == "ref-new" and not fresh.problem
+    assert fresh.label == "tools/review/lib/refs/index.py", "the prefix is stripped on render"
+
+    stale = _tokens(root, "It becomes `new:markdown.py`.")[0]
+    assert "already exists" in stale.problem, stale.problem
+
+    gone = _tokens(root, "It removes `old:tools/review/lib/render/linkify.py`.")[0]
+    assert gone.css == "ref-old" and not gone.problem
+
+
+def test_a_missing_path_is_a_problem(root: Path) -> None:
+    tokens = _tokens(root, "See `tools/review/lib/nope.py`.")
+    assert "not a file in this repository" in tokens[0].problem
+
+
+def test_a_line_reference_carries_its_line(root: Path) -> None:
+    token = _tokens(root, "See `markdown.py:63`.")[0]
+    assert token.line == 63 and token.href.endswith("#L63"), token
 
 
 def test_a_superseded_block_leaves_the_live_ones(root: Path) -> None:

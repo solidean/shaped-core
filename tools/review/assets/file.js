@@ -1,0 +1,48 @@
+// The page a click on a file reference opens: the whole file, highlighted, anchored at the line.
+//
+// A separate tab rather than a panel, because following a reference should not cost you the entry you were reading.
+
+async function main() {
+  const path = decodeURIComponent(location.pathname.replace(/^\/file\//, ""));
+  const line = Number((location.hash.match(/^#L(\d+)$/) || [])[1] || 0);
+
+  document.getElementById("file-path").textContent = path;
+  document.title = path.split("/").pop() + " — " + path;
+
+  // `whole=1` asks for the file rather than a peek window: this page is where you go to read around a reference.
+  const response = await fetch(`/api/file?path=${encodeURIComponent(path)}&line=0&whole=1`, {
+    headers: { Accept: "application/json" },
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    document.getElementById("file-body").textContent = body.error || "could not be read";
+    return;
+  }
+
+  document.getElementById("file-body").innerHTML = body.html;
+  document.getElementById("file-meta").textContent = `${body.lines} lines`;
+  document.getElementById("file-editor").href = `vscode://file/${body.absolute}${line ? ":" + line : ""}`;
+
+  numberLines(body.start);
+  if (line) focusLine(line);
+}
+
+// Line numbers are added here rather than server-side: the highlighter emits one blob, and a gutter is a reading
+// aid rather than part of the content.
+function numberLines(start) {
+  const code = document.getElementById("file-body");
+  const lines = code.innerHTML.split("\n");
+  code.innerHTML = lines
+    .map((text, index) => `<span class="src-line" id="L${start + index}">` +
+      `<span class="src-no">${start + index}</span>${text}</span>`)
+    .join("\n");
+}
+
+function focusLine(line) {
+  const target = document.getElementById("L" + line);
+  if (!target) return;
+  target.classList.add("src-focus");
+  target.scrollIntoView({ block: "center" });
+}
+
+main();

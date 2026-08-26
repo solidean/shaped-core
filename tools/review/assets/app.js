@@ -133,6 +133,7 @@ async function selectEntry(slug, { push = true } = {}) {
   state.staleContent = false;
   el("content").innerHTML = result.body.html;
   if (push) history.replaceState(null, "", "#" + slug);
+  annotate(el("content"), result.body.tokens);
   wireForms();
   wireComments();
   renderNav();
@@ -325,6 +326,145 @@ function wireForms() {
       opt.insertBefore(key, opt.firstChild);
     });
   }
+}
+
+// ---- annotation -------------------------------------------------------------
+//
+// One pass with a provider per kind of reference, rather than four render passes that would each grow their own
+// idea of what a code block is.
+//
+// The page decides nothing. Python found and resolved every reference over the entry source -- fences included --
+// and handed down a table of literal tokens; this walks text nodes and wraps the ones it finds. A text node is by
+// construction inside one element, so a match can never cross a boundary, which is what makes annotating inside
+// highlighted code work at all.
+
+// Which regions each provider's tokens may be decorated in. Server-side defaults, togglable here without a
+// re-render, which is what "configurable even if the option is not exposed" means.
+const ANNOTATE = { file: true, glossary: true, commit: true, symbol: true };
+
+function regionOf(node) {
+  if (node.closest("pre, code, .difflines")) return node.closest(".difflines") ? "diff" : "code";
+  return "prose";
+}
+
+function annotate(root, tokens) {
+  if (!tokens || !tokens.length) return;
+  const live = tokens.filter((t) => ANNOTATE[t.kind] !== false);
+  if (!live.length) return;
+
+  // Longest first, so `lib/render/markdown.py` wins over `markdown.py` at the same position.
+  const byLength = [...live].sort((a, b) => b.text.length - a.text.length);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.parentElement.closest("a, mark, .annot, textarea, .comment-composer")) continue;
+    targets.push(node);
+  }
+
+  for (const node of targets) {
+    const region = regionOf(node.parentElement);
+    const usable = byLength.filter((t) => t.regions.includes(region));
+    if (usable.length) wrapNode(node, usable);
+  }
+}
+
+function wrapNode(node, tokens) {
+  const text = node.nodeValue;
+  const hits = [];
+  for (const token of tokens) {
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(token.text, from);
+      if (at < 0) break;
+      // No nesting and no overlap: the first provider to claim a span owns it.
+      if (!hits.some((h) => at < h.end && at + token.text.length > h.start)) {
+        hits.push({ start: at, end: at + token.text.length, token });
+      }
+      from = at + token.text.length;
+    }
+  }
+  if (!hits.length) return;
+  hits.sort((a, b) => a.start - b.start);
+
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+  for (const hit of hits) {
+    if (hit.start > cursor) fragment.append(text.slice(cursor, hit.start));
+    fragment.append(decorate(hit.token));
+    cursor = hit.end;
+  }
+  if (cursor < text.length) fragment.append(text.slice(cursor));
+  node.parentNode.replaceChild(fragment, node);
+}
+
+function decorate(token) {
+  const el = document.createElement(token.href ? "a" : "span");
+  el.className = "annot " + (token.css || token.kind);
+  el.textContent = token.label || token.text;
+  el.dataset.kind = token.kind;
+  if (token.href) {
+    el.href = token.href;
+    el.target = "_blank";
+    el.rel = "noopener";
+  }
+  if (token.path) {
+    el.dataset.path = token.path;
+    el.dataset.line = String(token.line || 0);
+    el.addEventListener("mouseenter", () => peek(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  return el;
+}
+
+// ---- the popover ------------------------------------------------------------
+//
+// One popover shared by every provider. A second one would be a second set of positioning bugs.
+
+let popoverTimer = 0;
+
+function popover() {
+  let box = document.getElementById("popover");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "popover";
+    box.hidden = true;
+    box.addEventListener("mouseenter", () => clearTimeout(popoverTimer));
+    box.addEventListener("mouseleave", schedulePopoverClose);
+    document.body.appendChild(box);
+  }
+  return box;
+}
+
+function showPopover(anchor, html) {
+  const box = popover();
+  clearTimeout(popoverTimer);
+  box.innerHTML = html;
+  box.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  box.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - box.offsetWidth - 8)) + "px";
+  const below = rect.bottom + 6;
+  box.style.top = (below + box.offsetHeight > window.innerHeight ? rect.top - box.offsetHeight - 6 : below) + "px";
+}
+
+function schedulePopoverClose() {
+  clearTimeout(popoverTimer);
+  popoverTimer = setTimeout(() => { popover().hidden = true; }, 180);
+}
+
+const peekCache = new Map();
+
+async function peek(el) {
+  const key = el.dataset.path + "#" + el.dataset.line;
+  if (!peekCache.has(key)) {
+    const result = await getJSON(
+      `/api/file?path=${encodeURIComponent(el.dataset.path)}&line=${el.dataset.line}`);
+    if (!result.ok) return;
+    peekCache.set(key, result.body);
+  }
+  const body = peekCache.get(key);
+  showPopover(el,
+    `<div class="pop-head">${_esc(body.path)}  <span>lines ${body.start}-${body.end} of ${body.lines}</span></div>` +
+    `<pre class="pg"><code>${body.html}</code></pre>`);
 }
 
 // ---- comments ---------------------------------------------------------------

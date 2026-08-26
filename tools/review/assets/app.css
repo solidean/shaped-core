@@ -497,3 +497,80 @@ mark.new {
   padding: 0 2px;
   border-radius: 2px;
 }
+
+/* ---- annotation ---------------------------------------------------------- */
+/* Every reference the tool could resolve is underlined, so the page stops being a description of code and starts
+   being a way into it. The colour says what the reference asserts: plain, not-yet-written, or on its way out. */
+
+.annot {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.annot.ref { text-decoration-color: var(--accent); }
+.annot.ref-new { text-decoration-color: var(--good); }
+.annot.ref-old { text-decoration-color: var(--warn); font-style: italic; }
+.annot.ref-bad { text-decoration: underline wavy var(--bad); }
+
+a.annot { color: inherit; }
+a.annot:hover { color: var(--accent); }
+
+#popover {
+  position: fixed;
+  z-index: 40;
+  max-width: min(70ch, 90vw);
+  max-height: 50vh;
+  overflow: auto;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  font-size: 0.9rem;
+}
+
+#popover[hidden] { display: none; }
+#popover pre { margin: 6px 0 0; }
+
+.pop-head {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+/* ---- the file page ------------------------------------------------------- */
+
+body.file-page { margin: 0; padding: 0 0 40px; background: var(--bg); color: var(--text); }
+
+#file-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+
+#file-path { font-family: ui-monospace, monospace; }
+#file-meta { color: var(--text-dim); font-size: 0.85rem; }
+#file-editor { margin-left: auto; color: var(--accent); font-size: 0.85rem; }
+
+body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
+
+.src-line { display: block; padding-left: 8px; }
+.src-no {
+  display: inline-block;
+  width: 5ch;
+  margin-right: 12px;
+  color: var(--text-dim);
+  text-align: right;
+  user-select: none;
+}
+
+.src-focus { background: rgba(110, 168, 254, 0.12); }

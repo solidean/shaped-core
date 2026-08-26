@@ -158,6 +158,20 @@ class Context:
                     problems.append(f"{entry.slug}: {change_id} is not in the ledger")
         return problems
 
+    def reference_problems(self, paths: review.ReviewPaths, entries: list[review.Entry]) -> list[str]:
+        """Every file reference that does not hold, across the review.
+
+        Ambiguous is always the author's to fix, by writing a longer path.
+        Unresolved is one too, because the exceptions are marked rather than guessed — `new:` for a file the change
+        intends to create, `old:` for one it removes.
+        """
+        index = review.repo_index(self.repo, paths.root)
+        problems: list[str] = []
+        for entry in entries:
+            tokens = review.build_tokens(entry, index)
+            problems.extend(review.token_problems(entry, tokens))
+        return problems
+
     def unaddressed_comments(self, paths: review.ReviewPaths, entries: list[review.Entry]) -> list[tuple[str, object]]:
         """(entry slug, comment) for every sent comment no block claims to answer.
 

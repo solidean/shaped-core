@@ -35,6 +35,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if cfg.has_changeset:
         problems.extend(ctx.check_references(paths, entries))
 
+    # A file reference the tool cannot resolve renders as plain text, which is indistinguishable from one nobody
+    # meant as a reference — so the check goes looking rather than waiting to be tripped over.
+    problems.extend(ctx.reference_problems(paths, entries))
+
     for entry in entries:
         warnings.extend(review.word_warnings(entry))
         answers = ctx.answers(paths, entry)
@@ -101,5 +105,5 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if not args.quiet:
         # A design review has no ledger, so `check_references` never ran — claiming references resolve would be
         # reporting a check that did not happen.
-        checked = ", every reference resolves" if cfg.has_changeset else ""
-        print(review.console.green(f"{len(entries)} entries parse{checked}"))
+        changes = ", every change id resolves" if cfg.has_changeset else ""
+        print(review.console.green(f"{len(entries)} entries parse, every file reference resolves{changes}"))

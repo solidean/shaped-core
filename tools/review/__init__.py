@@ -43,6 +43,9 @@ from .lib.core.paths import (
     entry_slug,
     validate_name,
 )
+from .lib.annotate.index import RepoIndex
+from .lib.annotate.providers import Token
+from .lib.annotate.table import build as build_tokens, index_for as repo_index, problems as token_problems
 from .lib.entry.answers import Answer, AnswerFile, Comment
 from .lib.entry.askhash import canonical as ask_canonical
 from .lib.entry.askhash import hash_ask
@@ -93,6 +96,11 @@ __all__ = [
     "ADDED",
     "ARTIFACTS",
     "Answer",
+    "RepoIndex",
+    "Token",
+    "build_tokens",
+    "repo_index",
+    "token_problems",
     "AnswerFile",
     "Comment",
     "BLOCK_TYPES",

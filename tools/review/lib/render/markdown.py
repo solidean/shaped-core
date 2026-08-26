@@ -1,25 +1,21 @@
-"""Markdown for entry prose, plus the one thing plain markdown will not do: make a code reference clickable.
+"""Markdown for entry prose.
 
-A finding that names `libs/foo/bar.cc:63` should open that line, not make the reader search for it.
-So a backticked reference to a file that actually exists in the repo under review becomes a `vscode://` link,
-and one that does not is left as code — a dead link would be worse than plain text.
+Making a reference clickable used to live here, as a regex over the rendered HTML looking for a `<code>` span
+holding nothing but a path.
+It worked by an accident — highlighting wraps a fence's body in spans, so the regex never matched inside one —
+and that accident does not extend to a term mid-sentence, a sha, or a path inside a code comment.
+
+So it moved: `lib/annotate/` finds and resolves references over the entry source, and the page wraps them.
+What is left here is markdown, the fence rule, and the one span the block grammar adds.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from markdown_it import MarkdownIt
 
 from .highlight import highlight_code
-
-# A backticked code span holding a repo path, optionally with a line or a line range.
-_REF_RE = re.compile(
-    r"<code>([\w./+-]+\.[A-Za-z0-9]{1,6})(?::(\d+)(?:-(\d+))?)?</code>"
-)
-
-_MAX_PROBE = 4096
 
 
 def _mark_rule(state, silent: bool) -> bool:
@@ -71,30 +67,15 @@ def _fence(self, tokens, index, options, env):
 _MD.add_render_rule("fence", _fence)
 
 
-def _linkify_refs(html: str, repo: Path) -> str:
-    """Turn code spans naming a real file into editor links."""
-
-    def replace(m: re.Match) -> str:
-        rel, start, end = m.group(1), m.group(2), m.group(3)
-        target = repo / rel
-        if not target.is_file():
-            return m.group(0)
-        anchor = f"{target.as_posix()}:{start}" if start else target.as_posix()
-        shown = m.group(0)[len("<code>"):-len("</code>")]
-        title = f"open {rel}" + (f" at line {start}" + (f"-{end}" if end else "") if start else "")
-        return f'<a class="coderef" href="vscode://file/{anchor}" title="{title}"><code>{shown}</code></a>'
-
-    return _REF_RE.sub(replace, html)
-
-
 def render(text: str, *, repo: Path | None = None) -> str:
-    """Entry prose as HTML, with code references linked where the file is really there."""
+    """Entry prose as HTML.
+
+    References are decorated afterwards, by the annotation pass.
+    """
+    _ = repo
     if not text.strip():
         return ""
-    html = _MD.render(text)
-    if repo is not None and len(html) < _MAX_PROBE * 64:
-        html = _linkify_refs(html, repo)
-    return html
+    return _MD.render(text)
 
 
 def render_inline(text: str, *, repo: Path | None = None) -> str:

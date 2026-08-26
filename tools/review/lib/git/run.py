@@ -75,6 +75,16 @@ class Git:
             raise GitError(f"{rev!r} does not name a commit")
         return sha
 
+    def ls_files(self) -> list[str]:
+        """Every tracked path, as posix, which is the set an entry can meaningfully refer to.
+
+        Tracked rather than walked on purpose.
+        A checkout can hold a whole second copy of itself — `.tmp/worktrees/<name>` is where this tool puts one —
+        and a walk would report every basename in the repository as ambiguous.
+        """
+        out = self.run(["ls-files", "-z"], timeout=60, check=False)
+        return [p for p in out.split("\0") if p]
+
     def merge_base(self, a: str, b: str) -> str | None:
         out = self.run(["merge-base", a, b], timeout=30, check=False)
         return out.strip() or None
