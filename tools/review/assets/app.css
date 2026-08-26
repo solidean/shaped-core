@@ -193,6 +193,8 @@ button:hover { border-color: var(--accent); }
 .change { margin: 0.5rem 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg-sunken); }
 .change-head { display: flex; gap: 0.6rem; align-items: baseline; padding: 0.4rem 0.7rem; background: var(--bg-raised); cursor: pointer; }
 .change-sum { color: var(--text-dim); font-size: 0.82rem; }
+/* A collapsed changes block is skimmed by filename, so the filename is the part that carries weight. */
+.change-file { color: var(--accent); font-weight: 600; }
 .change-reason { padding: 0.4rem 0.7rem; color: var(--text-dim); font-size: 0.85rem; }
 .change.missing { color: var(--bad); padding: 0.4rem 0.7rem; }
 

@@ -32,15 +32,33 @@ def _esc(text: str) -> str:
     return html.escape(text, quote=True)
 
 
+def _summary_html(change) -> str:
+    """A change's one-line summary, with the filename picked out of it.
+
+    A collapsed `changes` block is skimmed by filename, and a uniformly dim line makes the one word a reader is
+    looking for weigh the same as the directory above it and the line counts after it.
+    """
+    text = change.summary or change.path
+    path = change.path
+    if not path or not text.startswith(path):
+        return f'<span class="change-sum">{_esc(text)}</span>'
+
+    directory, _, name = path.rpartition("/")
+    lead = f"{directory}/" if directory else ""
+    return (f'<span class="change-sum">{_esc(lead)}'
+            f'<span class="change-file">{_esc(name)}</span>'
+            f'{_esc(text[len(path):])}</span>')
+
+
 def _change_card(change, body: str, *, open_by_default: bool) -> str:
-    summary = _esc(change.summary or change.path)
+    summary = _summary_html(change)
     reason = f'<div class="change-reason">{_esc(change.reason)}</div>' if change.reason else ""
     if not body:
         return (f'<div class="change"><div class="change-head"><code>{_esc(change.id)}</code>'
-                f'<span class="change-sum">{summary}</span></div>{reason}</div>')
+                f'{summary}</div>{reason}</div>')
     return (
         f'<details class="change"{" open" if open_by_default else ""}><summary class="change-head"><code>{_esc(change.id)}</code>'
-        f'<span class="change-sum">{summary}</span></summary>{reason}'
+        f'{summary}</summary>{reason}'
         f'{highlight_diff(body, path=change.path)}</details>'
     )
 
