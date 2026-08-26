@@ -32,7 +32,7 @@ from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, gr
 from tools.review.lib.changeset.ledger import Change, Ledger  # noqa: E402
 from tools.review.lib.entry.answers import AnswerFile  # noqa: E402
 from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
-from tools.review.lib.entry.grammar import ReviewParseError  # noqa: E402
+from tools.review.lib.entry.grammar import ACK_NAME, ReviewParseError  # noqa: E402
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.entry.write import compose, immutability_violations, stamp_rounds  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
@@ -705,6 +705,25 @@ def test_answers_keep_a_finalized_answer_under_unchanged_wording(root: Path) -> 
         kept = answers.orphans["pick-one@r1"]
         assert kept.text == "the answer that round 1 quoted", kept.text
         assert kept.round == 1 and not kept.tentative
+
+
+def test_an_entry_with_no_ask_carries_an_acknowledgement(root: Path) -> None:
+    """Being read is progress, and an entry nobody opened must not look like one that is settled."""
+    front = "---\nid: 050\ntitle: t\ngroup: docs\nstate: open\n---\n\n"
+
+    silent = parse_text(front + "## prose\n\nNothing to decide.\n", Path("e.md"))
+    assert [b.name for b in silent.asks] == [ACK_NAME]
+    assert silent.acknowledgement is not None
+
+    reference = parse_text(front + "## auto-acknowledge\n\nA listing.\n\n## prose\n\nBody.\n", Path("e.md"))
+    assert reference.asks == [], "an opted-out entry asks nothing at all"
+    assert reference.acknowledgement is None
+
+    asking = parse_text(ENTRY, Path("e.md"))
+    assert ACK_NAME not in [b.name for b in asking.asks], "a real ask replaces the acknowledgement rather than joining it"
+
+    closed = parse_text(front.replace("state: open", "state: obsolete") + "## prose\n\nGone.\n", Path("e.md"))
+    assert closed.acknowledgement is None, "an entry that is no longer open is not waiting to be read"
 
 
 def test_answers_orphan_a_vanished_ask(root: Path) -> None:

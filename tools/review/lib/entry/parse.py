@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .grammar import (
+    ACK_NAME,
+    ACK_PROMPT,
     ASK_NAME_RE,
     ATTR_RE,
     BLOCK_TYPES,
@@ -101,8 +103,41 @@ class Entry:
         return self.front.get("severity", "")
 
     @property
+    def auto_acknowledged(self) -> bool:
+        """Whether this entry has declared that being read is not something to record.
+
+        Reference material is the case: a glossary is consulted rather than read through,
+        so asking someone to confirm they read it is a checkbox that means nothing.
+        """
+        return any(b.type == "auto-acknowledge" for b in self.blocks)
+
+    @property
+    def acknowledgement(self) -> Block | None:
+        """The synthetic ask an entry with no questions carries, so that reading it is recorded rather than assumed.
+
+        Without it an entry that asks nothing is indistinguishable from one that was answered,
+        and the progress count says the review is further along than anyone actually is.
+        It is synthetic on purpose: it never appears in the file, so no entry has to remember to write one.
+        """
+        if self.state != "open" or self.auto_acknowledged:
+            return None
+        if any(b.is_ask for b in self.blocks):
+            return None
+        return Block(type="ask", head=ACK_NAME, prose=ACK_PROMPT,
+                     options=[Option(kind="check", label="Read and acknowledged")])
+
+    @property
     def asks(self) -> list[Block]:
-        return [b for b in self.blocks if b.is_ask]
+        """Every question this entry poses, the synthetic acknowledgement included.
+
+        Downstream code counts, answers and reports asks without caring which kind it has,
+        which is the point: an acknowledgement is progress in exactly the way an answer is.
+        """
+        real = [b for b in self.blocks if b.is_ask]
+        if real:
+            return real
+        ack = self.acknowledgement
+        return [ack] if ack else []
 
     def ask(self, name: str) -> Block | None:
         return next((b for b in self.asks if b.name == name), None)

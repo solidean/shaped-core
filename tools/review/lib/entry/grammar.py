@@ -27,11 +27,18 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "changes": {"round", "generated", "show"},
     "recommendation": {"round"},
     "ask": {"round", "discharges", "follows"},
+    "auto-acknowledge": {"round"},
 }
 
 # The context tiers, in the order a reader meets them, with the word budget each is only useful under.
 CONTEXT_TIERS = ("context/cold", "context/repo", "context/delta")
 WORD_LIMITS = {"context/cold": 150, "context/repo": 120}
+
+# The answer key an acknowledgement is filed under.
+# It is not a name an entry may use for an ask of its own, since the two would then share an answer.
+ACK_NAME = "acknowledged"
+
+ACK_PROMPT = "Nothing here needs a decision. Acknowledge that you have read it."
 
 # A block carrying `generated: <key>` is the tool's to rewrite, and nothing else in an entry ever is.
 # That marker is what lets `review generate` refresh the overview without touching a sentence anyone wrote.

@@ -49,6 +49,8 @@ from .lib.entry.askhash import hash_ask
 from .lib.entry.generate import COVERAGE_SLUG, COVERAGE_TITLE, OVERVIEW_SLUG, OVERVIEW_TITLE
 from .lib.entry.generate import coverage_body, coverage_front, ensure as ensure_entry, overview_body, overview_front
 from .lib.entry.grammar import (
+    ACK_NAME,
+    ACK_PROMPT,
     BLOCK_TYPES,
     CONTEXT_TIERS,
     OPTION_KINDS,
@@ -83,6 +85,8 @@ from .lib.render.text import render_entry, render_summary
 from .lib.space.netspace import space_of
 
 __all__ = [
+    "ACK_NAME",
+    "ACK_PROMPT",
     "ADDED",
     "ARTIFACTS",
     "Answer",

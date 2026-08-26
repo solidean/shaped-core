@@ -18,12 +18,16 @@ from __future__ import annotations
 
 from ..core.config import ReviewConfig
 from ..entry.answers import AnswerFile
+from ..entry.grammar import ACK_NAME
 from ..entry.parse import Entry
 
 def _decisions(entry: Entry, answers: AnswerFile) -> list[tuple[str, list[str], str]]:
     """(ask name, chosen options, free text) for every question this entry has a real answer to."""
     out = []
     for block in entry.asks:
+        # An acknowledgement is bookkeeping between the agent and the maintainer, not a decision the author needs.
+        if block.name == ACK_NAME:
+            continue
         answer = answers.get(block.name)
         if answer is None or answer.is_empty:
             continue
@@ -114,7 +118,7 @@ def design_summary(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> 
             body = "; ".join([*chosen, *([text] if text else [])])
             settled.append(f"- {head}: {body}")
         for block in entry.asks:
-            if block.name not in answered_names:
+            if block.name != ACK_NAME and block.name not in answered_names:
                 open_points.append(f"- **{entry.title} / {block.name}** — not decided")
 
     lines += ["## Settled", ""] + (settled or ["_nothing yet_"])

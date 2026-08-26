@@ -151,6 +151,10 @@ An `ask` with well-chosen options is answered in a click; an `ask` with only a t
 Offer the two or three directions the maintainer would actually pick between, mark one `(recommended)`, and add a `check:` for the follow-ups worth doing either way.
 The freeform box is always there anyway, so options cost nothing when they are wrong.
 
+**An entry with no `ask` gets an acknowledge checkbox, automatically.**
+You do not write it, and you should not add a hollow ask to get one.
+If the entry is reference material — a glossary, a generated listing — declare `## auto-acknowledge` and it is left alone.
+
 **Discharge deliberately.**
 `discharges:` on an ask is what says "this question accounts for those hunks".
 An LGTM entry with one ask discharging forty changes is correct and good; forty entries would not be.

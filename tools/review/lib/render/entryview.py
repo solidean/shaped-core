@@ -115,6 +115,10 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
     if block.type == "code":
         return render_markdown(block.prose, repo=repo)
 
+    if block.type == "auto-acknowledge":
+        note = render_markdown(block.prose, repo=repo) if block.prose.strip() else ""
+        return f'<div class="auto-ack">Reference — nothing to acknowledge{note}</div>'
+
     if block.type == "recommendation":
         return (f'<aside class="recommendation"><div class="rec-label">Recommendation</div>'
                 f'{render_markdown(block.prose, repo=repo)}</aside>')
@@ -162,6 +166,10 @@ def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: Review
                 parts.append(f'<div class="round-divider"><span>round {block.round}</span></div>')
             last_round = block.round
         parts.append(_block_html(entry, block, ctx))
+
+    ack = entry.acknowledgement
+    if ack is not None:
+        parts.append(_block_html(entry, ack, ctx))
 
     if answers.orphans:
         rows = "".join(
