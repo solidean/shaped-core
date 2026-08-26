@@ -59,6 +59,13 @@ struct sv::generated_material_shader
     /// The generated text names a register, never a state, so nothing else can recover which state belongs to which register.
     cc::vector<sg::sampler> samplers;
 
+    /// Whether this permutation's fragment ever writes `geometry_opacity`, and so whether a cutout is possible at all.
+    ///
+    /// A fragment that never touches it leaves the default 1, which no any-hit could ever reject — so attaching one would
+    /// cost every intersection a shader invocation and the hardware its opaque fast path, to decide nothing.
+    /// Conservative in the harmless direction: a fragment that writes a constant 1 still counts as able to cut out.
+    bool can_cut_out = false;
+
     /// What the compile is cached on: the resolution's shape and how these options spell it (see `material_shader_key`).
     cc::hash128 key;
 };

@@ -134,6 +134,37 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
     return background_radiance(wi) * f * (wi_local.z / PT_ENV_PDF) * w;
 }
 
+/// The cutout test, run at every intersection a non-opaque instance reports.
+///
+/// STOCHASTIC rather than a fixed threshold: `geometry_opacity` is a coverage fraction, so accepting the hit that fraction of
+/// the time is what makes the estimate converge to a partly-covered surface instead of snapping to a binary mask.
+/// The accumulator does the averaging, which is why this costs no blending and no sorting.
+///
+/// The draw comes from the pixel, the frame's seed and the primitive rather than from the payload: an any-hit that wrote the
+/// path's random state would have to be granted access to it, and every ray would then carry a stream whose length depends on
+/// how many alpha-tested triangles it happened to graze.
+/// Varying with `rng_seed` is what keeps a static view refining rather than settling on one dither pattern.
+///
+/// Only permutations whose material can actually cut out get one of these attached — see `material_permutation::can_cut_out`.
+[shader("anyhit")]
+void PtAnyHit(inout PtPayload payload, in PtAttributes attribs)
+{
+    sv::instance inst = Instances[InstanceID()];
+    ByteAddressBuffer index_buffer = gBindlessBuffers[NonUniformResourceIndex(inst.indices)];
+    sv::shading_context ctx = sv::make_context(inst, index_buffer, PrimitiveIndex(), attribs.bary);
+
+    sv::surface surface = sv_evaluate_material(ctx);
+    if (surface.geometry_opacity >= 1.0)
+        return; // fully covered: the common case, and it accepts without drawing anything
+
+    uint2 px = DispatchRaysIndex().xy;
+    uint h = pt_hash(px.x + px.y * 65536u + rng_seed * 9781u + PrimitiveIndex() * 2654435761u);
+    float u = float(h) * (1.0 / 4294967296.0);
+
+    if (surface.geometry_opacity < u)
+        IgnoreHit();
+}
+
 [shader("closesthit")]
 void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
 {
@@ -188,10 +219,28 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
     }
 #endif
 
+    // The frame as authored, kept because the coat's normal is written in the same tangent space the base's is — so it has
+    // to be carried through THIS frame rather than through the one the base's own normal map produced.
+    sv::frame const authored = frame;
+
     // A normal map is a rotation of the frame, not a replacement for it: the tangent is carried across so the frame keeps
     // following the uv layout.
     if (any(surface.geometry_normal != float3(0, 0, 1)))
         frame = sv::perturb_frame(frame, surface.geometry_normal);
+
+    // The anisotropy direction, applied AFTER the normal map, because it is a rotation about the shading normal and the
+    // normal map is what decides which normal that is.
+    if (any(surface.geometry_tangent != float3(1, 0, 0)))
+        frame = sv::rotate_frame_to_tangent(frame, surface.geometry_tangent);
+
+    // The coat's normal, re-expressed in the frame the closure works in.
+    // An unbound one is the base's own normal, which is (0, 0, 1) there whatever the base's normal map did — so the guard
+    // is what keeps "the coat shares the base's normal" exact rather than nearly so.
+    if (any(surface.geometry_coat_normal != float3(0, 0, 1)))
+    {
+        float3 const coat_world = normalize(sv::to_world(authored, normalize(surface.geometry_coat_normal)));
+        surface.geometry_coat_normal = normalize(sv::to_local(frame, coat_world));
+    }
 
     float3 wo_local = sv::to_local(frame, V);
     float3 p = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();

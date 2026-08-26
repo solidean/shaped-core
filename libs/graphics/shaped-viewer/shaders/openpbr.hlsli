@@ -14,7 +14,7 @@
 // The fuzz is a Conty-Estevez sheen rather than the specified Zeltner microflake, the coat tints what passes through it once
 // rather than absorbing along the true refracted path length, and GGX energy compensation uses an analytic fit rather than a
 // tabulated directional albedo.
-// Transmission, subsurface, thin-film, dispersion and anisotropy are not modelled at all, and `sv::surface` does not carry them.
+// Transmission, subsurface and dispersion are not modelled at all, and `sv::surface` does not carry them.
 
 namespace sv
 {
@@ -24,43 +24,47 @@ static const float pi = 3.14159265358979323846;
 static const float min_alpha = 1e-3;
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// Microfacet primitives (GGX / Trowbridge-Reitz, isotropic)
+// Microfacet primitives (GGX / Trowbridge-Reitz, anisotropic)
+//
+// Every one of these takes `alpha` as a float2: the roughness along the frame's tangent and along its bitangent.
+// An isotropic lobe is the special case where the two are equal, so nothing needs a second code path — and the local frame's
+// tangent is what the two axes are measured against, which is why an anisotropic surface needs a frame that follows its uv
+// layout rather than the arbitrary one `make_frame` invents.
 
 /// The normal distribution at half-vector `h`, which must lie in the upper hemisphere of the local frame.
-float ggx_d(float3 h, float alpha)
+float ggx_d(float3 h, float2 alpha)
 {
-    float a2 = alpha * alpha;
-    float t = h.z * h.z * (a2 - 1.0) + 1.0;
-    return a2 / max(pi * t * t, 1e-9);
+    float3 v = float3(h.x / alpha.x, h.y / alpha.y, h.z);
+    float t = dot(v, v);
+    return 1.0 / max(pi * alpha.x * alpha.y * t * t, 1e-9);
 }
 
 /// Smith's lambda for GGX: the ratio of masked to visible area for a direction.
-float ggx_lambda(float3 w, float alpha)
+float ggx_lambda(float3 w, float2 alpha)
 {
     float c2 = w.z * w.z;
-    float s2 = max(0.0, 1.0 - c2);
-    float t2 = s2 / max(c2, 1e-9);
-    return 0.5 * (sqrt(1.0 + alpha * alpha * t2) - 1.0);
+    float t2 = (alpha.x * alpha.x * w.x * w.x + alpha.y * alpha.y * w.y * w.y) / max(c2, 1e-9);
+    return 0.5 * (sqrt(1.0 + t2) - 1.0);
 }
 
 /// Height-correlated Smith masking-shadowing for the pair, which is the term `ggx_d` is meant to be paired with.
-float ggx_g2(float3 wo, float3 wi, float alpha)
+float ggx_g2(float3 wo, float3 wi, float2 alpha)
 {
     return 1.0 / (1.0 + ggx_lambda(wo, alpha) + ggx_lambda(wi, alpha));
 }
 
 /// Masking for one direction alone, which is what the visible-normal pdf is normalized by.
-float ggx_g1(float3 w, float alpha)
+float ggx_g1(float3 w, float2 alpha)
 {
     return 1.0 / (1.0 + ggx_lambda(w, alpha));
 }
 
 /// A half-vector drawn from the distribution of VISIBLE normals (Heitz 2018), which is what keeps a sampled weight bounded.
 /// `wo` must lie in the upper hemisphere.
-float3 ggx_sample_vndf(float3 wo, float alpha, float2 u)
+float3 ggx_sample_vndf(float3 wo, float2 alpha, float2 u)
 {
     // Stretch the view direction into the configuration the routine is derived in.
-    float3 vh = normalize(float3(alpha * wo.x, alpha * wo.y, wo.z));
+    float3 vh = normalize(float3(alpha.x * wo.x, alpha.y * wo.y, wo.z));
 
     // An orthonormal basis around vh, staying finite when vh is near +z.
     float len2 = vh.x * vh.x + vh.y * vh.y;
@@ -76,11 +80,11 @@ float3 ggx_sample_vndf(float3 wo, float alpha, float2 u)
     p2 = (1.0 - s) * sqrt(max(0.0, 1.0 - p1 * p1)) + s * p2;
 
     float3 nh = p1 * t1 + p2 * t2 + sqrt(max(0.0, 1.0 - p1 * p1 - p2 * p2)) * vh;
-    return normalize(float3(alpha * nh.x, alpha * nh.y, max(1e-6, nh.z)));
+    return normalize(float3(alpha.x * nh.x, alpha.y * nh.y, max(1e-6, nh.z)));
 }
 
 /// The solid-angle pdf of a direction produced by reflecting about a `ggx_sample_vndf` half-vector.
-float ggx_pdf(float3 wo, float3 wi, float alpha)
+float ggx_pdf(float3 wo, float3 wi, float2 alpha)
 {
     if (wo.z <= 0.0 || wi.z <= 0.0)
         return 0.0;
@@ -88,6 +92,17 @@ float ggx_pdf(float3 wo, float3 wi, float alpha)
     float3 h = normalize(wo + wi);
     float d_vis = ggx_g1(wo, alpha) * ggx_d(h, alpha) * max(0.0, dot(wo, h)) / max(wo.z, 1e-9);
     return d_vis / (4.0 * max(dot(wo, h), 1e-9));
+}
+
+/// The isotropic roughness an anisotropic lobe reflects about as much as, for the fits that have no anisotropic form.
+///
+/// The directional-albedo fit below is isotropic and there is no anisotropic version of it, so the layer coupling and the
+/// energy compensation both reduce through here.
+/// The geometric mean is the reduction that keeps `alpha.x * alpha.y` — the lobe's solid angle — rather than its width along
+/// either axis, so a stretched highlight couples like the round one covering the same area.
+float alpha_iso(float2 alpha)
+{
+    return sqrt(max(alpha.x * alpha.y, 1e-12));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -141,19 +156,97 @@ float2 ggx_albedo_split(float mu, float alpha)
 }
 
 /// What a GGX lobe with normal-incidence reflectance `f0` reflects in total from direction `mu`.
-float3 ggx_albedo(float mu, float alpha, float3 f0)
+float3 ggx_albedo(float mu, float2 alpha, float3 f0)
 {
-    float2 ab = ggx_albedo_split(mu, alpha);
+    float2 ab = ggx_albedo_split(mu, alpha_iso(alpha));
     return f0 * ab.x + ab.y;
 }
 
 /// The multiple-scattering energy a single-scattering GGX lobe is missing, as a factor to multiply it by (Turquin 2019).
 /// It is 1 for a smooth surface and grows with roughness, which is the loss it exists to put back.
-float3 ggx_energy_compensation(float mu, float alpha, float3 f0)
+float3 ggx_energy_compensation(float mu, float2 alpha, float3 f0)
 {
-    float2 ab = ggx_albedo_split(mu, alpha);
+    float2 ab = ggx_albedo_split(mu, alpha_iso(alpha));
     float e_ss = ab.x + ab.y; // the white-furnace albedo of the lobe, which is what the loss is measured against
     return float3(1, 1, 1) + f0 * (1.0 / max(e_ss, 1e-3) - 1.0);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Thin film
+//
+// A film thin enough that the light reflected off its top and off its bottom still interfere, which is what makes a soap
+// bubble or an oxide layer colored: the two paths differ by an optical distance, so each wavelength is reinforced or
+// cancelled by a different amount.
+//
+// This evaluates that interference at THREE wavelengths, one per output channel, rather than integrating it over the
+// spectrum.
+// Belcour and Barla's spectral formulation is the full answer and the deviation here: with three samples a thin film shows
+// its first interference order faithfully and its higher orders alias into colors the spectrum would have averaged away, so
+// a film past roughly a micron drifts from what it should be.
+
+/// The wavelengths in nanometres the film is evaluated at, one per channel.
+static const float3 thin_film_wavelengths = float3(620.0, 550.0, 450.0);
+
+/// The SIGNED amplitude reflectances at one interface, s and p polarization, for a real relative index `eta`.
+///
+/// The sign is what carries the half-wave phase shift, and the sign is the whole effect: it decides whether the two paths add
+/// or cancel at a given thickness, which is where the color comes from.
+/// A magnitude-only Fresnel would produce a film that brightens and dims without ever changing hue.
+void fresnel_amplitude(float cos_i, float3 eta, out float3 r_s, out float3 r_p)
+{
+    float3 s2 = (1.0 - cos_i * cos_i) / max(eta * eta, float3(1e-6, 1e-6, 1e-6));
+    float3 cos_t = sqrt(max(float3(0, 0, 0), 1.0 - s2));
+
+    r_s = (cos_i - eta * cos_t) / max(abs(cos_i + eta * cos_t), float3(1e-6, 1e-6, 1e-6));
+    r_p = (eta * cos_i - cos_t) / max(abs(eta * cos_i + cos_t), float3(1e-6, 1e-6, 1e-6));
+
+    // Past the critical angle everything is reflected, and the phase this drops is what the three-wavelength sampling
+    // cannot represent anyway.
+    r_s = select(s2 >= 1.0, float3(1, 1, 1), r_s);
+    r_p = select(s2 >= 1.0, float3(1, 1, 1), r_p);
+}
+
+/// The Airy summation over the film's internal reflections, for one polarization.
+float3 airy_reflectance(float3 r1, float3 r2, float3 phase)
+{
+    float3 c = cos(phase);
+    float3 num = r1 * r1 + r2 * r2 + 2.0 * r1 * r2 * c;
+    float3 den = 1.0 + r1 * r1 * r2 * r2 + 2.0 * r1 * r2 * c;
+    return saturate(num / max(den, float3(1e-6, 1e-6, 1e-6)));
+}
+
+/// What a film of `thickness` nanometres and index `film_ior` reflects, sitting on a base whose own reflectance is `f0`.
+///
+/// The base enters as an equivalent REAL index rather than a complex one, so a metal's absorption does not shift the phase it
+/// reflects with.
+/// That costs the slight hue rotation a real conductor's substrate adds and keeps the model to one closed form for metal and
+/// dielectric alike.
+float3 thin_film_reflectance(float mu, float3 f0, float film_ior, float thickness)
+{
+    float eta_film = max(1.0 + 1e-3, film_ior);
+
+    // The angle inside the film, which sets both the second interface's incidence and the optical path length.
+    float s2 = (1.0 - mu * mu) / (eta_film * eta_film);
+    if (s2 >= 1.0)
+        return float3(1, 1, 1);
+    float cos_film = sqrt(1.0 - s2);
+
+    float3 r01_s = float3(0, 0, 0);
+    float3 r01_p = float3(0, 0, 0);
+    fresnel_amplitude(mu, float3(eta_film, eta_film, eta_film), r01_s, r01_p);
+
+    // The base as the index that would reflect `f0` at normal incidence, relative to the film it sits under.
+    float3 root = clamp(sqrt(saturate(f0)), 0.0, 0.99);
+    float3 eta_base = ((1.0 + root) / (1.0 - root)) / eta_film;
+
+    float3 r12_s = float3(0, 0, 0);
+    float3 r12_p = float3(0, 0, 0);
+    fresnel_amplitude(cos_film, eta_base, r12_s, r12_p);
+
+    // Twice the film's optical thickness along the refracted path, in radians per wavelength.
+    float3 phase = (4.0 * pi * eta_film * max(0.0, thickness) * cos_film) / thin_film_wavelengths;
+
+    return 0.5 * (airy_reflectance(r01_s, r12_s, phase) + airy_reflectance(r01_p, r12_p, phase));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -234,14 +327,22 @@ struct bsdf
 
     float3 metal_f0;
     float3 metal_tint;
-    float metal_alpha;
+    float2 metal_alpha;
 
     float3 spec_f0;
-    float spec_alpha;
+    float2 spec_alpha;
     float spec_weight;
 
     float coat_f0;
-    float coat_alpha;
+    float2 coat_alpha;
+
+    /// The coat's own frame, in the closure's local coordinates — its normal plus a tangent carried over from the base's.
+    ///
+    /// Identity when the coat shares the base's normal, which is the overwhelmingly common case and the one every cosine
+    /// below is written for.
+    float3 coat_n;
+    float3 coat_t;
+    float3 coat_b;
     float3 coat_tint;
     float coat_weight;
     float coat_darkening;
@@ -251,6 +352,10 @@ struct bsdf
     float fuzz_weight;
 
     float metalness;
+
+    float thin_film_weight;
+    float thin_film_thickness;
+    float thin_film_ior;
 
     float3 emission;
 };
@@ -277,10 +382,19 @@ struct bsdf_sample
 };
 
 /// The perceptual-to-microfacet roughness mapping OpenPBR specifies, floored so no lobe becomes a delta.
-float alpha_of(float roughness)
+///
+/// `anisotropy` stretches the lobe along the frame's tangent and squeezes it along the bitangent, and the pair is scaled so
+/// the two together cover about the solid angle the isotropic lobe did — which is what keeps turning anisotropy up from also
+/// making the surface look rougher.
+/// 0 is isotropic and 1 is as stretched as the model goes.
+float2 alpha_of(float roughness, float anisotropy)
 {
     float r = saturate(roughness);
-    return max(min_alpha, r * r);
+    float a = max(min_alpha, r * r);
+
+    float t = 1.0 - saturate(anisotropy);
+    float ax = a * sqrt(2.0 / (1.0 + t * t));
+    return float2(max(min_alpha, ax), max(min_alpha, t * ax));
 }
 
 /// The scalar a lobe's selection probability is ranked by; the closure only needs relative magnitudes, never a color.
@@ -298,8 +412,8 @@ float fresnel_average(float f0)
 /// One surface point in OpenPBR's parameter vocabulary, prepared into lobes by `bsdf_prepare`.
 ///
 /// This is the subset the viewer models, and the names are the specification's.
-/// Transmission, subsurface, thin-film and anisotropy are absent rather than defaulted, so a material cannot ask for one and
-/// silently get something else.
+/// Transmission and subsurface are absent rather than defaulted, so a material cannot ask for one and silently get something
+/// else.
 ///
 /// `geometry_normal` is TANGENT space, so (0, 0, 1) is the shading normal the hit already has.
 struct surface
@@ -314,12 +428,14 @@ struct surface
     float specular_weight;
     float3 specular_color;
     float specular_roughness;
+    float specular_roughness_anisotropy;
     float specular_ior;
 
     // coat
     float coat_weight;
     float3 coat_color;
     float coat_roughness;
+    float coat_roughness_anisotropy;
     float coat_ior;
     float coat_darkening;
 
@@ -328,12 +444,25 @@ struct surface
     float3 fuzz_color;
     float fuzz_roughness;
 
+    // thin film
+    float thin_film_weight;
+    float thin_film_thickness; ///< nanometres
+    float thin_film_ior;
+
     // emission
     float emission_luminance;
     float3 emission_color;
 
     // geometry
     float3 geometry_normal;
+
+    /// the coat's own shading normal, expressed in the frame the closure works in
+    ///
+    /// (0, 0, 1) means the coat shares the base's normal, which is what an unbound coat normal must come out as — so the hit
+    /// carries an authored one through the base's normal map first, rather than handing it over in the authored tangent
+    /// space the base's `geometry_normal` is written in.
+    /// A coat with its own bumps over a smooth base is the case this exists for.
+    float3 geometry_coat_normal;
     float geometry_opacity;
 
     /// the surface's tangent frame as a unit quaternion, taking tangent space to OBJECT space
@@ -343,6 +472,14 @@ struct surface
     /// That is why the hit consults `SV_ATTR_SUPPLIED_tangent_frame` rather than comparing against the identity: an
     /// unsupplied frame must fall back to the geometric one, and an authored identity is a legitimate value.
     float4 geometry_tangent_frame;
+
+    /// the direction the anisotropic lobes are stretched along, in TANGENT space
+    ///
+    /// (1, 0, 0) is the frame's own tangent, which is what an unrotated anisotropic highlight follows.
+    /// Only the component in the tangent plane is used, so a caller may hand over an object-space direction transformed into
+    /// the frame without projecting it first — and a vector that lands on the normal leaves the frame alone rather than
+    /// producing an arbitrary one.
+    float3 geometry_tangent;
 
     /// +1 for a right-handed frame, -1 where the uv parameterization is mirrored
     ///
@@ -365,11 +502,13 @@ surface default_surface()
     s.specular_weight = 1.0;
     s.specular_color = float3(1, 1, 1);
     s.specular_roughness = 0.3;
+    s.specular_roughness_anisotropy = 0.0;
     s.specular_ior = 1.5;
 
     s.coat_weight = 0.0;
     s.coat_color = float3(1, 1, 1);
     s.coat_roughness = 0.0;
+    s.coat_roughness_anisotropy = 0.0;
     s.coat_ior = 1.6;
     s.coat_darkening = 1.0;
 
@@ -377,12 +516,18 @@ surface default_surface()
     s.fuzz_color = float3(1, 1, 1);
     s.fuzz_roughness = 0.5;
 
+    s.thin_film_weight = 0.0;
+    s.thin_film_thickness = 500.0;
+    s.thin_film_ior = 1.4;
+
     s.emission_luminance = 0.0;
     s.emission_color = float3(1, 1, 1);
 
     s.geometry_normal = float3(0, 0, 1);
+    s.geometry_coat_normal = float3(0, 0, 1);
     s.geometry_opacity = 1.0;
     s.geometry_tangent_frame = float4(0, 0, 0, 1);
+    s.geometry_tangent = float3(1, 0, 0);
     s.geometry_handedness = 1.0;
 
     return s;
@@ -401,7 +546,7 @@ bsdf bsdf_prepare(surface s)
     // The metal's normal-incidence reflectance is the base color itself, and the specular color is its tint at 82 degrees.
     b.metal_f0 = saturate(s.base_weight * s.base_color);
     b.metal_tint = saturate(s.specular_weight * s.specular_color);
-    b.metal_alpha = alpha_of(s.specular_roughness);
+    b.metal_alpha = alpha_of(s.specular_roughness, s.specular_roughness_anisotropy);
 
     // The dielectric's reflectance comes from its IOR and `specular_color` tints it, while grazing incidence still goes to
     // white — which is what makes a tinted dielectric read as coated rather than metallic.
@@ -413,12 +558,22 @@ bsdf bsdf_prepare(surface s)
     float r0 = (ior - 1.0) / (ior + 1.0);
     b.spec_f0 = saturate(saturate(s.specular_color) * (r0 * r0));
     b.spec_weight = saturate(s.specular_weight);
-    b.spec_alpha = alpha_of(s.specular_roughness);
+    b.spec_alpha = alpha_of(s.specular_roughness, s.specular_roughness_anisotropy);
+
+    // The coat's frame: its normal, with the base's tangent spun onto it so an anisotropic coat still follows the uv layout.
+    // `geometry_coat_tangent` would let the coat point its own way; nothing needs that yet.
+    b.coat_n = normalize(s.geometry_coat_normal);
+    {
+        float3 t = float3(1, 0, 0) - b.coat_n * b.coat_n.x;
+        float len = length(t);
+        b.coat_t = len > 1e-6 ? t / len : float3(0, 1, 0);
+        b.coat_b = cross(b.coat_n, b.coat_t);
+    }
 
     float cior = max(1.0 + 1e-3, s.coat_ior);
     float cr0 = (cior - 1.0) / (cior + 1.0);
     b.coat_f0 = cr0 * cr0;
-    b.coat_alpha = alpha_of(s.coat_roughness);
+    b.coat_alpha = alpha_of(s.coat_roughness, s.coat_roughness_anisotropy);
     b.coat_tint = saturate(s.coat_color);
     b.coat_weight = saturate(s.coat_weight);
     b.coat_darkening = saturate(s.coat_darkening);
@@ -426,6 +581,10 @@ bsdf bsdf_prepare(surface s)
     b.fuzz_weight = saturate(s.fuzz_weight);
     b.fuzz_color = saturate(s.fuzz_color);
     b.fuzz_alpha = clamp(s.fuzz_roughness, min_alpha, 1.0);
+
+    b.thin_film_weight = saturate(s.thin_film_weight);
+    b.thin_film_thickness = max(0.0, s.thin_film_thickness);
+    b.thin_film_ior = max(1.0 + 1e-3, s.thin_film_ior);
 
     b.emission = max(float3(0, 0, 0), s.emission_luminance * s.emission_color);
 
@@ -438,10 +597,22 @@ float fuzz_transmission(bsdf b, float mu)
     return 1.0 - b.fuzz_weight * sheen_albedo(mu, b.fuzz_alpha);
 }
 
+/// `w` expressed in the coat's own frame, which is where its lobe is evaluated and sampled.
+float3 to_coat(bsdf b, float3 w)
+{
+    return float3(dot(w, b.coat_t), dot(w, b.coat_b), dot(w, b.coat_n));
+}
+
+/// A direction in the coat's frame, back in the closure's own.
+float3 from_coat(bsdf b, float3 w)
+{
+    return w.x * b.coat_t + w.y * b.coat_b + w.z * b.coat_n;
+}
+
 /// What the coat transmits to the base, in one direction.
 float coat_transmission(bsdf b, float mu)
 {
-    float2 ab = ggx_albedo_split(mu, b.coat_alpha);
+    float2 ab = ggx_albedo_split(mu, alpha_iso(b.coat_alpha));
     return 1.0 - b.coat_weight * (b.coat_f0 * ab.x + ab.y);
 }
 
@@ -501,10 +672,28 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
     float d_spec = ggx_d(h, b.spec_alpha);
     float g_spec = ggx_g2(wo, wi, b.spec_alpha);
 
-    float3 f_metal = fresnel_f82(mu_h, b.metal_f0, b.metal_tint) * (d_spec * g_spec / denom)
+    // The film replaces the interface's Fresnel rather than tinting what it returned, because the interference is what the
+    // reflectance IS at that thickness — a multiply could only darken where the film should be shifting hue.
+    //
+    // The layer coupling below still reads the film-free `spec_f0`. Averaged over the spectrum a film redistributes
+    // reflectance rather than adding it, so what reaches the diffuse substrate is close; a film-aware transmission would
+    // need the same albedo table the energy compensation is waiting on.
+    float3 f_metal_fresnel = fresnel_f82(mu_h, b.metal_f0, b.metal_tint);
+    float3 f_spec_fresnel = fresnel_schlick(mu_h, b.spec_f0);
+    if (b.thin_film_weight > 0.0)
+    {
+        f_metal_fresnel = lerp(f_metal_fresnel,
+                               thin_film_reflectance(mu_h, b.metal_f0, b.thin_film_ior, b.thin_film_thickness),
+                               b.thin_film_weight);
+        f_spec_fresnel = lerp(f_spec_fresnel,
+                              thin_film_reflectance(mu_h, b.spec_f0, b.thin_film_ior, b.thin_film_thickness),
+                              b.thin_film_weight);
+    }
+
+    float3 f_metal = f_metal_fresnel * (d_spec * g_spec / denom)
                    * ggx_energy_compensation(mu_o, b.metal_alpha, b.metal_f0);
 
-    float3 f_spec = b.spec_weight * fresnel_schlick(mu_h, b.spec_f0) * (d_spec * g_spec / denom)
+    float3 f_spec = b.spec_weight * f_spec_fresnel * (d_spec * g_spec / denom)
                   * ggx_energy_compensation(mu_o, b.spec_alpha, b.spec_f0);
 
     // The diffuse substrate takes what the specular layer let through, both on the way in and on the way out.
@@ -513,13 +702,30 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
 
     float3 f_base = lerp(f_spec + f_diffuse, f_metal, b.metalness);
 
-    // The coat: its own reflection, and what it passes down to the base.
-    float d_coat = ggx_d(h, b.coat_alpha);
-    float g_coat = ggx_g2(wo, wi, b.coat_alpha);
-    float3 f_coat = b.coat_weight * fresnel_dielectric(mu_h, (1.0 + sqrt(b.coat_f0)) / max(1e-3, 1.0 - sqrt(b.coat_f0)))
-                  * (d_coat * g_coat / denom);
+    // The coat, in its OWN frame: it may carry a normal the base does not, and every cosine its lobe needs is measured
+    // against that normal rather than the base's.
+    //
+    // What comes back is still added as a BSDF about the BASE normal, which is the standard simplification — the two frames
+    // disagree by a cosine ratio that no closed form absorbs, and the alternative is a second integrator.
+    // A direction below the coat's horizon sees no coat at all: it neither reflects nor blocks, so the base is charged
+    // nothing for a crossing that did not happen.
+    float3 wo_c = to_coat(b, wo);
+    float3 wi_c = to_coat(b, wi);
 
-    float t_coat = coat_transmission(b, mu_o) * coat_transmission(b, mu_i);
+    float3 f_coat = float3(0, 0, 0);
+    float t_coat = 1.0;
+    if (wo_c.z > 0.0 && wi_c.z > 0.0)
+    {
+        float3 h_c = normalize(wo_c + wi_c);
+        float mu_hc = max(dot(wo_c, h_c), 1e-6);
+        float d_coat = ggx_d(h_c, b.coat_alpha);
+        float g_coat = ggx_g2(wo_c, wi_c, b.coat_alpha);
+
+        f_coat = b.coat_weight * fresnel_dielectric(mu_hc, (1.0 + sqrt(b.coat_f0)) / max(1e-3, 1.0 - sqrt(b.coat_f0)))
+               * (d_coat * g_coat / (4.0 * wo_c.z * wi_c.z));
+
+        t_coat = coat_transmission(b, wo_c.z) * coat_transmission(b, wi_c.z);
+    }
     float3 coat_absorption = lerp(float3(1, 1, 1), b.coat_tint, b.coat_weight);
     float3 below_coat = f_base * t_coat * coat_absorption * coat_darkening_factor(b);
 
@@ -540,10 +746,14 @@ lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
     p.fuzz = b.fuzz_weight * luminance(b.fuzz_color) * sheen_albedo(mu, b.fuzz_alpha);
 
     float t_fuzz = fuzz_transmission(b, mu);
-    float2 coat_ab = ggx_albedo_split(mu, b.coat_alpha);
-    p.coat = t_fuzz * b.coat_weight * (b.coat_f0 * coat_ab.x + coat_ab.y);
 
-    float below = t_fuzz * coat_transmission(b, mu);
+    // The coat is ranked by what it reflects at ITS cosine, so a coat tilted away from the view is picked less often — and
+    // a coat turned past the horizon is not picked at all, which is the same case `bsdf_eval` charges nothing for.
+    float mu_coat = to_coat(b, wo).z;
+    float2 coat_ab = ggx_albedo_split(max(mu_coat, 1e-4), alpha_iso(b.coat_alpha));
+    p.coat = mu_coat > 0.0 ? t_fuzz * b.coat_weight * (b.coat_f0 * coat_ab.x + coat_ab.y) : 0.0;
+
+    float below = t_fuzz * (mu_coat > 0.0 ? coat_transmission(b, mu_coat) : 1.0);
     p.metal = below * b.metalness * luminance(ggx_albedo(mu, b.metal_alpha, b.metal_f0));
     p.spec = below * (1.0 - b.metalness) * b.spec_weight * luminance(ggx_albedo(mu, b.spec_alpha, b.spec_f0));
     p.diffuse = below * (1.0 - b.metalness) * luminance(b.diffuse_albedo * spec_transmission(b, mu));
@@ -580,7 +790,7 @@ float bsdf_pdf(bsdf b, float3 wo, float3 wi)
     float cosine = wi.z / pi;
 
     return p.fuzz * cosine                                //
-         + p.coat * ggx_pdf(wo, wi, b.coat_alpha)      //
+         + p.coat * ggx_pdf(to_coat(b, wo), to_coat(b, wi), b.coat_alpha) //
          + p.metal * ggx_pdf(wo, wi, b.metal_alpha)    //
          + p.spec * ggx_pdf(wo, wi, b.spec_alpha)      //
          + p.diffuse * cosine;
@@ -614,8 +824,14 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else if (pick < p.fuzz + p.coat)
     {
-        float3 h = ggx_sample_vndf(wo, b.coat_alpha, u.yz);
-        wi = reflect(-wo, h);
+        // Drawn in the coat's frame and brought back, so a tilted coat reflects where its own normal says rather than
+        // where the base's does.
+        float3 wo_c = to_coat(b, wo);
+        if (wo_c.z <= 0.0)
+            return r;
+
+        float3 h_c = ggx_sample_vndf(wo_c, b.coat_alpha, u.yz);
+        wi = from_coat(b, reflect(-wo_c, h_c));
     }
     else if (pick < p.fuzz + p.coat + p.metal)
     {
@@ -655,9 +871,9 @@ struct frame
 
 /// An orthonormal frame around `n`, with an arbitrary but stable tangent.
 ///
-/// The tangent is arbitrary because nothing here is anisotropic and no mesh carries tangents yet.
-/// A normal map is therefore applied in a frame that does not follow the uv layout, which is why `geometry_normal` is left at
-/// its default until tangents exist — see the viewer TODO.
+/// The fallback for a surface that supplies no tangent frame, and the tangent it invents follows nothing.
+/// So an anisotropic highlight on such a surface points somewhere arbitrary but consistent, and a normal map applied through
+/// it does not follow the uv layout — both want `frame_from_quaternion` and a mesh that carries the frame.
 frame make_frame(float3 n)
 {
     frame f;
@@ -710,6 +926,26 @@ frame flip_frame(frame f)
     r.t = f.t;
     r.b = -f.b;
     r.n = -f.n;
+    return r;
+}
+
+/// `f` spun about its own normal so its tangent points along the tangent-space direction `t_tangent`.
+///
+/// This is what `geometry_tangent` asks for, and it is the only thing that gives an anisotropic highlight a direction: the
+/// two roughness axes are measured against the frame's tangent, so rotating the frame rotates the highlight.
+/// A direction with nothing left in the tangent plane — one that came out parallel to the normal — leaves the frame alone
+/// rather than picking an arbitrary replacement.
+frame rotate_frame_to_tangent(frame f, float3 t_tangent)
+{
+    float3 t = t_tangent.x * f.t + t_tangent.y * f.b;
+    float len = length(t);
+    if (len < 1e-6)
+        return f;
+
+    frame r;
+    r.n = f.n;
+    r.t = t / len;
+    r.b = cross(f.n, r.t) * (dot(cross(f.n, r.t), f.b) < 0.0 ? -1.0 : 1.0);
     return r;
 }
 

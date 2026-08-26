@@ -33,11 +33,13 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.specular_weight = max(0.0, specular_weight);
     surface.specular_color = saturate(specular_color);
     surface.specular_roughness = saturate(specular_roughness);
+    surface.specular_roughness_anisotropy = saturate(specular_roughness_anisotropy);
     surface.specular_ior = max(1.0, specular_ior);
 
     surface.coat_weight = saturate(coat_weight);
     surface.coat_color = saturate(coat_color);
     surface.coat_roughness = saturate(coat_roughness);
+    surface.coat_roughness_anisotropy = saturate(coat_roughness_anisotropy);
     surface.coat_ior = max(1.0, coat_ior);
     surface.coat_darkening = saturate(coat_darkening);
 
@@ -45,13 +47,19 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.fuzz_color = saturate(fuzz_color);
     surface.fuzz_roughness = saturate(fuzz_roughness);
 
+    surface.thin_film_weight = saturate(thin_film_weight);
+    surface.thin_film_thickness = max(0.0, thin_film_thickness);
+    surface.thin_film_ior = max(1.0, thin_film_ior);
+
     surface.emission_luminance = max(0.0, emission_luminance);
     surface.emission_color = max(float3(0, 0, 0), emission_color);
 
     surface.geometry_normal = normalize(normal);
+    surface.geometry_coat_normal = normalize(coat_normal);
     surface.geometry_opacity = saturate(opacity);
 
     surface.geometry_tangent_frame = tangent_frame;
+    surface.geometry_tangent = tangent;
     surface.geometry_handedness = tangent_handedness;
 )hlsl";
 
@@ -99,11 +107,13 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("specular_weight", 1.0f));
     signature.push_back(material_signature_entry::of("specular_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("specular_roughness", 0.3f));
+    signature.push_back(material_signature_entry::of("specular_roughness_anisotropy", 0.0f));
     signature.push_back(material_signature_entry::of("specular_ior", 1.5f));
 
     signature.push_back(material_signature_entry::of("coat_weight", 0.0f));
     signature.push_back(material_signature_entry::of("coat_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("coat_roughness", 0.0f));
+    signature.push_back(material_signature_entry::of("coat_roughness_anisotropy", 0.0f));
     signature.push_back(material_signature_entry::of("coat_ior", 1.6f));
     signature.push_back(material_signature_entry::of("coat_darkening", 1.0f));
 
@@ -111,12 +121,25 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("fuzz_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("fuzz_roughness", 0.5f));
 
+    // Thickness is in nanometres, which is the scale interference happens at — a film is a few hundred of them.
+    signature.push_back(material_signature_entry::of("thin_film_weight", 0.0f));
+    signature.push_back(material_signature_entry::of("thin_film_thickness", 500.0f));
+    signature.push_back(material_signature_entry::of("thin_film_ior", 1.4f));
+
     signature.push_back(material_signature_entry::of("emission_luminance", 0.0f));
     signature.push_back(material_signature_entry::of("emission_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
 
     // Tangent space, so the default is the shading normal rather than any particular direction in world space.
     signature.push_back(material_signature_entry::of("normal", tg::vec3f(0.0f, 0.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("opacity", 1.0f));
+
+    // The coat's own shading normal, in the same tangent space — a coat with its own bumps over a smoother base.
+    // Defaulting to the base's normal is what makes an unbound one share it exactly.
+    signature.push_back(material_signature_entry::of("coat_normal", tg::vec3f(0.0f, 0.0f, 1.0f)));
+
+    // Which way the anisotropic lobes are stretched, in the same tangent space.
+    // The default is the frame's own tangent, so a surface that never binds this has its highlight follow the uv layout.
+    signature.push_back(material_signature_entry::of("tangent", tg::vec3f(1.0f, 0.0f, 0.0f)));
 
     // The tangent frame, as a rotation taking tangent space to object space, plus the handedness no rotation can carry.
     // Both default to a frame nothing supplied, and the generated `SV_ATTR_SUPPLIED_tangent_frame` is what tells the hit to

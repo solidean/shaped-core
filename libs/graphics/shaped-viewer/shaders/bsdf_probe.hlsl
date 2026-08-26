@@ -44,10 +44,6 @@ struct probe_case
     uint pad1;
 
     surface s;
-
-    float pad2;
-    float pad3;
-    float pad4;
 };
 
 StructuredBuffer<probe_case> Cases : register(t0);

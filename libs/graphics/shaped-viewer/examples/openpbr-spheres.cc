@@ -123,8 +123,21 @@ struct sweep_row
     cc::string_view name;
     cc::vector<sv::material_attribute_binding> shared;
 
-    /// which attribute this row's columns sweep from 0 to 1
+    /// which attribute this row's columns sweep
     cc::string_view swept = "specular_roughness";
+
+    /// What the swept attribute runs from and to across the row.
+    ///
+    /// The default never reaches 0: a mirror-smooth lobe is a delta the estimator cannot sample, and the BSDF floors it
+    /// anyway — starting just above is what makes the first column show that floor rather than hide it.
+    /// A row sweeping something that is not a roughness says so, because nanometres and radians have their own ranges.
+    float from = 0.03f;
+    float to = 1.0f;
+
+    /// When set, the swept attribute is a tangent-space DIRECTION rather than a scalar, and the column's value is how far it
+    /// leans off the surface normal.
+    /// `coat_normal` is the one that wants this: a coat tilted away from the base is not something a number expresses.
+    bool swept_is_direction = false;
 };
 
 [[nodiscard]] cc::vector<sweep_row> make_rows()
@@ -151,6 +164,46 @@ struct sweep_row
                     binding::of("fuzz_weight", 1.0f), binding::of("fuzz_color", tg::vec3f(0.85f, 0.72f, 0.55f))},
          .swept = "fuzz_roughness"});
 
+    // The anisotropy sweep needs the roughness held still, because it is the SHAPE of the highlight that varies here
+    // rather than its size — and the tangent frame the spheres carry is what gives the stretch a direction.
+    rows.push_back({.name = "anisotropic",
+                    .shared = {binding::of("base_color", tg::vec3f(0.90f, 0.90f, 0.93f)),
+                               binding::of("base_metalness", 1.0f), binding::of("specular_roughness", 0.35f)},
+                    .swept = "specular_roughness_anisotropy",
+                    .from = 0.0f,
+                    .to = 0.95f});
+
+    // Thickness in nanometres, across the range where the first interference order sweeps the whole hue circle.
+    // A smooth metal underneath, because the film's color is a property of the specular reflection and a diffuse base
+    // would wash it out.
+    rows.push_back({.name = "thin film",
+                    .shared = {binding::of("base_color", tg::vec3f(0.95f, 0.95f, 0.95f)),
+                               binding::of("base_metalness", 1.0f), binding::of("specular_roughness", 0.12f),
+                               binding::of("thin_film_weight", 1.0f), binding::of("thin_film_ior", 1.5f)},
+                    .swept = "thin_film_thickness",
+                    .from = 120.0f,
+                    .to = 900.0f});
+
+    // The coat's normal leaning further off the base's along the row, which moves the coat's highlight while the base's
+    // stays put — the one thing a shared normal cannot show.
+    rows.push_back(
+        {.name = "coat normal",
+         .shared = {binding::of("base_color", tg::vec3f(0.12f, 0.30f, 0.55f)), binding::of("specular_roughness", 0.5f),
+                    binding::of("coat_weight", 1.0f), binding::of("coat_roughness", 0.08f)},
+         .swept = "coat_normal",
+         .from = 0.0f,
+         .to = 1.4f,
+         .swept_is_direction = true});
+
+    // Coverage, which the any-hit turns into a stochastic cutout — so these resolve as the accumulation converges rather
+    // than as a blend.
+    rows.push_back(
+        {.name = "opacity",
+         .shared = {binding::of("base_color", tg::vec3f(0.85f, 0.35f, 0.20f)), binding::of("specular_roughness", 0.25f)},
+         .swept = "opacity",
+         .from = 0.08f,
+         .to = 1.0f});
+
     rows.push_back({.name = "diffuse",
                     .shared = {binding::of("base_color", tg::vec3f(0.72f, 0.55f, 0.42f)),
                                // No specular, so the row shows the diffuse lobe alone.
@@ -176,12 +229,21 @@ struct sweep_row
         auto const& row = rows[r];
         for (auto c = 0; c < column_count; ++c)
         {
-            // The sweep never reaches 0 exactly: a mirror-smooth lobe is a delta the estimator cannot sample, and the BSDF
-            // floors it anyway — starting just above makes the first column show what that floor looks like.
-            float const t = 0.03f + 0.97f * float(c) / float(column_count - 1);
+            float const t = float(c) / float(column_count - 1);
+            float const v = row.from + (row.to - row.from) * t;
 
             auto overrides = row.shared;
-            overrides.push_back(sv::material_attribute_binding::of(cc::string(row.swept), t));
+            if (row.swept_is_direction)
+            {
+                // `v` is how far the direction leans off the normal, and the lean is built rather than trigonometric:
+                // at 0 this is exactly (0, 0, 1), which is what "shares the base's normal" has to be.
+                overrides.push_back(
+                    sv::material_attribute_binding::of(cc::string(row.swept), tg::vec3f(v, 0.0f, 1.0f).normalized()));
+            }
+            else
+            {
+                overrides.push_back(sv::material_attribute_binding::of(cc::string(row.swept), v));
+            }
 
             auto const id
                 = lib.acquire(sv::material::create(cc::format("{}-{}", row.name, c), type, cc::move(overrides)));
@@ -219,6 +281,11 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
     auto& lib = *sv::acquire_material_library().value();
     auto const grid = make_grid(sphere_geometry, sphere_frames, lib);
 
+    // The framing follows the grid rather than being set to fit it: a row added to `make_rows` must not push its own
+    // spheres off screen, and the light must stay above the top row rather than inside it.
+    float const grid_height = float(make_rows().size() - 1) * spacing;
+    float const grid_top = grid_height + sphere_radius;
+
     auto const floor
         = sv::mesh{.name = "ground",
                    .geometry = sv::triangle_geometry::create_from_positions(ground_quad(-sphere_radius - 0.02f, 12.0f)),
@@ -231,8 +298,8 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
     {
         auto view = f.window().view();
 
-        view.initial_orbit({.target = tg::pos3d(0, 1.2, 0),
-                            .distance = 12.0,
+        view.initial_orbit({.target = tg::pos3d(0, double(grid_height) * 0.5, 0),
+                            .distance = double(grid_height) * 1.35 + 8.0,
                             .azimuth = tg::angle_d::make_from_degree(0.0),
                             .elevation = tg::angle_d::make_from_degree(12.0)});
 
@@ -244,7 +311,7 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
         // A broad overhead rect facing down.
         // It is what a smooth specular lobe actually reflects, so it — rather than the band-limited sky — is what gives the
         // metal row its highlight.
-        scene.add_light({.center = tg::pos3f(0, 6.0f, 1.5f),
+        scene.add_light({.center = tg::pos3f(0, grid_top + 2.5f, 1.5f),
                          .half_extent_u = tg::vec3f(3.0f, 0, 0),
                          .half_extent_v = tg::vec3f(0, 0, 1.2f),
                          .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});

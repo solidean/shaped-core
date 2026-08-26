@@ -408,9 +408,14 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     if (!opts.epilogue_include.empty())
         cc::format_append(src, "\n#include \"{}\"\n", opts.epilogue_include);
 
+    // Read off the FRAGMENT rather than the finished source, which also holds the runtime include's own declaration of the
+    // field and would match every material alike.
+    auto const can_cut_out = r.type->shader.contains(cc::string_view("geometry_opacity"));
+
     return {.source = cc::move(src),
             .layout = cc::move(layout),
             .samplers = cc::move(samplers),
+            .can_cut_out = can_cut_out,
             .key = material_shader_key(r.permutation_key, opts)};
 }
 } // namespace sv

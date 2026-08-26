@@ -28,7 +28,11 @@ namespace
     return {.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
 }
 
-/// Drives a permutation's compile to completion and fails the test with DXC's own message when it did not build.
+/// Drives a permutation's compiles to completion and fails the test with DXC's own message when one did not build.
+///
+/// BOTH nodes, because a permutation whose material can cut out carries an any-hit as well.
+/// A compile left undriven is async work still holding this test's context when it ends, which nexus reports as a failure of
+/// the test itself — intermittently, since a node that happens to settle first is never noticed.
 void require_compiled(sv::material_permutation const& p)
 {
     REQUIRE(p.shader != nullptr);
@@ -38,6 +42,22 @@ void require_compiled(sv::material_permutation const& p)
     REQUIRE(p.shader->has_value());
     CHECK(p.shader->try_value()->stage == sg::shader_stage::closest_hit);
     CHECK(p.shader->try_value()->bytecode.size() > 0);
+
+    // A material that never writes `geometry_opacity` deliberately has no any-hit: one that could reject nothing would
+    // still cost the hardware its opaque path on every intersection.
+    if (!p.can_cut_out)
+    {
+        CHECK(p.any_hit == nullptr);
+        return;
+    }
+
+    REQUIRE(p.any_hit != nullptr);
+    (void)cc::try_async_blocking_get(p.any_hit);
+    if (p.any_hit->has_error())
+        FAIL(cc::format("{}\n--- source ---\n{}", p.any_hit->try_error()->underlying().to_string(), p.source));
+    REQUIRE(p.any_hit->has_value());
+    CHECK(p.any_hit->try_value()->stage == sg::shader_stage::any_hit);
+    CHECK(p.any_hit->try_value()->bytecode.size() > 0);
 }
 } // namespace
 

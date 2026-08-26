@@ -109,7 +109,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     // init_declare drives the shared shaders — without this a build with no pool finds every permutation cold and
     // traces nothing, forever.
     auto hits = cc::vector<sg::compiled_shader const*>();
+    auto any_hits = cc::vector<sg::compiled_shader const*>();
     hits.reserve(d.hit_groups.size());
+    any_hits.reserve(d.hit_groups.size());
     for (auto const* const p : d.hit_groups)
     {
         (void)cc::try_async_blocking_get(p->shader);
@@ -117,6 +119,18 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         if (compiled == nullptr)
             return nullptr; // still in flight, or a material that does not compile — retried on a later frame
         hits.push_back(compiled);
+
+        // The cutout test, where the material has one.
+        // Driven inline for the same reason the closest-hit is.
+        auto const* compiled_ah = static_cast<sg::compiled_shader const*>(nullptr);
+        if (p->can_cut_out)
+        {
+            (void)cc::try_async_blocking_get(p->any_hit);
+            compiled_ah = p->any_hit->try_value();
+            if (compiled_ah == nullptr)
+                return nullptr;
+        }
+        any_hits.push_back(compiled_ah);
     }
 
     // The global root signature must cover every binding *any* stage uses, minus the manager's tables — those are the
@@ -127,6 +141,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     stages.push_back(compiled_sms->bindings);
     for (auto const* const h : hits)
         stages.push_back(h->bindings);
+    for (auto const* const h : any_hits)
+        if (h != nullptr)
+            stages.push_back(h->bindings);
 
     auto merged = sg::merge_bindings(stages);
     auto own = cc::vector<sg::binding>();
@@ -155,8 +172,13 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
 
     auto hit_handles = cc::vector<sg::hit_shader_handle>();
     hit_handles.reserve(hits.size());
-    for (auto const* const h : hits)
-        hit_handles.push_back(rpd.add_hit_shader({.closest_hit = *h}));
+    for (auto i = isize(0); i < hits.size(); ++i)
+    {
+        auto group = sg::hit_shader{.closest_hit = *hits[i]};
+        if (any_hits[i] != nullptr)
+            group.any_hit = *any_hits[i];
+        hit_handles.push_back(rpd.add_hit_shader(group));
+    }
 
     // The build is async and no pool is guaranteed here, so drive it inline like the compiles above.
     auto pipeline_r = cc::try_async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));

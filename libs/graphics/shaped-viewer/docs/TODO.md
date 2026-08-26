@@ -166,10 +166,40 @@ importance-samples the continuation — so what is left is coverage of the model
   rather than defaulted — neither exists.
 - **A normal map is still untested.** `geometry_normal` is applied through `sv::perturb_frame` now, so it has somewhere to land,
   but no material in the tree binds it to a texture.
-- **Transmission, subsurface, thin-film and dispersion are absent**, not defaulted — `sv::surface` does not carry them, so a
+  The same is true of `geometry_coat_normal`, which lands through the authored frame beside it.
+- **Transmission, subsurface and dispersion are absent**, not defaulted — `sv::surface` does not carry them, so a
   material cannot ask for one and silently get something else.
   Transmission is the one that changes the integrator rather than only the closure: it needs a refracted continuation and
   therefore a path that leaves the upper hemisphere.
+- **The thin film is sampled at three wavelengths**, one per output channel, rather than integrated over the spectrum.
+  Its first interference order is faithful and its higher orders alias into colors the spectrum would have averaged away, so
+  a film past roughly a micron drifts.
+  Belcour and Barla's spectral formulation is the replacement, and it wants the same hero-wavelength machinery dispersion
+  does — which is why the two are worth doing together rather than separately.
+- **The film's Fresnel does not reach the layer coupling.**
+  `spec_transmission` still reads the film-free `spec_f0`, so what the diffuse substrate is charged for the crossing ignores
+  the interference above it.
+  Averaged over the spectrum a film redistributes reflectance rather than adding it, so the error is small — and closing it
+  wants the same tabulated albedo the energy compensation does.
+- **The film treats the base as a real index.** A metal's absorption therefore does not shift the phase it reflects with,
+  which costs the slight hue rotation a real conductor's substrate adds.
+- **The coat's own normal is added as a BSDF about the BASE normal.**
+  `geometry_coat_normal` gives the coat its own frame and every cosine its lobe needs is measured there, but the result is
+  summed into a closure the integrator weights by the base's cosine.
+  The two frames disagree by a ratio no closed form absorbs; the alternative is a second integrator, and every renderer that
+  carries a coat normal makes the same trade.
+- **`geometry_coat_tangent` is absent.** An anisotropic coat is stretched along the base's tangent spun onto the coat's
+  normal, so it follows the same uv layout the base does and cannot point its own way.
+  It is `geometry_tangent`'s mechanism a second time over, and nothing needs it yet.
+- **A cutout is stochastic and its draw does not come from the path's own stream.**
+  `PtAnyHit` hashes the pixel, the frame seed and the primitive instead, because an any-hit writing the path's random state
+  would have to be granted access to it — and every ray would then carry a stream whose length depends on how many
+  alpha-tested triangles it happened to graze.
+  Independent draws per bounce are what it costs, which accumulation hides and a single-sample preview would not.
+- **No test traces a material that can cut out.**
+  `material-shader-cache-test` compiles the any-hit for a type that writes `geometry_opacity`, so the HLSL is covered; what
+  is not is a pipeline built with an any-hit attached and a trace through it.
+  Every tracing test drives the glTF type, which never writes opacity and so deliberately gets no any-hit.
 - **A GGX sample that reflects below the horizon is dropped rather than redistributed**, so `bsdf_pdf` legitimately claims
   less than the full hemisphere — around a tenth of it for a rough lobe.
   That is unbiased and standard, and the probe asserts the direction that matters (never MORE than 1) rather than equality.
@@ -200,7 +230,9 @@ importance-samples the continuation — so what is left is coverage of the model
   indirect light.
   What it needs is light sampling over emissive triangles — an emitter list built per trace with its own area pdf,
   balanced against the BSDF sampler the way `pt_light_intersect` already balances the rect.
-- **`geometry_opacity` is parsed and ignored.** Nothing in the trace has an any-hit shader, so a cutout is not expressible yet.
+- **A partly-covered surface is expressible now**, through `PtAnyHit` in `shaders/pt_material_hit.hlsli`.
+  It is attached only to permutations whose material actually writes `geometry_opacity` (`material_permutation::can_cut_out`),
+  because a hit group carrying an any-hit gives up the hardware's opaque fast path for every intersection on it.
 
 ## Everything else
 
