@@ -113,6 +113,11 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   An agent starts `serve` in the background, so there is no window to interrupt — without either of those the only way out is finding the process.
 - The first run pays a `uv` resolve for `pygments` and `markdown-it-py`. That is the dependency cost, and it is cached afterwards.
 
+**`Send to Claude` shows the round before it sends it.**
+An ask counts as answered on its first selection, so a checkbox left untaken reads exactly like one nobody saw.
+The confirmation panel is the last place that difference is catchable, and it says per ask how many optional items were offered against how many were taken.
+Nothing is handed back until it is confirmed.
+
 ## Layout
 
 ```

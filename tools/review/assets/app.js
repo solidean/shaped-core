@@ -343,22 +343,64 @@ function pickOption(number) {
 const SEND_ARM_MS = 4000;
 let sendArmTimer = null;
 
-function requestSend() {
-  if (state.sendArmed) {
-    state.sendArmed = false;
-    clearTimeout(sendArmTimer);
-    el("send").classList.remove("armed");
-    signal("send");
+// Handing a round back is irreversible from the page, so the button opens the round rather than sending it.
+// An ask is "answered" as soon as one option is picked, which leaves an untaken checkbox indistinguishable from one nobody read —
+// this is the last place the person who would know can still tell the difference.
+async function requestSend() {
+  for (const form of document.querySelectorAll(".ask-form")) flushSave(form);
+
+  const result = await getJSON("/api/summary");
+  if (!result.ok) {
+    setSaveState(result.body.error || "could not read the round back", "bad");
     return;
   }
-  state.sendArmed = true;
-  el("send").classList.add("armed");
-  setSaveState(`press s again to hand back round ${state.data ? state.data.round : ""}`, "warn");
-  sendArmTimer = setTimeout(() => {
-    state.sendArmed = false;
-    el("send").classList.remove("armed");
-    setSaveState("");
-  }, SEND_ARM_MS);
+  renderSendSummary(result.body);
+  el("send-veil").hidden = false;
+  el("send-confirm").focus();
+}
+
+function summaryRow(ask) {
+  const chosen = ask.selected.length ? `<ul class="send-chosen">${ask.selected.map((c) => `<li>${_esc(c)}</li>`).join("")}</ul>` : "";
+  const text = ask.text ? `<div class="send-text">${_esc(ask.text)}</div>` : "";
+
+  let extras = "";
+  if (ask.checks_offered) {
+    const untaken = ask.checks_offered - ask.checks_taken;
+    extras = untaken
+      ? `<div class="send-flag warn">${untaken} of ${ask.checks_offered} optional item${ask.checks_offered === 1 ? "" : "s"} not taken</div>`
+      : `<div class="send-flag ok">all ${ask.checks_offered} optional items taken</div>`;
+  }
+
+  const flag = ask.answered ? "" : '<div class="send-flag bad">nothing answered here</div>';
+  const stamp = ask.finalized ? '<span class="send-old">answered in an earlier round</span>' : "";
+  return `<div class="send-ask"><div class="send-ask-head"><code>${_esc(ask.name)}</code>${stamp}</div>${flag}${chosen}${text}${extras}</div>`;
+}
+
+function renderSendSummary(data) {
+  el("send-title").textContent = `Hand round ${data.round} back?`;
+
+  const fresh = [];
+  for (const row of data.entries) {
+    const asks = row.asks.filter((a) => !a.finalized);
+    if (!asks.length) continue;
+    fresh.push(
+      `<section class="send-entry"><h3>${_esc(row.entry)} ${_esc(row.title)}</h3>${asks.map(summaryRow).join("")}</section>`
+    );
+  }
+
+  el("send-body").innerHTML = fresh.length
+    ? fresh.join("")
+    : '<p class="send-empty">Nothing new since the last round. Sending hands back an empty round.</p>';
+}
+
+function closeSendSummary() {
+  el("send-veil").hidden = true;
+}
+
+function _esc(text) {
+  const d = document.createElement("div");
+  d.textContent = text == null ? "" : String(text);
+  return d.innerHTML;
 }
 
 // Closing the server ends the session for every tab, so it arms first exactly as sending does.
@@ -456,6 +498,7 @@ function listen() {
 function shortcuts(event) {
   if (event.key === "Escape") {
     el("help").hidden = true;
+    closeSendSummary();
     if (document.activeElement) document.activeElement.blur();
     return;
   }
@@ -493,6 +536,9 @@ async function main() {
   el("next").addEventListener("click", () => step(1));
   el("next-open").addEventListener("click", nextUnanswered);
   el("send").addEventListener("click", requestSend);
+  el("send-confirm").addEventListener("click", () => { closeSendSummary(); signal("send"); });
+  el("send-cancel").addEventListener("click", closeSendSummary);
+  el("send-veil").addEventListener("click", (e) => { if (e.target === el("send-veil")) closeSendSummary(); });
   el("pause").addEventListener("click", () => signal("pause"));
   el("shutdown").addEventListener("click", requestShutdown);
   el("help-toggle").addEventListener("click", () => { el("help").hidden = !el("help").hidden; });

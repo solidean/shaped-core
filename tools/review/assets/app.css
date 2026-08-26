@@ -339,3 +339,63 @@ body.is-stale #shell {
   pointer-events: none;
   user-select: none;
 }
+
+/* ---- the round, before it is handed back ------------------------------------
+   An ask counts as answered on its first selection, so an untaken checkbox reads the same as one nobody saw.
+   This is where that difference is still catchable, which is why it is a panel rather than a second keypress. */
+
+#send-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+#send-veil[hidden] { display: none; }
+
+.send-card {
+  display: flex;
+  flex-direction: column;
+  width: min(46rem, 92vw);
+  max-height: 86vh;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
+}
+
+.send-card h2 { margin: 0 0 4px; }
+
+.send-note { margin: 0 0 14px; color: var(--text-dim); }
+
+#send-body { overflow-y: auto; flex: 1; }
+
+.send-entry { margin-bottom: 16px; }
+.send-entry h3 { margin: 0 0 6px; font-size: 0.95rem; }
+
+.send-ask {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.send-ask-head { display: flex; gap: 10px; align-items: baseline; }
+.send-old { color: var(--text-dim); font-size: 0.85em; }
+
+.send-chosen { margin: 6px 0 0; padding-left: 18px; }
+.send-text { margin-top: 6px; color: var(--text-dim); white-space: pre-wrap; }
+
+.send-flag { margin-top: 6px; font-size: 0.85em; }
+.send-flag.warn { color: var(--warn); }
+.send-flag.bad { color: var(--bad); }
+.send-flag.ok { color: var(--good); }
+
+.send-empty { color: var(--text-dim); }
+
+.send-actions { display: flex; gap: 10px; margin-top: 16px; }
+.send-actions button { padding: 8px 18px; font: inherit; font-weight: 600; cursor: pointer; }

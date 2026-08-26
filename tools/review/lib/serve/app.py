@@ -190,6 +190,38 @@ class ReviewApp:
                 }
             return 200, {"answer": answer.to_record(), "hash": current_hash, "digest": written_digest}
 
+    def summary(self) -> dict:
+        """Every ask and what it is about to hand back, for the confirmation the send button shows.
+
+        The count that matters is `offered` against `taken` for the check options.
+        An unticked checkbox is a valid answer and is indistinguishable from one nobody read,
+        so this is the one place the difference can still be caught — by the person who would know.
+        """
+        rows = []
+        for file in self.paths.entry_files():
+            try:
+                entry = parse_file(file)
+            except ReviewParseError:
+                continue
+            answers = AnswerFile.load(self.paths.answers_for(file), file.stem)
+            asks = []
+            for block in entry.asks:
+                answer = answers.get(block.name)
+                selected = list(answer.selected) if answer else []
+                checks = [o.label for o in block.options if o.kind == "check"]
+                asks.append({
+                    "name": block.name,
+                    "answered": bool(answer) and not answer.is_empty,
+                    "finalized": bool(answer) and not answer.tentative,
+                    "selected": selected,
+                    "text": (answer.text.strip() if answer else ""),
+                    "checks_offered": len(checks),
+                    "checks_taken": sum(1 for c in checks if c in selected),
+                })
+            if asks:
+                rows.append({"entry": entry.slug, "title": entry.title, "asks": asks})
+        return {"round": self.config().next_round, "entries": rows}
+
     def shutdown(self) -> tuple[int, dict]:
         """Stop the server, from the page or from `review stop`.
 
@@ -266,6 +298,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._asset(unquote(route[len("/assets/"):]))
             elif route == "/api/state":
                 self._json(200, self.app.state())
+            elif route == "/api/summary":
+                self._json(200, self.app.summary())
             elif route.startswith("/api/entry/"):
                 code, payload = self.app.entry_html(unquote(route[len("/api/entry/"):]))
                 self._json(code, payload)

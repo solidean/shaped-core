@@ -645,6 +645,24 @@ def test_compose_is_parseable(root: Path) -> None:
 # ---- answers ----------------------------------------------------------------
 
 
+def test_every_css_variable_is_defined(root: Path) -> None:
+    """A `var(--x)` naming nothing falls back to inherited colour, so the rule silently does nothing.
+
+    It renders — usually as almost the right thing — which is why eyeballing the page does not catch it.
+    Written after `var(--dim)` shipped into a panel whose real token is `--text-dim`.
+    """
+    css = (REPO_ROOT / "tools" / "review" / "assets" / "app.css").read_text(encoding="utf-8")
+
+    defined = set(re.findall(r"^\s*(--[\w-]+)\s*:", css, re.M))
+    assert defined, "expected app.css to define custom properties"
+
+    # A second argument is a real fallback, so those are deliberate rather than typos.
+    used = set(re.findall(r"var\(\s*(--[\w-]+)\s*\)", css))
+
+    missing = sorted(used - defined)
+    assert not missing, f"app.css uses undefined custom properties: {', '.join(missing)}"
+
+
 def test_every_hidden_element_can_actually_hide(root: Path) -> None:
     """An element the page toggles with `hidden` must not be left visible by its own `display` rule.
 
