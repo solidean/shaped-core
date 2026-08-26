@@ -2,8 +2,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/refs.hh>
-#include <shaped-viewer/resources/resource_data.hh>
-#include <shaped-viewer/resources/resource_managers.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/scene/mesh.hh>
 
 namespace sv
@@ -39,19 +38,9 @@ layer& scene_ref::target() const
 
 mesh_ref scene_ref::add_mesh(sv::mesh const& mesh)
 {
-    auto const& geometry = mesh.geometry;
-    CC_ASSERT(!geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
-
-    auto& resources = _frame->resources();
-
-    // Both bridges keep the geometry's own content key, so this resolves to a resident id rather than an upload
-    // whenever the mesh has not changed.
-    auto const mesh_id = geometry.is_indexed() ? resources.meshes.acquire(indexed_triangle_data::from(geometry))
-                                               : resources.meshes.acquire(triangle_data::from(geometry));
-    auto const materials = resources.materials.acquire(mesh.attributes, geometry.triangle_count());
-
+    // Every step of it is content-keyed, so a caller re-adding an unchanged mesh every frame pays lookups.
     auto& items = target().items;
-    items.push_back({.mesh = mesh_id, .materials = materials, .transform = mesh.transform});
+    items.push_back(_frame->resources().acquire_scene_item(mesh));
     return mesh_ref(_frame, _view, _layer, u32(items.size() - 1));
 }
 

@@ -21,7 +21,20 @@ struct resource_budget;
 struct manager_config;
 struct mesh_record;
 struct material_record;
-struct scene_resources_config;
+struct texture_record;
+struct attribute_record;
+struct instance_slot;
+struct instance_record;
+struct instance_gpu;       // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
+enum class residency : u8; // how much of a resource has reached the GPU (resource_managers.hh)
+struct work_budget;        // how much follow-up GPU work one epoch may record
+struct texture_policy;     // what happens to a texture once it has landed
+struct gpu_resource_manager_config;
+
+// The bindless tables sv declares, and their budgets (see resources/bindless_tables.hh)
+enum class bindless_table : u8;
+struct bindless_table_budget;
+struct bindless_config;
 
 struct view_id;
 struct camera;
@@ -49,8 +62,25 @@ struct attribute_format;
 enum class attribute_frequency : u8;
 enum class mesh_flag; // per-mesh rendering opt-ins (mesh_flags.hh)
 struct mesh_attribute;
+struct texture_sample_source;
 struct mesh_texture;
 struct mesh;
+
+// the material system (see material/)
+enum class material_frequency : u8;   // where an attribute's value came from; the ORDER is the precedence
+enum class material_source_kind : u8; // a constant, or a uv-sampled texture
+struct material_signature_entry;      // one attribute a material type requires
+struct material_attribute_binding;    // one attribute a material overrides
+struct material_type;                 // a family of materials: signature + shader fragment
+struct material;                      // one instance of a type, with some attributes bound
+struct resolved_attribute;
+struct resolved_material;           // a type + material + mesh resolved down the frequency chain
+enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds
+struct material_slot;
+struct material_parameter_layout; // the parameter block one permutation reads
+struct generated_material_shader; // that permutation as HLSL, plus its layout
+struct material_shader_options;
+class material_library;
 
 // the per-frame description
 enum class layer_kind : u8;
@@ -76,19 +106,25 @@ struct frame_constants_gpu;
 struct triangle_data;
 struct indexed_triangle_data;
 struct material_data;
+struct texture_data;
 // the resource ids are defined at the bottom of this header, since they carry an `invalid` enumerator
 enum class mesh_id : u32;
 enum class material_set_id : u32;
+enum class material_type_id : u32;
 enum class material_id : u32;
 enum class tlas_id : u32;
 enum class texture_id : u32;
 enum class buffer_id : u32;
+enum class attribute_id : u32;
+enum class instance_id : u32;
 class mesh_manager;
 class material_manager;
 class texture_manager;
+class attribute_manager;
 // The class-key must match the definition: the Microsoft ABI mangles struct and class differently, so a
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
-class scene_resources;
+class gpu_resource_manager;
+class bound_resources; // the manager's tables, snapshotted and locked for one recording
 
 // render plan
 enum class draw_kind : u8;
@@ -121,6 +157,8 @@ struct layout_pipeline_key;
 } // namespace impl
 
 // rendering
+struct material_permutation; // one permutation generated + compiled (rendering/material_shader_cache.hh)
+class material_shader_cache;
 struct trace_desc;
 class pbr_raytrace_routine;
 struct pt_frame_constants_gpu;
@@ -205,11 +243,17 @@ enum class sv::material_set_id : sv::u32
     invalid = u32(-1)
 };
 
+/// Names one material TYPE — a family of materials, PBR or unlit — minted by `material_library::register_type`.
+enum class sv::material_type_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
 /// Names ONE material definition — how a mesh is drawn — rather than a per-triangle array of them.
 ///
 /// This is the thin handle an `sv::mesh` carries: the definition lives outside the mesh and is shared across many.
 /// It is what gives a mesh's attributes, parameters, textures and flags their meaning.
-/// No manager mints these yet — the material library is still to come — so a mesh only ever carries `invalid` today.
+/// Minted by `material_library::acquire`, and never evicted — a slot in GPU memory outlives the frame that wrote it.
 enum class sv::material_id : sv::u32
 {
     invalid = u32(-1)
@@ -226,6 +270,20 @@ enum class sv::texture_id : sv::u32
 };
 
 enum class sv::buffer_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Names one uploaded mesh attribute — the bytes plus the bindless element they are read through.
+/// Minted by `attribute_manager::acquire`, keyed on the attribute's own content hash.
+enum class sv::attribute_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Names one material parameter block — what a generated shader reads per instance.
+/// Minted by `gpu_resource_manager::acquire_instance`, keyed on a resolved material's `parameter_key`.
+enum class sv::instance_id : sv::u32
 {
     invalid = u32(-1)
 };

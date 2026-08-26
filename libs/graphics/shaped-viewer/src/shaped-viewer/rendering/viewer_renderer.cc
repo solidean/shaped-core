@@ -19,7 +19,7 @@ void viewer_renderer::init_declare(sg::context& ctx)
 void viewer_renderer::execute(sg::command_list& cmd,
                               viewer_definition const& def,
                               render_plan const& plan,
-                              scene_resources& resources,
+                              gpu_resource_manager& resources,
                               view_store& store,
                               sg::color_target const& output)
 {

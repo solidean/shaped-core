@@ -31,11 +31,10 @@ TEST("sv - view renderer end to end (headless)")
 
     // Build the scene through the managers (this is where the BLAS is built).
     auto const cloud = sv_test::make_triangle_cloud(64);
-    auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
-    REQUIRE(resources.meshes.contains(mesh));
-    REQUIRE(resources.materials.contains(materials));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
+    REQUIRE(resources.meshes.contains(item.mesh));
+    REQUIRE(resources.contains_instance(item.instance));
 
     auto const size = tg::vec2i(128, 128);
 
@@ -43,7 +42,7 @@ TEST("sv - view renderer end to end (headless)")
     v.id = sv::view_id::from_string("headless");
     v.resolution = size;
     v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)}; // default orientation frames the origin
-    sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+    sv::ensure_scene_3d(v).items.push_back(item);
     // Lights are a typed list on the view — an overhead rect facing down (cross(+x, +z) is -y).
     // Exercises the area_light -> area_light_gpu derivation the view_renderer does.
     sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
@@ -52,8 +51,8 @@ TEST("sv - view renderer end to end (headless)")
                                                   .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch()); // the frame's job, not the renderer's
-    auto store = sv::view_store{};              // and so is what the view keeps across frames
+    resources.advance_to(ctx.current_epoch()); // the frame's job, not the renderer's
+    auto store = sv::view_store{};             // and so is what the view keeps across frames
 
     // The renderer only ever hands back a texture — it never sees an output target.
     auto const traced = sv::view_renderer::execute(*cmd, v, resources, store);
@@ -92,11 +91,11 @@ TEST("sv - view renderer renders indexed geometry (headless)")
     REQUIRE(welded.indices.size() == box.positions.size());
     REQUIRE(welded.positions.size() < box.positions.size()); // the quads really do share vertices
 
-    auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));
-    auto const materials = resources.materials.acquire(sv::material_data::create(box.materials));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(
+        sv_test::as_indexed_mesh("cornell box", welded.positions, welded.indices, box.materials));
 
-    auto const* const mesh_rec = resources.meshes.get_ptr(mesh);
+    auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
     CHECK(mesh_rec->is_indexed); // an indexed BLAS, and the closest-hit reads through the real index buffer
     CHECK(mesh_rec->indices.element_count() == welded.indices.size());
@@ -110,14 +109,14 @@ TEST("sv - view renderer renders indexed geometry (headless)")
     v.id = sv::view_id::from_string("indexed");
     v.resolution = size;
     v.camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
-    sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+    sv::ensure_scene_3d(v).items.push_back(item);
     sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
                                                   .half_extent_u = tg::vec3f(0.75f, 0, 0),
                                                   .half_extent_v = tg::vec3f(0, 0, 0.75f),
                                                   .emission = tg::vec3f(15.0f, 15.0f, 15.0f)});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch());
+    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
     (void)sv::view_renderer::execute(*cmd, v, resources, store);
     ctx.submit_command_list(cc::move(cmd));
@@ -125,6 +124,6 @@ TEST("sv - view renderer renders indexed geometry (headless)")
 
     // A second acquire of the same content must hit the cache rather than build a second BLAS.
     auto const again = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));
-    CHECK(again == mesh);
+    CHECK(again == item.mesh);
     CHECK(resources.meshes.count() == 1);
 }

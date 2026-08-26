@@ -1,6 +1,10 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh> // sg::tlas_instance
 #include <shaped-graphics/resource/buffer.hh>
@@ -8,9 +12,9 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/gpu_types.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh> // area_light_gpu
-#include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/view/camera.hh> // camera_gpu
 #include <typed-geometry/linalg/pos.hh>
 
@@ -31,11 +35,9 @@ struct sv::pt_frame_constants_gpu
     u32 seed = 1;               // per-frame RNG seed; vary it to decorrelate accumulated frames
     u32 accum_frame = 0;        // progressive accumulation index: 0 restarts, >0 blends into the output in place
 
-    /// false => the bound mesh is a non-indexed triangle list, so the closest-hit reads its vertices directly
-    /// instead of through `Indices`. Set it from `mesh_record::is_indexed`; the trace binds one mesh per view,
-    /// which is why per-mesh state can ride here at all.
-    sr::gpu_boolean mesh_is_indexed = false;
-    f32 _padding5[3] = {};
+    // A whole 16-byte lane held back, so `prev_camera` keeps the offset the cbuffer gives it.
+    // Geometry layout used to ride here; it is per-instance state, and lives in the instance table now.
+    f32 _reserved0[4] = {};
 
     /// The camera the previous recorded frame traced from, which is what this frame reprojects its history through.
     /// Meaningless unless `has_history`.
@@ -94,42 +96,84 @@ struct sv::pt_trace_desc
     sg::texture_2d history_color;
     sg::texture_2d history_gbuffer;
 
-    sg::buffer<pbr_material_gpu> materials; // per-triangle PBR params, indexed by PrimitiveIndex()
-    sg::buffer<tg::pos3f> vertices;         // the hit mesh's positions, for the flat face normal
-    sg::buffer<u32> indices;                // 3 indices per triangle, into `vertices`
+    /// One `sv::instance_gpu` per entry of `instances`, in that same order — the closest-hit's `Instances`, read by `InstanceID()`.
+    /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
+    sg::buffer<instance_gpu> instance_table;
+
+    /// The permutations this trace's instances shade with, one hit group each, in hit-group index order.
+    ///
+    /// `sg::tlas_instance::hit_group_offset` indexes exactly this list, so the caller has already fixed the order and
+    /// must not disturb it between building the instances and getting here.
+    /// A permutation whose shader has not compiled — still in flight, or a broken material — makes the whole trace a
+    /// no-op, the same degradation a broken shader edit takes.
+    cc::span<material_permutation const* const> hit_groups;
+
+    /// The manager's bindless tables, snapshotted and locked for this recording — bound as the pipeline's second group.
+    /// It must outlive the dispatch, which is what `gpu_resource_manager::freeze()`'s scope is for.
+    bound_resources const* bindless = nullptr;
 };
 
 /// The global-illumination path-tracing pass.
 ///
 /// A render routine, structured exactly like pbr_raytrace_routine.
-/// It owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired path-tracing shaders and rebuilt on reload.
-/// Where the flat PBR routine shades a single direct-lit sample, this one integrates global illumination.
+/// It owns the slib-acquired raygen and miss shaders, and one DXR pipeline per **set of material permutations** a trace binds.
+/// The closest-hit is generated per material rather than authored, so which shaders a pipeline is built from is a property of the scene and cannot be settled in `init_declare`.
+/// What can, and is, are the three shaders every pipeline shares.
+/// Pipelines are cached on that set, so a scene whose materials are stable builds one and rebinds it every frame.
+///
+/// The bindings come in two groups, and that split is the reflection's rather than a convenience:
+/// group 0 is the trace's own (the TLAS, the targets, the constants, the instance table), group 1 is the manager's bindless tables, which sv owns as a schema and no shader gets to redeclare.
+/// Where the tracer shades a surface is the generated hit group; how it integrates is `shaders/pathtrace.hlsl`, which is shared.
 /// The raygen bounces each ray diffusely and estimates direct light at every hit by next-event estimation toward two sources: the rectangular area light and the SH environment.
 /// The environment is gathered by multiple importance sampling (balance heuristic) between that NEE ray and the escaped bounce ray, keeping a bright, non-uniform sky low-variance.
-/// `samples_per_pixel` paths per pixel accumulate in one dispatch; `shaders/pathtrace.hlsl` carries the estimators themselves.
-/// `execute` only reads what `init_declare` built, so it takes the const `acquire` and holds no lock — concurrent traces on the same context do not serialize on this routine.
+/// `samples_per_pixel` paths per pixel accumulate in one dispatch.
+/// `execute` may build a pipeline, so it takes the exclusive acquire — two traces on one context serialize on this routine.
 class sv::pathtrace_routine : public sg::render_routine<pathtrace_routine>
 {
 public:
     /// Builds the TLAS from `d.instances`, binds the scene, and integrates one path bundle per pixel over `d.output`'s extent into `d.output`.
-    /// A no-op (leaves the target untouched) if the shaders did not compile.
+    /// A no-op (leaves the target untouched) if the shaders did not compile, or if any permutation `d` names has not.
     static void execute(sg::command_list& cmd, pt_trace_desc const& d);
 
-    /// Whether this routine has a pipeline to dispatch — false when the shaders did not compile or the bindings did not merge.
+    /// Whether the most recent `execute` on this context actually dispatched.
     ///
+    /// It reports the *last trace* rather than the routine, because there is no longer one pipeline to ask about: a
+    /// pipeline exists per permutation set, so readiness only means anything relative to a trace that named one.
     /// `execute` degrades to a no-op rather than throwing, which is the right behavior for a live reload and the
     /// wrong one for a test: a broken shader then leaves an untouched target that no CPU-side assertion notices.
     /// So a test asserts on this, and a debug overlay can say why the image is empty.
+    /// False before the first execute.
     [[nodiscard]] static bool is_ready(sg::command_list& cmd);
 
 protected:
     void init_declare(sg::context& ctx) override;
 
 private:
-    // Rebuilt wholesale by init_declare on every reload.
-    // The pipeline layout is not among them — the pipeline holds it.
-    sg::binding_group_layout_handle _group_layout;
-    sg::raytracing_pipeline_handle _pipeline;
-    sg::raytracing_shader_table_handle _table;
-    sg::raygen_index _raygen = {};
+    /// One pipeline, built over one ordered set of hit groups.
+    ///
+    /// `group_layout` covers the trace's own bindings alone: the manager's tables are the second group and are
+    /// deliberately not merged into it, so a generated shader redeclaring them cannot change sv's schema.
+    /// The pipeline layout is not among these — the pipeline holds it, which is what keeps the root signature alive.
+    struct pipeline_variant
+    {
+        sg::binding_group_layout_handle group_layout;
+        sg::raytracing_pipeline_handle pipeline;
+        sg::raytracing_shader_table_handle table;
+        sg::raygen_index raygen = {};
+    };
+
+    /// The variant for `d`'s hit groups, built on a miss, or null when something it needs has not compiled.
+    [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d);
+
+    // Re-acquired by init_declare on every reload, which is also when every variant built from the old ones is dropped.
+    sg::async_compiled_shader _raygen_shader;
+    sg::async_compiled_shader _miss_shader;
+    sg::async_compiled_shader _shadow_miss_shader;
+
+    /// Keyed on the hit-group set in order, together with the layout the second group is bound through.
+    /// A map rather than a vector for the references: a variant is held across the dispatch that follows its build.
+    cc::map<cc::hash128, pipeline_variant> _variants;
+
+    /// Whether the last `execute` dispatched — what `is_ready` reports.
+    bool _traced = false;
 };

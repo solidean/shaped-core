@@ -50,7 +50,8 @@ cam.basis()                      // -> camera_basis { vec3d right, up, forward }
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; } — view-wide integration controls (no light/sky: those are on the view)
-sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; material_set_id materials; tg::affine_transform3f transform; } — triangle_mesh only for now
+sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
+                                 //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
                                  //   default-constructs to the identity; the renderer packs its linear part + translation into the TLAS's row-major 3x4
 sv::area_light                   // { pos3f center; vec3f half_extent_u, half_extent_v; vec3f emission; } — a world-space rect emitting along cross(half_extent_u, half_extent_v); one typed list per light kind on the view
@@ -63,9 +64,8 @@ sv::background::sun(direction, radiance)       // -> background — soft lobe pe
 sv::background::daylight() / ::studio()        // -> background — presets: blue sky + warm ground + soft sun / neutral gray brighter overhead
 bg.combined_with(other) / bg.scaled(factor)    // -> background — SH is linear, so environments superpose and scale; how gradient + sun compose into a preset
 sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
-sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — flat, per-triangle
-sv::pbr_attribute::base_color / ::metallic / ::roughness / ::emissive   // the per_triangle attribute names per-face PBR travels under
-sv::pbr_material_attributes(materials) -> vector<mesh_attribute>        // scalarizes an AoS range into those four; TEMPORARY, until an attribute can hold a struct
+sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — pbr_raytrace_routine's vocabulary, flat per-triangle
+                                 //   the path tracer shades through sv::material instead; the same four fields are attributes of the builtin `pbr` type
 ```
 
 ## Layout — the tree a view is filled with
@@ -135,6 +135,149 @@ Three properties worth knowing:
 - **A cycle degrades.** It reports a `plan_diagnostic` and drops that one leaf; every sibling still renders.
   A view tree is frequently data, so it must not assert.
 
+## Material data on the GPU — attributes, and the block a permutation reads
+
+```cpp
+m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes into a persistent buffer, keyed on attribute.hash
+m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; attribute_format format; attribute_frequency frequency; element_count;}
+
+m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key; layout from generate_material_shader over `resolved`
+m.get_instance(id)                     // -> instance_record {i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded;}
+m.contains_instance(id) / m.instance_count()
+sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
+m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
+
+m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the material resolved, its permutation compiled, its block resolved
+                                       //   material_id::invalid falls back to sv::default_material, so a mesh always draws
+m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
+                                       //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
+sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv_instance
+```
+
+A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv_attribute_desc`
+(`{bindless index, 0, element stride}`) per mesh-sourced attribute, and a bindless index per sampled texture.
+
+Gotchas:
+
+- **`gpu_resource_manager::create` requires `textures_2d` and `buffers`** in the bindless config, whatever else it declares.
+  A sampled texture is acquired into the first; geometry, attributes and parameter blocks into the second.
+- **Every index in a block is THIS EPOCH's**, never a pinned one — which is why a block is rebuilt per frame rather than cached across frames.
+  That is what makes the access declaration correct by construction: nothing a hit reads reached the GPU without an acquire.
+- **`describe_instance` must be called on the list that traces with it, and before `freeze()`** — it is where those indices are minted.
+- **The block's bytes are the epoch's; its buffer is not.** The record owns a persistent buffer and re-uploads only when the bytes actually differ.
+  A fresh transient buffer per frame would mint a new descriptor every frame, leaving the staging group permanently dirty.
+  Every trace then re-mints the whole 8752-descriptor table, which exhausts the heap in seconds.
+- **The layout and shader key must come from ONE `generate_material_shader`** over that same resolved material, or the block is filled at offsets the shader does not read.
+- **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
+- **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
+- **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
+- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `sv_instance` in `shaders/material_runtime.hlsli`.
+
+## Materials — a type, an instance, and the frequency chain
+
+`material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
+
+```cpp
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; hash128 hash; }
+sv::material_type::create(name, signature, shader)   // -> hashes all three; asserts a name declared twice, and a default that is not its format's size
+t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
+sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
+sv::material_signature_entry::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
+sv::material                     // { string name; material_type_id type; vector<material_attribute_binding> overrides; hash128 hash; }
+sv::material::create(name, type, overrides)          // -> hashes type + overrides; validates NOTHING (it cannot see the type)
+sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
+sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
+
+sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `pbr` and `unlit`
+lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
+lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
+lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
+lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
+sv::builtin_material::pbr / unlit                    // the names the builtins register under
+sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
+sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
+sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
+sv::acquire_shader_library()     // -> result<slib::shader_library*>, process-wide — what a GENERATED permutation compiles through
+sv::acquire_material_library()   // -> result<material_library*>, created once per process and shared
+
+sv::resolve_material(type, material, mesh)           // -> resolved_material; the pure form
+sv::resolve_material(lib, material_id, mesh)         // -> the same, resolving the id through the library
+sv::resolved_material            // { material_type const*; material const*; vector<resolved_attribute>; hash128 permutation_key, parameter_key; }
+sv::resolved_attribute           // { string_view name; attribute_format format; material_frequency frequency;
+                                 //   span<byte const> constant; mesh_attribute const* attribute;
+                                 //   texture_sample_source const* sample; mesh_attribute const* uv; }
+                                 //   exactly one payload is live, `frequency` says which; `uv` rides along with `sample` and is never null when it isn't
+sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture
+```
+
+**The enum order IS the precedence** — a value varying more finely beats one varying more coarsely, and `resolve_material` compares nothing else.
+`is_final`, on a declaration or a binding, stops the walk there so no finer frequency overrides it — which is how a material refuses a mesh's roughness texture.
+A `final` texture binding stops it even when its own sample was skipped, so the mesh's texture never wins by the back door.
+A candidate that cannot be used is skipped rather than fatal: a mesh attribute at the wrong format, or a texture whose `uv_attribute` the mesh does not carry, simply loses its turn.
+So every declaration resolves to something and a mesh carrying none of what a type asks for still draws.
+
+**The two keys are the point.**
+`permutation_key` covers only the SHAPE of the resolution (which rank won, the geometric frequency, the uv attribute and sampler) plus the type's hash, so gold and copper share one generated shader.
+`parameter_key` covers the resolved values (constant bytes, texture ids, each mesh attribute's own hash), and keys the per-instance slot they are written into.
+Only a texture sample forces a second permutation, which is what makes "the shader stays the same" mechanical rather than aspirational.
+Neither is what a shader cache is keyed on: `material_shader_key` folds `permutation_key` together with the options it is generated under, and a `scene_item::shader_key` is that.
+
+Gotchas:
+
+- **Every payload on a `resolved_attribute` BORROWS** — from the library, the material or the mesh.
+  A resolved material must not outlive any of them.
+- **Nothing is ever evicted from a library.** A `material_id` is written into GPU memory outliving its frame, so the ids have to stay meaningful; this is why it is not an `impl::lru_pool`.
+- **`material::create` validates nothing** against the type, because it cannot see one.
+  `material_library::acquire` is where a binding naming an undeclared attribute asserts.
+- **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+
+## Material shaders — one permutation, generated
+
+`material/shader_generator.hh`; `shaders/material_runtime.hlsli` is the hand-authored half it is written against.
+
+```cpp
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; material_parameter_layout layout; vector<sg::sampler> samplers; hash128 key;}
+                                 //   samplers[i] is what `sv_sampler_i` must be bound to; the text names a register and nothing else records the state
+sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
+sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; }
+                                 //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
+{.epilogue_include = "pt_material_hit.hlsli"}   // -> a full DXR closest-hit for this permutation, not just the material function
+sv::material_shader_key(permutation_key, opts)  // -> hash128 — what `g.key` is, without generating anything
+
+resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, in the context's preferred format, over cfg.bindless
+sv::material_shader_cache::create(format, opts = {})   // one compiled closest-hit per permutation; `opts` is COPIED and is part of the key
+sv::material_shader_cache::hit_entry_point / hit_epilogue_include   // "PtClosestHit" / "pt_material_hit.hlsli"
+cache.generation_options()       // -> material_shader_options borrowing from the cache — what to pass material_shader_key
+cache.acquire(resolved)          // -> material_permutation const& {hash128 key; layout; vector<sg::sampler> samplers; async_compiled_shader shader; string source;}
+cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
+sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
+sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
+sv::material_slot_kind           // constant | attribute_descriptor (an sv_attribute_desc) | texture_index (a u32 into the 2D table)
+
+slib::shader_library::compile_source(src, stage, entry, format, {.include_dir = "sv_shaders"})  // -> sg::async_compiled_shader
+```
+
+The generated source is, in order: the runtime include, only the bindless tables this permutation touches, one `SamplerState` per
+distinct sampler, then the entry function.
+That function declares one local per signature attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
+and then runs the type's fragment verbatim over them.
+`g.key` is `material_shader_key(resolved.permutation_key, opts)`: the resolution's shape AND how these options spell it.
+Two calls agreeing on that pair generate byte-identical source, and nothing else may share their cache entry — a second cache over different bindless budgets gets its own.
+
+Gotchas:
+
+- **The layout is the contract, and both sides read it.** The shader loads slot `offset`; the CPU fills slot `offset`.
+  Nothing recomputes it independently, which is why it comes back with the source rather than being derivable.
+- **A sampled attribute takes TWO slots** — the texture index, and the `sv_attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
+- **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
+  Three strides plus a runtime branch would be the other trade; see `material_runtime.hlsli`.
+- **`SampleLevel`, never `Sample`** — a ray tracing hit shader has no derivatives to pick a mip from.
+- **Every bindless index is wrapped in `NonUniformResourceIndex`**, because it varies per instance within a wave.
+- **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
+- **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier, is an HLSL keyword or builtin type, starts with `sv_`, or is `surface` / `ctx`.
+  Rejected rather than sanitized: the type's own fragment is written against the declared name.
+- **A generated permutation does not hot-reload on an include edit** — the key hashes the resolution and the options, not the include's contents.
+
 ## Mesh authoring — geometry + what a material reads
 
 One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh` and `mesh_texture.hh`.
@@ -162,8 +305,9 @@ sv::attribute_format_of<T>       // the format of an element type — scalars an
 sv::attribute_frequency          // per_instance (exactly 1 element, create asserts) | per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle
                                  //   per_edge is RESERVED and create asserts on it
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
-sv::mesh_texture                 // { string name; texture_id texture; } — a texture offered under a slot name the material binds
-sv::material_id                  // thin handle naming ONE material definition (owned elsewhere); nothing mints one yet
+sv::texture_sample_source        // { texture_id texture; string uv_attribute; sg::sampler sampler; } — everything a sample needs but what it is FOR
+sv::mesh_texture                 // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
+sv::material_id                  // thin handle naming ONE material definition, minted by material_library::acquire
 ```
 
 The material is what gives the three lists their meaning: it decides which attribute names it samples, which texture slots it binds, and how the flags change what it emits.
@@ -172,6 +316,7 @@ So a mesh may carry data no material uses and miss data another would want — a
 The mesh offers no by-name lookup, deliberately: a material resolves the names it wants once, into whatever binding table it draws from, rather than scanning strings per draw.
 Copying a mesh shares the pinned payloads (a refcount bump), so passing one around is cheap.
 Nothing renders an `sv::mesh` yet: the renderer still consumes `sv::scene_item` (ids into the managers), and the bridge is `triangle_data::from(triangle_geometry)`.
+`mesh.material` is likewise authored and not yet drawn — `sv::resolve_material` says what it means, but no shader is generated from the answer.
 The seeds behind every content key live in `impl/content_hash.hh`, so a geometry and the payload it is uploaded as agree on one key instead of caching the same bytes twice.
 
 ## Camera control — orbit and first-person
@@ -209,7 +354,7 @@ Set `look_requires_button = false` once the caller has captured the cursor (`sr:
 ## Resources by id — the managers
 
 ```cpp
-sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials } with per-manager budgets
+sv::gpu_resource_manager::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials, textures; bindless_config bindless }
 sv::mesh_manager::create(ctx, cfg)     // cfg = manager_config { resource_budget budget }; ctx must outlive it
 
 // What you hand a manager: an owning cc::pinned_data payload + the cc::hash128 that identifies it.
@@ -223,30 +368,70 @@ mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; el
 mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, but an indexed BLAS: PrimitiveIndex() order follows the index buffer
 sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas; }
 material_manager::acquire(material_data) -> material_set_id  // O(1) if resident; else uploads (one pbr_material_gpu per triangle)
-material_manager::acquire(attributes, triangle_count) -> material_set_id
-                                                             //   the same from a mesh's per_triangle sv::pbr_attribute lists — what scene_ref::add_mesh calls
-                                                             //   keyed by folding the attributes' own hashes, so it never re-hashes their bytes; a missing one falls back to pbr_material's default
+                                                             //   pbr_raytrace_routine's path only — the path tracer reads a per-instance block instead
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
-scene_resources.begin_frame(epoch)                  // reclaim + advance; the CALLER owns this — once per frame, no routine does it
-sv::mesh_id / material_set_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
+resources.advance_to(epoch)                         // reclaim + advance; IDEMPOTENT, so every window's draw path may call it and the first one pays
+resources.current_epoch()                           // -> sg::epoch — what it last advanced to
+sv::mesh_id / material_set_id / instance_id / attribute_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
 ```
 
 The managers ride on `sv::impl::lru_pool<Id, Record>`, the reusable id-pool.
 It mints ids, tracks each record's byte size and last-used epoch, and evicts on the idle timeout or the byte budget, least-recently-used first.
-It never evicts this frame's working set; `begin_frame` in its header states that rule exactly.
+It never evicts this frame's working set; `advance_to` in its header states that rule exactly.
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
 A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
 
-Bindless tables are `sg::bindless_array` over a staging binding group the caller owns — see the shaped-graphics cheat sheet.
-sv holds no bindless type of its own.
+### Bindless tables — declared by sv, owned by the manager
+
+```cpp
+sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d / _2d_array / cube / cube_array / _3d / buffers (+ count_)
+sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: gBindlessTextures2D, gBindlessBuffers, …
+sv::space_of(table)         // -> u32 — one register space per table, so a category needs no register-offset math
+sv::bindless_table_budget   // { bindless_table table; u32 count; }  — count 0 OMITS the table; a non-zero count < 2 ASSERTS (sg reads 1 as a scalar binding)
+sv::bindless_config         // { cc::vector<bindless_table_budget> tables = default_bindless_tables(); }
+sv::make_bindless_bindings(cfg)  // -> cc::vector<sg::binding> — the hand-declared layout; pure, so it needs no context
+
+m.acquire_texture(table, raw_view) -> sg::bindless_index   // THIS EPOCH ONLY; asserts when frozen or when the table is not declared
+m.acquire_buffer(raw_view) -> sg::bindless_index           // the same for the byte-address table
+m.pin_texture(table, raw_view) -> sg::bindless_element_handle  // pinned; h->index() outlives the epoch. NOTHING in sv uses one
+m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for the byte-address table
+                                            //   a pin needs no unlock, and is recorded for the access declaration like an acquire
+m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
+m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
+bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
+bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
+bound.declare_raytracing_access(cmd)        // declares EVERY declared table for the next dispatch_rays, empty ones included
+m.bindless_layout()                         // -> the same layout, without taking a snapshot
+m.has_table(table) / m.table_capacity(table)
+
+// textures + the follow-up work their policy asks for
+sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
+m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, queues the rest
+m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; residency state; i32 uploaded_mips, total_mips; }
+sv::residency                // pending | base_resident | complete — an id never blocks, so what varies is how good it is yet
+m.record_pending_work(cmd) -> i32   // records what THIS epoch's budget allows, oldest first; returns dispatches spent
+m.pending_work_count()              // -> isize — resources still waiting for their follow-up
+// config: { texture_policy textures_policy = {.generate_mips = true}; work_budget work = {.max_dispatches_per_epoch = 16} }
+```
+
+**The two budgets are different things.** Bytes in flight are sg's to schedule (`ctx.stream.set_upload_ratio`, per-handle priorities, aging).
+What `work_budget` bounds is the work that runs *after* a resource lands — mip generation today — and leaving it unbounded is what produces the microstutter.
+A chain is never split across epochs: a partially generated one would read as complete while its tail is uninitialized.
+
+The layout is hand-written rather than reflected, so the manager is constructible before any shader compiles — a shader matches the names above.
+The lock lives here rather than on `sg::bindless_array` because the invariant spans every array over one staging group.
+What keeps an index valid is sg's reclaim rule, not the lock: a full array reclaims only what was NOT acquired this epoch, and never a pinned element.
+See the header's TODO block for what that leaves open.
+An index that must outlive its epoch is *pinned*, and the type system enforces it: a `bindless_index` cannot be stored where a persistent one belongs.
+**sv pins nothing.** Every index a hit reads is acquired for the epoch that records with it, which is what makes `bound.declare_raytracing_access` complete by construction rather than by remembering.
 
 ## Rendering — the view_renderer + routines
 
 ```cpp
 // Both the FRAME's job — once, before the first view resolves its ids or reaches for its accumulator.
-resources.begin_frame(ctx.current_epoch())
+resources.advance_to(ctx.current_epoch())
 store.begin_frame(u64(ctx.current_epoch()))               // reclaims idle view textures; skipping it only means nothing is reclaimed
 
 // One view -> the texture the store keeps under its id. A convenience for a caller tracing a single view with no plan.
@@ -265,6 +450,11 @@ sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // outp
 
 // The leaf routines they drive — each an sg::render_routine<> (everything that traces/draws is a routine):
 sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches the GI integrator into the UAV target (no-op if the shaders did not compile)
+sv::pathtrace_routine::is_ready(cmd)                 // -> whether the LAST execute dispatched; false before the first one
+sv::pt_trace_desc                                    // the trace's targets and constants, plus:
+                                                     //   instance_table — one sv::instance_gpu per TLAS instance, in that order
+                                                     //   hit_groups     — the permutations, in hit-group index order; tlas_instance::hit_group_offset indexes it
+                                                     //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
 sv::pt_frame_constants_gpu                           // { camera_gpu camera; area_light_gpu light; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; } — 256 bytes
 
 // Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
@@ -398,7 +588,8 @@ A view whose camera the caller set last frame is skipped, so the two never fight
 ```cpp
 // the whole loop
 auto const mesh = sv::mesh{.geometry = sv::triangle_geometry::create_from_positions(positions),  // once: this pins and hashes
-                           .attributes = sv::pbr_material_attributes(materials)};                // per-face PBR, scalarized
+                           .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colors)},
+                           .material = sv::default_material(*sv::acquire_material_library().value())};
 
 for (auto f : sv::interactive("main"))
 {
@@ -425,16 +616,15 @@ for (auto f : sv::interactive("simple"))
 
 ```cpp
 // setup (once): build the scene through the managers
-auto resources = sv::scene_resources::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
-auto mesh = resources.meshes.acquire(sv::triangle_data::create(positions));   // or indexed_triangle_data::create(positions, indices)
-auto mats = resources.materials.acquire(sv::material_data::create(materials));
+auto resources = sv::gpu_resource_manager::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
+auto const item = resources.acquire_scene_item(mesh);   // geometry + BLAS, the material resolved, its permutation compiled
 
 // per frame: describe -> flatten -> record -> present, in one command list
 auto def = sv::viewer_definition{};
 
 auto v = sv::view_data{};
 v.id = sv::view_id::from_string("main");
-sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = mats});
+sv::ensure_scene_3d(v).items.push_back(item);
 def.views.push_back(cc::move(v));
 
 // a root view whose one layer is a layout naming that view — what sv::viewer synthesizes per frame
@@ -453,7 +643,7 @@ auto const plan = sv::build_render_plan(def, {w, h}, frame_index, history);
 
 auto rt = sc->acquire_backbuffer();
 auto cmd = ctx.create_command_list();
-resources.begin_frame(ctx.current_epoch());                 // both once per frame, before anything reaches for a texture
+resources.advance_to(ctx.current_epoch());                 // both once per frame, before anything reaches for a texture
 store.begin_frame(u64(ctx.current_epoch()));
 sv::viewer_renderer::execute(*cmd, def, plan, resources, store, rt.cleared(clear_color));
 ctx.submit_command_list_and_present(*sc, cc::move(cmd));
@@ -488,14 +678,12 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   ray reads only visibility) rather than reusing the surface payload.
 - **The frame-constants cbuffer is padded to 256 bytes** — a D3D12 CBV is sized in 256-byte multiples, so a
   smaller backing buffer overruns.
-- **One mesh per view for now** — the trace binds the first item's vertex/material buffers; multi-mesh needs
-  per-instance indexing (a flagged extension). The TLAS is still built from every item.
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
-  `mesh_record::is_indexed` says which a record is, and it must reach the closest-hit through `frame_constants_gpu::mesh_is_indexed` / `pt_frame_constants_gpu::mesh_is_indexed`.
-  That field is an `sr::gpu_boolean` (shaped-rendering owns it), so the plain `bool` off the record assigns straight into it.
-  The `view_renderer` sets it for you; a test driving a routine directly must set it, or the flat path will read `Indices` as if it were real.
+  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's closest-hit through `instance_gpu::is_indexed`, per instance.
+  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `sr::gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  A test driving that routine directly must set it, or it will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
   Seed with `initial_camera` / `initial_orbit` instead for a view that should converge.

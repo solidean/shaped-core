@@ -414,40 +414,6 @@ TEST("sv - a mesh attribute is typed, pinned and content-hashed")
           != a.hash);
 }
 
-TEST("sv - per-face pbr materials scalarize into per_triangle attributes")
-{
-    auto const materials = cc::vector<sv::pbr_material>{
-        {.base_color = tg::vec3f(1, 0, 0), .metallic = 0.25f, .roughness = 0.5f, .emissive = tg::vec3f(0, 0, 0)},
-        {.base_color = tg::vec3f(0, 1, 0), .metallic = 0.75f, .roughness = 0.125f, .emissive = tg::vec3f(2, 2, 2)}};
-
-    auto const attributes = sv::pbr_material_attributes(materials);
-    CHECK(attributes.size() == 4);
-
-    auto const by_name = [&](cc::string_view name) -> sv::mesh_attribute const&
-    {
-        for (auto const& a : attributes)
-            if (a.name == name)
-                return a;
-        CHECK(false);
-        return attributes[0];
-    };
-
-    for (auto const& a : attributes)
-    {
-        CHECK(a.frequency == sv::attribute_frequency::per_triangle); // one element per face, whatever the field
-        CHECK(a.element_count() == 2);
-    }
-
-    // Every field survives the round trip, in triangle order and at the type its name documents.
-    CHECK(by_name(sv::pbr_attribute::base_color).elements_as<tg::vec3f>()[1] == tg::vec3f(0, 1, 0));
-    CHECK(by_name(sv::pbr_attribute::metallic).elements_as<f32>()[0] == 0.25f);
-    CHECK(by_name(sv::pbr_attribute::roughness).elements_as<f32>()[1] == 0.125f);
-    CHECK(by_name(sv::pbr_attribute::emissive).elements_as<tg::vec3f>()[1] == tg::vec3f(2, 2, 2));
-
-    // Content-hashed like every other attribute, so an unchanged mesh re-acquires rather than re-uploads.
-    CHECK(sv::pbr_material_attributes(materials)[0].hash == attributes[0].hash);
-}
-
 TEST("sv - attribute_format spans scalars, vectors and matrices")
 {
     static_assert(sv::attribute_format_of<f32>.is_scalar());
@@ -515,7 +481,7 @@ TEST("sv - a mesh carries the data its material draws it with")
         sv::mesh_attribute::create("normal", sv::attribute_frequency::per_vertex,
                                    cc::vector<tg::vec3f>{tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1)}));
     m.attributes.push_back(sv::mesh_attribute::create_value("fade", 0.5f));
-    m.textures.push_back({.name = "albedo", .texture = sv::texture_id(3)});
+    m.textures.push_back({.name = "albedo", .source = {.texture = sv::texture_id(3), .uv_attribute = "uv"}});
 
     // The lists are the material's input, keyed by name; the mesh only holds them.
     REQUIRE(m.attributes.size() == 2);
@@ -524,12 +490,12 @@ TEST("sv - a mesh carries the data its material draws it with")
     CHECK(m.attributes[1].name == "fade"); // a per-instance value rides the same list
     CHECK(m.attributes[1].value_as<f32>() == 0.5f);
     REQUIRE(m.textures.size() == 1);
-    CHECK(m.textures[0].texture == sv::texture_id(3));
+    CHECK(m.textures[0].source.texture == sv::texture_id(3));
 
     // An unauthored mesh draws, casts and receives — the empty flag set would draw nothing.
     CHECK(m.is_visible());
     CHECK(m.flags.has(sv::mesh_flag::casts_shadow));
-    CHECK(m.material == sv::material_id::invalid); // no material library mints ids yet
+    CHECK(m.material == sv::material_id::invalid); // an unauthored mesh names no material
 
     // Copying shares the pinned payload rather than duplicating the buffers.
     auto const copy = m;
@@ -599,7 +565,7 @@ TEST("sv - viewer_definition assembles a view")
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("v0");
     v.resolution = tg::vec2i(640, 480);
-    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
+    sv::ensure_scene_3d(v).items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
     def.views.push_back(cc::move(v));
 
     REQUIRE(def.views.size() == 1);
@@ -625,7 +591,7 @@ TEST("sv - a view's geometry lives on a layer, not on the view")
     CHECK(v.layers[0].blend == sv::layer_blend::replace);
 
     // Asking again returns the same layer rather than appending a second one.
-    scene.items.push_back({.mesh = sv::mesh_id(1), .materials = sv::material_set_id(1)});
+    scene.items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
     CHECK(sv::ensure_scene_3d(v).items.size() == 1);
     CHECK(v.layers.size() == 1);
 }

@@ -22,8 +22,8 @@ RWTexture2D<float4> GBuffer : register(u1);
 // reprojection reads at a different pixel than it writes — in place that would be a race.
 // HistoryColor's .a carries that pixel's own accumulated sample count, which is what makes the estimator per-pixel.
 //
-// t4 and up: the global root signature covers every stage, so these share a register space with the hit shader's
-// Materials (t1), Vertices (t2) and Indices (t3) — see mesh.hlsli and pt_hit.hlsl.
+// t4 and up: the global root signature covers every stage, so these share a register space with the closest-hit's
+// Instances (t1) — see pt_material_hit.hlsli.
 Texture2D<float4> HistoryColor : register(t4);
 Texture2D<float4> HistoryGBuffer : register(t5);
 

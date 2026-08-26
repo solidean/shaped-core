@@ -34,7 +34,7 @@ TEST("sv - flat-PBR raytraced view (headless)")
 
     // Build the scene through the managers (this is where the BLAS is built).
     auto const cloud = sv_test::make_triangle_cloud(64);
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
     REQUIRE(resources.meshes.contains(mesh));

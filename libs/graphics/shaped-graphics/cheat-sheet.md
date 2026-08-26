@@ -576,16 +576,23 @@ sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle c
                                       //   even if that is nothing: unset_array, or an empty range, answers it. array elements themselves may stay vacant
                                       // NOT thread-safe (snapshot() mutates); a taken snapshot is independent — later sets never touch it
                                       // dx12: sets write a private non-shader-visible heap; a dirty snapshot is ONE CopyDescriptorsSimple, a clean one is free
-// sg::bindless_array — a bindless view over ONE array binding of a staging group: view identity -> element index. Owns no descriptor, mints nothing.
+// sg::bindless_array — a bindless view over ONE array binding of a staging group: view identity -> element index. Owns no descriptor.
 #include <shaped-graphics/binding/bindless_array.hh>
 sg::bindless_array::for_binding(ctx, sbg_handle, name)  // -> bindless_array (by value); KEEPS the group handle; asserts the binding exists and is an ARRAY; CLEARS it (which also counts as setting it)
-arr.acquire(raw_view)       // -> u32 element index — same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor
-                            //   an index is valid ONLY for the epoch it was acquired in — re-acquire the working set every epoch
-                            //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
-arr.slot() / capacity() / occupied_count()  // -> binding_slot / u32 / u32 (capacity IS the binding's count)
-arr.lock() / unlock()       // void — refuses acquires until unlock, which must come in the SAME epoch (both asserted); mints NOTHING
-arr.lock_scoped()           // -> sg::bindless_lock — RAII form, unlocks at scope exit; move-only (a moved-from lock is disarmed)
-                            // the SNAPSHOT stays yours: lock every array over the group, sbg->snapshot(), bind, unlock
+//   MOVE-CONSTRUCTIBLE ONLY: no copy, no assignment — the scopes hold a reference to their state and an assignment could not rebind them. One array per binding.
+// TWO scopes, picked by HOW LONG the index must stay true (state is shared, so copies/moves agree — no aliasing hazard):
+arr.transient.acquire(raw_view)   // -> sg::bindless_index (enum class : u32) — valid ONLY for the epoch it was acquired in; re-acquire the working set every epoch
+                                  //   same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor
+                                  //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
+arr.persistent.acquire(raw_view)  // -> sg::bindless_element_handle (shared_ptr<bindless_element const>) — pinned; the index outlives the epoch
+                                  //   THE ONLY index you may write into GPU memory that outlives an epoch (a material buffer above all)
+                                  //   re-acquiring a held view returns the SAME handle; the refcount IS the pin
+                                  //   last handle out frees the slot + clears the descriptor — unless it was ALSO acquired transiently this epoch, which defers it to the next sweep
+h->index() / h->slot()            // -> u32 / binding_slot
+// the two return types differ ON PURPOSE: storing a transient index somewhere persistent does not compile
+arr.slot() / capacity() / occupied_count() / pinned_count()  // -> binding_slot / u32 / u32 / u32 (capacity IS the binding's count; pins raise the floor the working set fits above)
+                            // NO lock here: guarding "my mint is in the snapshot I bound" spans every array over the group, so it belongs to the group's OWNER
+                            //   (sv::gpu_resource_manager is that owner in shaped-viewer; it holds the lock and hands out the snapshot)
                             // several arrays over different bindings of one group are independent; access declaration is the CONSUMER's (declare_array_*_access)
 
 // recording (on a command_list, via the cmd.compute scope):

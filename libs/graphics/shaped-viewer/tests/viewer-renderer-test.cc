@@ -66,9 +66,8 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
         SKIP("no DXC compiler to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
-    auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     // An output split into a row of three cells; each view traces at its cell's size and knows where it sits.
     // The odd width is on purpose: the cells must not have to divide evenly.
@@ -86,7 +85,7 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
         v.resolution = tg::vec2i(x1 - x0, output_size[1]);
         v.camera = sv::camera::orbiting(tg::pos3d::zero, 4.0, tg::angle_d::make_from_degree(40.0 * i),
                                         tg::angle_d::make_from_degree(20.0));
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         def.views.push_back(cc::move(v));
     }
     (void)add_layout_root(def, {}, {.rows = 1});
@@ -114,8 +113,8 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
                                                           .usage = sg::texture_usage::render_target});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch()); // the frame's job, not a routine's
-    auto store = sv::view_store{};              // and so is what its views keep across frames
+    resources.advance_to(ctx.current_epoch()); // the frame's job, not a routine's
+    auto store = sv::view_store{};             // and so is what its views keep across frames
     sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
                                  output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
     ctx.submit_command_list(cc::move(cmd));
@@ -123,7 +122,7 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
 
     // Every view resolved against the same two resources, so nothing was uploaded per view.
     CHECK(resources.meshes.count() == 1);
-    CHECK(resources.materials.count() == 1);
+    CHECK(resources.instance_count() == 1);
 }
 
 // No views at all: the pass still opens, so the output's clear lands and the target is defined.
@@ -140,13 +139,13 @@ TEST("sv - viewer renderer with no views still runs the clear (headless)")
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the blit shader");
 
-    auto resources = sv::scene_resources::create(ctx);
+    auto resources = sv::gpu_resource_manager::create(ctx);
 
     auto const output = ctx.persistent.create_texture_2d(
         {.format = sg::pixel_format::bgra8_unorm, .width = 64, .height = 64, .usage = sg::texture_usage::render_target});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch());
+    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
     sv::viewer_renderer::execute(*cmd, {}, {}, resources, store,
                                  output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
@@ -180,9 +179,8 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
         SKIP("no DXC compiler to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(16);
-    auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     auto const output_size = tg::vec2i(96, 48);
 
@@ -193,7 +191,7 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
         // Half the target, so the frame pass really does leave a narrowed viewport behind it.
         v.resolution = tg::vec2i(output_size[0] / 2, output_size[1]);
         v.camera = sv::camera{.position = tg::pos3d(0, 0, -3.5)};
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         def.views.push_back(cc::move(v));
     }
     (void)add_layout_root(def);
@@ -212,7 +210,7 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
          .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch());
+    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
     sv::viewer_renderer::execute(*cmd, def, plan_for(def, output_size), resources, store,
                                  rt.cleared(tg::vec4f(0, 0, 0, 1)));
@@ -255,9 +253,8 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
         SKIP("no DXC compiler to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(16);
-    auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
     auto const output_size = tg::vec2i(128, 64);
 
@@ -268,7 +265,7 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
         auto v = sv::view_data{};
         v.id = sv::view_id::from_string(name);
         v.camera = sv::camera{.position = tg::pos3d(0, 0, -3.5)};
-        sv::ensure_scene_3d(v).items.push_back({.mesh = mesh, .materials = materials});
+        sv::ensure_scene_3d(v).items.push_back(item);
         def.views.push_back(cc::move(v));
         return sv::view_index(def.views.size() - 1);
     };
@@ -331,7 +328,7 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
                                                           .usage = sg::texture_usage::render_target});
 
     auto cmd = ctx.create_command_list();
-    resources.begin_frame(ctx.current_epoch());
+    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
     store.begin_frame(u64(ctx.current_epoch()));
     sv::viewer_renderer::execute(*cmd, def, plan, resources, store,

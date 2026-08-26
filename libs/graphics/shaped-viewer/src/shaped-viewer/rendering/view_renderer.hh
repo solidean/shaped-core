@@ -34,7 +34,7 @@ struct sv::plan_resources
 /// It takes its own guard for the whole trace; the leaf it drives takes none, so driving it under the guard nests no lock.
 ///
 /// Nothing here advances `resources` or the store: both are per-frame operations, and a per-view routine cannot know how many more views the frame holds.
-/// Call `resources.begin_frame(ctx.current_epoch())` and `store.begin_frame(ctx.current_epoch())` once per frame, before the first view.
+/// Call `resources.advance_to(ctx.current_epoch())` and `store.begin_frame(ctx.current_epoch())` once per frame, before the first view.
 ///
 /// `sg::render_routine::evict` no longer reaches the accumulated images, since they are not held here — what keeps a
 /// reloaded tracer from blending into an image the old shaders produced is the reload generation folded into the trace hash.
@@ -52,7 +52,7 @@ public:
     /// A view whose traced image changed at all — camera, resolution, lights, geometry, settings — restarts from a blank accumulator on its own.
     [[nodiscard]] static sg::texture_2d execute(sg::command_list& cmd,
                                                 view_data const& v,
-                                                scene_resources& resources,
+                                                gpu_resource_manager& resources,
                                                 view_store& store);
 
     /// Allocates or resizes every texture `plan` names, and hands them back index-parallel to its targets and traces.
@@ -72,7 +72,7 @@ public:
                       render_plan const& plan,
                       u32 trace_index,
                       plan_resources const& res,
-                      scene_resources& resources,
+                      gpu_resource_manager& resources,
                       view_store& store);
 
 protected:

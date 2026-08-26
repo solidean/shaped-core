@@ -17,38 +17,56 @@ sg::bindless_array sg::bindless_array::for_binding(context& ctx, staging_binding
     // The table starts empty, so the descriptors must too — and this is also what says the binding was set.
     group->unset_array(slot);
     auto const capacity = u32(group->array_size(slot));
-    return bindless_array(ctx, cc::move(group), slot, capacity);
+    return bindless_array(std::make_shared<impl::bindless_array_state>(ctx, cc::move(group), slot, capacity));
 }
 
-sg::bindless_array::bindless_array(context& ctx, staging_binding_group_handle group, binding_slot slot, u32 capacity)
-  : _ctx(ctx), _group(cc::move(group)), _slot(slot), _table(capacity)
+sg::impl::bindless_array_state::bindless_array_state(context& ctx,
+                                                     staging_binding_group_handle group,
+                                                     binding_slot slot,
+                                                     u32 capacity)
+  : ctx(&ctx), group(cc::move(group)), slot(slot), table(capacity)
 {
 }
 
-u32 sg::bindless_array::acquire(raw_view const& view)
+u32 sg::impl::bindless_array_state::_acquire(raw_view const& view, bool pin)
 {
-    CC_ASSERT(!_locked, "no acquires while the bindless array is locked (unlock first)");
-
     // The table keys on the view itself, so resources participate by address and a hash collision resolves to
     // an inequality rather than a shared slot; the mapped entry holds the view, keeping that address valid.
-    // Every mint and reclaim is mirrored onto the staging group, which owns the descriptors.
-    auto const r
-        = _table.acquire(view, _ctx.current_epoch(), [&](u32 freed) { _group->unset_array_element(_slot, int(freed)); });
+    auto const e = ctx->current_epoch();
+    auto const r = pin ? table.acquire_pinned(view, e, [&](u32 freed) { clear(freed); })
+                       : table.acquire(view, e, [&](u32 freed) { clear(freed); });
     if (r.inserted)
-        _group->set_array_element(_slot, int(r.index), view);
+        group->set_array_element(slot, int(r.index), view);
     return r.index;
 }
 
-void sg::bindless_array::lock()
+void sg::impl::bindless_array_state::unpin(u32 index)
 {
-    CC_ASSERT(!_locked, "the bindless array is already locked");
-    _locked = true;
-    _lock_epoch = _ctx.current_epoch();
+    table.unpin(index, ctx->current_epoch(), [&](u32 freed) { clear(freed); });
 }
 
-void sg::bindless_array::unlock()
+void sg::impl::bindless_array_state::clear(u32 index)
 {
-    CC_ASSERT(_locked, "unlock without a lock");
-    CC_ASSERT(_ctx.current_epoch() == _lock_epoch, "lock and unlock must happen in the same epoch");
-    _locked = false;
+    group->unset_array_element(slot, int(index));
+}
+
+sg::bindless_element_handle sg::bindless_array_persistent_scope::acquire(raw_view const& view)
+{
+    auto const index = _state.acquire_pinned(view);
+
+    // One element is pinned once: a second acquire of a view already held shares the existing handle, so the
+    // refcount counts holders rather than acquires, and the slot frees exactly when the last one lets go.
+    if (auto const* weak = _state.elements.get_ptr(index))
+        if (auto existing = weak->lock())
+            return existing;
+
+    auto handle = std::shared_ptr<bindless_element>(new bindless_element(_state.shared_from_this(), index));
+    _state.elements[index] = handle;
+    return handle;
+}
+
+sg::bindless_element::~bindless_element()
+{
+    _state->elements.erase(_index);
+    _state->unpin(_index);
 }

@@ -67,6 +67,11 @@ slib::current_reload_generation();          // -> u64; it *is* sg::reload_genera
 lib.can_compile(language, format);          // -> bool;  lib.supported_formats(language) -> vector
 lib.assets();                               // -> span<shader_asset_handle const>
 lib.filesystem();                           // -> mount_table const&  (everything mounted)
+lib.compile_source(src, stage, entry, format, opts = {})  // -> sg::async_compiled_shader; text that was never a file
+slib::compile_source_options     // { shader_language language = hlsl; string_view include_dir; string_view label = "<generated>"; }
+// The door for GENERATED / downloaded / UI-authored shader text: compile_shader resolves the package owning a path, and such a
+// source is under none. Includes still resolve against the mount table, so generated code may pull in a package's .hlsli files.
+// NOTHING is cached — a caller generating a source already has a better key for it than a hash of the text would be.
 
 slib::reload_config                         // { double interval_ms = 200; bool unthreaded = false;
                                             //   bool force_polling = false; }

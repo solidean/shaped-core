@@ -49,6 +49,7 @@ What is left is the interaction on top of it, in dependency order:
   What remains is the coverage gap it exposed: every tracing test but `pathtraced-view-test` asserts only CPU-side
   facts, so none of them would notice tracing nothing at all.
   Until then, a tracing test that means anything needs `nx::config::main_thread` *and* an `is_ready` assertion.
+  That assertion now reports the last trace rather than the routine, so it belongs AFTER the execute rather than before it.
 - **The disocclusion thresholds are guesses**: 1% of view depth on position, 0.9 on the normal dot.
   They want tuning against real content, and probably want to be per-view rather than constants in the raygen.
 - **No spatial filter.** Reuse is purely temporal, so a freshly disoccluded pixel shows its raw estimate until it accumulates.
@@ -56,6 +57,86 @@ What is left is the interaction on top of it, in dependency order:
 - **One traced layer per view is still assumed** in `view_renderer::execute`, the single-view convenience the GPU tests
   drive.
   The plan and `trace` are already per `(view, layer)`.
+
+## What the bindless lock does not cover
+
+`sv::gpu_resource_manager` holds the lock, and its header carries the same two entries.
+They are recorded rather than solved: the lock is sound, but it is not what makes an index valid.
+What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not acquired this epoch* — which is structural and needs no lock.
+
+- **The lock prohibits where a generation stamp would verify.**
+  Bump a counter on every mint and record it in `bound_resources`.
+  Asserting at bind time that the snapshot covers every index the recording used would *check* the invariant rather than forbid its violation — same cost, and a failure that names what went wrong.
+- **The lock is global where the hazard is per-recording.**
+  A routine that legitimately wants to acquire mid-recording — a stream just landed, a later trace in the same list wants it — has one correct answer.
+  That answer is a fresh snapshot, rebound for the dispatches after it.
+  A clean `snapshot()` is the cached handle, so it is nearly free.
+  The lock refuses instead.
+
+## What the material system still needs
+
+The chain is joined end to end.
+A `sv::mesh` names a material, `scene_ref::add_mesh` resolves it against the mesh, and `gpu_resource_manager` generates and compiles its permutation and fills its parameter block.
+`pathtrace_routine` then traces a DXR pipeline carrying one hit group per permutation.
+What is left is narrower than it was:
+
+- **slib has no named-HLSL-fragment asset kind.**
+  A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
+  Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
+- **Two permutations may not disagree about a sampler register.**
+  A generated source names `sv_sampler_0` at `s0` and the pipeline bakes the states in as name-matched static samplers, so one register is one state for the whole pipeline.
+  The DXR-native answer is a per-hit-group *local* root signature, which sg's shader table does not carry yet.
+  Until it does, `collect_samplers` asserts when two materials claim one register with different states — loudly on the dev box, rather than an image nobody can explain.
+  Two materials sampling the same way still share it silently, which is the case that is actually fine.
+
+- **A generated permutation does not hot-reload when an `.hlsli` it includes is edited.**
+  The generated source carries a literal `#include` line whose bytes never change when the file does.
+  `material_shader_key` hashes the resolution and the generation options, never the include's contents.
+  Folding `slib::current_reload_generation()` in is not the fix: it is bumped for any watched file, so it would rebuild every permutation rather than the ones that changed.
+  What is needed is for `shader_library::compile_source` to return its `outcome.dependencies`, which it already computes and discards.
+  The cache can then hash the resolved include contents and rebuild precisely what moved.
+
+- **A sampled attribute cannot say what it is sampled THROUGH.**
+  `resolved_attribute::uv` is one hardcoded field: a `float2` mesh attribute, found by name, and nothing else may play that role.
+  The generalization is a *dependent* attribute: one that declares which other attribute supplies its coordinate.
+  A 1D coordinate into a 1D texture, a second uv set and triplanar then become the same mechanism rather than three special cases.
+  It is a change to `resolved_attribute`, to the two shape-side hashes in `resolve_material`, and to the slot the generator emits for it.
+- **One buffer per parameter block.**
+  That is one bindless slot per distinct (material, mesh) pairing rather than per instance, which is affordable but not free.
+  Packing many blocks into one buffer is invisible to the shader — it already takes an offset — so it is an optimization rather than a change of contract.
+- **A parameter block is rebuilt every epoch, per distinct (material, mesh) pair.**
+  That is tens of bytes of CPU work per pair per frame, and it buys an access declaration correct by construction: every index a hit reads is minted by the call that writes it.
+  The buffer it is written into stays *persistent*, and is re-uploaded only when the bytes change.
+  A fresh transient buffer per frame mints a descriptor per frame, which leaves the staging group permanently dirty and re-mints the whole bindless table on every trace.
+  That exhausted the descriptor heap within a second of `interactive-showcase-manual-test`, so the persistence is load-bearing rather than incidental.
+
+- **Nothing evicts a parameter block.**
+  The LRU pool went away with the pin it existed to hold, so the set is bounded by the distinct (material, mesh) pairs a process ever draws rather than by a budget.
+  Each is one small buffer plus its slots; a long-lived session cycling through materials would grow without bound.
+  Folding the records onto `impl::keyed_cache` alongside the other managers is what would bound it.
+
+- **A pipeline is keyed on the whole permutation SET, in scene order.**
+  Two views whose scenes hold the same materials in a different order build two pipelines over the same shaders.
+  Sorting the set before keying it would collapse them, at the cost of a `hit_group_offset` that no longer follows first use — worth doing once a scene has enough materials for it to matter.
+- **The generator handles scalars and vectors of f32 / i32 / u32 only.**
+  A matrix attribute has no settled `ByteAddressBuffer` layout here, and the narrow and 64-bit scalars need SM 6.2 16-bit types or a split load.
+  `hlsl_type_of` returns empty for those and `generate_material_shader` asserts, rather than emitting something that will not compile.
+- **The accumulation hash can restart a converged image for something that is not a scene change.**
+  `trace_hash` hashes each record's `vertices` and `indices` bindless indices plus its BLAS pointer.
+  Those are stable while a working set is.
+  They move the moment something reclaims — a bindless array that fills and rotates elements, or a mesh evicted from `mesh_manager` and re-uploaded under a new BLAS handle.
+  Same scene, restarted accumulation, nothing reporting it.
+  The rule the fix has to keep is that the hash may be imprecise in **one direction only**:
+  a render setting that feeds the hash without changing the image — a "high quality mirror" toggle in a scene with no mirrors — costs a restart nobody minds,
+  while a restart on a static scene the user did nothing to is not acceptable.
+  Precise content hashing for accumulation is what eventually fixes it.
+- **A library hook has no reset, and whether it should have one differs per hook.**
+  `acquire_shader_library`, `acquire_material_library` and `acquire_context` each memoize the first *successful* acquire into a function-local static that nothing clears.
+  So the first success decides for the process.
+  slib's constraint is real and external — a second `slib::shader_library` would fight the first over the package globals both write into — so a shader-library reset is not obviously legal.
+  The material library is scene state with no such constraint.
+  Whatever lands has to account for tests running concurrently.
+  `material-resolution-test.cc` already installs its own material library process-wide without `nx::exclusive`, hedging around the race with `CHECK(builds <= 1)`.
 
 ## Everything else
 
@@ -71,15 +152,8 @@ What is left is the interaction on top of it, in dependency order:
 - **`per_edge` attributes need an edge table on `triangle_geometry`.**
   The enumerator exists and `mesh_attribute::create` rejects it; what is missing is the numbering — the edges themselves (each naming its two vertices) plus each triangle's three edge indices.
   That table also decides whether opposite half-edges share one entry, which is the real design question.
-- **An `sv::mesh` is authored but not rendered as one.** `scene_ref::add_mesh` takes one and translates it — geometry through `triangle_data::from`, per-face PBR through the
-  `sv::pbr_attribute` lists — but what reaches the trace is still a `scene_item` naming two manager ids.
-  What is missing is the material *definition* the `material_id` names, plus general attribute upload; only the four PBR fields cross to the GPU today, and only because the
-  closest-hit already reads a `pbr_material_gpu` per triangle.
-- **`mesh_attribute` cannot hold a struct.** `attribute_format` is a scalar plus a dimensionality, so a `pbr_material` array must be scalarized into four `per_triangle`
-  attributes (`sv::pbr_material_attributes`).
-  A struct protocol — a field list of scalar/vector members, so one attribute carries one AoS payload — deletes that function and the four blessed names with it.
-- **`sv::pbr_attribute`'s names are a stand-in.** A material definition should declare which attributes it samples; there is no such type, so the repack in
-  `material_manager::acquire` looks up four fixed names instead.
+- **`mesh_attribute` cannot hold a struct.** `attribute_format` is a scalar plus a dimensionality, so an array of PBR values has to be authored as one attribute per field.
+  A struct protocol — a field list of scalar/vector members, so one attribute carries one AoS payload — would let a caller hand over the array they already have.
 - Fold `lru_pool` onto `impl::keyed_cache` — it is `keyed_cache` plus minted ids plus a content-hash index — so sv carries one eviction implementation rather than two.
 - Give `view_ref` a conditional-override vocabulary (an `ImGuiCond`-style `when { always, first_use }`), so `camera` /
   `resolution` / placement stop needing a separate `initial_*` setter each.
@@ -92,13 +166,7 @@ What is left is the interaction on top of it, in dependency order:
 - Multi-window compositing (multi-view within one window is done; the window system is one-per-process, so this needs shared ownership across viewers).
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
-- **`mesh_is_indexed` belongs on the mesh, not the frame.**
-  Geometry layout is a per-BLAS property.
-  It rides in `frame_constants_gpu` / `pt_frame_constants_gpu` only because the trace binds one mesh per view.
-  That is the same reason `Vertices` / `Indices` / `Materials` are single global bindings.
-  Fold it into the per-instance mesh descriptor table the "one mesh per view" seam wants anyway, indexed by `InstanceID()` and carrying each mesh's vertex/index range or bindless handles.
-  The bindless side now exists in sg: `sg::bindless_array` mints an element index per view.
-  What remains is building the group its arrays sit on, the per-instance table itself, and wiring the trace through it.
-  Moving the flag alone would not help: a per-instance flag over a still-global vertex buffer is no more correct.
-  The DXR-native alternative is per-geometry data in the hit-group shader record via a local root signature, which specializes the `[branch]` in `mesh.hlsli` away.
-  It needs local-root-signature support in sg's shader table first.
+- **`mesh_is_indexed` still rides in `frame_constants_gpu`**, for `pbr_raytrace_routine` alone.
+  The path tracer reads it per instance now, out of `instance_gpu`, and its own frame block no longer carries it.
+  The flat routine keeps the global `Vertices` / `Indices` / `Materials` bindings `shaders/mesh.hlsli` declares, which is the reason the flag is still per frame there.
+  Retiring it means giving that routine the same instance table, or retiring the routine.

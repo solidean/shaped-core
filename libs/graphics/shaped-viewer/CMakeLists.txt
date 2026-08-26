@@ -12,9 +12,15 @@ project(shaped-viewer LANGUAGES CXX)
 add_library(shaped-viewer
     src/shaped-viewer/shaped-viewer.cc
     src/shaped-viewer/context.cc
+    src/shaped-viewer/shader_library.cc
     src/shaped-viewer/scene/light.cc
     src/shaped-viewer/scene/background.cc
-    src/shaped-viewer/scene/pbr_material.cc
+    src/shaped-viewer/material/material_type.cc
+    src/shaped-viewer/material/material.cc
+    src/shaped-viewer/material/material_library.cc
+    src/shaped-viewer/material/builtin_material_types.cc
+    src/shaped-viewer/material/resolve.cc
+    src/shaped-viewer/material/shader_generator.cc
     src/shaped-viewer/view/camera.cc
     src/shaped-viewer/view/camera_controller.cc
     src/shaped-viewer/view/view_data.cc
@@ -27,6 +33,8 @@ add_library(shaped-viewer
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/resources/resource_managers.cc
+    src/shaped-viewer/resources/bindless_tables.cc
+    src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
@@ -34,6 +42,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/view_renderer.cc
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
+    src/shaped-viewer/resources/material_shader_cache.cc
 )
 
 target_sources(shaped-viewer
@@ -49,6 +58,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/interactive.hh
     src/shaped-viewer/viewer.hh
     src/shaped-viewer/context.hh
+    src/shaped-viewer/shader_library.hh
     src/shaped-viewer/scene/pbr_material.hh
     src/shaped-viewer/scene/light.hh
     src/shaped-viewer/scene/background.hh
@@ -57,6 +67,13 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/mesh_attribute.hh
     src/shaped-viewer/scene/mesh_flags.hh
     src/shaped-viewer/scene/mesh_texture.hh
+    src/shaped-viewer/material/material_attribute.hh
+    src/shaped-viewer/material/material_type.hh
+    src/shaped-viewer/material/material.hh
+    src/shaped-viewer/material/material_library.hh
+    src/shaped-viewer/material/resolve.hh
+    src/shaped-viewer/material/shader_generator.hh
+    src/shaped-viewer/material/impl/material_hash.hh
     src/shaped-viewer/scene/scene_item.hh
     src/shaped-viewer/view/view_id.hh
     src/shaped-viewer/view/camera.hh
@@ -70,10 +87,13 @@ target_sources(shaped-viewer
     src/shaped-viewer/layout/solvers.hh
     src/shaped-viewer/layout/layout_tree.hh
     src/shaped-viewer/resources/resource_data.hh
+    src/shaped-viewer/resources/instance_data.hh
     src/shaped-viewer/impl/content_hash.hh
     src/shaped-viewer/impl/keyed_cache.hh
     src/shaped-viewer/impl/view_state.hh
     src/shaped-viewer/resources/resource_managers.hh
+    src/shaped-viewer/resources/bindless_tables.hh
+    src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
     src/shaped-viewer/rendering/frame_constants.hh
     src/shaped-viewer/rendering/raytrace_routine.hh
@@ -83,6 +103,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/view_renderer.hh
     src/shaped-viewer/rendering/viewer_renderer.hh
     src/shaped-viewer/rendering/shaders.hh
+    src/shaped-viewer/resources/material_shader_cache.hh
 )
 
 target_compile_features(shaped-viewer PUBLIC cxx_std_23)
@@ -134,8 +155,12 @@ sc_add_shader_package(
         pathtrace.hlsl:raygen:PathTraceRayGen
         pt_hit.hlsl:miss:PtMiss
         pt_hit.hlsl:miss:PtShadowMiss
-        pt_hit.hlsl:closest_hit:PtClosestHit
 )
+
+# The examples corpus: the viewer as a caller actually reaches for it.
+# The subdirectory gates itself on the window + dx12 + DXC combination an example needs, and
+# sc_add_single_file_examples is a no-op when SC_BUILD_EXAMPLES is off.
+add_subdirectory(examples)
 
 # Test executable.
 # The vocabulary test needs no device and runs everywhere; the GPU tests drive a dx12 WARP/hardware context
@@ -150,6 +175,11 @@ if(SC_BUILD_TESTS)
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
+        tests/bindless-tables-test.cc
+        tests/material-resolution-test.cc
+        tests/material-shader-generator-test.cc
+        tests/material-shader-compile-test.cc
+        tests/material-shader-cache-test.cc
     )
 
     target_link_libraries(shaped-viewer-test
@@ -170,6 +200,7 @@ if(SC_BUILD_TESTS)
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
             tests/layout-routine-test.cc
+            tests/gpu-resource-manager-test.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
             tests/immediate-viewer-window-manual-test.cc

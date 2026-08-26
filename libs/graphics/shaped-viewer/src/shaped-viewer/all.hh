@@ -10,6 +10,7 @@
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/interactive.hh>
 #include <shaped-viewer/refs.hh>
+#include <shaped-viewer/shader_library.hh>
 #include <shaped-viewer/viewer.hh>
 
 // what a caller puts into a view
@@ -22,6 +23,14 @@
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
+
+// how a mesh is shaded
+#include <shaped-viewer/material/material.hh>
+#include <shaped-viewer/material/material_attribute.hh>
+#include <shaped-viewer/material/material_library.hh>
+#include <shaped-viewer/material/material_type.hh>
+#include <shaped-viewer/material/resolve.hh>
+#include <shaped-viewer/material/shader_generator.hh>
 
 // what a view is, and how it is framed
 #include <shaped-viewer/view/camera.hh>
@@ -40,6 +49,9 @@
 #include <shaped-viewer/layout/solvers.hh>
 
 // resources
+#include <shaped-viewer/resources/bindless_tables.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
+#include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 

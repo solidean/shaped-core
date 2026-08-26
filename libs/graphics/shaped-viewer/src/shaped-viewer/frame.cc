@@ -123,10 +123,10 @@ view_index frame::add_view(cc::string_view id)
     return index;
 }
 
-scene_resources& frame::resources()
+gpu_resource_manager& frame::resources()
 {
     CC_ASSERT(_viewer != nullptr, "a closed frame has no viewer to draw resources from");
-    return _viewer->scene_resources_of();
+    return _viewer->resources();
 }
 
 impl::view_state& frame::state_of(view_index view)

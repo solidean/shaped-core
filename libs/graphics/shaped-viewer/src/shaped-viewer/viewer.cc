@@ -8,8 +8,6 @@
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/shaders.hh> // sr::shader_package (blit)
 #include <shaped-rendering/window.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh> // slib::create_dxc_compiler
-#include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
@@ -19,6 +17,7 @@
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
+#include <shaped-viewer/shader_library.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
@@ -100,7 +99,7 @@ struct viewer::impl
 {
     // Only `resources` must be constructed in place (its managers hold a context reference, so it is not
     // assignable); everything else try_create fills in after make_unique.
-    impl(sg::context& c, scene_resources res) : ctx(&c), resources(cc::move(res)) {}
+    impl(sg::context& c, gpu_resource_manager res) : ctx(&c), resources(cc::move(res)) {}
 
     view_id id;
     viewer_config config;
@@ -115,9 +114,8 @@ struct viewer::impl
     cc::unique_ptr<sr::window> window;
     sg::swapchain_handle swapchain;
 
-    cc::unique_ptr<slib::shader_library> shader_library; // the viewer owns its shader library
 
-    scene_resources resources;
+    gpu_resource_manager resources;
 
     u64 frame_index = 0;
     bool stopped = false; // device lost
@@ -207,24 +205,18 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
         return cc::error("shaped-viewer: could not create a swapchain for the window");
     auto sc = sc_r.value();
 
-    // The viewer creates and owns its shader library, registering sv's and sr's packages plus a DXC compiler when available.
-    // Only one library may exist per process.
-    auto shader_library = cc::make_unique<slib::shader_library>();
-#if SLIB_HAS_DXC
-    auto compiler = slib::create_dxc_compiler();
-    if (compiler.has_value())
-        shader_library->add_compiler(cc::move(compiler.value()));
-#endif
-    shader_library->add_package(sv::shader_package());
-    shader_library->add_package(sr::shader_package());
+    // The library is process-wide rather than the viewer's, because a *generated* material permutation is compiled from the
+    // render path, which has no viewer to reach back to.
+    // A caller wanting their own registers it through set_acquire_shader_library before the first viewer.
+    if (acquire_shader_library().has_error())
+        return cc::error("shaped-viewer: could not bring up a shader library");
 
-    auto im = cc::make_unique<viewer::impl>(ctx, scene_resources::create(ctx));
+    auto im = cc::make_unique<viewer::impl>(ctx, gpu_resource_manager::create(ctx, config.resources));
     im->id = view_id::from_string(id_str);
     im->config = cc::move(config);
     im->window_system = cc::move(ws);
     im->window = cc::move(win);
     im->swapchain = cc::move(sc);
-    im->shader_library = cc::move(shader_library);
 
     im->start_time = std::chrono::steady_clock::now();
     return viewer(cc::move(im));
@@ -283,7 +275,7 @@ bool viewer::is_running() const
     return !im.window->is_close_requested() && !im.window_system->is_quit_requested();
 }
 
-scene_resources& viewer::scene_resources_of()
+gpu_resource_manager& viewer::resources()
 {
     return _impl->resources;
 }
@@ -560,10 +552,39 @@ void viewer::finish_frame(frame& f)
     }
 
     // The root exists only to own the frame's layout; it holds no scene of its own and its target is the backbuffer.
+    //
+    // Which layout that is depends on what the caller put on the window's own root view.
+    // A window view carrying nothing but a layout is flattened away — the root adopts that layout directly, so the
+    // common case costs no second texture.
+    // A window view carrying content of its own — `f.add_scene()`, the shorthand that names no view at all — cannot be:
+    // it has to render into its own texture, so the root gets a layout of one leaf naming it.
     auto root = view_data{};
     root.id = im.id;
-    if (!def.nodes.empty())
+
+    auto const window_draws_itself = [&]
+    {
+        if (f._windows.empty())
+            return false;
+        for (auto const& l : def[f._windows.front()].layers)
+            if (l.kind != layer_kind::layout)
+                return true;
+        return false;
+    }();
+
+    if (window_draws_itself)
+    {
+        auto const window_view = f._windows.front();
+
+        // Appended, so every leaf the caller already filled keeps its node id.
+        auto const node = def.nodes.add_container(invalid_node);
+        auto leaf = layout_leaf{};
+        leaf.views.push_back(window_view);
+        (void)def.nodes.add_leaf(node, cc::move(leaf));
+        root.layers.push_back({.kind = layer_kind::layout, .blend = layer_blend::replace, .root_node = node});
+    }
+    else if (!def.nodes.empty())
         root.layers.push_back({.kind = layer_kind::layout, .blend = layer_blend::replace, .root_node = layout_node_id(0)});
+
     def.root_view = view_index(def.views.size());
     def.views.push_back(cc::move(root));
 
@@ -650,7 +671,7 @@ void viewer::finish_frame(frame& f)
         // Reclaim stale / over-budget resources and advance to this frame's epoch, before any view resolves its ids or
         // reaches for its accumulator.
         // The view store already advanced on the same epoch, back in next_frame.
-        im.resources.begin_frame(im.ctx->current_epoch());
+        im.resources.advance_to(im.ctx->current_epoch());
 
         // With no views authored this places nothing and the clear alone lands, so the window is never left with
         // stale contents.

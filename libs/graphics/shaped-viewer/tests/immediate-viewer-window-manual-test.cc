@@ -1,3 +1,5 @@
+#include "viewer_test_env.hh"
+
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -116,16 +118,23 @@ TEST("sv - interactive viewer, one scene with no ceremony (manual)", nx::config:
         SKIP("no rendering context available");
 
 
+    // Content, so this test can actually be read: a window view with no layout reaches the screen only because
+    // finish_frame gives it a leaf of its own, and a black window is the failure that regressed here before.
+    auto const cloud_data = sv_test::make_triangle_cloud(48);
+    auto const cloud = sv_test::as_mesh("cloud", cloud_data.positions, cloud_data.materials);
+
     // The shortest thing that renders: no window, no view, no layout named at all — and no title either, so the
     // viewer's own name titles the window.
     // `f.add_scene()` resolves to the default window's default view's 3D layer, and that view fills the window.
     for (auto f : sv::interactive("shaped-viewer — one scene"))
     {
         auto scene = f.add_scene();
+        scene.add_mesh(cloud);
         scene.add_light({.center = tg::pos3f(0, 3, 0),
                          .half_extent_u = tg::vec3f(0.75f, 0, 0),
                          .half_extent_v = tg::vec3f(0, 0, 0.75f),
                          .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
+        scene.background(sv::background::gradient(tg::vec3f(0.70f, 0.96f, 1.44f), tg::vec3f(0.21f, 0.28f, 0.37f)));
     }
 
     CHECK(true);

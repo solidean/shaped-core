@@ -36,31 +36,34 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the path-tracing shaders");
 
-    // Build the Cornell box through the managers (this is where the BLAS is built).
+    // Build the Cornell box through the managers: the BLAS build, the material resolution and the permutation compile
+    // all happen here, exactly as `scene_ref::add_mesh` drives them.
     auto const box = sv_test::make_cornell_box();
-    auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(box.positions));
-    auto const materials = resources.materials.acquire(sv::material_data::create(box.materials));
-    REQUIRE(resources.meshes.contains(mesh));
-    REQUIRE(resources.materials.contains(materials));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cornell box", box.positions, box.materials));
+    REQUIRE(resources.meshes.contains(item.mesh));
+    REQUIRE(resources.contains_instance(item.instance));
 
-    auto const* const mesh_rec = resources.meshes.get_ptr(mesh);
-    auto const* const mat_rec = resources.materials.get_ptr(materials);
+    auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
-    REQUIRE(mat_rec != nullptr);
 
-    // The same materials as per-triangle attributes — the path scene_ref::add_mesh takes.
-    // It uploads its own set (a different content key), and re-acquiring it must hit the cache rather than upload
-    // again, since that is what keeps a per-frame add_mesh O(1).
-    auto const attributes = sv::pbr_material_attributes(box.materials);
-    auto const from_attributes = resources.materials.acquire(attributes, box.materials.size());
-    REQUIRE(resources.materials.contains(from_attributes));
-    CHECK(resources.materials.get(from_attributes).count == box.materials.size());
-    CHECK(resources.materials.acquire(attributes, box.materials.size()) == from_attributes);
+    // Re-adding an unchanged mesh must land on every id it already minted, since that is what keeps a per-frame
+    // add_mesh O(1) rather than an upload and a compile.
+    auto const again = resources.acquire_scene_item(sv_test::as_mesh("cornell box", box.positions, box.materials));
+    CHECK(again.mesh == item.mesh);
+    CHECK(again.instance == item.instance);
+    CHECK(again.shader_key == item.shader_key);
+
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
 
     // One instance at identity — the Cornell box geometry is already in world space.
+    // Hit group 0 is the one permutation this scene shades with.
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0});
+    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+
+    auto hit_groups = cc::vector<sv::material_permutation const*>();
+    hit_groups.push_back(permutation);
 
     // A pinhole camera outside the open front, looking down the +z axis into the box.
     auto const size = tg::vec2i(96, 96);
@@ -81,13 +84,16 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     fc.samples_per_pixel = 16;
     fc.max_bounces = 5;
     fc.seed = 1u;
-    fc.mesh_is_indexed = mesh_rec->is_indexed; // a plain triangle list here — the closest-hit skips Indices
 
     // A closed Cornell box lets no ray escape, so the environment probe stays dark; still bind it (the miss
     // reads it). Zero coefficients = black background.
     auto const bg = sv::background{};
 
     auto cmd = ctx.create_command_list();
+
+    // Built on the list that traces with it: every bindless index it names is minted here, for this epoch.
+    auto records = cc::vector<sv::instance_gpu>();
+    records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
 
     auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
         1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
@@ -115,6 +121,14 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
              .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
     };
 
+    // One `sv_instance` per TLAS instance: where this item's material parameters live, and where its geometry does.
+    auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+        records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd->upload.data_to_buffer(instance_table, records);
+
+    // The tables the closest-hit reaches all of that through, locked for the recording.
+    auto const bindless = resources.freeze();
+
     sv::pathtrace_routine::execute(*cmd, {.frame = frame,
                                           .background = background,
                                           .instances = instances,
@@ -122,9 +136,9 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
                                           .gbuffer = aux(),
                                           .history_color = aux(),
                                           .history_gbuffer = aux(),
-                                          .materials = mat_rec->materials,
-                                          .vertices = mesh_rec->vertices,
-                                          .indices = mesh_rec->indices});
+                                          .instance_table = instance_table,
+                                          .hit_groups = hit_groups,
+                                          .bindless = &bindless});
 
     // The routine degrades to a no-op when its shaders do not build, so without this every CPU-side check below
     // still passes against a target nothing ever wrote.
@@ -136,5 +150,6 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
 
     // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
     CHECK(mesh_rec->triangle_count == box.materials.size());
-    CHECK(!mesh_rec->is_indexed); // the non-indexed path: a non-indexed BLAS + the stand-in bound as Indices
+    CHECK(!mesh_rec->is_indexed); // the non-indexed path: the corner indices come from the primitive, not a buffer
+    CHECK(records[0].is_indexed == 0u);
 }

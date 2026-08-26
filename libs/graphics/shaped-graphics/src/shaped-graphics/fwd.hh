@@ -219,14 +219,22 @@ struct named_sampler; // {name, sampler} — static sampler (group layout) / dyn
 class staging_binding_group;
 enum class binding_slot : u32; // defined below — declared here so the definition can be written qualified
 
-// A non-owning bindless view over ONE array binding of a staging_binding_group (see binding/bindless_array.hh).
+// A bindless view over ONE array binding of a staging_binding_group (see binding/bindless_array.hh).
 class bindless_array;
-class bindless_lock; // RAII lock over a bindless_array: no acquires for its lifetime
+class bindless_array_transient_scope;  // array.transient — indices for this epoch only
+class bindless_array_persistent_scope; // array.persistent — shared holds whose index outlives the epoch
+
+// One element index into a bindless array, valid ONLY for the epoch it was acquired in.
+// A type of its own rather than a u32, so that storing one past its epoch does not compile.
+enum class bindless_index : u32;
+
+class bindless_element; // one pinned element, always held through the handle below
 
 namespace impl
 {
 template <class Key>
-class slot_table; // a bindless_array's key -> element-index map (binding/impl/slot_table.hh)
+class slot_table;           // a bindless_array's key -> element-index map (binding/impl/slot_table.hh)
+class bindless_array_state; // what a bindless_array owns, shared so an element may outlive it
 } // namespace impl
 
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the
@@ -360,6 +368,8 @@ using binding_group_handle = std::shared_ptr<binding_group const>; // immutable 
 // Mutable, unlike every other resource handle here: a staging group exists to be set, and snapshot() caches on it.
 using staging_binding_group_handle = std::shared_ptr<staging_binding_group>;
 using swapchain_handle = std::shared_ptr<swapchain>; // mutable: a swapchain is a per-frame driver (acquire/present)
+// A pinned bindless element: the refcount IS the pin, so the slot frees when the last copy dies.
+using bindless_element_handle = std::shared_ptr<bindless_element const>;
 
 // Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,
 // pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). These are the producing cc::async<T>

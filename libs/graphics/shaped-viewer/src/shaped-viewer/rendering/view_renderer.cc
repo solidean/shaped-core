@@ -6,6 +6,8 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
+#include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/view/render_settings.hh>
@@ -31,20 +33,42 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
     }
 }
 
-/// One view resolved to what the path tracer binds: the TLAS instances plus the first item's mesh/materials.
+/// One view resolved to what the path tracer binds: a TLAS instance and an `instance_gpu` per item, over the set of
+/// permutations those items shade with.
+///
+/// Two index relations, which together are the shape of the trace:
+/// `instances[i]` and `records[i]` describe the same item, and `instances[i].hit_group_offset` indexes `hit_groups`.
 struct resolved_view
 {
     cc::vector<sg::tlas_instance> instances;
-    mesh_record const* mesh = nullptr;
-    material_record const* materials = nullptr;
+    cc::vector<instance_gpu> records;
+
+    /// the parameter block each item shades with, parallel to `records` — its CONTENT identity, for the trace hash
+    cc::vector<instance_id> parameter_blocks;
+    cc::vector<material_permutation const*> hit_groups;
+
+    /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
+    cc::vector<cc::hash128> permutations;
 };
 
-resolved_view resolve_scene(layer const& l, scene_resources& resources)
+/// The hit-group index for `key` — a `scene_item::shader_key` — in `out`, appending it on first use, so the order is the
+/// scene's own.
+[[nodiscard]] u32 hit_group_of(resolved_view& out, cc::hash128 key, gpu_resource_manager& resources)
 {
-    // The bound Materials/Vertices come from the first mesh: with one item (this slice) that is exact.
-    // Multiple meshes want per-instance indexing — a flagged seam.
+    for (auto i = isize(0); i < out.permutations.size(); ++i)
+        if (out.permutations[i] == key)
+            return u32(i);
+
+    auto const* const permutation = resources.shaders.find(key);
+    CC_ASSERT(permutation != nullptr, "a scene_item names a permutation the shader cache never generated");
+    out.permutations.push_back(key);
+    out.hit_groups.push_back(permutation);
+    return u32(out.hit_groups.size() - 1);
+}
+
+resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources)
+{
     auto out = resolved_view{};
-    auto instance_index = u32(0);
 
     for (auto const& item : l.items)
     {
@@ -52,25 +76,32 @@ resolved_view resolve_scene(layer const& l, scene_resources& resources)
             continue;
 
         auto const* const mesh = resources.meshes.get_ptr(item.mesh);
-        auto const* const mats = resources.materials.get_ptr(item.materials);
         CC_ASSERT(mesh != nullptr, "scene_item references an unknown mesh_id");
-        CC_ASSERT(mats != nullptr, "scene_item references an unknown material_set_id");
+        CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
 
-        auto inst = sg::tlas_instance{.blas = mesh->blas, .instance_id = instance_index};
+        // The TLAS instance's own id is the row of the instance table this item occupies, which is what `InstanceID()` reads.
+        auto inst = sg::tlas_instance{.blas = mesh->blas,
+                                      .instance_id = u32(out.instances.size()),
+                                      .hit_group_offset = hit_group_of(out, item.shader_key, resources)};
         pack_transform(inst, item.transform);
         out.instances.push_back(cc::move(inst));
 
-        if (out.mesh == nullptr)
-        {
-            out.mesh = mesh;
-            out.materials = mats;
-        }
-        ++instance_index;
+        // This is where every index a hit reads is minted, so it must stay ahead of `freeze()` and on the list that traces.
+        out.records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
+        out.parameter_blocks.push_back(item.instance);
     }
 
-    CC_ASSERT(!out.instances.empty() && out.mesh != nullptr && out.materials != nullptr,
-              "a view needs at least one triangle-mesh item to render");
+    CC_ASSERT(!out.instances.empty(), "a view needs at least one triangle-mesh item to render");
     return out;
+}
+
+/// The instance table `r` describes, uploaded for this recording.
+[[nodiscard]] sg::buffer<instance_gpu> upload_instances(sg::command_list& cmd, resolved_view const& r)
+{
+    auto const buffer = cmd.context().transient.create_buffer<instance_gpu>(
+        r.records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd.upload.data_to_buffer(buffer, r.records);
+    return buffer;
 }
 
 /// The area light the path tracer integrates: the view's first, or the fallback below so a light-less view is still lit.
@@ -89,12 +120,9 @@ area_light primary_light(layer const& l)
 pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
                                                    layer const& l,
                                                    area_light const& light,
-                                                   mesh_record const& mesh,
                                                    tg::vec2i resolution)
 {
     auto fc = pt_frame_constants_gpu{};
-    // The trace binds this one mesh, so its geometry layout is what the closest-hit must read by.
-    fc.mesh_is_indexed = mesh.is_indexed;
     // The projection carries the aspect ratio.
     // It comes from the resolution the frame settled on rather than the view's own field, since a layout-following
     // view is sized by the rect it landed in.
@@ -154,11 +182,29 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
     for (auto const& inst : r.instances)
     {
         h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<float const>(inst.transform, 12).as_bytes()));
-        h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.blas.get()));
+        h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
     }
 
-    // Geometry identity: a re-upload under the same mesh_id is different content, and these buffers are what the trace binds.
-    return cc::combine_hash(h, cc::make_hash(r.mesh->vertices.raw().get(), r.materials->materials.raw().get()));
+    // The instance table is the whole of what a hit reads, geometry and material parameters alike, so hashing the
+    // records covers content identity for both: a re-upload under one id lands on a different bindless element.
+    //
+    // `param_buffer` is the one field taken out.
+    // The index is epoch-scoped by contract even where the slot table happens to hand back the same one, so it says
+    // nothing about the image and leaving it in would risk restarting the estimator for nothing.
+    // The `instance_id` beside it is the content identity that field stood for, since one is minted per `parameter_key`.
+    for (auto const& rec : r.records)
+    {
+        auto anonymized = rec;
+        anonymized.param_buffer = 0;
+        h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<instance_gpu const>(&anonymized, 1).as_bytes()));
+    }
+    for (auto const block : r.parameter_blocks)
+        h = cc::combine_hash(h, cc::make_hash(u32(block)));
+
+    // Which shader reads those records is not in them, and a different permutation is a different image.
+    for (auto const& key : r.permutations)
+        h = cc::combine_hash(h, cc::make_hash(key.low, key.high));
+    return h;
 }
 
 /// Frames a view may accumulate before it stops weighting new samples in.
@@ -374,7 +420,7 @@ void view_renderer::trace(sg::command_list& cmd,
                           render_plan const& plan,
                           u32 trace_index,
                           plan_resources const& res,
-                          scene_resources& resources,
+                          gpu_resource_manager& resources,
                           view_store& store)
 {
     auto& ctx = cmd.context();
@@ -392,11 +438,11 @@ void view_renderer::trace(sg::command_list& cmd,
     // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
     auto self = acquire_exclusive(cmd);
 
-    auto const resolved = resolve_scene(l, resources);
+    auto const resolved = resolve_scene(cmd, l, resources);
 
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
-    auto fc = make_pt_frame_constants_gpu(v, l, primary_light(l), *resolved.mesh, tr.resolution);
+    auto fc = make_pt_frame_constants_gpu(v, l, primary_light(l), tr.resolution);
     auto const bg = background_gpu::from(l.background);
     auto const hash = trace_hash(fc, bg, resolved, tr.resolution, self->_shader_generation);
 
@@ -427,6 +473,12 @@ void view_renderer::trace(sg::command_list& cmd,
         = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
+    auto const instance_table = upload_instances(cmd, resolved);
+
+    // Held across the dispatch: the tables are what the closest-hit reaches every mesh and texture through, and
+    // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
+    auto const bindless = resources.freeze();
+
     pathtrace_routine::execute(cmd, {.frame = frame,
                                      .background = background,
                                      .instances = resolved.instances,
@@ -434,9 +486,9 @@ void view_renderer::trace(sg::command_list& cmd,
                                      .gbuffer = gbuffer->texture,
                                      .history_color = slot->history,
                                      .history_gbuffer = gbuffer->history,
-                                     .materials = resolved.materials->materials,
-                                     .vertices = resolved.mesh->vertices,
-                                     .indices = resolved.mesh->indices});
+                                     .instance_table = instance_table,
+                                     .hit_groups = resolved.hit_groups,
+                                     .bindless = &bindless});
 
     // What the next frame reprojects through.
     rec.last_traced_camera = fc.camera;
@@ -446,7 +498,10 @@ void view_renderer::trace(sg::command_list& cmd,
         ++slot->accum_frame;
 }
 
-sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v, scene_resources& resources, view_store& store)
+sg::texture_2d view_renderer::execute(sg::command_list& cmd,
+                                      view_data const& v,
+                                      gpu_resource_manager& resources,
+                                      view_store& store)
 {
     // One span per view, which is the unit a viewer with several panes is actually spending its frame on.
     CC_RECORD_SCOPE("sv.view.render");
@@ -459,10 +514,11 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v,
     // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
     auto self = acquire_exclusive(cmd);
 
-    // resolve_scene() touches the layer's meshes/materials (get_ptr), keeping this frame's working set resident.
-    auto const resolved = resolve_scene(*scene, resources);
+    // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
+    // bindless index this trace reads.
+    auto const resolved = resolve_scene(cmd, *scene, resources);
 
-    auto fc = make_pt_frame_constants_gpu(v, *scene, primary_light(*scene), *resolved.mesh, v.resolution);
+    auto fc = make_pt_frame_constants_gpu(v, *scene, primary_light(*scene), v.resolution);
     auto const bg = background_gpu::from(scene->background);
     auto const hash = trace_hash(fc, bg, resolved, v.resolution, self->_shader_generation);
 
@@ -513,7 +569,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v,
         = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
-    // Called under our own guard, and takes none of its own.
+    auto const instance_table = upload_instances(cmd, resolved);
+    auto const bindless = resources.freeze();
+
+    // Called under our own guard; the leaf takes its own, which is a different routine and so nests no lock.
     pathtrace_routine::execute(cmd, {.frame = frame,
                                      .background = background,
                                      .instances = resolved.instances,
@@ -521,9 +580,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd, view_data const& v,
                                      .gbuffer = gb.slot->texture,
                                      .history_color = slot.history,
                                      .history_gbuffer = gb.slot->history,
-                                     .materials = resolved.materials->materials,
-                                     .vertices = resolved.mesh->vertices,
-                                     .indices = resolved.mesh->indices});
+                                     .instance_table = instance_table,
+                                     .hit_groups = resolved.hit_groups,
+                                     .bindless = &bindless});
 
     // What the next frame reprojects through.
     rec.last_traced_camera = fc.camera;

@@ -2,6 +2,7 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/impl/content_hash.hh>
+#include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 
@@ -134,86 +135,106 @@ material_set_id material_manager::acquire(material_data const& materials)
     return insert(materials.hash, {.materials = cc::move(buffer), .count = mats.size()}, size_in_bytes);
 }
 
+texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg)
+{
+    auto m = texture_manager(ctx);
+    m.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
+    return m;
+}
+
+void texture_manager::mark_mips_complete(texture_id id)
+{
+    auto* const record = mutable_record(id);
+    if (record == nullptr)
+        return;
+    record->uploaded_mips = record->total_mips;
+    record->state = residency::complete;
+}
+
+texture_id texture_manager::acquire(texture_data const& texture)
+{
+    if (auto const resident = find_by_hash(texture.hash); resident.has_value())
+        return resident.value();
+
+    CC_ASSERT(texture.width > 0 && texture.height > 0, "a texture needs a positive extent");
+    CC_ASSERT(texture.mip_count >= 1, "a texture carries at least its base level");
+
+    // The full chain is allocated up front even when only the base level is supplied, so generating the rest
+    // later fills this texture in place rather than replacing it.
+    auto const total_mips = impl::mip_count_of(texture.width, texture.height);
+    CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
+
+    auto gpu = _ctx.persistent.create_texture_2d({.format = texture.format,
+                                                  .width = texture.width,
+                                                  .height = texture.height,
+                                                  .mip_levels = total_mips,
+                                                  .usage = sg::texture_usage::readonly_texture
+                                                         | sg::texture_usage::readwrite_texture
+                                                         | sg::texture_usage::copy_dst});
+
+    // Every supplied level in one list, submitted before returning, so the id is usable the moment it is minted.
+    auto cmd = _ctx.create_command_list();
+    auto offset = isize(0);
+    for (auto mip = i32(0); mip < texture.mip_count; ++mip)
+    {
+        auto const size = impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
+        CC_ASSERT(offset + size <= texture.pixels.span().size(), "texture pixels are shorter than the mips they claim");
+        cmd->upload.bytes_to_texture(gpu.raw(), texture.pixels.span().subspan({.offset = offset, .size = size}),
+                                     {.mip_level = mip});
+        offset += size;
+    }
+    _ctx.submit_command_list(cc::move(cmd));
+
+    // The budget is charged for the whole allocated chain rather than the levels supplied so far.
+    // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
+    // completed texture would sit in the budget at three quarters of what it costs.
+    auto chain_bytes = isize(0);
+    for (auto mip = i32(0); mip < total_mips; ++mip)
+        chain_bytes += impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
+
+    // Whether it is done is the shape's answer, not the upload's: a texture given every level it has room for
+    // needs no follow-up, one given fewer is waiting on mip generation.
+    auto const state = texture.mip_count == total_mips ? residency::complete : residency::base_resident;
+
+    return insert(
+        texture.hash,
+        {.texture = cc::move(gpu), .state = state, .uploaded_mips = texture.mip_count, .total_mips = total_mips},
+        chain_bytes);
+}
+
 namespace
 {
-/// The attribute named `name`, or null when the mesh does not carry it.
-[[nodiscard]] mesh_attribute const* find_attribute(cc::span<mesh_attribute const> attributes, cc::string_view name)
-{
-    for (auto const& a : attributes)
-        if (a.name == name)
-            return &a;
-    return nullptr;
-}
-
-/// `a`'s elements as T, checked against what the attribute is supposed to carry; empty when the mesh has no such attribute.
-template <class T>
-[[nodiscard]] cc::span<T const> pbr_elements(mesh_attribute const* a, isize triangle_count)
-{
-    if (a == nullptr)
-        return {};
-
-    CC_ASSERT(a->frequency == attribute_frequency::per_triangle, "a pbr material attribute must be per_triangle");
-    CC_ASSERT(a->element_count() == triangle_count, "a pbr material attribute must hold one element per triangle");
-    return a->elements_as<T>();
-}
-
-/// `elements[i]`, or `fallback` when the mesh carries no such attribute.
-template <class T>
-[[nodiscard]] T element_or(cc::span<T const> elements, isize i, T const& fallback)
-{
-    return elements.empty() ? fallback : elements[i];
-}
+// readonly_buffer so a shader reads it as a ByteAddressBuffer through the bindless table; copy_dst for the upload.
+constexpr auto bindless_bytes_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
 
-material_set_id material_manager::acquire(cc::span<mesh_attribute const> attributes, isize triangle_count)
+attribute_manager attribute_manager::create(sg::context& ctx, manager_config const& cfg)
 {
-    CC_ASSERT(triangle_count > 0, "material_manager::acquire needs at least one triangle");
+    auto manager = attribute_manager(ctx);
+    manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
+    return manager;
+}
 
-    auto const* const base_color = find_attribute(attributes, pbr_attribute::base_color);
-    auto const* const metallic = find_attribute(attributes, pbr_attribute::metallic);
-    auto const* const roughness = find_attribute(attributes, pbr_attribute::roughness);
-    auto const* const emissive = find_attribute(attributes, pbr_attribute::emissive);
+attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
+{
+    if (auto const resident = find_by_hash(attribute.hash); resident.has_value())
+        return resident.value();
 
-    // Folded in a fixed name order, so the key does not depend on how the mesh happens to list its attributes.
-    // A missing attribute folds in as a zero digest, which is what makes "carries no emissive" its own set rather than
-    // an alias of one that does.
-    cc::hash128 const digests[] = {
-        base_color != nullptr ? base_color->hash : cc::hash128{}, metallic != nullptr ? metallic->hash : cc::hash128{},
-        roughness != nullptr ? roughness->hash : cc::hash128{}, emissive != nullptr ? emissive->hash : cc::hash128{}};
-    auto const key = cc::hash128::create(cc::span<cc::hash128 const>(digests).as_bytes(), impl::material_hash_seed);
+    auto const bytes = attribute.data.span();
+    CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
 
-    if (auto const id = find_by_hash(key); id.has_value())
-        return id.value();
-
-    auto const base_colors = pbr_elements<tg::vec3f>(base_color, triangle_count);
-    auto const metallics = pbr_elements<f32>(metallic, triangle_count);
-    auto const roughnesses = pbr_elements<f32>(roughness, triangle_count);
-    auto const emissives = pbr_elements<tg::vec3f>(emissive, triangle_count);
-
-    auto const defaults = pbr_material{};
-
-    auto gpu = cc::vector<pbr_material_gpu>();
-    gpu.reserve(triangle_count);
-    for (auto i = isize(0); i < triangle_count; ++i)
-        gpu.push_back(pbr_material_gpu::from({.base_color = element_or(base_colors, i, defaults.base_color),
-                                              .metallic = element_or(metallics, i, defaults.metallic),
-                                              .roughness = element_or(roughnesses, i, defaults.roughness),
-                                              .emissive = element_or(emissives, i, defaults.emissive)}));
-
-    auto buffer = _ctx.persistent.create_buffer<pbr_material_gpu>(
-        triangle_count, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
 
     auto up = _ctx.create_command_list();
-    up->upload.data_to_buffer(buffer, gpu);
+    up->upload.data_to_buffer(data, bytes);
     _ctx.submit_command_list(cc::move(up));
 
-    auto const size_in_bytes = buffer.size_in_bytes();
-    return insert(key, {.materials = cc::move(buffer), .count = triangle_count}, size_in_bytes);
+    return insert(attribute.hash,
+                  {.data = cc::move(data),
+                   .format = attribute.format,
+                   .frequency = attribute.frequency,
+                   .element_count = attribute.element_count()},
+                  bytes.size());
 }
 
-scene_resources scene_resources::create(sg::context& ctx, scene_resources_config const& cfg)
-{
-    return scene_resources(mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
-                           texture_manager::create(ctx));
-}
 } // namespace sv

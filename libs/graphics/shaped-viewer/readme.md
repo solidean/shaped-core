@@ -49,6 +49,16 @@ uv run dev.py test "sv "     # just the shaped-viewer tests while iterating
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.
 
+## Examples
+
+A runnable demonstration lives in [examples/](examples/), built by every Windows build and run by nobody automatically:
+
+```bash
+uv run dev.py example shaped-viewer/hello-cube
+```
+
+See [examples](../../../docs/guides/examples.md) for what an example is and how one is declared.
+
 ## More
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.

@@ -18,7 +18,21 @@
 namespace slib
 {
 struct reload_config;
+struct compile_source_options;
 } // namespace slib
+
+/// Where a source that is not a file resolves its includes, and what it is called in an error.
+/// See shader_library::compile_source.
+struct slib::compile_source_options
+{
+    shader_language language = shader_language::hlsl;
+
+    /// the virtual directory an `#include "..."` is looked for in first, before the mount root
+    cc::string_view include_dir = {};
+
+    /// what a preprocessing or compile error names, since there is no path to name
+    cc::string_view label = "<generated>";
+};
 
 /// How the reload watcher runs.
 /// See shader_library::start_hot_reload.
@@ -136,6 +150,30 @@ public:
                                                  cc::string_view entry_point,
                                                  sg::shader_format format) const;
 
+    /// Compiles HLSL (or whatever `opts.language` says) held in memory rather than mounted as a file.
+    ///
+    /// This is the door for shader text that was never authored: generated, downloaded, or typed into a UI.
+    /// `compile_shader` cannot serve it — that one resolves the package owning a path, and a generated source is under none.
+    /// Includes still resolve against the mount table, so generated code may pull in the hand-authored `.hlsli` files a package
+    /// mounted.
+    /// **An edit to one of those does NOT move a caller's cache key.** The generated source carries a literal `#include` line
+    /// whose bytes never change when the file does, and `outcome.dependencies` — the only thing that knows what was pulled in —
+    /// is not returned from here.
+    /// So a generated permutation does not hot-reload on an include edit — see [shaped-viewer's TODO](../../../shaped-viewer/docs/TODO.md).
+    ///
+    /// **slib adds no cache of its own at this seam** — which is not to say the path is uncached.
+    /// The compile goes through the same `ssc::dxc::shader_cache` every other compile does, in-memory tier and lazily-opened
+    /// persistent tier both, so a generated permutation already survives across runs.
+    /// What slib does not add is a second cache keyed on the source text: a caller generating a source already has a better key
+    /// for it — a material permutation, say — so the dedup belongs there.
+    ///
+    /// A missing compiler, a preprocessing failure, or a compile error all come back as an async error — never a throw.
+    [[nodiscard]] sg::async_compiled_shader compile_source(cc::string_view source,
+                                                           sg::shader_stage stage,
+                                                           cc::string_view entry_point,
+                                                           sg::shader_format format,
+                                                           compile_source_options const& opts = {}) const;
+
     /// The language of the package that owns `virtual_path`.
     [[nodiscard]] shader_language language_of(cc::string_view virtual_path) const;
 
@@ -158,6 +196,19 @@ private:
 
     /// The package that owns `virtual_path`. Every asset path lies under exactly one.
     [[nodiscard]] package_entry const& package_of(cc::string_view virtual_path) const;
+
+    /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, compile.
+    /// The two differ only in where the text came from and what its includes are searched against, so everything after that is here.
+    /// `package_root` is empty for a source belonging to no package, which simply drops one search root.
+    void _compile_text(compile_outcome& outcome,
+                       cc::string source,
+                       cc::string_view label,
+                       cc::string_view source_dir,
+                       cc::string_view package_root,
+                       shader_language language,
+                       sg::shader_stage stage,
+                       cc::string_view entry_point,
+                       sg::shader_format format) const;
 
     /// Alive-token handed to every asset as a weak reference, cleared first thing on destruction.
     /// Aliasing with a no-op deleter — it owns nothing, it only tracks whether we are still here.

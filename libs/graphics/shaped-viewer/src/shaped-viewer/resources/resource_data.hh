@@ -5,6 +5,7 @@
 #include <clean-core/common/utility.hh> // cc::forward, cc::move
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
@@ -75,6 +76,49 @@ struct sv::indexed_triangle_data
     {
         CC_ASSERT(g.is_indexed(), "geometry is a raw triangle list - use triangle_data::from");
         return {.positions = g.positions, .indices = g.indices, .hash = g.hash};
+    }
+};
+
+/// One texture's pixels and the shape to read them as.
+///
+/// `pixels` is tightly packed, mip 0 first and each successive mip after it, which is the layout
+/// `cmd.upload.bytes_to_texture` takes a subresource at a time.
+/// `mip_count` says how many are present: 1 is a base level on its own, and the manager is what generates the
+/// rest when its policy asks for them.
+struct sv::texture_data
+{
+    cc::pinned_data<byte const> pixels;
+    cc::hash128 hash;
+
+    sg::pixel_format format = sg::pixel_format::rgba8_unorm;
+    i32 width = 0;
+    i32 height = 0;
+    i32 mip_count = 1;
+
+    /// Pins `pixels` and hashes their bytes together with the shape.
+    ///
+    /// The shape is part of the key rather than only the bytes: the same buffer read as 64x32 and as 32x64 is
+    /// two different textures, and a content-addressed pool would otherwise hand back the first for the second.
+    template <class Pixels>
+    [[nodiscard]] static texture_data create(Pixels&& pixels,
+                                             sg::pixel_format format,
+                                             i32 width,
+                                             i32 height,
+                                             i32 mip_count = 1)
+    {
+        CC_ASSERT(width > 0 && height > 0, "a texture needs a positive extent");
+        CC_ASSERT(mip_count >= 1, "a texture carries at least its base level");
+
+        cc::pinned_data<byte const> pinned = cc::make_pinned_data(cc::forward<Pixels>(pixels));
+        i32 const shape_fields[] = {width, height, mip_count, i32(format)};
+        auto const shape = cc::hash128::create(cc::span<i32 const>(shape_fields).as_bytes(), impl::texture_hash_seed);
+        return {.pixels = cc::move(pinned),
+                .hash
+                = impl::combine_digests(cc::hash128::create(pinned.span().as_bytes(), impl::texture_hash_seed), shape),
+                .format = format,
+                .width = width,
+                .height = height,
+                .mip_count = mip_count};
     }
 };
 
