@@ -378,6 +378,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |
+| Run an example inside a review    | `uv run review.py run <name>` — executes its `example` blocks against the `run_prefixes` whitelist |
 | Coding standards & conventions   | [docs/coding-guidelines.md](docs/coding-guidelines.md)           |
 | Log or profile something         | [logging](libs/base/clean-core/docs/logging.md) / [profiling](libs/base/clean-core/docs/profiling.md) (`CC_LOG_*`, `CC_RECORD_SCOPE`, `CC_RECORD_STAT`) |
 | Recall a library's API fast      | its `cheat-sheet.md` (e.g. [clean-core](libs/base/clean-core/cheat-sheet.md), [nexus](libs/base/nexus/cheat-sheet.md)) |

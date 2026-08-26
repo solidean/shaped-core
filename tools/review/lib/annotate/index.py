@@ -9,7 +9,7 @@ That is not an optimization: a checkout can hold a complete second copy of itsel
 almost every basename as ambiguous.
 
 The review folder is indexed beside it.
-`review.toml` and `entries/040-x.md` are files an entry names as readily as it names source, and they are not in
+`review.toml` and the entry files under `entries/` are named as readily as source is, and they are not in
 the repository under review — which is why a path carries the root it was found under rather than only its name.
 """
 

@@ -65,7 +65,9 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `validate <name>` | every entry parses, every change id resolves; run it before serving a round |
 | `generate <name>` | write or refresh the overview and coverage entries |
 | `append <name> <entry>` | add blocks to an entry from stdin or `--file`, stamped with the round; **how a later round answers an earlier one** |
-| `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view |
+| `title <name> "<text>"` | name the review after reading it, which is what the tab and the navigation show |
+| `run <name> [entry]` | execute the `example` blocks and splice their output in; the only thing here that spawns a process |
+| `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view; `--history` adds superseded blocks |
 | `status <name>` | where this review stands: whether a server is really up, the round, what is still open |
 | `serve <name>` | the page the review is answered in; non-blocking |
 | `restart <name>` | stop the server and serve again on the same port, after the tool's own code changed |
@@ -100,6 +102,15 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 - **Typed text is never discarded.** A question that changed under an answer keeps the text against the new wording; a question that disappeared keeps the answer as an orphan.
 - **A finalized question is immutable.** Reword it and the tool refuses, naming the follow-up ask to write instead.
 - **The tool never re-serializes an entry you wrote.** Every write is a splice, so your formatting survives exactly.
+- **The maintainer can comment on any block, and on any line of a diff.**
+  A comment is a remark rather than a tracked question: the agent answers it next round by appending a block with `addresses:`,
+  and `validate` will not let a round be handed back while one is unanswered.
+- **A block can be superseded rather than edited.**
+  `supersedes:` retires an earlier block in the same entry; the page shows the replacement with the original struck beside it.
+  An ask that has already been answered cannot be — that is what `follows:` is for.
+- **Every file an entry names becomes a link**, resolved three ways: the exact path, a unique suffix, a bare basename.
+  Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).
+- **Glossary terms are underlined wherever they are used**, with the definition on hover, from any `prose` block carrying `glossary: true`.
 - **`entries/` belongs to the agent and `answers/` to the server**, which is why an entry can gain a paragraph while an answer to it is being typed.
 - **The `tooling` group is for friction in this tool**, not in what is being reviewed.
   It discharges nothing, so filing there costs the coverage gate nothing.
@@ -147,6 +158,9 @@ Named here rather than left to be discovered.
 - **`rank:` is accepted but not implemented.** The grammar takes it as an option kind and the page renders it as a checkbox,
   so ordering is not actually captured.
   Use `radio:` and `check:` until it is.
+- **A review folder is scratch.** It lives under `.tmp/`, the tool changes under it, and there is no migration promise;
+  making a review a durable artifact is in [TODO.md](TODO.md).
+- **Symbol links do not exist.** File and commit references resolve; a `sg::context::download` in prose does not.
 - **The published page has no offline form.** `show --all` is the fallback for reading a review away from the machine,
   and answers come back as chat text.
 

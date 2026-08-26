@@ -41,6 +41,10 @@ Define what the reader could be **wrong** about — where a term's boundary is, 
 
 ## Shape
 
+**Mark the block `glossary: true`**, and the tool underlines every term wherever another entry uses it, with the definition on hover and a click through to here.
+A term with irregular forms takes an alias list — `**atom** (atomic, atoms) — …` — since the matcher's plurals are naive.
+`validate` reports a paragraph in the block that does not parse as `**term** — definition`, which is the whole reason the block is marked rather than scraped.
+
 Numbered `018`, right after the generated `015-changes`, so it is met before any finding.
 Alphabetical within the block — a lookup that is ordered by importance is not a lookup.
 
