@@ -43,7 +43,7 @@ from .lib.core.paths import (
     entry_slug,
     validate_name,
 )
-from .lib.entry.answers import Answer, AnswerFile
+from .lib.entry.answers import Answer, AnswerFile, Comment
 from .lib.entry.askhash import canonical as ask_canonical
 from .lib.entry.askhash import hash_ask
 from .lib.entry.generate import COVERAGE_SLUG, COVERAGE_TITLE, OVERVIEW_SLUG, OVERVIEW_TITLE
@@ -93,6 +93,7 @@ __all__ = [
     "ARTIFACTS",
     "Answer",
     "AnswerFile",
+    "Comment",
     "BLOCK_TYPES",
     "Block",
     "CONTEXT_EXEMPT_GROUPS",

@@ -66,13 +66,36 @@ def render_entry(entry: Entry, answers: AnswerFile) -> str:
         out.append("")
         if block.is_ask:
             out.extend(_render_ask(block, answers))
-            continue
-        out.append(_block_heading(block))
-        if block.prose:
-            out.append("")
-            out.append(block.prose)
+        else:
+            out.append(_block_heading(block))
+            if block.prose:
+                out.append("")
+                out.append(block.prose)
+        out.extend(_render_comments([c for c in answers.comments.values() if c.block == block.anchor]))
+
+    loose = [c for c in answers.comments.values() if c.is_line or (c.block and entry.block(c.block) is None)]
+    if loose:
+        out.append("")
+        out.append("## comments not on a block")
+        out.extend(_render_comments(loose))
 
     return "\n".join(out) + "\n"
+
+
+def _render_comments(comments: list) -> list[str]:
+    """The maintainer's remarks, under whatever they were left on.
+
+    Printed inline rather than gathered at the end: a comment is about the block above it, and an agent reading
+    an entry back needs it where the thing it is about is.
+    """
+    out: list[str] = []
+    for comment in sorted(comments, key=lambda c: c.id):
+        state = "not sent yet" if comment.tentative else f"round {comment.round}"
+        out.append("")
+        out.append(f"  COMMENT {comment.id} ({state}, on {comment.where()}):")
+        for line in comment.text.strip().splitlines():
+            out.append(f"    | {line}")
+    return out
 
 
 def render_summary(entries: list[tuple[Entry, AnswerFile]]) -> str:

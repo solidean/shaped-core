@@ -950,6 +950,63 @@ def test_answers_orphan_a_vanished_ask(root: Path) -> None:
         assert not answers.answers and len(answers.orphans) == 1
 
 
+def test_a_comment_is_tentative_until_the_round_is_finalized(root: Path) -> None:
+    """Nothing reaches the agent until a round is sent, so a remark can still be deleted right up to that point."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    answers = AnswerFile.load(Path(root) / "x.json", "040-a")
+
+    block = entry.blocks[0]
+    made = answers.comment(comment_id="", text="why this way?", block=block.anchor,
+                           change="", offset=-1, round_number=1)
+    assert made.id == "c1"
+    assert not answers.comments_since(0), "a tentative comment is not part of a round"
+
+    answers.finalize(1)
+    assert [c.id for c in answers.comments_since(0)] == ["c1"]
+    assert not answers.comments_since(1), "the watermark excludes the round it names"
+
+
+def test_a_finalized_comment_cannot_be_edited(root: Path) -> None:
+    """The round that quoted it has to keep reading correctly, exactly as a finalized answer does."""
+    answers = AnswerFile.load(Path(root) / "x.json", "040-a")
+    answers.comment(comment_id="", text="the original", block="r1/prose", change="", offset=-1, round_number=1)
+    answers.finalize(1)
+    answers.comment(comment_id="c1", text="a rewrite", block="r1/prose", change="", offset=-1, round_number=2)
+    assert answers.comments["c1"].text == "the original"
+
+
+def test_deleting_a_comment_is_saving_it_empty(root: Path) -> None:
+    answers = AnswerFile.load(Path(root) / "x.json", "040-a")
+    answers.comment(comment_id="", text="never mind", block="r1/prose", change="", offset=-1, round_number=1)
+    assert answers.comment(comment_id="c1", text="  ", block="r1/prose", change="", offset=-1, round_number=1) is None
+    assert not answers.comments
+    # Ids stay monotonic, so a later comment never reuses the deleted one's anchor.
+    answers.comment(comment_id="", text="a second thought", block="r1/prose", change="", offset=-1, round_number=1)
+    assert list(answers.comments) == ["c1"]
+
+
+def test_a_comment_is_addressed_by_reference(root: Path) -> None:
+    """Outstanding is computed from `addresses:`, the way an undischarged change is, rather than tracked."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    assert not entry.addressed_comments()
+
+    answered = parse_text(ENTRY + "\n## prose\naddresses: c1 c2\n\nBoth noted; no change to the first.\n",
+                          Path("entry.md"))
+    assert answered.addressed_comments() == {"c1", "c2"}
+
+
+def test_a_comment_survives_a_round_trip_through_the_answers_file(root: Path) -> None:
+    path = Path(root) / "x.json"
+    answers = AnswerFile.load(path, "040-a")
+    answers.comment(comment_id="", text="on this hunk", block="", change="CHANGE-AAAA", offset=3, round_number=2)
+    answers.save()
+
+    reloaded = AnswerFile.load(path, "040-a")
+    comment = reloaded.comments["c1"]
+    assert comment.is_line and comment.change == "CHANGE-AAAA" and comment.offset == 3
+    assert "CHANGE-AAAA" in comment.where() and "line 4" in comment.where()
+
+
 def test_since_reports_only_finalized_answers(root: Path) -> None:
     entry = parse_text(ENTRY, Path("entry.md"))
     with tempfile.TemporaryDirectory(prefix="review-answers-") as answer_dir:

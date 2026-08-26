@@ -73,6 +73,11 @@ class Block:
         return self.attrs.get("discharges", "").split()
 
     @property
+    def addresses(self) -> list[str]:
+        """The comment ids this block answers."""
+        return self.attrs.get("addresses", "").replace(",", " ").split()
+
+    @property
     def round(self) -> int:
         try:
             return int(self.attrs.get("round", "0"))
@@ -190,6 +195,13 @@ class Entry:
             if block.type == "changes":
                 out.extend(block.change_ids)
             out.extend(block.discharges)
+        return out
+
+    def addressed_comments(self) -> set[str]:
+        """Every comment id a block in this entry claims to answer."""
+        out: set[str] = set()
+        for block in self.blocks:
+            out.update(block.addresses)
         return out
 
     def discharged_changes(self) -> list[str]:

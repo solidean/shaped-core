@@ -157,6 +157,22 @@ class Context:
                     problems.append(f"{entry.slug}: {change_id} is not in the ledger")
         return problems
 
+    def unaddressed_comments(self, paths: review.ReviewPaths, entries: list[review.Entry]) -> list[tuple[str, object]]:
+        """(entry slug, comment) for every sent comment no block claims to answer.
+
+        Computed rather than tracked, the way an undischarged change is: a comment carries no state of its own,
+        and `addresses:` on an appended block is the whole record that it was answered.
+        A tentative comment is not here — it has not been handed over, so nothing is owed yet.
+        """
+        out: list[tuple[str, object]] = []
+        for entry in entries:
+            answers = self.answers(paths, entry)
+            claimed = entry.addressed_comments()
+            for comment in answers.comments.values():
+                if not comment.tentative and comment.id not in claimed:
+                    out.append((entry.slug, comment))
+        return out
+
     def discharged(self, entries: list[review.Entry]) -> set[str]:
         """Every change id an ask discharges, across the whole review."""
         out: set[str] = set()

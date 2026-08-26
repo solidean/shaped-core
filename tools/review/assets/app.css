@@ -399,3 +399,78 @@ body.is-stale #shell {
 
 .send-actions { display: flex; gap: 10px; margin-top: 16px; }
 .send-actions button { padding: 8px 18px; font: inherit; font-weight: 600; cursor: pointer; }
+
+/* ---- comments ------------------------------------------------------------ */
+/* The button is quiet until the block is hovered: every block carries one, and twelve visible buttons
+   would read as twelve things to do rather than as one thing that is always available. */
+
+.block { position: relative; }
+
+.comment-slot { position: relative; }
+
+.comment-add {
+  position: absolute;
+  top: -1.6rem;
+  right: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.block:hover .comment-add,
+.comment-add:focus { opacity: 1; }
+.comment-add:hover { color: var(--text); border-color: var(--accent); }
+
+.comment-card {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--warn);
+  background: var(--bg-sunken);
+}
+
+.comment-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.comment-where { color: var(--text-dim); }
+.comment-state { margin-left: auto; }
+.comment-text { margin-top: 4px; white-space: pre-wrap; cursor: text; }
+
+.line-comments { margin: 0 0 10px 18px; }
+
+.comment-composer { margin: 8px 0; }
+
+.comment-composer textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.comment-actions { display: flex; gap: 8px; margin-top: 6px; }
+
+.comment-actions button {
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.comment-actions button.ghost { color: var(--text-dim); }
+.comment-actions button.danger:hover { color: var(--bad); border-color: var(--bad); }

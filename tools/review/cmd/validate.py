@@ -62,6 +62,15 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if entry.ask(name) is None:
                 warnings.append(f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it")
 
+    # A comment is written expecting an answer, so the agent may not hand back another round while one is unanswered.
+    # The gate sits here rather than on the maintainer's send: they wrote the remark, and blocking their own send on it
+    # would be the tool refusing to deliver a message because the message exists.
+    for slug, comment in ctx.unaddressed_comments(paths, entries):
+        problems.append(
+            f"{slug}: comment {comment.id} (on {comment.where()}) has no answer — "
+            f"append a block with `addresses: {comment.id}`, which a block that declines to act also satisfies"
+        )
+
     groups = set(review.groups_for(cfg.goals))
     unplaced = sorted({e.group for e in entries} - groups)
     if unplaced:

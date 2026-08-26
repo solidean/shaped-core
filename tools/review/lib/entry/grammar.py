@@ -22,7 +22,11 @@ from dataclasses import dataclass
 # `name` is optional on every type but `ask`: a block already has a derived identity, and this is for one the agent
 # expects to point at later.
 # An ask is the exception because its heading already names it, and a second spelling of the same thing is one to get wrong.
-_ANY = frozenset({"round", "name"})
+#
+# `addresses` is how the agent answers a comment: any appended block names the comment ids it responds to.
+# Outstanding is then computed from those references the way an undischarged change is, rather than tracked —
+# the tool has exactly one notion of something owed back, and a second one would be a second thing to get wrong.
+_ANY = frozenset({"round", "name", "addresses"})
 
 BLOCK_TYPES: dict[str, set[str]] = {
     "context/cold": set(_ANY),
@@ -32,7 +36,7 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "code": _ANY | {"lang", "file"},
     "changes": _ANY | {"generated", "show"},
     "recommendation": set(_ANY),
-    "ask": {"round", "discharges", "follows"},
+    "ask": {"round", "discharges", "follows", "addresses"},
     "auto-acknowledge": set(_ANY),
     "artifact": set(_ANY),
 }

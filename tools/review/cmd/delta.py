@@ -31,10 +31,20 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 def _entry_delta(entry: review.Entry, answers: review.AnswerFile, watermark: int) -> list[str]:
     fresh = [a for a in answers.since(watermark)]
-    if not fresh:
+    remarks = answers.comments_since(watermark)
+    if not fresh and not remarks:
         return []
     severity = f"/{entry.severity}" if entry.severity else ""
     out = [f"## {entry.id} {entry.title}   [{entry.group}{severity}]"]
+
+    # Printed with the answers rather than after them: a comment is a remark on this entry, and an agent that
+    # has to go looking for a second list is an agent that will not.
+    for comment in remarks:
+        out.append(f"### comment {comment.id}   (on {comment.where()})")
+        for line in comment.text.strip().splitlines():
+            out.append(f"  said: {line}")
+        out.append(f"  answer it by appending a block with `addresses: {comment.id}`")
+
     for answer in sorted(fresh, key=lambda a: a.name):
         block = entry.ask(answer.name)
         out.append(f"### {answer.name}")
@@ -97,7 +107,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     if args.finalize:
         for entry, answers in pairs:
-            if answers.finalize(cfg.next_round):
+            frozen, sent = answers.finalize(cfg.next_round)
+            if frozen or sent:
                 answers.save()
 
     body: list[str] = []

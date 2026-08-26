@@ -14,7 +14,7 @@ import html
 from pathlib import Path
 
 from ..core.paths import ReviewPaths
-from ..entry.answers import Answer, AnswerFile
+from ..entry.answers import Answer, AnswerFile, Comment
 from ..entry.parse import Block, Entry
 from .highlight import highlight_diff
 from .markdown import render as render_markdown
@@ -42,6 +42,32 @@ def _change_card(change, body: str, *, open_by_default: bool) -> str:
         f'<details class="change"{" open" if open_by_default else ""}><summary class="change-head"><code>{_esc(change.id)}</code>'
         f'<span class="change-sum">{summary}</span></summary>{reason}'
         f'{highlight_diff(body, path=change.path)}</details>'
+    )
+
+
+def _comment_card(comment: Comment) -> str:
+    """One remark, under whatever it was left on."""
+    state = "not sent yet" if comment.tentative else f"sent in round {comment.round}"
+    where = f'<span class="comment-where">{_esc(comment.where())}</span>' if comment.is_line else ""
+    return (
+        f'<div class="comment-card" data-comment="{_esc(comment.id)}">'
+        f'<div class="comment-head"><code>{_esc(comment.id)}</code>{where}'
+        f'<span class="comment-state">{_esc(state)}</span></div>'
+        f'<div class="comment-text">{_esc(comment.text)}</div></div>'
+    )
+
+
+def _comment_slot(anchor: str, comments: list[Comment]) -> str:
+    """The affordance for leaving a remark here, plus whatever has already been left.
+
+    On every block rather than only on an ask: the context tiers are where "why did we do it this way" lands,
+    and until now that question had nowhere to go but the text box of an unrelated question.
+    """
+    cards = "".join(_comment_card(c) for c in comments)
+    return (
+        f'<div class="comment-slot" data-anchor="{_esc(anchor)}">'
+        f'<button class="comment-add" type="button" title="comment on this block">comment</button>'
+        f'<div class="comment-list">{cards}</div></div>'
     )
 
 
@@ -109,6 +135,9 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
             if change.has_body and diff_path.is_file():
                 body = diff_path.read_text(encoding="utf-8", errors="replace")
             cards.append(_change_card(change, body, open_by_default=visible))
+            on_lines = [c for c in ctx["comments"] if c.change == change.id]
+            if on_lines:
+                cards.append(f'<div class="line-comments">{"".join(_comment_card(c) for c in on_lines)}</div>')
         commentary = render_markdown(block.prose, repo=repo)
         return f'<section class="changes">{commentary}{"".join(cards)}</section>'
 
@@ -148,7 +177,9 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
 
 def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: ReviewPaths, ledger, hash_of) -> str:
     """The whole entry as HTML: blocks in order, answers inline, a divider where a round begins."""
-    ctx = {"repo": repo, "paths": paths, "ledger": ledger, "answers": answers, "hash_of": hash_of}
+    comments = sorted(answers.comments.values(), key=lambda c: (c.round, c.id))
+    ctx = {"repo": repo, "paths": paths, "ledger": ledger, "answers": answers, "hash_of": hash_of,
+           "comments": comments}
 
     # A severity that repeats the group says nothing twice — `design/design`, `docs/docs` — so only a differing one is drawn.
     show_severity = entry.severity and entry.severity != entry.group
@@ -165,11 +196,22 @@ def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: Review
             if last_round:
                 parts.append(f'<div class="round-divider"><span>round {block.round}</span></div>')
             last_round = block.round
-        parts.append(_block_html(entry, block, ctx))
+        on_block = [c for c in comments if c.block == block.anchor]
+        parts.append(
+            f'<section class="block" data-anchor="{_esc(block.anchor)}">'
+            f'{_block_html(entry, block, ctx)}{_comment_slot(block.anchor, on_block)}</section>'
+        )
 
     ack = entry.acknowledgement
     if ack is not None:
         parts.append(_block_html(entry, ack, ctx))
+
+    stranded = [c for c in comments if not c.is_line and c.block and entry.block(c.block) is None]
+    if stranded:
+        parts.append(
+            '<section class="orphans"><h2>Comments whose block is gone</h2>'
+            + "".join(_comment_card(c) for c in stranded) + "</section>"
+        )
 
     if answers.orphans:
         rows = "".join(

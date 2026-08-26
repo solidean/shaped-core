@@ -190,6 +190,34 @@ class ReviewApp:
                 }
             return 200, {"answer": answer.to_record(), "hash": current_hash, "digest": written_digest}
 
+    def save_comment(self, payload: dict) -> tuple[int, dict]:
+        """Add, edit or delete one comment.
+
+        A comment is maintainer-authored, so it is server-owned and never spliced into an entry file —
+        it lives in the answers file, which is the half of the split the server already writes.
+        """
+        slug = str(payload.get("entry", ""))
+        target = next((f for f in self.paths.entry_files() if f.stem == slug), None)
+        if target is None:
+            return 410, {"error": "that entry no longer exists"}
+
+        with _lock_for(slug):
+            answers = AnswerFile.load(self.paths.answers_for(target), slug)
+            cfg = self.config()
+            comment = answers.comment(
+                comment_id=str(payload.get("id", "")),
+                text=str(payload.get("text", "")),
+                block=str(payload.get("block", "")),
+                change=str(payload.get("change", "")),
+                offset=int(payload.get("offset", -1)),
+                round_number=cfg.next_round,
+            )
+            answers.save()
+            return 200, {
+                "comment": comment.to_record() | {"id": comment.id} if comment else None,
+                "digest": compute_digest(self.paths),
+            }
+
     def summary(self) -> dict:
         """Every ask and what it is about to hand back, for the confirmation the send button shows.
 
@@ -324,6 +352,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route == "/api/answer":
                 code, result = self.app.save_answer(payload)
+            elif route == "/api/comment":
+                code, result = self.app.save_comment(payload)
             elif route == "/api/signal":
                 code, result = self.app.signal(payload)
             elif route == "/api/shutdown":

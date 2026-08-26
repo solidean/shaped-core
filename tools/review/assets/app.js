@@ -134,6 +134,7 @@ async function selectEntry(slug, { push = true } = {}) {
   el("content").innerHTML = result.body.html;
   if (push) history.replaceState(null, "", "#" + slug);
   wireForms();
+  wireComments();
   renderNav();
 
   window.scrollTo(0, scroll);
@@ -323,6 +324,102 @@ function wireForms() {
       key.textContent = String(index + 1);
       opt.insertBefore(key, opt.firstChild);
     });
+  }
+}
+
+// ---- comments ---------------------------------------------------------------
+//
+// A comment is a remark, never a tracked question: the agent answers one by appending a block that names it.
+// So there is nothing to track here -- the composer writes, the server stores, and the round carries it over.
+
+async function saveComment(anchor, text, { id = "", change = "", offset = -1 } = {}) {
+  const result = await postJSON("/api/comment", {
+    entry: state.current, id, text, block: change ? "" : anchor, change, offset,
+  });
+  if (!result.ok) {
+    setSaveState(result.body.error || "the comment did not save", "bad");
+    return false;
+  }
+  if (result.body.digest) state.selfDigests.add(result.body.digest);
+  setSaveState(text.trim() ? "comment saved" : "comment removed", "ok");
+  await selectEntry(state.current, { push: false });
+  return true;
+}
+
+// The composer is one element reused wherever it is opened, so there is never a second half-typed box on screen.
+function openComposer(host, { anchor, id = "", text = "", change = "", offset = -1 }) {
+  closeComposer();
+  const box = document.createElement("div");
+  box.className = "comment-composer";
+  const area = document.createElement("textarea");
+  area.rows = 3;
+  area.value = text;
+  area.placeholder = change ? "a remark on this line" : "a remark on this block";
+  const actions = document.createElement("div");
+  actions.className = "comment-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = id ? "save" : "comment";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "ghost";
+  cancel.textContent = "cancel";
+
+  save.addEventListener("click", () => saveComment(anchor, area.value, { id, change, offset }));
+  cancel.addEventListener("click", closeComposer);
+  area.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); closeComposer(); }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveComment(anchor, area.value, { id, change, offset });
+  });
+
+  actions.append(save, cancel);
+  if (id) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost danger";
+    remove.textContent = "delete";
+    remove.addEventListener("click", () => saveComment(anchor, "", { id, change, offset }));
+    actions.append(remove);
+  }
+  box.append(area, actions);
+  host.appendChild(box);
+  area.focus();
+}
+
+function closeComposer() {
+  for (const box of document.querySelectorAll(".comment-composer")) box.remove();
+}
+
+function wireComments() {
+  for (const button of document.querySelectorAll(".comment-add")) {
+    button.addEventListener("click", () => {
+      const slot = button.closest(".comment-slot");
+      openComposer(slot, { anchor: slot.dataset.anchor });
+    });
+  }
+
+  for (const card of document.querySelectorAll(".comment-card")) {
+    if (card.querySelector(".comment-state").textContent.startsWith("sent")) continue;
+    card.querySelector(".comment-text").addEventListener("click", () => {
+      const slot = card.closest(".comment-slot") || card.parentElement;
+      openComposer(slot, {
+        anchor: slot.dataset ? slot.dataset.anchor || "" : "",
+        id: card.dataset.comment,
+        text: card.querySelector(".comment-text").textContent,
+      });
+    });
+  }
+
+  // A line comment anchors on the change id plus the offset into that change's diff, which is stable
+  // for exactly as long as the change id is.
+  for (const table of document.querySelectorAll(".change .difflines")) {
+    const change = table.closest(".change").querySelector(".change-head code").textContent;
+    for (const row of table.querySelectorAll("tr[data-off]")) {
+      row.querySelector(".dl-src").addEventListener("dblclick", () => {
+        const host = table.closest(".change");
+        openComposer(host, { anchor: "", change, offset: Number(row.dataset.off) });
+      });
+    }
   }
 }
 
