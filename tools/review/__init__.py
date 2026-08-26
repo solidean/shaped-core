@@ -64,6 +64,7 @@ from .lib.entry.write import (
     append_text,
     check_immutable,
     compose,
+    missing_context_tiers,
     stamp_rounds,
     word_warnings,
     write_entry,
@@ -75,8 +76,9 @@ from .lib.space.intervals import IntervalList
 from .lib.space.netspace import ADDED, REMOVED, FileAtom, LineSpace
 from .lib.space.netspace import build as build_net_space
 from .lib.goals.finalize import ARTIFACTS
+from .lib.goals.skeleton import CONTEXT_EXEMPT_GROUPS
 from .lib.goals.skeleton import describe as describe_group
-from .lib.goals.skeleton import finalizer_for, groups_for
+from .lib.goals.skeleton import finalizer_for, groups_for, requires_context
 from .lib.render.text import render_entry, render_summary
 from .lib.space.netspace import space_of
 
@@ -87,6 +89,7 @@ __all__ = [
     "AnswerFile",
     "BLOCK_TYPES",
     "Block",
+    "CONTEXT_EXEMPT_GROUPS",
     "CONTEXT_TIERS",
     "COVERAGE_SLUG",
     "COVERAGE_TITLE",
@@ -146,6 +149,7 @@ __all__ = [
     "groups_for",
     "hash_ask",
     "load",
+    "missing_context_tiers",
     "now",
     "overview_body",
     "overview_front",
@@ -157,6 +161,7 @@ __all__ = [
     "record",
     "register",
     "render_entry",
+    "requires_context",
     "render_summary",
     "save",
     "space_of",

@@ -1,6 +1,7 @@
 """`list` — the reviews this repository has, and where each one stands.
 
 A review is scratch space that outlives a session, so coming back days later needs a way to find it again.
+The last column is what each review is *of*, which is not this repository whenever the branch under review sits in a worktree.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         try:
             cfg = review.load(paths.config)
         except review.ConfigError:
-            rows.append((folder.name, "unreadable", "", "", ""))
+            rows.append((folder.name, "unreadable", "", "", "", ""))
             continue
 
         entries = len(paths.entry_files())
@@ -44,6 +45,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             f"round {cfg.next_round}",
             f"{entries} entries",
             f"{changes} changes" if cfg.has_changeset else "design",
+            cfg.repo or ".",
         ))
 
     if not rows:
@@ -51,5 +53,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         return
 
     width = max(len(r[0]) for r in rows)
-    for name, goals, rnd, entries, changes in rows:
-        print(f"{name:<{width}}  {rnd:<9}  {entries:<12}  {changes:<14}  {goals}")
+    goal_width = max(len(r[1]) for r in rows)
+    for name, goals, rnd, entries, changes, repo in rows:
+        print(f"{name:<{width}}  {rnd:<9}  {entries:<12}  {changes:<14}  {goals:<{goal_width}}  {repo}")

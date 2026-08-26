@@ -18,6 +18,7 @@ import tools.review as review
 from . import args as a
 from .context import Context
 from . import delta as delta_cmd
+from . import serve as serve_cmd
 
 NAME = "round"
 
@@ -67,7 +68,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # Naming the review and the page it is waiting on, because an agent that has the wrong one otherwise finds out
     # only after the maintainer has spent a round answering someone else's entries.
     served = review.read_json(paths.served_marker)
-    where = f" at {served['url']}" if served.get("url") else " (no server running — `review serve` first)"
+    url = str(served.get("url", ""))
+    if url and not serve_cmd.is_up(url):
+        # The marker outlived its server.
+        # Clearing it here is what stops the next command repeating the same lie.
+        paths.served_marker.unlink(missing_ok=True)
+        print(review.console.yellow(f"the server recorded at {url} is not answering; `review serve {args.name}` brings it back"))
+        url = ""
+    where = f" at {url}" if url else " (no server running — `review serve` first)"
     if waiting is None:
         print(review.console.dim(f"waiting for round {cfg.next_round} of {cfg.name}{where} ..."), flush=True)
     else:

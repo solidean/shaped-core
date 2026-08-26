@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import sys
 import threading
+import urllib.parse
 import webbrowser
 
 import tools.review as review
@@ -30,6 +32,23 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1", help="address to bind (default 127.0.0.1, local only)")
     p.add_argument("--no-open", action="store_true", help="do not open a browser")
     return p
+
+
+def is_up(url: str) -> bool:
+    """Whether anything still answers at `url`.
+
+    A `serve` that is killed rather than asked to stop leaves its `.served` marker behind, and nothing revisits it.
+    Quoting a dead url as though it were live is a whole round spent answering in a tab that saves nowhere,
+    so every reader of the marker checks before believing it.
+    """
+    if not url:
+        return False
+    parsed = urllib.parse.urlparse(url)
+    try:
+        with socket.create_connection((parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=0.4):
+            return True
+    except OSError:
+        return False
 
 
 def start(ctx: Context, name: str, *, host: str, port: int) -> tuple[object, int]:
@@ -74,7 +93,8 @@ def _served_elsewhere(ctx: Context, name: str) -> list:
         return []
     out = []
     for folder in sorted(p for p in root.iterdir() if p.is_dir() and p.name != name):
-        if review.ReviewPaths(folder).served_marker.is_file():
+        marker = review.ReviewPaths(folder).served_marker
+        if marker.is_file() and is_up(str(review.read_json(marker).get("url", ""))):
             out.append(folder)
     return out
 

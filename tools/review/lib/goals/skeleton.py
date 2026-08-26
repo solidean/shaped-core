@@ -47,6 +47,17 @@ _DESCRIPTIONS = {
 }
 
 
+# Groups whose entries are the review's own orientation rather than a piece of the change.
+# They are exempt from the three context tiers because writing them there duplicates the orientation entry,
+# and twelve near-identical cold tiers is exactly how a reader learns the collapsed sections are noise.
+CONTEXT_EXEMPT_GROUPS = frozenset({"meta", "finalize", "framing"})
+
+
+def requires_context(group: str) -> bool:
+    """Whether an entry in this group must carry all three context tiers."""
+    return group not in CONTEXT_EXEMPT_GROUPS
+
+
 def groups_for(goals: list[str]) -> tuple[str, ...]:
     """The navigation groups a review with these goals uses."""
     return _DESIGN_GROUPS if goals == ["design"] else _CHANGE_GROUPS

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..core.atomic import write_atomic
 from .askhash import hash_ask
-from .grammar import WORD_LIMITS, ReviewParseError
+from .grammar import CONTEXT_TIERS, WORD_LIMITS, ReviewParseError
 from .parse import Entry, parse_text
 
 
@@ -82,6 +82,28 @@ def check_immutable(entry: Entry, finalized: dict[str, str]) -> None:
         f"ask {name!r} has been answered and finalized, so its wording is fixed",
         f"revert the text, or add `## ask <new-name>` with `follows: {name}` and ask the follow-up there",
     )
+
+
+def missing_context_tiers(entry: Entry) -> list[str]:
+    """The context tiers this entry does not carry, in reading order.
+
+    An entry is answered on its own, out of order, by someone who is not carrying the changeset in their head.
+    All three tiers are what make that possible, and each is scoped to *this entry's subject* rather than to the change
+    as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
+    """
+    present = {block.type for block in entry.blocks}
+    return [tier for tier in CONTEXT_TIERS if tier not in present]
+
+
+def missing_context_tiers(entry: Entry) -> list[str]:
+    """The context tiers this entry does not carry, in reading order.
+
+    An entry is answered on its own, out of order, by someone who is not carrying the changeset in their head.
+    All three tiers are what make that possible, and each is scoped to *this entry's subject* rather than to the change
+    as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
+    """
+    present = {block.type for block in entry.blocks}
+    return [tier for tier in CONTEXT_TIERS if tier not in present]
 
 
 def word_warnings(entry: Entry) -> list[str]:

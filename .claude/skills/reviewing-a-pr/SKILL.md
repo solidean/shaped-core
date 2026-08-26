@@ -130,10 +130,17 @@ This is the part the tool cannot do for you, and the part the previous chat work
 
 **Every entry stands alone.**
 The maintainer does not carry the changeset in their head, and assuming they do defeats the point of asking.
-Write the three context tiers so a reader with any amount of background can start from this entry:
-`context/cold` for someone new to both the change and the codebase, `context/repo` for someone who knows the codebase, `context/delta` for someone who has read the entries above.
-The first two collapse by default and have word budgets — respect them, since a tier nobody can skim is a tier nobody opens.
-`context/delta` is the one you always write.
+**Every entry outside `meta`, `finalize` and `framing` carries all three context tiers, and `validate` fails without them.**
+`context/cold` is for a reader new to both the change and the codebase, `context/repo` for one who knows the codebase, `context/delta` for one who has read the entries above.
+The first two collapse by default and have word budgets — 150 and 120 — so they cost a reader nothing until they are wanted.
+
+**Scope each tier to that entry's own subject, not to the change as a whole.**
+This is the rule that decides whether the tiers are worth having.
+Cold context for an entry about a texture budget is what a mip chain and an LRU budget are, and why charging the wrong one matters — not what the branch does.
+Written that way, twelve entries produce twelve distinct tiers, because they are about twelve different things.
+Written as "here is what this PR adds", they produce the same paragraph twelve times, and a reader who opens two of those never opens a third.
+
+The orientation and verdict entries are exempt because they *are* the review's cold context; repeating it there teaches exactly that skimming habit.
 
 **Describe neutrally, then recommend separately.**
 The `prose` block says what is true; the `recommendation` block says what you would do.

@@ -30,12 +30,18 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     problems: list[str] = []
     warnings: list[str] = []
+    thin = False
 
     if cfg.has_changeset:
         problems.extend(ctx.check_references(paths, entries))
 
     for entry in entries:
         warnings.extend(review.word_warnings(entry))
+        if review.requires_context(entry.group):
+            absent = review.missing_context_tiers(entry)
+            if absent:
+                thin = True
+                problems.append(f"{entry.slug}: no {', '.join(absent)}")
         answers = ctx.answers(paths, entry)
         for name in sorted(answers.answers):
             if entry.ask(name) is None:
@@ -44,15 +50,29 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     groups = set(review.groups_for(cfg.goals))
     unplaced = sorted({e.group for e in entries} - groups)
     if unplaced:
-        warnings.append(f"groups outside this review's skeleton: {', '.join(unplaced)}")
+        warnings.append(
+            f"groups outside this review's skeleton: {', '.join(unplaced)}. "
+            f"This review's groups are: {', '.join(review.groups_for(cfg.goals))}"
+        )
 
     for warning in warnings:
         print(review.console.yellow(f"warning: {warning}"))
     for problem in problems:
         print(review.console.red(f"error: {problem}"))
 
+    if thin:
+        # Said once rather than per entry: a rule repeated twelve times reads as twelve rules.
+        print(review.console.dim(
+            f"\nEvery entry outside {', '.join(sorted(review.CONTEXT_EXEMPT_GROUPS))} carries all three context tiers,"
+            f" so it can be answered on its own, out of order."
+        ))
+        print(review.console.dim(
+            "Scope each tier to that entry's own subject rather than to the change as a whole,"
+            " or every cold tier restates the same paragraph and nobody opens one again."
+        ))
+
     if problems:
-        print(review.console.red(f"\n{len(problems)} unresolved reference(s) across {len(entries)} entries"))
+        print(review.console.red(f"\n{len(problems)} problem(s) across {len(entries)} entries"))
         raise SystemExit(1)
     if not args.quiet:
         print(review.console.green(f"{len(entries)} entries parse, every reference resolves"))

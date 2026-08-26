@@ -55,6 +55,10 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | `context/cold` | — | for a reader new to the change *and* the codebase; collapsed by default, ~150 words |
 | `context/repo` | — | knows the codebase, new to the change; collapsed by default, ~120 words |
 | `context/delta` | — | what this entry adds over the previous ones; always shown |
+
+All three are required on every entry whose group is not `meta`, `finalize` or `framing`, and `validate` reports a missing one as an error.
+An entry is answered on its own, out of order, by someone not carrying the changeset in their head, and the tiers are what make that possible.
+Each is scoped to that entry's subject rather than to the change as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
 | `prose` | — | the body of the point, written neutrally |
 | `code` | — | a code sample; fenced blocks inside it are highlighted |
 | `changes` | change ids | the hunks under discussion, rendered with their diffs; `show:` is required |
