@@ -64,9 +64,14 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `list` | the reviews in this repository, and where each one stands |
 | `validate <name>` | every entry parses, every change id resolves; run it before serving a round |
 | `generate <name>` | write or refresh the overview and coverage entries |
+| `append <name> <entry>` | add blocks to an entry from stdin or `--file`, stamped with the round; **how a later round answers an earlier one** |
 | `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view |
+| `status <name>` | where this review stands: whether a server is really up, the round, what is still open |
 | `serve <name>` | the page the review is answered in; non-blocking |
+| `restart <name>` | stop the server and serve again on the same port, after the tool's own code changed |
 | `stop <name>` | shut that review's server down, from a terminal rather than from the page |
+| `artifact <name> [--write F]` | the exact text the review will publish, out of the draft entry's `## artifact` block |
+| `post <name> --pr N --confirm` | post that text to the PR as one comment; refuses until its ask is answered, and dry-runs without `--confirm` |
 | `delta <name> [--finalize]` | the answers since the watermark; `--finalize` freezes the round |
 | `round <name>` | block until the page signals, then print and freeze the round; `--no-wait` to peek |
 | `sync <name>` | re-point the review at a moved head |

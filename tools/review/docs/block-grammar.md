@@ -56,6 +56,7 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | `context/repo` | — | knows the codebase, new to the change; collapsed by default, ~120 words |
 | `context/delta` | — | what this entry adds over the previous ones; always shown |
 | `auto-acknowledge` | — | this entry is reference material, so reading it is not something to record |
+| `artifact` | — | the exact text the review will publish, read back by `review artifact` and `review post` |
 
 All three are required on every entry whose group is not `meta`, `finalize` or `framing`, for as long as it still has an ask waiting for an answer, and `validate` reports a missing one as an error.
 An entry whose asks are all finalized is past the point of needing them, and adding tiers there would edit a question the maintainer has already read.

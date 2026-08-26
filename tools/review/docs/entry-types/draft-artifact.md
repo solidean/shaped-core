@@ -29,8 +29,11 @@ Adding it after `finalize` inverts the point: the maintainer is then reviewing s
 
 ## How to write it
 
-**Put the real text in a `prose` block, as the comment.**
-Not a summary of it, not bullet points about it.
+**Put the real text in an `## artifact` block, as the comment.**
+That block is the contract with the tooling: `review artifact` reads it back out, and `review post` publishes exactly it.
+Everything around it — what you cut, why, the ask — is ordinary `prose`, and is never published.
+
+Not a summary of the comment, not bullet points about it.
 If it would be posted as markdown with three headings and a table, write three headings and a table.
 The maintainer is proofreading, and a paraphrase is not proofreadable.
 
@@ -48,7 +51,8 @@ A conclusion that was obvious after three rounds of discussion reads as a hand-w
 The reviewer is the last one able to notice, being still full of the context that is about to be dropped.
 
 **Check it with an agent that has only what the author will have.**
-Give a subagent the branch and the comment, withhold everything else, and ask per item whether it could implement the change or would have to come back and ask.
+`review artifact <name> --write <path>` puts the text somewhere the agent can read without seeing the review.
+Give a subagent the branch and that file, withhold everything else, and ask per item whether it could implement the change or would have to come back and ask.
 Have it look up every symbol the comment names.
 The two things it catches are a decision that lost its specifics on the way out, and a claim about the code that stopped being true.
 
@@ -78,5 +82,9 @@ Resist adding options for tone or length: an option list invites a choice betwee
 Do not discharge changes from it.
 It accounts for nothing in the ledger — every hunk was discharged by the entry that raised it, and pointing `discharges:` here would move coverage onto a formatting decision.
 
+A redraft appends a second `## artifact` block rather than rewriting the first.
+The last one is what publishes; the earlier ones stay as the record of what was shown and turned down.
+
 Do not post on the answer alone.
 "Post it" in a round is approval of the text; the go-ahead to actually post is a separate, explicit instruction, and the review folder is not the place it arrives.
+`review post` enforces the first half — it refuses while the draft entry's ask is unanswered, and dry-runs unless `--confirm` — but the second half is yours.

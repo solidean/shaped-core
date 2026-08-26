@@ -25,6 +25,8 @@ sys.path.insert(0, str(ROOT))
 import tools.review as review  # noqa: E402
 from tools.review import cmd  # noqa: E402
 from tools.review.cmd import (  # noqa: E402
+    append,
+    artifact,
     changes,
     coverage,
     delta,
@@ -33,10 +35,13 @@ from tools.review.cmd import (  # noqa: E402
     ingest,
     init,
     list_reviews,
+    post,
+    restart,
     round as round_cmd,
     selftest,
     serve,
     show,
+    status,
     stop,
     sync,
     validate,
@@ -50,14 +55,19 @@ COMMANDS = [
     coverage,
     changes,
     generate,
+    append,
     show,
+    status,
     validate,
     serve,
+    restart,
     delta,
     round_cmd,
     stop,
     sync,
+    artifact,
     finalize,
+    post,
     selftest,
 ]
 

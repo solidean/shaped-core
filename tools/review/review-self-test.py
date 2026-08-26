@@ -34,7 +34,7 @@ from tools.review.lib.entry.answers import AnswerFile  # noqa: E402
 from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
 from tools.review.lib.entry.grammar import ACK_NAME, ReviewParseError  # noqa: E402
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
-from tools.review.lib.entry.write import compose, immutability_violations, stamp_rounds  # noqa: E402
+from tools.review.lib.entry.write import append_text, compose, immutability_violations, stamp_rounds  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
 from tools.review.lib.git.run import Git  # noqa: E402
 from tools.review.lib.space.intervals import IntervalList  # noqa: E402
@@ -73,6 +73,11 @@ def commit(root: Path, message: str, files: dict[str, str]) -> str:
 
 def numbered(count: int, *, mark: str = "line") -> str:
     return "".join(f"{mark} {i}\n" for i in range(1, count + 1))
+
+
+def compose_append(entry, addition: str) -> str:
+    """What `review append` would write: the entry's text with `addition` spliced on the end."""
+    return append_text(entry, addition)
 
 
 # ---- intervals --------------------------------------------------------------
@@ -724,6 +729,61 @@ def test_an_entry_with_no_ask_carries_an_acknowledgement(root: Path) -> None:
 
     closed = parse_text(front.replace("state: open", "state: obsolete") + "## prose\n\nGone.\n", Path("e.md"))
     assert closed.acknowledgement is None, "an entry that is no longer open is not waiting to be read"
+
+
+def test_append_refuses_to_write_what_would_not_parse(root: Path) -> None:
+    """The addition is validated against the merged result, not on its own.
+
+    `append` writes to a file the server is reading, so a malformed block has to fail before the write
+    rather than leave an entry the page cannot render.
+    """
+    entry = parse_text(ENTRY, Path("entry.md"))
+
+    good = compose_append(entry, "## prose\n\nA second point.\n")
+    merged = parse_text(good, Path("entry.md"))
+    assert len(merged.blocks) == len(entry.blocks) + 1
+    assert [b.name for b in merged.asks] == [b.name for b in entry.asks], "appending prose adds no ask"
+
+    bad = compose_append(entry, "## not-a-block\n\nx\n")
+    try:
+        parse_text(bad, Path("entry.md"))
+    except ReviewParseError as e:
+        assert "not-a-block" in str(e), e
+    else:
+        raise AssertionError("an unknown block type must not parse")
+
+
+def test_append_keeps_an_existing_answer_addressable(root: Path) -> None:
+    """A follow-up appended beside a finalized ask must not disturb the ask that was already answered."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    original = [b.name for b in entry.asks]
+
+    merged = parse_text(
+        compose_append(entry, "## ask  the-followup\nfollows: pick-one\n\nAnd now?\n\n- radio: yes\n"),
+        Path("entry.md"),
+    )
+
+    assert [b.name for b in merged.asks] == original + ["the-followup"]
+    assert merged.ask("pick-one") is not None, "the answered ask is still there under its own name"
+    assert merged.ask("the-followup").attrs["follows"] == "pick-one"
+
+
+def test_the_last_artifact_block_is_the_one_that_publishes(root: Path) -> None:
+    """A redraft appends rather than rewrites, so the newest draft is what `post` would send.
+
+    The earlier ones stay as the record of what was shown and turned down, and must not end up concatenated into the comment.
+    """
+    text = (
+        "---\nid: 985\ntitle: draft\ngroup: finalize\nstate: open\n---\n\n"
+        "## artifact\nround: 1\n\nThe first draft.\n\n"
+        "## artifact\nround: 2\n\nThe redraft.\n"
+    )
+    entry = parse_text(text, Path("985-draft.md"))
+    blocks = [b for b in entry.blocks if b.type == "artifact"]
+
+    assert len(blocks) == 2
+    assert blocks[-1].prose.strip() == "The redraft.", "the last block wins"
+    assert "first draft" not in blocks[-1].prose
 
 
 def test_answers_orphan_a_vanished_ask(root: Path) -> None:

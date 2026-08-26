@@ -28,6 +28,7 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "recommendation": {"round"},
     "ask": {"round", "discharges", "follows"},
     "auto-acknowledge": {"round"},
+    "artifact": {"round"},
 }
 
 # The context tiers, in the order a reader meets them, with the word budget each is only useful under.

@@ -115,12 +115,19 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    uv run review.py serve pr-<n> --no-open &     # background: the shell caps below how long a review takes
    uv run review.py round pr-<n> --wait          # blocks, then prints the round
    ```
+   `uv run review.py status pr-<n>` says whether a server is actually up, which round is next, and what is still open —
+   it probes the port rather than trusting the marker, so a killed server reads as down.
+   `restart` is for after the *tool's* code changed; entry edits need no restart, since the page reloads itself.
    Exit 0 means sent, 2 means paused, 3 means timed out.
    Do not treat a pause as an answer.
 
 7. **Next round: append to the entry you are answering, rather than opening a new one.**
    The answer stays on screen and your follow-up lands under a round divider below it.
    The thread then reads top to bottom in one file.
+   ```bash
+   uv run review.py append pr-<n> 045 --file followup.md   # or pipe it on stdin
+   ```
+   where the file holds the new blocks and nothing else:
    ```markdown
    ## context/delta
 
@@ -133,7 +140,9 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    ## ask  the-followup
    follows: the-answered-ask
    ```
-   `stamp_rounds` stamps the new blocks and `entryview` draws the divider; nothing above is rewritten, which is what keeps a finalized answer immutable.
+   `append` stamps the round, parses the merged result before writing, and refuses a malformed block with a line number.
+   Nothing above is rewritten, which is what keeps a finalized answer immutable.
+   Never edit an entry file by hand while a server is reading it.
 
    **Open a new entry only when the subject is new**, not when the same subject reaches its second round.
    A new entry owes all three context tiers again, so a follow-up written as one restates what the parent entry already established.
@@ -166,7 +175,11 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    A class of claim you did not verify, a stance that reads as lecturing, a kind of detail that keeps getting dropped.
    That is where the review process improves, and the pass is wasted if only the per-item corrections are taken.
 
-9. **Finalize.** `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
+9. **Post.** `uv run review.py post pr-<n> --pr <n>` dry-runs it; `--confirm` publishes.
+   It refuses while the draft entry's ask is unanswered, so the gate cannot be skipped by accident.
+   The go-ahead to actually post is a separate instruction from the maintainer, never the round answer alone.
+
+   `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
    It is a draft: the tool gathered what was decided, it did not decide which points are worth an afternoon.
    Post only on an explicit go-ahead, as one comment.
 
