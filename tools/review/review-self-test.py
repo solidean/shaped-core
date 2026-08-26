@@ -32,7 +32,7 @@ from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, gr
 from tools.review.lib.changeset.ledger import Change, Ledger  # noqa: E402
 from tools.review.lib.entry.answers import AnswerFile  # noqa: E402
 from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
-from tools.review.lib.entry.grammar import ACK_NAME, ReviewParseError  # noqa: E402
+from tools.review.lib.entry.grammar import ReviewParseError, ack_name  # noqa: E402
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
 from tools.review.lib.entry.write import append_text, compose, immutability_violations, stamp_rounds  # noqa: E402
@@ -736,7 +736,7 @@ def test_an_entry_with_no_ask_carries_an_acknowledgement(root: Path) -> None:
     front = "---\nid: 050\ntitle: t\ngroup: docs\nstate: open\n---\n\n"
 
     silent = parse_text(front + "## prose\n\nNothing to decide.\n", Path("e.md"))
-    assert [b.name for b in silent.asks] == [ACK_NAME]
+    assert [b.name for b in silent.asks] == [ack_name(1)]
     assert silent.acknowledgement is not None
 
     reference = parse_text(front + "## auto-acknowledge\n\nA listing.\n\n## prose\n\nBody.\n", Path("e.md"))
@@ -744,7 +744,7 @@ def test_an_entry_with_no_ask_carries_an_acknowledgement(root: Path) -> None:
     assert reference.acknowledgement is None
 
     asking = parse_text(ENTRY, Path("e.md"))
-    assert ACK_NAME not in [b.name for b in asking.asks], "a real ask replaces the acknowledgement rather than joining it"
+    assert [b.name for b in asking.asks] == ["pick-one"], "a round that asks something needs no acknowledgement"
 
     closed = parse_text(front.replace("state: open", "state: obsolete") + "## prose\n\nGone.\n", Path("e.md"))
     assert closed.acknowledgement is None, "an entry that is no longer open is not waiting to be read"
@@ -826,6 +826,39 @@ def test_a_change_only_an_orientation_entry_claims_is_reported(root: Path) -> No
     assert list(thin) == ["CHANGE-AAA"], thin
     assert thin["CHANGE-AAA"] == ["010-orientation"]
     assert "CHANGE-BBB" not in thin, "a change some finding engaged with is not thin, whatever else also claims it"
+
+
+def test_material_added_after_an_answered_ask_needs_its_own_acknowledgement(root: Path) -> None:
+    """An entry can gain material in a later round without gaining a question.
+
+    A redrafted artifact, a correction, a note.
+    One acknowledgement per entry would already be answered from the round that asked something,
+    so the new material would arrive silently under a green tick.
+    """
+    front = "---\nid: 985\ntitle: t\ngroup: docs\nstate: open\n---\n\n"
+
+    asked = parse_text(front + "## prose\nround: 3\n\nBody.\n\n## ask  decide\nround: 3\n\nWell?\n\n- radio: yes\n", Path("e.md"))
+    assert [b.name for b in asked.asks] == ["decide"], "the round that asked something needs no acknowledgement"
+
+    redrafted = parse_text(
+        front
+        + "## prose\nround: 3\n\nBody.\n\n## ask  decide\nround: 3\n\nWell?\n\n- radio: yes\n\n"
+        + "## prose\nround: 6\n\nA redraft, asking nothing.\n",
+        Path("e.md"),
+    )
+
+    names = [b.name for b in redrafted.asks]
+    assert names == ["decide", ack_name(6)], names
+    assert redrafted.acknowledgement is not None
+    assert "gained material" in redrafted.acknowledgement.prose
+
+    # The earlier round's answer is not an orphan when the later acknowledgement supersedes it.
+    with tempfile.TemporaryDirectory(prefix="review-ack-") as answer_dir:
+        answers = AnswerFile.load(Path(answer_dir) / "985.json", "985")
+        answers.upsert(asked.acknowledgement or asked.ask("decide"), selected=["yes"], text="", round_number=3)
+        answers.answers[ack_name(3)] = answers.answers.pop("decide")
+        moved = answers.reconcile(redrafted)
+        assert moved == [], "a superseded acknowledgement is the mechanism working, not a vanished ask"
 
 
 def test_answers_orphan_a_vanished_ask(root: Path) -> None:

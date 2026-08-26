@@ -70,9 +70,15 @@ Each is scoped to that entry's subject rather than to the change as a whole — 
 
 ## Acknowledgement
 
-An entry that poses no `ask` still has to be *seen*, so the page appends one synthetic question to it: a checkbox reading `Read and acknowledged`.
-It is filed under the answer key `acknowledged`, counts toward progress like any other answer, and never appears in the file — no entry has to remember to write one.
+An entry whose newest round added material but no `ask` still has to be *seen*, so the page appends one synthetic question to it: a checkbox reading `Read and acknowledged`.
+It counts toward progress like any other answer and never appears in the file — no entry has to remember to write one.
 Without it an entry nobody has opened is indistinguishable from one that is settled, and the progress count says the review is further along than anyone is.
+
+**It is keyed per round**, as `acknowledged-r<N>`.
+An entry can gain material in a later round without gaining a question — a redrafted artifact, a correction, a note.
+One acknowledgement for the whole entry would already be answered from the round that did ask something.
+The new material would then arrive under a tick earned by the old question.
+An acknowledgement superseded by a later round is not treated as an orphan, since only the newest one is ever offered.
 
 `## auto-acknowledge` opts out, for material that is consulted rather than read through — a glossary, a generated listing.
 It is a block rather than a front-matter key on purpose: an unknown front-matter key is preserved verbatim, so a typo would silently do nothing,

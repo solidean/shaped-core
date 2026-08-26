@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..core.atomic import read_json, write_json
 from .askhash import hash_ask
+from .grammar import is_ack_name
 from .parse import Block, Entry
 
 
@@ -131,10 +132,16 @@ class AnswerFile:
         return [a for a in self.answers.values() if not a.tentative and a.round > watermark]
 
     def reconcile(self, entry: Entry) -> list[str]:
-        """Move answers whose ask no longer exists into the orphans; report the names moved."""
+        """Move answers whose ask no longer exists into the orphans; report the names moved.
+
+        An acknowledgement from an earlier round is exempt: it is synthetic, only the newest one is ever offered,
+        and the older ones going out of scope is the mechanism working rather than a question disappearing.
+        """
         live = {block.name for block in entry.asks}
         moved = []
         for name in list(self.answers):
+            if is_ack_name(name):
+                continue
             if name not in live:
                 self.orphan(name, "")
                 moved.append(name)

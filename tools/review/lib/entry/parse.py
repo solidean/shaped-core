@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .grammar import (
-    ACK_NAME,
     ACK_PROMPT,
+    ACK_PROMPT_LATER,
     ASK_NAME_RE,
+    ack_name,
     ATTR_RE,
     BLOCK_TYPES,
     FRONT_KNOWN,
@@ -112,18 +113,33 @@ class Entry:
         return any(b.type == "auto-acknowledge" for b in self.blocks)
 
     @property
-    def acknowledgement(self) -> Block | None:
-        """The synthetic ask an entry with no questions carries, so that reading it is recorded rather than assumed.
+    def newest_round(self) -> int:
+        """The highest round any block in this entry carries, or 1 for an entry nothing has stamped yet."""
+        return max((b.round for b in self.blocks), default=0) or 1
 
-        Without it an entry that asks nothing is indistinguishable from one that was answered,
-        and the progress count says the review is further along than anyone actually is.
-        It is synthetic on purpose: it never appears in the file, so no entry has to remember to write one.
+    @property
+    def acknowledgement(self) -> Block | None:
+        """The synthetic ask an entry carries when its newest round added material but no question.
+
+        Two cases reach this, and they are the same case.
+        An entry that never asked anything would otherwise be indistinguishable from one that was answered.
+        An entry that asked something in an earlier round, was answered, and then gained a redraft or a correction
+        would otherwise show that new material under a tick earned by the old question.
+
+        Keyed on the round, so each round's material is acknowledged on its own and an earlier acknowledgement
+        cannot stand in for a later one.
+        It never appears in the file, so no entry has to remember to write one.
         """
         if self.state != "open" or self.auto_acknowledged:
             return None
-        if any(b.is_ask for b in self.blocks):
+        latest = self.newest_round
+        # An unstamped block belongs to the round about to stamp it, which `newest_round` reports as 1 —
+        # so a freshly written entry's ask counts as covering it rather than being a round behind.
+        if any(b.is_ask and (b.round or 1) == latest for b in self.blocks):
             return None
-        return Block(type="ask", head=ACK_NAME, prose=ACK_PROMPT,
+        first_time = not any(b.is_ask for b in self.blocks)
+        return Block(type="ask", head=ack_name(latest),
+                     prose=ACK_PROMPT if first_time else ACK_PROMPT_LATER,
                      options=[Option(kind="check", label="Read and acknowledged")])
 
     @property
@@ -134,10 +150,8 @@ class Entry:
         which is the point: an acknowledgement is progress in exactly the way an answer is.
         """
         real = [b for b in self.blocks if b.is_ask]
-        if real:
-            return real
         ack = self.acknowledgement
-        return [ack] if ack else []
+        return real + ([ack] if ack is not None else [])
 
     def ask(self, name: str) -> Block | None:
         return next((b for b in self.asks if b.name == name), None)

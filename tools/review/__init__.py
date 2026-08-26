@@ -49,8 +49,10 @@ from .lib.entry.askhash import hash_ask
 from .lib.entry.generate import COVERAGE_SLUG, COVERAGE_TITLE, OVERVIEW_SLUG, OVERVIEW_TITLE
 from .lib.entry.generate import coverage_body, coverage_front, ensure as ensure_entry, overview_body, overview_front
 from .lib.entry.grammar import (
-    ACK_NAME,
+    ACK_PREFIX,
     ACK_PROMPT,
+    ack_name,
+    is_ack_name,
     BLOCK_TYPES,
     CONTEXT_TIERS,
     OPTION_KINDS,
@@ -85,7 +87,7 @@ from .lib.render.text import render_entry, render_summary
 from .lib.space.netspace import space_of
 
 __all__ = [
-    "ACK_NAME",
+    "ACK_PREFIX",
     "ACK_PROMPT",
     "ADDED",
     "ARTIFACTS",
@@ -128,6 +130,7 @@ __all__ = [
     "allocate_many",
     "append_jsonl",
     "append_text",
+    "ack_name",
     "ask_canonical",
     "build_net_space",
     "bulk_candidate",
@@ -152,6 +155,7 @@ __all__ = [
     "goal_help",
     "groups_for",
     "hash_ask",
+    "is_ack_name",
     "load",
     "missing_context_tiers",
     "now",

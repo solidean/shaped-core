@@ -35,11 +35,28 @@ BLOCK_TYPES: dict[str, set[str]] = {
 CONTEXT_TIERS = ("context/cold", "context/repo", "context/delta")
 WORD_LIMITS = {"context/cold": 150, "context/repo": 120}
 
-# The answer key an acknowledgement is filed under.
-# It is not a name an entry may use for an ask of its own, since the two would then share an answer.
-ACK_NAME = "acknowledged"
+# The answer key an acknowledgement is filed under, one per round.
+#
+# Per round rather than per entry, because an entry can gain material in a later round without gaining a question:
+# a redrafted artifact, a correction, a note.
+# One acknowledgement for the entry would already be answered from an earlier round,
+# so the new material would arrive silently under a green tick.
+#
+# `acknowledged` is not a name an entry may use for an ask of its own, since the two would share an answer.
+ACK_PREFIX = "acknowledged"
 
 ACK_PROMPT = "Nothing here needs a decision. Acknowledge that you have read it."
+
+ACK_PROMPT_LATER = "This entry gained material in this round and asks nothing. Acknowledge that you have read it."
+
+
+def ack_name(round_number: int) -> str:
+    return f"{ACK_PREFIX}-r{max(round_number, 1)}"
+
+
+def is_ack_name(name: str) -> bool:
+    """Whether `name` is a synthetic acknowledgement rather than an ask someone wrote."""
+    return name == ACK_PREFIX or name.startswith(ACK_PREFIX + "-r")
 
 # A block carrying `generated: <key>` is the tool's to rewrite, and nothing else in an entry ever is.
 # That marker is what lets `review generate` refresh the overview without touching a sentence anyone wrote.
