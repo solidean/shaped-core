@@ -39,6 +39,8 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.transmission_weight = saturate(transmission_weight);
     surface.transmission_color = saturate(transmission_color);
     surface.transmission_depth = max(0.0, transmission_depth);
+    surface.transmission_scatter = max(float3(0, 0, 0), transmission_scatter);
+    surface.transmission_scatter_anisotropy = clamp(transmission_scatter_anisotropy, -1.0, 1.0);
     surface.transmission_dispersion_scale = max(0.0, transmission_dispersion_scale);
     surface.transmission_dispersion_abbe_number = max(0.0, transmission_dispersion_abbe_number);
 
@@ -129,6 +131,11 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("transmission_weight", 0.0f));
     signature.push_back(material_signature_entry::of("transmission_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("transmission_depth", 0.0f));
+
+    // Black scatter is clear glass; anything above it makes the interior milky.
+    // Both need a positive `transmission_depth`, since that is the scale they are read against.
+    signature.push_back(material_signature_entry::of("transmission_scatter", tg::vec3f(0.0f, 0.0f, 0.0f)));
+    signature.push_back(material_signature_entry::of("transmission_scatter_anisotropy", 0.0f));
 
     // A smaller Abbe number disperses MORE; the scale is what turns it on at all, so its default is off.
     signature.push_back(material_signature_entry::of("transmission_dispersion_scale", 0.0f));

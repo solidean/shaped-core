@@ -541,6 +541,17 @@ struct surface
     float3 transmission_color;
     float transmission_depth; ///< the distance `transmission_color` is the color AT; 0 tints the interface instead
 
+    /// What the interior SCATTERS, as a coefficient per unit of `transmission_depth`.
+    ///
+    /// Black is clear glass — the interior only absorbs, and a ray crosses it in a straight line.
+    /// Anything above it makes the interior milky, and light spreads sideways through it the way it does through jade or a
+    /// thick liquid.
+    /// It needs a positive `transmission_depth` to mean anything: at 0 there is no volume for it to happen in.
+    float3 transmission_scatter;
+
+    /// The Henyey-Greenstein g for that scattering: forward at +1, back at -1, isotropic at 0.
+    float transmission_scatter_anisotropy;
+
     /// How far apart the wavelengths are bent, as a multiple of what `transmission_dispersion_abbe_number` implies.
     /// 0 is no dispersion at all, which is what keeps a path from being collapsed onto one wavelength for nothing.
     float transmission_dispersion_scale;
@@ -640,6 +651,8 @@ surface default_surface()
     s.transmission_weight = 0.0;
     s.transmission_color = float3(1, 1, 1);
     s.transmission_depth = 0.0;
+    s.transmission_scatter = float3(0, 0, 0);
+    s.transmission_scatter_anisotropy = 0.0;
     s.transmission_dispersion_scale = 0.0;
     s.transmission_dispersion_abbe_number = 20.0;
 
@@ -746,12 +759,20 @@ bsdf bsdf_prepare(surface s, bool exiting, uint channel)
 
         b.trans_tint = volumetric ? float3(1, 1, 1) : saturate(s.transmission_color);
 
-        // Beer-Lambert, solved so that `transmission_color` is what survives exactly `transmission_depth` of travel.
-        // It only absorbs, so its albedo is zero and the integrator needs no walk through it.
+        // Beer-Lambert, solved so that `transmission_color` is what survives exactly `transmission_depth` of travel — and
+        // the scattering coefficient over that same depth, so the two are read against one scale.
         float3 c = clamp(saturate(s.transmission_color), 1e-4, 1.0);
-        b.medium_sigma_t = volumetric ? -log(c) / max(s.transmission_depth, 1e-6) : float3(0, 0, 0);
-        b.medium_albedo = float3(0, 0, 0);
-        b.medium_g = 0.0;
+        float depth = max(s.transmission_depth, 1e-6);
+
+        float3 sigma_a = volumetric ? -log(c) / depth : float3(0, 0, 0);
+        float3 sigma_s = volumetric ? max(float3(0, 0, 0), s.transmission_scatter) / depth : float3(0, 0, 0);
+
+        // Extinction is what the two do together, and the albedo is scattering's share of it.
+        // A clear interior leaves that share at zero, which is what tells the integrator it can cross in a straight line
+        // rather than walking.
+        b.medium_sigma_t = sigma_a + sigma_s;
+        b.medium_albedo = sigma_s / max(b.medium_sigma_t, float3(1e-9, 1e-9, 1e-9));
+        b.medium_g = clamp(s.transmission_scatter_anisotropy, -0.95, 0.95);
     }
 
     // The subsurface interior: a dense scattering medium under the same interface, which the integrator random-walks.
@@ -870,6 +891,23 @@ float coat_crossing(bsdf b, float3 wo, float3 wi)
     return coat_transmission(b, mu_o) * coat_transmission(b, mu_i);
 }
 
+/// What the dielectric interface lets THROUGH at one incidence — exactly the complement of what its reflection lobe keeps.
+///
+/// Reading it off the reflection rather than computing a Fresnel of its own is the point.
+/// The two halves of one interface have to sum to 1 or the surface invents or destroys light, and they did not: the
+/// reflection used Schlick through `spec_f0` while the refraction used the exact dielectric relation.
+/// Those two agree closely at the indices real glass has, which is why the error stayed under the probe's energy bound —
+/// but they diverge completely as the index approaches 1, where Schlick's grazing tail still climbs to white and the exact
+/// relation correctly goes to nothing.
+///
+/// Past the critical angle this understates the internal reflection, since Schlick has no critical angle.
+/// The transmitted DIRECTION does not exist there — `refract` reports it and the sample ends — so nothing is created; what
+/// is lost is the energy that should have bounced back inside, which the viewer TODO records.
+float3 interface_transmittance(bsdf b, float mu)
+{
+    return saturate(float3(1, 1, 1) - b.spec_weight * fresnel_schlick(max(mu, 1e-6), b.spec_f0));
+}
+
 /// The rough-refraction BTDF through the dielectric interface (Walter 2007), Fresnel included and UNTINTED.
 ///
 /// The tint belongs to the caller because the transparent base and the subsurface base refract through this same interface
@@ -897,9 +935,8 @@ float3 transmission_btdf(bsdf b, float3 wo, float3 wi)
         float mu_h = max(dot(wo, h), 1e-6);
         float d = ggx_d(h, b.spec_alpha);
         float g = ggx_g2(wo, wi_mirror, b.spec_alpha);
-        float3 f = float3(1, 1, 1) - b.spec_weight * fresnel_schlick(mu_h, b.spec_f0);
 
-        return f * (d * g / (4.0 * wo.z * max(wi_mirror.z, 1e-6)));
+        return interface_transmittance(b, mu_h) * (d * g / (4.0 * wo.z * max(wi_mirror.z, 1e-6)));
     }
 
     float eta = b.trans_eta;
@@ -910,14 +947,13 @@ float3 transmission_btdf(bsdf b, float3 wo, float3 wi)
     if (dot_o <= 0.0 || dot_i >= 0.0)
         return float3(0, 0, 0); // the pair does not correspond to a refraction about any microfacet
 
-    float f_r = fresnel_dielectric(dot_o, eta);
     float d = ggx_d(h, b.spec_alpha);
     float g = ggx_g2(wo, float3(wi.x, wi.y, -wi.z), b.spec_alpha);
 
     float denom = dot_o + eta * dot_i;
     float scale = abs(dot_o) * abs(dot_i) / max(wo.z * abs(wi.z) * denom * denom, 1e-9);
 
-    return (1.0 - f_r) * d * g * scale;
+    return interface_transmittance(b, dot_o) * d * g * scale;
 }
 
 /// The full BSDF at (`wo`, `wi`), with the cosine NOT folded in.

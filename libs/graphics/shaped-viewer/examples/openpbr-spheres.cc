@@ -117,6 +117,24 @@ struct sphere_mesh
     return out;
 }
 
+/// What shape a swept attribute has.
+///
+/// A sweep is one number per column whatever the parameter is, so this is how that number reaches a parameter that is not
+/// itself a number.
+enum class swept_kind
+{
+    /// A plain float, which most of them are.
+    scalar,
+
+    /// A tangent-space direction, where the column's value is how far it leans off the surface normal.
+    /// `coat_normal` is the one that wants this: a coat tilted away from the base is not something a number expresses.
+    direction,
+
+    /// A color swept along its grey axis, for a per-channel coefficient whose SIZE is what the row is about — like how
+    /// much of an interior's extinction scatters rather than absorbs.
+    greyscale,
+};
+
 /// One row of the grid: what it is called, and the bindings every sphere in it carries beyond its own roughness.
 struct sweep_row
 {
@@ -134,10 +152,8 @@ struct sweep_row
     float from = 0.03f;
     float to = 1.0f;
 
-    /// When set, the swept attribute is a tangent-space DIRECTION rather than a scalar, and the column's value is how far it
-    /// leans off the surface normal.
-    /// `coat_normal` is the one that wants this: a coat tilted away from the base is not something a number expresses.
-    bool swept_is_direction = false;
+    /// What shape the swept attribute has, since not every OpenPBR parameter is a number.
+    swept_kind kind = swept_kind::scalar;
 };
 
 [[nodiscard]] cc::vector<sweep_row> make_rows()
@@ -193,7 +209,7 @@ struct sweep_row
          .swept = "coat_normal",
          .from = 0.0f,
          .to = 1.4f,
-         .swept_is_direction = true});
+         .kind = swept_kind::direction});
 
     // The transparent base, swept by the roughness of the interface it refracts through — clear glass at one end and
     // something closer to frosted at the other.
@@ -243,6 +259,19 @@ struct sweep_row
          .from = 0.01f,
          .to = 0.8f});
 
+    // A milky interior, swept by how much of the extinction scatters rather than absorbs.
+    // The near columns are nearly clear glass and the far ones read like jade — the walk is what makes the difference,
+    // and it is the only row here whose look comes from the integrator rather than from the closure.
+    rows.push_back({.name = "scattering",
+                    .shared = {binding::of("transmission_weight", 1.0f), binding::of("specular_roughness", 0.08f),
+                               binding::of("transmission_depth", 0.35f),
+                               binding::of("transmission_color", tg::vec3f(0.75f, 0.85f, 0.80f)),
+                               binding::of("transmission_scatter_anisotropy", 0.3f)},
+                    .swept = "transmission_scatter",
+                    .from = 0.0f,
+                    .to = 6.0f,
+                    .kind = swept_kind::greyscale});
+
     // Coverage, which the any-hit turns into a stochastic cutout — so these resolve as the accumulation converges rather
     // than as a blend.
     rows.push_back(
@@ -281,16 +310,20 @@ struct sweep_row
             float const v = row.from + (row.to - row.from) * t;
 
             auto overrides = row.shared;
-            if (row.swept_is_direction)
+            switch (row.kind)
             {
+            case swept_kind::direction:
                 // `v` is how far the direction leans off the normal, and the lean is built rather than trigonometric:
                 // at 0 this is exactly (0, 0, 1), which is what "shares the base's normal" has to be.
                 overrides.push_back(
                     sv::material_attribute_binding::of(cc::string(row.swept), tg::vec3f(v, 0.0f, 1.0f).normalized()));
-            }
-            else
-            {
+                break;
+            case swept_kind::greyscale:
+                overrides.push_back(sv::material_attribute_binding::of(cc::string(row.swept), tg::vec3f(v, v, v)));
+                break;
+            case swept_kind::scalar:
                 overrides.push_back(sv::material_attribute_binding::of(cc::string(row.swept), v));
+                break;
             }
 
             auto const id

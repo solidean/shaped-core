@@ -133,8 +133,15 @@ void PathTraceRayGen()
                     throughput *= (transmittance * medium_sigma_t * medium_albedo) / pdf;
 
                     origin = origin + dir * t;
-                    dir = pt_sample_hg(dir, medium_g, pt_rand(rng), pt_rand(rng));
-                    prev_pdf = pt_hg_phase(1.0, medium_g); // the density at the direction actually drawn
+
+                    float3 const scattered = pt_sample_hg(dir, medium_g, pt_rand(rng), pt_rand(rng));
+
+                    // The phase function is its own pdf, so this is the density at the direction ACTUALLY drawn — which is
+                    // what the area light's other strategy has to be balanced against.
+                    // Reading it at forward scattering instead would be right only for an isotropic medium, and silently
+                    // wrong for every anisotropic one.
+                    prev_pdf = pt_hg_phase(dot(dir, scattered), medium_g);
+                    dir = scattered;
 
                     ++scatters;
                     if (scatters > 256 || !pt_is_finite(throughput))

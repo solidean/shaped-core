@@ -43,6 +43,8 @@ struct probe_surface
     float transmission_weight = 0.0f;
     tg::vec3f transmission_color = tg::vec3f(1, 1, 1);
     float transmission_depth = 0.0f;
+    tg::vec3f transmission_scatter = tg::vec3f(0, 0, 0);
+    float transmission_scatter_anisotropy = 0.0f;
     float transmission_dispersion_scale = 0.0f;
     float transmission_dispersion_abbe_number = 20.0f;
 
@@ -79,7 +81,7 @@ struct probe_surface
     float geometry_handedness = 1.0f;
 };
 
-static_assert(sizeof(probe_surface) == 65 * 4, "probe_surface must match sv::surface in shaders/openpbr.hlsli");
+static_assert(sizeof(probe_surface) == 69 * 4, "probe_surface must match sv::surface in shaders/openpbr.hlsli");
 
 /// Which estimator a case runs — mirrors the `probe_*` constants in shaders/bsdf_probe.hlsl.
 enum class probe_mode : u32
@@ -109,7 +111,7 @@ struct probe_case
     float pad4 = 0.0f;
 };
 
-static_assert(sizeof(probe_case) == 304, "probe_case must match sv::probe_case in shaders/bsdf_probe.hlsl");
+static_assert(sizeof(probe_case) == 320, "probe_case must match sv::probe_case in shaders/bsdf_probe.hlsl");
 
 /// How many work items share one case, and how many samples each draws.
 ///
@@ -310,6 +312,18 @@ cc::vector<named_surface> surfaces_under_test()
 
     // Dispersion, which changes only the angle a wavelength refracts through — the probe carries all three, so what it
     // pins is that turning it on breaks neither the energy nor the pdf.
+    // An interface at index ~1, which is where the reflection's Fresnel and the refraction's have to agree exactly or the
+    // surface invents light: Schlick's grazing tail climbs to white where the exact relation goes to nothing.
+    out.push_back(
+        {"index-matched glass", {.specular_roughness = 0.15f, .specular_ior = 1.001f, .transmission_weight = 1.0f}});
+
+    out.push_back({"scattering interior",
+                   {.specular_roughness = 0.2f,
+                    .transmission_weight = 1.0f,
+                    .transmission_depth = 0.4f,
+                    .transmission_scatter = tg::vec3f(2.0f, 2.0f, 2.0f),
+                    .transmission_scatter_anisotropy = 0.4f}});
+
     out.push_back({"dispersive glass",
                    {.specular_roughness = 0.1f,
                     .transmission_weight = 1.0f,

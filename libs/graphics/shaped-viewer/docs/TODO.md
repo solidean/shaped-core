@@ -167,21 +167,23 @@ importance-samples the continuation — so what is left is coverage of the model
 - **A normal map is still untested.** `geometry_normal` is applied through `sv::perturb_frame` now, so it has somewhere to land,
   but no material in the tree binds it to a texture.
   The same is true of `geometry_coat_normal`, which lands through the authored frame beside it.
-- **`transmission_scatter` and `transmission_scatter_anisotropy` are absent**, which is now the ONLY missing parameter
-  group.
-  The machinery is all there — the integrator walks the subsurface interior with a phase function already — so this is
-  giving the transmissive interior a scattering albedo of its own rather than building anything.
+- **The parameter set is complete.**
+  Every group OpenPBR specifies is carried and shaded: base, specular, transmission, subsurface, coat, fuzz, emission, thin
+  film and geometry.
+  What is left below is fidelity and integration, not coverage.
 - **The thin film could stop aliasing now.**
   Its higher orders alias because it samples three wavelengths, and the path can be collapsed onto one wavelength since
   dispersion landed.
   Evaluating the film at the collapsed wavelength instead of at all three is most of what Belcour and Barla's spectral
   formulation would buy, for a path that has already paid the collapse.
-- **Nothing tests the WALK.**
-  The probe pins which interior a sample enters, which is the seam the integrator switches on — but the distance sampling,
-  the phase function and the channel-averaged weighting all live in `pathtrace.hlsl` and are exercised only by running an
-  example.
-  A furnace test for a medium is the analogue of the one for the closure: a non-absorbing scattering sphere under a uniform
-  environment must return the environment, whatever its albedo and mean free path.
+- **The walk is measured now**, by `tests/volumetric-furnace-test.cc`: a lossless object under a uniform environment is
+  invisible, so the traced image must come back at the environment's own radiance.
+  Three cases separate what could otherwise pass vacuously — a clear index-matched interior isolating the interface, a
+  purely scattering one which is the walk itself, and an absorbing one that must come back darker.
+  An 8% loss injected per scattering event moves the scattering case by 26% and leaves the clear one exact, which is what
+  says the assertion has teeth.
+  It runs in about 6 seconds on WARP, which is the slowest test sv has and the reason the resolution and frame count are
+  as low as they are.
 - **A scattering walk is capped at 256 events and has no Russian roulette.**
   The cap is a termination guard rather than a quality control, and a dense medium with a high albedo will reach it — which
   is energy lost rather than a path fairly ended.
@@ -202,6 +204,12 @@ importance-samples the continuation — so what is left is coverage of the model
   That is what makes a caustic converge slowly and a glass interior noisy.
   The fix is a shadow ray that accumulates transmittance instead of stopping at the first hit, which needs the any-hit to
   serve two purposes or a second traversal.
+- **The interface's two halves share one Fresnel now**, which they did not.
+  The reflection used Schlick through `spec_f0` while the refraction used the exact dielectric relation, so they did not
+  sum to 1 — invisible at the indices real glass has, where the two agree closely, and worth 12% of the light at an index
+  approaching 1 where Schlick's grazing tail still climbs to white.
+  `interface_transmittance` is the complement of the reflection by construction, and the probe carries an index-matched
+  case that fails without it.
 - **The transmitted lobe drops the radiance-compression factor**, deliberately: this tracer transports importance from the
   camera rather than radiance from the light, and the two conventions differ by exactly the square of the index ratio.
   A renderer that ever grows a light-side path — bidirectional, photon mapping — has to put it back on that side.

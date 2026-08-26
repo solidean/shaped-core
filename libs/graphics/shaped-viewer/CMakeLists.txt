@@ -201,6 +201,7 @@ if(SC_BUILD_TESTS)
             tests/headless-viewer-test.cc
             tests/pathtraced-view-test.cc
             tests/openpbr-bsdf-test.cc
+            tests/volumetric-furnace-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
