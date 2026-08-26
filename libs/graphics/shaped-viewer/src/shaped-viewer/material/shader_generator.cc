@@ -14,14 +14,14 @@ namespace sv
 namespace
 {
 constexpr i32 slot_alignment = 4;       ///< ByteAddressBuffer loads are 4-byte granular, so every slot starts on 4
-constexpr i32 attribute_desc_size = 12; ///< sv_attribute_desc: buffer, offset, stride
+constexpr i32 attribute_desc_size = 12; ///< sv::attribute_desc: buffer, offset, stride
 
 [[nodiscard]] i32 align_up(i32 value, i32 alignment)
 {
     return (value + alignment - 1) / alignment * alignment;
 }
 
-/// The `sv_interpolate_*` / `sv_load_element_*` suffix for a component count.
+/// The `sv::interpolate_*` / `sv::load_element_*` suffix for a component count.
 [[nodiscard]] cc::string_view load_suffix(int components)
 {
     switch (components)
@@ -71,7 +71,7 @@ constexpr i32 attribute_desc_size = 12; ///< sv_attribute_desc: buffer, offset, 
     case attribute_frequency::per_vertex:
         return "ctx.corner";
     case attribute_frequency::per_corner:
-        return "sv_corner_elements(ctx)";
+        return "sv::corner_elements(ctx)";
     case attribute_frequency::per_triangle:
         return "ctx.primitive";
     default:
@@ -286,78 +286,118 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     for (auto i = 0; i < samplers.size(); ++i)
         cc::format_append(src, "SamplerState sv_sampler_{} : register(s{}, space0);\n", i, i);
 
-    cc::format_append(src, "\nsv_surface {}(sv_shading_context ctx)\n{{\n", opts.entry_point);
-    cc::format_append(src, "    sv_surface surface = sv_default_surface();\n");
+    // Whether anything actually supplied each attribute, as a compile-time constant per permutation.
+    //
+    // A default is not a value somebody chose, and for some attributes those two must not shade the same way: an unsupplied
+    // tangent frame has to fall back to the geometric one rather than to the identity rotation, which points at object-space
+    // +z and is a frame belonging to no surface.
+    // The resolution knows the difference and the fragment does not, so it is spelled here — for every attribute rather than
+    // for the ones that happen to care, which keeps this a property of the generator rather than a list of names in it.
+    for (auto const& a : r.attributes)
+        cc::format_append(src, "#define SV_ATTR_SUPPLIED_{} {}\n", a.name,
+                          a.frequency == material_frequency::material_type ? 0 : 1);
+
+    cc::format_append(src, "\nsv::surface {}(sv::shading_context ctx)\n{{\n", opts.entry_point);
+    cc::format_append(src, "    sv::surface surface = sv::default_surface();\n");
+
+    // Every attribute is declared in the entry function's own scope and filled from the block below it.
+    //
+    // The block is what the material fragment's scope is protected by: the parameter buffer, an attribute's descriptor and a
+    // sampled uv are all born and dead inside it, so the only names the fragment can collide with are its own attributes,
+    // `surface` and `ctx`.
+    // A zero initializer is what lets the value escape the block it is loaded in, and every attribute is a scalar or vector,
+    // so the scalar broadcast covers all of them.
+    for (auto const& a : r.attributes)
+        cc::format_append(src, "    {} {} = 0;\n", hlsl_type_of(a.format), a.name);
 
     if (reads_buffers(r))
-        cc::format_append(src, "    ByteAddressBuffer sv_params = {}[NonUniformResourceIndex(ctx.param_buffer)];\n\n",
-                          name_of(bindless_table::buffers));
-
-    for (auto i = 0; i < r.attributes.size(); ++i)
     {
-        auto const& a = r.attributes[i];
-        auto const type = hlsl_type_of(a.format);
-        auto const components = a.format.component_count();
+        cc::format_append(
+            src, "\n    {{\n        ByteAddressBuffer params = {}[NonUniformResourceIndex(ctx.param_buffer)];\n",
+            name_of(bindless_table::buffers));
 
-        switch (a.frequency)
+        for (auto i = 0; i < r.attributes.size(); ++i)
         {
-        case material_frequency::material_type:
-        case material_frequency::material:
-        case material_frequency::mesh_instance:
-        {
-            // A constant is read out of the parameter block whatever it is worth, which is why gold and copper share this source.
-            auto const& s = slot_for(layout, i32(i), material_slot_kind::constant);
-            auto const load = components == 1 ? cc::string("Load") : cc::format("Load{}", components);
-            auto const raw = cc::format("sv_params.{}(ctx.param_offset + {})", load, s.offset);
-            cc::format_append(src, "    {} {} = {};\n", type, a.name,
-                              a.format.scalar == scalar_type::f32 ? cc::format("asfloat({})", raw) : raw);
-            break;
+            auto const& a = r.attributes[i];
+            auto const components = a.format.component_count();
+
+            switch (a.frequency)
+            {
+            case material_frequency::material_type:
+            case material_frequency::material:
+            case material_frequency::mesh_instance:
+            {
+                // A constant is read out of the parameter block whatever it is worth, which is why gold and copper share this
+                // source.
+                auto const& s = slot_for(layout, i32(i), material_slot_kind::constant);
+                auto const load = components == 1 ? cc::string("Load") : cc::format("Load{}", components);
+                auto const raw = cc::format("params.{}(ctx.param_offset + {})", load, s.offset);
+                cc::format_append(src, "\n        {} = {};\n", a.name,
+                                  a.format.scalar == scalar_type::f32 ? cc::format("asfloat({})", raw) : raw);
+                break;
+            }
+
+            case material_frequency::mesh_attribute:
+            {
+                auto const& s = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);
+                cc::format_append(src,
+                                  "\n        {{\n"
+                                  "            sv::attribute_desc desc = sv::load_attribute_desc(params, "
+                                  "ctx.param_offset "
+                                  "+ {});\n",
+                                  s.offset);
+                auto const buffer = buffer_expression("desc");
+                if (interpolates(a.attribute->frequency))
+                    // A rotation blends as one: the three corners are aligned into a common hemisphere before they are summed.
+                    // Flat frequencies fall through to the plain load below, where there is nothing to blend and the mode
+                    // therefore means nothing.
+                    cc::format_append(
+                        src, "            {} = sv::interpolate_{}({}, desc, {}, ctx.barycentrics);\n", a.name,
+                        a.interpolation == attribute_interpolation::rotation ? cc::string("rotation")
+                                                                             : cc::string(load_suffix(components)),
+                        buffer, element_expression(a.attribute->frequency));
+                else
+                    cc::format_append(src, "            {} = sv::load_element_{}({}, desc, {});\n", a.name,
+                                      load_suffix(components), buffer, element_expression(a.attribute->frequency));
+                src += "        }\n";
+                break;
+            }
+
+            case material_frequency::material_texture:
+            case material_frequency::mesh_texture:
+            {
+                auto const& tex = slot_for(layout, i32(i), material_slot_kind::texture_index);
+                auto const& uv_slot = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);
+                cc::format_append(src,
+                                  "\n        {{\n"
+                                  "            sv::attribute_desc uv_desc = sv::load_attribute_desc(params, "
+                                  "ctx.param_offset + {});\n",
+                                  uv_slot.offset);
+
+                auto const uv_buffer = buffer_expression("uv_desc");
+                if (interpolates(a.uv->frequency))
+                    cc::format_append(
+                        src, "            float2 uv = sv::interpolate_f2({}, uv_desc, {}, ctx.barycentrics);\n",
+                        uv_buffer, element_expression(a.uv->frequency));
+                else
+                    cc::format_append(src, "            float2 uv = sv::load_element_f2({}, uv_desc, {});\n", uv_buffer,
+                                      element_expression(a.uv->frequency));
+
+                cc::format_append(src, "            uint tex = params.Load(ctx.param_offset + {});\n", tex.offset);
+                // SampleLevel rather than Sample: there are no derivatives in a ray tracing hit shader, so the mip has to be
+                // named.
+                cc::format_append(src,
+                                  "            {} = {}[NonUniformResourceIndex(tex)].SampleLevel(sv_sampler_{}, uv, "
+                                  "0){};\n"
+                                  "        }}\n",
+                                  a.name, name_of(bindless_table::textures_2d),
+                                  index_of_sampler(samplers, a.sample->sampler), sample_swizzle(components));
+                break;
+            }
+            }
         }
 
-        case material_frequency::mesh_attribute:
-        {
-            auto const& s = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);
-            auto const desc = cc::format("sv_desc_{}", a.name);
-            cc::format_append(src,
-                              "    sv_attribute_desc {} = sv_load_attribute_desc(sv_params, ctx.param_offset + {});\n",
-                              desc, s.offset);
-            auto const buffer = buffer_expression(desc);
-            if (interpolates(a.attribute->frequency))
-                cc::format_append(src, "    {} {} = sv_interpolate_{}({}, {}, {}, ctx.barycentrics);\n", type, a.name,
-                                  load_suffix(components), buffer, desc, element_expression(a.attribute->frequency));
-            else
-                cc::format_append(src, "    {} {} = sv_load_element_{}({}, {}, {});\n", type, a.name,
-                                  load_suffix(components), buffer, desc, element_expression(a.attribute->frequency));
-            break;
-        }
-
-        case material_frequency::material_texture:
-        case material_frequency::mesh_texture:
-        {
-            auto const& tex = slot_for(layout, i32(i), material_slot_kind::texture_index);
-            auto const& uv_slot = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);
-            auto const uv_desc = cc::format("sv_uv_{}", a.name);
-            cc::format_append(src,
-                              "    sv_attribute_desc {} = sv_load_attribute_desc(sv_params, ctx.param_offset + {});\n",
-                              uv_desc, uv_slot.offset);
-
-            auto const uv_buffer = buffer_expression(uv_desc);
-            if (interpolates(a.uv->frequency))
-                cc::format_append(src, "    float2 sv_uvv_{} = sv_interpolate_f2({}, {}, {}, ctx.barycentrics);\n",
-                                  a.name, uv_buffer, uv_desc, element_expression(a.uv->frequency));
-            else
-                cc::format_append(src, "    float2 sv_uvv_{} = sv_load_element_f2({}, {}, {});\n", a.name, uv_buffer,
-                                  uv_desc, element_expression(a.uv->frequency));
-
-            cc::format_append(src, "    uint sv_tex_{} = sv_params.Load(ctx.param_offset + {});\n", a.name, tex.offset);
-            // SampleLevel rather than Sample: there are no derivatives in a ray tracing hit shader, so the mip has to be named.
-            cc::format_append(
-                src, "    {} {} = {}[NonUniformResourceIndex(sv_tex_{})].SampleLevel(sv_sampler_{}, sv_uvv_{}, 0){};\n",
-                type, a.name, name_of(bindless_table::textures_2d), a.name,
-                index_of_sampler(samplers, a.sample->sampler), a.name, sample_swizzle(components));
-            break;
-        }
-        }
+        src += "    }\n";
     }
 
     cc::format_append(src, "\n    // --- {} ---\n", r.type->name);

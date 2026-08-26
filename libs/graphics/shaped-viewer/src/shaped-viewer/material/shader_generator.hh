@@ -13,7 +13,7 @@
 enum class sv::material_slot_kind : sv::u8
 {
     constant,             ///< the attribute's value itself, in the layout `attribute_format` names
-    attribute_descriptor, ///< an `sv_attribute_desc` — where a mesh attribute's elements live
+    attribute_descriptor, ///< an `sv::attribute_desc` — where a mesh attribute's elements live
     texture_index,        ///< a `u32` index into the bindless texture table
 };
 
@@ -92,6 +92,10 @@ namespace sv
 /// That function declares one local per signature attribute — a constant loaded from the parameter block, a mesh attribute
 /// interpolated across the hit triangle, or a texture sampled through its uv attribute — and then runs the type's fragment
 /// verbatim over them.
+///
+/// The loads themselves happen in a nested block, so the attribute names, `surface` and `ctx` are the only names the fragment
+/// shares a scope with.
+/// That is what lets a material type name an attribute `params` or `uv` without the generator having to know.
 ///
 /// Only what the permutation touches is declared: a material sampling no texture emits no texture table, so the reflection a
 /// caller binds against stays as small as the material is.

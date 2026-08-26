@@ -121,7 +121,7 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
              .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
     };
 
-    // One `sv_instance` per TLAS instance: where this item's material parameters live, and where its geometry does.
+    // One `sv::instance` per TLAS instance: where this item's material parameters live, and where its geometry does.
     auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
         records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd->upload.data_to_buffer(instance_table, records);

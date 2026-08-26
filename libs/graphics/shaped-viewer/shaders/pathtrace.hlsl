@@ -1,14 +1,16 @@
 #include "pt_common.hlsli"
-#include "background.hlsli" // background_radiance (the SH environment probe)
 
 // The path-tracing raygen: a pinhole camera shoots `samples_per_pixel` jittered primary rays per pixel and
-// integrates global illumination by bouncing them diffusely. Direct light at each hit is estimated with
-// next-event estimation toward two sources — the rectangular ceiling light and the SH environment — one shadow
-// ray each per bounce, so the image converges at far fewer samples than letting the bounce rays find the light.
+// integrates global illumination by following the continuation each hit hands back.
 //
-// The environment is gathered by two strategies, combined with the balance-heuristic multiple-importance
-// sampling: the NEE ray below (uniform-hemisphere sampling) and the diffuse bounce ray when it escapes. MIS
-// keeps the sum unbiased while cutting the variance a non-uniform sky would otherwise add.
+// The SHADING is not here. Each closest-hit evaluates its material's OpenPBR BSDF, estimates direct light through
+// it toward both sources — the rectangular area light and the SH environment — and importance-samples the next
+// direction from it; see pt_material_hit.hlsli. What is left for this file is the loop: accumulate what a hit
+// reports, carry the throughput, and decide when a path ends.
+//
+// The environment is gathered by two strategies combined with balance-heuristic multiple importance sampling: the
+// hit's own next-event ray (uniform-hemisphere) and the BSDF-sampled bounce ray when it escapes. The weight for
+// the second is applied here, because only the caller knows the bounce escaped.
 
 RaytracingAccelerationStructure scene : register(t0);
 RWTexture2D<float4> Output : register(u0);
@@ -47,86 +49,6 @@ float2 reproject(Camera cam, float3 world, float2 dim, out bool ok)
     return (float2(a, b) * 0.5 + 0.5) * dim;
 }
 
-// Direct lighting at surface point P with normal N: sample one point on the area light, test visibility with
-// a shadow ray, and return the light's contribution *without* the surface albedo (the caller folds that in).
-float3 estimate_direct(float3 P, float3 N, inout uint rng)
-{
-    // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
-    float s = pt_rand(rng) * 2.0 - 1.0;
-    float t = pt_rand(rng) * 2.0 - 1.0;
-    float3 lp = light.center + s * light.u + t * light.v;
-
-    float3 to_light = lp - P;
-    float dist2 = dot(to_light, to_light);
-    float dist = sqrt(dist2);
-    float3 wi = to_light / dist;
-
-    float cos_surf = dot(N, wi);
-    float cos_light = dot(light.normal, -wi);
-    if (cos_surf <= 0.0 || cos_light <= 0.0)
-        return float3(0, 0, 0); // surface or light face turned away
-
-    // Shadow ray: occluded if anything sits between P and the light. Stop just short of the light surface, so
-    // the light's own geometry does not count as an occluder. Skip the closest-hit shader — only visibility
-    // matters — and route it to the shadow miss shader (miss index 1), which sets `visible` on a clear path.
-    ShadowPayload sp;
-    sp.visible = 0.0; // assume occluded; the shadow miss flips this to 1 when the ray reaches the light freely
-    RayDesc sray;
-    sray.Origin = P + N * 1e-3;
-    sray.Direction = wi;
-    sray.TMin = 1e-3;
-    sray.TMax = dist - 2e-3;
-    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, 0, 0, 1, sray, sp);
-    if (sp.visible < 0.5)
-        return float3(0, 0, 0); // occluded
-
-    // solid-angle pdf of uniform area sampling, times the Lambertian BRDF's 1/PI (albedo folded in by caller).
-    // the rect's full edges are 2*light.u and 2*light.v, so its area is |cross(2u, 2v)| = 4 |cross(u, v)|.
-    float area = 4.0 * length(cross(light.u, light.v));
-    float pdf = dist2 / (area * cos_light);
-    return light.emission * (cos_surf / (PT_PI * pdf));
-}
-
-// Environment next-event estimation at surface point P with normal N: one uniform-hemisphere sample toward the
-// SH environment, visibility-tested to infinity, MIS-weighted (balance heuristic) against the diffuse bounce
-// ray that samples the same environment. Returns the environment's contribution *without* the surface albedo
-// (the caller folds that in). The SH probe has no sharp features, so a proportional-to-radiance sampler is not
-// worth its cost — the uniform strategy plus MIS already cuts the variance of a bright, non-uniform sky.
-float3 estimate_env(float3 P, float3 N, inout uint rng)
-{
-    // Uniform-hemisphere direction about N: cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick.
-    float u1 = pt_rand(rng);
-    float u2 = pt_rand(rng);
-    float cos_surf = u1;
-    float r = sqrt(max(0.0, 1.0 - u1 * u1));
-    float phi = 2.0 * PT_PI * u2;
-
-    float3 up = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
-    float3 t = normalize(cross(up, N));
-    float3 b = cross(N, t);
-    float3 wi = normalize(t * (r * cos(phi)) + b * (r * sin(phi)) + N * cos_surf);
-
-    // pdfs of the two strategies for this direction: uniform hemisphere here, cosine-weighted for the bounce.
-    float p_env = 1.0 / (2.0 * PT_PI);
-    float p_brdf = cos_surf / PT_PI;
-    float w = p_env / (p_env + p_brdf); // balance heuristic
-
-    // Visibility to infinity: occluded if any geometry sits along the ray. Reuse the shadow miss (index 1).
-    ShadowPayload sp;
-    sp.visible = 0.0;
-    RayDesc sray;
-    sray.Origin = P + N * 1e-3;
-    sray.Direction = wi;
-    sray.TMin = 1e-3;
-    sray.TMax = 1e4;
-    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, 0, 0, 1, sray, sp);
-    if (sp.visible < 0.5)
-        return float3(0, 0, 0); // occluded
-
-    // Lambertian estimator f*cos*L / p_env with f = albedo/PI (albedo folded in by the caller), times the MIS weight.
-    return background_radiance(wi) * (cos_surf / (PT_PI * p_env)) * w;
-}
-
 [shader("raygeneration")]
 void PathTraceRayGen()
 {
@@ -154,6 +76,9 @@ void PathTraceRayGen()
         float2 c_ndc = (float2(px) + 0.5) / float2(dim) * 2.0 - 1.0;
 
         PtPayload gp;
+        gp.shade = 0; // geometry only: no material, no shadow rays, no continuation
+        gp.rng = rng;
+
         RayDesc gray;
         gray.Origin = camera.position;
         gray.Direction = normalize(camera.forward + camera.right_scaled * c_ndc.x - camera.up_scaled * c_ndc.y);
@@ -162,8 +87,9 @@ void PathTraceRayGen()
         TraceRay(scene, RAY_FLAG_NONE, 0xFF, 0, 0, 0, gray, gp);
 
         // Read every field the payload declares, as the access analyzer expects of the caller; only two are kept.
-        float3 unused = gp.albedo + gp.emissive;
-        gb_normal = gp.normal + unused * 0.0;
+        float3 unused = gp.direct + gp.emission + gp.throughput + gp.direction;
+        float unused_scalar = gp.bsdf_pdf + float(gp.rng) * 0.0;
+        gb_normal = gp.normal + unused * 0.0 + unused_scalar * 0.0;
         gb_t = gp.hit_t;
     }
 
@@ -177,11 +103,14 @@ void PathTraceRayGen()
 
         float3 throughput = float3(1, 1, 1);
         float3 radiance = float3(0, 0, 0);
-        float prev_cos = 0.0; // cos of the last bounce sample about its surface normal, for the escaped-env MIS
+        float prev_pdf = 0.0; // pdf of the direction the last hit sampled, for the escaped-environment MIS
 
         for (int b = 0; b < max_bounces; ++b)
         {
             PtPayload p;
+            p.shade = 1;
+            p.rng = rng;
+
             RayDesc ray;
             ray.Origin = origin;
             ray.Direction = dir;
@@ -189,40 +118,43 @@ void PathTraceRayGen()
             ray.TMax = 1e4;
             TraceRay(scene, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, p);
 
-            // Read every payload field into locals right away — before estimate_direct traces the shadow ray —
-            // so the payload-access analyzer sees them consumed, then branch on the hit.
+            // Read every payload field into locals right away, so the payload-access analyzer sees them consumed,
+            // then branch on the hit. The random state comes back advanced by whatever the hit drew from it.
+            rng = p.rng;
             float hit_t = p.hit_t;
-            float3 albedo = p.albedo;
-            float3 emissive = p.emissive;
+            float3 direct = p.direct;
+            float3 emission = p.emission;
+            float3 weight = p.throughput;
+            float3 next_dir = p.direction;
             float3 N = p.normal;
+            float pdf = p.bsdf_pdf;
 
             if (hit_t < 0.0)
             {
-                // Escaped to the SH environment (PtMiss wrote its radiance back in `emissive`). The primary ray
-                // sees the sky directly, at full weight; a bounce ray is the BRDF strategy of the env NEE below,
-                // so weight it by the balance heuristic against the env sampler's pdf (uniform hemisphere).
-                float w = (b == 0) ? 1.0 : (2.0 * prev_cos) / (2.0 * prev_cos + 1.0);
-                radiance += throughput * emissive * w;
+                // Escaped to the SH environment (PtMiss wrote its radiance back in `emission`). The primary ray
+                // sees the sky directly, at full weight; a bounce ray is the BSDF strategy of the hit's own
+                // environment estimate, so weight it against that sampler's uniform-hemisphere pdf.
+                float w = (b == 0) ? 1.0 : pt_mis_weight(prev_pdf, PT_ENV_PDF);
+                radiance += throughput * emission * w;
                 break;
             }
 
             // Count a hit emitter directly only on the primary ray; deeper bounces already get emitters through
-            // NEE at the previous hit, so adding emissive again would double-count.
+            // NEE at the previous hit, so adding emission again would double-count.
             if (b == 0)
-                radiance += throughput * emissive;
+                radiance += throughput * emission;
 
-            float3 hit_p = origin + dir * hit_t;
+            // What the hit already estimated toward the area light and the environment, through its own BSDF.
+            radiance += throughput * direct;
 
-            // Direct lighting by next-event estimation toward both sources: the area light and the SH environment.
-            radiance += throughput * albedo * estimate_direct(hit_p, N, rng);
-            radiance += throughput * albedo * estimate_env(hit_p, N, rng);
+            // A closure that sampled nothing — fully absorbed, or a lobe that collapsed — ends the path here.
+            if (all(weight <= float3(0, 0, 0)))
+                break;
 
-            // diffuse indirect bounce: cosine-weighted sampling makes (albedo/PI * cos) / pdf collapse to albedo
-            float3 wi = pt_sample_cosine_hemisphere(N, pt_rand(rng), pt_rand(rng));
-            prev_cos = max(dot(N, wi), 0.0); // pdf of this bounce = prev_cos / PI, for the env MIS on escape
-            throughput *= albedo;
-            origin = hit_p + N * 1e-3;
-            dir = wi;
+            throughput *= weight;
+            prev_pdf = pdf;
+            origin = origin + dir * hit_t + N * 1e-3;
+            dir = next_dir;
         }
 
         accum += radiance;

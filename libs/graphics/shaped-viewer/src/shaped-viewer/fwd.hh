@@ -67,12 +67,13 @@ struct mesh_texture;
 struct mesh;
 
 // the material system (see material/)
-enum class material_frequency : u8;   // where an attribute's value came from; the ORDER is the precedence
-enum class material_source_kind : u8; // a constant, or a uv-sampled texture
-struct material_signature_entry;      // one attribute a material type requires
-struct material_attribute_binding;    // one attribute a material overrides
-struct material_type;                 // a family of materials: signature + shader fragment
-struct material;                      // one instance of a type, with some attributes bound
+enum class material_frequency : u8;      // where an attribute's value came from; the ORDER is the precedence
+enum class material_source_kind : u8;    // a constant, or a uv-sampled texture
+enum class attribute_interpolation : u8; // how a mesh-sourced attribute is blended across a hit triangle
+struct material_signature_entry;         // one attribute a material type requires
+struct material_attribute_binding;       // one attribute a material overrides
+struct material_type;                    // a family of materials: signature + shader fragment
+struct material;                         // one instance of a type, with some attributes bound
 struct resolved_attribute;
 struct resolved_material;           // a type + material + mesh resolved down the frequency chain
 enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds

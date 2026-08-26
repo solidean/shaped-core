@@ -27,19 +27,42 @@ cbuffer FrameConstants : register(b0)
     uint   debug_view;         // 1 => write a false-color of the carried sample count instead of the image
 };
 
-// One path segment's hit result. The raygen (caller) reads it back; the closest-hit fills the surface fields;
-// the miss marks the segment escaped (hit_t < 0). SM 6.8 wants the DXR 1.1 [raypayload] annotation with
-// per-field read/write stage qualifiers.
-// Every field is written by both the closest-hit and the miss (the miss writes zeros plus hit_t < 0), so the
-// caller can read them all unconditionally right after TraceRay without the access analyzer flagging an
-// undefined read — it then branches on hit_t.
+// One path segment, in and out.
+//
+// The closest-hit does the shading: it evaluates the material's BSDF, estimates direct light from it, and samples the
+// continuation direction. So the payload carries the segment's RESULT rather than its surface, which is what lets a layered
+// BSDF stay on the hit shader's stack instead of being squeezed through here.
+//
+// `shade` and `rng` travel the other way, written by the caller. The random state round-trips so the whole path pulls from one
+// stream, and `shade` 0 asks for the geometry fields alone — the G-buffer prepass wants no shading done.
+//
+// Every result field is written by both the closest-hit and the miss (the miss writes zeros plus hit_t < 0), so the caller can
+// read them all unconditionally right after TraceRay without the access analyzer flagging an undefined read; it then branches
+// on hit_t. SM 6.8 wants the DXR 1.1 [raypayload] annotation with per-field read/write stage qualifiers.
 struct [raypayload] PtPayload
 {
-    float3 albedo   : read(caller) : write(closesthit, miss);
-    float3 emissive : read(caller) : write(closesthit, miss);
-    float3 normal   : read(caller) : write(closesthit, miss);
-    float  hit_t    : read(caller) : write(closesthit, miss); // < 0 => the ray escaped (miss)
+    uint shade : read(closesthit) : write(caller);
+    uint rng   : read(caller, closesthit) : write(caller, closesthit);
+
+    float3 direct     : read(caller) : write(closesthit, miss); // next-event estimate at this hit, BSDF folded in
+    float3 emission   : read(caller) : write(closesthit, miss); // the surface's own emission, or the sky on a miss
+    float3 throughput : read(caller) : write(closesthit, miss); // f * cos / pdf for the sampled continuation
+    float3 direction  : read(caller) : write(closesthit, miss); // where the path goes next
+    float3 normal     : read(caller) : write(closesthit, miss); // shading normal, for the G-buffer and the ray offset
+
+    float bsdf_pdf : read(caller) : write(closesthit, miss); // pdf of `direction`, for the escaped-environment MIS weight
+    float hit_t    : read(caller) : write(closesthit, miss); // < 0 => the ray escaped (miss)
 };
+
+// The pdf of the environment sampler the closest-hit estimates with: one uniform-hemisphere direction.
+// The raygen needs the same number to weight a bounce ray that escaped, so it lives here rather than in either of them.
+static const float PT_ENV_PDF = 1.0 / (2.0 * PT_PI);
+
+// The balance heuristic over two strategies, which is what keeps the sum of the two unbiased.
+float pt_mis_weight(float pdf_this, float pdf_other)
+{
+    return pdf_this / max(pdf_this + pdf_other, 1e-9);
+}
 
 // A separate, minimal payload for shadow rays. A shadow ray reads only visibility, so giving it its own type
 // keeps the payload-access qualifiers exact (the surface payload's fields would otherwise be flagged as
