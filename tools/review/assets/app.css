@@ -474,3 +474,26 @@ body.is-stale #shell {
 
 .comment-actions button.ghost { color: var(--text-dim); }
 .comment-actions button.danger:hover { color: var(--bad); border-color: var(--bad); }
+
+/* ---- superseding --------------------------------------------------------- */
+/* The struck original stays on screen because the maintainer read it. What the entry says now is the replacement
+   below it; what it said when they read it is one click away. */
+
+.superseded > summary {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.superseded[open] { border-left: 2px solid var(--line); padding-left: 12px; }
+.superseded[open] > *:not(summary) { opacity: 0.55; text-decoration: line-through; }
+
+.replaces { color: var(--text-dim); font-size: 0.82rem; margin-bottom: 4px; }
+
+mark.new {
+  background: rgba(110, 168, 254, 0.18);
+  color: var(--text);
+  padding: 0 2px;
+  border-radius: 2px;
+}

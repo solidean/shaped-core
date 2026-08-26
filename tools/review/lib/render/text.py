@@ -16,7 +16,10 @@ _RULE = "-" * 78
 def _block_heading(block: Block) -> str:
     head = f" {block.head}" if block.head else ""
     stamp = f"  [round {block.round}]" if block.round else ""
-    return f"## {block.type}{head}{stamp}"
+    # The name is printed because it is what a `supersedes:` and a comment anchor on, and an agent writing either
+    # needs to read it off somewhere.
+    name = f"  <{block.block_name}>" if block.block_name and not block.is_ask else ""
+    return f"## {block.type}{head}{name}{stamp}"
 
 
 def _render_ask(block: Block, answers: AnswerFile) -> list[str]:
@@ -50,8 +53,12 @@ def _render_ask(block: Block, answers: AnswerFile) -> list[str]:
     return out
 
 
-def render_entry(entry: Entry, answers: AnswerFile) -> str:
-    """One entry and its answers, in the order they were written."""
+def render_entry(entry: Entry, answers: AnswerFile, *, history: bool = False) -> str:
+    """One entry and its answers, in the order they were written.
+
+    Live blocks only by default: an agent reading back wants what the entry says now.
+    `history` adds the superseded ones, which is what the maintainer read rather than what is true.
+    """
     header = [
         _RULE,
         f"{entry.id}  {entry.title}",
@@ -62,8 +69,10 @@ def render_entry(entry: Entry, answers: AnswerFile) -> str:
     header.append(_RULE)
 
     out = list(header)
-    for block in entry.blocks:
+    for block in (entry.blocks if history else entry.live_blocks):
         out.append("")
+        if block.is_superseded:
+            out.append(f"  (superseded by {block.superseded_by})")
         if block.is_ask:
             out.extend(_render_ask(block, answers))
         else:

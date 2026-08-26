@@ -84,6 +84,24 @@ def check_immutable(entry: Entry, finalized: dict[str, str]) -> None:
     )
 
 
+def check_supersedes(entry: Entry, finalized: set[str]) -> None:
+    """Raise if an answered ask has been superseded, naming the remedy.
+
+    `supersedes:` on an answered ask would walk straight around the immutability guard: the old question renders
+    struck, the new one takes its place, and the answer that was given to the old wording sits under a question
+    the maintainer never saw.
+    An ask that has never been answered may be retired freely, since nothing was promised about it.
+    """
+    for block in entry.blocks:
+        if not block.is_ask or not block.is_superseded or block.name not in finalized:
+            continue
+        raise ReviewParseError(
+            entry.path, block.line,
+            f"ask {block.name!r} has been answered, so it cannot be superseded",
+            f"drop the `supersedes:`, and add `## ask <new-name>` with `follows: {block.name}` instead",
+        )
+
+
 def missing_context_tiers(entry: Entry) -> list[str]:
     """The context tiers this entry does not carry, in reading order.
 

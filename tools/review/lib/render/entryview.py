@@ -197,9 +197,18 @@ def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: Review
                 parts.append(f'<div class="round-divider"><span>round {block.round}</span></div>')
             last_round = block.round
         on_block = [c for c in comments if c.block == block.anchor]
+        body = _block_html(entry, block, ctx)
+        if block.is_superseded:
+            # Both, rather than only the replacement: the maintainer needs to see what the entry says now
+            # and what it said when they read it.
+            body = (f'<details class="superseded"><summary>superseded by '
+                    f'<code>{_esc(block.superseded_by)}</code></summary>{body}</details>')
+        replaces = ""
+        if block.supersedes:
+            replaces = f'<div class="replaces">replaces <code>{_esc(block.supersedes)}</code></div>'
         parts.append(
             f'<section class="block" data-anchor="{_esc(block.anchor)}">'
-            f'{_block_html(entry, block, ctx)}{_comment_slot(block.anchor, on_block)}</section>'
+            f'{replaces}{body}{_comment_slot(block.anchor, on_block)}</section>'
         )
 
     ack = entry.acknowledgement

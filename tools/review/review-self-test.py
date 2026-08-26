@@ -35,7 +35,10 @@ from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
 from tools.review.lib.entry.grammar import ReviewParseError, ack_name  # noqa: E402
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
-from tools.review.lib.entry.write import append_text, compose, immutability_violations, stamp_rounds  # noqa: E402
+from tools.review.lib.entry.write import (  # noqa: E402
+    append_text, check_supersedes, compose, immutability_violations, stamp_rounds,
+)
+from tools.review.lib.render.markdown import render as render_markdown  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
 from tools.review.lib.git.run import Git  # noqa: E402
 from tools.review.lib.space.intervals import IntervalList  # noqa: E402
@@ -948,6 +951,66 @@ def test_answers_orphan_a_vanished_ask(root: Path) -> None:
         moved = answers.reconcile(without)
         assert moved == ["pick-one"]
         assert not answers.answers and len(answers.orphans) == 1
+
+
+SUPERSEDE = """
+## prose
+round: 1
+
+The first telling.
+
+## prose
+round: 2
+supersedes: prose
+
+The ==corrected== telling.
+"""
+
+
+def test_a_superseded_block_leaves_the_live_ones(root: Path) -> None:
+    """Rounds stay immutable and the file stays append-only, so a correction is a new block rather than an edit."""
+    entry = parse_text(ENTRY + SUPERSEDE, Path("entry.md"))
+    prose = [b for b in entry.blocks if b.type == "prose"]
+    assert prose[0].is_superseded and prose[0].superseded_by == "r2/prose"
+    assert not prose[1].is_superseded
+    assert prose[0] not in entry.live_blocks and prose[1] in entry.live_blocks
+
+
+def test_supersedes_must_name_an_earlier_block_in_this_entry(root: Path) -> None:
+    """Within one entry is what keeps the struck original and its replacement on the same screen."""
+    try:
+        parse_text(ENTRY + "\n## prose\nsupersedes: nothing-like-this\n\nA correction.\n", Path("entry.md"))
+    except ReviewParseError as e:
+        assert "no earlier block" in str(e)
+        return
+    raise AssertionError("a supersedes naming nothing must be an error, not a silent no-op")
+
+
+def test_a_superseded_ask_discharges_nothing(root: Path) -> None:
+    """Otherwise a replaced ask would double-count against the coverage gate."""
+    text = ENTRY + "\n## ask  pick-again\nsupersedes: pick-one\ndischarges: CHANGE-AAAA\n\nWhich way now?\n\n- radio: yes\n"
+    entry = parse_text(text, Path("entry.md"))
+    assert [b.name for b in entry.asks] == ["pick-again"]
+    assert entry.discharged_changes() == ["CHANGE-AAAA"], "the replacement discharges; the original no longer does"
+
+
+def test_an_answered_ask_cannot_be_superseded(root: Path) -> None:
+    """Otherwise the answer sits under a question the maintainer never saw, which is what immutability prevents."""
+    text = ENTRY + "\n## ask  pick-again\nsupersedes: pick-one\n\nReworded.\n\n- radio: yes\n"
+    entry = parse_text(text, Path("entry.md"))
+    try:
+        check_supersedes(entry, {"pick-one"})
+    except ReviewParseError as e:
+        assert "follows: pick-one" in str(e)
+        return
+    raise AssertionError("superseding an answered ask must be refused, naming `follows:` as the remedy")
+
+
+def test_a_new_span_is_marked_and_a_code_span_is_not(root: Path) -> None:
+    """The rephrase case is why this exists: three words changed, unreadable as a diff."""
+    html = render_markdown("The ==corrected== telling, not `a == b`.")
+    assert '<mark class="new">corrected</mark>' in html, html
+    assert "<mark" not in html.split("<code>")[1], "a code span holding == must be left alone"
 
 
 def test_a_comment_is_tentative_until_the_round_is_finalized(root: Path) -> None:

@@ -22,10 +22,36 @@ _REF_RE = re.compile(
 _MAX_PROBE = 4096
 
 
+def _mark_rule(state, silent: bool) -> bool:
+    """`==new==` as a highlighted span, for a block re-stated in full with only its changed points drawn.
+
+    The case this exists for is a rephrase where three words moved: unreadable as a diff, dishonest as a silent
+    replacement, and invisible to a maintainer who does not re-read an entry end to end before sending.
+
+    Registered after `backticks`, so a code span holding `==` is left alone.
+    The content is taken as plain text: this marks changed words, and nesting emphasis inside it would be a second
+    thing to reason about for no case anyone has.
+    """
+    src, pos = state.src, state.pos
+    if not src.startswith("==", pos):
+        return False
+    end = src.find("==", pos + 2)
+    if end < 0 or not src[pos + 2:end].strip():
+        return False
+    if not silent:
+        opened = state.push("mark_open", "mark", 1)
+        opened.attrs = {"class": "new"}
+        state.push("text", "", 0).content = src[pos + 2:end]
+        state.push("mark_close", "mark", -1)
+    state.pos = end + 2
+    return True
+
+
 def _renderer() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"linkify": False, "html": True})
     md.enable("table")
     md.enable("strikethrough")
+    md.inline.ruler.before("emphasis", "mark", _mark_rule)
     return md
 
 

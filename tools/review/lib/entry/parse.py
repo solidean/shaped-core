@@ -50,6 +50,7 @@ class Block:
     raw: str = ""
     block_name: str = ""
     effective_round: int = 0
+    superseded_by: str = ""
 
     @property
     def name(self) -> str:
@@ -83,6 +84,15 @@ class Block:
             return int(self.attrs.get("round", "0"))
         except ValueError:
             return 0
+
+    @property
+    def supersedes(self) -> str:
+        """The block this one replaces, if any."""
+        return self.attrs.get("supersedes", "")
+
+    @property
+    def is_superseded(self) -> bool:
+        return bool(self.superseded_by)
 
     @property
     def is_ask(self) -> bool:
@@ -161,13 +171,24 @@ class Entry:
                      options=[Option(kind="check", label="Read and acknowledged")])
 
     @property
+    def live_blocks(self) -> list[Block]:
+        """The blocks that still say what this entry says, with everything superseded left out.
+
+        What an agent reads back, and what the artifact carries.
+        The page shows both, because the maintainer needs to see what it said when they read it.
+        """
+        return [b for b in self.blocks if not b.is_superseded]
+
+    @property
     def asks(self) -> list[Block]:
         """Every question this entry poses, the synthetic acknowledgement included.
 
         Downstream code counts, answers and reports asks without caring which kind it has,
         which is the point: an acknowledgement is progress in exactly the way an answer is.
+
+        A superseded ask is not among them: it has been retired, and only one that was never answered may be.
         """
-        real = [b for b in self.blocks if b.is_ask]
+        real = [b for b in self.blocks if b.is_ask and not b.is_superseded]
         ack = self.acknowledgement
         return real + ([ack] if ack is not None else [])
 
@@ -379,6 +400,40 @@ def _assign_block_names(entry: Entry, path: Path) -> None:
         seen[key] = block
 
 
+def _resolve_supersedes(entry: Entry, path: Path) -> None:
+    """Point every `supersedes:` at the block it replaces, and refuse one that names nothing.
+
+    Only an earlier block in the same entry can be a target.
+    Within one entry is what makes the rendering obvious — the struck original and its replacement are on the same
+    screen — and a correction that lands somewhere the reader is not is the problem this feature exists to solve.
+    """
+    for index, block in enumerate(entry.blocks):
+        ref = block.supersedes
+        if not ref:
+            continue
+        _, _, name = ref.rpartition("/")
+        wanted = canonical_block_name(name)
+        round_part, _, _ = ref.rpartition("/")
+        want_round = int(round_part[1:]) if round_part.startswith("r") and round_part[1:].isdigit() else 0
+
+        candidates = [
+            b for b in entry.blocks[:index]
+            if canonical_block_name(b.block_name) == wanted and (not want_round or b.effective_round == want_round)
+        ]
+        if not candidates:
+            raise ReviewParseError(
+                path, block.line, f"`supersedes: {ref}` names no earlier block in this entry",
+                "a correction replaces a block above it, in the same entry; `review show` lists the block names",
+            )
+        target = candidates[-1]
+        if target.is_superseded:
+            raise ReviewParseError(
+                path, block.line, f"{ref!r} has already been superseded",
+                f"supersede {block.block_name!r}'s current replacement instead, or name it explicitly",
+            )
+        target.superseded_by = block.anchor
+
+
 def parse_text(text: str, path: Path, slug: str = "") -> Entry:
     """Parse entry text, raising ReviewParseError with a line number on anything malformed.
 
@@ -435,6 +490,7 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
         entry.blocks.append(block)
 
     _assign_block_names(entry, path)
+    _resolve_supersedes(entry, path)
     return entry
 
 

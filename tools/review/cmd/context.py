@@ -126,6 +126,7 @@ class Context:
             finalized = {name: a.prompt_hash for name, a in answers.answers.items() if not a.tentative}
             try:
                 review.check_immutable(entry, finalized)
+                review.check_supersedes(entry, set(finalized))
             except review.ReviewParseError as e:
                 self.die(str(e))
 

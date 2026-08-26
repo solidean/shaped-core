@@ -26,7 +26,11 @@ from dataclasses import dataclass
 # `addresses` is how the agent answers a comment: any appended block names the comment ids it responds to.
 # Outstanding is then computed from those references the way an undischarged change is, rather than tracked —
 # the tool has exactly one notion of something owed back, and a second one would be a second thing to get wrong.
-_ANY = frozenset({"round", "name", "addresses"})
+#
+# `supersedes` retires an earlier block in the same entry without editing it.
+# A partial round leaves earlier entries out of date, and the only two moves were appending a correction that buries
+# itself at the bottom, or editing a block the maintainer has already read.
+_ANY = frozenset({"round", "name", "addresses", "supersedes"})
 
 BLOCK_TYPES: dict[str, set[str]] = {
     "context/cold": set(_ANY),
@@ -36,7 +40,7 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "code": _ANY | {"lang", "file"},
     "changes": _ANY | {"generated", "show"},
     "recommendation": set(_ANY),
-    "ask": {"round", "discharges", "follows", "addresses"},
+    "ask": {"round", "discharges", "follows", "addresses", "supersedes"},
     "auto-acknowledge": set(_ANY),
     "artifact": set(_ANY),
 }

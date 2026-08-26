@@ -67,6 +67,7 @@ from .lib.entry.parse import parse_text as parse_entry_text
 from .lib.entry.write import (
     append_text,
     check_immutable,
+    check_supersedes,
     compose,
     missing_context_tiers,
     stamp_rounds,
@@ -141,6 +142,7 @@ __all__ = [
     "commit_atoms",
     "candidates_for",
     "check_immutable",
+    "check_supersedes",
     "compose",
     "console",
     "coverage_body",
