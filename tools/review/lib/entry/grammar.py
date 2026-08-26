@@ -46,7 +46,18 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "ask": {"round", "discharges", "follows", "addresses", "supersedes"},
     "auto-acknowledge": set(_ANY),
     "artifact": set(_ANY),
+    # An example, and what running it produced.
+    # `run:` means the tool executed it and requires a capture; `cmd:` means it did not, and may still carry
+    # output the agent captured out of band.
+    # The page draws the difference, which is a fact about which key was used rather than a promise anyone made.
+    "example": _ANY | {"source", "run", "cmd", "capture", "output", "status", "sha", "at"},
 }
+
+# What a `capture:` may ask for.
+CAPTURE_KINDS = ("stdout", "screenshot")
+
+# What an example block reports about itself when the tool did not run it.
+EXAMPLE_STATES = ("ok", "failed", "not-automatable")
 
 # A block's identity is `<entry>/r<round>/<name>`, derived so that no entry ever has to be retrofitted with one.
 # The name is the block's type, indexed only when that type repeats within the same entry and round — and then all of

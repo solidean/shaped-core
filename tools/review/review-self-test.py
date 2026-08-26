@@ -42,7 +42,7 @@ from tools.review.lib.entry.grammar import ReviewParseError, ack_name  # noqa: E
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
 from tools.review.lib.entry.write import (  # noqa: E402
-    append_text, check_supersedes, compose, immutability_violations, stamp_rounds,
+    append_text, check_supersedes, compose, immutability_violations, set_block_attrs, stamp_rounds,
 )
 from tools.review.lib.render.markdown import render as render_markdown  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
@@ -1059,6 +1059,58 @@ glossary: true
 
 **line space** (spaces) — the net set of added and removed lines.
 """
+
+
+EXAMPLE = """
+## example  clean-core/vector
+source: libs/base/clean-core/examples/vector.cc:1-40
+run: uv run dev.py example clean-core/vector
+capture: stdout
+"""
+
+
+def test_an_example_needs_exactly_one_of_run_and_cmd(root: Path) -> None:
+    """`run:` is the tool's claim that it produced the output; `cmd:` says it did not."""
+    assert parse_text(ENTRY + EXAMPLE, Path("entry.md")).blocks[-1].type == "example"
+
+    for bad, expected in (
+        ("## example  x\ncapture: stdout\n", "needs a `run:` or a `cmd:`"),
+        ("## example  x\nrun: a\ncmd: b\n", "never both"),
+        ("## example  x\nrun: a\ncapture: video\n", "unknown capture"),
+        ("## example  x\nrun: a\nstatus: fine\n", "unknown example status"),
+    ):
+        try:
+            parse_text(ENTRY + "\n" + bad, Path("entry.md"))
+        except ReviewParseError as e:
+            assert expected in str(e), (bad, str(e))
+            continue
+        raise AssertionError(f"expected {expected!r} for {bad!r}")
+
+
+def test_running_an_example_splices_its_provenance_in(root: Path) -> None:
+    """Output without the command, the commit and the time is an unverifiable claim."""
+    entry = parse_text(ENTRY + EXAMPLE, Path("entry.md"))
+    block = entry.blocks[-1]
+    text = set_block_attrs(entry, [(block, {
+        "output": "attachments/x.txt", "status": "ok", "sha": "abc123def456", "at": "2026-08-26T21:00:00",
+    })])
+
+    again = parse_text(text, Path("entry.md"))
+    updated = again.blocks[-1]
+    assert updated.attrs["output"] == "attachments/x.txt"
+    assert updated.attrs["sha"] == "abc123def456"
+    # Everything it did not target survives, which is the same promise `stamp_rounds` makes.
+    assert updated.attrs["run"] == "uv run dev.py example clean-core/vector"
+    assert entry.text[:block.start] == text[:block.start]
+
+
+def test_setting_an_attribute_twice_rewrites_rather_than_repeats(root: Path) -> None:
+    entry = parse_text(ENTRY + EXAMPLE, Path("entry.md"))
+    once = set_block_attrs(entry, [(entry.blocks[-1], {"status": "ok"})])
+    twice = parse_text(once, Path("entry.md"))
+    final = set_block_attrs(twice, [(twice.blocks[-1], {"status": "failed"})])
+    assert final.count("status:") == 1, final[-300:]
+    assert parse_text(final, Path("entry.md")).blocks[-1].attrs["status"] == "failed"
 
 
 def test_a_glossary_block_declares_its_terms(root: Path) -> None:

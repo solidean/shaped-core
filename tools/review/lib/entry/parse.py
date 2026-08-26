@@ -18,6 +18,8 @@ from .grammar import (
     ack_name,
     ATTR_RE,
     BLOCK_TYPES,
+    CAPTURE_KINDS,
+    EXAMPLE_STATES,
     FENCE_RE,
     FRONT_KNOWN,
     FRONT_REQUIRED,
@@ -322,6 +324,24 @@ def _validate_block(block: Block, path: Path, seen_asks: set[str]) -> None:
         if duplicate:
             raise ReviewParseError(path, block.line, f"duplicate option {duplicate!r} in ask {block.name!r}",
                                    "two options that read the same cannot be told apart in an answer")
+    elif block.type == "example":
+        run, cmd = block.attrs.get("run", ""), block.attrs.get("cmd", "")
+        if not run and not cmd:
+            raise ReviewParseError(path, block.line, "an `example` block needs a `run:` or a `cmd:`",
+                                   "`run:` is executed by `review run`; `cmd:` is shown for a reader to run")
+        if run and cmd:
+            raise ReviewParseError(
+                path, block.line, "an `example` block carries `run:` or `cmd:`, never both",
+                "`run:` is the tool's claim that it produced the output; `cmd:` says it did not",
+            )
+        capture = block.attrs.get("capture", "")
+        if capture and capture not in CAPTURE_KINDS:
+            raise ReviewParseError(path, block.line, f"unknown capture {capture!r}",
+                                   f"one of: {', '.join(CAPTURE_KINDS)}")
+        state = block.attrs.get("status", "")
+        if state and state not in EXAMPLE_STATES:
+            raise ReviewParseError(path, block.line, f"unknown example status {state!r}",
+                                   f"one of: {', '.join(EXAMPLE_STATES)}")
     elif block.type == "changes":
         show = block.attrs.get("show", "")
         if not show:
@@ -333,7 +353,7 @@ def _validate_block(block: Block, path: Path, seen_asks: set[str]) -> None:
             raise ReviewParseError(path, block.line, f"unknown show {show!r}", f"one of: {', '.join(SHOW_KINDS)}")
     elif block.head:
         raise ReviewParseError(path, block.line, f"a `{block.type}` block takes no argument, got {block.head!r}",
-                               "only `changes` and `ask` take one")
+                               "only `changes`, `ask` and `example` take one")
 
 
 def _fenced_lines(lines: list[str], first_line: int, path: Path) -> set[int]:

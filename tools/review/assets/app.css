@@ -620,3 +620,28 @@ body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
 
 .annot.ref-term { text-decoration-color: var(--warn); }
 .pop-def { max-width: 60ch; }
+
+/* ---- executed examples --------------------------------------------------- */
+/* The provenance line is the point: output without the command, the commit and the time is an unverifiable
+   claim in a tool whose premise is that claims are checkable. */
+
+.example { margin: 12px 0; border-left: 2px solid var(--line); padding-left: 12px; }
+
+.example-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.example-name { font-weight: 600; }
+.example-cmd { color: var(--text-dim); font-size: 0.85rem; }
+
+.example-out {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  max-height: 30rem;
+  overflow: auto;
+  background: var(--bg-sunken);
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+}
+
+.example-shot { max-width: 100%; margin-top: 8px; border: 1px solid var(--line); }
+.example-missing { margin-top: 8px; color: var(--bad); font-size: 0.85rem; }
+.example-note { margin-top: 6px; color: var(--text-dim); font-size: 0.8rem; }
+.example-note.stale { color: var(--warn); }

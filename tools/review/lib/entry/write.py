@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..core.atomic import write_atomic
 from .askhash import hash_ask
-from .grammar import CONTEXT_TIERS, WORD_LIMITS, ReviewParseError
+from .grammar import ATTR_RE, CONTEXT_TIERS, WORD_LIMITS, ReviewParseError
 from .parse import Entry, parse_text
 
 
@@ -49,6 +49,33 @@ def stamp_rounds(entry: Entry, round_number: int) -> str | None:
     if not edits:
         return None
     return restore_newlines(entry, _splice(entry.text, edits))
+
+
+def set_block_attrs(entry: Entry, edits: list[tuple]) -> str:
+    """Set attributes on blocks, as a splice against their preludes.
+
+    `review run` is the only writer that changes an entry the agent already wrote, so it changes as little as
+    it can: an attribute already there is rewritten in place, and a new one is inserted after the heading.
+    Everything else in the file is left byte-identical, exactly as `stamp_rounds` leaves it.
+    """
+    splices: list[tuple[int, int, str]] = []
+    for block, attrs in edits:
+        body_lines = entry.text[block.heading_end:block.end].split("\n")
+        offset = block.heading_end
+        replaced: set[str] = set()
+        for line in body_lines:
+            match = ATTR_RE.match(line)
+            if match is None:
+                break
+            key = match.group(1)
+            if key in attrs:
+                splices.append((offset, offset + len(line), f"{key}: {attrs[key]}"))
+                replaced.add(key)
+            offset += len(line) + 1
+        fresh = "".join(f"{k}: {v}\n" for k, v in attrs.items() if k not in replaced)
+        if fresh:
+            splices.append((block.heading_end, block.heading_end, fresh))
+    return restore_newlines(entry, _splice(entry.text, splices))
 
 
 def append_text(entry: Entry, addition: str) -> str:

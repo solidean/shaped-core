@@ -43,6 +43,15 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     return p
 
 
+def _seed_run_prefixes(repo: Path) -> list[str]:
+    """What `review run` may execute here, guessed once so the common case needs no configuration.
+
+    Empty by default and empty for a repository this does not recognise: running examples through `dev.py` is a
+    fact about shaped-core, and this tool reviews any git repository.
+    """
+    return ["uv run dev.py example"] if (repo / "dev.py").is_file() else []
+
+
 def _resolve_range(ctx: Context, spec: str | None) -> tuple[str, str, str, str]:
     """(base_sha, head_sha, base_spec, head_spec), with the merge base pinned."""
     if spec:
@@ -92,6 +101,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         repo=ctx.record_repo(paths.root), upstream=ctx.git.remote_url(),
         base=base, head=head, base_spec=base_spec, head_spec=head_spec,
         context=args.context, coalesce_gap=args.gap, created=review.now(),
+        run_prefixes=_seed_run_prefixes(ctx.repo),
     )
 
     paths.create()

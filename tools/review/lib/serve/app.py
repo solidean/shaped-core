@@ -151,6 +151,7 @@ class ReviewApp:
             html = render_entry(
                 entry, answers,
                 repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
+                head=Git(self.repo).rev_parse('HEAD') or '',
             )
             tokens = build_tokens(entry, self.index(), answers=answers,
                                   confirm_shas=Git(self.repo).which_are_commits,
@@ -466,6 +467,17 @@ class Handler(BaseHTTPRequestHandler):
         content_type = types.get(target.suffix, "application/octet-stream") + "; charset=utf-8"
         self._send(200, target.read_bytes(), content_type)
 
+    def _attachment(self, name: str) -> None:
+        """Serve one file out of the review's own `attachments/`, and nothing outside it."""
+        root = self.app.paths.attachments_dir.resolve()
+        target = (root / name).resolve()
+        if not target.is_file() or root not in target.parents:
+            self._json(404, {"error": "no such attachment"})
+            return
+        types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+                 ".webp": "image/webp", ".svg": "image/svg+xml", ".txt": "text/plain; charset=utf-8"}
+        self._send(200, target.read_bytes(), types.get(target.suffix.lower(), "application/octet-stream"))
+
     def do_GET(self) -> None:  # noqa: N802 — the base class names it.
         route = urlparse(self.path).path
         try:
@@ -495,6 +507,8 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(urlparse(self.path).query)
                 code, payload = self.app.commit_view(query.get("sha", [""])[0])
                 self._json(code, payload)
+            elif route.startswith("/attachments/"):
+                self._attachment(unquote(route[len("/attachments/"):]))
             elif route.startswith("/file/"):
                 self._asset("file.html")
             elif route == "/events":

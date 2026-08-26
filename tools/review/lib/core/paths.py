@@ -53,6 +53,14 @@ class ReviewPaths:
         return self.root / "entries"
 
     @property
+    def attachments_dir(self) -> Path:
+        """Captured output and screenshots — agent-owned, like `entries/`.
+
+        The one thing in a review folder that is not regenerable: the run that produced it is gone.
+        """
+        return self.root / "attachments"
+
+    @property
     def answers_dir(self) -> Path:
         return self.root / "answers"
 
@@ -90,7 +98,8 @@ class ReviewPaths:
         return self.answers_dir / (entry_file.stem + ".json")
 
     def create(self) -> None:
-        for d in (self.root, self.changes_dir, self.entries_dir, self.answers_dir, self.rounds_dir):
+        for d in (self.root, self.changes_dir, self.entries_dir, self.answers_dir,
+                  self.attachments_dir, self.rounds_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     def exists(self) -> bool:
