@@ -348,6 +348,14 @@ It is **event-driven and time-free** — every input carries the motion it cause
 `sv::viewer` drives one per view for you; a caller running its own event pump (see `viewer-window-manual-test.cc`) just feeds it `wsys->events()`.
 
 ```cpp
+sv::camera_style                 // { orbit, fly } — which built-in controller a view's camera is driven by
+```
+
+A view picks one with `view.camera_style(...)`, re-asserted every frame.
+`sv::viewer` routes that view's events to the chosen controller and calls the fly one's `update(dt)` itself, so neither needs a hand-rolled event pump.
+It also calls `release_input()` while the window is unfocused, so a key released out of sight cannot keep the camera flying.
+
+```cpp
 sv::fps_state                    // { pos3d position; angle_d yaw, pitch, vertical_fov; } — yaw around +y, 0 looks along +z
 s.forward() / s.to_camera()      // -> vec3d view direction / -> camera; fps_state::from_camera(cam) is the exact inverse (roll dropped)
 sv::fps_camera_controller        // { fps_state pose; fps_camera_controller_config config; }
@@ -363,6 +371,7 @@ Right-drag looks, W/A/S/D move along the view, E/Q rise and fall along world +y,
 Free-flying — no gravity or collision, and forward follows the pitch, so W into a raised view climbs.
 Unlike the orbit controller it **integrates over time**, hence the two halves: `handle` for events, `update(dt)` once per frame for the motion they imply.
 Set `look_requires_button = false` once the caller has captured the cursor (`sr::window::set_relative_mouse_mode`), so every motion turns the view.
+Reachable through `view.camera_style(sv::camera_style::fly)` — a caller does not have to own the loop to use it.
 
 ## Resources by id — the managers
 
@@ -581,7 +590,11 @@ view.layout_rows(style) / .layout_columns(style) / .layout_grid(c, r, style) / .
                                                                //   fills the view with a tree; asking twice returns the SAME tree
                                                                //   all one container: rows pins one column, columns one row, the params form pins either
 view.camera(cam)                                               // the caller owns it THIS frame: the controller leaves this view alone
-view.initial_camera(cam) / .initial_orbit(orbit)               // applied only the first time this id is seen
+view.initial_camera(cam) / .initial_orbit(orbit) / .initial_fps(pose)
+                                                               //   applied only the first time this id is seen
+view.camera_style(sv::camera_style::fly)                       // which built-in controller drives this view; orbit by default
+                                                               //   RE-ASSERT every frame — dropping it hands the view back to orbit
+                                                               //   the camera survives the switch: the incoming controller is re-seeded from it
 view.resolution(vec2i)                                         // pin a fixed pixel size instead of taking the rect it lands in
 view.refresh_rate(rate)                                        // 1 every frame, 0.5 every second frame
 view.display_name("name") / .display_name() -> string_view     // persistent; defaults to the id up to its ##, and "" restores that default
@@ -720,7 +733,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   A test driving that routine directly must set it, or it will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
-  Seed with `initial_camera` / `initial_orbit` instead for a view that should converge.
+  Seed with `initial_camera` / `initial_orbit` / `initial_fps` instead for a view that should converge.
 - **Nothing about placement may reach a trace.** A `view_data` has no position at all, and a leaf's fit, sampler, zoom and post-process
   parameters never reach an upload — which is why relayout, magnifying, or dragging a wipe slider all leave a converged image alone.
   The one deliberate exception is the resolution, folded into the trace hash explicitly: it reaches the upload only through the camera's

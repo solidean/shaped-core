@@ -63,6 +63,19 @@ struct view_state
 
     orbit_camera_controller controller = {};
 
+    /// The fly controller, which unlike the orbit one integrates over time — so the viewer updates it every frame rather
+    /// than only on frames that saw an event.
+    fps_camera_controller fly = {};
+
+    /// Which of the two drives this view, re-asserted every frame like `movable_this_frame`.
+    ///
+    /// Routing runs before authoring, so it reads the *previous* frame's answer — the last complete one there is.
+    /// `style_seeded` is what makes a switch re-seed the incoming controller from the camera the outgoing one left, rather
+    /// than snapping to whatever pose it still held from before.
+    camera_style style_this_frame = camera_style::orbit;
+    camera_style style_last_frame = camera_style::orbit;
+    bool style_seeded = false;
+
     /// The camera this view renders from when the caller does not supply one.
     /// Kept alongside the controller's orbit because a caller may set a camera the orbit cannot express exactly.
     sv::camera camera = {};

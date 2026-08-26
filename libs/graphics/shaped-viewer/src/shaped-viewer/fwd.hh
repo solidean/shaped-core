@@ -42,6 +42,7 @@ struct camera_basis;
 struct perspective_projection;
 struct camera_gpu;
 struct orbit_state;
+enum class camera_style;
 struct camera_controller_config;
 class orbit_camera_controller;
 struct fps_state;

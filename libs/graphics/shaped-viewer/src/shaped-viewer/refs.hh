@@ -128,6 +128,11 @@ public:
     void initial_camera(sv::camera const& cam);
     void initial_orbit(orbit_state const& o);
 
+    /// The pose a FLY view starts at, applied only the first time this id is seen — `initial_orbit`'s counterpart.
+    /// Seeding the fly controller directly rather than going through a camera is what keeps the yaw and pitch exact: a
+    /// camera round-trips them through a basis, and a straight-down pitch has no unique yaw to recover.
+    void initial_fps(fps_state const& pose);
+
     /// Pins this view to a fixed pixel resolution instead of taking the rect it lands in.
     void resolution(tg::vec2i r);
 
@@ -141,6 +146,13 @@ public:
     /// it were absent, and it draws in front.
     /// Re-assert it every frame; dropping the call leaves the view where it was but stops it being draggable.
     void movable(bool v = true);
+
+    /// Which built-in controller drives this view's camera — orbit by default.
+    ///
+    /// Re-assert it every frame, like `movable`: the viewer reads the previous frame's answer when it routes input, so a
+    /// call that stops being made hands the view back to the orbit controller.
+    /// The camera survives the switch — the incoming controller is seeded from where the outgoing one left it.
+    void camera_style(sv::camera_style style);
 
     /// What this view is called where a human reads it, which defaults to `display_name_of(id)` — the id up to its
     /// `##`.
@@ -313,6 +325,8 @@ struct sv::view_api
     void camera(sv::camera const& cam) { self().default_view().camera(cam); }
     void initial_camera(sv::camera const& cam) { self().default_view().initial_camera(cam); }
     void initial_orbit(orbit_state const& o) { self().default_view().initial_orbit(o); }
+    void initial_fps(fps_state const& pose) { self().default_view().initial_fps(pose); }
+    void camera_style(sv::camera_style style) { self().default_view().camera_style(style); }
     void refresh_rate(float rate) { self().default_view().refresh_rate(rate); }
 
 private:

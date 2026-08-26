@@ -275,9 +275,13 @@ importance-samples the continuation — so what is left is coverage of the model
 - Give `view_ref` a conditional-override vocabulary (an `ImGuiCond`-style `when { always, first_use }`), so `camera` /
   `resolution` / placement stop needing a separate `initial_*` setter each.
   Only the first-use half is built today.
-- Let a view pick its controller: `sv::viewer` drives an orbit controller per view, so `fps_camera_controller` is only reachable by a caller running its own event pump.
-  A view losing the cursor or the window losing focus must reach the controller's `release_input`, or a held key keeps flying.
-  `pathtraced-window-manual-test.cc` still hand-rolls its own fly camera and can drop it once this lands.
+- **A view picks its controller now** — `view_ref::camera_style`, with `sv::viewer` routing to it and driving the fly one's
+  `update(dt)`, releasing input while the window is unfocused.
+  What is left of that entry is the cleanup: `pathtraced-window-manual-test.cc` still hand-rolls its own fly camera and can
+  drop it.
+  Losing the CURSOR is also still unhandled — only focus is — so a view whose cursor leaves the window mid-look keeps looking.
+- **Nothing tests `camera_style`.** The controllers have their own CPU tests, but the switch, the re-seeding across it and the
+  unfocused release all live in `sv::viewer`, which needs a window — so they are only exercised by running an example.
 - `render_settings::max_accumulated_frames`, replacing the process-wide `sv::accumulation_frame_cap` in `render_settings.hh`.
   It is public rather than file-scope because a caller waiting for convergence has to tell "not there yet" from "as good as it gets" — `view_ref::is_accumulation_converged` applies it.
   It must then be excluded from the trace hash — lowering the cap should not restart the image.

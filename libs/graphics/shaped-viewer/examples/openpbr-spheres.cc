@@ -273,8 +273,11 @@ struct sweep_row
             auto const id
                 = lib.acquire(sv::material::create(cc::format("{}-{}", row.name, c), type, cc::move(overrides)));
 
+            // Laid out ON the floor: columns run across in x, rows run away in z, and every sphere rests on the ground
+            // rather than floating in a wall.
+            // That is what makes the grid something to walk into rather than something to look at.
             float const x = (float(c) - float(column_count - 1) * 0.5f) * spacing;
-            float const y = float(r) * spacing;
+            float const z = float(r) * spacing;
 
             out.push_back(
                 sv::mesh{.name = cc::format("{}-{}", row.name, c),
@@ -282,7 +285,7 @@ struct sweep_row
                          // A mesh attribute is a value sharing its pinned payload, so every sphere naming the same
                          // frames costs a refcount bump rather than a copy — and one upload rather than thirty-five.
                          .attributes = {frames},
-                         .transform = tg::affine_transform3f::make_translation(tg::vec3f(x, y, 0.0f)),
+                         .transform = tg::affine_transform3f::make_translation(tg::vec3f(x, sphere_radius, z)),
                          .material = id});
         }
     }
@@ -306,40 +309,51 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
     auto& lib = *sv::acquire_material_library().value();
     auto const grid = make_grid(sphere_geometry, sphere_frames, lib);
 
-    // The framing follows the grid rather than being set to fit it: a row added to `make_rows` must not push its own
-    // spheres off screen, and the light must stay above the top row rather than inside it.
-    float const grid_height = float(make_rows().size() - 1) * spacing;
-    float const grid_top = grid_height + sphere_radius;
+    // Everything below follows the grid rather than being set to fit it: a row added to `make_rows` must not fall off the
+    // floor, out of the light, or behind the camera.
+    float const grid_depth = float(make_rows().size() - 1) * spacing;
+    float const grid_width = float(column_count - 1) * spacing;
 
-    auto const floor
-        = sv::mesh{.name = "ground",
-                   .geometry = sv::triangle_geometry::create_from_positions(ground_quad(-sphere_radius - 0.02f, 12.0f)),
-                   .material = lib.acquire(sv::material::create(
-                       "ground", lib.acquire_type(sv::builtin_material::openpbr).value(),
-                       {sv::material_attribute_binding::of("base_color", tg::vec3f(0.32f, 0.32f, 0.34f)),
-                        sv::material_attribute_binding::of("specular_roughness", 0.55f)}))};
+    auto const floor = sv::mesh{.name = "ground",
+                                .geometry = sv::triangle_geometry::create_from_positions(
+                                    ground_quad(0.0f, cc::max(grid_width, grid_depth) + 8.0f)),
+                                .material = lib.acquire(sv::material::create(
+                                    "ground", lib.acquire_type(sv::builtin_material::openpbr).value(),
+                                    {sv::material_attribute_binding::of("base_color", tg::vec3f(0.32f, 0.32f, 0.34f)),
+                                     sv::material_attribute_binding::of("specular_roughness", 0.55f)}))};
 
     for (auto f : sv::interactive("shaped-viewer/openpbr-spheres"))
     {
         auto view = f.window().view();
 
-        view.initial_orbit({.target = tg::pos3d(0, double(grid_height) * 0.5, 0),
-                            .distance = double(grid_height) * 1.35 + 8.0,
-                            .azimuth = tg::angle_d::make_from_degree(0.0),
-                            .elevation = tg::angle_d::make_from_degree(12.0)});
+        // Eye height at the front of the grid, looking down the rows.
+        // Seeded once — after that the controller owns it, so this is where you START rather than where you are held.
+        view.initial_fps({.position = tg::pos3d(0, 1.7, -4.5),
+                          .yaw = tg::angle_d::make_from_degree(0.0),
+                          .pitch = tg::angle_d::make_from_degree(-8.0)});
+
+        // Right-drag looks, WASD moves, E and Q rise and fall, the wheel retunes the speed.
+        // Re-asserted every frame, which is the contract: dropping the call hands the view back to the orbit controller.
+        view.camera_style(sv::camera_style::fly);
 
         auto scene = view.add_scene();
         for (auto const& m : grid)
             scene.add_mesh(m);
         scene.add_mesh(floor);
 
-        // A broad overhead rect facing down.
+        // A soft box over the whole grid, facing down.
         // It is what a smooth specular lobe actually reflects, so it — rather than the band-limited sky — is what gives the
-        // metal row its highlight.
-        scene.add_light({.center = tg::pos3f(0, grid_top + 2.5f, 1.5f),
-                         .half_extent_u = tg::vec3f(3.0f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 1.2f),
-                         .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
+        // metal and glass rows their highlights, and it has to span the grid or the far rows sit in its falloff.
+        //
+        // The emission falls as the rect grows: a light this large would otherwise blow out everything under it, and what
+        // matters here is that each row is lit the same as its neighbours rather than that the scene is bright.
+        float const light_u = grid_width * 0.5f + 2.0f;
+        float const light_v = grid_depth * 0.5f + 2.0f;
+
+        scene.add_light({.center = tg::pos3f(0, 7.0f, grid_depth * 0.5f),
+                         .half_extent_u = tg::vec3f(light_u, 0, 0),
+                         .half_extent_v = tg::vec3f(0, 0, light_v),
+                         .emission = tg::vec3f(1, 1, 1) * (260.0f / (light_u * light_v))});
 
         scene.background(sv::background::studio().scaled(0.6f));
     }

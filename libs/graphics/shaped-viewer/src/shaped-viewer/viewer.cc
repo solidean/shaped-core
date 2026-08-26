@@ -169,6 +169,11 @@ struct viewer::impl
     // Last frame's leaves, in window space and with the links that order them.
     // Routing runs before the next frame is authored, so last frame's answer is the only one there is.
     cc::vector<hit_region> last_hit_regions;
+
+    /// The views the previous frame authored, so a per-frame controller update can reach each of them exactly once.
+    /// `last_hit_regions` cannot serve: one view may own several regions, and a fly controller integrated twice over the
+    /// same delta moves twice as far.
+    cc::vector<view_id> last_frame_views;
 };
 
 cc::result<viewer> viewer::try_create(cc::string_view id_str, viewer_config config)
@@ -500,12 +505,23 @@ void viewer::route_input()
         if (st == nullptr || st->camera_owned_last_frame)
             continue;
 
-        if (st->controller.handle(e))
-            st->camera = st->controller.camera();
+        if (st->style_last_frame == camera_style::fly)
+        {
+            if (st->fly.handle(e))
+                st->camera = st->fly.camera();
 
-        // The drag holder lives here rather than on the view: only one view can hold it, and it must survive the
-        // cursor leaving that view's rect.
-        im.active_view = st->controller.is_dragging() ? owner : cc::optional<view_id>();
+            // A look holds the view for the same reason a drag does: the cursor wanders off the rect while turning.
+            im.active_view = st->fly.is_looking() ? owner : cc::optional<view_id>();
+        }
+        else
+        {
+            if (st->controller.handle(e))
+                st->camera = st->controller.camera();
+
+            // The drag holder lives here rather than on the view: only one view can hold it, and it must survive the
+            // cursor leaving that view's rect.
+            im.active_view = st->controller.is_dragging() ? owner : cc::optional<view_id>();
+        }
     }
 }
 
@@ -554,6 +570,25 @@ frame viewer::acquire_frame()
     auto const delta = im.frame_index == 0 ? 0.0 : std::chrono::duration<double>(now - im.last_frame_time).count();
     im.last_frame_time = now;
     ++im.frame_index;
+
+    // The fly controller integrates over time, so a held key has to move the camera on a frame that saw no event at all.
+    // Driven off the PREVIOUS frame's style, which is the last complete answer to who owns this view — the same reason
+    // routing reads it rather than what is being authored right now.
+    // A window that is not focused releases instead, or a key released out of sight keeps flying forever.
+    for (auto const id : im.last_frame_views)
+    {
+        auto* const st = im.views.get_ptr(id);
+        if (st == nullptr || st->style_last_frame != camera_style::fly)
+            continue;
+
+        if (!im.window->is_focused())
+        {
+            st->fly.release_input();
+            continue;
+        }
+        if (st->fly.update(delta))
+            st->camera = st->fly.camera();
+    }
 
     auto f = frame{};
     f._viewer = this;
@@ -628,9 +663,11 @@ void viewer::finish_frame(frame& f)
     def.views = f._views;
     def.nodes = f._nodes;
 
+    im.last_frame_views.clear();
     for (auto& v : def.views)
     {
         auto& st = im.views.get_or_create(v.id);
+        im.last_frame_views.push_back(v.id);
 
         // A caller that set a camera this frame owns it; otherwise the view renders from whatever it was orbited to.
         if (!st.camera_owned_this_frame)
@@ -642,6 +679,19 @@ void viewer::finish_frame(frame& f)
         st.camera_owned_last_frame = st.camera_owned_this_frame;
         st.camera_owned_this_frame = false;
         st.movable_last_frame = st.movable_this_frame;
+
+        // A view that changed hands re-seeds the incoming controller from the camera the outgoing one left, so the switch
+        // itself moves nothing — the image restarts when the camera does rather than when the caller changes its mind.
+        if (!st.style_seeded || st.style_this_frame != st.style_last_frame)
+        {
+            if (st.style_this_frame == camera_style::fly)
+                st.fly.pose = fps_state::from_camera(st.camera);
+            else
+                st.controller.orbit = orbit_state::from_camera(st.camera);
+            st.style_seeded = true;
+        }
+        st.style_last_frame = st.style_this_frame;
+        st.style_this_frame = camera_style::orbit;
     }
 
     // The root exists only to own the frame's layout; it holds no scene of its own and its target is the backbuffer.
