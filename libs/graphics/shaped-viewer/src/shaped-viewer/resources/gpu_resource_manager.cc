@@ -112,7 +112,9 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
 
         // for_binding clears the array, which is also what tells the group this binding was set — so the
         // "every binding set before the first snapshot" rule is satisfied by wiring alone.
-        tables.push_back({.table = b.table, .array = sg::bindless_array::for_binding(ctx, group, name_of(b.table))});
+        auto array = sg::bindless_array::for_binding(ctx, group, name_of(b.table));
+        auto recorded_in = cc::vector<u64>::create_defaulted(isize(array.capacity()));
+        tables.push_back({.table = b.table, .array = cc::move(array), .recorded_in = cc::move(recorded_in)});
     }
 
     CC_ASSERT(_find_table(tables, bindless_table::textures_2d) != nullptr, "the textures_2d table must be declared — a "
@@ -157,6 +159,7 @@ void gpu_resource_manager::advance_to(sg::epoch e)
     attributes.begin_frame(e);
     for (auto& t : _tables)
         t.acquired.clear();
+    ++_record_stamp;
     _epoch = e;
 }
 
@@ -277,7 +280,7 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
     auto const& permutation = shaders.acquire(resolved);
 
     return {.mesh = geometry,
-            .instance = acquire_instance(resolved, permutation.layout, permutation.key),
+            .instance = acquire_instance(resolved, permutation.layout),
             .shader_key = permutation.key,
             .transform = mesh.transform};
 }
@@ -293,9 +296,7 @@ instance_record const& gpu_resource_manager::get_instance(instance_id id) const
     return _instances[isize(u32(id))];
 }
 
-instance_id gpu_resource_manager::acquire_instance(resolved_material const& r,
-                                                   material_parameter_layout const& layout,
-                                                   cc::hash128 shader_key)
+instance_id gpu_resource_manager::acquire_instance(resolved_material const& r, material_parameter_layout const& layout)
 {
     // The layout is what the generated shader reads, so a block built from a different one would be read at the wrong offsets.
     CC_ASSERT(r.type != nullptr, "a resolved material names its type");
@@ -303,7 +304,7 @@ instance_id gpu_resource_manager::acquire_instance(resolved_material const& r,
     if (auto const* const resident = _instances_by_key.get_ptr(r.parameter_key); resident != nullptr)
         return *resident;
 
-    auto record = instance_record{.shader_key = shader_key, .size_bytes = layout.size_bytes};
+    auto record = instance_record{.size_bytes = layout.size_bytes};
     record.slots.reserve(layout.slots.size());
 
     for (auto const& slot : layout.slots)
@@ -401,11 +402,15 @@ i32 gpu_resource_manager::_declared_slot_of(bindless_table table) const
 
 void gpu_resource_manager::_record(table_entry& t, u32 index)
 {
+    CC_ASSERT(isize(index) < t.recorded_in.size(), "a bindless index outside its array's capacity");
+
     // Re-acquiring a view returns the index it already has, so the list is deduplicated rather than appended to
     // blindly — an access declaration naming one element twice is not what a dispatch expects.
-    for (auto const e : t.acquired)
-        if (e == index)
-            return;
+    // The stamp is what makes that a compare: `acquired` grows across the epoch, so scanning it would cost the
+    // n-th acquire n comparisons, on a path both `_acquire` and `_pin` reach.
+    if (t.recorded_in[isize(index)] == _record_stamp)
+        return;
+    t.recorded_in[isize(index)] = _record_stamp;
     t.acquired.push_back(index);
 }
 

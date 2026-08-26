@@ -141,8 +141,8 @@ Three properties worth knowing:
 m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes into a persistent buffer, keyed on attribute.hash
 m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; attribute_format format; attribute_frequency frequency; element_count;}
 
-m.acquire_instance(resolved, layout, shader_key)  // -> instance_id, content-keyed on resolved.parameter_key; layout + key from ONE generation
-m.get_instance(id)                     // -> instance_record {hash128 shader_key; i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded;}
+m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key; layout from generate_material_shader over `resolved`
+m.get_instance(id)                     // -> instance_record {i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded;}
 m.contains_instance(id) / m.instance_count()
 sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes

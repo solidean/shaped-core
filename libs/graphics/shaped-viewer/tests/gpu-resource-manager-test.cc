@@ -255,6 +255,14 @@ TEST("sv - a texture acquire is content-addressed and pins its element")
     CHECK(record->state == sv::residency::base_resident);
     CHECK(record->texture.raw() != nullptr);
 
+    // The budget is charged for the chain that was allocated rather than the one level that was uploaded:
+    // a record's byte size is fixed at insert, so nothing could correct it once the rest of the mips land.
+    auto chain_bytes = isize(0);
+    for (auto mip = 0; mip < record->total_mips; ++mip)
+        chain_bytes += sv::impl::mip_byte_size(sg::pixel_format::rgba8_unorm, 16, 16, mip);
+    CHECK(chain_bytes > sv::impl::mip_byte_size(sg::pixel_format::rgba8_unorm, 16, 16, 0));
+    CHECK(m.textures.used_bytes() == chain_bytes);
+
     // Same content, same id, no second upload.
     auto const again = sv::texture_data::create(make_pixels(16, 16, 1, false), sg::pixel_format::rgba8_unorm, 16, 16);
     CHECK(m.acquire_texture(again) == id);
@@ -552,7 +560,7 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
 
     auto const resolved = sv::resolve_material(lib, gold, mesh);
     auto const generated = sv::generate_material_shader(resolved);
-    auto const instance = m.acquire_instance(resolved, generated.layout, generated.key);
+    auto const instance = m.acquire_instance(resolved, generated.layout);
     auto const bytes = m.build_instance_parameters(m.get_instance(instance));
     CHECK(bytes.size() == generated.layout.size_bytes);
     auto const block = cc::span<byte const>(bytes);
@@ -586,9 +594,8 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     CHECK(u32_at(block, slot_of("base_color.uv").offset + 8) == u32(sizeof(tg::vec2f)));
 
     // The record is content-cached on parameter_key, so an unchanged mesh re-acquired every frame is a lookup.
-    CHECK(m.acquire_instance(resolved, generated.layout, generated.key) == instance);
+    CHECK(m.acquire_instance(resolved, generated.layout) == instance);
     CHECK(m.instance_count() == 1);
-    CHECK(m.get_instance(instance).shader_key == generated.key);
 
     // Building it again mints nothing new: every index it writes is one this epoch already handed out.
     CHECK(cc::memcmp(m.build_instance_parameters(m.get_instance(instance)).data(), bytes.data(), bytes.size()) == 0);
@@ -619,7 +626,7 @@ TEST("sv - an instance record names its own geometry and parameters")
     auto const generated = sv::generate_material_shader(resolved);
 
     auto const mesh_id = m.meshes.acquire(sv::triangle_data::from(mesh.geometry));
-    auto const instance = m.acquire_instance(resolved, generated.layout, generated.key);
+    auto const instance = m.acquire_instance(resolved, generated.layout);
 
     auto cmd = ctx.create_command_list();
     auto const record = m.describe_instance(*cmd, mesh_id, instance);

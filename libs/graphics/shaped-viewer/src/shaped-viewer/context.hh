@@ -21,7 +21,7 @@ using context_provider = cc::unique_function<cc::result<sg::context_handle>()>;
 ///
 /// Unset by default, and then `impl::acquire_default_context` answers instead — so a caller who never touches this
 /// gets a working viewer, and one who does is in full control.
-/// Passing `{}` clears it again, which is how a test hands the default back.
+/// Passing `{}` clears the provider again — the paragraph below is what that does and does not undo.
 ///
 /// Set it before the first viewer is created.
 /// Once a provider has answered successfully its context is kept for the process, so setting this afterwards has no

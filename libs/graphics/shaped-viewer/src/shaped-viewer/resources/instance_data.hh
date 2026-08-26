@@ -64,9 +64,11 @@ struct sv::instance_slot
 
 /// One instance's material parameter block: the slots it is built from, and the buffer it is built into.
 ///
-/// `shader_key` says which generated permutation reads it, which is what a hit-group assignment is keyed on.
 /// Minted by `gpu_resource_manager::acquire_instance` and content-cached on the resolved material's `parameter_key`, so two
 /// meshes drawn identically share one.
+/// Which generated permutation reads the block is `scene_item::shader_key`'s to say, and is deliberately not repeated here:
+/// two materials differing only in their sampler share a `parameter_key` while splitting the permutation, so a copy stored
+/// beside the shared block could name either of them.
 ///
 /// **The buffer is persistent and the bytes in it are not.**
 /// Every index a block holds is the epoch's that wrote it, so `describe_instance` rebuilds the bytes each epoch — but into the
@@ -75,8 +77,6 @@ struct sv::instance_slot
 /// a fresh transient buffer per frame would re-mint the whole bindless table on every trace.
 struct sv::instance_record
 {
-    cc::hash128 shader_key;
-
     /// how big the block is, which is `material_parameter_layout::size_bytes`
     i32 size_bytes = 0;
 

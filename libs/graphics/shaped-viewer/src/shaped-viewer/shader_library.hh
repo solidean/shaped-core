@@ -21,7 +21,11 @@ using shader_library_provider = cc::unique_function<cc::result<slib::shader_libr
 ///     sv::set_acquire_shader_library([] { return &my_library; });
 /// Unset by default, and then `impl::acquire_default_shader_library` answers instead, which registers sv's and sr's packages plus
 /// a DXC compiler where one exists.
-/// Passing `{}` clears it again, which is how a test hands the default back.
+/// Passing `{}` clears the provider, but not the library already acquired: the first *successful* acquire is memoized for the
+/// process, so nothing hands the default back after one, a test included.
+/// A failed acquire is deliberately not memoized, so a provider set after a failure is retried.
+/// There is no reset, and one is not obviously legal here: at most one `slib::shader_library` may exist per process, so a second
+/// library would fight the first over the package globals both write into.
 ///
 /// The library must outlive every viewer using it.
 void set_acquire_shader_library(shader_library_provider provider);

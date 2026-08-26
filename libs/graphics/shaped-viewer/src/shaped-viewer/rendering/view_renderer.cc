@@ -189,8 +189,8 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
     // records covers content identity for both: a re-upload under one id lands on a different bindless element.
     //
     // `param_buffer` is the one field taken out.
-    // The block lives in a transient buffer rebuilt every epoch, so its index is new every frame and says nothing about the
-    // image; leaving it in would restart the estimator forever.
+    // The index is epoch-scoped by contract even where the slot table happens to hand back the same one, so it says
+    // nothing about the image and leaving it in would risk restarting the estimator for nothing.
     // The `instance_id` beside it is the content identity that field stood for, since one is minted per `parameter_key`.
     for (auto const& rec : r.records)
     {

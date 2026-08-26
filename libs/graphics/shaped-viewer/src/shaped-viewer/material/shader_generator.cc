@@ -128,6 +128,14 @@ constexpr i32 attribute_desc_size = 12; ///< sv_attribute_desc: buffer, offset, 
     return !r.attributes.empty();
 }
 
+/// Whether the generated source must declare the buffer table.
+/// An epilogue counts even when no attribute reads a buffer: `pt_material_hit.hlsli` reads the mesh's positions through the table unconditionally,
+/// so an attribute-less type would otherwise generate a shader that does not compile.
+[[nodiscard]] bool declares_buffers(resolved_material const& r, material_shader_options const& opts)
+{
+    return reads_buffers(r) || !opts.epilogue_include.empty();
+}
+
 [[nodiscard]] u32 count_of(bindless_config const& cfg, bindless_table table)
 {
     for (auto const& b : cfg.tables)
@@ -269,7 +277,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     cc::format_append(src, "#include \"{}\"\n\n", opts.runtime_include);
 
     // Only the tables this permutation touches, so the reflection a caller binds against stays as small as the material is.
-    if (reads_buffers(r))
+    if (declares_buffers(r, opts))
         cc::format_append(src, "ByteAddressBuffer {}[{}] : register(t0, space{});\n", name_of(bindless_table::buffers),
                           count_of(bindless, bindless_table::buffers), space_of(bindless_table::buffers));
     if (samples_texture(r))

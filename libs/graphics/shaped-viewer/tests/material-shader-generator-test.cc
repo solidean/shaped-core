@@ -110,6 +110,21 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
     CHECK(sv::generate_material_shader(resolved, {.bindless = &smaller}).key != g.key);
 }
 
+TEST("sv::generate_material_shader - an attribute-less type still declares the buffer table")
+{
+    // The epilogue reads the mesh's positions through gBindlessBuffers whatever the signature holds,
+    // so a type with no attributes at all would otherwise generate a shader that does not compile.
+    auto const type = sv::material_type::create("bare", {}, "    surface.albedo = float3(1, 0, 1);");
+    auto const resolved = sv::resolve_material(type, bare_material(), make_mesh());
+
+    auto const with_epilogue = sv::generate_material_shader(resolved, {.epilogue_include = "epilogue.hlsli"});
+    CHECK(with_epilogue.source.contains("ByteAddressBuffer gBindlessBuffers[4096] : register(t0, space8);"));
+    CHECK(with_epilogue.layout.slots.empty());
+
+    // Without one, nothing in the source reaches a buffer, and the declaration stays out.
+    CHECK(!sv::generate_material_shader(resolved).source.contains("gBindlessBuffers"));
+}
+
 TEST("sv::generate_material_shader - a mesh attribute is loaded through its descriptor")
 {
     auto const type = make_type();

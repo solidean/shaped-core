@@ -121,9 +121,22 @@ What is left is narrower than it was:
 - **The generator handles scalars and vectors of f32 / i32 / u32 only.**
   A matrix attribute has no settled `ByteAddressBuffer` layout here, and the narrow and 64-bit scalars need SM 6.2 16-bit types or a split load.
   `hlsl_type_of` returns empty for those and `generate_material_shader` asserts, rather than emitting something that will not compile.
-- **A material type with an empty signature generates a shader that does not compile.**
-  The prologue declares `gBindlessBuffers` only when some attribute reads a buffer, and `pt_material_hit.hlsli` reads the mesh's positions through it unconditionally.
-  Declaring the buffer table whenever an epilogue is emitted is the fix; nothing in the tree hits it, since every builtin type declares attributes.
+- **The accumulation hash can restart a converged image for something that is not a scene change.**
+  `trace_hash` hashes each record's `vertices` and `indices` bindless indices plus its BLAS pointer.
+  Those are stable while a working set is.
+  They move the moment something reclaims — a bindless array that fills and rotates elements, or a mesh evicted from `mesh_manager` and re-uploaded under a new BLAS handle.
+  Same scene, restarted accumulation, nothing reporting it.
+  The rule the fix has to keep is that the hash may be imprecise in **one direction only**:
+  a render setting that feeds the hash without changing the image — a "high quality mirror" toggle in a scene with no mirrors — costs a restart nobody minds,
+  while a restart on a static scene the user did nothing to is not acceptable.
+  Precise content hashing for accumulation is what eventually fixes it.
+- **A library hook has no reset, and whether it should have one differs per hook.**
+  `acquire_shader_library`, `acquire_material_library` and `acquire_context` each memoize the first *successful* acquire into a function-local static that nothing clears.
+  So the first success decides for the process.
+  slib's constraint is real and external — a second `slib::shader_library` would fight the first over the package globals both write into — so a shader-library reset is not obviously legal.
+  The material library is scene state with no such constraint.
+  Whatever lands has to account for tests running concurrently.
+  `material-resolution-test.cc` already installs its own material library process-wide without `nx::exclusive`, hedging around the race with `CHECK(builds <= 1)`.
 
 ## Everything else
 

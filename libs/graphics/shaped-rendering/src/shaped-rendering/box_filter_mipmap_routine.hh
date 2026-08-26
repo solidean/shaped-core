@@ -141,19 +141,38 @@ private:
         int z = 1;
     };
 
+    /// How many slices the shape's array view carries, a cube's six faces per layer included.
+    /// The same rule `texture::_whole_slice_count()` applies, so the dispatch covers exactly what the UAV does.
+    template <class Traits>
+    [[nodiscard]] static int _slice_count(sg::texture<Traits> const& texture)
+    {
+        return texture.raw()->array_layers() * (Traits::is_cube ? 6 : 1);
+    }
+
     /// The thread extent of `level` — halved on every axis the shape actually halves.
+    ///
+    /// Which axis carries the slice is the entry point's business rather than the shape's rank:
+    /// `main_1d_array_cs` indexes its slice with `id.y`, every 2D array and cube with `id.z`.
     template <class Traits>
     [[nodiscard]] static extent _extent_of(sg::texture<Traits> const& texture, int level)
     {
         auto e = extent{.x = _mip_extent(texture.width(), level)};
-        if constexpr (Traits::dimension != sg::texture_dimension::d1)
+        if constexpr (Traits::dimension == sg::texture_dimension::d1)
+        {
+            if constexpr (Traits::is_array)
+                e.y = _slice_count(texture);
+        }
+        else if constexpr (Traits::dimension == sg::texture_dimension::d3)
+        {
             e.y = _mip_extent(texture.height(), level);
-        if constexpr (Traits::dimension == sg::texture_dimension::d3)
             e.z = _mip_extent(texture.depth(), level); // the one axis that halves with the rest
-        else if constexpr (Traits::is_cube)
-            e.z = texture.raw()->array_layers(); // 6 per cube, and a slice is never averaged into another
-        else if constexpr (Traits::is_array)
-            e.z = texture.array_layers();
+        }
+        else
+        {
+            e.y = _mip_extent(texture.height(), level);
+            if constexpr (Traits::is_array || Traits::is_cube)
+                e.z = _slice_count(texture); // a slice is never averaged into another
+        }
         return e;
     }
 

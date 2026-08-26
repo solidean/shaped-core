@@ -161,9 +161,11 @@ public:
     /// is not returned from here.
     /// So a generated permutation does not hot-reload on an include edit — see [shaped-viewer's TODO](../../../shaped-viewer/docs/TODO.md).
     ///
-    /// **Nothing is cached here.** A generated source is produced by a caller that already has a key for it — a material
-    /// permutation, say — and that key is a better one than a hash of the text, so the dedup belongs there rather than behind a
-    /// second cache with a coarser key.
+    /// **slib adds no cache of its own at this seam** — which is not to say the path is uncached.
+    /// The compile goes through the same `ssc::dxc::shader_cache` every other compile does, in-memory tier and lazily-opened
+    /// persistent tier both, so a generated permutation already survives across runs.
+    /// What slib does not add is a second cache keyed on the source text: a caller generating a source already has a better key
+    /// for it — a material permutation, say — so the dedup belongs there.
     ///
     /// A missing compiler, a preprocessing failure, or a compile error all come back as an async error — never a throw.
     [[nodiscard]] sg::async_compiled_shader compile_source(cc::string_view source,

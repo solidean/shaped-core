@@ -54,7 +54,7 @@ cc::vector<tg::pos3f> cube_triangles(float size)
 }
 
 /// One base color per face, repeated for both of its triangles — the `pbr` material type reads this by name.
-/// The three attributes it also declares (metallic, roughness, emissive) are absent, so the type's own defaults win.
+/// The five attributes it also declares (metallic, roughness, emissive, normal, occlusion) are absent, so the type's own defaults win.
 cc::vector<tg::vec3f> face_colors()
 {
     tg::vec3f const per_face[6] = {

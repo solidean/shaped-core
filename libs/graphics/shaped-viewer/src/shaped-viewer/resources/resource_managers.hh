@@ -39,7 +39,9 @@ struct sv::manager_config
 ///
 /// Indexed and non-indexed geometry stay distinct all the way down.
 /// An `indexed_triangle_data` acquire uploads the caller's index buffer and builds an indexed BLAS, while a `triangle_data` acquire uploads nothing extra and builds a non-indexed one.
-/// `is_indexed` is what a shader branches on, reaching the closest-hit through the frame constants.
+/// `is_indexed` is what a shader branches on.
+/// It reaches the path tracer's closest-hit per instance, through `instance_gpu::is_indexed` and `InstanceID()`;
+/// the flat `pbr_raytrace_routine` still takes it per frame, in `frame_constants_gpu::mesh_is_indexed`.
 /// It is also the only thing that makes `indices` meaningful.
 struct sv::mesh_record
 {
@@ -161,6 +163,7 @@ enum class sv::residency : sv::u8
 ///
 /// The whole chain is allocated on the first acquire even when only the base level is supplied, so generating the rest later
 /// fills this texture in place rather than replacing it.
+/// The budget is charged for that whole chain from the first acquire, since a record's byte size is fixed at insert.
 struct sv::texture_record
 {
     sg::texture_2d texture;

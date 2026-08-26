@@ -82,7 +82,9 @@ using material_library_provider = cc::unique_function<cc::result<material_librar
 /// Sets the hook that decides which material library viewers draw from.
 ///     sv::set_acquire_material_library([] { return &my_library; });
 /// Unset by default, and then `impl::acquire_default_material_library` answers instead, which registers the builtin types.
-/// Passing `{}` clears it again, which is how a test hands the default back.
+/// Passing `{}` clears the provider, but not the library already acquired: the first *successful* acquire is memoized for the
+/// process, so nothing hands the default back after one, a test included.
+/// A failed acquire is deliberately not memoized, so a provider set after a failure is retried.
 ///
 /// The library must outlive every viewer using it, which is why this hands out a pointer rather than a value: a library is
 /// referenced by id from GPU memory, so it cannot be copied or moved out from under one.

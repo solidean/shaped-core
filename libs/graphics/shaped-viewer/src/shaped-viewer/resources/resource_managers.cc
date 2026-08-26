@@ -175,7 +175,6 @@ texture_id texture_manager::acquire(texture_data const& texture)
     // Every supplied level in one list, submitted before returning, so the id is usable the moment it is minted.
     auto cmd = _ctx.create_command_list();
     auto offset = isize(0);
-    auto uploaded_bytes = isize(0);
     for (auto mip = i32(0); mip < texture.mip_count; ++mip)
     {
         auto const size = impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
@@ -183,9 +182,15 @@ texture_id texture_manager::acquire(texture_data const& texture)
         cmd->upload.bytes_to_texture(gpu.raw(), texture.pixels.span().subspan({.offset = offset, .size = size}),
                                      {.mip_level = mip});
         offset += size;
-        uploaded_bytes += size;
     }
     _ctx.submit_command_list(cc::move(cmd));
+
+    // The budget is charged for the whole allocated chain rather than the levels supplied so far.
+    // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
+    // completed texture would sit in the budget at three quarters of what it costs.
+    auto chain_bytes = isize(0);
+    for (auto mip = i32(0); mip < total_mips; ++mip)
+        chain_bytes += impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
 
     // Whether it is done is the shape's answer, not the upload's: a texture given every level it has room for
     // needs no follow-up, one given fewer is waiting on mip generation.
@@ -194,7 +199,7 @@ texture_id texture_manager::acquire(texture_data const& texture)
     return insert(
         texture.hash,
         {.texture = cc::move(gpu), .state = state, .uploaded_mips = texture.mip_count, .total_mips = total_mips},
-        uploaded_bytes);
+        chain_bytes);
 }
 
 namespace

@@ -207,11 +207,9 @@ public:
 
     /// `r` resolved down to ids — the durable half of what a generated shader reads per instance.
     ///
-    /// `layout` and `shader_key` must come from ONE `generate_material_shader` over `r` — `material_permutation`'s two
-    /// fields, or a `generated_material_shader`'s.
-    /// The layout is what the slots are laid out at and the key is what the record carries forward, and taking them together
-    /// is what keeps the CPU's offsets and the shader's from being two independent computations.
-    /// They are taken as two values rather than as the permutation so that resolving a block never forces its compile.
+    /// `layout` must be the one `generate_material_shader` produced for `r`, since it is what the generated shader reads
+    /// the block at — a block laid out against a different one is read at the wrong offsets.
+    /// It is taken as a layout rather than as the permutation so that resolving a block never forces its compile.
     ///
     /// This is where the chain resolves: a constant is copied out, a mesh-sourced attribute is uploaded through `attributes`,
     /// and a sampled texture is named by an already-resident `texture_id`.
@@ -219,9 +217,7 @@ public:
     ///
     /// Content-cached on `r.parameter_key`, so re-acquiring an unchanged mesh every frame is a lookup.
     /// Nothing is evicted: a record is ids and tens of bytes, bounded by the distinct (material, mesh) pairs a scene draws.
-    [[nodiscard]] instance_id acquire_instance(resolved_material const& r,
-                                               material_parameter_layout const& layout,
-                                               cc::hash128 shader_key);
+    [[nodiscard]] instance_id acquire_instance(resolved_material const& r, material_parameter_layout const& layout);
 
     /// Whether `id` names a record this manager minted.
     [[nodiscard]] bool contains_instance(instance_id id) const;
@@ -302,6 +298,11 @@ private:
         bindless_table table = bindless_table::textures_2d;
         sg::bindless_array array;
         cc::vector<u32> acquired; ///< the element indices acquired this epoch, for the access declaration
+
+        /// The stamp each element was last recorded under, one entry per element of `array`.
+        /// This is what makes "is it in `acquired` already?" a compare rather than a scan of a list that grows all epoch.
+        /// A stamp rather than a bitset because the per-epoch reset is then free — bumping `_record_stamp` is the reset.
+        cc::vector<u64> recorded_in;
     };
 
     gpu_resource_manager(mesh_manager meshes,
@@ -324,7 +325,7 @@ private:
     [[nodiscard]] bool _is_pending(texture_id id) const;
 
     /// Notes `index` as in use this epoch, for the access declaration; already-present indices are skipped.
-    static void _record(table_entry& t, u32 index);
+    void _record(table_entry& t, u32 index);
 
     /// The array for `table`, or null if the table was not declared.
     [[nodiscard]] sg::bindless_array* _array_of(bindless_table table);
@@ -359,5 +360,10 @@ private:
     work_budget _work_budget;
 
     sg::epoch _epoch = sg::epoch(0);
+
+    /// Bumped every time the epoch advances, and compared against `table_entry::recorded_in`.
+    /// Its own counter rather than `_epoch` because a manager records before its first `advance_to`, and a zero-initialized
+    /// stamp must not read as "already recorded" — so live values start at 1.
+    u64 _record_stamp = 1;
     bool _locked = false;
 };

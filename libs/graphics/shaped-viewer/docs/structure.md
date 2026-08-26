@@ -45,7 +45,7 @@ gpu_resource_manager                     [in progress]  where resource managemen
                                                         Its tick is `advance_to(epoch)` — idempotent, so N windows drawing at N rates each call it and the first one pays.
                                                         It holds the bindless lock too, since that invariant spans every array over one group rather than any single one
 bindless tables                          [in progress]  sv hand-declares the layout (resources/bindless_tables.hh): one table per view dimension, byte-address buffers, budgets from the config.
-                                                        Every generated permutation samples gBindlessTextures2D and reads gBindlessBuffers, bound as the trace's second group
+                                                        Every generated permutation reads gBindlessBuffers — its epilogue reaches the mesh's positions through it — and declares gBindlessTextures2D only where an attribute samples one; both are bound as the trace's second group
 pathtrace_routine                        [in progress]  the DXR GI trace view_renderer drives: TLAS + dispatch_rays into a UAV target
 pbr_raytrace_routine                     [in progress]  the flat single-bounce IBL DXR trace (SH environment), driven directly
 sv_shaders package                       [in progress]  raygen / miss+closest-hit, plus layout.hlsl (border / view / wipe), via slib
