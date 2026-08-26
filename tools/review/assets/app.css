@@ -617,3 +617,6 @@ body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
 .pop-body { margin: 6px 0 0; white-space: pre-wrap; color: var(--text-dim); font-size: 0.85rem; }
 .pop-stat { margin-top: 6px; color: var(--text-dim); font-size: 0.82rem; }
 .pop-link { margin-top: 6px; font-size: 0.82rem; }
+
+.annot.ref-term { text-decoration-color: var(--warn); }
+.pop-def { max-width: 60ch; }

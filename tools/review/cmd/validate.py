@@ -39,6 +39,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # meant as a reference — so the check goes looking rather than waiting to be tripped over.
     problems.extend(ctx.reference_problems(paths, entries))
 
+    # A paragraph in a glossary block that is not a term is a term nobody finds out is missing,
+    # which is the whole reason the block is marked rather than scraped.
+    problems.extend(review.glossary_problems(entries))
+
     for entry in entries:
         warnings.extend(review.word_warnings(entry))
         answers = ctx.answers(paths, entry)

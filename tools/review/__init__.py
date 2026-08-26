@@ -45,7 +45,13 @@ from .lib.core.paths import (
 )
 from .lib.annotate.index import RepoIndex
 from .lib.annotate.providers import Token
-from .lib.annotate.table import build as build_tokens, index_for as repo_index, problems as token_problems
+from .lib.annotate.table import (
+    build as build_tokens,
+    glossary_problems,
+    glossary_terms,
+    index_for as repo_index,
+    problems as token_problems,
+)
 from .lib.entry.answers import Answer, AnswerFile, Comment
 from .lib.entry.askhash import canonical as ask_canonical
 from .lib.entry.askhash import hash_ask
@@ -99,6 +105,8 @@ __all__ = [
     "RepoIndex",
     "Token",
     "build_tokens",
+    "glossary_problems",
+    "glossary_terms",
     "repo_index",
     "token_problems",
     "AnswerFile",

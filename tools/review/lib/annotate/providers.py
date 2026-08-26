@@ -52,10 +52,12 @@ class Token:
     css: str = ""
     regions: tuple[str, ...] = (PROSE, CODE, DIFF)
     problem: str = ""
+    note: str = ""
+    target: str = ""
 
     def to_json(self) -> dict:
         out = {"text": self.text, "kind": self.kind, "regions": list(self.regions)}
-        for key in ("label", "href", "path", "css"):
+        for key in ("label", "href", "path", "css", "note", "target"):
             if getattr(self, key):
                 out[key] = getattr(self, key)
         if self.line:

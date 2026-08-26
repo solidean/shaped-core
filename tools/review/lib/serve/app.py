@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..annotate.index import RepoIndex
-from ..annotate.table import build as build_tokens, to_json as tokens_to_json
+from ..annotate.table import build as build_tokens, glossary_terms, to_json as tokens_to_json
 from ..changeset.ledger import Ledger
 from ..core import config as config_module
 from ..core.atomic import stat_key, write_json
@@ -134,6 +134,10 @@ class ReviewApp:
             self._index, self._index_key = RepoIndex.build(self.repo, self.paths.root), key
         return self._index
 
+    def terms(self) -> list:
+        """Every glossary term in the review, which is what makes one entry's vocabulary reach the others."""
+        return glossary_terms([e for _, e, err in self.entries() if err is None])
+
     def entry_html(self, slug: str) -> tuple[int, dict]:
         for file, entry, error in self.entries():
             if file.stem != slug:
@@ -146,7 +150,8 @@ class ReviewApp:
                 repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
             )
             tokens = build_tokens(entry, self.index(), answers=answers,
-                                  confirm_shas=Git(self.repo).which_are_commits)
+                                  confirm_shas=Git(self.repo).which_are_commits,
+                                  terms=self.terms())
             return 200, {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
         return 404, {"error": f"no entry {slug!r}"}
 

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from ..entry.answers import AnswerFile
 from ..entry.parse import Entry
+from .glossary import GlossaryProvider, malformed_in, terms_in
 from .index import RepoIndex
 from .providers import CommitProvider, FileProvider, Token
 
@@ -42,7 +43,8 @@ def _referencing_text(text: str) -> list[str]:
     return out
 
 
-def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, confirm_shas=None) -> list[Token]:
+def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, confirm_shas=None,
+          terms: list | None = None) -> list[Token]:
     """Every token this entry's text carries, deduplicated by literal.
 
     The maintainer's own answers are scanned too.
@@ -54,6 +56,7 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     """
     files = FileProvider(index=index)
     commits = CommitProvider(confirm=confirm_shas) if confirm_shas is not None else None
+    glossary = GlossaryProvider(terms=terms) if terms else None
     tokens: list[Token] = []
 
     def scan(text: str) -> None:
@@ -61,6 +64,9 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
             tokens.extend(files.tokens(fragment))
         if commits is not None:
             tokens.extend(commits.tokens(text))
+        if glossary is not None:
+            # The glossary entry is skipped: underlining a definition inside its own definition says nothing.
+            tokens.extend(glossary.tokens(text, skip_entry=entry.slug))
 
     for block in entry.blocks:
         scan(block.prose)
@@ -82,6 +88,22 @@ def problems(entry: Entry, tokens: list[Token]) -> list[str]:
 
 def to_json(tokens: list[Token]) -> list[dict]:
     return [token.to_json() for token in tokens]
+
+
+def glossary_terms(entries) -> list:
+    """Every term declared anywhere in the review, since one entry defines what all of them use."""
+    out = []
+    for entry in entries:
+        out.extend(terms_in(entry))
+    return out
+
+
+def glossary_problems(entries) -> list[str]:
+    """Paragraphs in a glossary block that do not parse as a term."""
+    out = []
+    for entry in entries:
+        out.extend(malformed_in(entry))
+    return out
 
 
 def index_for(repo: Path, review_root: Path | None = None) -> RepoIndex:

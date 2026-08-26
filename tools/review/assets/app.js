@@ -367,10 +367,24 @@ function annotate(root, tokens) {
     targets.push(node);
   }
 
+  // A glossary term is drawn once per block. A term used eleven times in a paragraph becomes eleven dotted
+  // underlines, which reads as a rash rather than as help.
+  const drawnTerms = new Map();
+
   for (const node of targets) {
     const region = regionOf(node.parentElement);
-    const usable = byLength.filter((t) => t.regions.includes(region));
-    if (usable.length) wrapNode(node, usable);
+    const block = node.parentElement.closest(".block") || root;
+    if (!drawnTerms.has(block)) drawnTerms.set(block, new Set());
+    const done = drawnTerms.get(block);
+    const usable = byLength.filter((t) => {
+      if (!t.regions.includes(region)) return false;
+      return t.kind !== "glossary" || !done.has(t.text.toLowerCase());
+    });
+    if (usable.length) {
+      for (const hit of wrapNode(node, usable)) {
+        if (hit.kind === "glossary") done.add(hit.text.toLowerCase());
+      }
+    }
   }
 }
 
@@ -389,7 +403,7 @@ function wrapNode(node, tokens) {
       from = at + token.text.length;
     }
   }
-  if (!hits.length) return;
+  if (!hits.length) return [];
   hits.sort((a, b) => a.start - b.start);
 
   const fragment = document.createDocumentFragment();
@@ -401,6 +415,7 @@ function wrapNode(node, tokens) {
   }
   if (cursor < text.length) fragment.append(text.slice(cursor));
   node.parentNode.replaceChild(fragment, node);
+  return hits.map((h) => h.token);
 }
 
 function decorate(token) {
@@ -424,7 +439,22 @@ function decorate(token) {
     el.addEventListener("mouseenter", () => peekCommit(el));
     el.addEventListener("mouseleave", schedulePopoverClose);
   }
+  if (token.note) {
+    el.title = "";
+    el.addEventListener("mouseenter", () => showPopover(el, `<div class="pop-def">${mdInline(token.note)}</div>`));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  // Clicking a term goes to the entry that defines it, for the reader who wants more than a sentence.
+  if (token.target) {
+    el.style.cursor = "pointer";
+    el.addEventListener("click", (e) => { e.preventDefault(); selectEntry(token.target); });
+  }
   return el;
+}
+
+// The definition is one line of markdown, and only its bold lead ever matters.
+function mdInline(text) {
+  return _esc(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
 // ---- the popover ------------------------------------------------------------

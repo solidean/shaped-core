@@ -36,7 +36,10 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "context/cold": set(_ANY),
     "context/repo": set(_ANY),
     "context/delta": set(_ANY),
-    "prose": _ANY | {"generated"},
+    # `glossary: true` says the bold leads in this block are terms.
+    # An attribute rather than a scrape, because the tool would otherwise drop a paragraph that does not parse
+    # as one and say nothing — the same silence the attribute whitelist exists to prevent.
+    "prose": _ANY | {"generated", "glossary"},
     "code": _ANY | {"lang", "file"},
     "changes": _ANY | {"generated", "show"},
     "recommendation": set(_ANY),

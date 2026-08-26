@@ -29,6 +29,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.review.lib.annotate.index import RepoIndex  # noqa: E402
 from tools.review.lib.annotate.table import build as build_tokens  # noqa: E402
 from tools.review.lib.annotate.providers import CommitProvider  # noqa: E402
+from tools.review.lib.annotate.glossary import GlossaryProvider, malformed_in, terms_in  # noqa: E402
 from tools.review.lib.entry.generate import _tree_html as tree_html  # noqa: E402
 from tools.review.lib.serve.app import _forge_commit_url as forge_url  # noqa: E402
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
@@ -1048,6 +1049,48 @@ def test_a_missing_path_is_a_problem(root: Path) -> None:
 def test_a_line_reference_carries_its_line(root: Path) -> None:
     token = _tokens(root, "See `markdown.py:63`.")[0]
     assert token.line == 63 and token.href.endswith("#L63"), token
+
+
+GLOSSARY = """
+## prose
+glossary: true
+
+**atom** — one unit of change the review must account for.
+
+**line space** (spaces) — the net set of added and removed lines.
+"""
+
+
+def test_a_glossary_block_declares_its_terms(root: Path) -> None:
+    """Marked rather than scraped, so a paragraph that is not a term can be reported instead of dropped."""
+    entry = parse_text(ENTRY + GLOSSARY, Path("018-glossary.md"), slug="018-glossary")
+    terms = terms_in(entry)
+    assert [t.term for t in terms] == ["atom", "line space"], terms
+    assert terms[1].aliases == ("spaces",)
+    assert not malformed_in(entry)
+
+
+def test_a_paragraph_that_is_not_a_term_is_reported(root: Path) -> None:
+    """A term nobody finds out is missing is exactly what marking the block is for."""
+    text = ENTRY + "\n## prose\nglossary: true\n\n**atom**: the wrong dash entirely.\n"
+    problems = malformed_in(parse_text(text, Path("018-glossary.md"), slug="018-glossary"))
+    assert len(problems) == 1 and "not `**term**" in problems[0], problems
+
+
+def test_a_term_is_matched_in_whatever_form_the_text_used(root: Path) -> None:
+    """Whole-word, case-insensitive, longest first, with naive plurals both ways."""
+    entry = parse_text(ENTRY + GLOSSARY, Path("018-glossary.md"), slug="018-glossary")
+    provider = GlossaryProvider(terms=terms_in(entry))
+    found = {t.text for t in provider.tokens("Every Atom in the line spaces, but not atomic or spacer.")}
+    assert "Atom" in found and "line spaces" in found, found
+    assert not any(f in ("atomic", "spacer") for f in found), found
+
+
+def test_the_glossary_entry_does_not_annotate_itself(root: Path) -> None:
+    """Underlining a definition inside its own definition says nothing."""
+    entry = parse_text(ENTRY + GLOSSARY, Path("018-glossary.md"), slug="018-glossary")
+    provider = GlossaryProvider(terms=terms_in(entry))
+    assert not provider.tokens("an atom here", skip_entry="018-glossary")
 
 
 def test_the_tree_folds_single_child_chains(root: Path) -> None:
