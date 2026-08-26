@@ -37,6 +37,7 @@ from tools.review.cmd import (  # noqa: E402
     selftest,
     serve,
     show,
+    stop,
     sync,
     validate,
 )
@@ -54,6 +55,7 @@ COMMANDS = [
     serve,
     delta,
     round_cmd,
+    stop,
     sync,
     finalize,
     selftest,

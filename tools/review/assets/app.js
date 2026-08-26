@@ -11,6 +11,8 @@ const state = {
   dirty: new Set(),
   staleContent: false,
   sendArmed: false,
+  shutdownArmed: false,
+  stopped: false,
   // Digests this tab caused by saving an answer. A reload carrying one of them is our own write coming back.
   selfDigests: new Set(),
 };
@@ -270,6 +272,34 @@ function requestSend() {
   }, SEND_ARM_MS);
 }
 
+// Closing the server ends the session for every tab, so it arms first exactly as sending does.
+async function requestShutdown() {
+  const button = el("shutdown");
+  if (!state.shutdownArmed) {
+    state.shutdownArmed = true;
+    button.classList.add("armed");
+    setSaveState("click Close server again to shut it down", "warn");
+    setTimeout(() => {
+      state.shutdownArmed = false;
+      button.classList.remove("armed");
+    }, SEND_ARM_MS);
+    return;
+  }
+
+  state.shutdownArmed = false;
+  button.classList.remove("armed");
+  for (const form of document.querySelectorAll(".ask-form")) flushSave(form);
+
+  // The server stops answering the moment it acknowledges, so a dropped connection here is success, not failure.
+  try {
+    await postJSON("/api/shutdown", {});
+  } catch (e) {
+    // ignored on purpose
+  }
+  state.stopped = true;
+  el("stopped-veil").hidden = false;
+}
+
 async function signal(action) {
   for (const form of document.querySelectorAll(".ask-form")) flushSave(form);
   const result = await postJSON("/api/signal", { action });
@@ -310,7 +340,10 @@ function listen() {
     }
     if (state.current) await selectEntry(state.current, { push: false });
   });
-  events.onerror = () => setSaveState("live updates disconnected", "warn");
+  events.onerror = () => {
+    if (state.stopped) { events.close(); return; }
+    setSaveState("live updates disconnected", "warn");
+  };
 
   setInterval(() => {
     if (state.staleContent && !state.dirty.size && !typing()) {
@@ -363,6 +396,7 @@ async function main() {
   el("next-open").addEventListener("click", nextUnanswered);
   el("send").addEventListener("click", requestSend);
   el("pause").addEventListener("click", () => signal("pause"));
+  el("shutdown").addEventListener("click", requestShutdown);
   el("help-toggle").addEventListener("click", () => { el("help").hidden = !el("help").hidden; });
   el("help").addEventListener("click", () => { el("help").hidden = true; });
   el("filter").addEventListener("input", renderNav);

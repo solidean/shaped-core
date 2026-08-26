@@ -56,6 +56,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `generate <name>` | write or refresh the overview and coverage entries |
 | `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view |
 | `serve <name>` | the page the review is answered in; non-blocking |
+| `stop <name>` | shut that review's server down, from a terminal rather than from the page |
 | `delta <name> [--finalize]` | the answers since the watermark; `--finalize` freezes the round |
 | `round <name>` | block until the page signals, then print and freeze the round; `--no-wait` to peek |
 | `sync <name>` | re-point the review at a moved head |
@@ -93,6 +94,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   input to a synthesis step rather than something to paste unread.
 - **Only one server per review.** `serve` refuses a taken port rather than sharing it, and says so when another review
   in this repo is already up.
+- **The page can close its own server**, with `Close server` in the toolbar, and `review stop <name>` does it from a terminal.
+  An agent starts `serve` in the background, so there is no window to interrupt — without either of those the only way out is finding the process.
 - The first run pays a `uv` resolve for `pygments` and `markdown-it-py`. That is the dependency cost, and it is cached afterwards.
 
 ## Layout

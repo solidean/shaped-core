@@ -129,6 +129,15 @@ button:hover { border-color: var(--accent); }
 /* Armed but not yet sent: the second press is the one that hands the round back. */
 #send.armed { border-color: var(--warn); color: var(--warn); }
 #send.armed .btn-key { color: var(--warn); }
+/* Quiet by default, because closing the server is rarely what you came here to do — and armed before it acts. */
+#shutdown { color: var(--text-dim); }
+#shutdown.armed { border-color: var(--bad); color: var(--bad); }
+
+/* Every control is dead once the server is gone, and the page has to say so rather than look merely unresponsive. */
+#stopped-veil { position: fixed; inset: 0; background: rgba(0,0,0,0.72); display: flex; align-items: center; justify-content: center; z-index: 30; }
+#stopped-veil[hidden] { display: none; }
+.stopped-card { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; padding: 1.2rem 1.6rem; max-width: 34rem; }
+.stopped-card code { color: var(--accent); }
 
 /* The shortcut a button is also reachable by, so the keys are learned from the toolbar rather than from the help card. */
 .btn-key { color: var(--accent); opacity: 0.7; margin-left: 0.45em; font-size: 0.8em; }

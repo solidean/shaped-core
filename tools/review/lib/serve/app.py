@@ -179,6 +179,16 @@ class ReviewApp:
                 }
             return 200, {"answer": answer.to_record(), "hash": current_hash, "digest": written_digest}
 
+    def shutdown(self) -> tuple[int, dict]:
+        """Stop the server, from the page or from `review stop`.
+
+        The agent usually starts `serve` in the background, so the maintainer has no terminal to interrupt —
+        without this the only way to get the port back is finding the process.
+        `shutdown()` must not run on a handler thread, since it waits for the serve loop this request is inside.
+        """
+        record(self.paths.log, "shutdown")
+        return 200, {"stopped": True}
+
     def signal(self, payload: dict) -> tuple[int, dict]:
         action = str(payload.get("action", "send"))
         if action not in ("send", "pause"):
@@ -271,6 +281,13 @@ class Handler(BaseHTTPRequestHandler):
                 code, result = self.app.save_answer(payload)
             elif route == "/api/signal":
                 code, result = self.app.signal(payload)
+            elif route == "/api/shutdown":
+                code, result = self.app.shutdown()
+                self._json(code, result)
+                self.wfile.flush()
+                # Off the handler thread on purpose: `shutdown` waits for the loop this request is running inside.
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
             else:
                 code, result = 404, {"error": "no such route"}
             self._json(code, result)

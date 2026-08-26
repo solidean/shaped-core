@@ -31,10 +31,19 @@
       <span id="save-state"></span>
       <button id="send" title="finalize this round and hand it back (s)">Send to Claude<span class="btn-key">s</span></button>
       <button id="pause" title="stop waiting, keep everything (p)">Pause<span class="btn-key">p</span></button>
+      <button id="shutdown" title="close the server and free the port; the review folder is untouched">Close server</button>
       <button id="help-toggle" title="shortcuts (?)">?</button>
     </div>
     <div id="content"></div>
   </main>
+</div>
+
+<div id="stopped-veil" hidden>
+  <div class="stopped-card">
+    <h2>Server stopped</h2>
+    <p>Every answer is saved in the review folder. Nothing was lost, and nothing was handed back that you had not sent.</p>
+    <p>Bring it back with <code>uv run review.py serve &lt;name&gt;</code>.</p>
+  </div>
 </div>
 
 <div id="help" hidden>
@@ -49,6 +58,7 @@
       <tr><td><kbd>s</kbd></td><td>finalize the round and hand it back</td></tr>
       <tr><td><kbd>p</kbd></td><td>pause: stop the agent waiting, keep every answer</td></tr>
       <tr><td><kbd>?</kbd></td><td>this card</td></tr>
+      <tr><td>Close server</td><td>shuts the server down; <code>review serve</code> brings it back, answers and all</td></tr>
     </table>
     <p>Answers save themselves as you type. Nothing is handed back until you send.</p>
     <p class="help-dismiss">Click anywhere, or press <kbd>Esc</kbd>, to close this.</p>
