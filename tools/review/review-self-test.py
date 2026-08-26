@@ -17,6 +17,7 @@ Run it directly with `uv run tools/review/review-self-test.py [-v]`.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -637,6 +638,28 @@ def test_compose_is_parseable(root: Path) -> None:
 
 
 # ---- answers ----------------------------------------------------------------
+
+
+def test_every_hidden_element_can_actually_hide(root: Path) -> None:
+    """An element the page toggles with `hidden` must not be left visible by its own `display` rule.
+
+    `[hidden] { display: none }` comes from the user agent stylesheet and loses to any id selector that sets `display`,
+    so a veil styled `#x { display: flex }` is shown permanently and the attribute the code sets is inert.
+    Nothing else catches this: the markup is right, the code is right, and only the two together are wrong.
+    """
+    assets = REPO_ROOT / "tools" / "review" / "assets"
+    page = (assets / "page.html").read_text(encoding="utf-8")
+    css = (assets / "app.css").read_text(encoding="utf-8")
+
+    toggled = set(re.findall(r'id="([\w-]+)"[^>]*\shidden\b', page))
+    assert toggled, "expected the page to toggle something by `hidden`"
+
+    for name in sorted(toggled):
+        sets_display = re.search(r"#" + re.escape(name) + r"\s*(?:,[^{]*)?\{[^}]*\bdisplay\s*:", css)
+        if not sets_display:
+            continue
+        guard = "#" + name + "[hidden]"
+        assert guard in css, f"{name} sets display but has no `{guard} {{ display: none }}`, so `hidden` cannot hide it"
 
 
 def test_answers_keep_a_reworded_question_s_answer(root: Path) -> None:

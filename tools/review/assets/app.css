@@ -307,6 +307,11 @@ body.save-alarm #main {
   backdrop-filter: blur(3px);
 }
 
+/* An id selector's `display` outranks the user agent's `[hidden] { display: none }`, so a `hidden` attribute alone does nothing here.
+   Every element the page toggles by `hidden` needs this line whenever it is given a `display` of its own. */
+#stale-veil[hidden] { display: none; }
+#save-alarm-bar[hidden] { display: none; }
+
 .stale-card {
   max-width: 34rem;
   padding: 28px 32px;
