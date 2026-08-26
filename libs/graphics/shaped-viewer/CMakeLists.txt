@@ -200,6 +200,7 @@ if(SC_BUILD_TESTS)
             tests/raytraced-view-test.cc
             tests/headless-viewer-test.cc
             tests/pathtraced-view-test.cc
+            tests/openpbr-bsdf-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
@@ -211,6 +212,19 @@ if(SC_BUILD_TESTS)
             tests/interactive-showcase-manual-test.cc
         )
         target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
+
+        # The BSDF probe: a compute shader over shaders/openpbr.hlsli, so a test can measure what the closure returns.
+        # Its own package rather than an entry in sv_shaders, because nothing a viewer runs dispatches it — and a package
+        # is per target, so the two mount side by side over the same source directory.
+        sc_add_shader_package(
+            TARGET     shaped-viewer-test
+            NAME       sv_test_shaders
+            NAMESPACE  sv_test::shaders
+            SOURCE_DIR shaders
+            LANGUAGE   hlsl
+            SHADERS
+                bsdf_probe.hlsl:compute:BsdfProbe
+        )
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.

@@ -170,17 +170,27 @@ importance-samples the continuation — so what is left is coverage of the model
   material cannot ask for one and silently get something else.
   Transmission is the one that changes the integrator rather than only the closure: it needs a refracted continuation and
   therefore a path that leaves the upper hemisphere.
+- **A GGX sample that reflects below the horizon is dropped rather than redistributed**, so `bsdf_pdf` legitimately claims
+  less than the full hemisphere — around a tenth of it for a rough lobe.
+  That is unbiased and standard, and the probe asserts the direction that matters (never MORE than 1) rather than equality.
+  Multiple-scattering GGX sampling is what would put that mass back, and it is the same tabulated-albedo work as the
+  compensation entry below.
 - **Three lobes are approximations, named at the top of `openpbr.hlsli`.**
   The fuzz is a Conty-Estevez sheen rather than the specified Zeltner microflake, the coat tints what passes through it once
   rather than absorbing along the refracted path, and GGX energy compensation is Turquin's analytic fit rather than a tabulated
   directional albedo.
   Each is a self-contained replacement, and the sheen is the one that most visibly deviates.
-- **No pixel is ever inspected.** The suite pins that the permutation compiles, that the pipeline builds and that the trace
-  runs; nothing checks what the BSDF returns.
-  The cheap first assertions are a white-furnace test — a rough metal under a uniform environment must return roughly its own
-  albedo — and a reciprocity check over sampled direction pairs.
-  Both need the pixel readback the accumulation entry above also wants, which is the one piece of test infrastructure sv has
-  none of.
+- **The closure is measured; the IMAGE still is not.**
+  `shaders/bsdf_probe.hlsl` plus `tests/openpbr-bsdf-test.cc` run three estimators over `sv::bsdf` on the GPU and read the
+  numbers back — directional albedo, the mass `bsdf_pdf` claims against what `bsdf_sample_direction` draws, and Helmholtz
+  reciprocity — across eleven surfaces at three incidences each.
+  A lobe added to the closure goes in `surfaces_under_test` and is then held to all three.
+  What that does not cover is anything above the closure: the integrator, the accumulation blend and the layout composite
+  still have no readback, and `pathtraced-window-manual-test` is the only confirmation of those.
+- **Two of the energy bounds are a fit's error rather than a lobe's.**
+  A white metal furnace overshoots by about 3% (Turquin's analytic compensation) and the fuzz by about 6% at grazing
+  (`sheen_albedo` charges the layers below it less than the Conty-Estevez lobe actually reflects).
+  The probe's `1.06` energy bound is exactly those two, so it is what tightens when the tabulated albedos above land.
 - **The environment cannot produce a sharp reflection.** The background is an order-3 SH probe, so a smooth specular lobe
   reflects a blur whatever the roughness says; only the analytic area light gives a real highlight.
   An equirect HDR environment with 2D-CDF importance sampling is the fix, and it needs a Radiance `.hdr` reader in babel first —

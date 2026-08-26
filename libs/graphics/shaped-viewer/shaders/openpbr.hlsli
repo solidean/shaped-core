@@ -238,6 +238,7 @@ struct bsdf
 
     float3 spec_f0;
     float spec_alpha;
+    float spec_weight;
 
     float coat_f0;
     float coat_alpha;
@@ -402,11 +403,16 @@ bsdf bsdf_prepare(surface s)
     b.metal_tint = saturate(s.specular_weight * s.specular_color);
     b.metal_alpha = alpha_of(s.specular_roughness);
 
-    // The dielectric's reflectance comes from its IOR; `specular_weight` scales it and `specular_color` tints it, while
-    // grazing incidence still goes to white — which is what makes a tinted dielectric read as coated rather than metallic.
+    // The dielectric's reflectance comes from its IOR and `specular_color` tints it, while grazing incidence still goes to
+    // white — which is what makes a tinted dielectric read as coated rather than metallic.
+    //
+    // `specular_weight` scales the whole LOBE rather than only `f0`.
+    // Folding it into `f0` would leave Schlick's grazing tail at full strength, so a surface asking for no specular at all
+    // still reflected white at the horizon — and the diffuse below it was still charged for the crossing.
     float ior = max(1.0 + 1e-3, s.specular_ior);
     float r0 = (ior - 1.0) / (ior + 1.0);
-    b.spec_f0 = saturate(max(0.0, s.specular_weight) * saturate(s.specular_color) * (r0 * r0));
+    b.spec_f0 = saturate(saturate(s.specular_color) * (r0 * r0));
+    b.spec_weight = saturate(s.specular_weight);
     b.spec_alpha = alpha_of(s.specular_roughness);
 
     float cior = max(1.0 + 1e-3, s.coat_ior);
@@ -442,14 +448,21 @@ float coat_transmission(bsdf b, float mu)
 /// What the dielectric specular layer transmits to the diffuse substrate, in one direction.
 float3 spec_transmission(bsdf b, float mu)
 {
-    return float3(1, 1, 1) - ggx_albedo(mu, b.spec_alpha, b.spec_f0);
+    return float3(1, 1, 1) - b.spec_weight * ggx_albedo(mu, b.spec_alpha, b.spec_f0);
 }
 
 /// How much the base is darkened by sitting under the coat, beyond the transmission the two crossings already cost.
 ///
-/// Light entering the coat is repeatedly reflected back down at the inner interface, and each bounce is another chance for the
-/// base to absorb it; the series over those bounces is what makes a coated surface read darker and more saturated.
-/// `coat_darkening` 1 keeps that darkening and 0 compensates it away, so the factor here is what UNDOES it at 0.
+/// Light that reaches the base and comes back up meets the coat's inner interface, where most of it is past the critical
+/// angle and is reflected back DOWN for another chance to be absorbed.
+/// The factor is that series: a bright base survives the extra bounces and loses little, a dark one loses nearly all of it —
+/// which is why the effect is a shift in saturation rather than a uniform dimming.
+///
+/// `coat_darkening` 1 is the physical result and 0 compensates it away, so the factor runs from 1 toward the series rather
+/// than the other way round.
+/// It is bounded ABOVE by 1 in every channel, which is what keeps a coated surface from returning more light than it
+/// received — the failure the earlier form had, where compensating the darkening away multiplied the base by the series
+/// instead of dividing the escape out of it.
 float3 coat_darkening_factor(bsdf b)
 {
     if (b.coat_weight <= 0.0)
@@ -458,13 +471,17 @@ float3 coat_darkening_factor(bsdf b)
     // The average reflectance seen from INSIDE the coat, which is what drives the internal-reflection series.
     float f_avg = fresnel_average(b.coat_f0);
     float ior = (1.0 + sqrt(b.coat_f0)) / max(1e-3, 1.0 - sqrt(b.coat_f0));
-    float f_avg_internal = 1.0 - (1.0 - f_avg) / max(ior * ior, 1e-3);
+    float f_avg_internal = saturate(1.0 - (1.0 - f_avg) / max(ior * ior, 1e-3));
 
-    float3 base_albedo = lerp(b.diffuse_albedo, b.metal_f0, b.metalness);
-    float3 series = float3(1, 1, 1) / max(float3(1e-3, 1e-3, 1e-3), float3(1, 1, 1) - f_avg_internal * base_albedo);
+    float3 base_albedo = saturate(lerp(b.diffuse_albedo, b.metal_f0, b.metalness));
 
-    // At `coat_darkening` 1 nothing is undone; at 0 the series is applied in full and the base regains what the coat cost it.
-    return lerp(series, float3(1, 1, 1), b.coat_darkening);
+    // What escapes per attempt over what the series recovers. Both carry the same internal reflectance, which is what makes
+    // the ratio conserve energy: it is 1 for a white base and falls toward `1 - f_avg_internal` for a black one.
+    float3 escaped = (1.0 - f_avg_internal) / max(float3(1e-3, 1e-3, 1e-3), float3(1, 1, 1) - f_avg_internal * base_albedo);
+
+    // At `coat_darkening` 0 nothing is darkened; at 1 the series applies in full.
+    // A coat that is only partly there darkens only that far, so the weight rides along.
+    return lerp(float3(1, 1, 1), saturate(escaped), b.coat_darkening * b.coat_weight);
 }
 
 /// The full BSDF at (`wo`, `wi`), with the cosine NOT folded in.
@@ -487,7 +504,7 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
     float3 f_metal = fresnel_f82(mu_h, b.metal_f0, b.metal_tint) * (d_spec * g_spec / denom)
                    * ggx_energy_compensation(mu_o, b.metal_alpha, b.metal_f0);
 
-    float3 f_spec = fresnel_schlick(mu_h, b.spec_f0) * (d_spec * g_spec / denom)
+    float3 f_spec = b.spec_weight * fresnel_schlick(mu_h, b.spec_f0) * (d_spec * g_spec / denom)
                   * ggx_energy_compensation(mu_o, b.spec_alpha, b.spec_f0);
 
     // The diffuse substrate takes what the specular layer let through, both on the way in and on the way out.
@@ -528,7 +545,7 @@ lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
 
     float below = t_fuzz * coat_transmission(b, mu);
     p.metal = below * b.metalness * luminance(ggx_albedo(mu, b.metal_alpha, b.metal_f0));
-    p.spec = below * (1.0 - b.metalness) * luminance(ggx_albedo(mu, b.spec_alpha, b.spec_f0));
+    p.spec = below * (1.0 - b.metalness) * b.spec_weight * luminance(ggx_albedo(mu, b.spec_alpha, b.spec_f0));
     p.diffuse = below * (1.0 - b.metalness) * luminance(b.diffuse_albedo * spec_transmission(b, mu));
 
     float sum = p.fuzz + p.coat + p.metal + p.spec + p.diffuse;
