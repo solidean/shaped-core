@@ -160,6 +160,12 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    Have it verify every symbol, file and line the comment names, since a wrong reference costs the review its credibility.
    It catches two things reliably — a decision that lost its detail on the way out of the review, and a claim about the code that no longer holds.
 
+   **Sort what it returns into two piles.**
+   What is wrong with this comment goes into the next round.
+   What names a *habit* goes into [docs/guides/reviewing-prs.md](../../../docs/guides/reviewing-prs.md) as a rule with its worked example, in the same session.
+   A class of claim you did not verify, a stance that reads as lecturing, a kind of detail that keeps getting dropped.
+   That is where the review process improves, and the pass is wasted if only the per-item corrections are taken.
+
 9. **Finalize.** `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
    It is a draft: the tool gathered what was decided, it did not decide which points are worth an afternoon.
    Post only on an explicit go-ahead, as one comment.

@@ -189,11 +189,70 @@ a line in a "Not yet" section, a TODO with the shape of the fix, an issue — al
 That option is what lets a maintainer ship incompletely *with intent* rather than by omission, and offering it costs nothing when the answer is "fix it".
 A review that only ever offers "fix it" pushes toward a completeness nobody asked for, and the deferral then happens silently instead.
 
+### A finding the diff already documents is not a finding
+
+**Search the branch's own docs for your finding before you raise it.**
+`docs/TODO.md`, a "Not yet" section, the doc comment on the function itself — a good author writes the gap down, and the reviewer who missed that hands it back as a discovery.
+
+pr-146 is the worked case, twice over.
+"An attribute-less `material_type` generates a shader that does not compile" was raised as a blocking correctness bug.
+The branch's `docs/TODO.md` already carried the same diagnosis, the same prescribed fix, and the author's judgement that nothing in the tree reaches it.
+"`compile_source` drops the dependency list, so a generated permutation does not hot-reload" was raised the same way.
+`shader_library.hh` says it three lines above the sentence the review asked to reword.
+
+Both readings damage the review twice.
+They say the reviewer did not read the docs *in the diff they are reviewing*, which is the one place a reader assumes they looked.
+And they silently overrule a recorded decision to defer, without arguing against it — see [A gap the author names](#a-gap-the-author-names-is-where-to-look-and-often-where-to-defer).
+
+When the branch already records it, there are only two honest moves.
+**Drop it**, if the author's call stands.
+Or **raise it as a disagreement with the recorded judgement**, quoting what they wrote and saying why this branch should not ship with it.
+That is a different finding, and a much harder one to write.
+
+### A mechanism claim needs the line that proves it
+
+**When a finding turns on "X is derived from Y", read the line that derives it.**
+A plausible mechanism assembled from two things that look related is the most expensive kind of wrong: it survives review, it gets agreed to, and it produces a fix for a bug that was never there.
+
+pr-146: the accumulation-hash finding claimed `instance_id` came from `lru_pool`'s `Id(_next++)`.
+Eviction would then re-mint it for unchanged content and restart a converged image.
+`instance_id` is `instance_id(u32(_instances.size()))` into a plain append-only vector that nothing evicts — the branch's own TODO says "Nothing evicts a parameter block".
+Two content-addressed pools sat next to each other and only one of them minted the id in question.
+The maintainer had already approved the fix before the error was found.
+
+The check is cheap and specific: grep the constructor of the value, not the type that looks like it owns it.
+
+**Beware two mechanisms with similar names.**
+The same review asserted a cache key moved on an include edit, against a header saying it does not.
+Both were true — of the DXC compile key and of the slib asset key — and the finding named neither, so it read as contradicting the document it was asking to correct.
+
+### Do not hand back work you already did
+
+A review that says "grep for the readers first" was written by someone who already ran that grep — it is the sentence before it.
+Say what the grep found.
+
+The same shape, in three variants seen in one comment:
+telling the author to check what their own header says, quoting their own doc comment back at them to establish a point they wrote, and restating their TODO as news.
+None of it is rudeness in the wording; it is the *stance*, and it reads as lecturing however politely the sentence is built.
+
 ### Commit messages are not evidence
 
 Commit messages are agent-written and unreliable, especially about **provenance**.
 A message saying "review feedback" is not proof a human decided anything.
 Never let one close a question — raise the question anyway, and say where you saw it.
+
+## Feed the adversarial pass back into this document
+
+The `reviewing-a-pr` skill has a subagent read the drafted comment against the branch with none of the review's context, asking per item whether it could be implemented as written.
+**Its findings are not all about that comment.**
+
+Sort what comes back into two piles.
+What is wrong with *this* comment goes into the next round.
+What names a habit belongs **here**, as a rule with the worked example attached, in the same session.
+A class of claim that went unverified, a stance that reads as lecturing, a kind of detail that keeps getting dropped on the way out of a review.
+
+The three rules above about documented findings, mechanism claims and handing back work all came from one such pass.
+A pass that produces only per-item corrections has probably been read too narrowly.
 
 ## Asking good questions
 
