@@ -34,6 +34,14 @@ struct [raypayload] PtPayload
 {
     uint rng : read(caller, closesthit) : write(caller, closesthit);
 
+    // The absorption coefficient of the medium the ray is travelling through, round-tripping like `rng`.
+    //
+    // The caller writes what the CURRENT segment travelled in and the hit writes what the CONTINUATION will, because only
+    // the hit knows whether the direction it sampled crossed the surface — and only the caller knows how far the segment it
+    // is about to take actually goes.
+    // Zero is vacuum, which is every path that never entered a transmissive solid.
+    float3 medium : read(caller, closesthit) : write(caller, closesthit);
+
     float3 direct     : read(caller) : write(closesthit, miss); // next-event estimate at this hit, BSDF folded in
     float3 emission   : read(caller) : write(closesthit, miss); // the surface's own emission, or the sky on a miss
     float3 throughput : read(caller) : write(closesthit, miss); // f * cos / pdf for the sampled continuation

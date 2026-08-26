@@ -195,6 +195,31 @@ struct sweep_row
          .to = 1.4f,
          .swept_is_direction = true});
 
+    // The transparent base, swept by the roughness of the interface it refracts through — clear glass at one end and
+    // something closer to frosted at the other.
+    rows.push_back({.name = "glass",
+                    .shared = {binding::of("transmission_weight", 1.0f), binding::of("specular_ior", 1.5f)},
+                    .swept = "specular_roughness"});
+
+    // The same, minus the interior: a thin wall does not refract and encloses no medium, so its tint is paid at the
+    // crossing and the sphere reads as a bubble rather than as a solid ball of glass.
+    rows.push_back({.name = "thin walled",
+                    .shared = {binding::of("transmission_weight", 1.0f), binding::of("thin_walled", 1.0f),
+                               binding::of("transmission_color", tg::vec3f(0.85f, 0.62f, 0.45f))},
+                    .swept = "specular_roughness"});
+
+    // Absorption inside the solid, swept by the distance the color is reached at.
+    // The near columns absorb within a fraction of a sphere and read nearly opaque; the far ones barely tint.
+    // This is the one parameter whose effect is a property of the VOLUME rather than of the surface, so it needs the
+    // sphere's own thickness to show at all.
+    rows.push_back({.name = "absorbing",
+                    .shared = {binding::of("transmission_weight", 1.0f),
+                               binding::of("transmission_color", tg::vec3f(0.25f, 0.55f, 0.85f)),
+                               binding::of("specular_roughness", 0.06f)},
+                    .swept = "transmission_depth",
+                    .from = 0.06f,
+                    .to = 2.5f});
+
     // Coverage, which the any-hit turns into a stochastic cutout — so these resolve as the accumulation converges rather
     // than as a blend.
     rows.push_back(

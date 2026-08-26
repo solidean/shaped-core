@@ -45,10 +45,16 @@ void PathTraceRayGen()
         float3 radiance = float3(0, 0, 0);
         float prev_pdf = 0.0; // pdf of the direction the last hit sampled, for the escaped-environment MIS
 
+        // What the next segment travels through: zero until the path refracts into a transmissive solid.
+        // Tracked here rather than in the hit because absorption is a property of the DISTANCE travelled, and the distance
+        // is not known until the segment ends.
+        float3 medium = float3(0, 0, 0);
+
         for (int b = 0; b < max_bounces; ++b)
         {
             PtPayload p;
             p.rng = rng;
+            p.medium = medium;
 
             RayDesc ray;
             ray.Origin = origin;
@@ -60,6 +66,7 @@ void PathTraceRayGen()
             // Read every payload field into locals right away, so the payload-access analyzer sees them consumed,
             // then branch on the hit. The random state comes back advanced by whatever the hit drew from it.
             rng = p.rng;
+            float3 next_medium = p.medium;
             float hit_t = p.hit_t;
             float3 direct = p.direct;
             float3 emission = p.emission;
@@ -74,6 +81,12 @@ void PathTraceRayGen()
             // balance against, and weighting it here would make the light visible to the camera, which it is not.
             // The rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer
             // than the light blocks it, and nothing else can.
+            // Beer-Lambert over the segment just travelled, applied BEFORE anything this hit contributes: the next-event
+            // estimate and the emission both happen at the far end of it, so they are attenuated by the whole crossing.
+            bool const inside = any(medium > float3(0, 0, 0));
+            if (inside && hit_t > 0.0)
+                throughput *= exp(-medium * hit_t);
+
             if (b > 0)
             {
                 float t_light = 0.0;
@@ -88,6 +101,12 @@ void PathTraceRayGen()
 
             if (hit_t < 0.0)
             {
+                // A ray that escapes while still inside a solid travelled an unbounded distance through it, so nothing
+                // survives. It means the transmissive geometry is not closed, which is an authoring fact rather than a
+                // case worth estimating.
+                if (inside)
+                    break;
+
                 // Escaped to the SH environment (PtMiss wrote its radiance back in `emission`). The primary ray
                 // sees the sky directly, at full weight; a bounce ray is the BSDF strategy of the hit's own
                 // environment estimate, so weight it against that sampler's uniform-hemisphere pdf.
@@ -114,8 +133,12 @@ void PathTraceRayGen()
 
             throughput *= weight;
             prev_pdf = pdf;
-            origin = origin + dir * hit_t + N * 1e-3;
+
+            // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side, and
+            // pushing it along +N would start it back inside the surface it just crossed.
+            origin = origin + dir * hit_t + N * (dot(next_dir, N) < 0.0 ? -1e-3 : 1e-3);
             dir = next_dir;
+            medium = next_medium;
         }
 
         // One non-finite path would poison this pixel forever: the mean is blended in place, so a NaN carried into

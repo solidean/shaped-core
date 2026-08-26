@@ -40,6 +40,10 @@ struct probe_surface
     float specular_roughness_anisotropy = 0.0f;
     float specular_ior = 1.5f;
 
+    float transmission_weight = 0.0f;
+    tg::vec3f transmission_color = tg::vec3f(1, 1, 1);
+    float transmission_depth = 0.0f;
+
     float coat_weight = 0.0f;
     tg::vec3f coat_color = tg::vec3f(1, 1, 1);
     float coat_roughness = 0.0f;
@@ -58,6 +62,7 @@ struct probe_surface
     float emission_luminance = 0.0f;
     tg::vec3f emission_color = tg::vec3f(1, 1, 1);
 
+    float geometry_thin_walled = 0.0f;
     tg::vec3f geometry_normal = tg::vec3f(0, 0, 1);
     tg::vec3f geometry_coat_normal = tg::vec3f(0, 0, 1);
     float geometry_opacity = 1.0f;
@@ -66,7 +71,7 @@ struct probe_surface
     float geometry_handedness = 1.0f;
 };
 
-static_assert(sizeof(probe_surface) == 48 * 4, "probe_surface must match sv::surface in shaders/openpbr.hlsli");
+static_assert(sizeof(probe_surface) == 54 * 4, "probe_surface must match sv::surface in shaders/openpbr.hlsli");
 
 /// Which estimator a case runs — mirrors the `probe_*` constants in shaders/bsdf_probe.hlsl.
 enum class probe_mode : u32
@@ -89,14 +94,21 @@ struct probe_case
     u32 pad1 = 0;
 
     probe_surface s = {};
+
+    float pad2 = 0.0f;
+    float pad3 = 0.0f;
 };
 
-static_assert(sizeof(probe_case) == 224, "probe_case must match sv::probe_case in shaders/bsdf_probe.hlsl");
+static_assert(sizeof(probe_case) == 256, "probe_case must match sv::probe_case in shaders/bsdf_probe.hlsl");
 
 /// How many work items share one case, and how many samples each draws.
-/// The product is the sample count behind every tolerance below, so lowering either loosens all of them.
+///
+/// The product is the sample count behind every tolerance below, so lowering either loosens all of them — and the tolerances
+/// are meant to be statements about named approximations, not about how many samples were affordable.
+/// A quarter of this had the rough-glass pdf reading 2% high purely from noise, which is the same size as the bound it has to
+/// clear, so the two were no longer distinguishable.
 constexpr int blocks_per_case = 32;
-constexpr u32 samples_per_block = 512;
+constexpr u32 samples_per_block = 2048;
 
 [[nodiscard]] float abs_of(float v)
 {
@@ -243,6 +255,29 @@ cc::vector<named_surface> surfaces_under_test()
                     .coat_roughness = 0.35f,
                     .coat_roughness_anisotropy = 0.5f,
                     .geometry_coat_normal = tg::vec3f(0.7f, -0.3f, 0.648f)}});
+
+    // The transparent base: refracting glass, a tinted crossing, an absorbing interior, and a thin wall that does neither.
+    out.push_back({"glass, smooth", {.specular_roughness = 0.08f, .transmission_weight = 1.0f}});
+    out.push_back({"glass, rough", {.specular_roughness = 0.45f, .transmission_weight = 1.0f}});
+    out.push_back(
+        {"glass, tinted crossing",
+         {.specular_roughness = 0.2f, .transmission_weight = 1.0f, .transmission_color = tg::vec3f(0.4f, 0.85f, 0.6f)}});
+    out.push_back({"glass, absorbing interior",
+                   {.specular_roughness = 0.15f,
+                    .transmission_weight = 1.0f,
+                    .transmission_color = tg::vec3f(0.3f, 0.7f, 0.9f),
+                    .transmission_depth = 0.5f}});
+    out.push_back({"thin walled",
+                   {.specular_roughness = 0.3f,
+                    .transmission_weight = 1.0f,
+                    .transmission_color = tg::vec3f(0.9f, 0.75f, 0.6f),
+                    .geometry_thin_walled = 1.0f}});
+    out.push_back({"half transmissive, coated",
+                   {.base_color = tg::vec3f(0.3f, 0.4f, 0.5f),
+                    .specular_roughness = 0.25f,
+                    .transmission_weight = 0.5f,
+                    .coat_weight = 1.0f,
+                    .coat_roughness = 0.1f}});
 
     out.push_back({"anisotropic, tangent rotated",
                    {.specular_roughness = 0.4f,

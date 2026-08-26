@@ -36,6 +36,10 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.specular_roughness_anisotropy = saturate(specular_roughness_anisotropy);
     surface.specular_ior = max(1.0, specular_ior);
 
+    surface.transmission_weight = saturate(transmission_weight);
+    surface.transmission_color = saturate(transmission_color);
+    surface.transmission_depth = max(0.0, transmission_depth);
+
     surface.coat_weight = saturate(coat_weight);
     surface.coat_color = saturate(coat_color);
     surface.coat_roughness = saturate(coat_roughness);
@@ -54,6 +58,7 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.emission_luminance = max(0.0, emission_luminance);
     surface.emission_color = max(float3(0, 0, 0), emission_color);
 
+    surface.geometry_thin_walled = thin_walled;
     surface.geometry_normal = normalize(normal);
     surface.geometry_coat_normal = normalize(coat_normal);
     surface.geometry_opacity = saturate(opacity);
@@ -110,6 +115,13 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("specular_roughness_anisotropy", 0.0f));
     signature.push_back(material_signature_entry::of("specular_ior", 1.5f));
 
+    // `transmission_depth` is the distance `transmission_color` is the color AT.
+    // 0 is OpenPBR's default and means the color is a property of the crossing rather than of a volume, which is also the
+    // only form a thin wall can have.
+    signature.push_back(material_signature_entry::of("transmission_weight", 0.0f));
+    signature.push_back(material_signature_entry::of("transmission_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
+    signature.push_back(material_signature_entry::of("transmission_depth", 0.0f));
+
     signature.push_back(material_signature_entry::of("coat_weight", 0.0f));
     signature.push_back(material_signature_entry::of("coat_color", tg::vec3f(1.0f, 1.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("coat_roughness", 0.0f));
@@ -132,6 +144,9 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     // Tangent space, so the default is the shading normal rather than any particular direction in world space.
     signature.push_back(material_signature_entry::of("normal", tg::vec3f(0.0f, 0.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("opacity", 1.0f));
+
+    // Nonzero makes the surface a shell with no interior: it does not refract and encloses no medium.
+    signature.push_back(material_signature_entry::of("thin_walled", 0.0f));
 
     // The coat's own shading normal, in the same tangent space — a coat with its own bumps over a smoother base.
     // Defaulting to the base's normal is what makes an unbound one share it exactly.

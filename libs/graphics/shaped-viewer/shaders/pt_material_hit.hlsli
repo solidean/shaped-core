@@ -181,7 +181,12 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
     float3 N = normalize(mul((float3x3)ObjectToWorld3x4(), n_obj));
 
     float3 V = -normalize(WorldRayDirection());
-    if (dot(N, V) < 0.0)
+
+    // Which side the ray arrived on, read off the geometry BEFORE the normal is turned to face it.
+    // The shading frame always faces the ray, so this is the only place the distinction survives — and a refraction needs
+    // it, since the index ratio inverts between going in and coming back out.
+    bool const exiting = dot(N, V) < 0.0;
+    if (exiting)
         N = -N; // two-sided: face the incoming ray so arbitrary winding still shades
 
     payload.normal = N;
@@ -191,7 +196,7 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
     uint rng = payload.rng;
 
     sv::surface surface = sv_evaluate_material(ctx);
-    sv::bsdf bsdf = sv::bsdf_prepare(surface);
+    sv::bsdf bsdf = sv::bsdf_prepare(surface, exiting);
 
     // The shading frame, in three steps: the authored one if there is one, faced toward the ray, then the normal map on top.
     //
@@ -247,7 +252,7 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
 
     payload.emission = bsdf.emission;
 
-    // A grazing hit whose shading frame turned away has no upper hemisphere to integrate over.
+    // A grazing hit whose shading frame turned away has no hemisphere to integrate over.
     if (wo_local.z <= 0.0)
     {
         payload.direct = float3(0, 0, 0);
@@ -255,8 +260,12 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
         payload.direction = float3(0, 0, 0);
         payload.bsdf_pdf = 0.0;
         payload.rng = rng;
+        payload.medium = float3(0, 0, 0);
         return;
     }
+
+    // What the medium was on the way in, so a continuation that stays on this side keeps travelling through it.
+    float3 const medium_in = payload.medium;
 
     payload.direct = pt_estimate_area_light(bsdf, frame, wo_local, p, N, rng)
                    + pt_estimate_environment(bsdf, frame, wo_local, p, N, rng);
@@ -267,15 +276,27 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
 
     if (s.valid)
     {
-        payload.throughput = s.value * (s.direction.z / s.pdf);
+        // The cosine is the one at the SURFACE, so a refracted direction contributes its own magnitude rather than a
+        // negative weight — which direction it left on is the offset's business, not the estimator's.
+        payload.throughput = s.value * (abs(s.direction.z) / s.pdf);
         payload.direction = sv::to_world(frame, s.direction);
         payload.bsdf_pdf = s.pdf;
+
+        // A continuation that crossed the surface changes which medium it travels in: into this material's interior when
+        // it entered, and back out to whatever lay outside when it left.
+        // A thin wall encloses nothing, so crossing one changes no medium at all.
+        bool const crossed = s.direction.z < 0.0;
+        if (!crossed || surface.geometry_thin_walled != 0.0)
+            payload.medium = medium_in;
+        else
+            payload.medium = exiting ? float3(0, 0, 0) : bsdf.medium_sigma;
     }
     else
     {
         payload.throughput = float3(0, 0, 0);
         payload.direction = float3(0, 0, 0);
         payload.bsdf_pdf = 0.0;
+        payload.medium = medium_in;
     }
 
     payload.rng = rng;

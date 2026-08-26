@@ -94,6 +94,43 @@ float ggx_pdf(float3 wo, float3 wi, float2 alpha)
     return d_vis / (4.0 * max(dot(wo, h), 1e-9));
 }
 
+/// The half-vector a REFRACTION through relative index `eta` happened about, oriented into the upper hemisphere.
+///
+/// `wo` leaves the surface on the +z side and `wi` on the -z side, and `eta` is the index on `wi`'s side over the index on
+/// `wo`'s — so it inverts when the path crosses back out.
+/// Each direction is weighted by the index of the side it is ON (Walter 2007), which is what makes the microfacet normal
+/// the one Snell's law would have bent about.
+float3 refraction_half_vector(float3 wo, float3 wi, float eta)
+{
+    float3 h = -normalize(wo + eta * wi);
+    return h.z < 0.0 ? -h : h;
+}
+
+/// The Jacobian taking a half-vector density to a refracted-direction density, which is what turns the visible-normal
+/// distribution into a pdf over `wi`.
+float refraction_jacobian(float3 wo, float3 wi, float3 h, float eta)
+{
+    float dot_o = dot(wo, h);
+    float dot_i = dot(wi, h);
+    float denom = dot_o + eta * dot_i;
+    return eta * eta * abs(dot_i) / max(denom * denom, 1e-9);
+}
+
+/// The solid-angle pdf of a direction produced by refracting about a `ggx_sample_vndf` half-vector.
+float ggx_refraction_pdf(float3 wo, float3 wi, float2 alpha, float eta)
+{
+    if (wo.z <= 0.0 || wi.z >= 0.0)
+        return 0.0;
+
+    float3 h = refraction_half_vector(wo, wi, eta);
+    float dot_o = dot(wo, h);
+    if (dot_o <= 0.0)
+        return 0.0;
+
+    float d_vis = ggx_g1(wo, alpha) * ggx_d(h, alpha) * dot_o / max(wo.z, 1e-9);
+    return d_vis * refraction_jacobian(wo, wi, h, eta);
+}
+
 /// The isotropic roughness an anisotropic lobe reflects about as much as, for the fits that have no anisotropic form.
 ///
 /// The directional-albedo fit below is isotropic and there is no anisotropic version of it, so the layer coupling and the
@@ -333,6 +370,22 @@ struct bsdf
     float2 spec_alpha;
     float spec_weight;
 
+    /// The transparent base, which replaces the diffuse substrate under the same interface by `trans_weight`.
+    ///
+    /// `trans_eta` is the index on the far side of that interface over the index on this one, so it is the reciprocal on the
+    /// way out — which is why `bsdf_prepare` has to be told which side it is on.
+    /// `trans_tint` is what the crossing costs: `transmission_color` when the depth is 0 or the wall is thin, and white when
+    /// a medium is doing the absorbing instead.
+    float trans_weight;
+    float3 trans_tint;
+    float trans_eta;
+    float thin_walled;
+
+    /// The interior's absorption coefficient, which the INTEGRATOR applies over the distance travelled.
+    /// Zero unless `transmission_depth` is positive, because that is the only case where the color is a property of a volume
+    /// rather than of the crossing.
+    float3 medium_sigma;
+
     float coat_f0;
     float2 coat_alpha;
 
@@ -361,7 +414,7 @@ struct bsdf
 };
 
 /// How likely each lobe is to be picked for one outgoing direction, in the order the evaluator sums them.
-/// The five always add to 1: `bsdf_lobe_probs` normalizes, and falls back to the diffuse lobe when every weight is zero.
+/// The six always add to 1: `bsdf_lobe_probs` normalizes, and falls back to the diffuse lobe when every weight is zero.
 struct lobe_probs
 {
     float fuzz;
@@ -369,16 +422,17 @@ struct lobe_probs
     float metal;
     float spec;
     float diffuse;
+    float transmission;
 };
 
 /// What one sampled direction carries back: the direction itself, the BSDF value there, and the pdf that produced it.
 /// `pdf` is the FULL closure pdf rather than the chosen lobe's, so a caller can weight it against a light sampler directly.
 struct bsdf_sample
 {
-    float3 direction;
-    float3 value; ///< the BSDF at (wo, direction), cosine NOT folded in
+    float3 direction; ///< may point BELOW the surface, which is a refraction rather than a failure
+    float3 value;     ///< the BSDF at (wo, direction), cosine NOT folded in
     float pdf;
-    bool valid; ///< false when the sample left the upper hemisphere or the pdf collapsed
+    bool valid; ///< false when the direction grazed the surface, total internal reflection ended it, or the pdf collapsed
 };
 
 /// The perceptual-to-microfacet roughness mapping OpenPBR specifies, floored so no lobe becomes a delta.
@@ -431,6 +485,11 @@ struct surface
     float specular_roughness_anisotropy;
     float specular_ior;
 
+    // transmission
+    float transmission_weight;
+    float3 transmission_color;
+    float transmission_depth; ///< the distance `transmission_color` is the color AT; 0 tints the interface instead
+
     // coat
     float coat_weight;
     float3 coat_color;
@@ -454,6 +513,13 @@ struct surface
     float3 emission_color;
 
     // geometry
+    /// whether the surface is a shell with no interior — a leaf, a bubble, a pane
+    ///
+    /// A thin wall does not refract and encloses no medium, so light passes straight through and `transmission_color` tints
+    /// it at the crossing whatever `transmission_depth` says.
+    /// Nonzero is thin-walled; the parameter is a float because the generated parameter block carries no bools.
+    float geometry_thin_walled;
+
     float3 geometry_normal;
 
     /// the coat's own shading normal, expressed in the frame the closure works in
@@ -505,6 +571,10 @@ surface default_surface()
     s.specular_roughness_anisotropy = 0.0;
     s.specular_ior = 1.5;
 
+    s.transmission_weight = 0.0;
+    s.transmission_color = float3(1, 1, 1);
+    s.transmission_depth = 0.0;
+
     s.coat_weight = 0.0;
     s.coat_color = float3(1, 1, 1);
     s.coat_roughness = 0.0;
@@ -523,6 +593,7 @@ surface default_surface()
     s.emission_luminance = 0.0;
     s.emission_color = float3(1, 1, 1);
 
+    s.geometry_thin_walled = 0.0;
     s.geometry_normal = float3(0, 0, 1);
     s.geometry_coat_normal = float3(0, 0, 1);
     s.geometry_opacity = 1.0;
@@ -534,7 +605,12 @@ surface default_surface()
 }
 
 /// The lobes `s` describes, with every quantity that does not depend on the incoming direction folded in.
-bsdf bsdf_prepare(surface s)
+///
+/// `exiting` is whether the path is LEAVING the surface's interior rather than entering it.
+/// The shading frame is always turned to face the incoming ray, so the closure cannot read that off the geometry — and it
+/// changes the direction of every refraction, which is why it is a parameter rather than something inferred.
+/// It means nothing for a surface that does not transmit.
+bsdf bsdf_prepare(surface s, bool exiting)
 {
     bsdf b;
 
@@ -568,6 +644,26 @@ bsdf bsdf_prepare(surface s)
         float len = length(t);
         b.coat_t = len > 1e-6 ? t / len : float3(0, 1, 0);
         b.coat_b = cross(b.coat_n, b.coat_t);
+    }
+
+    // The transparent base, under the same dielectric interface the diffuse substrate sits under.
+    b.trans_weight = saturate(s.transmission_weight);
+    b.thin_walled = s.geometry_thin_walled != 0.0 ? 1.0 : 0.0;
+
+    {
+        float interface_ior = max(1.0 + 1e-3, s.specular_ior);
+        b.trans_eta = exiting ? 1.0 / interface_ior : interface_ior;
+
+        // A positive depth makes the color a property of the VOLUME, so the crossing costs nothing and the integrator
+        // attenuates over the distance instead.
+        // A thin wall encloses no volume at all, so it always pays at the crossing however the depth is authored.
+        bool volumetric = s.transmission_depth > 0.0 && b.thin_walled == 0.0;
+
+        b.trans_tint = volumetric ? float3(1, 1, 1) : saturate(s.transmission_color);
+
+        // Beer-Lambert, solved so that `transmission_color` is what survives exactly `transmission_depth` of travel.
+        float3 c = clamp(saturate(s.transmission_color), 1e-4, 1.0);
+        b.medium_sigma = volumetric ? -log(c) / max(s.transmission_depth, 1e-6) : float3(0, 0, 0);
     }
 
     float cior = max(1.0 + 1e-3, s.coat_ior);
@@ -655,11 +751,92 @@ float3 coat_darkening_factor(bsdf b)
     return lerp(float3(1, 1, 1), saturate(escaped), b.coat_darkening * b.coat_weight);
 }
 
+/// What two crossings of the coat cost, for a pair that may straddle the surface.
+///
+/// A transmitted direction leaves on the far side, where the coat is not — so only the entry crossing is charged, and the
+/// exit is charged at the mirrored cosine as the closest thing to it this model has.
+float coat_crossing(bsdf b, float3 wo, float3 wi)
+{
+    float3 wo_c = to_coat(b, wo);
+    float mu_o = wo_c.z > 0.0 ? wo_c.z : 0.0;
+    float mu_i = abs(to_coat(b, wi).z);
+
+    if (mu_o <= 0.0)
+        return 1.0;
+
+    return coat_transmission(b, mu_o) * coat_transmission(b, mu_i);
+}
+
+/// The rough-refraction BTDF through the dielectric interface (Walter 2007), Fresnel included.
+///
+/// The radiance-compression factor is deliberately ABSENT.
+///
+/// A beam entering a denser medium is squeezed into a narrower cone, so the radiance along it rises by the square of the
+/// index ratio — and a path traced from the LIGHT would have to carry that.
+/// This one is traced from the camera, which transports importance rather than radiance, and the two conventions differ by
+/// exactly that factor.
+/// Including it here would have a lossless interface return 2.25 times the light it received, which is what the probe's
+/// energy bound caught.
+///
+/// A BTDF is not reciprocal either way: `f(wo, wi)` and `f(wi, wo)` differ by that same ratio, which is a property of
+/// radiance rather than an error — so the probe compares only directions on one side.
+float3 transmission_eval(bsdf b, float3 wo, float3 wi)
+{
+    // A thin wall has no interior to refract into: light goes straight on through, spread by the interface's roughness.
+    // So the lobe is the reflection lobe mirrored about the surface, which is what `-wi` recovers.
+    if (b.thin_walled != 0.0)
+    {
+        float3 wi_mirror = float3(wi.x, wi.y, -wi.z);
+        float3 h = normalize(wo + wi_mirror);
+        float mu_h = max(dot(wo, h), 1e-6);
+        float d = ggx_d(h, b.spec_alpha);
+        float g = ggx_g2(wo, wi_mirror, b.spec_alpha);
+        float3 f = float3(1, 1, 1) - b.spec_weight * fresnel_schlick(mu_h, b.spec_f0);
+
+        return b.trans_tint * f * (d * g / (4.0 * wo.z * max(wi_mirror.z, 1e-6)));
+    }
+
+    float eta = b.trans_eta;
+    float3 h = refraction_half_vector(wo, wi, eta);
+
+    float dot_o = dot(wo, h);
+    float dot_i = dot(wi, h);
+    if (dot_o <= 0.0 || dot_i >= 0.0)
+        return float3(0, 0, 0); // the pair does not correspond to a refraction about any microfacet
+
+    float f_r = fresnel_dielectric(dot_o, eta);
+    float d = ggx_d(h, b.spec_alpha);
+    float g = ggx_g2(wo, float3(wi.x, wi.y, -wi.z), b.spec_alpha);
+
+    float denom = dot_o + eta * dot_i;
+    float scale = abs(dot_o) * abs(dot_i) / max(wo.z * abs(wi.z) * denom * denom, 1e-9);
+
+    return b.trans_tint * (1.0 - f_r) * d * g * scale;
+}
+
 /// The full BSDF at (`wo`, `wi`), with the cosine NOT folded in.
 /// Both directions must be unit and in the local frame; a direction below the surface evaluates to zero.
 float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
 {
-    if (wo.z <= 0.0 || wi.z <= 0.0)
+    if (wo.z <= 0.0)
+        return float3(0, 0, 0);
+
+    // A direction on the far side is a TRANSMISSION, and only the transparent base produces one.
+    // Everything layered above it — the coat, the fuzz — reflects, so what reaches here has already crossed both and pays
+    // for both again on the way out.
+    if (wi.z < 0.0)
+    {
+        if (b.trans_weight <= 0.0)
+            return float3(0, 0, 0);
+
+        float3 f_trans = transmission_eval(b, wo, wi);
+        float t_coat_x = coat_crossing(b, wo, wi);
+        float t_fuzz_x = fuzz_transmission(b, wo.z) * fuzz_transmission(b, abs(wi.z));
+
+        return f_trans * t_coat_x * t_fuzz_x * (1.0 - b.metalness) * b.trans_weight;
+    }
+
+    if (wi.z <= 0.0)
         return float3(0, 0, 0);
 
     float mu_o = wo.z;
@@ -698,7 +875,8 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
 
     // The diffuse substrate takes what the specular layer let through, both on the way in and on the way out.
     float3 t_spec = spec_transmission(b, mu_o) * spec_transmission(b, mu_i);
-    float3 f_diffuse = b.diffuse_albedo * (oren_nayar(wo, wi, b.diffuse_roughness) / pi) * t_spec;
+    float3 f_diffuse
+        = (1.0 - b.trans_weight) * b.diffuse_albedo * (oren_nayar(wo, wi, b.diffuse_roughness) / pi) * t_spec;
 
     float3 f_base = lerp(f_spec + f_diffuse, f_metal, b.metalness);
 
@@ -756,9 +934,15 @@ lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
     float below = t_fuzz * (mu_coat > 0.0 ? coat_transmission(b, mu_coat) : 1.0);
     p.metal = below * b.metalness * luminance(ggx_albedo(mu, b.metal_alpha, b.metal_f0));
     p.spec = below * (1.0 - b.metalness) * b.spec_weight * luminance(ggx_albedo(mu, b.spec_alpha, b.spec_f0));
-    p.diffuse = below * (1.0 - b.metalness) * luminance(b.diffuse_albedo * spec_transmission(b, mu));
 
-    float sum = p.fuzz + p.coat + p.metal + p.spec + p.diffuse;
+    float3 t_spec = spec_transmission(b, mu);
+    p.diffuse = below * (1.0 - b.metalness) * (1.0 - b.trans_weight) * luminance(b.diffuse_albedo * t_spec);
+
+    // The transparent base is ranked by what the interface lets THROUGH, which is what the diffuse substrate would
+    // otherwise have received — the two split exactly the same budget.
+    p.transmission = below * (1.0 - b.metalness) * b.trans_weight * luminance(t_spec * b.trans_tint);
+
+    float sum = p.fuzz + p.coat + p.metal + p.spec + p.diffuse + p.transmission;
     if (sum <= 1e-6)
     {
         // Nothing reflects anything worth sampling; the diffuse lobe keeps the pdf well-defined rather than zero.
@@ -767,6 +951,7 @@ lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
         p.metal = 0.0;
         p.spec = 0.0;
         p.diffuse = 1.0;
+        p.transmission = 0.0;
         return p;
     }
 
@@ -776,6 +961,7 @@ lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
     p.metal *= inv;
     p.spec *= inv;
     p.diffuse *= inv;
+    p.transmission *= inv;
     return p;
 }
 
@@ -783,10 +969,26 @@ lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
 /// sampler needs.
 float bsdf_pdf(bsdf b, float3 wo, float3 wi)
 {
-    if (wo.z <= 0.0 || wi.z <= 0.0)
+    if (wo.z <= 0.0)
         return 0.0;
 
     lobe_probs p = bsdf_lobe_probs(b, wo);
+
+    // Only the transparent base reaches the far side, so a transmitted direction is that lobe's density alone.
+    if (wi.z < 0.0)
+    {
+        if (p.transmission <= 0.0)
+            return 0.0;
+
+        if (b.thin_walled != 0.0)
+            return p.transmission * ggx_pdf(wo, float3(wi.x, wi.y, -wi.z), b.spec_alpha);
+
+        return p.transmission * ggx_refraction_pdf(wo, wi, b.spec_alpha, b.trans_eta);
+    }
+
+    if (wi.z <= 0.0)
+        return 0.0;
+
     float cosine = wi.z / pi;
 
     return p.fuzz * cosine                                //
@@ -799,8 +1001,11 @@ float bsdf_pdf(bsdf b, float3 wo, float3 wi)
 /// One direction drawn from the closure, with the BSDF and the full pdf there.
 ///
 /// `u` is three uniforms in [0, 1): the first picks the lobe and the other two the direction within it.
-/// The lobe choice is a one-sample estimator over the five, so the returned pdf is the mixture's rather than the picked
+/// The lobe choice is a one-sample estimator over the six, so the returned pdf is the mixture's rather than the picked
 /// lobe's — which is what keeps a lobe that another lobe could also have produced from being counted twice.
+///
+/// The direction may leave the UPPER hemisphere: a transparent base refracts, and the caller has to follow it through the
+/// surface rather than treating the sample as invalid.
 bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
 {
     bsdf_sample r;
@@ -843,12 +1048,35 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
         float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
         wi = reflect(-wo, h);
     }
-    else
+    else if (pick < p.fuzz + p.coat + p.metal + p.spec + p.diffuse)
     {
         wi = sample_cosine_local(u.yz);
     }
+    else
+    {
+        // The transparent base. Refracted about a visible microfacet, or straight through when the wall is thin.
+        float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
+        if (b.thin_walled != 0.0)
+        {
+            float3 wi_mirror = reflect(-wo, h);
+            if (wi_mirror.z <= 1e-6)
+                return r;
+            wi = float3(wi_mirror.x, wi_mirror.y, -wi_mirror.z);
+        }
+        else
+        {
+            wi = refract(-wo, h, 1.0 / b.trans_eta);
 
-    if (wi.z <= 1e-6)
+            // Total internal reflection: `refract` returns zero, and there is no transmitted direction to hand back.
+            // The reflected lobe already carries that energy through its own Fresnel, so this ends the sample rather
+            // than turning it into a reflection the pdf does not describe.
+            if (dot(wi, wi) < 1e-6 || wi.z >= -1e-6)
+                return r;
+            wi = normalize(wi);
+        }
+    }
+
+    if (wi.z > -1e-6 && wi.z <= 1e-6)
         return r;
 
     r.direction = wi;

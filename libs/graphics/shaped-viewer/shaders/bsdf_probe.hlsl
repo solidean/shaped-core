@@ -44,6 +44,9 @@ struct probe_case
     uint pad1;
 
     surface s;
+
+    float pad2;
+    float pad3;
 };
 
 StructuredBuffer<probe_case> Cases : register(t0);
@@ -73,6 +76,14 @@ float3 probe_uniform_hemisphere(float2 u)
     return float3(r * cos(phi), r * sin(phi), z);
 }
 
+/// A cosine-weighted direction on EITHER side of the surface, whose density is `0.5 * |wi.z| / pi` over the whole sphere.
+/// The closure transmits, so a proposal covering only the upper hemisphere would leave the refracted lobe unmeasured.
+float3 probe_sample_two_sided_cosine(float3 u)
+{
+    float3 wi = sample_cosine_local(u.yz);
+    return u.x < 0.5 ? wi : float3(wi.x, wi.y, -wi.z);
+}
+
 /// The estimator `probe_pdf_norm` runs: is `bsdf_pdf` the density that `bsdf_sample_direction` actually draws from?
 ///
 /// That is the property multiple importance sampling depends on, and it is strictly stronger than "the pdf integrates to 1" —
@@ -87,14 +98,14 @@ float3 probe_uniform_hemisphere(float2 u)
 /// either way — which is what keeps a smooth lobe measurable at all.
 float probe_consistency_weight(float3 wi, float claimed_pdf)
 {
-    float cosine = wi.z / pi;
+    float cosine = 0.5 * abs(wi.z) / pi;
     return claimed_pdf / max(0.5 * cosine + 0.5 * claimed_pdf, 1e-9);
 }
 
 /// The estimate one work item contributes, which the CPU sums with its siblings.
 float4 probe_run(probe_case c, uint item)
 {
-    bsdf b = bsdf_prepare(c.s);
+    bsdf b = bsdf_prepare(c.s, false); // measured from outside, which is the side every case here describes
     uint rng = item * 9781u + c.seed * 26699u + 1u;
 
     if (c.mode == probe_echo)
@@ -113,7 +124,7 @@ float4 probe_run(probe_case c, uint item)
             float3 u = float3(probe_rand(rng), probe_rand(rng), probe_rand(rng));
             bsdf_sample s = bsdf_sample_direction(b, wo, u);
             if (s.valid)
-                sum += s.value * s.direction.z / s.pdf;
+                sum += s.value * abs(s.direction.z) / s.pdf; // `abs`: a refracted direction leaves on the far side
         }
         else if (c.mode == probe_pdf_norm)
         {
@@ -124,8 +135,8 @@ float4 probe_run(probe_case c, uint item)
 
             if (pick < 0.5)
             {
-                float3 wi = sample_cosine_local(u);
-                if (wi.z > 1e-6)
+                float3 wi = probe_sample_two_sided_cosine(float3(probe_rand(rng), u));
+                if (abs(wi.z) > 1e-6)
                     sum.x += probe_consistency_weight(wi, bsdf_pdf(b, wo, wi));
             }
             else
@@ -139,6 +150,9 @@ float4 probe_run(probe_case c, uint item)
         {
             // Both directions drawn rather than one held fixed: a reciprocity break that only shows at grazing incidence
             // would hide behind a `wo` the case pinned.
+            // Both directions stay in the UPPER hemisphere, so only the reflective lobes are compared.
+            // A BTDF is deliberately not reciprocal — it carries the ratio of the two indices squared, which is a property
+            // of radiance rather than an error — so a transmitted pair has nothing to assert here.
             float3 wa = probe_uniform_hemisphere(float2(probe_rand(rng), probe_rand(rng)));
             float3 wb = probe_uniform_hemisphere(float2(probe_rand(rng), probe_rand(rng)));
 

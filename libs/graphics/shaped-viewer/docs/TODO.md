@@ -167,10 +167,31 @@ importance-samples the continuation — so what is left is coverage of the model
 - **A normal map is still untested.** `geometry_normal` is applied through `sv::perturb_frame` now, so it has somewhere to land,
   but no material in the tree binds it to a texture.
   The same is true of `geometry_coat_normal`, which lands through the authored frame beside it.
-- **Transmission, subsurface and dispersion are absent**, not defaulted — `sv::surface` does not carry them, so a
-  material cannot ask for one and silently get something else.
-  Transmission is the one that changes the integrator rather than only the closure: it needs a refracted continuation and
-  therefore a path that leaves the upper hemisphere.
+- **Subsurface and dispersion are absent**, not defaulted — `sv::surface` does not carry them, so a material cannot ask for
+  one and silently get something else.
+  Dispersion is the near one: it needs hero-wavelength sampling in the raygen, which is also what the thin film wants to stop
+  aliasing its higher orders.
+  Subsurface is a random walk in a dense medium, so it wants `transmission_scatter` first.
+- **`transmission_scatter` and `transmission_scatter_anisotropy` are absent.**
+  The interior absorbs but does not scatter, so it is clear glass with a color rather than something milky.
+  Adding them means a random walk with a phase function inside the medium the integrator already tracks, which is most of
+  what subsurface needs too.
+- **Next-event estimation does not pass through glass.**
+  A shadow ray is a visibility test with no closure on it, so a point inside a transmissive solid — or behind one — is lit
+  by BSDF sampling alone.
+  That is what makes a caustic converge slowly and a glass interior noisy.
+  The fix is a shadow ray that accumulates transmittance instead of stopping at the first hit, which needs the any-hit to
+  serve two purposes or a second traversal.
+- **The transmitted lobe drops the radiance-compression factor**, deliberately: this tracer transports importance from the
+  camera rather than radiance from the light, and the two conventions differ by exactly the square of the index ratio.
+  A renderer that ever grows a light-side path — bidirectional, photon mapping — has to put it back on that side.
+- **A ray escaping while still inside a solid is dropped.**
+  It travelled an unbounded distance through an absorbing medium, so nothing survives — but that is only true for CLOSED
+  geometry, and an open shell authored as solid loses paths rather than being told it is wrong.
+- **Total internal reflection ends the sample rather than reflecting.**
+  `bsdf_sample_direction` returns invalid, and the reflected lobe carries that energy through its own Fresnel — so the
+  energy is accounted for but a path that should have bounced inside the solid terminates instead.
+  It is what makes a thick glass corner darker than it should be.
 - **The thin film is sampled at three wavelengths**, one per output channel, rather than integrated over the spectrum.
   Its first interference order is faithful and its higher orders alias into colors the spectrum would have averaged away, so
   a film past roughly a micron drifts.
