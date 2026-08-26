@@ -131,6 +131,7 @@ This is the part the tool cannot do for you, and the part the previous chat work
 **Every entry stands alone.**
 The maintainer does not carry the changeset in their head, and assuming they do defeats the point of asking.
 **Every entry outside `meta`, `finalize` and `framing` carries all three context tiers, and `validate` fails without them.**
+The obligation lasts while an ask is still waiting: an entry answered in an earlier round is left alone rather than retrofitted.
 `context/cold` is for a reader new to both the change and the codebase, `context/repo` for one who knows the codebase, `context/delta` for one who has read the entries above.
 The first two collapse by default and have word budgets — 150 and 120 — so they cost a reader nothing until they are wanted.
 

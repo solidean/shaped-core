@@ -37,12 +37,16 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for entry in entries:
         warnings.extend(review.word_warnings(entry))
-        if review.requires_context(entry.group):
+        answers = ctx.answers(paths, entry)
+        # The tiers exist so an entry can be answered on its own, so they are owed while it is still waiting for an answer.
+        # An entry whose asks are all finalized will not be answered again, and adding tiers to it would edit a question
+        # the maintainer has already read — which is the thing the immutability check exists to prevent.
+        awaiting = any(a is None or a.tentative for a in (answers.get(b.name) for b in entry.asks))
+        if awaiting and review.requires_context(entry.group):
             absent = review.missing_context_tiers(entry)
             if absent:
                 thin = True
                 problems.append(f"{entry.slug}: no {', '.join(absent)}")
-        answers = ctx.answers(paths, entry)
         for name in sorted(answers.answers):
             if entry.ask(name) is None:
                 warnings.append(f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it")
@@ -63,8 +67,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if thin:
         # Said once rather than per entry: a rule repeated twelve times reads as twelve rules.
         print(review.console.dim(
-            f"\nEvery entry outside {', '.join(sorted(review.CONTEXT_EXEMPT_GROUPS))} carries all three context tiers,"
-            f" so it can be answered on its own, out of order."
+            f"\nEvery entry outside {', '.join(sorted(review.CONTEXT_EXEMPT_GROUPS))} carries all three context tiers"
+            f" while it is still waiting for an answer, so it can be answered on its own, out of order."
         ))
         print(review.console.dim(
             "Scope each tier to that entry's own subject rather than to the change as a whole,"

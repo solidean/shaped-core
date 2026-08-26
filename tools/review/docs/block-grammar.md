@@ -57,7 +57,8 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | `context/delta` | — | what this entry adds over the previous ones; always shown |
 | `auto-acknowledge` | — | this entry is reference material, so reading it is not something to record |
 
-All three are required on every entry whose group is not `meta`, `finalize` or `framing`, and `validate` reports a missing one as an error.
+All three are required on every entry whose group is not `meta`, `finalize` or `framing`, for as long as it still has an ask waiting for an answer, and `validate` reports a missing one as an error.
+An entry whose asks are all finalized is past the point of needing them, and adding tiers there would edit a question the maintainer has already read.
 An entry is answered on its own, out of order, by someone not carrying the changeset in their head, and the tiers are what make that possible.
 Each is scoped to that entry's subject rather than to the change as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
 
