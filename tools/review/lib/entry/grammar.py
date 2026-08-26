@@ -18,18 +18,43 @@ from dataclasses import dataclass
 # Every block type, mapped to the attributes it accepts.
 # A key that looks like an attribute but is not on its type's list is an error, never silently prose:
 # a typo'd `discharge:` degrading into a sentence is exactly the failure this grammar exists to prevent.
+#
+# `name` is optional on every type but `ask`: a block already has a derived identity, and this is for one the agent
+# expects to point at later.
+# An ask is the exception because its heading already names it, and a second spelling of the same thing is one to get wrong.
+_ANY = frozenset({"round", "name"})
+
 BLOCK_TYPES: dict[str, set[str]] = {
-    "context/cold": {"round"},
-    "context/repo": {"round"},
-    "context/delta": {"round"},
-    "prose": {"round", "generated"},
-    "code": {"round", "lang", "file"},
-    "changes": {"round", "generated", "show"},
-    "recommendation": {"round"},
+    "context/cold": set(_ANY),
+    "context/repo": set(_ANY),
+    "context/delta": set(_ANY),
+    "prose": _ANY | {"generated"},
+    "code": _ANY | {"lang", "file"},
+    "changes": _ANY | {"generated", "show"},
+    "recommendation": set(_ANY),
     "ask": {"round", "discharges", "follows"},
-    "auto-acknowledge": {"round"},
-    "artifact": {"round"},
+    "auto-acknowledge": set(_ANY),
+    "artifact": set(_ANY),
 }
+
+# A block's identity is `<entry>/r<round>/<name>`, derived so that no entry ever has to be retrofitted with one.
+# The name is the block's type, indexed only when that type repeats within the same entry and round — and then all of
+# them are indexed, never a bare `prose` beside a `prose#2`.
+#
+# `prose` and `prose#1` resolve to the same block.
+# That alias is what keeps an anchor taken mid-round valid after a later append turns the round's only prose block
+# into the first of two.
+
+
+def derived_name(block_type: str, ordinal: int, *, indexed: bool) -> str:
+    """The name a block carries when it declares none."""
+    base = block_type.replace("/", "-")
+    return f"{base}#{ordinal}" if indexed else base
+
+
+def canonical_block_name(name: str) -> str:
+    """A block name with a `#1` folded away, since the unindexed spelling means the same block."""
+    return name[:-2] if name.endswith("#1") else name
 
 # The context tiers, in the order a reader meets them, with the word budget each is only useful under.
 CONTEXT_TIERS = ("context/cold", "context/repo", "context/delta")
@@ -75,6 +100,10 @@ FRONT_REQUIRED = ("id", "title")
 FRONT_KNOWN = {"id", "title", "group", "state", "severity", "round", "resolved-by"}
 
 HEADING_RE = re.compile(r"^##[ \t]+(\S+)(?:[ \t]+(.*?))?[ \t]*$")
+# A fenced code block, opened by three or more backticks or tildes and closed by at least as many of the same character.
+# `## ` starts a block wherever it lands, so without this an entry cannot quote the block grammar it is written about —
+# which is what every entry in a review of this tool wants to do.
+FENCE_RE = re.compile(r"^(`{3,}|~{3,})")
 ATTR_RE = re.compile(r"^([a-z][a-z0-9-]*):[ \t](.*)$")
 OPTION_RE = re.compile(r"^-[ \t]+(" + "|".join(OPTION_KINDS) + r"):[ \t]*(.+?)[ \t]*$")
 ASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")

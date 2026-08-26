@@ -90,4 +90,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(review.console.red(f"\n{len(problems)} problem(s) across {len(entries)} entries"))
         raise SystemExit(1)
     if not args.quiet:
-        print(review.console.green(f"{len(entries)} entries parse, every reference resolves"))
+        # A design review has no ledger, so `check_references` never ran — claiming references resolve would be
+        # reporting a check that did not happen.
+        checked = ", every reference resolves" if cfg.has_changeset else ""
+        print(review.console.green(f"{len(entries)} entries parse{checked}"))

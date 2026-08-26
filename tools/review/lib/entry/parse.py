@@ -18,6 +18,7 @@ from .grammar import (
     ack_name,
     ATTR_RE,
     BLOCK_TYPES,
+    FENCE_RE,
     FRONT_KNOWN,
     FRONT_REQUIRED,
     HEADING_RE,
@@ -26,6 +27,8 @@ from .grammar import (
     STATES,
     Option,
     ReviewParseError,
+    canonical_block_name,
+    derived_name,
     did_you_mean,
     parse_option,
 )
@@ -45,11 +48,21 @@ class Block:
     heading_end: int = 0
     end: int = 0
     raw: str = ""
+    block_name: str = ""
+    effective_round: int = 0
 
     @property
     def name(self) -> str:
         """An ask's answer key."""
         return self.head.strip()
+
+    @property
+    def anchor(self) -> str:
+        """This block's identity within its entry: the round it was written in, and its name.
+
+        Stable because rounds freeze and blocks are only ever appended, so a later block never renumbers an earlier one.
+        """
+        return f"r{self.effective_round}/{self.block_name}"
 
     @property
     def change_ids(self) -> list[str]:
@@ -155,6 +168,20 @@ class Entry:
 
     def ask(self, name: str) -> Block | None:
         return next((b for b in self.asks if b.name == name), None)
+
+    def block(self, ref: str) -> Block | None:
+        """A block by its identity, as `r2/prose#1` or as a bare `prose#1`.
+
+        A bare name is resolved against every round, newest first, since it can only be ambiguous across rounds —
+        within one, names are unique.
+        """
+        round_part, _, name = ref.rpartition("/")
+        wanted = canonical_block_name(name)
+        want_round = int(round_part[1:]) if round_part[1:].isdigit() and round_part.startswith("r") else 0
+        matches = [b for b in self.blocks if canonical_block_name(b.block_name) == wanted]
+        if want_round:
+            matches = [b for b in matches if b.effective_round == want_round]
+        return max(matches, key=lambda b: b.effective_round, default=None)
 
     def referenced_changes(self) -> list[str]:
         """Every change id this entry names, from `changes` heads and `discharges` attributes alike."""
@@ -276,6 +303,70 @@ def _validate_block(block: Block, path: Path, seen_asks: set[str]) -> None:
                                "only `changes` and `ask` take one")
 
 
+def _fenced_lines(lines: list[str], first_line: int, path: Path) -> set[int]:
+    """The line numbers sitting inside a fenced code block, where a `## ` is prose rather than a block start."""
+    inside: set[int] = set()
+    fence = ""
+    opened_at = 0
+    for number, raw in enumerate(lines, start=first_line):
+        stripped = raw.lstrip(" ")
+        indented = len(raw) - len(stripped)
+        m = FENCE_RE.match(stripped) if indented <= 3 else None
+        if not fence:
+            if m:
+                fence, opened_at = m.group(1), number
+                inside.add(number)
+            continue
+        inside.add(number)
+        # A closing fence is at least as long as its opener, of the same character, and carries nothing else.
+        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not stripped[len(m.group(1)):].strip():
+            fence = ""
+    if fence:
+        raise ReviewParseError(path, opened_at, "a fenced code block is never closed",
+                               f"add a closing `{fence}` line, or the rest of the entry is read as code")
+    return inside
+
+
+def _assign_block_names(entry: Entry, path: Path) -> None:
+    """Give every block its derived name, and refuse two blocks of one round that answer to the same one.
+
+    A block that carries `name:` keeps it; an ask is named by its heading, which the grammar already keeps unique.
+    Everything else is named after its type, indexed only where that type repeats within the round.
+    """
+    latest = entry.newest_round
+    groups: dict[tuple[int, str], list[Block]] = {}
+    for block in entry.blocks:
+        # An unstamped block belongs to the round about to stamp it, which is the same rule `acknowledgement` uses.
+        block.effective_round = block.round or latest
+        groups.setdefault((block.effective_round, block.type), []).append(block)
+
+    for (_, block_type), blocks in groups.items():
+        indexed = len(blocks) > 1
+        for ordinal, block in enumerate(blocks, start=1):
+            explicit = block.attrs.get("name", "")
+            if explicit and not ASK_NAME_RE.match(canonical_block_name(explicit)):
+                raise ReviewParseError(path, block.line, f"{explicit!r} is not a usable block name",
+                                       "lowercase letters, digits and dashes")
+            if explicit:
+                block.block_name = explicit
+            elif block.is_ask:
+                block.block_name = block.name
+            else:
+                block.block_name = derived_name(block_type, ordinal, indexed=indexed)
+
+    seen: dict[tuple[int, str], Block] = {}
+    for block in entry.blocks:
+        key = (block.effective_round, canonical_block_name(block.block_name))
+        clash = seen.get(key)
+        if clash is not None:
+            raise ReviewParseError(
+                path, block.line, f"two blocks of round {block.effective_round} are both named {key[1]!r}",
+                f"the other is on line {clash.line}; a block name is the anchor a comment or a `supersedes:` uses, "
+                f"so it must be unique within a round",
+            )
+        seen[key] = block
+
+
 def parse_text(text: str, path: Path, slug: str = "") -> Entry:
     """Parse entry text, raising ReviewParseError with a line number on anything malformed.
 
@@ -291,10 +382,11 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
                   body_start=body_offset, newline=newline)
 
     lines = text[body_offset:].splitlines(keepends=True)
+    fenced = _fenced_lines(lines, body_line, path)
     starts: list[tuple[int, int, str]] = []
     offset = body_offset
     for number, raw in enumerate(lines, start=body_line):
-        if raw.startswith("## "):
+        if raw.startswith("## ") and number not in fenced:
             starts.append((offset, number, raw))
         offset += len(raw)
 
@@ -312,8 +404,13 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
             # `## ` opens a block wherever it lands.
             prose_heading = block_type[:1].isupper() or "_" in block_type
             hint = ("known types: " + ", ".join(sorted(BLOCK_TYPES)))
+            remedy = (f"if that is a heading inside a block's body, write it as `### {block_type}`; "
+                      "if it is a sample of the block grammar, indent it four spaces. "
+                      "`## ` starts a block outside a fenced block, whatever it lands in. ")
             if prose_heading:
-                hint = f"if that is a heading inside a block's body, write it as `### {block_type}` — `## ` always starts a block. " + hint
+                hint = remedy + hint
+            else:
+                hint = "if this is not meant as a block, " + remedy + hint
             raise ReviewParseError(path, number, f"unknown block type {block_type!r}", hint)
 
         heading_end = start + len(heading)
@@ -325,6 +422,7 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
         _validate_block(block, path, seen_asks)
         entry.blocks.append(block)
 
+    _assign_block_names(entry, path)
     return entry
 
 

@@ -565,6 +565,83 @@ def test_duplicate_ask_names_are_rejected(root: Path) -> None:
     raise AssertionError("ask names are the answer key, so duplicates must be rejected")
 
 
+FENCED_SAMPLE = """
+## prose
+
+The shape:
+
+```
+## example  clean-core/vector
+run: uv run dev.py example clean-core/vector
+```
+"""
+
+TWO_PROSE = """
+## prose
+
+One.
+
+## prose
+
+Two.
+"""
+
+
+def test_a_fenced_block_can_hold_a_block_heading(root: Path) -> None:
+    """An entry about the block grammar wants to quote it, and `## ` starts a block wherever it lands.
+
+    Written after an append was refused for a fenced `## example` sample that parsed as a real block.
+    """
+    entry = parse_text(ENTRY + FENCED_SAMPLE, Path("entry.md"))
+    assert [b.type for b in entry.blocks].count("prose") == 1, "the fenced sample must not become a block"
+    assert "## example" in entry.blocks[-1].prose
+
+
+def test_an_unterminated_fence_is_an_error(root: Path) -> None:
+    """Reading the rest of the entry as code is the failure the fence rule would otherwise introduce."""
+    try:
+        parse_text(ENTRY + "\n## prose\n\n```\nnever closed\n", Path("entry.md"))
+    except ReviewParseError as e:
+        assert "never closed" in str(e)
+        return
+    raise AssertionError("an unterminated fence must be an error rather than swallowing the entry")
+
+
+def test_block_names_are_derived_and_only_indexed_when_they_repeat(root: Path) -> None:
+    """A lone block of its type keeps the bare name; a second one indexes both, never only one of the two."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    assert entry.block("context-delta") is not None
+    assert entry.block("changes") is not None
+
+    two = parse_text(ENTRY + TWO_PROSE, Path("entry.md"))
+    names = [b.block_name for b in two.blocks if b.type == "prose"]
+    assert names == ["prose#1", "prose#2"], names
+    assert two.block("prose#1") is two.block("prose"), "the unindexed spelling must alias to #1"
+
+
+def test_an_ask_is_named_by_its_heading(root: Path) -> None:
+    """An ask already carries a unique name, so `ask#1` would be a second identity for the same thing."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    assert entry.block("pick-one") is entry.ask("pick-one")
+
+
+def test_a_block_name_that_collides_is_rejected(root: Path) -> None:
+    """A name is what a comment and a `supersedes:` anchor on, so two blocks answering to one are unresolvable."""
+    try:
+        parse_text(ENTRY + "\n## prose\nname: pick-one\n\nCollides with the ask.\n", Path("entry.md"))
+    except ReviewParseError as e:
+        assert "named" in str(e)
+        return
+    raise AssertionError("two blocks of one round cannot share a name")
+
+
+def test_block_names_are_scoped_to_a_round(root: Path) -> None:
+    """Round-scoped ordinals are why an append never renumbers a block the maintainer already anchored on."""
+    text = ENTRY + "\n## prose\nround: 1\n\nFirst.\n\n## prose\nround: 2\n\nSecond.\n"
+    prose = [b for b in parse_text(text, Path("entry.md")).blocks if b.type == "prose"]
+    assert [b.anchor for b in prose] == ["r1/prose", "r2/prose"], [b.anchor for b in prose]
+
+
 def test_stamping_leaves_every_other_byte_alone(root: Path) -> None:
     entry = parse_text(ENTRY, Path("entry.md"))
     stamped_text = stamp_rounds(entry, 2)

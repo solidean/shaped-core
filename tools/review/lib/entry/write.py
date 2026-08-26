@@ -95,17 +95,6 @@ def missing_context_tiers(entry: Entry) -> list[str]:
     return [tier for tier in CONTEXT_TIERS if tier not in present]
 
 
-def missing_context_tiers(entry: Entry) -> list[str]:
-    """The context tiers this entry does not carry, in reading order.
-
-    An entry is answered on its own, out of order, by someone who is not carrying the changeset in their head.
-    All three tiers are what make that possible, and each is scoped to *this entry's subject* rather than to the change
-    as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
-    """
-    present = {block.type for block in entry.blocks}
-    return [tier for tier in CONTEXT_TIERS if tier not in present]
-
-
 def word_warnings(entry: Entry) -> list[str]:
     """Context tiers past the length that keeps them worth collapsing."""
     out = []
