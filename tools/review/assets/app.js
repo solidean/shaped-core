@@ -15,26 +15,48 @@ const state = {
   stopped: false,
   // Digests this tab caused by saving an answer. A reload carrying one of them is our own write coming back.
   selfDigests: new Set(),
+  // Forms whose last save did not reach the server, and when the first of them started failing.
+  unsaved: new Map(),
+  failingSince: 0,
+  // The round this window rendered. Once the server moves past it, everything on screen is history.
+  round: null,
+  stale: false,
 };
 
 const SAVE_DEBOUNCE_MS = 400;
+
+// How long typed text may sit unsaved before the page stops being subtle about it.
+// A status line in the corner is enough for a hiccup and nowhere near enough for a dead server:
+// an hour of answering that saved must never look like an hour of answering that did not.
+const ALARM_AFTER_MS = 4000;
+const RETRY_EVERY_MS = 3000;
 
 const el = (id) => document.getElementById(id);
 
 // ---- fetching ---------------------------------------------------------------
 
+// A rejected fetch -- server gone, network dropped -- must not throw past the caller.
+// An uncaught rejection there is the silent failure this page cannot afford: the save just never happens and nothing says so.
 async function getJSON(url) {
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  return { ok: response.ok, status: response.status, body: await response.json() };
+  try {
+    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    return { ok: response.ok, status: response.status, body: await response.json() };
+  } catch (e) {
+    return { ok: false, status: 0, unreachable: true, body: { error: "the server did not answer" } };
+  }
 }
 
 async function postJSON(url, payload) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return { ok: response.ok, status: response.status, body: await response.json() };
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return { ok: response.ok, status: response.status, body: await response.json() };
+  } catch (e) {
+    return { ok: false, status: 0, unreachable: true, body: { error: "the server did not answer" } };
+  }
 }
 
 // ---- navigation -------------------------------------------------------------
@@ -153,6 +175,53 @@ function nextUnanswered() {
   else setSaveState("everything is answered");
 }
 
+// ---- when the window can no longer be trusted --------------------------------
+
+function markStale(reason) {
+  // A round that was handed back is finalized, so the forms on screen still look answerable and are not.
+  // Nothing here is recoverable by retrying, which is why the window is sealed rather than nagged about.
+  if (state.stale) return;
+  state.stale = true;
+  state.pending.forEach((timer) => clearTimeout(timer));
+  state.pending.clear();
+  el("stale-reason").textContent = reason;
+  el("stale-veil").hidden = false;
+  document.body.classList.add("is-stale");
+}
+
+function alarmText() {
+  const seconds = Math.round((Date.now() - state.failingSince) / 1000);
+  const n = state.unsaved.size;
+  return n + " answer" + (n === 1 ? "" : "s") + " not saved for " + seconds + "s — still retrying; keep this tab open";
+}
+
+function noteUnsaved(form, key) {
+  state.unsaved.set(key, form);
+  state.dirty.add(key);
+  if (!state.failingSince) state.failingSince = Date.now();
+}
+
+function noteSaved(key) {
+  state.unsaved.delete(key);
+  if (state.unsaved.size) return;
+  state.failingSince = 0;
+  document.body.classList.remove("save-alarm");
+  el("save-alarm-bar").hidden = true;
+}
+
+function alarmTick() {
+  if (state.stale || !state.unsaved.size) return;
+  if (Date.now() - state.failingSince < ALARM_AFTER_MS) return;
+  document.body.classList.add("save-alarm");
+  el("save-alarm-bar").hidden = false;
+  el("save-alarm-text").textContent = alarmText();
+}
+
+function retryUnsaved() {
+  if (state.stale) return;
+  state.unsaved.forEach((form) => saveForm(form));
+}
+
 // ---- answering --------------------------------------------------------------
 
 function setSaveState(text, cls = "") {
@@ -168,33 +237,52 @@ function formPayload(form) {
     entry: form.dataset.entry,
     ask: form.dataset.ask,
     hash: form.dataset.hash,
+    round: state.round,
     selected,
     text,
   };
 }
 
 async function saveForm(form) {
+  if (state.stale) return;
   const key = form.dataset.entry + "::" + form.dataset.ask;
   const status = form.querySelector(".ask-status");
   const result = await postJSON("/api/answer", formPayload(form));
   state.dirty.delete(key);
 
+  // Unreachable or broken is the one case where the text on screen is the only copy of it,
+  // so the key stays dirty and the form goes on being retried until it lands.
+  if (result.unreachable || result.status >= 500) {
+    noteUnsaved(form, key);
+    status.className = "ask-status bad";
+    status.textContent = "not saved — retrying";
+    return;
+  }
+  if (result.body && result.body.stale) {
+    markStale(result.body.error);
+    return;
+  }
+
   if (result.status === 410) {
+    noteSaved(key);
     status.className = "ask-status bad";
     status.textContent = result.body.error;
     return;
   }
   if (result.status === 409) {
+    noteSaved(key);
     status.className = "ask-status warn";
     status.textContent = result.body.error + " — your text is saved against the new wording";
     if (result.body.hash) form.dataset.hash = result.body.hash;
     return;
   }
   if (!result.ok) {
+    noteUnsaved(form, key);
     status.className = "ask-status bad";
     status.textContent = result.body.error || "could not save";
     return;
   }
+  noteSaved(key);
   status.className = "ask-status";
   status.textContent = "saved";
   setSaveState("saved " + new Date().toLocaleTimeString());
@@ -203,6 +291,7 @@ async function saveForm(form) {
 }
 
 function scheduleSave(form) {
+  if (state.stale) return;
   const key = form.dataset.entry + "::" + form.dataset.ask;
   state.dirty.add(key);
   clearTimeout(state.pending.get(key));
@@ -321,6 +410,10 @@ async function refreshState() {
   const result = await getJSON("/api/state");
   if (!result.ok) return;
   state.data = result.body;
+  if (state.round === null) state.round = result.body.round;
+  else if (result.body.round !== state.round) {
+    markStale("This window is showing round " + state.round + ", which has been handed back. The review is on round " + result.body.round + " now.");
+  }
   renderNav();
 }
 
@@ -341,7 +434,7 @@ function listen() {
     if (state.current) await selectEntry(state.current, { push: false });
   });
   events.onerror = () => {
-    if (state.stopped) { events.close(); return; }
+    if (state.stopped || state.stale) { events.close(); return; }
     setSaveState("live updates disconnected", "warn");
   };
 
@@ -351,6 +444,11 @@ function listen() {
       selectEntry(state.current, { push: false });
     }
   }, 1500);
+
+  setInterval(alarmTick, 1000);
+  setInterval(retryUnsaved, RETRY_EVERY_MS);
+  // The server decides which round is current, and a dead EventSource is exactly when a tab drifts without noticing.
+  setInterval(refreshState, 5000);
 }
 
 // ---- keyboard ---------------------------------------------------------------

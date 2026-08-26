@@ -661,6 +661,29 @@ def test_answers_keep_a_reworded_question_s_answer(root: Path) -> None:
         assert reloaded.get("pick-one").text == "new take"
 
 
+def test_answers_keep_a_finalized_answer_under_unchanged_wording(root: Path) -> None:
+    """Re-answering an ask that was never reworded must still not overwrite the finalized answer.
+
+    The reworded case is the obvious one and was always handled; this is the one that looks like a plain update
+    and is how a round already handed back loses the text it quoted.
+    """
+    entry = parse_text(ENTRY, Path("entry.md"))
+    with tempfile.TemporaryDirectory(prefix="review-answers-") as answer_dir:
+        answers = AnswerFile.load(Path(answer_dir) / "040-a.json", "040-a")
+        block = entry.ask("pick-one")
+
+        answers.upsert(block, selected=["the first way"], text="the answer that round 1 quoted", round_number=1)
+        answers.finalize(1)
+
+        answers.upsert(block, selected=[], text="a second-round rethink", round_number=2)
+
+        assert answers.get("pick-one").text == "a second-round rethink"
+        assert len(answers.orphans) == 1, "the finalized answer must survive a same-wording re-answer"
+        kept = answers.orphans["pick-one@r1"]
+        assert kept.text == "the answer that round 1 quoted", kept.text
+        assert kept.round == 1 and not kept.tentative
+
+
 def test_answers_orphan_a_vanished_ask(root: Path) -> None:
     entry = parse_text(ENTRY, Path("entry.md"))
     with tempfile.TemporaryDirectory(prefix="review-answers-") as answer_dir:

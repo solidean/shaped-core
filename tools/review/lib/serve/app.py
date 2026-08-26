@@ -158,6 +158,17 @@ class ReviewApp:
 
             current_hash = hash_ask(block)
             cfg = self.config()
+
+            # A tab left open across a `Send to Claude` still shows the old round's forms, and they still look answerable.
+            # Writing them would file the answer under the *next* round, silently, against a question already handed back.
+            client_round = payload.get("round")
+            if client_round is not None and int(client_round) != cfg.next_round:
+                return 409, {
+                    "stale": True,
+                    "error": f"this window is showing round {int(client_round)}, which has been handed back",
+                    "round": cfg.next_round,
+                }
+
             answer = answers.upsert(
                 block,
                 selected=[str(s) for s in payload.get("selected", [])],

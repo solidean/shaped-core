@@ -38,6 +38,19 @@
   </main>
 </div>
 
+<div id="save-alarm-bar" hidden>
+  <span id="save-alarm-text"></span>
+</div>
+
+<div id="stale-veil" hidden>
+  <div class="stale-card">
+    <h2>This window is out of date</h2>
+    <p id="stale-reason"></p>
+    <p>Everything you answered was saved and handed back. Nothing here can be edited any more, and nothing you type below will be kept.</p>
+    <p><button onclick="location.reload()">Reload for the current round</button></p>
+  </div>
+</div>
+
 <div id="stopped-veil" hidden>
   <div class="stopped-card">
     <h2>Server stopped</h2>

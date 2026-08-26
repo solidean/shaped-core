@@ -90,13 +90,16 @@ class AnswerFile:
     def upsert(self, block: Block, *, selected: list[str], text: str, round_number: int) -> Answer:
         """Record a tentative answer against an ask as it currently reads.
 
-        An answer already finalized against a different wording is moved to the orphans rather than overwritten,
-        so the round it belonged to still reads correctly afterwards.
+        A finalized answer is never overwritten, whatever the new one says.
+        It is moved to the orphans first, keyed by the round it was frozen in, so re-answering an ask in a later round
+        adds to the record instead of replacing it — and the round that already quoted it still reads correctly.
+        The wording being unchanged is not a licence to overwrite: that is the common case, not the safe one.
         """
         current_hash = hash_ask(block)
         existing = self.answers.get(block.name)
-        if existing is not None and not existing.tentative and existing.prompt_hash != current_hash:
-            self.orphans[f"{block.name}@{existing.prompt_hash}"] = existing
+        if existing is not None and not existing.tentative:
+            key = f"{block.name}@{existing.prompt_hash}" if existing.prompt_hash != current_hash else f"{block.name}@r{existing.round}"
+            self.orphans[key] = existing
 
         answer = Answer(
             name=block.name, prompt_hash=current_hash, selected=list(selected), text=text,
