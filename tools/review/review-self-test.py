@@ -34,6 +34,7 @@ from tools.review.lib.entry.answers import AnswerFile  # noqa: E402
 from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
 from tools.review.lib.entry.grammar import ACK_NAME, ReviewParseError  # noqa: E402
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
+from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
 from tools.review.lib.entry.write import append_text, compose, immutability_violations, stamp_rounds  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
 from tools.review.lib.git.run import Git  # noqa: E402
@@ -802,6 +803,29 @@ def test_the_last_artifact_block_is_the_one_that_publishes(root: Path) -> None:
     assert len(blocks) == 2
     assert blocks[-1].prose.strip() == "The redraft.", "the last block wins"
     assert "first draft" not in blocks[-1].prose
+
+
+def test_a_change_only_an_orientation_entry_claims_is_reported(root: Path) -> None:
+    """Accounted for and not read is invisible in both coverage gates, so it gets its own line.
+
+    An orientation ask legitimately discharges what it names — it is answering "is this the right change to review" —
+    and says nothing about the contents.
+    Written after a 35-line file went through a whole review exactly that way.
+    """
+
+    def entry_of(slug: str, group: str, ids: list[str]):
+        head = "---\nid: 010\ntitle: t\ngroup: " + group + "\nstate: open\n---\n\n"
+        body = "## ask  a\ndischarges: " + " ".join(ids) + "\n\nWell?\n\n- radio: yes\n"
+        return parse_text(head + body, Path(slug + ".md"))
+
+    orientation = entry_of("010-orientation", "meta", ["CHANGE-AAA", "CHANGE-BBB"])
+    finding = entry_of("040-a-finding", "correctness", ["CHANGE-BBB"])
+
+    thin = thinly_discharged([orientation, finding])
+
+    assert list(thin) == ["CHANGE-AAA"], thin
+    assert thin["CHANGE-AAA"] == ["010-orientation"]
+    assert "CHANGE-BBB" not in thin, "a change some finding engaged with is not thin, whatever else also claims it"
 
 
 def test_answers_orphan_a_vanished_ask(root: Path) -> None:

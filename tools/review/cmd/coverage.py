@@ -42,6 +42,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     live = ledger.live()
     bulk_ids = {c.id for c in live if c.discharged_by_reason}
 
+    entries = ctx.entries(paths)
+    thin = ctx.thinly_discharged(entries)
+
     if args.json:
         print(json.dumps({
             "atoms": len(net),
@@ -53,12 +56,23 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             # an uncovered count with an empty `runs` reads as a bug in the reader rather than a file atom nobody claimed.
             "files": [{"path": a.path, "kind": a.kind, "discriminant": a.discriminant}
                       for a in sorted(uncovered.files, key=lambda a: (a.path, a.kind))],
+            "thin": [{"change": cid, "entries": slugs} for cid, slugs in sorted(thin.items())],
         }, indent=2))
         return
 
     print(f"{len(net) - len(uncovered)}/{len(net)} atoms accounted for by {len(live)} changes")
     if bulk_ids:
         print(f"{len(bulk_ids)} bulk claims carry their own reason")
+
+    if thin:
+        # Accounted for and not read is the failure this names, and it is invisible in both gates.
+        print(review.console.yellow(
+            f"{len(thin)} change(s) discharged only by a meta or orientation entry, so nothing reviewed their contents"
+        ))
+        for change_id, slugs in sorted(thin.items()):
+            change = ledger.resolve(change_id)
+            where = change.summary or change.path if change is not None else change_id
+            print(f"  {change_id}  {where}  ({', '.join(slugs)})")
 
     if uncovered.is_empty:
         print(review.console.green("gate 1 green: every change in the range has an identity"))

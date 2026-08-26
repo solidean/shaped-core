@@ -59,7 +59,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest --bulk-commits A..B --reason WHY` | the same, scoped to what those commits contributed — a formatting sweep is one id |
 | `ingest --rest` | ids for whatever nothing claims yet |
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
-| `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed |
+| `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed; also names changes only a meta or orientation entry claims |
 | `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path`, `--ids` |
 | `list` | the reviews in this repository, and where each one stands |
 | `validate <name>` | every entry parses, every change id resolves; run it before serving a round |

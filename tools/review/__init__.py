@@ -80,7 +80,7 @@ from .lib.space.netspace import build as build_net_space
 from .lib.goals.finalize import ARTIFACTS
 from .lib.goals.skeleton import CONTEXT_EXEMPT_GROUPS
 from .lib.goals.skeleton import describe as describe_group
-from .lib.goals.skeleton import finalizer_for, groups_for, requires_context
+from .lib.goals.skeleton import finalizer_for, groups_for, requires_context, thinly_discharged
 from .lib.render.text import render_entry, render_summary
 from .lib.space.netspace import space_of
 
@@ -171,6 +171,7 @@ __all__ = [
     "space_of",
     "stamp_rounds",
     "stat_key",
+    "thinly_discharged",
     "validate_name",
     "word_warnings",
     "write_atomic",

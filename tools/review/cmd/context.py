@@ -165,6 +165,10 @@ class Context:
                 out.update(entry.discharged_changes())
         return out
 
+    def thinly_discharged(self, entries: list[review.Entry]) -> dict[str, list[str]]:
+        """Changes accounted for by a meta or orientation entry and by nothing that read them."""
+        return review.thinly_discharged(entries)
+
     def warn_gitignore(self, paths: review.ReviewPaths) -> None:
         """Warn when the review folder would be committed.
 

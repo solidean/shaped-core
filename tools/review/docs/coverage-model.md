@@ -100,3 +100,14 @@ It is reported, never enforced: a review is allowed to be unfinished, and rounds
 `sync` recomputes net space against the moved head.
 A change whose claim no longer meets net space is marked **superseded** and never deleted, so an entry that discussed it stays readable.
 In a `land-changes` review that mark is the evidence: the fix landed, so the hunk it was about is gone.
+
+## Discharged is not the same as read
+
+A broad ask legitimately discharges whatever it names.
+The orientation entry's "is this the right change to review" is the usual one: answering it accounts for every id it lists and says nothing whatever about their contents.
+
+So a change can be accounted for, discharged, and never actually read, with both gates green throughout.
+`coverage` therefore names any change whose *only* discharge comes from a `meta`, `framing` or `finalize` entry — the groups whose entries are about the review rather than about a piece of the change.
+
+It is a report rather than a gate, because discharging that way is sometimes exactly right: a vendored drop or a formatting sweep wants one broad claim and no reading.
+What it prevents is the case where nobody noticed.

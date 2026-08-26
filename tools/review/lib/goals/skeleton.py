@@ -58,6 +58,28 @@ def requires_context(group: str) -> bool:
     return group not in CONTEXT_EXEMPT_GROUPS
 
 
+def thinly_discharged(entries) -> dict[str, list[str]]:
+    """Change ids whose only discharge comes from a meta, orientation or finalize entry.
+
+    Those entries ask about the review rather than about a piece of the change: "is this the right thing to review"
+    legitimately accounts for whatever it names and says nothing at all about the contents.
+    A change discharged only there has been accounted for and not read, and both coverage gates stay green while it happens.
+
+    Maps each such change id to the entries discharging it, which is what makes the report actionable.
+    """
+    by_change: dict[str, list[str]] = {}
+    engaged: set[str] = set()
+    for entry in entries:
+        if entry.state != "open":
+            continue
+        meta = not requires_context(entry.group)
+        for change_id in entry.discharged_changes():
+            by_change.setdefault(change_id, []).append(entry.slug)
+            if not meta:
+                engaged.add(change_id)
+    return {cid: slugs for cid, slugs in by_change.items() if cid not in engaged}
+
+
 def groups_for(goals: list[str]) -> tuple[str, ...]:
     """The navigation groups a review with these goals uses."""
     return _DESIGN_GROUPS if goals == ["design"] else _CHANGE_GROUPS
