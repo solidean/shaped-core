@@ -138,6 +138,55 @@ What is left is narrower than it was:
   Whatever lands has to account for tests running concurrently.
   `material-resolution-test.cc` already installs its own material library process-wide without `nx::exclusive`, hedging around the race with `CHECK(builds <= 1)`.
 
+## What the OpenPBR surface still needs
+
+`sv::surface` is OpenPBR's parameter set and `shaders/openpbr.hlsli` is the layered BSDF over it: fuzz over coat over a base that
+mixes the metal against a dielectric specular layer over the diffuse substrate.
+The path tracer shades through it — the closest-hit evaluates the closure, estimates both light sources through it, and
+importance-samples the continuation — so what is left is coverage of the model rather than plumbing.
+
+- **Tangent frames are quaternions, and not yet quantized.**
+  A mesh supplies `tangent_frame` — a unit quaternion taking tangent space to object space — plus `tangent_handedness`, and the
+  hit builds its shading frame from that instead of the flat face normal.
+  The storage is an uncompressed `f32x4`.
+  The intended encoding is `quat10x3+i2` (see [zeux.io on quantizing tangent frames](https://zeux.io/2026/04/30/quantizing-tangent-frames/)),
+  which is a format change on one attribute plus a decode in the generated prologue — the same seam `attribute_interpolation`
+  already opened, and not a content migration, because handedness deliberately lives beside the quaternion rather than in the
+  sign of its `w`.
+  `quat10x3+i2` rather than the article's own `oct11x2+d9` pick, because a closest-hit decodes three corners per hit and then
+  blends them: the quaternion is the form the blend wants, where an octahedral normal plus a diamond angle would have to be
+  built into a basis per corner first.
+- **A non-uniform instance scale shears the tangent frame.**
+  The hit rotates the authored frame by `ObjectToWorld3x4` and renormalizes, which is exact for a rigid or uniformly scaled
+  placement and wrong for anything else — the normal wants the inverse transpose while the tangent wants the matrix itself.
+  Nothing in the tree scales non-uniformly yet.
+- **Nothing produces a frame but the sphere example.**
+  `openpbr-spheres` emits an analytic one per vertex.
+  A glTF import would carry `TANGENT` and a handedness in its `w`, and a mesh with uvs but no tangents wants them derived
+  rather than defaulted — neither exists.
+- **A normal map is still untested.** `geometry_normal` is applied through `sv::perturb_frame` now, so it has somewhere to land,
+  but no material in the tree binds it to a texture.
+- **Transmission, subsurface, thin-film and dispersion are absent**, not defaulted — `sv::surface` does not carry them, so a
+  material cannot ask for one and silently get something else.
+  Transmission is the one that changes the integrator rather than only the closure: it needs a refracted continuation and
+  therefore a path that leaves the upper hemisphere.
+- **Three lobes are approximations, named at the top of `openpbr.hlsli`.**
+  The fuzz is a Conty-Estevez sheen rather than the specified Zeltner microflake, the coat tints what passes through it once
+  rather than absorbing along the refracted path, and GGX energy compensation is Turquin's analytic fit rather than a tabulated
+  directional albedo.
+  Each is a self-contained replacement, and the sheen is the one that most visibly deviates.
+- **No pixel is ever inspected.** The suite pins that the permutation compiles, that the pipeline builds and that the trace
+  runs; nothing checks what the BSDF returns.
+  The cheap first assertions are a white-furnace test — a rough metal under a uniform environment must return roughly its own
+  albedo — and a reciprocity check over sampled direction pairs.
+  Both need the pixel readback the reprojection entry above also wants, which is the one piece of test infrastructure sv has
+  none of.
+- **The environment cannot produce a sharp reflection.** The background is an order-3 SH probe, so a smooth specular lobe
+  reflects a blur whatever the roughness says; only the analytic area light gives a real highlight.
+  An equirect HDR environment with 2D-CDF importance sampling is the fix, and it needs a Radiance `.hdr` reader in babel first —
+  `babel::image` has PNG and JPEG only.
+- **`geometry_opacity` is parsed and ignored.** Nothing in the trace has an any-hit shader, so a cutout is not expressible yet.
+
 ## Everything else
 
 - Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.

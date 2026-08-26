@@ -120,7 +120,11 @@ The whole sv API compiles everywhere, though: without a backend a routine simply
 
 ## First library-extension seams (per the "living libraries" rule)
 
-- **PBR/BRDF shading** is authored fresh in `shaders/pbr.hlsli`; a shared shader BRDF library is the natural home once a second consumer appears.
+- **The BSDF is sv's own**, in `shaders/openpbr.hlsli`: the OpenPBR Surface subset the path tracer shades through, plus the GGX / Fresnel / sheen primitives under it.
+  A shared shader BRDF library in shaped-rendering is the natural home once a second consumer appears, and the primitives are the half that would move.
+  The flat `pbr_raytrace_routine` still has its own `shaders/pbr.hlsli`, which is one of the reasons to retire that routine.
+- **Meshing primitives belong in typed-geometry.** Both examples hand-roll their geometry: a cube in `hello-cube`, a UV sphere in `openpbr-spheres`.
+  Two callers is enough to want a `tg::` sphere / box tessellation.
 - **The id-pool now exists** as `sv::impl::lru_pool<Id, Record>` (budget + idle eviction, LRU).
   If a second library wants it, promoting a generational version into clean-core is the next step.
 - **TLAS is rebuilt every frame**, since refit/update is not implemented in sg yet; `tlas_id` exists for a future prebuilt/persistent TLAS.

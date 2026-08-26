@@ -151,10 +151,10 @@ m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the ma
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
-sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv_instance
+sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
 ```
 
-A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv_attribute_desc`
+A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv::attribute_desc`
 (`{bindless index, 0, element stride}`) per mesh-sourced attribute, and a bindless index per sampled texture.
 
 Gotchas:
@@ -171,7 +171,7 @@ Gotchas:
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
 - **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
-- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `sv_instance` in `shaders/material_runtime.hlsli`.
+- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `sv::instance` in `shaders/material_runtime.hlsli`.
 
 ## Materials — a type, an instance, and the frequency chain
 
@@ -185,15 +185,20 @@ sv::material_signature_entry      // { string name; attribute_format format; vec
 sv::material_signature_entry::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
 sv::material                     // { string name; material_type_id type; vector<material_attribute_binding> overrides; hash128 hash; }
 sv::material::create(name, type, overrides)          // -> hashes type + overrides; validates NOTHING (it cannot see the type)
+sv::material_signature_entry::of_rotation("tangent_frame", q)  // -> the same, blended as a QUATERNION across the hit triangle
+                                 //   requires an f32x4; corners are hemisphere-aligned before the blend, which sv::interpolate_f4 would not do
+sv::attribute_interpolation      // linear | rotation — a property of the DECLARATION, so it rides the type hash into the permutation key
 sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
 sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
 
-sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `pbr` and `unlit`
+sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `pbr` and `unlit`
 lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
 lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
-sv::builtin_material::pbr / unlit                    // the names the builtins register under
+sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
+                                 //   openpbr: the OpenPBR Surface subset (20 attributes) — the type to author against
+                                 //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
@@ -230,6 +235,11 @@ Gotchas:
 - **`material::create` validates nothing** against the type, because it cannot see one.
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
 - **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+- **`surface` is OpenPBR's parameter set** (`sv::surface`, `shaders/openpbr.hlsli`), not a metallic-roughness struct.
+  Every type writes that one vocabulary, which is what lets the integrator evaluate a single layered BSDF whatever the material was authored as.
+- **The generator emits `#define SV_ATTR_SUPPLIED_<name> 0/1` per attribute**, one constant per permutation.
+  It separates "something supplied this" from "the declaration's default came through", which a fragment cannot tell and the tangent frame depends on:
+  an unsupplied frame must fall back to the geometric one rather than trust the identity rotation, which points at object-space +z.
 
 ## Material shaders — one permutation, generated
 
@@ -252,7 +262,7 @@ cache.acquire(resolved)          // -> material_permutation const& {hash128 key;
 cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
-sv::material_slot_kind           // constant | attribute_descriptor (an sv_attribute_desc) | texture_index (a u32 into the 2D table)
+sv::material_slot_kind           // constant | attribute_descriptor (an sv::attribute_desc) | texture_index (a u32 into the 2D table)
 
 slib::shader_library::compile_source(src, stage, entry, format, {.include_dir = "sv_shaders"})  // -> sg::async_compiled_shader
 ```
@@ -261,6 +271,7 @@ The generated source is, in order: the runtime include, only the bindless tables
 distinct sampler, then the entry function.
 That function declares one local per signature attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
 and then runs the type's fragment verbatim over them.
+The loads run in a NESTED BLOCK, so the parameter buffer, an attribute's descriptor and a sampled uv never reach the fragment's scope.
 `g.key` is `material_shader_key(resolved.permutation_key, opts)`: the resolution's shape AND how these options spell it.
 Two calls agreeing on that pair generate byte-identical source, and nothing else may share their cache entry — a second cache over different bindless budgets gets its own.
 
@@ -268,12 +279,14 @@ Gotchas:
 
 - **The layout is the contract, and both sides read it.** The shader loads slot `offset`; the CPU fills slot `offset`.
   Nothing recomputes it independently, which is why it comes back with the source rather than being derivable.
-- **A sampled attribute takes TWO slots** — the texture index, and the `sv_attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
+- **A sampled attribute takes TWO slots** — the texture index, and the `sv::attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
   Three strides plus a runtime branch would be the other trade; see `material_runtime.hlsli`.
 - **`SampleLevel`, never `Sample`** — a ray tracing hit shader has no derivatives to pick a mip from.
 - **Every bindless index is wrapped in `NonUniformResourceIndex`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
+- **The runtime lives in `namespace sv`**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
+  `sv_` survives only for `sv_sampler_i` and the entry point, which are file scope and cannot be namespaced without changing what reflection reports.
 - **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier, is an HLSL keyword or builtin type, starts with `sv_`, or is `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
 - **A generated permutation does not hot-reload on an include edit** — the key hashes the resolution and the options, not the include's contents.
