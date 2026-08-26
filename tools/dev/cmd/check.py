@@ -73,6 +73,18 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
         return run_licenses(ctx, check=True, verbose=verbose)
 
+    def check_review(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The review tool's own suite: coverage math, change identity and the entry grammar.
+        # It builds throwaway git repositories and reaches no network, so it is cheap enough to sit here.
+        # Not fixable and not scopable, so fix and scope are ignored.
+        runner = ctx.root / "tools" / "review" / "review-self-test.py"
+        result = dev.run_step(
+            ["uv", "run", str(runner)],
+            step_type="review", name="review-self-test",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        return result.ok
+
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
         # Not fixable, so fix and scope are ignored.
@@ -118,6 +130,8 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
                   False, check_deps_licenses),
+        dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
+                  False, check_review),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "
                   "(and where supported, sanitizer) presets",

@@ -95,7 +95,8 @@ Supporting directories:
 
 * **`tools/`** — `dev/` (Python build/test machinery behind [dev.py](dev.py);
   see [docs/dev-py-driver.md](docs/dev-py-driver.md)), `bin/` (checked-in binaries, e.g. `diag-launcher.exe`), `cmake/` (repo-wide build config modules), `lint/` (the clang-tidy gate whitelist),
-  `shaped-linter/` (our own C++ linter — own lexer + parser, no LLVM; see [its readme](tools/shaped-linter/readme.md) — run via `dev.py lint shaped`), and `instruction-tracer/` (a C++ tool —
+  `shaped-linter/` (our own C++ linter — own lexer + parser, no LLVM; see [its readme](tools/shaped-linter/readme.md) — run via `dev.py lint shaped`),
+  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)), and `instruction-tracer/` (a C++ tool —
   see [its readme](tools/instruction-tracer/readme.md) — that records what optimized code actually executed; drive it via `dev.py assembly trace`).
 * **`docs/`** — repo-wide docs; start at [docs/_index.md](docs/_index.md).
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry points.
@@ -376,6 +377,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
+| Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |
 | Coding standards & conventions   | [docs/coding-guidelines.md](docs/coding-guidelines.md)           |
 | Log or profile something         | [logging](libs/base/clean-core/docs/logging.md) / [profiling](libs/base/clean-core/docs/profiling.md) (`CC_LOG_*`, `CC_RECORD_SCOPE`, `CC_RECORD_STAT`) |
 | Recall a library's API fast      | its `cheat-sheet.md` (e.g. [clean-core](libs/base/clean-core/cheat-sheet.md), [nexus](libs/base/nexus/cheat-sheet.md)) |

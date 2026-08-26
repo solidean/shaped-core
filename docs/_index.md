@@ -89,6 +89,8 @@ Findings we want to keep, but that are not a guide to anything.
 - [shaped-linter](../tools/shaped-linter/readme.md) — our own C++ and prose linter, and the `prose apply` plan grammar.
   Start at its [docs hub](../tools/shaped-linter/docs/_index.md), which covers the architecture, how to write a rule, and the corpus format.
 - [instruction-tracer](../tools/instruction-tracer/readme.md) — what optimized code actually executed, driven by `dev.py assembly trace`.
+- [review](../tools/review/readme.md) — the review tool: a commit range as a folder of files, answered in a local page, iterated in rounds.
+  Start at its [docs hub](../tools/review/docs/_index.md), which covers the coverage model, the entry grammar and the folder format.
 
 ## Third-party licenses
 
