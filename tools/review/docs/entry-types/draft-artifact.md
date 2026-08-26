@@ -33,6 +33,10 @@ Adding it after `finalize` inverts the point: the maintainer is then reviewing s
 That block is the contract with the tooling: `review artifact` reads it back out, and `review post` publishes exactly it.
 Everything around it — what you cut, why, the ask — is ordinary `prose`, and is never published.
 
+**Its own headings start at `###`.**
+A line beginning `## ` opens a block no matter which block it is inside, so a comment sectioned with `## ` fails to parse.
+This is the one place the grammar leaks into what you are writing, and `###` renders identically on a PR.
+
 Not a summary of the comment, not bullet points about it.
 If it would be posted as markdown with three headings and a table, write three headings and a table.
 The maintainer is proofreading, and a paraphrase is not proofreadable.

@@ -293,8 +293,14 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
                                    "write `## <type>` or `## <type> <argument>`")
         block_type, head = m.group(1), (m.group(2) or "").strip()
         if block_type not in BLOCK_TYPES:
-            raise ReviewParseError(path, number, f"unknown block type {block_type!r}",
-                                   "known types: " + ", ".join(sorted(BLOCK_TYPES)))
+            # A block type is lowercase kebab-case, so anything else here is usually a markdown heading
+            # inside a block whose body is markdown — an `artifact` above all.
+            # `## ` opens a block wherever it lands.
+            prose_heading = block_type[:1].isupper() or "_" in block_type
+            hint = ("known types: " + ", ".join(sorted(BLOCK_TYPES)))
+            if prose_heading:
+                hint = f"if that is a heading inside a block's body, write it as `### {block_type}` — `## ` always starts a block. " + hint
+            raise ReviewParseError(path, number, f"unknown block type {block_type!r}", hint)
 
         heading_end = start + len(heading)
         block = Block(

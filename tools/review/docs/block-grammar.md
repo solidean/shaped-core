@@ -58,6 +58,11 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | `auto-acknowledge` | — | this entry is reference material, so reading it is not something to record |
 | `artifact` | — | the exact text the review will publish, read back by `review artifact` and `review post` |
 
+An `artifact` block is markdown destined for somewhere else, so it is the one block whose body wants headings of its own.
+**They have to start at `###`.**
+`## ` at the start of a line is how a block begins, whatever the block it lands in, so a comment sectioned with `## ` fails to parse with "unknown block type" naming its first heading.
+`###` is safe because a heading needs whitespace after the `##`, and it renders the same everywhere the comment is going.
+
 All three are required on every entry whose group is not `meta`, `finalize` or `framing`, for as long as it still has an ask waiting for an answer, and `validate` reports a missing one as an error.
 An entry whose asks are all finalized is past the point of needing them, and adding tiers there would edit a question the maintainer has already read.
 An entry is answered on its own, out of order, by someone not carrying the changeset in their head, and the tiers are what make that possible.
