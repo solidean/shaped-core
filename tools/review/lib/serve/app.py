@@ -11,9 +11,12 @@ because a broken entry is the moment the maintainer most needs to see the rest o
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import threading
 import time
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -340,6 +343,28 @@ class ReviewApp:
         return 200, {"action": action, "round": cfg.next_round}
 
 
+def favicon_svg(name: str) -> str:
+    """A tab icon derived from the review's name.
+
+    Several reviews open in several tabs is the normal case, and a checked-in icon would make every one of them
+    look the same — which is the complaint rather than the fix.
+    Initials on a colour hashed from the whole name: distinguishable, stable per review, and nothing to ship.
+    """
+    parts = [p for p in re.split(r"[-_. ]+", name) if p]
+    # A number in the name is the discriminator, so it wins: `pr-146` and `pr-147` both initial to `P1`.
+    numbers = [p for p in parts if p.isdigit()]
+    mark = numbers[-1][-3:] if numbers else "".join(p[0] for p in parts)[:2].upper() or "R"
+    hue = int(hashlib.blake2b(name.encode("utf-8"), digest_size=2).hexdigest(), 16) % 360
+    size = 64
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}">'
+        f'<rect width="{size}" height="{size}" rx="12" fill="hsl({hue} 55% 42%)"/>'
+        f'<text x="50%" y="54%" dominant-baseline="central" text-anchor="middle" '
+        f'font-family="system-ui, sans-serif" font-size="{34 if len(mark) < 2 else 28 if len(mark) < 3 else 22}" '
+        f'font-weight="700" fill="#fff">{escape(mark)}</text></svg>'
+    )
+
+
 def _forge_commit_url(upstream: str, sha: str) -> str:
     """A web URL for a commit, or empty where the remote is not one this can be derived from.
 
@@ -398,7 +423,6 @@ def _walk_up_through_comments(lines: list[str], line: int) -> int:
 
 
 def _error_panel(error: ReviewParseError) -> str:
-    from html import escape
     return (
         '<article class="entry"><header class="entry-head"><h1>This entry does not parse</h1></header>'
         f'<pre class="parse-error">{escape(str(error))}</pre>'
@@ -447,6 +471,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route in ("/", "/index.html"):
                 self._asset("page.html")
+            elif route == "/favicon.svg":
+                self._send(200, favicon_svg(self.app.config().name).encode("utf-8"),
+                           "image/svg+xml; charset=utf-8", cache=True)
             elif route == "/assets/highlight.css":
                 self._send(200, highlight_css().encode("utf-8"), "text/css; charset=utf-8")
             elif route.startswith("/assets/"):

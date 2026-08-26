@@ -44,6 +44,7 @@ from tools.review.cmd import (  # noqa: E402
     status,
     stop,
     sync,
+    title,
     validate,
 )
 
@@ -56,6 +57,7 @@ COMMANDS = [
     changes,
     generate,
     append,
+    title,
     show,
     status,
     validate,

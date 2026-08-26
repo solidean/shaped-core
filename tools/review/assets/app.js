@@ -71,7 +71,10 @@ function entryMark(row) {
 
 function renderNav() {
   const data = state.data;
-  el("review-name").textContent = data.title || data.name;
+  const shown = data.title || data.name;
+  el("review-name").textContent = shown;
+  // The tab is how you find a review among several, so the title is the review rather than the tool.
+  document.title = shown;
   el("review-range").textContent = data.range;
   el("review-goals").textContent = data.goals.join(" + ") + " · round " + data.round;
 

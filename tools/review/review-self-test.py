@@ -31,7 +31,7 @@ from tools.review.lib.annotate.table import build as build_tokens  # noqa: E402
 from tools.review.lib.annotate.providers import CommitProvider  # noqa: E402
 from tools.review.lib.annotate.glossary import GlossaryProvider, malformed_in, terms_in  # noqa: E402
 from tools.review.lib.entry.generate import _tree_html as tree_html  # noqa: E402
-from tools.review.lib.serve.app import _forge_commit_url as forge_url  # noqa: E402
+from tools.review.lib.serve.app import _forge_commit_url as forge_url, favicon_svg  # noqa: E402
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
 from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, group_hunks, register  # noqa: E402
@@ -1122,6 +1122,16 @@ def test_a_commit_sha_is_confirmed_against_git(root: Path) -> None:
     assert [t.text for t in tokens] == ["cefb3b9a"], tokens
     assert "ab12" not in asked[0], "fewer than seven hex characters is a word, not a candidate"
     assert "deadbeef" in asked[0], "git decides, not the length"
+
+
+def test_a_favicon_is_derived_from_the_review_name(root: Path) -> None:
+    """Several reviews in several tabs is the normal case, and one checked-in icon makes them all look the same."""
+    one, two = favicon_svg("pr-147"), favicon_svg("review-ux")
+    # A number in the name is the discriminator: `pr-146` and `pr-147` would both initial to `P1`.
+    assert ">147<" in one, one
+    assert ">RU<" in two, two
+    assert favicon_svg("pr-146") != one, "two reviews must not look the same"
+    assert favicon_svg("pr-147") == one, "an icon has to be stable, or you stop recognising the tab"
 
 
 def test_a_forge_url_is_derived_or_absent(root: Path) -> None:
