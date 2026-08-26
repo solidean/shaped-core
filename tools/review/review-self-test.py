@@ -1,8 +1,11 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["pygments>=2.17", "markdown-it-py>=3"]
 # ///
+
+# The render path is the only part of the tool needing those two, and the only part nothing but the server reaches.
+# The suite carries them rather than leaving the one layer a crash can hide in untested.
 
 """Self-test for the review tool: the interval algebra, change identity, coverage math and the block grammar.
 
@@ -218,6 +221,58 @@ def test_file_atoms_are_accounted_for(root: Path) -> None:
     assert net.subtract(claimed).is_empty, "a rename must be claimable"
 
 
+def test_binary_and_mode_changes_are_atoms(root: Path) -> None:
+    """Git writes no `---`/`+++` for either, so the path can only come from the `diff --git` header.
+
+    Without that fallback the file is dropped from the parsed diff entirely, which is a change with no atom
+    and no id, under a coverage gate still reporting green.
+    """
+    git = git_init(root)
+    (root / "img.bin").write_bytes(b"\x00\x01\x02before")
+    (root / "run.sh").write_text("echo hi\n", encoding="utf-8", newline="\n")
+    base = commit(root, "base", {"a.txt": "content\n"})
+
+    (root / "img.bin").write_bytes(b"\x00\x01\x02after-and-longer")
+    subprocess.run(["git", "update-index", "--chmod=+x", "run.sh"], cwd=root, check=True, capture_output=True)
+    head = commit(root, "binary and mode", {})
+
+    net = build_net(git, base, head)
+    assert "img.bin" in net.paths(), f"a modified binary file must reach net space, got {net.paths()}"
+    assert any(a.kind == "binary" for a in net.files), f"expected a binary atom, got {net.files}"
+    assert any(a.kind == "mode" for a in net.files), f"expected a mode atom, got {net.files}"
+
+    candidates = candidates_for(git, base, head, context=8, gap=20, net=net)
+    claimed = net.__class__.empty()
+    for candidate in candidates:
+        claimed = claimed.union(candidate.claim)
+    assert net.subtract(claimed).is_empty, "both must be claimable by the default sweep"
+
+
+def test_commit_local_claim_survives_a_later_insertion(root: Path) -> None:
+    """An insertion hunk is numbered by the line before it, so the boundary line must not take its delta.
+
+    The line the earlier commit wrote is exactly that boundary once a later commit inserts under it,
+    and mapping it forward by the insertion's length silently hands its claim to a line someone else wrote.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"f.txt": "a\nb\nc\n"})
+    first = commit(root, "insert P", {"f.txt": "a\nb\nP\nc\n"})
+    head = commit(root, "insert under P", {"f.txt": "a\nb\nP\nQ\nR\nc\n"})
+
+    net = build_net(git, base, head)
+    assert net.get(ADDED, "f.txt").spans == ((3, 5),), net.get(ADDED, "f.txt").spans
+
+    candidates = commit_ingest.candidates_for_commit(
+        git, first, base=base, head=head, context=3, gap=20, net=net,
+    )
+    claimed = net.__class__.empty()
+    for candidate in candidates:
+        claimed = claimed.union(candidate.claim)
+    assert claimed.get(ADDED, "f.txt").spans == ((3, 3),), (
+        f"the commit wrote head line 3, so that is what it claims; got {claimed.get(ADDED, 'f.txt').spans}"
+    )
+
+
 def test_rest_only_claims_what_is_left(root: Path) -> None:
     git = git_init(root)
     base = commit(root, "base", {"a.txt": numbered(20), "b.txt": numbered(20)})
@@ -389,6 +444,7 @@ severity: bug
 Some delta context.
 
 ## changes  CHANGE-AAAA CHANGE-BBBB
+show: collapsed
 
 Commentary.
 
@@ -439,6 +495,57 @@ def test_blank_first_line_escapes_the_prelude(root: Path) -> None:
     ask = entry.ask("pick-one")
     assert "discharge: this is prose" in ask.prose
     assert not ask.discharges
+
+
+def test_changes_block_must_declare_how_it_opens(root: Path) -> None:
+    """`show:` is required, because defaulting it would make the quiet choice the unconsidered one."""
+    missing = "---\nid: 1\ntitle: t\n---\n\n## changes  CHANGE-AAAA\n\nCommentary.\n"
+    try:
+        parse_text(missing, Path("x.md"))
+    except ReviewParseError as e:
+        assert "how it opens" in str(e), str(e)
+    else:
+        raise AssertionError("a `changes` block with no `show:` must be an error")
+
+    try:
+        parse_text(missing.replace("## changes  CHANGE-AAAA\n", "## changes  CHANGE-AAAA\nshow: maybe\n"), Path("x.md"))
+    except ReviewParseError as e:
+        assert "unknown show" in str(e), str(e)
+    else:
+        raise AssertionError("an unknown `show:` value must be an error")
+
+    for kind in ("visible", "collapsed"):
+        entry = parse_text(missing.replace("## changes  CHANGE-AAAA\n", f"## changes  CHANGE-AAAA\nshow: {kind}\n"), Path("x.md"))
+        assert entry.blocks[0].attrs["show"] == kind
+
+
+def test_every_block_type_renders(root: Path) -> None:
+    """The renderer is only reachable through the server, so nothing else exercises it.
+
+    A fenced code block threw on every entry that had one for the life of the tool, and the page turned that
+    into nav items that ignored clicks — a crash two layers away from where it was visible.
+    """
+    from tools.review.lib.changeset.ledger import Change
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.render.entryview import render_entry
+
+    body = "---\nid: 1\ntitle: t\nseverity: bug\n---\n"
+    for kind in ("context/cold", "context/repo", "context/delta", "prose", "recommendation"):
+        body += f"\n## {kind}\n\nSome prose with `a/b.cc:12` in it.\n"
+    body += "\n## code\n\n```python:x.py\ndef f():\n    return 1\n```\n"
+    body += "\n## changes  CHANGE-AAAA\nshow: visible\n\nCommentary.\n"
+    body += "\n## ask  a-question\ndischarges: CHANGE-AAAA\n\nWhich way?\n\n- radio: this way  (recommended)\n- check: and that\n"
+
+    entry = parse_text(body, root / "entries" / "010-x.md", slug="010-x")
+    ledger = Ledger(root / "ledger.jsonl")
+    ledger.changes["CHANGE-AAAA"] = Change(id="CHANGE-AAAA", digest="d", kind="hunk", path="x.py", summary="x.py:1-2")
+
+    html = render_entry(
+        entry, AnswerFile(root / "a.json"),
+        repo=root, paths=ReviewPaths(root), ledger=ledger, hash_of=hash_ask,
+    )
+    for needle in ("tier-delta-rule", "recommendation", "<pre class=\"pg\">", "class=\"changes\"", "ask-form"):
+        assert needle in html, f"{needle!r} missing from the rendered entry"
 
 
 def test_duplicate_ask_names_are_rejected(root: Path) -> None:

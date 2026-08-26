@@ -69,6 +69,11 @@ class ReviewPaths:
         """The server's one-shot mailbox that `round --wait` polls for."""
         return self.root / ".signal"
 
+    @property
+    def served_marker(self) -> Path:
+        """Written while a server for this review is up, so a second one can say so rather than fight for the port."""
+        return self.root / ".served"
+
     def change_diff(self, change_id: str) -> Path:
         return self.changes_dir / f"{change_id}.diff"
 

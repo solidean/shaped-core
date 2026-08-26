@@ -32,14 +32,14 @@ def _esc(text: str) -> str:
     return html.escape(text, quote=True)
 
 
-def _change_card(change, body: str, repo: Path) -> str:
+def _change_card(change, body: str, *, open_by_default: bool) -> str:
     summary = _esc(change.summary or change.path)
     reason = f'<div class="change-reason">{_esc(change.reason)}</div>' if change.reason else ""
     if not body:
         return (f'<div class="change"><div class="change-head"><code>{_esc(change.id)}</code>'
                 f'<span class="change-sum">{summary}</span></div>{reason}</div>')
     return (
-        f'<details class="change" open><summary class="change-head"><code>{_esc(change.id)}</code>'
+        f'<details class="change"{" open" if open_by_default else ""}><summary class="change-head"><code>{_esc(change.id)}</code>'
         f'<span class="change-sum">{summary}</span></summary>{reason}'
         f'{highlight_diff(body, path=change.path)}</details>'
     )
@@ -61,7 +61,6 @@ def _ask_form(entry: Entry, block: Block, answer: Answer | None, prompt_hash: st
     text = answer.text if answer else ""
 
     inputs = []
-    radios = [o for o in block.options if o.kind == "radio"]
     for index, option in enumerate(block.options):
         control = "radio" if option.kind == "radio" else "checkbox"
         group = f"{entry.slug}::{block.name}" if option.kind == "radio" else f"{entry.slug}::{block.name}::{index}"
@@ -72,7 +71,6 @@ def _ask_form(entry: Entry, block: Block, answer: Answer | None, prompt_hash: st
             f'<input type="{control}" name="{_esc(group)}" value="{_esc(option.label)}"{checked}>'
             f'<span class="opt-label">{_esc(option.label)}</span>{rec}</label>'
         )
-    _ = radios
 
     return (
         f'<form class="ask-form" data-entry="{_esc(entry.slug)}" data-ask="{_esc(block.name)}" '
@@ -94,9 +92,12 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
         if block.type in _COLLAPSED_TIERS:
             return (f'<details class="tier tier-{block.type.split("/")[1]}">'
                     f'<summary>{_esc(label)}</summary><div class="tier-body">{body}</div></details>')
-        return f'<div class="tier tier-delta"><div class="tier-label">{_esc(label)}</div>{body}</div>'
+        # Drawn as a rule rather than a label: this is where a round's new material starts, and it has to be findable by eye.
+        return (f'<div class="tier-delta-rule"><span>{_esc(label)}</span></div>'
+                f'<div class="tier tier-delta">{body}</div>')
 
     if block.type == "changes":
+        visible = block.attrs.get("show", "collapsed") == "visible"
         cards = []
         for change_id in block.change_ids:
             change = ctx["ledger"].resolve(change_id)
@@ -107,7 +108,7 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
             diff_path: Path = ctx["paths"].change_diff(change.id)
             if change.has_body and diff_path.is_file():
                 body = diff_path.read_text(encoding="utf-8", errors="replace")
-            cards.append(_change_card(change, body, repo))
+            cards.append(_change_card(change, body, open_by_default=visible))
         commentary = render_markdown(block.prose, repo=repo)
         return f'<section class="changes">{commentary}{"".join(cards)}</section>'
 
@@ -145,7 +146,9 @@ def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: Review
     """The whole entry as HTML: blocks in order, answers inline, a divider where a round begins."""
     ctx = {"repo": repo, "paths": paths, "ledger": ledger, "answers": answers, "hash_of": hash_of}
 
-    severity = f'<span class="sev sev-{_esc(entry.severity)}">{_esc(entry.severity)}</span>' if entry.severity else ""
+    # A severity that repeats the group says nothing twice — `design/design`, `docs/docs` — so only a differing one is drawn.
+    show_severity = entry.severity and entry.severity != entry.group
+    severity = f'<span class="sev sev-{_esc(entry.severity)}">{_esc(entry.severity)}</span>' if show_severity else ""
     state = f'<span class="state state-{_esc(entry.state)}">{_esc(entry.state)}</span>' if entry.state != "open" else ""
     head = (f'<header class="entry-head"><div class="entry-id">{_esc(entry.id)}</div>'
             f'<h1>{_esc(entry.title)}</h1><div class="entry-meta">'

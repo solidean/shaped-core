@@ -95,7 +95,12 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    This is where the highest-value findings are, because it is exactly what a diff view hides.
 
 5. **Write the entries**, as below.
-   `uv run review.py generate pr-<n>` writes the overview and coverage entries first.
+   `uv run review.py generate pr-<n>` writes the generated `015-changes` and `990-coverage` first, and
+   `uv run review.py changes pr-<n>` lists the ledger, which is what `discharges:` is written from.
+
+   Read [tools/review/docs/entry-types/_index.md](../../../tools/review/docs/entry-types/_index.md) and open the types that apply.
+   Four anchor a review with a changeset: **orientation** at `010`, **glossary** at `018`, the findings between, and **verdict** at `980`.
+   The set is prose rather than code, so it grows by writing a file there — never by teaching the tool a new entry.
 
 6. **Hand it over and wait.**
    ```bash
@@ -135,9 +140,17 @@ The freeform box is always there anyway, so options cost nothing when they are w
 `discharges:` on an ask is what says "this question accounts for those hunks".
 An LGTM entry with one ask discharging forty changes is correct and good; forty entries would not be.
 
-**Show the code.**
-Use `changes` blocks so the hunks render inline, and cite `file.hh:63` in backticks — the page turns it into a link that opens the file.
+**Show the code, and decide whether it opens.**
+Use `changes` blocks so the hunks are there, and cite `file.hh:63` in backticks — the page turns it into a link that opens the file.
 Report API shape in symbols, never in prose about symbols.
+
+Every `changes` block must carry `show: visible` or `show: collapsed`, and the tool refuses one that does not.
+Ask **can the maintainer decide this entry without the code?**
+Where the prose plus a quoted excerpt or a verified repro already settles it, the full hunks are depth material — `show: collapsed`.
+Only where the point genuinely cannot be judged without seeing the hunk is it `show: visible`.
+
+`collapsed` is the common answer, and quoting the four lines that matter inside a `prose` block beats opening the whole diff.
+A screen of diff costs scrolling on every visit to that entry, and the maintainer's attention is the scarcest thing a review spends.
 
 **One point per ask.** The maintainer cannot half-agree with a bundled question.
 

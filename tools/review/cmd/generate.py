@@ -37,12 +37,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     review.ensure_entry(
         overview, review.overview_front(cfg), "overview",
         review.overview_body(ctx.git, cfg, net),
+        title=review.OVERVIEW_TITLE,
     )
 
     coverage = paths.entries_dir / f"{review.COVERAGE_SLUG}.md"
     review.ensure_entry(
         coverage, review.coverage_front(), "coverage",
         review.coverage_body(cfg, net, ledger, discharged),
+        title=review.COVERAGE_TITLE,
     )
 
     review.record(paths.log, "generate", entries=[review.OVERVIEW_SLUG, review.COVERAGE_SLUG])

@@ -6,7 +6,6 @@ The tool warns when that path is not gitignored, because the first thing a fresh
 
 ```
 review.toml           what the review is pinned to, and what it has reached
-index.md              reserved for a rendered index
 changes/
   ledger.jsonl        one record per change, append-only
   CHANGE-7Q2M.diff    that change's hunk body

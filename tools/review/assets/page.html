@@ -24,13 +24,13 @@
   </nav>
   <main id="main">
     <div id="topbar">
-      <button id="prev" title="previous entry (k)">&#8593;</button>
-      <button id="next" title="next entry (j)">&#8595;</button>
-      <button id="next-open" title="next unanswered entry (n)">next unanswered</button>
+      <button id="prev" title="previous entry (k)">&#8593;<span class="btn-key">k</span></button>
+      <button id="next" title="next entry (j)">&#8595;<span class="btn-key">j</span></button>
+      <button id="next-open" title="next unanswered entry (n)">next unanswered<span class="btn-key">n</span></button>
       <div id="topbar-spacer"></div>
       <span id="save-state"></span>
-      <button id="send" title="finalize this round and hand it back (s)">Send to Claude</button>
-      <button id="pause" title="stop waiting, keep everything (p)">Pause</button>
+      <button id="send" title="finalize this round and hand it back (s)">Send to Claude<span class="btn-key">s</span></button>
+      <button id="pause" title="stop waiting, keep everything (p)">Pause<span class="btn-key">p</span></button>
       <button id="help-toggle" title="shortcuts (?)">?</button>
     </div>
     <div id="content"></div>
@@ -51,6 +51,7 @@
       <tr><td><kbd>?</kbd></td><td>this card</td></tr>
     </table>
     <p>Answers save themselves as you type. Nothing is handed back until you send.</p>
+    <p class="help-dismiss">Click anywhere, or press <kbd>Esc</kbd>, to close this.</p>
   </div>
 </div>
 

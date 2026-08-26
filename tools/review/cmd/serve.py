@@ -7,6 +7,8 @@ Handing the round back is a separate, deliberate act — the `Send to Claude` bu
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import threading
 import webbrowser
 
@@ -53,13 +55,39 @@ def start(ctx: Context, name: str, *, host: str, port: int) -> tuple[object, int
     raise SystemExit(1)
 
 
+def _warn_about_other_servers(ctx: Context, name: str) -> None:
+    """Name any other review in this repo that already has a server up.
+
+    Two servers on one machine is normal; not knowing which one a browser tab is showing is not,
+    and that is a whole round of confusion when the answer is "a different review".
+    """
+    others = [p.name for p in _served_elsewhere(ctx, name)]
+    if others:
+        print(review.console.yellow(
+            f"  note: {', '.join(others)} {'is' if len(others) == 1 else 'are'} also being served from this repo"
+        ))
+
+
+def _served_elsewhere(ctx: Context, name: str) -> list:
+    root = review.reviews_root(ctx.repo)
+    if not root.is_dir():
+        return []
+    out = []
+    for folder in sorted(p for p in root.iterdir() if p.is_dir() and p.name != name):
+        if review.ReviewPaths(folder).served_marker.is_file():
+            out.append(folder)
+    return out
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open(args.name)
     server, port = start(ctx, args.name, host=args.host, port=args.port)
     url = f"http://{args.host}:{port}/"
 
+    review.write_json(paths.served_marker, {"url": url, "pid": os.getpid(), "at": review.now()})
     review.record(paths.log, "serve", url=url, host=args.host)
     print(f"review {cfg.name} at {url}")
+    _warn_about_other_servers(ctx, args.name)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         # Reachable from the network is the point of --host, and there is no authentication of any kind.
         print(review.console.yellow(
@@ -71,9 +99,15 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if not args.no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
 
+    # An agent runs this in the background, where Python block-buffers stdout to a pipe.
+    # Without the flush the lines above arrive only when the server exits, so a wrong port or a wrong review is invisible
+    # to whoever is driving — which is a whole round spent answering another review's entries.
+    sys.stdout.flush()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped")
     finally:
         server.server_close()
+        paths.served_marker.unlink(missing_ok=True)

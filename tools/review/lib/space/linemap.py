@@ -86,11 +86,14 @@ def build(git: Git, earlier: str, later: str) -> TreeMap:
         new_path = file.new_path or file.path
         entry = FileMap(renamed_to=new_path if new_path != old_path else "")
         for hunk in file.hunks:
+            # A zero-length side is an insertion point, and git numbers it by the line *before* it.
+            # Shifting it to `start + 1` makes it a genuinely empty range, so the lookups below need no special case
+            # and the boundary line — which did not move — no longer collects the insertion's delta.
             entry.edits.append(Edit(
-                old_start=hunk.old_start,
-                old_len=0 if hunk.old_count == 0 else hunk.old_count,
-                new_start=hunk.new_start,
-                new_len=0 if hunk.new_count == 0 else hunk.new_count,
+                old_start=hunk.old_start + 1 if hunk.old_count == 0 else hunk.old_start,
+                old_len=hunk.old_count,
+                new_start=hunk.new_start + 1 if hunk.new_count == 0 else hunk.new_start,
+                new_len=hunk.new_count,
             ))
         entry.edits.sort(key=lambda e: e.old_start)
         tree.files[old_path] = entry

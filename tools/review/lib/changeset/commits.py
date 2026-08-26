@@ -12,7 +12,7 @@ so a claim can never escape the obligation the review actually has.
 from __future__ import annotations
 
 from ..git.diffparse import parse
-from ..git.run import EMPTY_TREE, Git, GitError
+from ..git.run import EMPTY_TREE, Git
 from ..space import linemap
 from ..space.netspace import ADDED, REMOVED, LineSpace
 from .ids import digest_of
@@ -115,9 +115,8 @@ def commit_atoms(
             claimed.add(REMOVED, base_path, reached.intersect(net.get(REMOVED, base_path)))
 
         # A file-level change is contributed whole, so it needs no mapping — only a check that head still carries it.
-        for kind, discriminant in file.file_atoms():
+        for kind, _ in file.file_atoms():
             match = next((a for a in net.files if a.kind == kind and a.path in (commit_new_path, commit_old_path)), None)
-            _ = discriminant
             if match is not None:
                 claimed.files = claimed.files | {match}
 
@@ -164,14 +163,13 @@ def shrinkage(git: Git, sha: str, candidates: list[Candidate], paths: list[str] 
     a commit whose work was rewritten later claims less than its diff suggests, and the number says so.
     """
     parent = _parent_of(git, sha)
-    try:
-        written = 0
-        for file in parse(git.diff(parent, sha, context=0, paths=paths)):
-            for hunk in file.hunks:
-                hunk_added, hunk_removed = hunk.sides()
-                written += len(hunk_added) + len(hunk_removed)
-    except GitError:
-        written = 0
+    written = 0
+    # A GitError here is not survivable: swallowing it reported zero lines written, and `collect` then dropped
+    # every candidate this commit produced without saying so.
+    for file in parse(git.diff(parent, sha, context=0, paths=paths)):
+        for hunk in file.hunks:
+            hunk_added, hunk_removed = hunk.sides()
+            written += len(hunk_added) + len(hunk_removed)
     claimed = sum(len(c.claim) for c in candidates)
     return written, claimed
 

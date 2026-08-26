@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
+_DIFF_GIT_RE = re.compile(r"^diff --git (.+)$")
 
 # Which file-level facts get their own change, since none of them is expressible as a line.
 FILE_ATOM_KINDS = ("rename", "mode", "binary", "delete", "add")
@@ -23,6 +24,36 @@ def unquote_path(raw: str) -> str:
     if s.startswith(("a/", "b/")):
         s = s[2:]
     return s
+
+
+def header_paths(rest: str) -> tuple[str, str]:
+    """The (old, new) paths from a `diff --git a/X b/Y` line, or ("", "") when they cannot be pinned.
+
+    Git omits the `---` / `+++` lines for a binary file and for a mode-only change, so for those this header
+    is the only place the path appears at all — and a file whose change never yields a path is dropped from the diff,
+    which is a change with no atom and no id.
+
+    The line is genuinely ambiguous for a path containing a space, which is why this is a fallback rather than the source.
+    The usual case pins itself: both sides name the same path, so `len` fixes the split exactly.
+    """
+    rest = rest.strip()
+    if rest.startswith('"'):
+        closing = rest.find('" "')
+        if closing > 0:
+            return unquote_path(rest[:closing + 1]), unquote_path(rest[closing + 2:])
+        return "", ""
+
+    # `a/P b/P`: 2 + len(P) + 1 + 2 + len(P) characters, so an odd remainder means the two sides differ.
+    if (len(rest) - 5) % 2 == 0:
+        width = (len(rest) - 5) // 2
+        same = rest[2:2 + width]
+        if width > 0 and rest == f"a/{same} b/{same}":
+            return same, same
+
+    marker = rest.find(" b/")
+    if rest.startswith("a/") and marker > 0:
+        return rest[2:marker], rest[marker + 3:]
+    return "", ""
 
 
 @dataclass
@@ -95,6 +126,24 @@ class FileDiff:
     is_delete: bool = False
     is_rename: bool = False
     hunks: list[Hunk] = field(default_factory=list)
+    # What the `diff --git` line said, used only where nothing better set a path.
+    header_old: str = ""
+    header_new: str = ""
+
+    def fill_paths_from_header(self) -> None:
+        """Take the paths from the `diff --git` header when the diff body never gave any.
+
+        Only ever fills what is empty, and respects the add/delete direction:
+        the header names both sides even for a file that exists on only one of them.
+        """
+        if self.old_path or self.new_path:
+            return
+        if not self.header_old and not self.header_new:
+            return
+        if not self.is_new:
+            self.old_path = self.header_old
+        if not self.is_delete:
+            self.new_path = self.header_new
 
     @property
     def path(self) -> str:
@@ -123,6 +172,9 @@ def parse(text: str) -> list[FileDiff]:
     for raw in text.splitlines():
         if raw.startswith("diff --git "):
             current = FileDiff()
+            m = _DIFF_GIT_RE.match(raw)
+            if m:
+                current.header_old, current.header_new = header_paths(m.group(1))
             hunk = None
             files.append(current)
             continue
@@ -173,4 +225,6 @@ def parse(text: str) -> list[FileDiff]:
         elif raw.startswith("Binary files ") or raw.startswith("GIT binary patch"):
             current.is_binary = True
 
+    for f in files:
+        f.fill_paths_from_header()
     return [f for f in files if f.old_path or f.new_path]

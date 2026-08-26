@@ -90,6 +90,8 @@ code, pre, kbd, .difflines { font-family: "Cascadia Code", "JetBrains Mono", Con
 
 .nav-id { color: var(--text-dim); font-size: 0.75rem; min-width: 2.2rem; }
 .nav-title { flex: 1; font-size: 0.87rem; }
+/* The group rides on the row rather than heading a section, so the navigation can keep the agent's reading order. */
+.nav-group-tag { color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
 .nav-mark { font-size: 0.8rem; }
 .nav-mark.ok { color: var(--good); }
 .nav-mark.partial { color: var(--warn); }
@@ -124,6 +126,13 @@ button {
 }
 button:hover { border-color: var(--accent); }
 #send { border-color: var(--good); color: var(--good); }
+/* Armed but not yet sent: the second press is the one that hands the round back. */
+#send.armed { border-color: var(--warn); color: var(--warn); }
+#send.armed .btn-key { color: var(--warn); }
+
+/* The shortcut a button is also reachable by, so the keys are learned from the toolbar rather than from the help card. */
+.btn-key { color: var(--accent); opacity: 0.7; margin-left: 0.45em; font-size: 0.8em; }
+#send .btn-key { color: var(--good); }
 
 #content { padding: 1.5rem 1.2rem 6rem; max-width: var(--reading); }
 
@@ -143,6 +152,19 @@ button:hover { border-color: var(--accent); }
 .tier-body { margin-top: 0.4rem; color: var(--text-dim); }
 .tier-delta { border-left-color: var(--accent); }
 .tier-label { color: var(--accent); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+/* Where a round's new material starts. Same shape as the round divider, in the accent colour, because it is the same question:
+   what have I not read yet. */
+.tier-delta-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 1.8rem 0 0.9rem;
+  color: var(--accent);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tier-delta-rule::before, .tier-delta-rule::after { content: ""; flex: 1; height: 2px; background: var(--accent); opacity: 0.45; }
 
 .recommendation {
   margin: 1.1rem 0;
@@ -226,9 +248,12 @@ a.coderef code { color: var(--accent); border-bottom: 1px dotted var(--accent); 
 
 /* ---- help ---------------------------------------------------------------- */
 
+/* The `display: flex` below outranks the `hidden` attribute's UA rule, so the attribute needs its own. */
 #help { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 20; }
+#help[hidden] { display: none; }
 .help-card { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; padding: 1.2rem 1.6rem; max-width: 32rem; }
 .help-card td { padding: 0.15rem 0.8rem 0.15rem 0; }
+.help-dismiss { color: var(--text-dim); }
 kbd { background: var(--bg-sunken); border: 1px solid var(--line); border-radius: 4px; padding: 0.05rem 0.35rem; }
 
 .hidden { display: none !important; }

@@ -32,7 +32,8 @@ def _renderer() -> MarkdownIt:
 _MD = _renderer()
 
 
-def _fence(tokens, index, options, env):
+# `add_render_rule` binds the function onto the renderer, so a rule takes `self` first even though it uses nothing from it.
+def _fence(self, tokens, index, options, env):
     token = tokens[index]
     info = (token.info or "").strip()
     lang, _, rest = info.partition(":")

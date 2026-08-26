@@ -30,7 +30,7 @@ from ..entry.parse import Entry, parse_file
 from ..goals.skeleton import describe, groups_for
 from ..render.entryview import render_entry
 from ..render.highlight import css as highlight_css
-from .watch import Watcher
+from .watch import Watcher, compute_digest
 
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
 
@@ -166,13 +166,18 @@ class ReviewApp:
             )
             answers.save()
 
+            # The digest this write produced, so the tab can recognise the reload it is about to cause as its own.
+            # Without it the watcher tells every tab that answers/ moved, and the one that moved it re-renders itself.
+            written_digest = compute_digest(self.paths)
+
             if client_hash and client_hash != current_hash:
                 return 409, {
                     "error": "the question changed while you were answering it",
                     "hash": current_hash,
                     "answer": answer.to_record(),
+                    "digest": written_digest,
                 }
-            return 200, {"answer": answer.to_record(), "hash": current_hash}
+            return 200, {"answer": answer.to_record(), "hash": current_hash, "digest": written_digest}
 
     def signal(self, payload: dict) -> tuple[int, dict]:
         action = str(payload.get("action", "send"))
@@ -299,6 +304,12 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
+
+    # `HTTPServer` turns this on, and on Windows SO_REUSEADDR lets a bind to a port another process is already
+    # listening on *succeed* — so the port fallback never fires, two servers hold one port, and the OS keeps
+    # routing the browser to whichever bound first.
+    # A second review then silently serves the first one's entries.
+    allow_reuse_address = False
 
     def __init__(self, address, app: ReviewApp) -> None:
         super().__init__(address, Handler)

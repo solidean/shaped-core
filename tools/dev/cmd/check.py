@@ -75,12 +75,13 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
     def check_review(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The review tool's own suite: coverage math, change identity and the entry grammar.
-        # It builds throwaway git repositories and reaches no network, so it is cheap enough to sit here; fix and scope are ignored.
+        # It builds throwaway git repositories and reaches no network, so it is cheap enough to sit here.
+        # Not fixable and not scopable, so fix and scope are ignored.
         runner = ctx.root / "tools" / "review" / "review-self-test.py"
         result = dev.run_step(
             ["uv", "run", str(runner)],
             step_type="review", name="review-self-test",
-            build_dir=ctx.root / "build", cwd=ctx.root, mirror=True, verbose=verbose,
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
         )
         return result.ok
 

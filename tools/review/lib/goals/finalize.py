@@ -5,8 +5,13 @@ A comment for someone else must stand alone for a reader who was never in the co
 A session that lands its own changes wants a work order, keyed to the changes so `sync` can verify each one.
 A design review wants the decisions, because the code that will carry them does not exist yet.
 
-Every artifact here is a **draft**.
-The tool can assemble what was decided; it cannot know which three of the twelve points are the ones worth someone's afternoon.
+Every artifact here is a **draft**, and that is what decides how much it filters.
+Each one is *input* to a synthesis step rather than something to paste unread, so none of them drops an entry by its group:
+an agent can tell a tooling note from a finding, every answer names the entry it came from, and a skip list is one more thing
+to remember when a group is added — which is exactly how `tooling` leaked into a PR comment.
+
+So the rule is the same everywhere: **every answer, in entry order**.
+What differs per goal is the *shape*, not the membership.
 """
 
 from __future__ import annotations
@@ -14,9 +19,6 @@ from __future__ import annotations
 from ..core.config import ReviewConfig
 from ..entry.answers import AnswerFile
 from ..entry.parse import Entry
-
-_SKIP_GROUPS = {"meta", "lgtm", "finalize", "framing"}
-
 
 def _decisions(entry: Entry, answers: AnswerFile) -> list[tuple[str, list[str], str]]:
     """(ask name, chosen options, free text) for every question this entry has a real answer to."""
@@ -30,6 +32,7 @@ def _decisions(entry: Entry, answers: AnswerFile) -> list[tuple[str, list[str], 
 
 
 def _answered(pairs: list[tuple[Entry, AnswerFile]]) -> list[tuple[Entry, AnswerFile, list]]:
+    """Every open entry that has a real answer, in entry order — which is the order the review was written to be read in."""
     rows = []
     for entry, answers in pairs:
         if entry.state != "open":
@@ -43,17 +46,16 @@ def _answered(pairs: list[tuple[Entry, AnswerFile]]) -> list[tuple[Entry, Answer
 def pr_comment(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
     """A single standalone comment: instructions only, no conversation, no open questions.
 
-    Context tiers and the overview are dropped on purpose — they exist so the maintainer could judge a point,
-    and they tell the author nothing they do not already know.
+    The per-goal shape is that context tiers and the overview never appear.
+    They exist so the maintainer could judge a point, and they tell the author nothing they do not already know.
+    Which entries appear is not a goal question — every answered one does, tagged with its group so the synthesis step can weigh it.
     """
     lines = ["<!-- draft: read it before posting; the tool assembled it, it did not decide it -->", ""]
     number = 0
     for entry, _, decisions in _answered(pairs):
-        if entry.group in _SKIP_GROUPS:
-            continue
         number += 1
         severity = f" ({entry.severity})" if entry.severity else ""
-        lines.append(f"**{number}. {entry.title}**{severity}")
+        lines.append(f"**{number}. {entry.title}**  <sub>{entry.group}{severity}</sub>")
         for _, chosen, text in decisions:
             for option in chosen:
                 lines.append(f"- {option}")
@@ -69,13 +71,12 @@ def pr_comment(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
 def work_order(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
     """A todo list for this session, keyed to the changes each point discharges.
 
-    The change ids are what makes it checkable afterwards: once the fix lands, `sync` marks them superseded.
+    The per-goal shape is the checkboxes and the change ids: once a fix lands, `sync` marks those changes superseded,
+    which is what makes the list checkable rather than merely readable.
     """
     lines = [f"# Work order — {cfg.name}", ""]
     number = 0
     for entry, _, decisions in _answered(pairs):
-        if entry.group in _SKIP_GROUPS:
-            continue
         number += 1
         lines.append(f"## {number}. {entry.title}  ({entry.group}"
                      + (f"/{entry.severity}" if entry.severity else "") + ")")

@@ -46,7 +46,7 @@ from .lib.core.paths import (
 from .lib.entry.answers import Answer, AnswerFile
 from .lib.entry.askhash import canonical as ask_canonical
 from .lib.entry.askhash import hash_ask
-from .lib.entry.generate import COVERAGE_SLUG, OVERVIEW_SLUG
+from .lib.entry.generate import COVERAGE_SLUG, COVERAGE_TITLE, OVERVIEW_SLUG, OVERVIEW_TITLE
 from .lib.entry.generate import coverage_body, coverage_front, ensure as ensure_entry, overview_body, overview_front
 from .lib.entry.grammar import (
     BLOCK_TYPES,
@@ -89,6 +89,7 @@ __all__ = [
     "Block",
     "CONTEXT_TIERS",
     "COVERAGE_SLUG",
+    "COVERAGE_TITLE",
     "Candidate",
     "Change",
     "Commit",
@@ -106,6 +107,7 @@ __all__ = [
     "LineSpace",
     "OPTION_KINDS",
     "OVERVIEW_SLUG",
+    "OVERVIEW_TITLE",
     "Option",
     "REMOVED",
     "ReviewConfig",

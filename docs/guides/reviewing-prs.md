@@ -171,6 +171,24 @@ Two corollaries a review should check:
 - **Keep the code paths.** Rejecting the feature at the API door is not the same as deleting the plumbing; the point is that conditional or full support later needs no redesign.
 - **Say why, and where.** The rejection must point at the portability reason in a doc, not just assert "not supported yet".
 
+### A gap the author names is where to look, and often where to defer
+
+**The layer a PR body flags as unexercised is where the defects are**, and it is worth going there first.
+The tool review (pr-147) is the worked case: the body said the local page had never been driven by a human, and every UI defect was there —
+a help overlay that could not be dismissed, a crash on every fenced code block, a save loop that scrolled the reader to the top, two servers sharing a port.
+Meanwhile the coverage engine the body argued for at length held up under adversarial testing.
+
+**But an acknowledged gap is frequently deliberate, and closing it is not automatically the right call.**
+Perfectionism kills velocity, and shipping something incomplete *on purpose* is a legitimate engineering decision.
+The trade is genuinely hard, and it is the author's to make rather than the reviewer's.
+
+So the finding is never "this is untested".
+It is **what is actually broken there**, found by going and looking, and then an ask whose options include **document and defer** —
+a line in a "Not yet" section, a TODO with the shape of the fix, an issue — alongside fixing it now.
+
+That option is what lets a maintainer ship incompletely *with intent* rather than by omission, and offering it costs nothing when the answer is "fix it".
+A review that only ever offers "fix it" pushes toward a completeness nobody asked for, and the deferral then happens silently instead.
+
 ### Commit messages are not evidence
 
 Commit messages are agent-written and unreliable, especially about **provenance**.

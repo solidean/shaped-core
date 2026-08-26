@@ -11,6 +11,8 @@ Repo-wide docs are at [docs/_index.md](../../../docs/_index.md).
 - [block-grammar](block-grammar.md) — the entry file format: block types, the attribute prelude, asks and options.
   This is what an agent writes and what the page renders, so it is the contract between them.
 - [review-folder](review-folder.md) — every file in a review folder, who writes it, and what survives a re-ingest.
+- [entry-types/](entry-types/_index.md) — recurring kinds of entry, as instructions rather than as code.
+  Read its index every review and a type in full only when it applies; the tool knows about none of them, which is why the set grows by writing prose.
 
 ## Elsewhere
 

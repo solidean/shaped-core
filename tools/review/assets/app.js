@@ -10,6 +10,9 @@ const state = {
   pending: new Map(),
   dirty: new Set(),
   staleContent: false,
+  sendArmed: false,
+  // Digests this tab caused by saving an answer. A reload carrying one of them is our own write coming back.
+  selfDigests: new Set(),
 };
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -55,52 +58,34 @@ function renderNav() {
     `${progress.answered}/${progress.asks} answered · ` +
     `${progress.discharged}/${progress.changes} changes discharged`;
 
-  const filter = el("filter").value.trim().toLowerCase();
   const list = el("nav-list");
   list.textContent = "";
 
-  const known = new Set(data.groups.map((g) => g.name));
-  const order = [...data.groups.map((g) => g.name)];
-  for (const row of data.entries) if (!known.has(row.group)) { order.push(row.group); known.add(row.group); }
+  for (const row of navRows()) {
+    const item = document.createElement("div");
+    item.className = "nav-entry";
+    if (row.slug === state.current) item.classList.add("current");
+    if (row.state !== "open") item.classList.add("obsolete");
+    if (row.error) item.classList.add("broken");
+    if (row.asks && row.answered === row.asks) item.classList.add("done");
 
-  for (const group of order) {
-    const rows = data.entries.filter(
-      (r) => r.group === group &&
-        (!filter || r.title.toLowerCase().includes(filter) || r.id.includes(filter))
-    );
-    if (!rows.length) continue;
+    const id = document.createElement("span");
+    id.className = "nav-id";
+    id.textContent = row.id;
+    const title = document.createElement("span");
+    title.className = "nav-title";
+    title.textContent = row.title;
+    const group = document.createElement("span");
+    group.className = "nav-group-tag";
+    group.textContent = row.group;
+    const mark = entryMark(row);
+    const flag = document.createElement("span");
+    flag.className = "nav-mark " + mark.cls;
+    flag.textContent = mark.text;
 
-    const section = document.createElement("div");
-    section.className = "nav-group";
-    const name = document.createElement("div");
-    name.className = "nav-group-name";
-    name.textContent = group;
-    section.appendChild(name);
-
-    for (const row of rows) {
-      const item = document.createElement("div");
-      item.className = "nav-entry";
-      if (row.slug === state.current) item.classList.add("current");
-      if (row.state !== "open") item.classList.add("obsolete");
-      if (row.error) item.classList.add("broken");
-      if (row.asks && row.answered === row.asks) item.classList.add("done");
-
-      const id = document.createElement("span");
-      id.className = "nav-id";
-      id.textContent = row.id;
-      const title = document.createElement("span");
-      title.className = "nav-title";
-      title.textContent = row.title;
-      const mark = entryMark(row);
-      const flag = document.createElement("span");
-      flag.className = "nav-mark " + mark.cls;
-      flag.textContent = mark.text;
-
-      item.append(id, title, flag);
-      item.addEventListener("click", () => selectEntry(row.slug));
-      section.appendChild(item);
-    }
-    list.appendChild(section);
+    item.append(id, title, group, flag);
+    item.addEventListener("click", () => selectEntry(row.slug));
+    list.appendChild(item);
   }
 }
 
@@ -109,19 +94,45 @@ function renderNav() {
 async function selectEntry(slug, { push = true } = {}) {
   if (!slug) return;
   const result = await getJSON("/api/entry/" + encodeURIComponent(slug));
-  if (!result.ok) return;
+  if (!result.ok) {
+    // Returning silently here makes a server-side render failure look like a nav item that does not respond to clicks.
+    setSaveState(`${slug}: ${result.body.error || "could not be rendered"}`, "bad");
+    return;
+  }
+
+  // Re-rendering the entry you are already on must not move you; only actually navigating goes back to the top.
+  const staying = slug === state.current;
+  const scroll = staying ? window.scrollY : 0;
+  const focused = staying ? (document.querySelector(".ask.focus") || {}).id : "";
 
   state.current = slug;
   state.staleContent = false;
   el("content").innerHTML = result.body.html;
   if (push) history.replaceState(null, "", "#" + slug);
-  window.scrollTo(0, 0);
   wireForms();
   renderNav();
+
+  window.scrollTo(0, scroll);
+  if (focused) {
+    // The focus class is what `1`-`9` aims at, so losing it across a refresh silently retargets the number keys.
+    const ask = document.getElementById(focused);
+    if (ask) ask.classList.add("focus");
+  }
+}
+
+// The one reading order — the agent's own numbering, which is the order it wants the review read in.
+// Grouping the nav by group would reshuffle that sequence, and then j/k could not agree with what is on screen.
+function navRows() {
+  if (!state.data) return [];
+  const filter = el("filter").value.trim().toLowerCase();
+  if (!filter) return state.data.entries;
+  return state.data.entries.filter(
+    (r) => r.title.toLowerCase().includes(filter) || r.id.includes(filter) || r.group.includes(filter)
+  );
 }
 
 function orderedSlugs() {
-  return state.data ? state.data.entries.map((r) => r.slug) : [];
+  return navRows().map((r) => r.slug);
 }
 
 function step(delta) {
@@ -132,7 +143,7 @@ function step(delta) {
 }
 
 function nextUnanswered() {
-  const rows = state.data ? state.data.entries : [];
+  const rows = navRows();
   const at = rows.findIndex((r) => r.slug === state.current);
   const pending = (r) => r.state === "open" && (r.error || (r.asks && r.answered < r.asks));
   const after = rows.slice(at + 1).find(pending) || rows.find(pending);
@@ -185,6 +196,7 @@ async function saveForm(form) {
   status.className = "ask-status";
   status.textContent = "saved";
   setSaveState("saved " + new Date().toLocaleTimeString());
+  if (result.body.digest) state.selfDigests.add(result.body.digest);
   refreshState();
 }
 
@@ -235,6 +247,29 @@ function pickOption(number) {
 
 // ---- rounds -----------------------------------------------------------------
 
+// Sending is the one irreversible act on this page: it freezes the round, moves the watermark and unblocks the agent.
+// So it is armed first and sent second, and a single stray keystroke cannot do it.
+const SEND_ARM_MS = 4000;
+let sendArmTimer = null;
+
+function requestSend() {
+  if (state.sendArmed) {
+    state.sendArmed = false;
+    clearTimeout(sendArmTimer);
+    el("send").classList.remove("armed");
+    signal("send");
+    return;
+  }
+  state.sendArmed = true;
+  el("send").classList.add("armed");
+  setSaveState(`press s again to hand back round ${state.data ? state.data.round : ""}`, "warn");
+  sendArmTimer = setTimeout(() => {
+    state.sendArmed = false;
+    el("send").classList.remove("armed");
+    setSaveState("");
+  }, SEND_ARM_MS);
+}
+
 async function signal(action) {
   for (const form of document.querySelectorAll(".ask-form")) flushSave(form);
   const result = await postJSON("/api/signal", { action });
@@ -261,8 +296,13 @@ async function refreshState() {
 
 function listen() {
   const events = new EventSource("/events");
-  events.addEventListener("reload", async () => {
+  events.addEventListener("reload", async (event) => {
     await refreshState();
+    if (state.selfDigests.has(event.data)) {
+      // Our own answer coming back. The nav counters are refreshed above, and the entry on screen is already right.
+      state.selfDigests.delete(event.data);
+      return;
+    }
     if (state.dirty.size || typing()) {
       state.staleContent = true;
       setSaveState("this entry changed — it will refresh when you stop typing", "warn");
@@ -302,7 +342,7 @@ function shortcuts(event) {
   if (event.key === "j") step(1);
   else if (event.key === "k") step(-1);
   else if (event.key === "n") nextUnanswered();
-  else if (event.key === "s") signal("send");
+  else if (event.key === "s") requestSend();
   else if (event.key === "p") signal("pause");
   else if (event.key === "?") el("help").hidden = !el("help").hidden;
   else if (event.key === "/") { el("filter").focus(); event.preventDefault(); }
@@ -321,7 +361,7 @@ async function main() {
   el("prev").addEventListener("click", () => step(-1));
   el("next").addEventListener("click", () => step(1));
   el("next-open").addEventListener("click", nextUnanswered);
-  el("send").addEventListener("click", () => signal("send"));
+  el("send").addEventListener("click", requestSend);
   el("pause").addEventListener("click", () => signal("pause"));
   el("help-toggle").addEventListener("click", () => { el("help").hidden = !el("help").hidden; });
   el("help").addEventListener("click", () => { el("help").hidden = true; });

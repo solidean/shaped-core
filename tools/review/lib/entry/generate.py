@@ -1,8 +1,7 @@
 """The two entries the tool writes for itself, and the rule that keeps them safe to rewrite.
 
-Only the overview and the coverage report are generated.
-The API surface is not, and deliberately: a symbol dump is not a cheat sheet, and the judgement about what matters
-in a change is the most useful thing an entry can carry.
+Only the overview and the coverage report are generated, and every other entry is authored end to end:
+the judgement about what matters in a change is the most useful thing an entry can carry, and nothing mechanical produces it.
 
 A generated block carries `generated: <key>`, and regeneration replaces exactly those blocks.
 Everything else in the file — including prose written directly underneath one — is left untouched,
@@ -11,6 +10,7 @@ so refreshing the overview after a `sync` never costs a sentence anyone wrote.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ..changeset.ledger import Ledger
@@ -20,7 +20,7 @@ from ..space.netspace import LineSpace
 from .parse import Entry, parse_file
 from .write import compose, restore_newlines, write_entry
 
-OVERVIEW_SLUG = "010-overview"
+OVERVIEW_SLUG = "015-changes"
 COVERAGE_SLUG = "990-coverage"
 
 _MAX_COMMITS = 40
@@ -70,6 +70,10 @@ def overview_body(git: Git, cfg: ReviewConfig, net: LineSpace) -> str:
     return "\n".join(lines)
 
 
+COVERAGE_TITLE = "Coverage & Finalize"
+OVERVIEW_TITLE = "Changes"
+
+
 def coverage_body(cfg: ReviewConfig, net: LineSpace, ledger: Ledger, discharged: set[str]) -> str:
     """The generated coverage report: identity first, then discharge."""
     uncovered = net.subtract(ledger.covered())
@@ -112,22 +116,39 @@ def _replace_generated(entry: Entry, key: str, body: str) -> str:
     return restore_newlines(entry, entry.text.rstrip("\n") + "\n\n" + body.strip() + "\n")
 
 
-def ensure(path: Path, front: dict[str, str], key: str, body: str) -> Entry:
-    """Create a generated entry, or refresh only its generated block if it is already there."""
+def _replace_front_title(text: str, body_start: int, title: str) -> str:
+    """Rewrite a generated entry's `title:`, and only within its front matter.
+
+    Bounded to `body_start` so a `title:` line inside someone's prose is never touched.
+    The character class excludes both line endings rather than using `.`, which matches a carriage return and would eat it.
+    """
+    head, rest = text[:body_start], text[body_start:]
+    updated, count = re.subn(r"(?m)^title:[^\r\n]*", "title: " + title, head, count=1)
+    return (updated if count else head) + rest
+
+
+def ensure(path: Path, front: dict[str, str], key: str, body: str, *, title: str = "") -> Entry:
+    """Create a generated entry, or refresh only its generated block if it is already there.
+
+    `title` is refreshed too where given, because a title carrying a live number is stale the moment the block under it moves.
+    """
     if path.is_file():
         existing = parse_file(path)
-        return write_entry(path, _replace_generated(existing, key, body))
+        text = _replace_generated(existing, key, body)
+        if title:
+            text = _replace_front_title(text, existing.body_start, title)
+        return write_entry(path, text)
     return write_entry(path, compose(front, [body]))
 
 
 def overview_front(cfg: ReviewConfig) -> dict[str, str]:
     return {
-        "id": "010",
-        "title": cfg.title or f"Overview: {cfg.base_spec}..{cfg.head_spec}",
+        "id": "015",
+        "title": OVERVIEW_TITLE,
         "group": "meta" if cfg.has_changeset else "framing",
         "state": "open",
     }
 
 
-def coverage_front() -> dict[str, str]:
-    return {"id": "990", "title": "Coverage", "group": "finalize", "state": "open"}
+def coverage_front(title: str = COVERAGE_TITLE) -> dict[str, str]:
+    return {"id": "990", "title": title, "group": "finalize", "state": "open"}

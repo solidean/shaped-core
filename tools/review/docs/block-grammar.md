@@ -21,6 +21,7 @@ severity: bug
 What this entry adds over the ones before it.
 
 ## changes  CHANGE-7Q2M CHANGE-K3PP
+show: collapsed
 
 Optional commentary on those hunks.
 
@@ -56,12 +57,24 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | `context/delta` | — | what this entry adds over the previous ones; always shown |
 | `prose` | — | the body of the point, written neutrally |
 | `code` | — | a code sample; fenced blocks inside it are highlighted |
-| `changes` | change ids | the hunks under discussion, rendered with their diffs |
+| `changes` | change ids | the hunks under discussion, rendered with their diffs; `show:` is required |
 | `recommendation` | — | the agent's opinion, visually separated from the neutral description |
 | `ask` | a name | the answerable question |
 
 The word limits warn rather than fail.
 They exist because a collapsed tier nobody can skim is a tier nobody opens.
+
+### `show:` is required on a `changes` block
+
+`show: visible` opens the diffs; `show: collapsed` puts them one click away.
+There is no default, on purpose: a default would make the quiet choice the unconsidered one, and this choice is about the reader's attention rather than about formatting.
+
+The question to answer is **can this entry be decided without the code?**
+Where the prose and the evidence already settle it, the diff is depth material for a reader who wants to go further, and it is `collapsed`.
+Where the reader genuinely cannot judge the point without seeing the hunk, it is `visible`.
+
+`collapsed` is the common answer, and a review whose every `changes` block is `visible` has not asked the question.
+A screen of diff costs scrolling on every visit to that entry, and human attention is the scarcest thing the tool spends.
 
 ## The attribute prelude
 
@@ -111,5 +124,5 @@ the tool accusing them of an edit the tool itself made.
 A block carrying `generated: <key>` is the tool's to rewrite, and nothing else in an entry ever is.
 `review generate` replaces exactly those blocks, so commentary written directly underneath one survives every refresh.
 
-Only the overview and the coverage report are generated.
-The API surface entry is authored, deliberately: a symbol dump is not a cheat sheet, and judging what matters in a change is the most useful thing an entry can carry.
+Only the overview and the coverage report are generated, and the coverage entry's `title:` is refreshed along with its block, since it carries a live percentage.
+Every other entry is authored end to end: judging what matters in a change is the most useful thing an entry can carry, and nothing mechanical produces it.

@@ -50,13 +50,14 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest --rest` | ids for whatever nothing claims yet |
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed |
+| `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path`, `--ids` |
 | `list` | the reviews in this repository, and where each one stands |
 | `validate <name>` | every entry parses, every change id resolves; run it before serving a round |
 | `generate <name>` | write or refresh the overview and coverage entries |
 | `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view |
 | `serve <name>` | the page the review is answered in; non-blocking |
 | `delta <name> [--finalize]` | the answers since the watermark; `--finalize` freezes the round |
-| `round <name> --wait` | block until the page signals, then print and freeze the round |
+| `round <name>` | block until the page signals, then print and freeze the round; `--no-wait` to peek |
 | `sync <name>` | re-point the review at a moved head |
 | `finalize <name>` | assemble the end artifact for the goal |
 | `self-test` | the tool's own suite, which `dev.py check` also gates on |
@@ -86,6 +87,12 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 - **`entries/` belongs to the agent and `answers/` to the server**, which is why an entry can gain a paragraph while an answer to it is being typed.
 - **The `tooling` group is for friction in this tool**, not in what is being reviewed.
   It discharges nothing, so filing there costs the coverage gate nothing.
+- **A `changes` block must declare `show: visible` or `show: collapsed`.**
+  There is no default, because the choice is about the reader's attention: most entries are decidable without opening the diff.
+- **`finalize` drops nothing by group.** Every answered entry appears, tagged with its group, because the artifact is
+  input to a synthesis step rather than something to paste unread.
+- **Only one server per review.** `serve` refuses a taken port rather than sharing it, and says so when another review
+  in this repo is already up.
 - The first run pays a `uv` resolve for `pygments` and `markdown-it-py`. That is the dependency cost, and it is cached afterwards.
 
 ## Layout
@@ -122,6 +129,7 @@ Named here rather than left to be discovered.
 
 ## Elsewhere
 
+- [TODO.md](TODO.md) — ideas agreed in a session but not built, as opposed to the known gaps above.
 - [docs/_index.md](docs/_index.md) — the design: the coverage model, the block grammar, the folder format.
 - [docs/guides/reviewing-prs.md](../../docs/guides/reviewing-prs.md) — what we look for in a review, which is the taste this tool carries rather than replaces.
 - [the `reviewing-a-pr` skill](../../.claude/skills/reviewing-a-pr/SKILL.md) — how a session drives all of this.

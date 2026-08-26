@@ -24,7 +24,7 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "context/delta": {"round"},
     "prose": {"round", "generated"},
     "code": {"round", "lang", "file"},
-    "changes": {"round", "generated"},
+    "changes": {"round", "generated", "show"},
     "recommendation": {"round"},
     "ask": {"round", "discharges", "follows"},
 }
@@ -36,6 +36,11 @@ WORD_LIMITS = {"context/cold": 150, "context/repo": 120}
 # A block carrying `generated: <key>` is the tool's to rewrite, and nothing else in an entry ever is.
 # That marker is what lets `review generate` refresh the overview without touching a sentence anyone wrote.
 GENERATED_ATTR = "generated"
+
+# How a `changes` block opens.
+# Required rather than defaulted, because the choice is about the reader's attention rather than about formatting:
+# a diff shown by default costs scrolling on every visit, and most entries are decidable from their prose and their evidence.
+SHOW_KINDS = ("visible", "collapsed")
 
 STATES = ("open", "obsolete", "superseded")
 SEVERITIES = ("bug", "design", "api", "docs", "nit", "question", "lgtm")

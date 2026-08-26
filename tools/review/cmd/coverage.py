@@ -49,6 +49,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             "changes": len(live),
             "bulk": len(bulk_ids),
             "runs": [{"path": p, "side": s, "start": lo, "end": hi} for p, s, lo, hi in uncovered.runs()],
+            # The human report lists these under the runs, so a script reading the JSON must see them too:
+            # an uncovered count with an empty `runs` reads as a bug in the reader rather than a file atom nobody claimed.
+            "files": [{"path": a.path, "kind": a.kind, "discriminant": a.discriminant}
+                      for a in sorted(uncovered.files, key=lambda a: (a.path, a.kind))],
         }, indent=2))
         return
 

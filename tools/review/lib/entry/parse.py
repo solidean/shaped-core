@@ -19,6 +19,7 @@ from .grammar import (
     FRONT_REQUIRED,
     HEADING_RE,
     SEVERITIES,
+    SHOW_KINDS,
     STATES,
     Option,
     ReviewParseError,
@@ -212,7 +213,16 @@ def _validate_block(block: Block, path: Path, seen_asks: set[str]) -> None:
         if duplicate:
             raise ReviewParseError(path, block.line, f"duplicate option {duplicate!r} in ask {block.name!r}",
                                    "two options that read the same cannot be told apart in an answer")
-    elif block.head and block.type != "changes":
+    elif block.type == "changes":
+        show = block.attrs.get("show", "")
+        if not show:
+            raise ReviewParseError(
+                path, block.line, "a `changes` block must say how it opens",
+                "add `show: collapsed` unless the reader cannot decide the entry without the diff, then `show: visible`",
+            )
+        if show not in SHOW_KINDS:
+            raise ReviewParseError(path, block.line, f"unknown show {show!r}", f"one of: {', '.join(SHOW_KINDS)}")
+    elif block.head:
         raise ReviewParseError(path, block.line, f"a `{block.type}` block takes no argument, got {block.head!r}",
                                "only `changes` and `ask` take one")
 

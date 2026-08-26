@@ -16,9 +16,92 @@ from functools import lru_cache
 from pygments import highlight as _pygments_highlight
 from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name, guess_lexer_for_filename
+from pygments.style import Style
+from pygments.token import (
+    Comment,
+    Error,
+    Generic,
+    Keyword,
+    Name,
+    Number,
+    Operator,
+    Punctuation,
+    String,
+    Text,
+    Whitespace,
+)
 from pygments.util import ClassNotFound
 
-_FORMATTER = HtmlFormatter(nowrap=True, classprefix="pg-")
+
+class DarkModern(Style):
+    """VS Code's Dark Modern palette, mapped onto Pygments' token tree.
+
+    Pygments ships no dark default, so without this the page emits the light `default` style over a dark background.
+    The tree is coarser than a TextMate grammar, so a few tokens are a judgement call rather than a translation:
+    Pygments has no `keyword.control`, so `Keyword.Namespace` carries the magenta that VS Code gives `import` and `#include`,
+    and every other keyword takes the blue.
+
+    `background_color` is empty on purpose.
+    The diff table paints its own per-line tint, and a style background would sit on top of it.
+    """
+
+    background_color = ""
+    line_number_color = "#6e7681"
+
+    styles = {
+        Text: "#cccccc",
+        Whitespace: "#cccccc",
+        Error: "#f44747",
+
+        Comment: "#6a9955",
+        Comment.Preproc: "#c586c0",
+        Comment.PreprocFile: "#ce9178",
+
+        Keyword: "#569cd6",
+        Keyword.Namespace: "#c586c0",
+        Keyword.Constant: "#569cd6",
+        Keyword.Type: "#569cd6",
+
+        Operator: "#d4d4d4",
+        Operator.Word: "#c586c0",
+        Punctuation: "#d4d4d4",
+
+        Name: "#9cdcfe",
+        Name.Attribute: "#9cdcfe",
+        Name.Builtin: "#569cd6",
+        Name.Builtin.Pseudo: "#569cd6",
+        Name.Class: "#4ec9b0",
+        Name.Constant: "#4fc1ff",
+        Name.Decorator: "#dcdcaa",
+        Name.Entity: "#569cd6",
+        Name.Exception: "#4ec9b0",
+        Name.Function: "#dcdcaa",
+        Name.Function.Magic: "#dcdcaa",
+        Name.Label: "#c8c8c8",
+        Name.Namespace: "#4ec9b0",
+        Name.Property: "#9cdcfe",
+        Name.Tag: "#569cd6",
+        Name.Variable: "#9cdcfe",
+
+        String: "#ce9178",
+        String.Doc: "#6a9955",
+        String.Escape: "#d7ba7d",
+        String.Interpol: "#569cd6",
+        String.Regex: "#d16969",
+        String.Symbol: "#ce9178",
+
+        Number: "#b5cea8",
+
+        Generic.Deleted: "#f44747",
+        Generic.Inserted: "#6a9955",
+        Generic.Emph: "italic",
+        Generic.Strong: "bold",
+        Generic.Heading: "bold #569cd6",
+        Generic.Subheading: "bold #4ec9b0",
+    }
+
+
+_FORMATTER = HtmlFormatter(nowrap=True, classprefix="pg-", style=DarkModern)
 
 # Extensions the repo actually carries, mapped to what Pygments calls them.
 _BY_SUFFIX = {
@@ -30,8 +113,13 @@ _BY_SUFFIX = {
 
 
 def css() -> str:
-    """The highlighting palette, emitted once into the page."""
-    return HtmlFormatter(classprefix="pg-").get_style_defs(".pg")
+    """The highlighting palette, emitted once into the page.
+
+    An empty `background_color` still makes Pygments emit `background: ;`, which is an invalid declaration rather than no
+    declaration, so it is dropped here — the diff table's own per-line tint is what should show through.
+    """
+    defs = HtmlFormatter(classprefix="pg-", style=DarkModern).get_style_defs(".pg")
+    return defs.replace("background: ; ", "").replace("{ background: ; }", "{ }")
 
 
 def _lexer_for(path: str, lang: str):
