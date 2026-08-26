@@ -69,6 +69,14 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    `init` resolves the merge base and pins it as a sha, so a moving `main` cannot change what the review is accountable for.
    **Never diff against local `main`** — it only moves when someone pulls.
 
+   Reviewing a branch the current checkout cannot hold — the tool lives here and the change lives elsewhere — means a worktree, and `--repo` pointing the tool at it.
+   **Put it under `.tmp/worktrees/<name>`**, or in your scratchpad, or wherever the user said; never in a sibling folder next to their projects.
+   ```bash
+   git worktree add .tmp/worktrees/pr-<n> pr-<n>
+   uv run review.py --repo .tmp/worktrees/pr-<n> init pr-<n> --range origin/main..pr-<n> --goal <goal>
+   ```
+   `--repo` has to be on every later command too, since it is what decides which repository the review folder belongs to.
+
 2. **Account for every change.**
    ```bash
    uv run review.py ingest pr-<n> --stats     # the shape, before committing to reading it
