@@ -118,11 +118,38 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    Exit 0 means sent, 2 means paused, 3 means timed out.
    Do not treat a pause as an answer.
 
-7. **Next round.** Act on what came back, append new blocks and entries, and serve again.
+7. **Next round: append to the entry you are answering, rather than opening a new one.**
+   The answer stays on screen and your follow-up lands under a round divider below it.
+   The thread then reads top to bottom in one file.
+   ```markdown
+   ## context/delta
+
+   You asked whether X. Here is what the code says.
+
+   ## prose
+
+   ...
+
+   ## ask  the-followup
+   follows: the-answered-ask
+   ```
+   `stamp_rounds` stamps the new blocks and `entryview` draws the divider; nothing above is rewritten, which is what keeps a finalized answer immutable.
+
+   **Open a new entry only when the subject is new**, not when the same subject reaches its second round.
+   A new entry owes all three context tiers again, so a follow-up written as one restates what the parent entry already established.
+   `validate` warns when an ask's `follows:` names an ask in a different entry, which is the tell.
+   Discharges are the other cost: the change ids stay on the parent, so the entry that owns the hunks stops being the entry with the live question.
+
    A round with three answers out of twelve is a normal round.
 
-8. **Finalize.** `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
+8. **When most entries are settled, draft the artifact as an entry.**
+   For a `pr-comment` review, add `985-draft-comment` immediately before `990` holding the comment you would actually post, and ask whether to post it.
+   The maintainer approves the exact text rather than a summary of it, which is the last thing they cannot check any other way.
+   See [entry-types/draft-artifact.md](../../../tools/review/docs/entry-types/draft-artifact.md).
+
+9. **Finalize.** `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
    It is a draft: the tool gathered what was decided, it did not decide which points are worth an afternoon.
+   Post only on an explicit go-ahead, as one comment.
 
 ## Writing entries that are worth answering
 

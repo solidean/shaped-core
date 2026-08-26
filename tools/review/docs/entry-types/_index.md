@@ -42,6 +42,11 @@ Take its structure and its examples, and drop anything the change does not have.
   The judgement that detail-oriented entries lose.
   *Applies: always, when there is a changeset — written last, after the findings are known.*
 
+- [draft-artifact](draft-artifact.md) — **the comment you are about to post, shown as itself.**
+  The maintainer approved each finding as it was raised; this is the first time they see them assembled, in order, at the length someone else will read.
+  One ask, and it is a gate rather than a question.
+  *Applies: a `pr-comment` or `land-changes` review, once the answers stop producing follow-ups.*
+
 ## Where they sit
 
 The numbering is the reading order, and these three anchor it:
@@ -52,6 +57,7 @@ The numbering is the reading order, and these three anchor it:
 018-glossary.md        the vocabulary                    (authored)
 0xx-...                the findings                      (authored)
 980-verdict.md         the big picture                   (authored)
+985-draft-comment.md   the artifact, before it is posted (authored)
 990-coverage.md        the gates                         (generated)
 ```
 

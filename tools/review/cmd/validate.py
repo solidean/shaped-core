@@ -47,6 +47,17 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if absent:
                 thin = True
                 problems.append(f"{entry.slug}: no {', '.join(absent)}")
+        # A follow-up belongs under the ask it follows, where the answer it responds to is on screen above it.
+        # Naming an ask in another entry usually means a new entry was opened where a round should have been appended,
+        # which splits one thread across two files and makes the second restate the first's context.
+        for block in entry.asks:
+            target = block.attrs.get("follows", "")
+            if target and entry.ask(target) is None:
+                warnings.append(
+                    f"{entry.slug}: ask {block.name!r} follows {target!r}, which is not an ask in this entry — "
+                    f"a follow-up usually belongs appended to the entry it follows"
+                )
+
         for name in sorted(answers.answers):
             if entry.ask(name) is None:
                 warnings.append(f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it")
