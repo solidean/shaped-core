@@ -123,6 +123,13 @@ view_index frame::add_view(cc::string_view id)
     return index;
 }
 
+void frame::register_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body)
+{
+    CC_ASSERT(_open, "cannot author a closed frame");
+    if (_viewer != nullptr)
+        _viewer->apply_capture(name, body, *this);
+}
+
 isize frame::pending_resource_work() const
 {
     return _viewer == nullptr ? 0 : _viewer->pending_resource_work();

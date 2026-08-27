@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/print.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
@@ -11,8 +12,10 @@
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
+#include <shaped-viewer/impl/capture_session.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
+#include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/shaders.hh> // sv::shader_package (path tracer)
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
@@ -120,6 +123,9 @@ struct viewer::impl
 
     /// Headless only: what `request_close` sets, since there is no window to route it through.
     bool close_requested = false;
+
+    /// The capture this run is taking, or null on an ordinary interactive run.
+    cc::unique_ptr<sv::impl::capture_session> capture;
 
 
     gpu_resource_manager resources;
@@ -324,6 +330,27 @@ gpu_resource_manager& viewer::resources()
 isize viewer::pending_resource_work() const
 {
     return _impl->resources.pending_work_count();
+}
+
+void viewer::install_capture(capture_request req)
+{
+    CC_ASSERT(_impl->config.headless, "a capture needs a headless viewer — there is no offscreen target otherwise");
+    _impl->capture = cc::make_unique<sv::impl::capture_session>(cc::move(req));
+    _impl->capture->begin();
+}
+
+void viewer::apply_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body, frame& f)
+{
+    auto* const session = _impl->capture.get();
+    if (session == nullptr)
+        return; // an interactive run: a registered capture is inert, exactly as if it had never been declared
+
+    session->note_registered(name);
+    if (!session->is_active(name))
+        return;
+
+    body({.first_frame = session->is_first_application(), .name = name, .size = f.viewport_size()});
+    session->mark_applied();
 }
 
 sv::impl::view_state& viewer::state_of(view_id id)
@@ -732,6 +759,7 @@ void viewer::finish_frame(frame& f)
         if (target.refresh)
             im.views.get_or_create(target.id).last_refresh_frame = f._id;
 
+    auto traces_ran = false;
     try
     {
         // Reclaim stale / over-budget resources and advance to this frame's epoch, before any view resolves its ids or
@@ -746,6 +774,10 @@ void viewer::finish_frame(frame& f)
         // render_target_view, so the whole pass below this is identical either way.
         auto const output = im.config.headless ? im.offscreen.as_render_target_view() : im.current_backbuffer;
         viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
+
+        // Asked while the list is still ours: `is_ready` reports the last trace recorded onto it, and submitting moves it away.
+        // A frame with no trace has nothing to report, and nothing to be wrong about.
+        traces_ran = plan.traces.empty() || pathtrace_routine::is_ready(*im.current_cmd);
 
         if (im.config.headless)
         {
@@ -765,5 +797,54 @@ void viewer::finish_frame(frame& f)
 
     im.current_cmd = nullptr;
     im.current_backbuffer = sg::render_target_view{};
+
+    if (im.capture != nullptr)
+        advance_capture(plan, traces_ran);
+}
+
+void viewer::advance_capture(render_plan const& plan, bool traces_ran)
+{
+    auto& im = *_impl;
+    auto& session = *im.capture;
+    if (session.is_done())
+        return;
+
+    // The listing is answered by the first frame that ran: registration happens while a frame is authored, so there
+    // is nothing to list before one has been.
+    if (session.request().list_only)
+    {
+        // A library does not print, but a listing IS this run's requested output and has no other channel to reach
+        // the tool that asked for it.
+        for (auto const& name : session.registered_names())
+            cc::println("{}", name);
+
+        session.mark_done();
+        request_close();
+        return;
+    }
+
+    // One count per trace that refreshed, since only a traced layer accumulates and a view without one would
+    // otherwise hold the whole run at zero forever.
+    auto accumulated = cc::vector<u32>();
+    for (auto const& tr : plan.traces)
+        if (tr.refresh)
+            accumulated.push_back(im.views.accumulated_frames(tr.id, temporal_id::accumulation(tr.layer)));
+
+    auto const settled = session.is_settled(accumulated, im.resources.pending_work_count(), traces_ran);
+    if (!settled && !session.is_out_of_time())
+        return;
+
+    if (settled)
+        session.mark_settled_before_writing();
+    else
+        CC_LOG_WARNING("capture: giving up after {}s — writing the image as it stands", session.elapsed_seconds());
+
+    auto const written = sv::impl::write_capture_image(
+        *im.ctx, im.offscreen, tg::vec2i(im.config.width, im.config.height), session.request().output_path);
+    if (written.has_error())
+        CC_LOG_ERROR("capture: {}", written.error().to_string());
+
+    session.mark_done();
+    request_close();
 }
 } // namespace sv

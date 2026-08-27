@@ -38,6 +38,19 @@ class Example:
     line: int
 
 
+def capture_directory(preset: Preset, example_name: str, shot: str = "") -> Path:
+    """Where one capture's artifacts land: `build/<preset>/captures/<example>/<shot>/`.
+
+    Under the build directory rather than beside the example, because a capture must never dirty the source tree — it is runnable by anyone, at any time, including from CI.
+    Copying the image next to its example is the separate refresh step, and only a capture that succeeded is ever copied.
+
+    That location also inherits what the build directory already has: the gitignore, the log archiving, and the CI
+    upload that makes a runner-only failure diagnosable.
+    """
+    parts = example_name.split("/")
+    return preset.build_dir / "captures" / Path(*parts) / (shot or "default")
+
+
 def is_example_target(target: Target) -> bool:
     """Project convention: example executables are named '*-example'."""
     return target.kind == "EXECUTABLE" and target.name.endswith("-example")

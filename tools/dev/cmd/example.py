@@ -17,7 +17,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
-from tools.dev.lib.pipeline.examples import collect_examples, is_example_target, resolve_example
+from tools.dev.lib.pipeline.examples import capture_directory, collect_examples, is_example_target, resolve_example
 
 from . import args as a
 from .context import Context
@@ -40,6 +40,21 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--background", action="store_true",
                    help="Ask the example not to steal focus: its windows appear without being activated. "
                         "Sets SC_REQUEST_BACKGROUND=1, which sr::window_system reads (sr::background_request_env_var).")
+    p.add_argument("--capture", nargs="?", const="", metavar="NAME",
+                   help="Run headless and write an image instead of opening a window: no display is needed. "
+                        "With NAME, take the capture the example registered under that name. "
+                        "Sets SC_CAPTURE, which sv::interactive reads (libs/graphics/shaped-viewer/src/shaped-viewer/capture.hh).")
+    p.add_argument("--capture-out", metavar="PATH",
+                   help="Where --capture writes. Defaults to build/<preset>/captures/<name>/<shot>/capture.jpg; "
+                        "the extension picks the format.")
+    p.add_argument("--capture-size", metavar="WxH", default="1920x1080",
+                   help="Resolution --capture renders at (default: 1920x1080)")
+    p.add_argument("--capture-accumulate", metavar="N", type=int,
+                   help="Accumulated frames every traced view must reach before --capture writes (default: 60)")
+    p.add_argument("--capture-timeout", metavar="SECS", type=float,
+                   help="How long --capture may spend before it gives up and writes what it has (default: 60)")
+    p.add_argument("--capture-list", action="store_true",
+                   help="Print the capture names the example registers, then exit. Runs one headless frame to find out.")
     p.add_argument("--test-args", metavar="LINE",
                    help="A command line for the example itself, reachable from its body through "
                         "nx::test_args(). Forwarded as one string and tokenized by the runner, so the "
@@ -104,6 +119,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if args.background:
         env = {**os.environ, "SC_REQUEST_BACKGROUND": "1"}
 
+    capture_path = None
+    if args.capture is not None or args.capture_list:
+        capture_path, capture_env = _capture_environment(ctx, preset, example, args)
+        env = {**(env or os.environ), **capture_env}
+
     # The exact name plus the bucket flag: an example is never swept, so it must be named to run.
     # Mirrored, because watching the example run is the entire point of the command.
     result = dev.run_step(
@@ -113,7 +133,42 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         timeout=args.timeout if args.timeout else None,
         mirror=True, verbose=args.verbose,
     )
+    if capture_path is not None and result.returncode == 0:
+        print(console.dim(f"capture -> {ctx.rel(capture_path)}"), file=sys.stderr)
+
     sys.exit(result.returncode)
+
+
+def _capture_environment(ctx: Context, preset, example, args) -> tuple[Path | None, dict]:
+    """The environment a capture run needs, and the image it will write.
+
+    The output path is composed here rather than inside the example, because dev.py is the only party that knows both
+    the resolved example name and where this preset's build directory is.
+    A capture never writes into the source tree: it lands under the build directory, which already carries the gitignore, the log archiving and the CI upload.
+    Copying one next to its example is the separate refresh step.
+    """
+    env = {"SC_CAPTURE": "1", "SC_CAPTURE_SIZE": args.capture_size}
+    if args.capture_accumulate is not None:
+        env["SC_CAPTURE_ACCUMULATE"] = str(args.capture_accumulate)
+    if args.capture_timeout is not None:
+        env["SC_CAPTURE_TIMEOUT"] = str(args.capture_timeout)
+
+    if args.capture_list:
+        env["SC_CAPTURE_LIST"] = "1"
+        return None, env
+
+    shot = args.capture or ""
+    if shot:
+        env["SC_CAPTURE_NAME"] = shot
+
+    if args.capture_out:
+        out = Path(args.capture_out).resolve()
+    else:
+        out = capture_directory(preset, example.name, shot) / "capture.jpg"
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    env["SC_CAPTURE_OUT"] = str(out)
+    return out, env
 
 
 def _working_directory(ctx: Context, example) -> Path:

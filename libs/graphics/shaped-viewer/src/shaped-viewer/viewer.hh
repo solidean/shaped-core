@@ -2,6 +2,7 @@
 
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -141,10 +142,28 @@ private:
     /// Separate from `resources()` because that one hands out a mutable manager, and asking a count should not.
     [[nodiscard]] isize pending_resource_work() const;
 
+    /// Installs the capture this run is taking; the viewer must have been created headless for it.
+    ///
+    /// **Only `sv::interactive` calls this.**
+    /// A caller driving `begin_frame` / `end_frame` never gets a session, whatever the environment says, so an
+    /// application embedding the viewer cannot have its loop ended out from under it.
+    void install_capture(capture_request req);
+
+    /// Runs `body` when `name` is the capture being taken, and notes the name either way for the listing mode.
+    ///
+    /// Called from `frame::register_capture`, so the callback runs exactly where it was declared in the frame body —
+    /// which is what lets it override what the body already wrote.
+    void apply_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body, frame& f);
+
     /// The persistent state of the view named `id`, created on first use.
     /// The frame reaches this on a caller's behalf; nothing outside authoring should hold the reference across frames,
     /// since the cache reclaims views that go unseen.
     [[nodiscard]] sv::impl::view_state& state_of(view_id id);
+
+    /// Decides what a capture run does next: settle, give up, or keep going — and writes the image when it is either
+    /// of the first two.
+    /// Runs after the frame has been submitted, since that is when its accumulators hold this frame's counts.
+    void advance_capture(render_plan const& plan, bool traces_ran);
 
     /// Runs one frame's rendering: resolve layout, translate views to a viewer_definition, drive viewer_renderer, present, advance the epoch.
     /// Called by frame::present.
@@ -180,6 +199,7 @@ private:
 
     friend class frame;
     friend class frame_iterator;
+    friend class frame_range;
 
     /// interactive() owns the viewer it opens, so it starts the loop the same way frames() does.
     friend frame_range interactive(cc::string_view id, viewer_config config);

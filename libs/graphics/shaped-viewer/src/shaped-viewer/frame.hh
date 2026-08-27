@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh> // cc::move, for the frame a frame_scope adopts
 #include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
@@ -143,6 +144,23 @@ public:
 
     /// The seed view names currently derive from — for a caller minting a view_id by hand.
     [[nodiscard]] u64 id_seed() const { return _id_seed; }
+
+    /// Declares a named capture: a setup this frame can be asked for by name, instead of the view as the body leaves it.
+    ///
+    ///     f.register_capture("front", [&](sv::capture_context const&) { view.camera(front_camera); });
+    ///
+    /// `body` runs INLINE, right here in the frame body, on every frame of the run — and only when this capture is the
+    /// one being taken (`SC_CAPTURE_NAME`). So it may simply force what it wants, and whatever the body writes after it
+    /// still wins, which is visible in the source rather than in a rule.
+    /// On an interactive run nothing is taken, so no callback ever runs.
+    ///
+    /// **`body` must be idempotent after its first frame.**
+    /// Any change to what the image depends on restarts the accumulation, so a callback writing a slightly different
+    /// value every frame never converges: the run spends its whole timeout and then fails.
+    /// `capture_context::first_frame` is where one-shot setup goes.
+    ///
+    /// Re-registering the same name is how this is meant to be called — every frame, from the same place.
+    void register_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body);
 
     /// Flattens the frame into a render plan, records it and presents.
     /// Idempotent, and a no-op on a closed frame.
