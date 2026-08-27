@@ -36,7 +36,7 @@ Read trends, not third decimals.
 ## Reproducing
 
 These full tables are the manual `bench-string-hash (… full sweep)` benchmarks.
-Lean `GUIDE_BENCHMARK`s of the same base names record just the representative points (≈8 B and ≈64 KiB) via `nx::guide`, for `dev.py pgo`.
+Lean `PGO_BENCHMARK`s of the same base names record just the representative points (≈8 B and ≈64 KiB) via `nx::pgo`, for `dev.py pgo`.
 The full sweep regenerates a multi-MB corpus per length, so it is far slower.
 Both are excluded from normal sweeps, and the `"bench-string-hash"` filter matches both — so name them explicitly:
 

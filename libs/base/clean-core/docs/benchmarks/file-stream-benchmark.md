@@ -76,7 +76,7 @@ Worth adding if bulk file copies become a hot path.
 ## Running it
 
 ```bash
-# guide benchmark: prints the table, records the 1 B points into the .perf.json sidecar
+# PGO benchmark: prints the table, records the 1 B points into the .pgo.json sidecar
 uv run dev.py --mirror-output test "bench-file-stream (cc vs std)" --preset release-clang
 ```
 

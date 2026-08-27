@@ -475,7 +475,7 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
             metrics.clear();
         });
 
-    // Only a normal test must contain a CHECK/REQUIRE; a manual test or guide benchmark may legitimately have none.
+    // Only a normal test must contain a CHECK/REQUIRE; a manual test or PGO benchmark may legitimately have none.
     // A driver that dispatches parametrized tests (nested non-empty) is exempt too, since its assertions live in the dispatched children rather than its own body.
     bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal
                              && ctx.execution->nested.empty();

@@ -30,7 +30,7 @@ Four capabilities are easy to miss from the macros alone:
 |---|---|---|
 | parametrized / data-driven tests | `INVOCABLE_TEST` + `nx::invoke_tests` | [docs/invocable-tests.md](docs/invocable-tests.md) |
 | API-sequence fuzzing with shrinking and emitted reproducers | `nx::fuzz::test` | [docs/fuzz-testing.md](docs/fuzz-testing.md) |
-| recorded perf metrics, consumed by `dev.py pgo` | `GUIDE_BENCHMARK` + `nx::guide` | [docs/guides/perf-results.md](../../../docs/guides/perf-results.md) |
+| recorded perf metrics, consumed by `dev.py pgo` | `PGO_BENCHMARK` + `nx::pgo` | [docs/guides/perf-results.md](../../../docs/guides/perf-results.md) |
 | runnable demonstrations of an API in practice | `EXAMPLE` + `dev.py example` | [docs/guides/examples.md](../../../docs/guides/examples.md) |
 | a command line, with help, validation and completion | `nx::args` | [docs/args.md](docs/args.md) |
 | hardware performance counters around a workload | `nx::bench::measure_hw_counters` | [docs/guides/profiling.md](../../../docs/guides/profiling.md) |
@@ -42,7 +42,7 @@ Source lives in `src/nexus/`, grouped by responsibility:
 
 | Folder | What's in it |
 |---|---|
-| *(root)* | the macro surface (`test.hh`), the runner entry point (`run.hh`), and guide-benchmark reporting (`guide.hh`) |
+| *(root)* | the macro surface (`test.hh`), the runner entry point (`run.hh`), and pgo-benchmark reporting (`guide.hh`) |
 | `tests/` | the runner itself — registry, config, scheduling, execution, checks, sections, aliases, and the invocable machinery |
 | `tests/export/` | output formats: Catch2 XML, JUnit XML, the JSON test listing `dev.py test` pre-selects binaries with, and the perf sidecar |
 | `bench/` | hardware performance counters, with a per-OS backend under `impl/` |

@@ -16,14 +16,14 @@
 //
 // Anti-fold: each node is heap-allocated (unelidable) and its address/value is XOR-folded into the u64 returned from each pass -> bench::sink, so nothing is optimized away.
 //
-// Runs as a GUIDE_BENCHMARK: not part of the normal sweep, but recorded for the perf gate and reachable by exact name.
+// Runs as a PGO_BENCHMARK: not part of the normal sweep, but recorded for the perf gate and reachable by exact name.
 
 #include "../bench_util.hh"
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -68,7 +68,7 @@ void report(char const* label, double ops_per_sec, double prev_ns, char const* n
         std::printf("%-34s %9.2f %+12.2f   %s\n", label, ns, ns - prev_ns, note);
 
     if (metric != nullptr)
-        nx::guide::report_raw(metric, ns, "ns/op", /*higher_is_better*/ false);
+        nx::pgo::report_raw(metric, ns, "ns/op", /*higher_is_better*/ false);
 }
 
 void run(bool record)
@@ -179,7 +179,7 @@ void run(bool record)
 // The whole ladder runs either way, since the rows are cumulative deltas and you cannot measure one without the ones below it.
 // `record` only selects which rows are filed as metrics.
 // Also hosts the disassembly probes; the trace command targeting this name is in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
-GUIDE_BENCHMARK("bench-async born-ready decomposition")
+PGO_BENCHMARK("bench-async born-ready decomposition")
 {
     run(/*record*/ true);
 

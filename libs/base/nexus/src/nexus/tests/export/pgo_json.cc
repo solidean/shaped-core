@@ -1,9 +1,9 @@
-#include "perf_json.hh"
+#include "pgo_json.hh"
 
 #include <babel-serializer/data/json.hh>
 #include <clean-core/common/assert.hh>
 
-cc::string nx::write_perf_json(cc::string_view suite_name, nx::test_schedule_execution const& execution)
+cc::string nx::write_pgo_json(cc::string_view suite_name, nx::test_schedule_execution const& execution)
 {
     namespace json = babel::json;
 

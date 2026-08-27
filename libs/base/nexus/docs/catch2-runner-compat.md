@@ -40,8 +40,8 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 | `-v` | Enables verbose schedule printing |
 | `-c <name>` | Adds a section filter |
 | `--manual` | Selects the *manual* bucket for sweeps (see below). Not a Catch2 flag |
-| `--guide-benchmarks` | Selects the *guide_benchmark* bucket (perf benchmarks; see [perf-results.md](../../../../docs/guides/perf-results.md)). Not a Catch2 flag |
-| `--perf-json <file>` | Writes recorded `nx::guide` metrics to `<file>` (additive). Not a Catch2 flag |
+| `--pgo-benchmarks` | Selects the *pgo_benchmark* bucket (perf benchmarks; see [perf-results.md](../../../../docs/guides/perf-results.md)). Not a Catch2 flag |
+| `--pgo-json <file>` | Writes recorded `nx::pgo` metrics to `<file>` (additive). Not a Catch2 flag |
 | `--record` | Buckets every test's `cc::rec` events and writes a recording for each failing one, whatever the tests' own configs say (see [recording.md](recording.md)). Not a Catch2 flag |
 | `--no-recording` | Leaves `cc::rec` down for the whole run: no per-test buckets, no console logger, no failure dumps (see [recording.md](recording.md)). Not a Catch2 flag |
 | `--list-tests-json <file>` | Writes a JSON listing of every registered test (with eligibility under the other args) to `<file>` — `-` means stdout — then exits 0 without running anything. Used by `dev.py test` to pre-select binaries. Not a Catch2 flag |
@@ -72,15 +72,15 @@ A filter naming a directory stands for its subtree.
 Separators are normalized (`\` and `/` are the same, and git-bash's `/c/x` is `C:\x`), and matching folds case.
 
 A file match selects exactly like a substring filter does — it is **never** an exact name, so it opens neither the disabled nor the bucket gate.
-`dev.py test hash-benchmark.cc` therefore reports that the file's benchmarks are in the `guide_benchmark` bucket rather than running them; `--guide-benchmarks hash-benchmark.cc` runs them.
+`dev.py test hash-benchmark.cc` therefore reports that the file's benchmarks are in the `pgo_benchmark` bucket rather than running them; `--pgo-benchmarks hash-benchmark.cc` runs them.
 
 The fallback is decided once per binary, by `resolve_filter_mode`, before anything queries a filter — so the schedule and the `--list-tests-json` listing always agree.
 `--match-files` and `--match-names` pin the reading instead of letting it fall back.
 
 ### Buckets and disabled tests
 
-Every test lives in exactly one **bucket** — `normal` (the default), `manual`, `guide_benchmark` or `example` — set via `nx::config::manual` / `guide_benchmark` / `example`.
-A sweep selects exactly one bucket: the default selects `normal`, `--manual` selects `manual`, `--guide-benchmarks` selects `guide_benchmark`, `--examples` selects `example`.
+Every test lives in exactly one **bucket** — `normal` (the default), `manual`, `pgo_benchmark` or `example` — set via `nx::config::manual` / `pgo_benchmark` / `example`.
+A sweep selects exactly one bucket: the default selects `normal`, `--manual` selects `manual`, `--pgo-benchmarks` selects `pgo_benchmark`, `--examples` selects `example`.
 The bucket set is intentionally extensible.
 
 `disabled` (`enabled = false`) is **orthogonal** to buckets: it can apply to any bucket, and excludes a test from sweeps until it is named exactly or `run_disabled_tests` is set.
@@ -88,8 +88,8 @@ The bucket set is intentionally extensible.
 
 - **manual** — tests that open windows, or are otherwise incompatible with unattended runs.
   Swept only under `--manual`.
-- **guide_benchmark** — perf benchmarks that report metrics via `nx::guide`, covered by [perf-results.md](../../../../docs/guides/perf-results.md).
-  Swept only under `--guide-benchmarks`.
+- **pgo_benchmark** — perf benchmarks that report metrics via `nx::pgo`, covered by [perf-results.md](../../../../docs/guides/perf-results.md).
+  Swept only under `--pgo-benchmarks`.
 - **example** — `EXAMPLE` declarations demonstrating an API in practice, covered by [examples.md](../../../../docs/guides/examples.md).
   Swept only under `--examples`, and normally reached one at a time by exact name, which is what `dev.py example` sends.
 

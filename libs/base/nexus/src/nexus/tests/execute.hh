@@ -32,7 +32,7 @@ struct nx::test_error
     // NOTE: if expr == expanded, C++ TestMate just shows "failed" instead of anything useful, so make sure they are always different
 };
 
-// A single performance metric recorded by a guide benchmark via nx::guide (see guide.hh).
+// A single performance metric recorded by a PGO benchmark via nx::pgo (see guide.hh).
 // higher_is_better orients comparisons (throughput vs. latency); unit is a free-form label (e.g. "GB/s", "s").
 struct nx::recorded_metric
 {
@@ -46,7 +46,7 @@ struct nx::test_execution
 {
     test_instance instance;
 
-    // Metrics recorded by nx::guide during this test (typically a guide benchmark). Empty for normal tests.
+    // Metrics recorded by nx::pgo during this test (typically a PGO benchmark). Empty for normal tests.
     cc::vector<recorded_metric> metrics;
 
     struct section
@@ -174,7 +174,7 @@ struct check_result
 void report_check_result(check_result result);
 
 // Appends a metric to the active test's execution, and is a no-op when no test is running.
-// nx::guide is the public face.
+// nx::pgo is the public face.
 void record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better);
 
 // Crash-context hook (cc::crash_context_hook): writes the currently running test and section index to stderr.

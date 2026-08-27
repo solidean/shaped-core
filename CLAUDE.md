@@ -25,7 +25,7 @@ One-liner per library:
   [docs/systems/recording.md](libs/base/clean-core/docs/systems/recording.md) is the mechanism.
   **Every library has a recording domain and logs its diagnostics** — a library never prints, and never writes its own `[lib]` prefix.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
-  Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
+  Carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   Namespace `nx`. Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
   **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
@@ -360,7 +360,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
 | Benchmark / compare two implementations | a `nx::config::manual` test — never swept, needs no CHECK, prints its own table ([sort-benchmark.cc](libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model). A microbenchmark harness in nexus is still TODO |
-| Record a tracked metric for PGO  | `GUIDE_BENCHMARK` + `nx::guide` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
+| Record a tracked metric for PGO  | `PGO_BENCHMARK` + `nx::pgo` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Read hardware performance counters | `uv run dev.py profiling counters` ([docs/guides/profiling.md](docs/guides/profiling.md)) |
 | Find where a build/test/check run's time goes | `uv run dev.py check --fix --profile <file> --profile-type chrome-tracing` ([profiling a run](docs/guides/building-and-testing.md#profiling-a-run)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |

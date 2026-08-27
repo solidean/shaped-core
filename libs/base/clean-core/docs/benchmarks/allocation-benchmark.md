@@ -27,7 +27,7 @@ decimals.
 ## Reproducing
 
 This full table is the manual `bench-alloc (… full sweep)` benchmark.
-A lean `GUIDE_BENCHMARK` of the same base name records just the representative points — mimalloc/system at 64 B and 4 KiB — via `nx::guide` for `dev.py pgo`.
+A lean `PGO_BENCHMARK` of the same base name records just the representative points — mimalloc/system at 64 B and 4 KiB — via `nx::pgo` for `dev.py pgo`.
 Both are excluded from normal sweeps, and the `"bench-alloc"` filter matches both, so name them explicitly:
 
 ```bash

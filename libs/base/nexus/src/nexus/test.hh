@@ -67,10 +67,10 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 
 #define TEST(name, ...) NX_IMPL_TEST(name, __COUNTER__, __VA_ARGS__)
 
-// A guide benchmark: a test in the guide_benchmark bucket that reports metrics via nx::guide (see guide.hh).
-// Swept only via --guide-benchmarks, or named exactly, and never in a normal run.
-// Extra config items compose as with TEST, e.g. GUIDE_BENCHMARK("name", seed(42)).
-#define GUIDE_BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, guide_benchmark __VA_OPT__(, ) __VA_ARGS__)
+// A PGO benchmark: a test in the pgo_benchmark bucket that reports metrics via nx::pgo (see guide.hh).
+// Swept only via --pgo-benchmarks, or named exactly, and never in a normal run.
+// Extra config items compose as with TEST, e.g. PGO_BENCHMARK("name", seed(42)).
+#define PGO_BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, pgo_benchmark __VA_OPT__(, ) __VA_ARGS__)
 
 // An example: a runnable demonstration of an API in practice, in the example bucket.
 // Swept only via --examples, or named exactly, and never in a normal run; `dev.py example <match>` runs exactly one.

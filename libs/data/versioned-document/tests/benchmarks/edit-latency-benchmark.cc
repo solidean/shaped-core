@@ -23,7 +23,7 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <versioned-document/incremental_parse.hh>
 #include <versioned-document/layer_stack.hh>
@@ -381,14 +381,14 @@ struct measurement
 
     if (record)
     {
-        nx::guide::report_time_for("edit-p50", linear_total.p50());
-        nx::guide::report_time_for("edit-p95", linear_total.p95());
-        nx::guide::report_time_for("edit-max", linear_total.worst());
-        nx::guide::report_time_for("edit-build-p95", out.linear.build.p95());
-        nx::guide::report_time_for("edit-advance-p95", out.linear.advance.p95());
-        nx::guide::report_time_for("edit-apply-p95", out.linear.apply.p95());
-        nx::guide::report_time_for("drag-chained-frame-p95", chain_total.p95());
-        nx::guide::report_time_for("drag-fanned-frame-p95", fan_total.p95());
+        nx::pgo::report_time_for("edit-p50", linear_total.p50());
+        nx::pgo::report_time_for("edit-p95", linear_total.p95());
+        nx::pgo::report_time_for("edit-max", linear_total.worst());
+        nx::pgo::report_time_for("edit-build-p95", out.linear.build.p95());
+        nx::pgo::report_time_for("edit-advance-p95", out.linear.advance.p95());
+        nx::pgo::report_time_for("edit-apply-p95", out.linear.apply.p95());
+        nx::pgo::report_time_for("drag-chained-frame-p95", chain_total.p95());
+        nx::pgo::report_time_for("drag-fanned-frame-p95", fan_total.p95());
     }
 
     return out;
@@ -552,9 +552,9 @@ void produce_wall(vdoc::direct_layer& layer, produced_wall const& wall, cc::opti
 
     if (record)
     {
-        nx::guide::report_time_for("layered-frame-p95", frame_total.p95());
-        nx::guide::report_time_for("layered-apply-p95", out.apply.p95());
-        nx::guide::report_time_for("layered-rebuild-p95", out.rebuild.p95());
+        nx::pgo::report_time_for("layered-frame-p95", frame_total.p95());
+        nx::pgo::report_time_for("layered-apply-p95", out.apply.p95());
+        nx::pgo::report_time_for("layered-rebuild-p95", out.rebuild.p95());
     }
 
     return out;
@@ -562,7 +562,7 @@ void produce_wall(vdoc::direct_layer& layer, produced_wall const& wall, cc::opti
 } // namespace
 
 // The representative size, recorded: an editing session's worth of history, one op at a time.
-GUIDE_BENCHMARK("bench-vdoc-edit-latency (one op at a time)")
+PGO_BENCHMARK("bench-vdoc-edit-latency (one op at a time)")
 {
     (void)measure(2000, 50, /*record =*/true);
 }
@@ -580,7 +580,7 @@ TEST("bench-vdoc-edit-latency (full sweep)", nx::config::manual)
 }
 
 // The layered per-frame shape, recorded: the three-layer stack layering exists for.
-GUIDE_BENCHMARK("bench-vdoc-layered-frame (three layers, per frame)")
+PGO_BENCHMARK("bench-vdoc-layered-frame (three layers, per frame)")
 {
     (void)measure_layered(2000, 30, /*record =*/true);
 }

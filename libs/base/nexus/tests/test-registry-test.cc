@@ -497,7 +497,7 @@ TEST("test registry - selected_bucket restricts the eligible set to that bucket"
     CHECK(exec.count_failed_tests() == 0);
 }
 
-TEST("test registry - guide-benchmark bucket is swept only when selected", no_scheduler)
+TEST("test registry - pgo-benchmark bucket is swept only when selected", no_scheduler)
 {
     nx::test_registry reg;
 
@@ -517,13 +517,13 @@ TEST("test registry - guide-benchmark bucket is swept only when selected", no_sc
                             ++counter_manual;
                             SUCCEED();
                         });
-    reg.add_declaration("T_guide", nx::config::cfg{.bucket = nx::config::test_bucket::guide_benchmark},
+    reg.add_declaration("T_guide", nx::config::cfg{.bucket = nx::config::test_bucket::pgo_benchmark},
                         [&]
                         {
                             ++counter_guide; /* no checks: allowed */
                         });
 
-    // Default sweep: neither manual nor guide benchmarks run.
+    // Default sweep: neither manual nor PGO benchmarks run.
     {
         auto exec = nx::execute_tests(nx::test_schedule::create({}, reg), {});
         CHECK(counter_normal == 1);
@@ -532,11 +532,11 @@ TEST("test registry - guide-benchmark bucket is swept only when selected", no_sc
         CHECK(exec.count_total_tests() == 1);
     }
 
-    // --guide-benchmarks mode: only the guide_benchmark bucket, and an empty-CHECK guide benchmark passes.
+    // --pgo-benchmarks mode: only the pgo_benchmark bucket, and an empty-CHECK PGO benchmark passes.
     counter_normal = counter_manual = counter_guide = 0;
     {
         auto exec = nx::execute_tests(
-            nx::test_schedule::create({.selected_bucket = nx::config::test_bucket::guide_benchmark}, reg), {});
+            nx::test_schedule::create({.selected_bucket = nx::config::test_bucket::pgo_benchmark}, reg), {});
         CHECK(counter_normal == 0);
         CHECK(counter_manual == 0);
         CHECK(counter_guide == 1);
@@ -575,13 +575,13 @@ TEST("test schedule config - a bucket flag selects a bucket and pins the sweep t
         CHECK(cfg.filters.empty());
     }
 
-    // --guide-benchmarks selects the guide_benchmark bucket.
+    // --pgo-benchmarks selects the pgo_benchmark bucket.
     {
         char a0[] = "prog";
-        char a1[] = "--guide-benchmarks";
+        char a1[] = "--pgo-benchmarks";
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
-        CHECK(cfg.selected_bucket == nx::config::test_bucket::guide_benchmark);
+        CHECK(cfg.selected_bucket == nx::config::test_bucket::pgo_benchmark);
         CHECK(!cfg.allow_cross_bucket_naming);
     }
 
@@ -625,7 +625,7 @@ TEST("test schedule config - a bucket flag selects a bucket and pins the sweep t
 TEST("test schedule config - a substring filter never reaches another bucket", no_scheduler)
 {
     // The reported bug: `dev.py test "async"` ran not just the normal async tests but every manual and
-    // guide-benchmark test whose name merely contained "async" — expensive benchmarks in an unattended run.
+    // pgo-benchmark test whose name merely contained "async" — expensive benchmarks in an unattended run.
     // Drives the real CLI path (create_from_args), which is where the gate used to open up globally.
     nx::test_registry reg;
 
@@ -641,7 +641,7 @@ TEST("test schedule config - a substring filter never reaches another bucket", n
                         });
     reg.add_declaration("async - throughput bench", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
                         [&] { ++counter_manual; });
-    reg.add_declaration("async - guide bench", nx::config::cfg{.bucket = nx::config::test_bucket::guide_benchmark},
+    reg.add_declaration("async - guide bench", nx::config::cfg{.bucket = nx::config::test_bucket::pgo_benchmark},
                         [&] { ++counter_guide; });
 
     auto const config_from = [](cc::span<char const* const> args)
@@ -678,10 +678,10 @@ TEST("test schedule config - a substring filter never reaches another bucket", n
         CHECK(exec.count_total_tests() == 1);
     }
 
-    // --guide-benchmarks likewise (the path dev.py pgo drives).
+    // --pgo-benchmarks likewise (the path dev.py pgo drives).
     counter_normal = counter_manual = counter_guide = 0;
     {
-        char const* const args[] = {"prog", "--guide-benchmarks", "async"};
+        char const* const args[] = {"prog", "--pgo-benchmarks", "async"};
         auto exec = nx::execute_tests(nx::test_schedule::create(config_from(args), reg), {});
         CHECK(counter_guide == 1);
         CHECK(counter_manual == 0);

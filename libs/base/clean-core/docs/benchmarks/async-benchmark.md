@@ -11,7 +11,7 @@ The single-thread number comes first on purpose: if driving a node is expensive,
 | work-stealing pool | [pool-benchmark.cc](../../tests/benchmarks/async/pool-benchmark.cc) | scaling across five fork-join shapes, and the per-node scheduling cost |
 | grain & fork floor | [grain-benchmark.cc](../../tests/benchmarks/async/grain-benchmark.cc) | at what leaf size fork-join overhead stops dominating, and what the second thread costs |
 
-The first three are `GUIDE_BENCHMARK`s, recording representative points via `nx::guide` for the perf gate.
+The first three are `PGO_BENCHMARK`s, recording representative points via `nx::pgo` for the perf gate.
 The single-thread and pool ones each also have a manual full-sweep twin that prints the whole table; the born-ready ladder has none, since its rows are cumulative and it always runs all of them.
 The fourth is manual-only: two of its three entry points emit CSV for the plot scripts beside it, and the third prints a round-trip table.
 None runs in the normal test sweep; every one is reachable by exact name.
@@ -153,7 +153,7 @@ Read the `w=1` line first — one worker plus the participating caller is the mi
 
 ## Running them
 
-The guide benchmarks and their full-sweep twins are excluded from normal sweeps; an exact (non-wildcard) name runs a test regardless of bucket.
+The PGO benchmarks and their full-sweep twins are excluded from normal sweeps; an exact (non-wildcard) name runs a test regardless of bucket.
 
 ```bash
 # guide points, recorded for the perf gate
@@ -180,7 +180,7 @@ uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py
 
 Each plot script saves its raw stdout next to the PNGs, so `--input raw.txt` re-plots a capture for free.
 
-Three disassembly probes are pinned symbols kept alive by their guide benchmarks — two on the born-ready ladder, one on the driven leaf:
+Three disassembly probes are pinned symbols kept alive by their PGO benchmarks — two on the born-ready ladder, one on the driven leaf:
 
 ```bash
 uv run dev.py assembly show make_async_lazy_probe          # cold lazy node: must show exactly ONE alloc path

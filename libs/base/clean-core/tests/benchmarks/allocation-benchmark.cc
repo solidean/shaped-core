@@ -4,8 +4,8 @@
 // The pattern is a churn: a small ring of concurrently-live allocations, each cycle freeing the oldest and allocating a fresh block.
 // The results, the machine they were taken on, and the /Ob1 inlining story are in libs/base/clean-core/docs/benchmarks/allocation-benchmark.md.
 //
-// Guide benchmark (GUIDE_BENCHMARK): prints the table and records mimalloc/system throughput at 64 B and
-// 4 KiB via nx::guide for the PGO speedup report.
+// PGO benchmark (PGO_BENCHMARK): prints the table and records mimalloc/system throughput at 64 B and
+// 4 KiB via nx::pgo for the PGO speedup report.
 
 #include "bench_util.hh"
 
@@ -14,7 +14,7 @@
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/string/string.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
 #include <chrono>
@@ -351,7 +351,7 @@ void run_all()
 
 // Sweeps `sizes`, printing one mimalloc/system row each.
 // When `record`, the 64 B and 4 KiB points are also reported as guide metrics.
-// So pass the representative-only sizes for a fast guide benchmark, or the full set with record=false for the human analysis table.
+// So pass the representative-only sizes for a fast PGO benchmark, or the full set with record=false for the human analysis table.
 void run(cc::span<isize const> sizes, bool record)
 {
     isize const align = 16; // typical malloc alignment; both resources honor it
@@ -368,8 +368,8 @@ void run(cc::span<isize const> sizes, bool record)
         if (record && (size == 64 || size == 4096))
         {
             char const* const label = size == 64 ? "64B" : "4KiB";
-            nx::guide::report_raw(cc::string("mimalloc@") + label, mi, "M ops/s", true);
-            nx::guide::report_raw(cc::string("system@") + label, sys, "M ops/s", true);
+            nx::pgo::report_raw(cc::string("mimalloc@") + label, mi, "M ops/s", true);
+            nx::pgo::report_raw(cc::string("system@") + label, sys, "M ops/s", true);
         }
     }
     std::fflush(stdout);
@@ -400,13 +400,13 @@ void run_comparison()
     std::fflush(stdout);
 }
 
-// The representative sizes the guide benchmark sweeps: one small block (64 B) and one page-sized (4 KiB).
+// The representative sizes the PGO benchmark sweeps: one small block (64 B) and one page-sized (4 KiB).
 constexpr isize guide_sizes[] = {64, 4096};
 isize const full_sizes[] = {16, 32, 64, 128, 256, 512, 1024, 4096, 16384, 65536};
 } // namespace
 
-// Lean guide benchmark: just the representative sizes, recorded for the PGO speedup report.
-GUIDE_BENCHMARK("bench-alloc (mimalloc vs system)")
+// Lean PGO benchmark: just the representative sizes, recorded for the PGO speedup report.
+PGO_BENCHMARK("bench-alloc (mimalloc vs system)")
 {
     run(guide_sizes, /*record*/ true);
 }

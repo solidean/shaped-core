@@ -15,7 +15,7 @@
 #include <nexus/tests/export/catch2.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
-#include <nexus/tests/export/perf_json.hh>
+#include <nexus/tests/export/pgo_json.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
@@ -186,11 +186,11 @@ int nx::run(int argc, char** argv)
     // Check if any tests were scheduled
     if (schedule.instances.empty())
     {
-        // A guide-benchmark sweep over a binary that has none is not an error: `dev.py pgo` runs
-        // --guide-benchmarks across every test binary, and most contain no guide benchmarks.
-        if (config.selected_bucket == nx::config::test_bucket::guide_benchmark)
+        // A pgo-benchmark sweep over a binary that has none is not an error: `dev.py pgo` runs
+        // --pgo-benchmarks across every test binary, and most contain no PGO benchmarks.
+        if (config.selected_bucket == nx::config::test_bucket::pgo_benchmark)
         {
-            cc::println("No guide benchmarks in this binary");
+            cc::println("No PGO benchmarks in this binary");
             return 0;
         }
 
@@ -236,12 +236,12 @@ int nx::run(int argc, char** argv)
                          written.error().to_string());
     }
 
-    // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::guide). Also additive.
-    if (!config.perf_json_file.empty())
+    // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::pgo). Also additive.
+    if (!config.pgo_json_file.empty())
     {
-        auto const written = write_report_file(config.perf_json_file, write_perf_json(suite_name(), execution));
+        auto const written = write_report_file(config.pgo_json_file, write_pgo_json(suite_name(), execution));
         if (!written.has_value())
-            cc::eprintln("Error: could not write perf JSON file: {}: {}", config.perf_json_file,
+            cc::eprintln("Error: could not write perf JSON file: {}: {}", config.pgo_json_file,
                          written.error().to_string());
     }
 
@@ -252,7 +252,7 @@ int nx::run(int argc, char** argv)
         return execution.count_failed_tests() > 0 ? 1 : 0;
     }
 
-    // Print any metrics recorded via nx::guide (guide benchmarks). Console-only mirror of the perf JSON sidecar.
+    // Print any metrics recorded via nx::pgo (PGO benchmarks). Console-only mirror of the perf JSON sidecar.
     {
         bool has_metrics = false;
         for (auto const& exec : execution.executions)

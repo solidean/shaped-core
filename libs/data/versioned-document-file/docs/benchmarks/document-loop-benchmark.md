@@ -92,7 +92,7 @@ uv run dev.py test "bench-vdoc-loop (full sweep)" --preset release-clang --timeo
 ```
 
 The first records the representative point as guide metrics; the second prints the table below.
-See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md) for the guide-benchmark mechanism.
+See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md) for the pgo-benchmark mechanism.
 
 ## Method
 

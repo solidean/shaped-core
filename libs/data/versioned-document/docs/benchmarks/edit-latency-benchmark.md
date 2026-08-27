@@ -165,7 +165,7 @@ uv run dev.py test "bench-vdoc-layered-frame (full sweep)" --preset release-clan
 ```
 
 The first records the representative point (2,000 entities) as guide metrics; the second prints the table above.
-See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md) for the guide-benchmark mechanism.
+See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md) for the pgo-benchmark mechanism.
 
 ## Method notes
 

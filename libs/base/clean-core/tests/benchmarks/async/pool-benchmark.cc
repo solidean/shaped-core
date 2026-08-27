@@ -29,7 +29,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/thread.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -396,7 +396,7 @@ cc::vector<int> sweep_workers()
     return ws;
 }
 
-// What the guide benchmark measures: just the two ends.
+// What the PGO benchmark measures: just the two ends.
 // 1 worker anchors the scaling ratio and P-1 is the number that matters, so the intermediate points only shape the human-facing curve.
 cc::vector<int> guide_workers()
 {
@@ -602,16 +602,16 @@ void run_all()
 // Deliberately not "speedup" for both: parallel-for is the regular case, where speedup-vs-serial is the question a user would actually ask.
 // The spawn tree's leaves do nothing at all, so its cost per node IS the pool's overhead, and its scaling only means anything against itself at one worker.
 // The full sweep below is the human-facing table.
-GUIDE_BENCHMARK("bench-async-pool (work-stealing)")
+PGO_BENCHMARK("bench-async-pool (work-stealing)")
 {
     auto const ws = guide_workers();
     auto const pfor = case_pfor(ws);
     auto const tree = case_tree(ws);
 
-    nx::guide::report_raw("parallel-for speedup@P", pfor.vs_serial, "x", /*higher_is_better*/ true);
-    nx::guide::report_raw("parallel-for scaling@P (vs 1w)", pfor.vs_one, "x", /*higher_is_better*/ true);
-    nx::guide::report_raw("spawn-tree ns/node@P", tree.ns_at_p, "ns/node", /*higher_is_better*/ false);
-    nx::guide::report_raw("spawn-tree scaling@P (vs 1w)", tree.vs_one, "x", /*higher_is_better*/ true);
+    nx::pgo::report_raw("parallel-for speedup@P", pfor.vs_serial, "x", /*higher_is_better*/ true);
+    nx::pgo::report_raw("parallel-for scaling@P (vs 1w)", pfor.vs_one, "x", /*higher_is_better*/ true);
+    nx::pgo::report_raw("spawn-tree ns/node@P", tree.ns_at_p, "ns/node", /*higher_is_better*/ false);
+    nx::pgo::report_raw("spawn-tree scaling@P (vs 1w)", tree.vs_one, "x", /*higher_is_better*/ true);
 }
 
 // The full canonical set across the worker sweep.

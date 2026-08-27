@@ -22,7 +22,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/op_builder.hh>
@@ -302,12 +302,12 @@ struct loop_measurement
 
     if (record)
     {
-        nx::guide::report_time_for("loop-total", measured_total);
-        nx::guide::report_time_for("loop-open", out.times.open);
-        nx::guide::report_time_for("loop-publish", out.times.publish);
-        nx::guide::report_time_for("op-hashing-total", out.hashing_seconds);
-        nx::guide::report_raw("hash-share-of-loop", share_of_loop, "%", /*higher_is_better =*/false);
-        nx::guide::report_raw("hash-share-of-open", share_of_open, "%", /*higher_is_better =*/false);
+        nx::pgo::report_time_for("loop-total", measured_total);
+        nx::pgo::report_time_for("loop-open", out.times.open);
+        nx::pgo::report_time_for("loop-publish", out.times.publish);
+        nx::pgo::report_time_for("op-hashing-total", out.hashing_seconds);
+        nx::pgo::report_raw("hash-share-of-loop", share_of_loop, "%", /*higher_is_better =*/false);
+        nx::pgo::report_raw("hash-share-of-open", share_of_open, "%", /*higher_is_better =*/false);
     }
 
     return out;
@@ -315,7 +315,7 @@ struct loop_measurement
 } // namespace
 
 // The representative size, recorded: an editing session's worth of history, saved once more.
-GUIDE_BENCHMARK("bench-vdoc-loop (open / edit / publish / close)")
+PGO_BENCHMARK("bench-vdoc-loop (open / edit / publish / close)")
 {
     auto const impl = sqlite_impl();
     if (!impl.is_available())

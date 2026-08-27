@@ -77,4 +77,4 @@ Everything below is session judgement; the mechanisms, flags and artifact format
 - `test_diag … errors_only=true`, with a larger `limit`, expands every failure.
 - The positional `<pattern>` is a test-name substring applied across binaries, or the exact name of a whole `*-test` binary.
   A pattern that matches no name anywhere is retried as a glob over the tests' **source files**, so `vector-test.cc`, `libs/base/clean-core/tests/memory` or an absolute path all select.
-  That is a filter like any other: it does not open the disabled or bucket gates, so a file of benchmarks still needs `--manual` / `--guide-benchmarks`.
+  That is a filter like any other: it does not open the disabled or bucket gates, so a file of benchmarks still needs `--manual` / `--pgo-benchmarks`.

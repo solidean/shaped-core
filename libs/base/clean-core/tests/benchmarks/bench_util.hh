@@ -7,7 +7,7 @@
 #include <clean-core/fwd.hh>
 
 // Shared helpers for the clean-core micro-benchmarks under tests/benchmarks/.
-// These are guide benchmarks (GUIDE_BENCHMARK) that print timing tables and record representative points via nx::guide.
+// These are PGO benchmarks (PGO_BENCHMARK) that print timing tables and record representative points via nx::pgo.
 // See libs/base/clean-core/docs/benchmarks/ and docs/guides/perf-results.md.
 
 namespace bench

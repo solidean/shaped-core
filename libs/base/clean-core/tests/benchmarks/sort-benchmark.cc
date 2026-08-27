@@ -4,7 +4,7 @@
 // element in a temporary, so its small sort shifts by swapping where a move-based one moves once per element.
 // It is also what would justify ever adding a move-based fallback for the small sort.
 //
-// The manual sweep is the comparison; the GUIDE_BENCHMARK at the bottom records two stable points for the PGO report.
+// The manual sweep is the comparison; the PGO_BENCHMARK at the bottom records two stable points for the PGO report.
 // Run the sweeps with
 //   uv run dev.py test "bench-sort - cc::sort vs std::sort" --preset release-clang --timeout 0
 //   uv run dev.py test "bench-sort - sort_async" --preset release-clang --timeout 0
@@ -22,7 +22,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/to_string.hh>
 #include <clean-core/thread/async_thread_pool.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
 #include <algorithm>
@@ -295,7 +295,7 @@ TEST("bench-sort - sort_async vs cc::sort", nx::config::manual)
 }
 #endif
 
-GUIDE_BENCHMARK("bench-sort - throughput")
+PGO_BENCHMARK("bench-sort - throughput")
 {
     cc::random rng(3);
 
@@ -305,6 +305,6 @@ GUIDE_BENCHMARK("bench-sort - throughput")
         double const rate = sort_rate(original, [](cc::vector<i32>& v) { cc::sort(v); });
 
         auto const name = cc::format("cc::sort i32 random@{}", n);
-        nx::guide::report_elements_per_sec(name, rate);
+        nx::pgo::report_elements_per_sec(name, rate);
     }
 }

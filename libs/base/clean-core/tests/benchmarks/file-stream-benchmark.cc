@@ -5,8 +5,8 @@
 // std streams route every put()/get() through the streambuf sentry and a virtual overflow/underflow.
 // Each timed pass is end-to-end — open, transfer 4 MiB, close — and repeated passes stay in the OS cache, so this measures the stream layer's CPU cost rather than the disk.
 //
-// Guide benchmark: prints the full table and records the byte-at-a-time points (where the abstraction cost
-// lives) via nx::guide.
+// PGO benchmark: prints the full table and records the byte-at-a-time points (where the abstraction cost
+// lives) via nx::pgo.
 
 #include "bench_util.hh"
 
@@ -15,7 +15,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh> // cc::print / cc::format
 #include <clean-core/string/string.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
 #include <fstream> // the std baseline under test
@@ -206,10 +206,10 @@ void run()
 
         if (chunk_n == 1)
         {
-            nx::guide::report_raw("cc write@1B", cc_w, "MB/s", true);
-            nx::guide::report_raw("std write@1B", std_w, "MB/s", true);
-            nx::guide::report_raw("cc read@1B", cc_r, "MB/s", true);
-            nx::guide::report_raw("std read@1B", std_r, "MB/s", true);
+            nx::pgo::report_raw("cc write@1B", cc_w, "MB/s", true);
+            nx::pgo::report_raw("std write@1B", std_w, "MB/s", true);
+            nx::pgo::report_raw("cc read@1B", cc_r, "MB/s", true);
+            nx::pgo::report_raw("std read@1B", std_r, "MB/s", true);
         }
     }
 
@@ -217,7 +217,7 @@ void run()
 }
 } // namespace
 
-GUIDE_BENCHMARK("bench-file-stream (cc vs std)")
+PGO_BENCHMARK("bench-file-stream (cc vs std)")
 {
     run();
 }

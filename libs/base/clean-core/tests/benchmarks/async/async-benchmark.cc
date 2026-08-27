@@ -8,13 +8,13 @@
 // Each number is the median of 5 measurements, each doing its own prewarm via bench::measure_units_per_sec.
 //
 // Two entry points, neither in the normal test sweep and both reachable by exact name.
-// A GUIDE_BENCHMARK recording three representative points for the perf gate, and a manual full sweep printing the whole table.
+// A PGO_BENCHMARK recording three representative points for the perf gate, and a manual full sweep printing the whole table.
 
 #include "../bench_util.hh"
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/thread/async.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -102,7 +102,7 @@ void report(char const* label, isize nodes, double async_ops_per_sec, double dir
     std::printf("%-22s %8lld %13.1f %13.2f %14.2f %9.1fx\n", label, (long long)nodes, a_mops, a_ns, d_ns, tax);
 
     if (record)
-        nx::guide::report_raw(label, a_ns, "ns/node", /*higher_is_better*/ false);
+        nx::pgo::report_raw(label, a_ns, "ns/node", /*higher_is_better*/ false);
 }
 
 // Drive a freshly-built root to completion on the calling thread's scheduler, and return its value.
@@ -352,7 +352,7 @@ void run_all(bool record)
     std::fflush(stdout);
 }
 
-// The points the guide benchmark records.
+// The points the PGO benchmark records.
 // The first three cover the distinct cost shapes with the fewest measurements: the undriven floor, one full scheduler round-trip, and the amortized per-node cost at scale.
 //
 // The last two are here because the "other rows merely interpolate" argument stops holding once a change lands cost on a path none of the first three reach:
@@ -361,7 +361,7 @@ void run_all(bool record)
 //   * fan-in is the only one whose frame captures more than one dependency handle, which is what the node's inline frame budget is sized against.
 //
 // Both are cheap next to the sum tree.
-// Resist growing this further — guide benchmarks are swept across every binary by dev.py pgo, so each point is paid for repeatedly.
+// Resist growing this further — PGO benchmarks are swept across every binary by dev.py pgo, so each point is paid for repeatedly.
 void run_guide()
 {
     std::printf("\n=== cc::async single-thread drive (guide points, median of 5) ===\n");
@@ -383,7 +383,7 @@ void run_guide()
 // The regression guard for the single-thread result: three representative points, recorded for the perf gate.
 // Also hosts the single_lazy_probe disassembly probe, so the documented trace command targets this (leaner) test.
 // An exact (non-wildcard) name runs a test regardless of bucket, so a plain `dev.py test "bench-async (single-thread drive)"` reaches it too.
-GUIDE_BENCHMARK("bench-async (single-thread drive)")
+PGO_BENCHMARK("bench-async (single-thread drive)")
 {
     run_guide();
 

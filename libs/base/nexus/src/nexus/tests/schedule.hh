@@ -104,8 +104,8 @@ struct nx::test_schedule_config
     cc::string junit_xml_file;
 
     // When non-empty, run() writes a perf-metrics JSON sidecar to this path, additionally to the console output.
-    // Set via --perf-json <file>; nx::guide records the metrics.
-    cc::string perf_json_file;
+    // Set via --pgo-json <file>; nx::pgo records the metrics.
+    cc::string pgo_json_file;
 
     // The arguments the selected test itself receives, reachable from its body through nx::test_args().
     // Set via --test-args "<line>", or by everything after a bare --.

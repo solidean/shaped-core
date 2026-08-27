@@ -38,7 +38,7 @@ Findings we want to keep, but that are not a guide to anything.
 - [guides/disassembly.md](guides/disassembly.md) — `dev.py assembly`: read the emitted codegen, or trace what one invocation actually ran.
 - [guides/profiling.md](guides/profiling.md) — hardware performance counters via `nx::bench` and `dev.py profiling`.
 - [guides/coverage.md](guides/coverage.md) — LLVM source-based coverage, and [guides/pgo.md](guides/pgo.md) — profile-guided optimization.
-- [guides/perf-results.md](guides/perf-results.md) — guide benchmarks and the `.perf.json` contract.
+- [guides/perf-results.md](guides/perf-results.md) — PGO benchmarks and the `.pgo.json` contract.
 - [guides/dependencies.md](guides/dependencies.md) — the `extern/` manifests, `dev.py deps`, and how to bump a pin.
 - [guides/cheat-sheets.md](guides/cheat-sheets.md) — the per-library cheat-sheet format, and where the sheets live.
 - [guides/postmortem.md](guides/postmortem.md) — the session friction review behind `/postmortem`.

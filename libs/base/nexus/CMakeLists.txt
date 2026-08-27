@@ -19,7 +19,7 @@ add_library(nexus
     src/nexus/args/impl/suggest.cc
     src/nexus/rec.cc
     src/nexus/test.cc
-    src/nexus/guide.cc
+    src/nexus/pgo.cc
     src/nexus/bench/hardware_counters.cc
     src/nexus/tests/alias.cc
     src/nexus/tests/check.cc
@@ -31,7 +31,7 @@ add_library(nexus
     src/nexus/tests/export/xml.cc
     src/nexus/tests/export/catch2.cc
     src/nexus/tests/export/junit.cc
-    src/nexus/tests/export/perf_json.cc
+    src/nexus/tests/export/pgo_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/runner.cc
@@ -69,7 +69,7 @@ target_sources(nexus
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
-    src/nexus/guide.hh
+    src/nexus/pgo.hh
     src/nexus/bench/fwd.hh
     src/nexus/bench/hardware_counters.hh
     src/nexus/bench/bench.hh
@@ -86,7 +86,7 @@ target_sources(nexus
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
-    src/nexus/tests/export/perf_json.hh
+    src/nexus/tests/export/pgo_json.hh
     src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh
@@ -119,7 +119,7 @@ target_link_libraries(nexus
     PUBLIC
     clean-core
     # nexus is a leaf: the harness sits on top of the libraries it tests, so babel::json writing the
-    # listing and perf sidecars is a dependency going DOWN, not an upward one.
+    # listing and pgo sidecars is a dependency going DOWN, not an upward one.
     #
     # babel-data rather than babel-serializer, and that constraint is nexus' rather than babel's: EVERY *-test binary
     # in the repo links nexus, so whatever nexus depends on is a tax the whole tree pays and a link every test binary

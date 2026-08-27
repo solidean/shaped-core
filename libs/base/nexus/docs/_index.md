@@ -26,7 +26,7 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
 
 Two nexus capabilities are documented at repo level, next to the `dev.py` workflow that consumes them:
 
-- [docs/guides/perf-results](../../../../docs/guides/perf-results.md) — `GUIDE_BENCHMARK` + `nx::guide`, and how a recorded metric reaches `dev.py pgo`.
+- [docs/guides/perf-results](../../../../docs/guides/perf-results.md) — `PGO_BENCHMARK` + `nx::pgo`, and how a recorded metric reaches `dev.py pgo`.
 - [docs/guides/profiling](../../../../docs/guides/profiling.md) — `nx::bench::measure_hw_counters`, what each platform can measure, and the setup a non-elevated Windows user needs.
 
 ## Conventions

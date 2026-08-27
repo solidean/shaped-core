@@ -1,12 +1,12 @@
 #include <babel-serializer/data/json.hh>
 #include <clean-core/string/string.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
-#include <nexus/tests/export/perf_json.hh>
+#include <nexus/tests/export/pgo_json.hh>
 #include <nexus/tests/export/xml.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
@@ -141,7 +141,7 @@ TEST("schedule - would_run honors buckets and disabled, filter_matches ignores t
     // Explicit bucket mode: a name in another bucket matches by name but is excluded by the bucket gate.
     // That is the "matched but wrong bucket" case, and an exact name does not override a flag.
     {
-        char const* const args[] = {"prog", "--guide-benchmarks", "alpha"};
+        char const* const args[] = {"prog", "--pgo-benchmarks", "alpha"};
         auto const cfg = config_from(args);
         CHECK(cfg.filter_matches(alpha));
         CHECK(!cfg.would_run(alpha));
@@ -292,14 +292,14 @@ TEST("export - perf JSON carries every metric a run recorded", no_scheduler)
     reg.add_declaration("bench", {},
                         []
                         {
-                            nx::guide::report_elements_per_sec("keys", 1250.5);
-                            nx::guide::report_time_for("per_op", 0.25);
+                            nx::pgo::report_elements_per_sec("keys", 1250.5);
+                            nx::pgo::report_time_for("per_op", 0.25);
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
 
-    auto const doc = babel::json::read(nx::write_perf_json("my-suite", exec)).value();
+    auto const doc = babel::json::read(nx::write_pgo_json("my-suite", exec)).value();
     auto const root = doc.root();
 
     CHECK(root["suite"].as_string() == "my-suite");

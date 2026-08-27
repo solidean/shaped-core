@@ -43,7 +43,7 @@ TEST("test cli - the defaults a real invocation starts from")
 TEST("test cli - the bucket flags")
 {
     CHECK(parse({"--manual"}).selected_bucket == nx::config::test_bucket::manual);
-    CHECK(parse({"--guide-benchmarks"}).selected_bucket == nx::config::test_bucket::guide_benchmark);
+    CHECK(parse({"--pgo-benchmarks"}).selected_bucket == nx::config::test_bucket::pgo_benchmark);
     CHECK(parse({"--examples"}).selected_bucket == nx::config::test_bucket::example);
 
     // A bucket flag pins the sweep, so an exact name may no longer cross out of it.
@@ -97,7 +97,7 @@ TEST("test cli - section filters")
 TEST("test cli - the report file flags each consume their path")
 {
     CHECK(parse({"--junit-xml", "out.xml"}).junit_xml_file == "out.xml");
-    CHECK(parse({"--perf-json", "out.json"}).perf_json_file == "out.json");
+    CHECK(parse({"--pgo-json", "out.json"}).pgo_json_file == "out.json");
     CHECK(parse({"--list-tests-json", "-"}).list_tests_json_file == "-");
 
     SECTION("the path is not also read as a filter")
@@ -255,7 +255,7 @@ TEST("test cli - help describes the flags the parser actually has")
     auto const help = nx::test_schedule_config::cli_help_text();
 
     for (auto const* const flag :
-         {"--manual", "--guide-benchmarks", "--examples", "--jobs", "--junit-xml", "--perf-json", "--list-tests-json",
+         {"--manual", "--pgo-benchmarks", "--examples", "--jobs", "--junit-xml", "--pgo-json", "--list-tests-json",
           "--match-files", "--match-names", "--record", "--no-recording", "--list-tests", "--reporter", "--test-args"})
         CHECK(help.contains(flag));
 }

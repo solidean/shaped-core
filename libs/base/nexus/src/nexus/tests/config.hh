@@ -10,14 +10,14 @@ enum class ambient_mode;
 } // namespace nx::config
 
 // Which selection bucket a test belongs to; a test lives in exactly one.
-// An automatic sweep selects a single bucket — normal by default, manual via --manual, guide_benchmark via --guide-benchmarks, example via --examples.
+// An automatic sweep selects a single bucket — normal by default, manual via --manual, pgo_benchmark via --pgo-benchmarks, example via --examples.
 // An exact (non-substring) filter naming a test can also pull it in from another bucket, but only when no bucket flag was given.
 // The set is intentionally extensible.
 enum class nx::config::test_bucket
 {
     normal,
     manual,
-    guide_benchmark,
+    pgo_benchmark,
     example,
 };
 
@@ -145,13 +145,13 @@ constexpr struct
     void apply(cfg& result) const { result.bucket = test_bucket::manual; }
 } manual;
 
-// A guide benchmark records performance metrics via nx::guide, and is swept only via --guide-benchmarks.
+// A PGO benchmark records performance metrics via nx::pgo, and is swept only via --pgo-benchmarks.
 // Naming it exactly also runs it, as long as no bucket flag was given; like a manual test it otherwise stays out of automatic runs.
-// GUIDE_BENCHMARK in test.hh is the macro.
+// PGO_BENCHMARK in test.hh is the macro.
 constexpr struct
 {
-    void apply(cfg& result) const { result.bucket = test_bucket::guide_benchmark; }
-} guide_benchmark;
+    void apply(cfg& result) const { result.bucket = test_bucket::pgo_benchmark; }
+} pgo_benchmark;
 
 // An example demonstrates an API in practice rather than pinning an invariant, and is swept only via --examples.
 // Naming it exactly also runs it, as long as no bucket flag was given; like a manual test it otherwise stays out of automatic runs.

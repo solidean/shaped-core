@@ -22,7 +22,7 @@
 // `as_bytes` is force-inlined so the only difference between the wrapper and raw columns is the wrapper's own out-of-line call, not benchmark plumbing.
 // Under /Ob1 an unmarked helper would itself stay out-of-line.
 //
-// GUIDE_BENCHMARK runs only the three representative lengths (≈8 B, ≈256 B and ≈64 KiB) and records them via nx::guide for the PGO speedup report.
+// PGO_BENCHMARK runs only the three representative lengths (≈8 B, ≈256 B and ≈64 KiB) and records them via nx::pgo for the PGO speedup report.
 // 256 B is there for BLAKE3: an op payload is a few hundred bytes, so that is the size its cost is actually argued about at.
 // The full length table comes from the manual sweep at the bottom of this file.
 // Run e.g.
@@ -40,7 +40,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/string/string.hh>
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <xxhash.h>
 
@@ -57,7 +57,7 @@ CC_FORCE_INLINE cc::span<byte const> as_bytes(char const* p, size_t n)
 
 // Sweeps `lengths`, printing one throughput row each.
 // When `record`, the points nearest 8 B and 64 KiB are also reported as guide metrics.
-// Pass the representative-only lengths for a fast guide benchmark, or the full sweep (record=false) for the human analysis table.
+// Pass the representative-only lengths for a fast PGO benchmark, or the full sweep (record=false) for the human analysis table.
 void run(cc::span<isize const> lengths, bool record)
 {
     cc::random rng(0xABCDEFu);
@@ -150,22 +150,22 @@ void run(cc::span<isize const> lengths, bool record)
     if (record)
         for (auto const& r : reps)
         {
-            nx::guide::report_raw(cc::string("hob64@") + r.label, r.hob, "GB/s", true);
-            nx::guide::report_raw(cc::string("hash128@") + r.label, r.h128, "GB/s", true);
-            nx::guide::report_raw(cc::string("xxh64@") + r.label, r.x64, "GB/s", true);
-            nx::guide::report_raw(cc::string("xxh128@") + r.label, r.x128, "GB/s", true);
-            nx::guide::report_raw(cc::string("blake3@") + r.label, r.b3, "GB/s", true);
-            nx::guide::report_raw(cc::string("b3raw@") + r.label, r.b3raw, "GB/s", true);
+            nx::pgo::report_raw(cc::string("hob64@") + r.label, r.hob, "GB/s", true);
+            nx::pgo::report_raw(cc::string("hash128@") + r.label, r.h128, "GB/s", true);
+            nx::pgo::report_raw(cc::string("xxh64@") + r.label, r.x64, "GB/s", true);
+            nx::pgo::report_raw(cc::string("xxh128@") + r.label, r.x128, "GB/s", true);
+            nx::pgo::report_raw(cc::string("blake3@") + r.label, r.b3, "GB/s", true);
+            nx::pgo::report_raw(cc::string("b3raw@") + r.label, r.b3raw, "GB/s", true);
         }
 }
 
-// The representative lengths the guide benchmark sweeps: one short key (8 B), one op-sized (256 B) and one long (64 KiB), matching the points reported as metrics.
+// The representative lengths the PGO benchmark sweeps: one short key (8 B), one op-sized (256 B) and one long (64 KiB), matching the points reported as metrics.
 // Far faster than the full sweep, while still exercising every hash code path.
 constexpr isize guide_lengths[] = {8, 256, 64 * 1024};
 } // namespace
 
-// Lean guide benchmark: just the representative lengths, recorded for the PGO speedup report.
-GUIDE_BENCHMARK("bench-hash (xxh3 64/128, raw vs wrapper)")
+// Lean PGO benchmark: just the representative lengths, recorded for the PGO speedup report.
+PGO_BENCHMARK("bench-hash (xxh3 64/128, raw vs wrapper)")
 {
     run(guide_lengths, /*record*/ true);
 }

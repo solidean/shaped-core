@@ -51,7 +51,7 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexu
     CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
 }                                        // no co_ keyword? then `return` a COLD cc::shared_async<cc::unit> instead
 
-// Buckets: every test is in one bucket — normal (default), manual, guide_benchmark, or example. A sweep selects
+// Buckets: every test is in one bucket — normal (default), manual, pgo_benchmark, or example. A sweep selects
 // one bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
@@ -72,22 +72,22 @@ EXAMPLE("clean-core/vector")             // swept only via `--examples`, or run 
 // The run still installs an ambient async scheduler; EXAMPLE("x", no_scheduler) is how one installs its own.
 ```
 
-## Guide benchmarks (PGO metrics)
+## PGO benchmarks (PGO metrics)
 
 A **tracking signal**, not a benchmarking framework: a few stable points per subject, consumed by `dev.py pgo`.
 To compare two implementations, write a `nx::config::manual` test instead — it never runs in a sweep, needs no CHECK, and prints whatever table you want.
 
 ```cpp
-#include <nexus/guide.hh>
+#include <nexus/pgo.hh>
 
-GUIDE_BENCHMARK("hash - throughput")     // a test in the guide_benchmark bucket (implies no-CHECK is fine);
-{                                        //   swept only via `--guide-benchmarks`, or run by exact name
+PGO_BENCHMARK("hash - throughput")     // a test in the pgo_benchmark bucket (implies no-CHECK is fine);
+{                                        //   swept only via `--pgo-benchmarks`, or run by exact name
     double gbps = measure(...);
-    nx::guide::report_raw("xxh3@8B", gbps, "GB/s", /*higher_is_better=*/true);  // free-form unit + orientation
-    nx::guide::report_elements_per_sec("keys", n_per_s);  // unit "1/s",  higher is better
-    nx::guide::report_time_for("op", seconds);            // unit "s",    lower  is better
+    nx::pgo::report_raw("xxh3@8B", gbps, "GB/s", /*higher_is_better=*/true);  // free-form unit + orientation
+    nx::pgo::report_elements_per_sec("keys", n_per_s);  // unit "1/s",  higher is better
+    nx::pgo::report_time_for("op", seconds);            // unit "s",    lower  is better
 }
-// Recorded metrics print as a table and, with `--perf-json <file>`, write a sidecar consumed by `dev.py pgo`.
+// Recorded metrics print as a table and, with `--pgo-json <file>`, write a sidecar consumed by `dev.py pgo`.
 ```
 
 ## Hardware counters (`nx::bench`)
@@ -230,8 +230,8 @@ uv run dev.py test                       # build + run the whole suite
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // --test-args "<line>", or everything after a bare --, is a command line for the SELECTED TEST itself,
 //   readable from its body through nx::test_args(). Replaces whatever nx::config::args declared.
-// Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
-// --examples (sweep example bucket), --perf-json <file> (write recorded-metric sidecar).
+// Bucket / perf CLI: --manual (sweep manual bucket), --pgo-benchmarks (sweep pgo-benchmark bucket),
+// --examples (sweep example bucket), --pgo-json <file> (write recorded-metric sidecar).
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
 //   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.
@@ -373,7 +373,7 @@ TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test driv
 - **`SKIP` does not yet interact cleanly with `SECTION`** (known limitation).
 - **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` above, not Catch2 generators.
 - **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, and type-parametrized (templated) tests.
-  Use `.context()` / `.note()` / `.dump()` for messages, and `GUIDE_BENCHMARK` + `nx::guide` for benchmarks.
+  Use `.context()` / `.note()` / `.dump()` for messages, and `PGO_BENCHMARK` + `nx::pgo` for benchmarks.
 
 [docs/catch2-runner-compat.md](docs/catch2-runner-compat.md) has the exact CLI subset and how IDE discovery works.
 [docs/_index.md](docs/_index.md) indexes the rest, including the hardware counters and the perf-metric workflow.
