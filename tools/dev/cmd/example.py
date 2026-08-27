@@ -19,6 +19,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
+from tools.dev.lib.pipeline.captures import IMAGE_MECHANISMS, SIDECAR_NAME, SidecarError, captures_for
 from tools.dev.lib.pipeline.examples import (capture_directory, collect_examples, is_example_target,
                                              resolve_example, select_examples)
 
@@ -45,19 +46,17 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "Sets SC_REQUEST_BACKGROUND=1, which sr::window_system reads (sr::background_request_env_var).")
     p.add_argument("--capture", nargs="?", const="", metavar="NAME",
                    help="Run headless and write an image instead of opening a window: no display is needed. "
-                        "With NAME, take the capture the example registered under that name. "
-                        "Sets SC_CAPTURE, which sv::interactive reads (libs/graphics/shaped-viewer/src/shaped-viewer/capture.hh).")
+                        "With NAME, take the capture of that name. Both must be declared in the example's "
+                        ".capture.json sidecar; an example without one is not capturable.")
     p.add_argument("--capture-out", metavar="PATH",
                    help="Where --capture writes. Defaults to build/<preset>/captures/<name>/<shot>/capture.jpg; "
                         "the extension picks the format.")
-    p.add_argument("--capture-size", metavar="WxH", default="1920x1080",
-                   help="Resolution --capture renders at (default: 1920x1080)")
+    p.add_argument("--capture-size", metavar="WxH",
+                   help="Override the resolution the sidecar declares")
     p.add_argument("--capture-accumulate", metavar="N", type=int,
-                   help="Accumulated frames every traced view must reach before --capture writes (default: 60)")
+                   help="Override the accumulated-frame target the sidecar declares")
     p.add_argument("--capture-timeout", metavar="SECS", type=float,
-                   help="How long --capture may spend before it gives up and writes what it has (default: 60)")
-    p.add_argument("--capture-list", action="store_true",
-                   help="Print the capture names the example registers, then exit. Runs one headless frame to find out.")
+                   help="Override the timeout the sidecar declares")
     p.add_argument("--update-captures", nargs="?", const="", metavar="MATCH",
                    help="Capture every example MATCH selects (each of its registered shots), then copy the successful "
                         "ones next to their source. Omit MATCH for the whole corpus. Headless, so unlike running "
@@ -138,9 +137,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         env = {**os.environ, "SC_REQUEST_BACKGROUND": "1"}
 
     capture_path = None
-    if args.capture is not None or args.capture_list:
-        capture_path, capture_env = _capture_environment(ctx, preset, example, args)
-        env = {**(env or os.environ), **capture_env}
+    if args.capture is not None:
+        capture = _one_capture(ctx, example, args.capture, args)
+        capture_path = _capture_output(preset, capture, args)
+        env = {**(env or os.environ), **_capture_environment(capture, capture_path, args)}
 
     # The exact name plus the bucket flag: an example is never swept, so it must be named to run.
     # Mirrored, because watching the example run is the entire point of the command.
@@ -152,6 +152,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         mirror=True, verbose=args.verbose,
     )
     if capture_path is not None and result.returncode == 0:
+        # A capture the binary refused — an unregistered name, a target it could not read back — is reported by
+        # logging and closing the loop, so a clean exit alone does not mean an image exists.
+        if capture.mechanism in IMAGE_MECHANISMS and not capture_path.is_file():
+            ctx.die(f"capture produced no image at {ctx.rel(capture_path)} — see the run's stderr above")
         print(console.dim(f"capture -> {ctx.rel(capture_path)}"), file=sys.stderr)
 
     sys.exit(result.returncode)
@@ -161,42 +165,55 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 # wrong for a corpus refresh, where one example that never settles would hang the whole thing.
 _SWEEP_TIMEOUT_SECONDS = 300.0
 
-# What sv prints each registered capture name behind; see sv::capture_list_prefix in
-# libs/graphics/shaped-viewer/src/shaped-viewer/capture.hh.
-_LIST_PREFIX = "sv-capture: "
 
 
 def _sweep(ctx: Context, preset, targets, examples: list, args: argparse.Namespace) -> None:
-    """Capture every example the matcher selects, then refresh the ones that worked.
+    """Capture every declared capture of every example the matcher selects, then refresh the ones that worked.
 
-    One process per shot, so every shot starts from an identical cold state — which is what makes a committed image
-    reproducible rather than dependent on what ran before it in the same process.
+    What it iterates is the SIDECARS, not the examples.
+    An example with no `.capture.json` entry is never launched, so the sweep genuinely opens no window — which is what
+    separates it from the `--all` that docs/guides/examples.md refuses, rather than a claim nobody checks.
+
+    One process per capture, so each starts from an identical cold state.
     """
     selected = select_examples(examples, args.update_captures)
     if not selected:
         ctx.die(f"no example matches {args.update_captures!r}")
 
     by_target = {t.name: t for t in targets}
-    report: list[tuple[str, str, str]] = []  # (example, shot, outcome)
+    report: list[tuple[str, str, str]] = []
+    skipped = 0
 
     for example in selected:
-        artifact = by_target.get(example.target)
-        artifact = artifact.artifact if artifact else None
+        try:
+            declared = captures_for(example, ctx.root)
+        except SidecarError as e:
+            ctx.die(str(e))
+
+        if declared is None:
+            skipped += 1
+            continue
+
+        target = by_target.get(example.target)
+        artifact = target.artifact if target else None
         if artifact is None:
             report.append((example.name, "-", "skipped: no built artifact"))
             continue
 
-        shots = [""] + _registered_shots(ctx, preset, example, artifact, args)
-        for shot in shots:
-            outcome = _capture_one(ctx, preset, example, artifact, shot, args)
-            report.append((example.name, shot or "default", outcome))
+        for capture in declared:
+            outcome = _capture_one(ctx, preset, example, artifact, capture, args)
+            report.append((example.name, capture.slug, outcome))
+
+    if not report:
+        ctx.die("nothing to capture: no selected example declares a .capture.json entry")
 
     failures = [r for r in report if not r[2].startswith("captured")]
     print("", file=sys.stderr)
     for name, shot, outcome in report:
         line = f"  {name}  [{shot}]  {outcome}"
         print(line if outcome.startswith("captured") else console.dim(line), file=sys.stderr)
-    print(console.dim(f"{len(report) - len(failures)}/{len(report)} captured"), file=sys.stderr)
+    print(console.dim(f"{len(report) - len(failures)}/{len(report)} captured"
+                      + (f", {skipped} example(s) declare no capture" if skipped else "")), file=sys.stderr)
 
     _refresh(ctx, preset, args.refresh_captures if args.refresh_captures is not None else args.update_captures)
 
@@ -204,52 +221,72 @@ def _sweep(ctx: Context, preset, targets, examples: list, args: argparse.Namespa
         sys.exit(1)
 
 
-def _registered_shots(ctx: Context, preset, example, artifact: Path, args: argparse.Namespace) -> list[str]:
-    """The capture names an example registers, asked of the example itself.
+def _one_capture(ctx: Context, example, name: str, args: argparse.Namespace):
+    """The one capture `name` selects out of an example's sidecar.
 
-    Registration happens while a frame is authored, so this runs one headless frame to find out.
-    A run that fails to answer contributes no shots rather than failing the sweep: its default capture still runs, and
-    that is where the real error will surface.
+    A name the sidecar does not declare is an error here rather than a run that quietly takes the default view.
+    The binary makes the same refusal for a name nothing registered, so both halves of a rename fail loudly.
     """
-    result = dev.run_step(
-        [str(artifact), example.name, "--examples"],
-        step_type="example", name=f"{example.target}-list",
-        build_dir=preset.build_dir, cwd=_working_directory(ctx, example),
-        env={**os.environ, "SC_CAPTURE": "1", "SC_CAPTURE_LIST": "1"},
-        timeout=_SWEEP_TIMEOUT_SECONDS, mirror=False, verbose=args.verbose,
-    )
-    if result.returncode != 0:
-        return []
+    try:
+        declared = captures_for(example, ctx.root)
+    except SidecarError as e:
+        ctx.die(str(e))
 
-    # The listing goes to stdout, which run_step captured to a file rather than handing back.
-    # Only lines carrying the prefix count: the binary is a test runner too, and its own summary line goes to the same stream.
-    # Taking every non-empty line made "All 1 tests passed" a capture name.
-    printed = _read_log(result.stdout_log)
-    return [line.strip().removeprefix(_LIST_PREFIX)
-            for line in printed.splitlines() if line.strip().startswith(_LIST_PREFIX)]
+    if declared is None:
+        ctx.die(f"{example.name} declares no captures: add an entry to {Path(example.file).parent / SIDECAR_NAME}")
+
+    for capture in declared:
+        if capture.name == name:
+            return capture
+
+    offered = ", ".join(c.slug for c in declared)
+    ctx.die(f"{example.name} declares no capture named {name!r}; it declares: {offered}")
 
 
-def _capture_one(ctx: Context, preset, example, artifact: Path, shot: str, args: argparse.Namespace) -> str:
+def _capture_output(preset, capture, args: argparse.Namespace) -> Path:
+    """Where one capture's image goes, honouring an explicit --capture-out."""
+    if args.capture_out:
+        out = Path(args.capture_out).resolve()
+    else:
+        out = capture_directory(preset, capture.example, capture.name) / f"capture.{capture.fmt}"
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _capture_environment(capture, out: Path, args: argparse.Namespace) -> dict:
+    """The environment one capture run needs.
+
+    The sidecar carries the defaults and the flags override them, so iterating on framing never means editing a file.
+    """
+    env = {"SC_CAPTURE": "1", "SC_CAPTURE_OUT": str(out), "SC_CAPTURE_SIZE": args.capture_size or capture.size}
+    if capture.name:
+        env["SC_CAPTURE_NAME"] = capture.name
+
+    accumulate = args.capture_accumulate if args.capture_accumulate is not None else capture.accumulate
+    if accumulate is not None:
+        env["SC_CAPTURE_ACCUMULATE"] = str(accumulate)
+
+    timeout = args.capture_timeout if args.capture_timeout is not None else capture.timeout
+    if timeout is not None:
+        env["SC_CAPTURE_TIMEOUT"] = str(timeout)
+
+    return env
+
+
+def _capture_one(ctx: Context, preset, example, artifact: Path, capture, args: argparse.Namespace) -> str:
     """One capture, into its own folder under the build directory.
 
     Returns the line the report shows for it.
     """
-    directory = capture_directory(preset, example.name, shot)
-    directory.mkdir(parents=True, exist_ok=True)
-    image = directory / "capture.jpg"
-
-    env = {**os.environ, "SC_CAPTURE": "1", "SC_CAPTURE_SIZE": args.capture_size, "SC_CAPTURE_OUT": str(image)}
-    if shot:
-        env["SC_CAPTURE_NAME"] = shot
-    if args.capture_accumulate is not None:
-        env["SC_CAPTURE_ACCUMULATE"] = str(args.capture_accumulate)
-    if args.capture_timeout is not None:
-        env["SC_CAPTURE_TIMEOUT"] = str(args.capture_timeout)
+    image = _capture_output(preset, capture, args)
+    directory = image.parent
 
     result = dev.run_step(
         [str(artifact), example.name, "--examples"],
         step_type="example", name=f"{example.target}-capture",
-        build_dir=preset.build_dir, cwd=_working_directory(ctx, example), env=env,
+        build_dir=preset.build_dir, cwd=_working_directory(ctx, example),
+        env={**os.environ, **_capture_environment(capture, image, args)},
         timeout=_SWEEP_TIMEOUT_SECONDS, mirror=False, verbose=args.verbose,
     )
 
@@ -257,27 +294,31 @@ def _capture_one(ctx: Context, preset, example, artifact: Path, shot: str, args:
     (directory / "stdout.txt").write_text(printed, encoding="utf-8")
     (directory / "stderr.txt").write_text(_read_log(result.stderr_log), encoding="utf-8")
 
-    # An example that wrote no image is a text example, not a failure: SC_CAPTURE means nothing to one, so it simply ran.
-    # Its transcript is the artifact, which is what makes the envelope — one flag, one folder, one report — genuinely
-    # shared rather than an image feature with text bolted on.
-    ok = result.returncode == 0
-    if ok and image.is_file():
+    # What counts as the artifact is the MECHANISM's answer, never a guess from what appeared.
+    # An `sv` capture that produced no image failed, even on a clean exit — the binary reports a capture it could not
+    # take by logging and closing the loop, so the exit code alone would call that a success.
+    # Guessing instead would file a failed image capture as a successful transcript, which is a plausible-looking lie.
+    expects_image = capture.mechanism in IMAGE_MECHANISMS
+    ok = result.returncode == 0 and (image.is_file() if expects_image else True)
+    if not ok:
+        main = None
+    elif expects_image:
         main = image.name
-    elif ok:
+    else:
         main = "transcript.txt"
         (directory / main).write_text(printed, encoding="utf-8")
-    else:
-        main = None
 
     # The manifest names which artifact is the main one, so the refresh step needs to know nothing about example kinds.
     # `ok` is what keeps a failed capture out of the source tree: refresh copies nothing that did not succeed.
     (directory / "manifest.json").write_text(
-        json.dumps({"example": example.name, "shot": shot, "main": main,
+        json.dumps({"example": example.name, "shot": capture.name, "main": main,
                     "source": example.file, "ok": ok}, indent=2),
         encoding="utf-8",
     )
     if main is not None:
         return f"captured -> {ctx.rel(directory / main)}"
+    if result.returncode == 0:
+        return "FAILED (the run wrote no image — see stderr.txt beside it)"
     return f"FAILED (exit {result.returncode})"
 
 
@@ -329,38 +370,6 @@ def _refresh(ctx: Context, preset, match: str) -> None:
         copied += 1
 
     print(console.dim(f"{copied} image(s) refreshed"), file=sys.stderr)
-
-
-def _capture_environment(ctx: Context, preset, example, args) -> tuple[Path | None, dict]:
-    """The environment a capture run needs, and the image it will write.
-
-    The output path is composed here rather than inside the example, because dev.py is the only party that knows both
-    the resolved example name and where this preset's build directory is.
-    A capture never writes into the source tree: it lands under the build directory, which already carries the gitignore, the log archiving and the CI upload.
-    Copying one next to its example is the separate refresh step.
-    """
-    env = {"SC_CAPTURE": "1", "SC_CAPTURE_SIZE": args.capture_size}
-    if args.capture_accumulate is not None:
-        env["SC_CAPTURE_ACCUMULATE"] = str(args.capture_accumulate)
-    if args.capture_timeout is not None:
-        env["SC_CAPTURE_TIMEOUT"] = str(args.capture_timeout)
-
-    if args.capture_list:
-        env["SC_CAPTURE_LIST"] = "1"
-        return None, env
-
-    shot = args.capture or ""
-    if shot:
-        env["SC_CAPTURE_NAME"] = shot
-
-    if args.capture_out:
-        out = Path(args.capture_out).resolve()
-    else:
-        out = capture_directory(preset, example.name, shot) / "capture.jpg"
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    env["SC_CAPTURE_OUT"] = str(out)
-    return out, env
 
 
 def _working_directory(ctx: Context, example) -> Path:

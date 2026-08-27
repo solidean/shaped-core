@@ -38,7 +38,7 @@ A single-file example shares its library's `examples/` folder with its siblings;
 
 Anything `dev.py` does not recognize is forwarded to the example, so `dev.py example x -- --my-flag` reaches its `main`.
 There is deliberately **no `--all`**: executing the whole corpus would open every window it has, and nobody wants that.
-The capture sweep below is the one exception, and it is allowed for exactly that reason — a capture opens no window at all.
+The capture sweep below is the one exception, and it is allowed because it cannot do that: it runs only what a sidecar declares capturable, and every such example runs headless.
 
 ### `--background`, for a run that should not take over the screen
 
@@ -59,8 +59,7 @@ An example that constructs its own `window_system_description` can override it i
 
 ```bash
 uv run dev.py example shaped-viewer/hello-cube --capture          # write an image, open no window
-uv run dev.py example shaped-viewer/hello-cube --capture front    # a capture the example registered by name
-uv run dev.py example shaped-viewer/hello-cube --capture-list     # what names it registers
+uv run dev.py example shaped-viewer/hello-cube --capture front    # one the sidecar declares by name
 ```
 
 **This is the authoring loop for a graphical example, not just a way to refresh a picture.**
@@ -83,6 +82,39 @@ That last one is what stops a routine whose shaders never compiled from writing 
 `--capture-accumulate` and `--capture-timeout` move the thresholds when a scene needs longer.
 A run that spends its whole timeout writes what it has and then fails, so the partial image is there to look at.
 
+### An example is capturable when it says so
+
+Capture is opt-in, through a `.capture.json` beside the example source, keyed by example name:
+
+```json
+{
+    "shaped-viewer/hello-cube": {
+        "mechanism": "sv",
+        "size": "1280x720",
+        "format": "jpg",
+        "captures": [
+            {}
+        ]
+    }
+}
+```
+
+**An example with no entry is never launched by a sweep.**
+That is what makes "the sweep opens no window" true by construction rather than by detection, and it is the whole reason the sweep is allowed to exist where `--all` is not.
+It also means an example rendering through something other than `sv::interactive` is simply not capturable yet, rather than being launched and quietly ignoring the request.
+The two `vdoc/cube-*` examples own their own window, swapchain and renderer, so they have no mechanism to declare.
+
+`mechanism` says how the run is driven and what it must produce.
+`sv` is a run through `sv::interactive`, which must leave an image at the path it was given; `transcript` is a text example, whose artifact is its stdout.
+Declaring it is what stops a failed image capture from being filed as a successful transcript.
+
+Everything else is optional and is a **default the flags override**, so iterating on framing never means editing the file.
+`size`, `format`, `accumulate` and `timeout` may sit on the example or on a single capture, and the latter wins.
+That is where a scene needing longer to converge says so, without a line in the source.
+
+Full-line `//` comments are stripped before parsing, so the file reads like configuration despite being JSON.
+JSON rather than YAML because `dev.py` declares `dependencies = []` and is worth keeping that way — see [dev-py-driver.md](../dev-py-driver.md).
+
 ### Named captures, for an example that shows more than one thing
 
 ```cpp
@@ -92,6 +124,10 @@ f.register_capture("front", [&](sv::capture_context const& c) { view.camera(fron
 The body runs inline, where it is declared, on every frame — and only when that capture is the one being taken.
 So it may simply force what it wants, and whatever the example writes after it still wins.
 On an interactive run nothing is taken, so it never runs at all.
+
+**The name must appear in both places**, and a disagreement fails rather than falling back.
+A sidecar naming a capture the source does not register stops on the first frame and writes nothing; asking for one the sidecar does not declare fails before the binary is even launched.
+Without that, renaming a callback would go on producing the default view under the old name's filename, and a sweep would refresh it into the repository reporting success.
 
 **It must be idempotent after its first frame.**
 Any change to what the image depends on restarts the accumulation, so a callback writing a slightly different value every frame never converges: the run spends its whole timeout and then fails.

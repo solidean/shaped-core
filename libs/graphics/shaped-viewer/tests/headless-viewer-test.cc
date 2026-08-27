@@ -178,3 +178,54 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
     }
     cc::remove_file(path);
 }
+
+// A capture asked for by a name nothing registers must fail, and must fail WITHOUT writing anything.
+//
+// Nothing discovers capture names any more — a `.capture.json` beside the example declares them — so this is the only
+// thing standing between a renamed callback and a plausible, wrong reference image: the default view, written under
+// the old name's filename, refreshed into the repository by a sweep that reported success.
+TEST("sv - a capture nothing registered fails without writing", nx::config::main_thread)
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    auto const path = cc::format("{}/sv-capture-missing.jpg", cc::temp_directory_path());
+    cc::remove_file(path); // a leftover from an earlier run would make the check below vacuous
+
+    auto const on = cc::scoped_environment_variable(sv::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sv::capture_output_env_var, path);
+    auto const dim = cc::scoped_environment_variable(sv::capture_size_env_var, "64x48");
+    auto const which = cc::scoped_environment_variable(sv::capture_name_env_var, "no-such-capture");
+    auto const lim = cc::scoped_environment_variable(sv::capture_timeout_env_var, "120");
+
+    auto frames = 0;
+    for (auto f : sv::interactive(ctx, "sv-test/capture-missing"))
+    {
+        f.window().view().add_scene();
+        f.register_capture("front", [](sv::capture_context const&) {});
+
+        ++frames;
+        REQUIRE(frames < 200); // it should stop on the first frame; this only keeps a hang from becoming a timeout
+    }
+
+    // The first frame is enough to know: registration happens while a frame is authored.
+    CHECK(frames == 1);
+
+    // And nothing was written.
+    // A file here would be the default view wearing the requested name.
+    CHECK(cc::file_read_stream_adapter::open(path).has_error());
+}

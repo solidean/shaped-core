@@ -21,7 +21,7 @@ namespace
     if (!req.active)
         return req;
 
-    if (req.output_path.empty() && !req.list_only)
+    if (req.output_path.empty())
     {
         CC_LOG_ERROR("capture: {} is set but {} names no file — running interactively instead", capture_request_env_var,
                      capture_output_env_var);

@@ -4,7 +4,6 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/string/print.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
@@ -810,14 +809,16 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     if (session.is_done())
         return;
 
-    // The listing is answered by the first frame that ran: registration happens while a frame is authored, so there
-    // is nothing to list before one has been.
-    if (session.request().list_only)
+    // A capture asked for by name that nothing registered is an error, and it is caught on the FIRST frame rather
+    // than after the timeout: registration happens while a frame is authored, so one frame is all it takes to know.
+    //
+    // The alternative is the quiet one — capturing the default view under the requested name's filename — which is
+    // exactly how a renamed callback would go on producing a plausible, wrong reference image.
+    if (!session.request().name.empty() && session.is_first_application())
     {
-        // A library does not print, but a listing IS this run's requested output and has no other channel to reach
-        // the tool that asked for it.
+        CC_LOG_ERROR("capture: nothing registered the capture {}", session.request().name);
         for (auto const& name : session.registered_names())
-            cc::println("{}{}", capture_list_prefix, name);
+            CC_LOG_ERROR("capture: this frame registered {}", name);
 
         session.mark_done();
         request_close();

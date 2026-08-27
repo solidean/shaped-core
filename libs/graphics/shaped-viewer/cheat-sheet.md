@@ -520,7 +520,7 @@ sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provi
 sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count, headless }
                                  //   title is optional: unset takes the id, up to its ## — so naming a viewer usually titles it too
                                  //   headless: no window system, no window, no swapchain, nothing presented — composites into an offscreen texture
-                                 //   SC_CAPTURE turns this on by itself, and installs a capture; see capture.hh and docs/guides/examples.md
+                                 //   SC_CAPTURE turns this on by itself and installs a capture, but only for an example its .capture.json declares
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
@@ -548,6 +548,7 @@ frame.pending_resource_work() -> isize                         // resources stil
 frame.register_capture("name", body)                           // a named capture; body runs INLINE here, every frame, only when it is the one taken
                                                                //   takes sv::capture_context { first_frame, name, size }
                                                                //   MUST be idempotent after the first frame, or accumulation never settles
+                                                               //   the name must also appear in the example's .capture.json; a mismatch fails, never falls back
 
 // on a view — the layout layer is created lazily, so you only pay for what you name
 view.add_scene()                 -> scene_ref                  // APPENDS a 3D layer; a traced layer is forced to `replace`, so a second one overwrites the first

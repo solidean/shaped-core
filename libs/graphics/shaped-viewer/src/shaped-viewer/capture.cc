@@ -54,12 +54,6 @@ capture_request capture_request::from_environment()
 {
     auto req = capture_request{};
     req.active = cc::is_environment_flag_set(capture_request_env_var);
-    req.list_only = cc::is_environment_flag_set(capture_list_env_var);
-
-    // The listing is a capture run that writes nothing, so it needs the headless bring-up the flag above turns on.
-    if (req.list_only)
-        req.active = true;
-
     if (!req.active)
         return req;
 
