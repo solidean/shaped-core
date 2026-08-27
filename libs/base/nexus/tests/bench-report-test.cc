@@ -1,5 +1,7 @@
+#include <clean-core/common/macros.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/stat.hh>
+#include <nexus/bench/environment.hh>
 #include <nexus/bench/report.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/registry.hh>
@@ -257,4 +259,55 @@ TEST("bench - a benchmark stays out of a normal sweep")
     for (auto const& decl : registry.declarations)
         if (decl.test_config.bucket == nx::config::test_bucket::benchmark)
             CHECK(!config.would_run(decl));
+}
+
+// The environment layer: what the report header and the sidecar both read.
+TEST("bench - the system summary is structurally complete even where it cannot be filled")
+{
+    auto const& sys = nx::bench::describe_system();
+
+    // Never absent, so the shape a consumer parses does not change when sysinfo lands.
+    CHECK(!sys.os.empty());
+    CHECK(!sys.arch.empty());
+    CHECK(!sys.cpu.empty());
+    CHECK(!sys.build.empty());
+
+    CHECK(sys.logical_cores >= 1);
+
+    // Until there is a system-information library to ask, every run says so rather than leaving a reader to notice.
+    CHECK(sys.is_provisional);
+
+    // The one field that decides whether a number means anything, and the compiler knows it exactly.
+    CHECK(sys.assertions_enabled == (CC_ASSERT_ENABLED != 0));
+}
+
+TEST("bench - a load reading measures the clock this thread actually ran on")
+{
+    auto const first = nx::bench::sample_load();
+    CHECK(first.ticks_per_ns > 0);
+
+    // The OS busy fraction needs two readings to be a fraction at all, so the first is negative by contract.
+    CHECK(first.cpu_busy_fraction < 0);
+
+    auto const second = nx::bench::sample_load();
+    CHECK(second.ticks_per_ns > 0);
+
+    // A constant-rate counter, so two readings taken moments apart agree closely.
+    // Wide tolerance on purpose: this is asserting the reading is a rate at all, not the machine's stability.
+    auto const ratio = second.ticks_per_ns / first.ticks_per_ns;
+    CHECK(ratio > 0.5);
+    CHECK(ratio < 2.0);
+}
+
+TEST("bench - pinning reports what it achieved rather than assuming")
+{
+    // Never asserts, on any platform: where affinity is unavailable — macOS offers only advisory hints — this reports
+    // false and changes nothing, which is what lets the caller print the truth.
+    auto const pinned = nx::bench::try_pin_to_core(0);
+    if (pinned)
+        nx::bench::unpin();
+
+    // An out-of-range core is refused rather than clamped onto some other core.
+    CHECK(!nx::bench::try_pin_to_core(-1));
+    CHECK(!nx::bench::try_pin_to_core(1 << 20));
 }

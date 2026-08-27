@@ -22,6 +22,11 @@ rules:
     files: src/nexus/bench/impl/hardware_counters_linux.cc
 
   - kind: allow-include
+    value: <sched.h>
+    reason: sched_setaffinity, the only way to pin a benchmark thread to one core on Linux
+    files: src/nexus/bench/impl/platform_load_linux.cc
+
+  - kind: allow-include
     value: <crt_externs.h>
     reason: _NSGetArgv is the only route to this process's argv on Apple platforms
     files: src/nexus/args/impl/os_args.cc

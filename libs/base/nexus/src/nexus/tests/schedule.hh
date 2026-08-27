@@ -107,6 +107,25 @@ struct nx::test_schedule_config
     // Set via --pgo-json <file>; nx::pgo records the metrics.
     cc::string pgo_json_file;
 
+    // When non-empty, run() writes the benchmark sidecar to this path, additionally to the console output.
+    //
+    // A different schema from the PGO one and a different consumer, which is why the two files are named apart:
+    // <name>.pgo.json tracks a handful of points over time, <name>.bench.json carries a whole run including every
+    // sample.
+    // Set via --benchmark-json <file>.
+    cc::string benchmark_json_file;
+
+    // Print the full statistics block under every row of a benchmark table.
+    // A single-loop benchmark is always drawn in full, so this changes nothing there.
+    bool benchmark_verbose = false;
+
+    // Pin the run to one core before the benchmarks, and report whether it worked.
+    //
+    // Off by default on purpose: a harness that silently pins will eventually pin onto a core something else is
+    // already using, and that measurement is worse than the unpinned one.
+    // Set via --benchmark-pin.
+    bool benchmark_pin = false;
+
     // The arguments the selected test itself receives, reachable from its body through nx::test_args().
     // Set via --test-args "<line>", or by everything after a bare --.
     // Tokenized once here, by the same rules a response file uses.

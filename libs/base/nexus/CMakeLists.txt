@@ -22,6 +22,7 @@ add_library(nexus
     src/nexus/pgo.cc
     src/nexus/bench/barriers.cc
     src/nexus/bench/calibration.cc
+    src/nexus/bench/environment.cc
     src/nexus/bench/report.cc
     src/nexus/bench/run.cc
     src/nexus/bench/statistics.cc
@@ -36,6 +37,7 @@ add_library(nexus
     src/nexus/tests/export/xml.cc
     src/nexus/tests/export/catch2.cc
     src/nexus/tests/export/junit.cc
+    src/nexus/tests/export/bench_json.cc
     src/nexus/tests/export/pgo_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
@@ -78,6 +80,8 @@ target_sources(nexus
     src/nexus/bench/fwd.hh
     src/nexus/bench/barriers.hh
     src/nexus/bench/calibration.hh
+    src/nexus/bench/environment.hh
+    src/nexus/bench/impl/platform_load.hh
     src/nexus/bench/report.hh
     src/nexus/bench/result.hh
     src/nexus/bench/run.hh
@@ -98,6 +102,7 @@ target_sources(nexus
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
+    src/nexus/tests/export/bench_json.hh
     src/nexus/tests/export/pgo_json.hh
     src/nexus/tests/export/listing_json.hh
 
@@ -145,15 +150,18 @@ target_link_libraries(nexus
 # the runtime source of truth is always nx::bench::available_hw_counters().
 if(WIN32)
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_windows.cc)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/platform_load_windows.cc)
     # advapi32: the ETW control + real-time consumer APIs (StartTrace / TraceSetInformation / OpenTrace /
     # ProcessTrace / ControlTrace) plus the token APIs used to enable SeSystemProfilePrivilege.
     target_link_libraries(nexus PUBLIC advapi32)
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=1)
 elseif(LINUX)
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_linux.cc)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/platform_load_linux.cc)
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=1)
 else()
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_none.cc)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/platform_load_none.cc)
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=0)
 endif()
 

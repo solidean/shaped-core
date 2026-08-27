@@ -1,15 +1,19 @@
 #include <babel-serializer/data/json.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
+#include <nexus/tests/export/bench_json.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
 #include <nexus/tests/export/pgo_json.hh>
 #include <nexus/tests/export/xml.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
+
+using namespace cc::primitive_defines;
 
 namespace
 {
@@ -333,4 +337,58 @@ TEST("export - junit report for an all-pass run has no failure elements", no_sch
     CHECK(xml.contains("tests=\"2\""));
     CHECK(xml.contains("failures=\"0\""));
     CHECK(!xml.contains("<failure"));
+}
+
+TEST("export - the benchmark sidecar carries the samples, not just a summary", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("bench", {},
+                        []
+                        {
+                            auto cfg = nx::bench::run_config::standard();
+                            cfg.min_time_secs = 0.001;
+                            cfg.max_time_secs = 0.05;
+                            cfg.min_samples = 8;
+                            cfg.max_samples = 16;
+                            cfg.warmup_time_secs = 0.001;
+
+                            auto acc = u64(0);
+                            nx::bench::run("a loop", cfg,
+                                           [&](nx::bench::iteration& it)
+                                           {
+                                               acc += 1;
+                                               nx::bench::sink(acc);
+                                               it.items(2);
+                                           });
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    auto const doc = babel::json::read(nx::write_bench_json("my-suite", exec)).value();
+    auto const root = doc.root();
+
+    CHECK(root["suite"].as_string() == "my-suite");
+
+    // The machine, whose absence would make every number here uninterpretable — and the flag that says the fields are
+    // placeholders until sysinfo lands.
+    CHECK(root["system"]["logical_cores"].as_double() >= 1);
+    CHECK(root["system"]["is_provisional"].as_bool());
+
+    auto const loops = root["loops"];
+    REQUIRE(loops.size() == 1);
+
+    auto const loop = loops[0];
+    CHECK(loop["test"].as_string() == "bench");
+    CHECK(loop["loop"].as_string() == "a loop");
+    CHECK(loop["measured_iterations"].as_double() > 0);
+    CHECK(loop["statistics"]["median"].as_double() > 0);
+
+    // Two items per measured iteration, declared through the handle.
+    CHECK(loop["items"].as_double() == loop["measured_iterations"].as_double() * 2);
+
+    // The point of the sidecar: a consumer holding the samples can recompute any statistic this design got wrong.
+    auto const samples = loop["samples"];
+    CHECK(samples.size() == loop["statistics"]["samples"].as_double());
+    CHECK(samples.size() >= 8);
 }

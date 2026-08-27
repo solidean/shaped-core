@@ -31,6 +31,8 @@ struct recorded_quantity;
 struct result;
 struct iteration;
 struct calibration;
+struct system_summary;
+struct load_sample;
 
 } // namespace nx::bench
 
