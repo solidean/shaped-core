@@ -258,6 +258,12 @@ cc::string_view view_ref::display_name() const
     return _frame->state_of(_view).display_name;
 }
 
+u32 view_ref::accumulated_frames() const
+{
+    auto const* const slot = _frame->state_of(_view).temporal.get_ptr(temporal_id::accumulation(0));
+    return slot == nullptr ? 0 : slot->accum_frame;
+}
+
 // ---- window_ref ------------------------------------------------------------------------------------------
 
 view_ref window_ref::default_view() const

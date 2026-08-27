@@ -159,6 +159,16 @@ public:
 
     [[nodiscard]] cc::string_view display_name() const;
 
+    /// How many frames this view's first traced layer has blended into its accumulated image.
+    ///
+    /// It is 0 on any frame that restarts the accumulation, which is any frame changing what the image depends on —
+    /// the camera, the scene, the resolution, or a shader reload.
+    /// So a caller waiting for a converged image needs no "has anything changed" rule of its own; this counter already
+    /// is one.
+    /// What it does NOT see is post-load work a resource still owes, which changes a texture's contents rather than
+    /// its id — `frame::pending_resource_work` is that half.
+    [[nodiscard]] u32 accumulated_frames() const;
+
     [[nodiscard]] view_id id() const;
     [[nodiscard]] view_index index() const { return _view; }
 

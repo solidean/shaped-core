@@ -195,6 +195,7 @@ if(SC_BUILD_TESTS)
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-viewer-test PRIVATE
             tests/raytraced-view-test.cc
+            tests/headless-viewer-test.cc
             tests/pathtraced-view-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc

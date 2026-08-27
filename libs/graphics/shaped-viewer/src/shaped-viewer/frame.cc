@@ -123,6 +123,11 @@ view_index frame::add_view(cc::string_view id)
     return index;
 }
 
+isize frame::pending_resource_work() const
+{
+    return _viewer == nullptr ? 0 : _viewer->pending_resource_work();
+}
+
 gpu_resource_manager& frame::resources()
 {
     CC_ASSERT(_viewer != nullptr, "a closed frame has no viewer to draw resources from");

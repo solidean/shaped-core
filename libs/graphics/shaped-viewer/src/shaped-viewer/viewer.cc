@@ -114,6 +114,13 @@ struct viewer::impl
     cc::unique_ptr<sr::window> window;
     sg::swapchain_handle swapchain;
 
+    /// Headless only: what the frame composites into, in place of a back buffer.
+    /// Persistent rather than transient — a capture reads it back after the frame that wrote it has been submitted.
+    sg::texture_2d offscreen;
+
+    /// Headless only: what `request_close` sets, since there is no window to route it through.
+    bool close_requested = false;
+
 
     gpu_resource_manager resources;
 
@@ -176,18 +183,24 @@ cc::result<viewer> viewer::try_create(cc::string_view id_str, viewer_config conf
 
 cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, viewer_config config)
 {
-    auto ws_r = sr::window_system::try_create();
-    if (ws_r.has_error())
-        return cc::error("shaped-viewer: no window backend / display available");
-    auto ws = cc::move(ws_r.value());
+    // Headless brings up neither, so it needs no display and no window backend at all.
+    auto ws = cc::unique_ptr<sr::window_system>();
+    auto win = cc::unique_ptr<sr::window>();
+    if (!config.headless)
+    {
+        auto ws_r = sr::window_system::try_create();
+        if (ws_r.has_error())
+            return cc::error("shaped-viewer: no window backend / display available");
+        ws = cc::move(ws_r.value());
 
-    // An unset title takes the viewer's own name, so naming a viewer is usually all a caller has to do.
-    auto const title = config.title.has_value() ? cc::string_view(config.title.value()) : display_name_of(id_str);
+        // An unset title takes the viewer's own name, so naming a viewer is usually all a caller has to do.
+        auto const title = config.title.has_value() ? cc::string_view(config.title.value()) : display_name_of(id_str);
 
-    auto win_r = ws->try_create_window({.title = title, .width = config.width, .height = config.height});
-    if (win_r.has_error())
-        return cc::error("shaped-viewer: could not create a window");
-    auto win = cc::move(win_r.value());
+        auto win_r = ws->try_create_window({.title = title, .width = config.width, .height = config.height});
+        if (win_r.has_error())
+            return cc::error("shaped-viewer: could not create a window");
+        win = cc::move(win_r.value());
+    }
 
     // Ray tracing must be supported to build the meshes' BLAS; fail cleanly rather than asserting later.
     {
@@ -198,12 +211,31 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
             return cc::error("shaped-viewer: the rendering context reports no ray-tracing support");
     }
 
-    auto sc_r = ctx.try_create_swapchain({.native_window_handle = win->native_window_handle(),
-                                          .buffer_count = config.buffer_count,
-                                          .format = sg::pixel_format::bgra8_unorm});
-    if (sc_r.has_error())
-        return cc::error("shaped-viewer: could not create a swapchain for the window");
-    auto sc = sc_r.value();
+    // The frame's output: a back buffer when there is a window, an offscreen texture when there is not.
+    // Same format either way, so nothing downstream — the layout pipelines above all — sees which one it got.
+    auto sc = sg::swapchain_handle();
+    auto offscreen = sg::texture_2d();
+    if (config.headless)
+    {
+        auto tex_r = ctx.persistent.try_create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                           .width = config.width,
+                                                           .height = config.height,
+                                                           .usage = sg::texture_usage::render_target
+                                                                  | sg::texture_usage::readonly_texture
+                                                                  | sg::texture_usage::copy_src});
+        if (tex_r.has_error())
+            return cc::error("shaped-viewer: could not create the offscreen target for a headless viewer");
+        offscreen = cc::move(tex_r.value());
+    }
+    else
+    {
+        auto sc_r = ctx.try_create_swapchain({.native_window_handle = win->native_window_handle(),
+                                              .buffer_count = config.buffer_count,
+                                              .format = sg::pixel_format::bgra8_unorm});
+        if (sc_r.has_error())
+            return cc::error("shaped-viewer: could not create a swapchain for the window");
+        sc = sc_r.value();
+    }
 
     // The library is process-wide rather than the viewer's, because a *generated* material permutation is compiled from the
     // render path, which has no viewer to reach back to.
@@ -217,6 +249,7 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     im->window_system = cc::move(ws);
     im->window = cc::move(win);
     im->swapchain = cc::move(sc);
+    im->offscreen = cc::move(offscreen);
 
     im->start_time = std::chrono::steady_clock::now();
     return viewer(cc::move(im));
@@ -270,7 +303,15 @@ void viewer::begin_frames()
 bool viewer::is_running() const
 {
     auto const& im = *_impl;
-    if (im.stopped || im.window == nullptr)
+    if (im.stopped)
+        return false;
+
+    // Headless: nothing polls, nothing can be quit, so `request_close` is the only way out and the loop body is what
+    // decides when that is.
+    if (im.config.headless)
+        return !im.close_requested;
+
+    if (im.window == nullptr)
         return false;
     return !im.window->is_close_requested() && !im.window_system->is_quit_requested();
 }
@@ -278,6 +319,11 @@ bool viewer::is_running() const
 gpu_resource_manager& viewer::resources()
 {
     return _impl->resources;
+}
+
+isize viewer::pending_resource_work() const
+{
+    return _impl->resources.pending_work_count();
 }
 
 sv::impl::view_state& viewer::state_of(view_id id)
@@ -362,6 +408,8 @@ void viewer::zoom_at(tg::pos2f window_point, float ticks)
 void viewer::route_input()
 {
     auto& im = *_impl;
+    if (im.window_system == nullptr)
+        return; // headless: no events, and no cursor to route them by
 
     for (auto const& e : im.window_system->events())
     {
@@ -437,27 +485,36 @@ void viewer::route_input()
 frame viewer::acquire_frame()
 {
     auto& im = *_impl;
-    im.window_system->poll_events();
+    if (!im.config.headless)
+        im.window_system->poll_events();
 
     // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
     // texture, which is all its reclaim needs.
     im.views.begin_frame(u64(im.ctx->current_epoch()));
     route_input();
 
-    if (im.window->is_close_requested() || im.window_system->is_quit_requested())
-        return frame{}; // closed — the loop stops on is_running()
-
-    if (im.window->is_minimized())
-        return frame{}; // closed — skip this frame, the window is still open
-
-    try
+    if (im.config.headless)
     {
-        im.current_backbuffer = im.swapchain->acquire_backbuffer();
+        if (im.close_requested)
+            return frame{}; // closed — the loop stops on is_running()
     }
-    catch (sg::device_lost_exception const&)
+    else
     {
-        im.stopped = true;
-        return frame{};
+        if (im.window->is_close_requested() || im.window_system->is_quit_requested())
+            return frame{}; // closed — the loop stops on is_running()
+
+        if (im.window->is_minimized())
+            return frame{}; // closed — skip this frame, the window is still open
+
+        try
+        {
+            im.current_backbuffer = im.swapchain->acquire_backbuffer();
+        }
+        catch (sg::device_lost_exception const&)
+        {
+            im.stopped = true;
+            return frame{};
+        }
     }
     im.current_cmd = im.ctx->create_command_list();
 
@@ -473,7 +530,7 @@ frame viewer::acquire_frame()
 
     auto f = frame{};
     f._viewer = this;
-    f._size = im.current_backbuffer.size();
+    f._size = im.config.headless ? tg::vec2i(im.config.width, im.config.height) : im.current_backbuffer.size();
     f._seconds = std::chrono::duration<double>(now - im.start_time).count();
     f._delta_seconds = delta;
     f._id = im.frame_index;
@@ -515,7 +572,16 @@ frame_range viewer::frames()
 
 void viewer::request_close()
 {
-    if (_impl == nullptr || _impl->window == nullptr)
+    if (_impl == nullptr)
+        return;
+
+    if (_impl->config.headless)
+    {
+        _impl->close_requested = true;
+        return;
+    }
+
+    if (_impl->window == nullptr)
         return;
 
     // Routed through the window so it is the same signal the close button raises, and is_running() needs no second condition.
@@ -675,10 +741,22 @@ void viewer::finish_frame(frame& f)
 
         // With no views authored this places nothing and the clear alone lands, so the window is never left with
         // stale contents.
-        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views,
-                                 im.current_backbuffer.cleared(clear_color));
-        im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
-        im.ctx->advance_epoch(im.swapchain->buffer_count());
+        //
+        // The output is a back buffer or the offscreen texture, and viewer_renderer cannot tell: same format, same
+        // render_target_view, so the whole pass below this is identical either way.
+        auto const output = im.config.headless ? im.offscreen.as_render_target_view() : im.current_backbuffer;
+        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
+
+        if (im.config.headless)
+        {
+            im.ctx->submit_command_list(cc::move(im.current_cmd));
+            im.ctx->advance_epoch(im.config.buffer_count);
+        }
+        else
+        {
+            im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
+            im.ctx->advance_epoch(im.swapchain->buffer_count());
+        }
     }
     catch (sg::device_lost_exception const&)
     {

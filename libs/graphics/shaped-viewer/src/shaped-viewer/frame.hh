@@ -80,6 +80,13 @@ public:
     /// Monotonic frame counter, increasing once per drawn frame.
     [[nodiscard]] u64 id() const { return _id; }
 
+    /// How many resources still owe post-load work — mip generation and its kin, drained under a per-epoch budget.
+    ///
+    /// This is the half of "is the image finished" that accumulation cannot see.
+    /// Such work changes a texture's contents rather than its id, so it never restarts a view's accumulation:
+    /// a caller waiting for a settled image has to watch this AND `view_ref::accumulated_frames`.
+    [[nodiscard]] isize pending_resource_work() const;
+
     /// Seconds since the frame loop started, sampled once when this frame was acquired.
     /// Every view in the frame animates off that one instant, so they cannot drift apart within a frame.
     [[nodiscard]] double seconds() const { return _seconds; }

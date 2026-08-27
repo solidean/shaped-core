@@ -24,6 +24,15 @@ struct sv::viewer_config
     int width = 1280;
     int height = 720;
 
+    /// Runs with no window, no swapchain and no present: the frame is composited into an offscreen texture and left
+    /// there, `width` x `height`.
+    ///
+    /// It needs no display and no window backend, which is the point — this is what a capture run uses.
+    /// The frame API is unchanged either way: `frame::viewport_size` reports the offscreen size and nothing hands out
+    /// a swapchain, so an authoring body cannot tell the difference.
+    /// A headless loop is ended by `request_close` alone, since there is no window to close.
+    bool headless = false;
+
     /// Swapchain back buffers, and also the pipelining depth passed to advance_epoch.
     /// Must be >= 2.
     int buffer_count = 3;
@@ -127,6 +136,10 @@ private:
     /// The GPU resources every view in this viewer draws from.
     /// Reached through `frame::resources`, which is the only sanctioned way in — a caller has no viewer to ask.
     [[nodiscard]] sv::gpu_resource_manager& resources();
+
+    /// The post-load work the resource managers still owe, as a const query — `frame::pending_resource_work`'s answer.
+    /// Separate from `resources()` because that one hands out a mutable manager, and asking a count should not.
+    [[nodiscard]] isize pending_resource_work() const;
 
     /// The persistent state of the view named `id`, created on first use.
     /// The frame reaches this on a caller's behalf; nothing outside authoring should hold the reference across frames,
