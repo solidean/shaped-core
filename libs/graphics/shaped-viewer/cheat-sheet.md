@@ -517,8 +517,10 @@ sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_functi
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
 
-sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count }
+sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count, headless }
                                  //   title is optional: unset takes the id, up to its ## — so naming a viewer usually titles it too
+                                 //   headless: no window system, no window, no swapchain, nothing presented — composites into an offscreen texture
+                                 //   SC_CAPTURE turns this on by itself, and installs a capture; see capture.hh and docs/guides/examples.md
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
@@ -540,6 +542,12 @@ auto id = frame.scoped_id(i);  frame.id_seed()                 // RAII id scope,
 frame.push_id(i) / frame.pop_id()                              // the same, explicit — every push needs its pop
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
+frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)
+                                                               //   0 does NOT mean settled, and it never restarts accumulation: that work
+                                                               //   changes a texture's contents, not its id, so accumulated_frames cannot see it
+frame.register_capture("name", body)                           // a named capture; body runs INLINE here, every frame, only when it is the one taken
+                                                               //   takes sv::capture_context { first_frame, name, size }
+                                                               //   MUST be idempotent after the first frame, or accumulation never settles
 
 // on a view — the layout layer is created lazily, so you only pay for what you name
 view.add_scene()                 -> scene_ref                  // APPENDS a 3D layer; a traced layer is forced to `replace`, so a second one overwrites the first

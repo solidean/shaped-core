@@ -93,4 +93,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - letting a windowed renderer thread the swapchain's back-buffer count into `advance_epoch`;
   - a headless/offscreen present target, so the present path can be pixel-verified on CI.
     Today the WARP swapchain test needs a real hidden window and SKIPs without one.
+    Tentative, with no caller waiting on it: shaped-viewer's headless mode does NOT need one, since it skips presenting
+    rather than presenting somewhere else.
+    So this buys sg's own suite a present path it can exercise without a window, and nothing else.
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
