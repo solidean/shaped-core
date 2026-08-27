@@ -157,12 +157,16 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
     auto const* const compiled = shader->try_value();
     REQUIRE(compiled != nullptr); // the probe shader must build; without it every check below is vacuous
 
+    std::fprintf(stderr, "[marker] probe: shader compiled\n");
+    std::fflush(stderr);
     auto const group_layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
     auto const built = cc::async_blocking_get(pipeline);
     REQUIRE(built != nullptr);
 
+    std::fprintf(stderr, "[marker] probe: pipeline built\n");
+    std::fflush(stderr);
     auto const item_count = cases.size() * blocks_per_case;
 
     auto cmd = ctx.create_command_list();
@@ -184,8 +188,12 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
 
     auto readback = cmd->download.data_from_buffer(result_buffer);
 
+    std::fprintf(stderr, "[marker] probe: submitting\n");
+    std::fflush(stderr);
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
+    std::fprintf(stderr, "[marker] probe: gpu idle\n");
+    std::fflush(stderr);
     // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
     auto const delivered = ctx.wait_for(readback);
     REQUIRE(delivered.has_value());
@@ -400,7 +408,11 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context& ctx = *ctx_h;
 
+    std::fprintf(stderr, "[marker] closure-probe: rt supported\n");
+    std::fflush(stderr);
     auto const& env = sv_test::shared_env();
+    std::fprintf(stderr, "[marker] closure-probe: shared env\n");
+    std::fflush(stderr);
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the probe shader");
 
@@ -412,6 +424,8 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
         return true;
     }();
     CHECK(registered);
+    std::fprintf(stderr, "[marker] closure-probe: package registered\n");
+    std::fflush(stderr);
 
     auto const surfaces = surfaces_under_test();
 
@@ -423,6 +437,8 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
         echo.s.specular_roughness = 0.375f;
         echo.s.geometry_tangent_frame = tg::vec4f(0, 0, 0, 0.625f);
 
+        std::fprintf(stderr, "[marker] closure-probe: echo dispatch\n");
+        std::fflush(stderr);
         auto const r = run_probe(ctx, cc::span<probe_case const>(&echo, 1));
         REQUIRE(r.size() == 1);
         CHECK(r[0].mean[0] == 0.125f).context("base_color.x, the first float3 in the struct");
