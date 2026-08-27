@@ -69,9 +69,22 @@ function entryMark(row) {
   return { text: "○", cls: "" };
 }
 
+// The nav row preview is off.
+//
+// It works, and the whole entry in a popover is genuinely useful, but a full render is slow enough to open that
+// the hover feels laggy, and it survives a pointer moving into the main content by a path the leave handler
+// does not see — so it sits over what you were trying to read.
+// Both are fixable with a hover delay and a pointer-position check rather than a leave event, and neither is
+// worth doing blind. Flip this to re-enable; everything behind it is intact.
+const PREVIEW_ENTRIES = false;
+
 function renderNav() {
+  entryPeekCache.clear();
   const data = state.data;
-  el("review-name").textContent = data.title || data.name;
+  const shown = data.title || data.name;
+  el("review-name").textContent = shown;
+  // The tab is how you find a review among several, so the title is the review rather than the tool.
+  document.title = shown;
   el("review-range").textContent = data.range;
   el("review-goals").textContent = data.goals.join(" + ") + " · round " + data.round;
 
@@ -109,6 +122,10 @@ function renderNav() {
 
     item.append(id, title, group, flag);
     item.addEventListener("click", () => selectEntry(row.slug));
+    if (PREVIEW_ENTRIES && !row.error) {
+      item.addEventListener("mouseenter", () => peekEntry(item, row.slug));
+      item.addEventListener("mouseleave", schedulePopoverClose);
+    }
     list.appendChild(item);
   }
 }
@@ -133,7 +150,9 @@ async function selectEntry(slug, { push = true } = {}) {
   state.staleContent = false;
   el("content").innerHTML = result.body.html;
   if (push) history.replaceState(null, "", "#" + slug);
+  annotate(el("content"), result.body.tokens);
   wireForms();
+  wireComments();
   renderNav();
 
   window.scrollTo(0, scroll);
@@ -323,6 +342,414 @@ function wireForms() {
       key.textContent = String(index + 1);
       opt.insertBefore(key, opt.firstChild);
     });
+  }
+}
+
+// ---- annotation -------------------------------------------------------------
+//
+// One pass with a provider per kind of reference, rather than four render passes that would each grow their own
+// idea of what a code block is.
+//
+// The page decides nothing. Python found and resolved every reference over the entry source -- fences included --
+// and handed down a table of literal tokens; this walks text nodes and wraps the ones it finds. A text node is by
+// construction inside one element, so a match can never cross a boundary, which is what makes annotating inside
+// highlighted code work at all.
+
+// Which regions each provider's tokens may be decorated in. Server-side defaults, togglable here without a
+// re-render, which is what "configurable even if the option is not exposed" means.
+const ANNOTATE = { file: true, dir: true, glossary: true, commit: true, symbol: true };
+
+function regionOf(node) {
+  if (node.closest("pre, code, .difflines")) return node.closest(".difflines") ? "diff" : "code";
+  return "prose";
+}
+
+function annotate(root, tokens) {
+  // The overview's tree emits its own links: a row shows a basename while the link needs the whole path, so the
+  // pass has no literal to match on. They still want the same peek.
+  for (const el of root.querySelectorAll("a.annot[data-path]")) {
+    el.addEventListener("mouseenter", () => peek(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  if (!tokens || !tokens.length) return;
+  const live = tokens.filter((t) => ANNOTATE[t.kind] !== false);
+  if (!live.length) return;
+
+  // Longest first, so `lib/render/markdown.py` wins over `markdown.py` at the same position.
+  const byLength = [...live].sort((a, b) => b.text.length - a.text.length);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    // `code.raw` is the author's opt-out: a span that looks like a reference and is not.
+    if (node.parentElement.closest("a, mark, .annot, textarea, .comment-composer, code.raw")) continue;
+    targets.push(node);
+  }
+
+  // A glossary term is drawn once per block. A term used eleven times in a paragraph becomes eleven dotted
+  // underlines, which reads as a rash rather than as help.
+  const drawnTerms = new Map();
+
+  for (const node of targets) {
+    const region = regionOf(node.parentElement);
+    const block = node.parentElement.closest(".block") || root;
+    if (!drawnTerms.has(block)) drawnTerms.set(block, new Set());
+    const done = drawnTerms.get(block);
+    const usable = byLength.filter((t) => {
+      if (!t.regions.includes(region)) return false;
+      return t.kind !== "glossary" || !done.has(t.text.toLowerCase());
+    });
+    if (usable.length) {
+      for (const hit of wrapNode(node, usable)) {
+        if (hit.kind === "glossary") done.add(hit.text.toLowerCase());
+      }
+    }
+  }
+}
+
+// A term was matched whole-word on the Python side, and the literal it emitted carries no record of that.
+// So `round` would be found inside `around` here, and — since a term is drawn once per block — the real
+// occurrence further along would then get nothing. Worse than not matching at all, which is the outcome
+// the glossary is explicitly trying to avoid.
+//
+// Paths and shas keep matching as substrings: a filename inside a longer run of word characters is a
+// different situation, and the current behaviour there is right.
+const WORD = /[A-Za-z0-9_]/;
+
+function isWholeWord(text, at, length) {
+  const before = at > 0 ? text[at - 1] : "";
+  const after = at + length < text.length ? text[at + length] : "";
+  return !WORD.test(before) && !WORD.test(after);
+}
+
+function wrapNode(node, tokens) {
+  const text = node.nodeValue;
+  const hits = [];
+  for (const token of tokens) {
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(token.text, from);
+      if (at < 0) break;
+      from = at + token.text.length;
+      if (token.kind === "glossary" && !isWholeWord(text, at, token.text.length)) continue;
+      // No nesting and no overlap: the first provider to claim a span owns it.
+      if (!hits.some((h) => at < h.end && at + token.text.length > h.start)) {
+        hits.push({ start: at, end: at + token.text.length, token });
+      }
+    }
+  }
+  if (!hits.length) return [];
+  hits.sort((a, b) => a.start - b.start);
+
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+  for (const hit of hits) {
+    if (hit.start > cursor) fragment.append(text.slice(cursor, hit.start));
+    fragment.append(decorate(hit.token));
+    cursor = hit.end;
+  }
+  if (cursor < text.length) fragment.append(text.slice(cursor));
+  node.parentNode.replaceChild(fragment, node);
+  return hits.map((h) => h.token);
+}
+
+function decorate(token) {
+  const el = document.createElement(token.href ? "a" : "span");
+  el.className = "annot " + (token.css || token.kind);
+  el.textContent = token.label || token.text;
+  el.dataset.kind = token.kind;
+  if (token.href) {
+    el.href = token.href;
+    el.target = "_blank";
+    el.rel = "noopener";
+  }
+  if (token.path) {
+    el.dataset.path = token.path;
+    el.dataset.line = String(token.line || 0);
+    el.addEventListener("mouseenter", () => peek(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  if (token.kind === "dir") {
+    el.dataset.dir = token.path;
+    el.addEventListener("mouseenter", () => peekTree(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  if (token.kind === "commit") {
+    el.dataset.sha = token.text;
+    el.addEventListener("mouseenter", () => peekCommit(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  if (token.note) {
+    el.title = "";
+    el.addEventListener("mouseenter", () => showPopover(el, `<div class="pop-def">${mdInline(token.note)}</div>`));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  // Clicking a term goes to the entry that defines it, for the reader who wants more than a sentence.
+  if (token.target) {
+    el.style.cursor = "pointer";
+    el.addEventListener("click", (e) => { e.preventDefault(); selectEntry(token.target); });
+  }
+  return el;
+}
+
+// The definition is one line of markdown, and only its bold lead ever matters.
+function mdInline(text) {
+  return _esc(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+// ---- the popover ------------------------------------------------------------
+//
+// One popover shared by every provider. A second one would be a second set of positioning bugs.
+
+let popoverTimer = 0;
+
+function popover() {
+  let box = document.getElementById("popover");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "popover";
+    box.hidden = true;
+    box.addEventListener("mouseenter", () => clearTimeout(popoverTimer));
+    box.addEventListener("mouseleave", schedulePopoverClose);
+    document.body.appendChild(box);
+  }
+  return box;
+}
+
+// `beside` puts the box past the anchor's right edge instead of under it, and aligns its top with the anchor.
+//
+// A nav row is the case: opening downwards covers the rows below the one being hovered, so the list you are
+// scanning disappears under the preview of the thing you were scanning it for.
+function showPopover(anchor, html, { beside = false } = {}) {
+  const box = popover();
+  clearTimeout(popoverTimer);
+  box.innerHTML = html;
+  box.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+
+  if (beside) {
+    const room = window.innerWidth - rect.right - 16;
+    box.style.maxWidth = Math.max(320, room) + "px";
+    box.style.left = Math.min(rect.right + 10, window.innerWidth - box.offsetWidth - 8) + "px";
+    box.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - box.offsetHeight - 8)) + "px";
+    return;
+  }
+
+  box.style.maxWidth = "";
+  box.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - box.offsetWidth - 8)) + "px";
+  const below = rect.bottom + 6;
+  box.style.top = (below + box.offsetHeight > window.innerHeight ? rect.top - box.offsetHeight - 6 : below) + "px";
+}
+
+function schedulePopoverClose() {
+  clearTimeout(popoverTimer);
+  popoverTimer = setTimeout(() => { popover().hidden = true; }, 180);
+}
+
+// Line numbers are added here rather than server-side: the highlighter emits one blob, and a gutter is a
+// reading aid rather than part of the content.
+// Splitting the serialized HTML on newlines is safe because pygments closes its spans at every line end,
+// so no element ever straddles the split.
+// Joined with nothing rather than with a newline: `.src-line` is `display: block` and breaks the line itself,
+// while a `pre` renders the newline between two blocks as a second break. That doubled every line's height,
+// which reads exactly like vertical padding on the gutter and is not.
+function withLineNumbers(html, start) {
+  return html.split("\n")
+    .map((text, index) => `<span class="src-line" data-line="${start + index}">` +
+      `<span class="src-no">${start + index}</span>${text}</span>`)
+    .join("");
+}
+
+// The whole file, every time, bounded and scrollable — rather than a window computed around the line.
+//
+// A window has to guess how much you wanted, and it guessed with a rule about comment blocks that was right
+// often enough to be worth having and wrong often enough to be noticed. Scrolling costs the reader nothing
+// and never hides the line above or below the one they asked about.
+// Cached per path rather than per path-and-line, since there is now only one response per file.
+const peekCache = new Map();
+
+async function peek(el) {
+  const path = el.dataset.path;
+  const line = Number(el.dataset.line || 0);
+  if (!peekCache.has(path)) {
+    const result = await getJSON(`/api/file?path=${encodeURIComponent(path)}&line=0&whole=1`);
+    if (!result.ok) return;
+    peekCache.set(path, result.body);
+  }
+  const body = peekCache.get(path);
+  showPopover(el,
+    `<div class="pop-head">${_esc(body.path)}` +
+    `<span>${line ? `line ${line} of ` : ""}${body.lines} lines</span></div>` +
+    `<pre class="pg pop-scroll"><code>${withLineNumbers(body.html, body.start)}</code></pre>`);
+  focusPopoverLine(line);
+}
+
+// Top when no line was given, and the line itself when one was — a third of the way down, so the lines
+// leading up to it are on screen too.
+function focusPopoverLine(line) {
+  const scroller = popover().querySelector(".pop-scroll");
+  if (!scroller) return;
+  if (!line) {
+    scroller.scrollTop = 0;
+    return;
+  }
+  const target = scroller.querySelector(`.src-line[data-line="${line}"]`);
+  if (!target) return;
+  target.classList.add("src-focus");
+  scroller.scrollTop = Math.max(0, target.offsetTop - scroller.clientHeight / 3);
+}
+
+// The whole entry, in the popover the nav row opens.
+//
+// Reading is what the nav is for, and until now the only way to see whether an entry was the one you meant
+// was to navigate into it and lose your place. Non-interactive on purpose: an ask answered by accident from
+// a hover is worse than no preview at all, so the copy is inert and the real one is a click away.
+const entryPeekCache = new Map();
+
+async function peekEntry(anchor, slug) {
+  if (!entryPeekCache.has(slug)) {
+    const result = await getJSON("/api/entry/" + encodeURIComponent(slug));
+    if (!result.ok || result.body.broken) return;
+    entryPeekCache.set(slug, result.body.html);
+  }
+  showPopover(anchor,
+    `<div class="pop-entry pop-scroll" aria-hidden="true">${entryPeekCache.get(slug)}</div>`,
+    { beside: true });
+  const scroller = popover().querySelector(".pop-scroll");
+  if (scroller) scroller.scrollTop = 0;
+}
+
+// A folder's popover: what is under it, as the same tree the overview draws.
+// The full tree with the overview's own row cap, rather than one level — a folder reference is asking what is
+// in here, and a listing that stops at the first directory answers that for almost no folder in this repo.
+const treeCache = new Map();
+
+async function peekTree(el) {
+  const path = el.dataset.dir;
+  if (!treeCache.has(path)) {
+    const result = await getJSON("/api/tree?path=" + encodeURIComponent(path));
+    if (!result.ok) return;
+    treeCache.set(path, result.body);
+  }
+  const body = treeCache.get(path);
+  showPopover(el,
+    `<div class="pop-head">${_esc(body.path)}/<span>${body.files} files</span></div>` +
+    `<div class="pop-scroll pop-tree">${body.html}</div>`);
+}
+
+const commitCache = new Map();
+
+async function peekCommit(el) {
+  const sha = el.dataset.sha;
+  if (!commitCache.has(sha)) {
+    const result = await getJSON("/api/commit?sha=" + encodeURIComponent(sha));
+    if (!result.ok) return;
+    commitCache.set(sha, result.body);
+  }
+  const c = commitCache.get(sha);
+  // The forge link lives in the popover rather than on the sha: `upstream` is not always there, and a popover
+  // can lose a line without the reference losing its link.
+  const forge = c.forge ? `<a href="${_esc(c.forge)}" target="_blank" rel="noopener">open on the forge</a>` : "";
+  showPopover(el,
+    `<div class="pop-head"><code>${_esc(c.short)}</code><span>${_esc(c.author)} · ${_esc(c.date)}</span></div>` +
+    `<div class="pop-subject">${_esc(c.subject)}</div>` +
+    (c.body ? `<pre class="pop-body">${_esc(c.body)}</pre>` : "") +
+    (c.stat ? `<div class="pop-stat">${_esc(c.stat)}</div>` : "") +
+    (forge ? `<div class="pop-link">${forge}</div>` : ""));
+}
+
+// ---- comments ---------------------------------------------------------------
+//
+// A comment is a remark, never a tracked question: the agent answers one by appending a block that names it.
+// So there is nothing to track here -- the composer writes, the server stores, and the round carries it over.
+
+async function saveComment(anchor, text, { id = "", change = "", offset = -1 } = {}) {
+  const result = await postJSON("/api/comment", {
+    entry: state.current, id, text, block: change ? "" : anchor, change, offset,
+  });
+  if (!result.ok) {
+    setSaveState(result.body.error || "the comment did not save", "bad");
+    return false;
+  }
+  if (result.body.digest) state.selfDigests.add(result.body.digest);
+  setSaveState(text.trim() ? "comment saved" : "comment removed", "ok");
+  await selectEntry(state.current, { push: false });
+  return true;
+}
+
+// The composer is one element reused wherever it is opened, so there is never a second half-typed box on screen.
+function openComposer(host, { anchor, id = "", text = "", change = "", offset = -1 }) {
+  closeComposer();
+  const box = document.createElement("div");
+  box.className = "comment-composer";
+  const area = document.createElement("textarea");
+  area.rows = 3;
+  area.value = text;
+  area.placeholder = change ? "a remark on this line" : "a remark on this block";
+  const actions = document.createElement("div");
+  actions.className = "comment-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = id ? "save" : "comment";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "ghost";
+  cancel.textContent = "cancel";
+
+  save.addEventListener("click", () => saveComment(anchor, area.value, { id, change, offset }));
+  cancel.addEventListener("click", closeComposer);
+  area.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); closeComposer(); }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveComment(anchor, area.value, { id, change, offset });
+  });
+
+  actions.append(save, cancel);
+  if (id) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost danger";
+    remove.textContent = "delete";
+    remove.addEventListener("click", () => saveComment(anchor, "", { id, change, offset }));
+    actions.append(remove);
+  }
+  box.append(area, actions);
+  host.appendChild(box);
+  area.focus();
+}
+
+function closeComposer() {
+  for (const box of document.querySelectorAll(".comment-composer")) box.remove();
+}
+
+function wireComments() {
+  for (const button of document.querySelectorAll(".comment-add")) {
+    button.addEventListener("click", () => {
+      const slot = button.closest(".comment-slot");
+      openComposer(slot, { anchor: slot.dataset.anchor });
+    });
+  }
+
+  for (const card of document.querySelectorAll(".comment-card")) {
+    if (card.querySelector(".comment-state").textContent.startsWith("sent")) continue;
+    card.querySelector(".comment-text").addEventListener("click", () => {
+      const slot = card.closest(".comment-slot") || card.parentElement;
+      openComposer(slot, {
+        anchor: slot.dataset ? slot.dataset.anchor || "" : "",
+        id: card.dataset.comment,
+        text: card.querySelector(".comment-text").textContent,
+      });
+    });
+  }
+
+  // A line comment anchors on the change id plus the offset into that change's diff, which is stable
+  // for exactly as long as the change id is.
+  for (const table of document.querySelectorAll(".change .difflines")) {
+    const change = table.closest(".change").querySelector(".change-head code").textContent;
+    for (const row of table.querySelectorAll("tr[data-off]")) {
+      row.querySelector(".dl-src").addEventListener("dblclick", () => {
+        const host = table.closest(".change");
+        openComposer(host, { anchor: "", change, offset: Number(row.dataset.off) });
+      });
+    }
   }
 }
 

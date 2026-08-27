@@ -37,6 +37,10 @@ Take its structure and its examples, and drop anything the change does not have.
   *Applies: when the change adds, removes or reshapes a public symbol — a header, an exported type, a CLI surface.
   Skip it for a change that is entirely internal, or for a tool with no library API.*
 
+- [example-evidence](example-evidence.md) — **what the examples actually printed, run rather than described.**
+  The one type with a block of its own, because "quote the output" is a claim nobody downstream can check.
+  *Applies: when the change adds examples, or reworks existing ones enough that a reader would want to see them run.*
+
 - [verdict](verdict.md) — **the big picture, at the end.**
   Is the shape right, does it fit the repository's philosophy, would we want this in a year.
   The judgement that detail-oriented entries lose.

@@ -18,6 +18,9 @@ from .grammar import (
     ack_name,
     ATTR_RE,
     BLOCK_TYPES,
+    CAPTURE_KINDS,
+    EXAMPLE_STATES,
+    FENCE_RE,
     FRONT_KNOWN,
     FRONT_REQUIRED,
     HEADING_RE,
@@ -26,6 +29,8 @@ from .grammar import (
     STATES,
     Option,
     ReviewParseError,
+    canonical_block_name,
+    derived_name,
     did_you_mean,
     parse_option,
 )
@@ -45,11 +50,22 @@ class Block:
     heading_end: int = 0
     end: int = 0
     raw: str = ""
+    block_name: str = ""
+    effective_round: int = 0
+    superseded_by: str = ""
 
     @property
     def name(self) -> str:
         """An ask's answer key."""
         return self.head.strip()
+
+    @property
+    def anchor(self) -> str:
+        """This block's identity within its entry: the round it was written in, and its name.
+
+        Stable because rounds freeze and blocks are only ever appended, so a later block never renumbers an earlier one.
+        """
+        return f"r{self.effective_round}/{self.block_name}"
 
     @property
     def change_ids(self) -> list[str]:
@@ -60,11 +76,25 @@ class Block:
         return self.attrs.get("discharges", "").split()
 
     @property
+    def addresses(self) -> list[str]:
+        """The comment ids this block answers."""
+        return self.attrs.get("addresses", "").replace(",", " ").split()
+
+    @property
     def round(self) -> int:
         try:
             return int(self.attrs.get("round", "0"))
         except ValueError:
             return 0
+
+    @property
+    def supersedes(self) -> str:
+        """The block this one replaces, if any."""
+        return self.attrs.get("supersedes", "")
+
+    @property
+    def is_superseded(self) -> bool:
+        return bool(self.superseded_by)
 
     @property
     def is_ask(self) -> bool:
@@ -143,18 +173,43 @@ class Entry:
                      options=[Option(kind="check", label="Read and acknowledged")])
 
     @property
+    def live_blocks(self) -> list[Block]:
+        """The blocks that still say what this entry says, with everything superseded left out.
+
+        What an agent reads back, and what the artifact carries.
+        The page shows both, because the maintainer needs to see what it said when they read it.
+        """
+        return [b for b in self.blocks if not b.is_superseded]
+
+    @property
     def asks(self) -> list[Block]:
         """Every question this entry poses, the synthetic acknowledgement included.
 
         Downstream code counts, answers and reports asks without caring which kind it has,
         which is the point: an acknowledgement is progress in exactly the way an answer is.
+
+        A superseded ask is not among them: it has been retired, and only one that was never answered may be.
         """
-        real = [b for b in self.blocks if b.is_ask]
+        real = [b for b in self.blocks if b.is_ask and not b.is_superseded]
         ack = self.acknowledgement
         return real + ([ack] if ack is not None else [])
 
     def ask(self, name: str) -> Block | None:
         return next((b for b in self.asks if b.name == name), None)
+
+    def block(self, ref: str) -> Block | None:
+        """A block by its identity, as `r2/prose#1` or as a bare `prose#1`.
+
+        A bare name is resolved against every round, newest first, since it can only be ambiguous across rounds —
+        within one, names are unique.
+        """
+        round_part, _, name = ref.rpartition("/")
+        wanted = canonical_block_name(name)
+        want_round = int(round_part[1:]) if round_part[1:].isdigit() and round_part.startswith("r") else 0
+        matches = [b for b in self.blocks if canonical_block_name(b.block_name) == wanted]
+        if want_round:
+            matches = [b for b in matches if b.effective_round == want_round]
+        return max(matches, key=lambda b: b.effective_round, default=None)
 
     def referenced_changes(self) -> list[str]:
         """Every change id this entry names, from `changes` heads and `discharges` attributes alike."""
@@ -165,12 +220,30 @@ class Entry:
             out.extend(block.discharges)
         return out
 
+    def addressed_comments(self) -> set[str]:
+        """Every comment id a block in this entry claims to answer."""
+        out: set[str] = set()
+        for block in self.blocks:
+            out.update(block.addresses)
+        return out
+
     def discharged_changes(self) -> list[str]:
         """The change ids this entry actually discharges, which only an ask can do."""
         out: list[str] = []
         for block in self.asks:
             out.extend(block.discharges)
         return out
+
+
+def _unquote(value: str) -> str:
+    """Drop one layer of matching quotes, so `id: "018"` and `id: 018` are the same id.
+
+    An id is written both ways — quoted keeps a leading zero in a YAML editor's head — and the difference
+    would otherwise reach every place an id is displayed, where it reads as two different conventions.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
 
 
 def _split_front(text: str, path: Path) -> tuple[dict[str, str], int, int]:
@@ -191,7 +264,7 @@ def _split_front(text: str, path: Path) -> tuple[dict[str, str], int, int]:
         key, sep, value = stripped.partition(":")
         if not sep:
             raise ReviewParseError(path, number, f"front matter line {stripped!r} is not `key: value`")
-        front[key.strip()] = value.strip()
+        front[key.strip()] = _unquote(value.strip())
     raise ReviewParseError(path, len(lines), "front matter is never closed",
                            "add a closing `---` line after the last key")
 
@@ -262,6 +335,24 @@ def _validate_block(block: Block, path: Path, seen_asks: set[str]) -> None:
         if duplicate:
             raise ReviewParseError(path, block.line, f"duplicate option {duplicate!r} in ask {block.name!r}",
                                    "two options that read the same cannot be told apart in an answer")
+    elif block.type == "example":
+        run, cmd = block.attrs.get("run", ""), block.attrs.get("cmd", "")
+        if not run and not cmd:
+            raise ReviewParseError(path, block.line, "an `example` block needs a `run:` or a `cmd:`",
+                                   "`run:` is executed by `review run`; `cmd:` is shown for a reader to run")
+        if run and cmd:
+            raise ReviewParseError(
+                path, block.line, "an `example` block carries `run:` or `cmd:`, never both",
+                "`run:` is the tool's claim that it produced the output; `cmd:` says it did not",
+            )
+        capture = block.attrs.get("capture", "")
+        if capture and capture not in CAPTURE_KINDS:
+            raise ReviewParseError(path, block.line, f"unknown capture {capture!r}",
+                                   f"one of: {', '.join(CAPTURE_KINDS)}")
+        state = block.attrs.get("status", "")
+        if state and state not in EXAMPLE_STATES:
+            raise ReviewParseError(path, block.line, f"unknown example status {state!r}",
+                                   f"one of: {', '.join(EXAMPLE_STATES)}")
     elif block.type == "changes":
         show = block.attrs.get("show", "")
         if not show:
@@ -273,7 +364,111 @@ def _validate_block(block: Block, path: Path, seen_asks: set[str]) -> None:
             raise ReviewParseError(path, block.line, f"unknown show {show!r}", f"one of: {', '.join(SHOW_KINDS)}")
     elif block.head:
         raise ReviewParseError(path, block.line, f"a `{block.type}` block takes no argument, got {block.head!r}",
-                               "only `changes` and `ask` take one")
+                               "only `changes`, `ask` and `example` take one")
+
+
+def _fenced_lines(lines: list[str], first_line: int, path: Path) -> set[int]:
+    """The line numbers sitting inside a fenced code block, where a `## ` is prose rather than a block start."""
+    inside: set[int] = set()
+    fence = ""
+    opened_at = 0
+    for number, raw in enumerate(lines, start=first_line):
+        stripped = raw.lstrip(" ")
+        indented = len(raw) - len(stripped)
+        m = FENCE_RE.match(stripped) if indented <= 3 else None
+        if not fence:
+            if m:
+                fence, opened_at = m.group(1), number
+                inside.add(number)
+            continue
+        inside.add(number)
+        # A closing fence is at least as long as its opener, of the same character, and carries nothing else.
+        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not stripped[len(m.group(1)):].strip():
+            fence = ""
+    if fence:
+        raise ReviewParseError(path, opened_at, "a fenced code block is never closed",
+                               f"add a closing `{fence}` line, or the rest of the entry is read as code")
+    return inside
+
+
+def _assign_block_names(entry: Entry, path: Path) -> None:
+    """Give every block its derived name, and refuse two blocks of one round that answer to the same one.
+
+    A block that carries `name:` keeps it; an ask is named by its heading, which the grammar already keeps unique.
+    Everything else is named after its type, indexed only where that type repeats within the round.
+    """
+    latest = entry.newest_round
+    groups: dict[tuple[int, str], list[Block]] = {}
+    for block in entry.blocks:
+        # An unstamped block belongs to the round about to stamp it, which is the same rule `acknowledgement` uses.
+        block.effective_round = block.round or latest
+        groups.setdefault((block.effective_round, block.type), []).append(block)
+
+    for (_, block_type), blocks in groups.items():
+        for block in blocks:
+            explicit = block.attrs.get("name", "")
+            if explicit and not ASK_NAME_RE.match(canonical_block_name(explicit)):
+                raise ReviewParseError(path, block.line, f"{explicit!r} is not a usable block name",
+                                       "lowercase letters, digits and dashes")
+
+        # Only the blocks actually taking a derived name are counted, so a named block does not consume an
+        # ordinal and leave a `prose#2` with no `prose#1` behind it.
+        # The rule the grammar states is all-or-nothing: one on its own is `prose`, and two are `#1` and `#2`.
+        derived = [b for b in blocks if not b.attrs.get("name", "") and not b.is_ask]
+        indexed = len(derived) > 1
+        for ordinal, block in enumerate(derived, start=1):
+            block.block_name = derived_name(block_type, ordinal, indexed=indexed)
+
+        for block in blocks:
+            if block.attrs.get("name", ""):
+                block.block_name = block.attrs["name"]
+            elif block.is_ask:
+                block.block_name = block.name
+
+    seen: dict[tuple[int, str], Block] = {}
+    for block in entry.blocks:
+        key = (block.effective_round, canonical_block_name(block.block_name))
+        clash = seen.get(key)
+        if clash is not None:
+            raise ReviewParseError(
+                path, block.line, f"two blocks of round {block.effective_round} are both named {key[1]!r}",
+                f"the other is on line {clash.line}; a block name is the anchor a comment or a `supersedes:` uses, "
+                f"so it must be unique within a round",
+            )
+        seen[key] = block
+
+
+def _resolve_supersedes(entry: Entry, path: Path) -> None:
+    """Point every `supersedes:` at the block it replaces, and refuse one that names nothing.
+
+    Only an earlier block in the same entry can be a target.
+    Within one entry is what makes the rendering obvious — the struck original and its replacement are on the same
+    screen — and a correction that lands somewhere the reader is not is the problem this feature exists to solve.
+    """
+    for index, block in enumerate(entry.blocks):
+        ref = block.supersedes
+        if not ref:
+            continue
+        round_part, _, name = ref.rpartition("/")
+        wanted = canonical_block_name(name)
+        want_round = int(round_part[1:]) if round_part.startswith("r") and round_part[1:].isdigit() else 0
+
+        candidates = [
+            b for b in entry.blocks[:index]
+            if canonical_block_name(b.block_name) == wanted and (not want_round or b.effective_round == want_round)
+        ]
+        if not candidates:
+            raise ReviewParseError(
+                path, block.line, f"`supersedes: {ref}` names no earlier block in this entry",
+                "a correction replaces a block above it, in the same entry; `review show` lists the block names",
+            )
+        target = candidates[-1]
+        if target.is_superseded:
+            raise ReviewParseError(
+                path, block.line, f"{ref!r} has already been superseded",
+                f"supersede {block.block_name!r}'s current replacement instead, or name it explicitly",
+            )
+        target.superseded_by = block.anchor
 
 
 def parse_text(text: str, path: Path, slug: str = "") -> Entry:
@@ -291,10 +486,11 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
                   body_start=body_offset, newline=newline)
 
     lines = text[body_offset:].splitlines(keepends=True)
+    fenced = _fenced_lines(lines, body_line, path)
     starts: list[tuple[int, int, str]] = []
     offset = body_offset
     for number, raw in enumerate(lines, start=body_line):
-        if raw.startswith("## "):
+        if raw.startswith("## ") and number not in fenced:
             starts.append((offset, number, raw))
         offset += len(raw)
 
@@ -312,8 +508,13 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
             # `## ` opens a block wherever it lands.
             prose_heading = block_type[:1].isupper() or "_" in block_type
             hint = ("known types: " + ", ".join(sorted(BLOCK_TYPES)))
+            remedy = (f"if that is a heading inside a block's body, write it as `### {block_type}`; "
+                      "if it is a sample of the block grammar, indent it four spaces. "
+                      "`## ` starts a block outside a fenced block, whatever it lands in. ")
             if prose_heading:
-                hint = f"if that is a heading inside a block's body, write it as `### {block_type}` — `## ` always starts a block. " + hint
+                hint = remedy + hint
+            else:
+                hint = "if this is not meant as a block, " + remedy + hint
             raise ReviewParseError(path, number, f"unknown block type {block_type!r}", hint)
 
         heading_end = start + len(heading)
@@ -325,6 +526,8 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
         _validate_block(block, path, seen_asks)
         entry.blocks.append(block)
 
+    _assign_block_names(entry, path)
+    _resolve_supersedes(entry, path)
     return entry
 
 

@@ -1,7 +1,7 @@
-"""`generate` — write or refresh the two entries the tool owns.
+"""`generate` — write or refresh the entries the tool owns.
 
-The overview and the coverage report are the only generated entries.
-Both are refreshed in place: only blocks marked `generated:` are replaced, so commentary written under one survives every refresh.
+The overview, the catch-all and the coverage report are the generated entries.
+Each is refreshed in place: only blocks marked `generated:` are replaced, so commentary written under one survives every refresh.
 """
 
 from __future__ import annotations
@@ -40,6 +40,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         title=review.OVERVIEW_TITLE,
     )
 
+    anything = paths.entries_dir / f"{review.ANYTHING_SLUG}.md"
+    review.ensure_entry(
+        anything, review.anything_front(), "anything",
+        review.anything_body(),
+        title=review.ANYTHING_TITLE,
+    )
+
     coverage = paths.entries_dir / f"{review.COVERAGE_SLUG}.md"
     review.ensure_entry(
         coverage, review.coverage_front(), "coverage",
@@ -47,6 +54,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         title=review.COVERAGE_TITLE,
     )
 
-    review.record(paths.log, "generate", entries=[review.OVERVIEW_SLUG, review.COVERAGE_SLUG])
+    review.record(paths.log, "generate",
+                  entries=[review.OVERVIEW_SLUG, review.ANYTHING_SLUG, review.COVERAGE_SLUG])
     print(f"refreshed {ctx.rel(overview)}")
+    print(f"refreshed {ctx.rel(anything)}")
     print(f"refreshed {ctx.rel(coverage)}")

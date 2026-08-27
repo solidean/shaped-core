@@ -35,6 +35,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if cfg.has_changeset:
         problems.extend(ctx.check_references(paths, entries))
 
+    # A file reference the tool cannot resolve renders as plain text, which is indistinguishable from one nobody
+    # meant as a reference — so the check goes looking rather than waiting to be tripped over.
+    problems.extend(ctx.reference_problems(paths, entries))
+
+    # A paragraph in a glossary block that is not a term is a term nobody finds out is missing,
+    # which is the whole reason the block is marked rather than scraped.
+    problems.extend(review.glossary_problems(entries))
+
     for entry in entries:
         warnings.extend(review.word_warnings(entry))
         answers = ctx.answers(paths, entry)
@@ -61,6 +69,15 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         for name in sorted(answers.answers):
             if entry.ask(name) is None:
                 warnings.append(f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it")
+
+    # A comment is written expecting an answer, so the agent may not hand back another round while one is unanswered.
+    # The gate sits here rather than on the maintainer's send: they wrote the remark, and blocking their own send on it
+    # would be the tool refusing to deliver a message because the message exists.
+    for slug, comment in ctx.unaddressed_comments(paths, entries):
+        problems.append(
+            f"{slug}: comment {comment.id} (on {comment.where()}) has no answer — "
+            f"append a block with `addresses: {comment.id}`, which a block that declines to act also satisfies"
+        )
 
     groups = set(review.groups_for(cfg.goals))
     unplaced = sorted({e.group for e in entries} - groups)
@@ -90,4 +107,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(review.console.red(f"\n{len(problems)} problem(s) across {len(entries)} entries"))
         raise SystemExit(1)
     if not args.quiet:
-        print(review.console.green(f"{len(entries)} entries parse, every reference resolves"))
+        # A design review has no ledger, so `check_references` never ran — claiming references resolve would be
+        # reporting a check that did not happen.
+        changes = ", every change id resolves" if cfg.has_changeset else ""
+        print(review.console.green(f"{len(entries)} entries parse, every file reference resolves{changes}"))

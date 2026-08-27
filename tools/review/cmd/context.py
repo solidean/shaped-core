@@ -126,6 +126,7 @@ class Context:
             finalized = {name: a.prompt_hash for name, a in answers.answers.items() if not a.tentative}
             try:
                 review.check_immutable(entry, finalized)
+                review.check_supersedes(entry, set(finalized))
             except review.ReviewParseError as e:
                 self.die(str(e))
 
@@ -156,6 +157,36 @@ class Context:
                 if ledger.resolve(change_id) is None:
                     problems.append(f"{entry.slug}: {change_id} is not in the ledger")
         return problems
+
+    def reference_problems(self, paths: review.ReviewPaths, entries: list[review.Entry]) -> list[str]:
+        """Every file reference that does not hold, across the review.
+
+        Ambiguous is always the author's to fix, by writing a longer path.
+        Unresolved is one too, because the exceptions are marked rather than guessed — `new:` for a file the change
+        intends to create, `old:` for one it removes.
+        """
+        index = review.repo_index(self.repo, paths.root)
+        problems: list[str] = []
+        for entry in entries:
+            tokens = review.build_tokens(entry, index)
+            problems.extend(review.token_problems(entry, tokens))
+        return problems
+
+    def unaddressed_comments(self, paths: review.ReviewPaths, entries: list[review.Entry]) -> list[tuple[str, object]]:
+        """(entry slug, comment) for every sent comment no block claims to answer.
+
+        Computed rather than tracked, the way an undischarged change is: a comment carries no state of its own,
+        and `addresses:` on an appended block is the whole record that it was answered.
+        A tentative comment is not here — it has not been handed over, so nothing is owed yet.
+        """
+        out: list[tuple[str, object]] = []
+        for entry in entries:
+            answers = self.answers(paths, entry)
+            claimed = entry.addressed_comments()
+            for comment in answers.comments.values():
+                if not comment.tentative and comment.id not in claimed:
+                    out.append((entry.slug, comment))
+        return out
 
     def discharged(self, entries: list[review.Entry]) -> set[str]:
         """Every change id an ask discharges, across the whole review."""

@@ -11,25 +11,32 @@ because a broken entry is the moment the maintainer most needs to see the rest o
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import threading
 import time
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
+from ..annotate.index import RepoIndex
+from ..annotate.table import build as build_tokens, glossary_terms, to_json as tokens_to_json
 from ..changeset.ledger import Ledger
 from ..core import config as config_module
-from ..core.atomic import write_json
+from ..core.atomic import stat_key, write_json
 from ..core.log import record
 from ..core.paths import ReviewPaths
 from ..entry.answers import AnswerFile
 from ..entry.askhash import hash_ask
+from ..entry.generate import POPOVER_ROWS, _tree_html as tree_html
 from ..entry.grammar import ReviewParseError
 from ..entry.parse import Entry, parse_file
+from ..git.run import Git
 from ..goals.skeleton import describe, groups_for
 from ..render.entryview import render_entry
-from ..render.highlight import css as highlight_css
+from ..render.highlight import css as highlight_css, highlight_code
 from .watch import Watcher, compute_digest
 
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
@@ -51,6 +58,11 @@ class ReviewApp:
         self.repo = repo
         self.paths = paths
         self.watcher = watcher
+        self._index: RepoIndex | None = None
+        self._index_key: tuple | None = None
+        self._terms: list | None = None
+        self._terms_digest: str = ""
+        self._head_sha: str = ""
 
     def config(self):
         return config_module.load(self.paths.config)
@@ -117,6 +129,41 @@ class ReviewApp:
             "digest": self.watcher.digest,
         }
 
+    def index(self) -> RepoIndex:
+        """The paths an entry can refer to, rebuilt when the tracked set actually changes.
+
+        Keyed on git's own index file rather than on the watcher's digest: the watcher sees the review folder,
+        and the set of tracked files changes when someone stages something in the repository under review —
+        two different events, and using the wrong one leaves a newly tracked file unresolvable until a restart.
+        """
+        key = (stat_key(self.repo / ".git" / "index"), stat_key(self.paths.root))
+        if self._index is None or self._index_key != key:
+            self._index, self._index_key = RepoIndex.build(self.repo, self.paths.root), key
+        return self._index
+
+    def terms(self) -> list:
+        """Every glossary term in the review, which is what makes one entry's vocabulary reach the others.
+
+        Keyed on the watcher's digest, unlike `index()` above: the terms come from the entry files, which is
+        exactly what the watcher is watching, while the tracked file set moves independently of this folder.
+        Without a key, fetching one entry re-parses every entry — quadratic in a review's size.
+        """
+        digest = self.watcher.digest
+        if self._terms is None or self._terms_digest != digest:
+            self._terms = glossary_terms([e for _, e, err in self.entries() if err is None])
+            self._terms_digest = digest
+        return self._terms
+
+    def head_sha(self) -> str:
+        """HEAD, resolved once for the life of the server rather than once per entry fetch.
+
+        A review is read against one tree, and `restart` is already the answer for anything that moves
+        under a running server — which is what the staleness marker on an `example` block is measured against.
+        """
+        if not self._head_sha:
+            self._head_sha = Git(self.repo).rev_parse("HEAD") or ""
+        return self._head_sha
+
     def entry_html(self, slug: str) -> tuple[int, dict]:
         for file, entry, error in self.entries():
             if file.stem != slug:
@@ -127,9 +174,67 @@ class ReviewApp:
             html = render_entry(
                 entry, answers,
                 repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
+                head=self.head_sha(),
             )
-            return 200, {"slug": slug, "html": html, "broken": False}
+            tokens = build_tokens(entry, self.index(), answers=answers,
+                                  confirm_shas=Git(self.repo).which_are_commits,
+                                  terms=self.terms())
+            return 200, {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
         return 404, {"error": f"no entry {slug!r}"}
+
+    def file_view(self, path: str) -> tuple[int, dict]:
+        """One whole file, highlighted — for the peek popover and for the page a click opens alike.
+
+        Both want the same thing, and a computed window only ever guessed at how much of it.
+        The rule that walked up through the comment block above a line was right often enough to keep and wrong
+        often enough to notice.
+        The reader scrolls instead, which never hides the line above the one they asked about.
+
+        Only paths the index resolves are served, so a path outside the tree is a lookup miss rather than
+        a case to defend against.
+        """
+        resolution = self.index().resolve(path)
+        if not resolution.ok:
+            return 404, {"error": f"{path!r} is not a tracked file in the repository under review"}
+        target = self.index().absolute(resolution.path)
+        if target is None:
+            return 404, {"error": f"{resolution.path} left the index"}
+        try:
+            body = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return 404, {"error": f"{resolution.path} could not be read: {e}"}
+
+        count = len(body.splitlines())
+        return 200, {
+            "path": resolution.path, "absolute": target.resolve().as_posix(),
+            "start": 1, "end": count, "lines": count,
+            "html": highlight_code(body, path=resolution.path),
+        }
+
+    def tree_view(self, path: str) -> tuple[int, dict]:
+        """What is under one folder, as the same tree the overview draws.
+
+        The leaf label is size rather than diff delta: a folder reference asks what is in here, not what moved.
+        """
+        resolution = self.index().resolve_dir(path)
+        if not resolution.ok:
+            return 404, {"error": f"{path!r} is not a folder in the repository under review"}
+        files = self.index().under(resolution.path)
+        return 200, {
+            "path": resolution.path, "files": len(files),
+            "html": tree_html(files, _size_label(self.index()), max_rows=POPOVER_ROWS),
+        }
+
+    def commit_view(self, sha: str) -> tuple[int, dict]:
+        """One commit's message and diffstat, for the popover its sha carries."""
+        if not sha or not all(c in "0123456789abcdef" for c in sha.lower()):
+            return 404, {"error": "not a commit id"}
+        details = Git(self.repo).commit_details(sha)
+        if not details:
+            return 404, {"error": f"{sha} does not name a commit here"}
+        cfg = self.config()
+        details["forge"] = _forge_commit_url(cfg.upstream, details["sha"])
+        return 200, details
 
     def save_answer(self, payload: dict) -> tuple[int, dict]:
         slug = str(payload.get("entry", ""))
@@ -190,6 +295,34 @@ class ReviewApp:
                 }
             return 200, {"answer": answer.to_record(), "hash": current_hash, "digest": written_digest}
 
+    def save_comment(self, payload: dict) -> tuple[int, dict]:
+        """Add, edit or delete one comment.
+
+        A comment is maintainer-authored, so it is server-owned and never spliced into an entry file —
+        it lives in the answers file, which is the half of the split the server already writes.
+        """
+        slug = str(payload.get("entry", ""))
+        target = next((f for f in self.paths.entry_files() if f.stem == slug), None)
+        if target is None:
+            return 410, {"error": "that entry no longer exists"}
+
+        with _lock_for(slug):
+            answers = AnswerFile.load(self.paths.answers_for(target), slug)
+            cfg = self.config()
+            comment = answers.comment(
+                comment_id=str(payload.get("id", "")),
+                text=str(payload.get("text", "")),
+                block=str(payload.get("block", "")),
+                change=str(payload.get("change", "")),
+                offset=int(payload.get("offset", -1)),
+                round_number=cfg.next_round,
+            )
+            answers.save()
+            return 200, {
+                "comment": comment.to_record() | {"id": comment.id} if comment else None,
+                "digest": compute_digest(self.paths),
+            }
+
     def summary(self) -> dict:
         """Every ask and what it is about to hand back, for the confirmation the send button shows.
 
@@ -242,8 +375,78 @@ class ReviewApp:
         return 200, {"action": action, "round": cfg.next_round}
 
 
+def favicon_svg(name: str) -> str:
+    """A tab icon derived from the review's name.
+
+    Several reviews open in several tabs is the normal case, and a checked-in icon would make every one of them
+    look the same — which is the complaint rather than the fix.
+    Initials on a colour hashed from the whole name: distinguishable, stable per review, and nothing to ship.
+    """
+    parts = [p for p in re.split(r"[-_. ]+", name) if p]
+    # A number in the name is the discriminator, so it wins: `pr-146` and `pr-147` both initial to `P1`.
+    numbers = [p for p in parts if p.isdigit()]
+    mark = numbers[-1][-3:] if numbers else "".join(p[0] for p in parts)[:2].upper() or "R"
+    hue = int(hashlib.blake2b(name.encode("utf-8"), digest_size=2).hexdigest(), 16) % 360
+    size = 64
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}">'
+        f'<rect width="{size}" height="{size}" rx="12" fill="hsl({hue} 55% 42%)"/>'
+        f'<text x="50%" y="54%" dominant-baseline="central" text-anchor="middle" '
+        f'font-family="system-ui, sans-serif" font-size="{34 if len(mark) < 2 else 28 if len(mark) < 3 else 22}" '
+        f'font-weight="700" fill="#fff">{escape(mark)}</text></svg>'
+    )
+
+
+# Read far enough to be sure, and no further: a NUL in the first block is what every tool uses to call a file
+# binary, and a file with none in 8 kB does not hide one in the middle often enough to pay for reading it all.
+_SNIFF_BYTES = 8192
+
+
+def _size_label(index: RepoIndex):
+    """A leaf's label in a folder tree: lines where the file reads as text, bytes where it does not."""
+    def label(path: str) -> str:
+        target = index.absolute(path)
+        if target is None:
+            return ""
+        try:
+            size = target.stat().st_size
+            head = target.read_bytes()[:_SNIFF_BYTES]
+        except OSError:
+            return ""
+        if b"\0" in head:
+            return f'<span class="tree-size">{_human_bytes(size)}</span>'
+        try:
+            lines = len(target.read_text(encoding="utf-8").splitlines())
+        except (OSError, UnicodeDecodeError):
+            return f'<span class="tree-size">{_human_bytes(size)}</span>'
+        return f'<span class="tree-size">{lines} lines</span>'
+    return label
+
+
+def _human_bytes(size: int) -> str:
+    for unit, cut in (("MB", 1024 * 1024), ("kB", 1024)):
+        if size >= cut:
+            return f"{size / cut:.1f} {unit}"
+    return f"{size} B"
+
+
+def _forge_commit_url(upstream: str, sha: str) -> str:
+    """A web URL for a commit, or empty where the remote is not one this can be derived from.
+
+    A repository with no forge is a valid thing to review, so this degrades to no link rather than to a broken one.
+    """
+    if not upstream or not sha:
+        return ""
+    url = upstream.strip()
+    if url.startswith("git@") and ":" in url:
+        host, _, path = url[len("git@"):].partition(":")
+        url = f"https://{host}/{path}"
+    if not url.startswith(("http://", "https://")):
+        return ""
+    return url.removesuffix(".git").rstrip("/") + f"/commit/{sha}"
+
+
 def _error_panel(error: ReviewParseError) -> str:
-    from html import escape
     return (
         '<article class="entry"><header class="entry-head"><h1>This entry does not parse</h1></header>'
         f'<pre class="parse-error">{escape(str(error))}</pre>'
@@ -287,11 +490,25 @@ class Handler(BaseHTTPRequestHandler):
         content_type = types.get(target.suffix, "application/octet-stream") + "; charset=utf-8"
         self._send(200, target.read_bytes(), content_type)
 
+    def _attachment(self, name: str) -> None:
+        """Serve one file out of the review's own `attachments/`, and nothing outside it."""
+        root = self.app.paths.attachments_dir.resolve()
+        target = (root / name).resolve()
+        if not target.is_file() or root not in target.parents:
+            self._json(404, {"error": "no such attachment"})
+            return
+        types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+                 ".webp": "image/webp", ".svg": "image/svg+xml", ".txt": "text/plain; charset=utf-8"}
+        self._send(200, target.read_bytes(), types.get(target.suffix.lower(), "application/octet-stream"))
+
     def do_GET(self) -> None:  # noqa: N802 — the base class names it.
         route = urlparse(self.path).path
         try:
             if route in ("/", "/index.html"):
                 self._asset("page.html")
+            elif route == "/favicon.svg":
+                self._send(200, favicon_svg(self.app.config().name).encode("utf-8"),
+                           "image/svg+xml; charset=utf-8", cache=True)
             elif route == "/assets/highlight.css":
                 self._send(200, highlight_css().encode("utf-8"), "text/css; charset=utf-8")
             elif route.startswith("/assets/"):
@@ -303,6 +520,22 @@ class Handler(BaseHTTPRequestHandler):
             elif route.startswith("/api/entry/"):
                 code, payload = self.app.entry_html(unquote(route[len("/api/entry/"):]))
                 self._json(code, payload)
+            elif route == "/api/file":
+                query = parse_qs(urlparse(self.path).query)
+                code, payload = self.app.file_view(query.get("path", [""])[0])
+                self._json(code, payload)
+            elif route == "/api/tree":
+                query = parse_qs(urlparse(self.path).query)
+                code, payload = self.app.tree_view(query.get("path", [""])[0])
+                self._json(code, payload)
+            elif route == "/api/commit":
+                query = parse_qs(urlparse(self.path).query)
+                code, payload = self.app.commit_view(query.get("sha", [""])[0])
+                self._json(code, payload)
+            elif route.startswith("/attachments/"):
+                self._attachment(unquote(route[len("/attachments/"):]))
+            elif route.startswith("/file/"):
+                self._asset("file.html")
             elif route == "/events":
                 self._events()
             else:
@@ -324,6 +557,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route == "/api/answer":
                 code, result = self.app.save_answer(payload)
+            elif route == "/api/comment":
+                code, result = self.app.save_comment(payload)
             elif route == "/api/signal":
                 code, result = self.app.signal(payload)
             elif route == "/api/shutdown":

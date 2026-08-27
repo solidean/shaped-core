@@ -43,11 +43,22 @@ from .lib.core.paths import (
     entry_slug,
     validate_name,
 )
-from .lib.entry.answers import Answer, AnswerFile
+from .lib.annotate.index import RepoIndex
+from .lib.annotate.providers import Token
+from .lib.annotate.table import (
+    build as build_tokens,
+    glossary_problems,
+    glossary_terms,
+    index_for as repo_index,
+    problems as token_problems,
+)
+from .lib.entry.answers import Answer, AnswerFile, Comment
 from .lib.entry.askhash import canonical as ask_canonical
 from .lib.entry.askhash import hash_ask
-from .lib.entry.generate import COVERAGE_SLUG, COVERAGE_TITLE, OVERVIEW_SLUG, OVERVIEW_TITLE
-from .lib.entry.generate import coverage_body, coverage_front, ensure as ensure_entry, overview_body, overview_front
+from .lib.entry.generate import (ANYTHING_SLUG, ANYTHING_TITLE, COVERAGE_SLUG, COVERAGE_TITLE,
+                                 OVERVIEW_SLUG, OVERVIEW_TITLE)
+from .lib.entry.generate import (anything_body, anything_front, coverage_body, coverage_front,
+                                 ensure as ensure_entry, overview_body, overview_front)
 from .lib.entry.grammar import (
     ACK_PREFIX,
     ACK_PROMPT,
@@ -67,8 +78,10 @@ from .lib.entry.parse import parse_text as parse_entry_text
 from .lib.entry.write import (
     append_text,
     check_immutable,
+    check_supersedes,
     compose,
     missing_context_tiers,
+    set_block_attrs,
     stamp_rounds,
     word_warnings,
     write_entry,
@@ -92,11 +105,21 @@ __all__ = [
     "ADDED",
     "ARTIFACTS",
     "Answer",
+    "RepoIndex",
+    "Token",
+    "build_tokens",
+    "glossary_problems",
+    "glossary_terms",
+    "repo_index",
+    "token_problems",
     "AnswerFile",
+    "Comment",
     "BLOCK_TYPES",
     "Block",
     "CONTEXT_EXEMPT_GROUPS",
     "CONTEXT_TIERS",
+    "ANYTHING_SLUG",
+    "ANYTHING_TITLE",
     "COVERAGE_SLUG",
     "COVERAGE_TITLE",
     "Candidate",
@@ -140,8 +163,11 @@ __all__ = [
     "commit_atoms",
     "candidates_for",
     "check_immutable",
+    "check_supersedes",
     "compose",
     "console",
+    "anything_body",
+    "anything_front",
     "coverage_body",
     "coverage_front",
     "default_root",
@@ -158,6 +184,7 @@ __all__ = [
     "is_ack_name",
     "load",
     "missing_context_tiers",
+    "set_block_attrs",
     "now",
     "overview_body",
     "overview_front",

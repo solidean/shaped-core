@@ -102,7 +102,14 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    Look the symbol up — never confirm a doc sentence by reading the sentence.
    This is where the highest-value findings are, because it is exactly what a diff view hides.
 
-5. **Write the entries**, as below.
+5. **Name the review once you have read it.**
+   ```bash
+   uv run review.py title pr-<n> "what this branch is actually about"
+   ```
+   `init` asked for a name before anyone had read the range, which is the worst moment to name anything.
+   Several reviews open in several tabs is the normal case, and the title is how you tell them apart.
+
+6. **Write the entries**, as below.
    `uv run review.py generate pr-<n>` writes the generated `015-changes` and `990-coverage` first, and
    `uv run review.py changes pr-<n>` lists the ledger, which is what `discharges:` is written from.
 
@@ -110,7 +117,7 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    Four anchor a review with a changeset: **orientation** at `010`, **glossary** at `018`, the findings between, and **verdict** at `980`.
    The set is prose rather than code, so it grows by writing a file there — never by teaching the tool a new entry.
 
-6. **Hand it over and wait.**
+7. **Hand it over and wait.**
    ```bash
    uv run review.py serve pr-<n> --no-open &     # background: the shell caps below how long a review takes
    uv run review.py round pr-<n> --wait          # blocks, then prints the round
@@ -121,7 +128,7 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    Exit 0 means sent, 2 means paused, 3 means timed out.
    Do not treat a pause as an answer.
 
-7. **Next round: append to the entry you are answering, rather than opening a new one.**
+8. **Next round: append to the entry you are answering, rather than opening a new one.**
    The answer stays on screen and your follow-up lands under a round divider below it.
    The thread then reads top to bottom in one file.
    ```bash
@@ -140,6 +147,24 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    ## ask  the-followup
    follows: the-answered-ask
    ```
+   **A round can come back with comments as well as answers**, on any block or any line of a diff.
+   A comment is a remark rather than a tracked question, and answering one is appending a block that names it:
+
+   ```markdown
+   ## prose
+   addresses: c1
+
+   Noted — the parser already does this, so no change.
+   ```
+
+   `validate` refuses to hand back another round while a comment from a finalized one is unaddressed, and a block
+   that declines to act satisfies it: the obligation is to answer, not to comply.
+
+   **A block that is now wrong is superseded rather than edited.**
+   `supersedes: r1/prose#2` retires it and the page shows both, which is what a partial round needs — answering one
+   entry often invalidates a paragraph in another that nobody has reached yet.
+   An ask that was already answered cannot be superseded; that is what `follows:` is for.
+
    `append` stamps the round, parses the merged result before writing, and refuses a malformed block with a line number.
    Nothing above is rewritten, which is what keeps a finalized answer immutable.
    Never edit an entry file by hand while a server is reading it.
@@ -151,7 +176,7 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
 
    A round with three answers out of twelve is a normal round.
 
-8. **When most entries are settled, draft the artifact as an entry.**
+9. **When most entries are settled, draft the artifact as an entry.**
    For a `pr-comment` review, add `985-draft-comment` immediately before `990` holding the comment you would actually post, and ask whether to post it.
    The maintainer approves the exact text rather than a summary of it, which is the last thing they cannot check any other way.
    See [entry-types/draft-artifact.md](../../../tools/review/docs/entry-types/draft-artifact.md).
@@ -175,7 +200,7 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    A class of claim you did not verify, a stance that reads as lecturing, a kind of detail that keeps getting dropped.
    That is where the review process improves, and the pass is wasted if only the per-item corrections are taken.
 
-9. **Post.** `uv run review.py post pr-<n> --pr <n>` dry-runs it; `--confirm` publishes.
+10. **Post.** `uv run review.py post pr-<n> --pr <n>` dry-runs it; `--confirm` publishes.
    It refuses while the draft entry's ask is unanswered, so the gate cannot be skipped by accident.
    The go-ahead to actually post is a separate instruction from the maintainer, never the round answer alone.
 
@@ -218,6 +243,12 @@ If the entry is reference material — a glossary, a generated listing — decla
 **Discharge deliberately.**
 `discharges:` on an ask is what says "this question accounts for those hunks".
 An LGTM entry with one ask discharging forty changes is correct and good; forty entries would not be.
+
+**A file you name becomes a link, so name it accurately.**
+Backtick it and the resolver finds it three ways — the exact path, a unique suffix, a bare basename — and `validate`
+fails on one that is ambiguous or does not exist.
+That is a feature rather than an obstacle: it is the check that catches a path you half-remembered.
+A file the change will *create* is `new:path`, and one it removes is `old:path`.
 
 **Show the code, and decide whether it opens.**
 Use `changes` blocks so the hunks are there, and cite `file.hh:63` in backticks — the page turns it into a link that opens the file.

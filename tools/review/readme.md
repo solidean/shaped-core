@@ -65,7 +65,10 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `validate <name>` | every entry parses, every change id resolves; run it before serving a round |
 | `generate <name>` | write or refresh the overview and coverage entries |
 | `append <name> <entry>` | add blocks to an entry from stdin or `--file`, stamped with the round; **how a later round answers an earlier one** |
-| `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view |
+| `title <name> "<text>"` | name the review after reading it, which is what the tab and the navigation show |
+| `edit <name> [entry]` | the path to an entry file, or every entry and its path; refuses an ambiguous selector |
+| `run <name> [entry]` | execute the `example` blocks and splice their output in; the only thing here that spawns a process |
+| `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view; `--history` adds superseded blocks |
 | `status <name>` | where this review stands: whether a server is really up, the round, what is still open |
 | `serve <name>` | the page the review is answered in; non-blocking |
 | `restart <name>` | stop the server and serve again on the same port, after the tool's own code changed |
@@ -100,6 +103,28 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 - **Typed text is never discarded.** A question that changed under an answer keeps the text against the new wording; a question that disappeared keeps the answer as an orphan.
 - **A finalized question is immutable.** Reword it and the tool refuses, naming the follow-up ask to write instead.
 - **The tool never re-serializes an entry you wrote.** Every write is a splice, so your formatting survives exactly.
+- **The maintainer can comment on any block, and on any line of a diff.**
+  A comment is a remark rather than a tracked question: the agent answers it next round by appending a block with `addresses:`,
+  and `validate` will not let a round be handed back while one is unanswered.
+- **A block can be superseded rather than edited.**
+  `supersedes:` retires an earlier block in the same entry; the page shows the replacement with the original struck beside it.
+  An ask that has already been answered cannot be — that is what `follows:` is for.
+- **Every file an entry names becomes a link**, resolved three ways: the exact path, a unique suffix, a bare basename.
+  Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).
+- **Glossary terms are underlined wherever they are used**, with the definition on hover, from any `prose` block carrying `glossary: true`.
+  Whole words only: a term is never drawn inside a longer word.
+- **A folder reference resolves too**, written with a trailing slash — `annotate/` finds `tools/review/lib/annotate`.
+  Hovering it shows what is under it, as the same tree the overview draws, with each file's line count or its size in bytes.
+- **`raw:` on a code span opts it out of every provider.**
+  `` `raw:origin/main..HEAD` `` renders as `raw:origin/main..HEAD` and is matched by nothing, which is the escape
+  for a span that looks like a reference and is not.
+  A whole fence opts out the same way, with `raw` or `raw:` in front of its usual `lang:path` info string.
+  The matchers stay eager on purpose: narrowing them would trade a loud false positive for a typo'd path silently staying plain.
+- **Hovering a file reference shows the whole file**, bounded and scrollable, scrolled to the line when one was named.
+  A nav row can show the whole entry the same way, inert, but that preview is **off** — `PREVIEW_ENTRIES` in
+  `tools/review/assets/app.js` turns it back on once its hover timing is worth fixing.
+- **`generate` writes three entries**: the overview at `015`, the catch-all at `988`, and the coverage report at `990`.
+  `988` is where a remark that belongs to no entry goes, since every comment otherwise has to be anchored on something.
 - **`entries/` belongs to the agent and `answers/` to the server**, which is why an entry can gain a paragraph while an answer to it is being typed.
 - **The `tooling` group is for friction in this tool**, not in what is being reviewed.
   It discharges nothing, so filing there costs the coverage gate nothing.
@@ -147,6 +172,9 @@ Named here rather than left to be discovered.
 - **`rank:` is accepted but not implemented.** The grammar takes it as an option kind and the page renders it as a checkbox,
   so ordering is not actually captured.
   Use `radio:` and `check:` until it is.
+- **A review folder is scratch.** It lives under `.tmp/`, the tool changes under it, and there is no migration promise;
+  making a review a durable artifact is in [TODO.md](TODO.md).
+- **Symbol links do not exist.** File, folder and commit references resolve; a `sg::context::download` in prose does not.
 - **The published page has no offline form.** `show --all` is the fallback for reading a review away from the machine,
   and answers come back as chat text.
 

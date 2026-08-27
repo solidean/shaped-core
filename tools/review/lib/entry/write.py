@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..core.atomic import write_atomic
 from .askhash import hash_ask
-from .grammar import CONTEXT_TIERS, WORD_LIMITS, ReviewParseError
+from .grammar import ATTR_RE, CONTEXT_TIERS, WORD_LIMITS, ReviewParseError
 from .parse import Entry, parse_text
 
 
@@ -51,6 +51,33 @@ def stamp_rounds(entry: Entry, round_number: int) -> str | None:
     return restore_newlines(entry, _splice(entry.text, edits))
 
 
+def set_block_attrs(entry: Entry, edits: list[tuple]) -> str:
+    """Set attributes on blocks, as a splice against their preludes.
+
+    `review run` is the only writer that changes an entry the agent already wrote, so it changes as little as
+    it can: an attribute already there is rewritten in place, and a new one is inserted after the heading.
+    Everything else in the file is left byte-identical, exactly as `stamp_rounds` leaves it.
+    """
+    splices: list[tuple[int, int, str]] = []
+    for block, attrs in edits:
+        body_lines = entry.text[block.heading_end:block.end].split("\n")
+        offset = block.heading_end
+        replaced: set[str] = set()
+        for line in body_lines:
+            match = ATTR_RE.match(line)
+            if match is None:
+                break
+            key = match.group(1)
+            if key in attrs:
+                splices.append((offset, offset + len(line), f"{key}: {attrs[key]}"))
+                replaced.add(key)
+            offset += len(line) + 1
+        fresh = "".join(f"{k}: {v}\n" for k, v in attrs.items() if k not in replaced)
+        if fresh:
+            splices.append((block.heading_end, block.heading_end, fresh))
+    return restore_newlines(entry, _splice(entry.text, splices))
+
+
 def append_text(entry: Entry, addition: str) -> str:
     """Append blocks to an entry, keeping exactly one blank line before them."""
     body = entry.text.rstrip("\n")
@@ -84,15 +111,22 @@ def check_immutable(entry: Entry, finalized: dict[str, str]) -> None:
     )
 
 
-def missing_context_tiers(entry: Entry) -> list[str]:
-    """The context tiers this entry does not carry, in reading order.
+def check_supersedes(entry: Entry, finalized: set[str]) -> None:
+    """Raise if an answered ask has been superseded, naming the remedy.
 
-    An entry is answered on its own, out of order, by someone who is not carrying the changeset in their head.
-    All three tiers are what make that possible, and each is scoped to *this entry's subject* rather than to the change
-    as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
+    `supersedes:` on an answered ask would walk straight around the immutability guard: the old question renders
+    struck, the new one takes its place, and the answer that was given to the old wording sits under a question
+    the maintainer never saw.
+    An ask that has never been answered may be retired freely, since nothing was promised about it.
     """
-    present = {block.type for block in entry.blocks}
-    return [tier for tier in CONTEXT_TIERS if tier not in present]
+    for block in entry.blocks:
+        if not block.is_ask or not block.is_superseded or block.name not in finalized:
+            continue
+        raise ReviewParseError(
+            entry.path, block.line,
+            f"ask {block.name!r} has been answered, so it cannot be superseded",
+            f"drop the `supersedes:`, and add `## ask <new-name>` with `follows: {block.name}` instead",
+        )
 
 
 def missing_context_tiers(entry: Entry) -> list[str]:

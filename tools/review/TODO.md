@@ -6,95 +6,66 @@ Each one is here because it was decided in a session and would otherwise be lost
 The known *gaps* — remote and mobile answering, the unimplemented `rank:` option kind, the missing offline form — live in the [readme](readme.md#not-yet) instead.
 This file is for work that would add something the tool cannot do at all.
 
-## Comments and questions anywhere
+## Linking a symbol, not just a file
 
-**The maintainer can only speak where the agent left an ask.**
-An ask carries options plus a freeform box, and that is the whole channel back.
-So a question about a `context/repo` block, or about one line of a hunk, has nowhere to go: it ends up in the text box of an unrelated ask, or back in chat.
-Chat is the narrative the tool exists to replace, and an answer that silently belongs to a different block is worse than no answer.
+**Entries name symbols far more often than they name files**, and a file link gets a reader to the right file rather than to the declaration they were after.
 
-Two anchors, both wanted:
+The annotation pass is shaped around this: providers plug into it, three exist, and the fourth has somewhere to go.
+What is missing is the index behind it, and two findings from the design review say why that is not simply "file linking, one step further".
 
-- **Per block.** A small icon anchored top-right of every `## <type>` section, on hover.
-  Every block type, not only `ask` — the context tiers are where the "why did we do it this way" questions actually land.
-- **Per line of a change.** A comment on one line of a rendered diff, from the gutter.
+**Ambiguity here is unfixable by the author.**
+A file reference that resolves two ways is always fixable by writing a longer path, which is what lets `validate` fail on one.
+A symbol has overloads, has the same name in three namespaces, and is declared in one file and defined in another — none of which the agent can disambiguate by writing more.
+So a symbol resolver has to be allowed to give up quietly and often, and the severity model the file provider uses does not carry over.
 
-### What the design has to respect
+**A code span is mostly not a symbol.**
+Entries are full of backticked things that look like identifiers and are not: `show: visible`, `--dirty-only`, `context/cold`, an option label, a front-matter key.
+A matcher that links one of those is strictly worse than no matcher, because it teaches the reader that the underlines are noise.
 
-- **`entries/` belongs to the agent and `answers/` to the server.**
-  A comment is maintainer-authored, so it is server-owned and must never be spliced into an entry file.
-  A sibling `comments/<entry>.json`, or a section inside the existing answers file, both fit; the ownership split is the constraint, not the filename.
-- **A line anchor must survive a re-ingest.**
-  Line numbers move, so a comment cannot key on one.
-  A change id plus the offset into that change's `.diff` body is stable exactly as long as the change id is.
-  That is the right lifetime: when `sync` supersedes the change, the comment hangs on a hunk that no longer exists.
-- **A comment discharges nothing.**
-  Like the `tooling` group, it is not an answer to an ask, so it must not move the coverage gate.
-- **It has to reach the agent through the round**, printed by `delta` alongside the answers, with enough context to be actionable on its own — which block, which change, which line.
+**The tractable subset is qualified names only** — anything with a `::` or a `.` between two identifier segments.
+Those are nearly unambiguous, they are what an entry writes when it means a symbol, and everything unqualified is left alone.
+That drops most of the value and nearly all of the risk, which is the right trade for something nobody depends on.
 
-### The open question
+### Where an index could come from
 
-**A comment and a question are not the same thing**, and the tool probably needs to know which it got.
-A comment is a remark the agent reads and may act on.
-A question expects an answer back, which means the next round owes the maintainer a reply — and something has to track that a question is still unanswered, the way an ask is tracked today.
+*A compilation database.* Accurate, and it needs a configured build of the repository under review — disqualifying for a tool whose selling point is that it works on any checkout.
 
-Whether that is one type with a flag, two types, or a comment that the agent turns into a real `ask` in the next round, is undecided.
+*shaped-linter.* It already parses this repo's C++ without LLVM and could emit a declaration index as a side product.
+It is also shaped-core-specific, so it can only ever be an optional provider rather than the mechanism.
 
-## Superseding a block, not just an entry
+*A ctags-style regex sweep.* Cheap, language-agnostic-ish, and wrong often enough to matter — silently.
 
-**A partial round leaves earlier entries out of date, and there is no way to tighten them.**
-Round 1 of pr-147 answered 020 and left 070 open — but 070's first defect only existed *because* 020 was unfixed, so answering 020 settled part of a question nobody had reached yet.
-Today the only tools are appending a new block, which buries the correction at the bottom, or editing the old one in place, which rewrites history a maintainer already read.
+The overfit is allowed: better than eighty per cent of reviews here are of shaped-core itself.
+But it has to arrive as a provider with no default, chosen per review and possibly overridden per entry, rather than as something the pass assumes.
 
-`state:` can retire a whole entry.
-Nothing can retire a block.
+## A semantic peek
 
-### The shape
+Hovering a file reference shows a window: up through the comment block above the line, down by the review's context setting.
+That rule is mechanical and good enough to be worth having.
 
-**Rounds stay immutable, and the file stays append-only.**
-A correction is a *new* block appended after the round boundary that names what it replaces, rather than an edit to the block above:
+**What a reader actually wants is the enclosing declaration with its doc comment**, which is the symbol index under a different name.
+Recorded here so that whoever builds the index knows it has a second customer.
 
-```markdown
-## prose
-supersedes: r1-defect-list
+## Questions, as something the tool tracks
 
-The two remaining defects, now that the parser is fixed.
-```
+Comments are remarks: the agent answers one by appending a block with `addresses:`, and nothing new is tracked.
 
-The page renders the superseded block collapsed and struck, with the replacement in its place, so the maintainer can see both what it says now and what it said when they read it.
-An agent reading the entry back gets only the live blocks unless it asks for the history.
+**A question expects an answer back**, which the current shape does not model.
+The agent replies in prose and the maintainer reads it in the entry, with nothing saying the reply is owed or has arrived.
+That was deliberate: the tool has exactly one notion of something outstanding, and a second one means a second definition of "still open" and a second way for `status` to be wrong.
 
-That needs blocks to be **nameable**, which they are not today — only an `ask` has a name.
-An optional `name:` on any block is the smaller half of this feature, and `supersedes:` is the larger.
+Revisit once comments have been used on a few reviews.
+If the appended-ask path turns out to be enough, this stays closed; if maintainers keep asking questions that go unanswered, it is a real gap.
 
-### Marking what is new
+## Making a review durable
 
-A rephrase where three words changed is unreadable as a diff and dishonest as a silent replacement.
-So a superseding block wants an inline **new** span — a markdown annotation the page highlights — letting a block be re-stated in full with only the changed points drawn.
+A review folder is scratch under `.tmp/`, and the tool changes under it with no migration promise.
+That is right while the tool is being built and wrong for a review anyone wants to keep.
 
-This matters most exactly where partial rounds do.
-The maintainer does not re-read an entry end to end before sending, so a correction buried in an unchanged paragraph is one they will not see.
-
-### What has to be decided
-
-- Whether `supersedes:` may cross entries, or only work within one.
-  Within one is simpler and probably enough.
-- Whether a superseded block still counts for `discharges:`.
-  It must not, or a replaced ask would double-count.
-- What `show --all` and `delta` print: live blocks only, or the chain.
-- Whether the **new** span is a fenced role (`==new==`-style) or an attribute on the block.
-  A span is what the rephrase case needs.
-
-## An identity for a review
-
-`init` gives a review a name and an optional `--title`, and the page's `<title>` is the literal string `review`.
-Two small things:
-
-- **Let the agent write the title.** It has read the range by the time `generate` runs, so a review can be called what it is about rather than `pr-147`.
-- **A favicon.** Several reviews open in several tabs is the normal case, and they are currently indistinguishable.
-
-Neither is load-bearing; both are the difference between a tool that feels finished and one that does not.
+**An export mode** would turn one into a durable artifact: the entries, the answers, the rounds and the attachments, in a form that does not depend on this version of the tool.
+What that form is — a single markdown file, a static page, a zip — is undecided, and so is whether it can be read back.
 
 ## Provenance
 
-Raised while dogfooding the tool on its own PR (pr-147), 2026-08-26.
+Everything this file used to hold — comments anywhere, superseding a block, an identity for a review — was designed and built on 2026-08-26.
+What is left came out of that design review as the parts deliberately not built, plus one thing the review itself turned up.

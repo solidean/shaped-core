@@ -14,9 +14,9 @@ import html
 from pathlib import Path
 
 from ..core.paths import ReviewPaths
-from ..entry.answers import Answer, AnswerFile
+from ..entry.answers import Answer, AnswerFile, Comment
 from ..entry.parse import Block, Entry
-from .highlight import highlight_diff
+from .highlight import highlight_code, highlight_diff
 from .markdown import render as render_markdown
 
 _COLLAPSED_TIERS = ("context/cold", "context/repo")
@@ -32,16 +32,60 @@ def _esc(text: str) -> str:
     return html.escape(text, quote=True)
 
 
+def _summary_html(change) -> str:
+    """A change's one-line summary, with the filename picked out of it.
+
+    A collapsed `changes` block is skimmed by filename, and a uniformly dim line makes the one word a reader is
+    looking for weigh the same as the directory above it and the line counts after it.
+    """
+    text = change.summary or change.path
+    path = change.path
+    if not path or not text.startswith(path):
+        return f'<span class="change-sum">{_esc(text)}</span>'
+
+    directory, _, name = path.rpartition("/")
+    lead = f"{directory}/" if directory else ""
+    return (f'<span class="change-sum">{_esc(lead)}'
+            f'<span class="change-file">{_esc(name)}</span>'
+            f'{_esc(text[len(path):])}</span>')
+
+
 def _change_card(change, body: str, *, open_by_default: bool) -> str:
-    summary = _esc(change.summary or change.path)
+    summary = _summary_html(change)
     reason = f'<div class="change-reason">{_esc(change.reason)}</div>' if change.reason else ""
     if not body:
         return (f'<div class="change"><div class="change-head"><code>{_esc(change.id)}</code>'
-                f'<span class="change-sum">{summary}</span></div>{reason}</div>')
+                f'{summary}</div>{reason}</div>')
     return (
         f'<details class="change"{" open" if open_by_default else ""}><summary class="change-head"><code>{_esc(change.id)}</code>'
-        f'<span class="change-sum">{summary}</span></summary>{reason}'
+        f'{summary}</summary>{reason}'
         f'{highlight_diff(body, path=change.path)}</details>'
+    )
+
+
+def _comment_card(comment: Comment) -> str:
+    """One remark, under whatever it was left on."""
+    state = "not sent yet" if comment.tentative else f"sent in round {comment.round}"
+    where = f'<span class="comment-where">{_esc(comment.where())}</span>' if comment.is_line else ""
+    return (
+        f'<div class="comment-card" data-comment="{_esc(comment.id)}">'
+        f'<div class="comment-head"><code>{_esc(comment.id)}</code>{where}'
+        f'<span class="comment-state">{_esc(state)}</span></div>'
+        f'<div class="comment-text">{_esc(comment.text)}</div></div>'
+    )
+
+
+def _comment_slot(anchor: str, comments: list[Comment]) -> str:
+    """The affordance for leaving a remark here, plus whatever has already been left.
+
+    On every block rather than only on an ask: the context tiers are where "why did we do it this way" lands,
+    and until now that question had nowhere to go but the text box of an unrelated question.
+    """
+    cards = "".join(_comment_card(c) for c in comments)
+    return (
+        f'<div class="comment-slot" data-anchor="{_esc(anchor)}">'
+        f'<button class="comment-add" type="button" title="comment on this block">comment</button>'
+        f'<div class="comment-list">{cards}</div></div>'
     )
 
 
@@ -83,6 +127,74 @@ def _ask_form(entry: Entry, block: Block, answer: Answer | None, prompt_hash: st
     )
 
 
+def _source_slice(repo: Path, spec: str) -> tuple[str, str]:
+    """(path, the lines it names), for the `source:` an example shows before its output."""
+    path, _, span = spec.partition(":")
+    target = repo / path.strip()
+    if not target.is_file():
+        return path.strip(), ""
+    lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    first, _, last = span.partition("-")
+    start = max(int(first) - 1, 0) if first.strip().isdigit() else 0
+    end = int(last) if last.strip().isdigit() else (start + 40 if first.strip().isdigit() else len(lines))
+    return path.strip(), "\n".join(lines[start:end])
+
+
+def _example_html(block: Block, ctx: dict) -> str:
+    """One example, its source, and what running it printed.
+
+    The provenance line is the point of the block.
+    Output without the command, the commit and the time is an unverifiable claim, in a tool whose whole premise
+    is that claims are checkable — and the difference between "I ran it" and "I read it and it looked right"
+    is one nobody can make from the outside.
+    """
+    repo: Path = ctx["repo"]
+    paths: ReviewPaths = ctx["paths"]
+    ran, shown = block.attrs.get("run", ""), block.attrs.get("cmd", "")
+    command = ran or shown
+
+    head = (f'<div class="example-head"><span class="example-name">{_esc(block.head or "example")}</span>'
+            f'<code class="example-cmd">{_esc(command)}</code></div>')
+
+    source = ""
+    if block.attrs.get("source"):
+        path, body = _source_slice(repo, block.attrs["source"])
+        if body:
+            source = (f'<div class="code-label">{_esc(block.attrs["source"])}</div>'
+                      f'<pre class="pg"><code>{highlight_code(body, path=path)}</code></pre>')
+
+    output = ""
+    name = block.attrs.get("output", "")
+    if name:
+        target = paths.root / name
+        if target.is_file():
+            if target.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"):
+                output = f'<img class="example-shot" src="/attachments/{_esc(target.name)}" alt="{_esc(command)}">'
+            else:
+                body = target.read_text(encoding="utf-8", errors="replace")
+                output = f'<pre class="example-out">{_esc(body)}</pre>'
+        else:
+            output = f'<div class="example-missing">{_esc(name)} is not in this review folder</div>'
+
+    state = block.attrs.get("status", "")
+    if not ran:
+        # A fact about which key was used, not an honour system: the tool knows it did not produce this.
+        note = "not reproduced by the tool" if output else "not run here — the command is for you to run"
+    elif state == "failed":
+        note = f"exited non-zero, at {block.attrs.get('sha', '?')}"
+    else:
+        note = f"run at {block.attrs.get('sha', '?')}, {block.attrs.get('at', '')}"
+    if state == "not-automatable":
+        note = "cannot be captured automatically yet"
+
+    stale = ctx.get("head", "") and block.attrs.get("sha") and not ctx["head"].startswith(block.attrs["sha"])
+    provenance = (f'<div class="example-note{" stale" if stale else ""}">{_esc(note)}'
+                  f'{" · the code has moved since" if stale else ""}</div>')
+
+    commentary = render_markdown(block.prose, repo=repo)
+    return f'<section class="example">{head}{commentary}{source}{output}{provenance}</section>'
+
+
 def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
     repo: Path = ctx["repo"]
 
@@ -109,8 +221,14 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
             if change.has_body and diff_path.is_file():
                 body = diff_path.read_text(encoding="utf-8", errors="replace")
             cards.append(_change_card(change, body, open_by_default=visible))
+            on_lines = [c for c in ctx["comments"] if c.change == change.id]
+            if on_lines:
+                cards.append(f'<div class="line-comments">{"".join(_comment_card(c) for c in on_lines)}</div>')
         commentary = render_markdown(block.prose, repo=repo)
         return f'<section class="changes">{commentary}{"".join(cards)}</section>'
+
+    if block.type == "example":
+        return _example_html(block, ctx)
 
     if block.type == "code":
         return render_markdown(block.prose, repo=repo)
@@ -146,9 +264,12 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
     return f'<div class="prose">{render_markdown(block.prose, repo=repo)}</div>'
 
 
-def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: ReviewPaths, ledger, hash_of) -> str:
+def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: ReviewPaths, ledger, hash_of,
+                 head: str = "") -> str:
     """The whole entry as HTML: blocks in order, answers inline, a divider where a round begins."""
-    ctx = {"repo": repo, "paths": paths, "ledger": ledger, "answers": answers, "hash_of": hash_of}
+    comments = sorted(answers.comments.values(), key=lambda c: (c.round, c.id))
+    ctx = {"repo": repo, "paths": paths, "ledger": ledger, "answers": answers, "hash_of": hash_of,
+           "comments": comments, "head": head}
 
     # A severity that repeats the group says nothing twice — `design/design`, `docs/docs` — so only a differing one is drawn.
     show_severity = entry.severity and entry.severity != entry.group
@@ -165,11 +286,31 @@ def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: Review
             if last_round:
                 parts.append(f'<div class="round-divider"><span>round {block.round}</span></div>')
             last_round = block.round
-        parts.append(_block_html(entry, block, ctx))
+        on_block = [c for c in comments if c.block == block.anchor]
+        body = _block_html(entry, block, ctx)
+        if block.is_superseded:
+            # Both, rather than only the replacement: the maintainer needs to see what the entry says now
+            # and what it said when they read it.
+            body = (f'<details class="superseded"><summary>superseded by '
+                    f'<code>{_esc(block.superseded_by)}</code></summary>{body}</details>')
+        replaces = ""
+        if block.supersedes:
+            replaces = f'<div class="replaces">replaces <code>{_esc(block.supersedes)}</code></div>'
+        parts.append(
+            f'<section class="block" data-anchor="{_esc(block.anchor)}">'
+            f'{replaces}{body}{_comment_slot(block.anchor, on_block)}</section>'
+        )
 
     ack = entry.acknowledgement
     if ack is not None:
         parts.append(_block_html(entry, ack, ctx))
+
+    stranded = [c for c in comments if not c.is_line and c.block and entry.block(c.block) is None]
+    if stranded:
+        parts.append(
+            '<section class="orphans"><h2>Comments whose block is gone</h2>'
+            + "".join(_comment_card(c) for c in stranded) + "</section>"
+        )
 
     if answers.orphans:
         rows = "".join(

@@ -26,6 +26,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from tools.review.lib.annotate.index import RepoIndex  # noqa: E402
+from tools.review.lib.annotate.table import build as build_tokens  # noqa: E402
+from tools.review.lib.annotate.providers import CommitProvider  # noqa: E402
+from tools.review.lib.annotate.glossary import GlossaryProvider, malformed_in, terms_in  # noqa: E402
+from tools.review.lib.entry.generate import _tree_html as tree_html  # noqa: E402
+from tools.review.lib.serve.app import _forge_commit_url as forge_url, favicon_svg  # noqa: E402
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
 from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, group_hunks, register  # noqa: E402
@@ -35,7 +41,10 @@ from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
 from tools.review.lib.entry.grammar import ReviewParseError, ack_name  # noqa: E402
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
-from tools.review.lib.entry.write import append_text, compose, immutability_violations, stamp_rounds  # noqa: E402
+from tools.review.lib.entry.write import (  # noqa: E402
+    append_text, check_supersedes, compose, immutability_violations, set_block_attrs, stamp_rounds,
+)
+from tools.review.lib.render.markdown import render as render_markdown  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
 from tools.review.lib.git.run import Git  # noqa: E402
 from tools.review.lib.space.intervals import IntervalList  # noqa: E402
@@ -565,6 +574,83 @@ def test_duplicate_ask_names_are_rejected(root: Path) -> None:
     raise AssertionError("ask names are the answer key, so duplicates must be rejected")
 
 
+FENCED_SAMPLE = """
+## prose
+
+The shape:
+
+```
+## example  clean-core/vector
+run: uv run dev.py example clean-core/vector
+```
+"""
+
+TWO_PROSE = """
+## prose
+
+One.
+
+## prose
+
+Two.
+"""
+
+
+def test_a_fenced_block_can_hold_a_block_heading(root: Path) -> None:
+    """An entry about the block grammar wants to quote it, and `## ` starts a block wherever it lands.
+
+    Written after an append was refused for a fenced `## example` sample that parsed as a real block.
+    """
+    entry = parse_text(ENTRY + FENCED_SAMPLE, Path("entry.md"))
+    assert [b.type for b in entry.blocks].count("prose") == 1, "the fenced sample must not become a block"
+    assert "## example" in entry.blocks[-1].prose
+
+
+def test_an_unterminated_fence_is_an_error(root: Path) -> None:
+    """Reading the rest of the entry as code is the failure the fence rule would otherwise introduce."""
+    try:
+        parse_text(ENTRY + "\n## prose\n\n```\nnever closed\n", Path("entry.md"))
+    except ReviewParseError as e:
+        assert "never closed" in str(e)
+        return
+    raise AssertionError("an unterminated fence must be an error rather than swallowing the entry")
+
+
+def test_block_names_are_derived_and_only_indexed_when_they_repeat(root: Path) -> None:
+    """A lone block of its type keeps the bare name; a second one indexes both, never only one of the two."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    assert entry.block("context-delta") is not None
+    assert entry.block("changes") is not None
+
+    two = parse_text(ENTRY + TWO_PROSE, Path("entry.md"))
+    names = [b.block_name for b in two.blocks if b.type == "prose"]
+    assert names == ["prose#1", "prose#2"], names
+    assert two.block("prose#1") is two.block("prose"), "the unindexed spelling must alias to #1"
+
+
+def test_an_ask_is_named_by_its_heading(root: Path) -> None:
+    """An ask already carries a unique name, so `ask#1` would be a second identity for the same thing."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    assert entry.block("pick-one") is entry.ask("pick-one")
+
+
+def test_a_block_name_that_collides_is_rejected(root: Path) -> None:
+    """A name is what a comment and a `supersedes:` anchor on, so two blocks answering to one are unresolvable."""
+    try:
+        parse_text(ENTRY + "\n## prose\nname: pick-one\n\nCollides with the ask.\n", Path("entry.md"))
+    except ReviewParseError as e:
+        assert "named" in str(e)
+        return
+    raise AssertionError("two blocks of one round cannot share a name")
+
+
+def test_block_names_are_scoped_to_a_round(root: Path) -> None:
+    """Round-scoped ordinals are why an append never renumbers a block the maintainer already anchored on."""
+    text = ENTRY + "\n## prose\nround: 1\n\nFirst.\n\n## prose\nround: 2\n\nSecond.\n"
+    prose = [b for b in parse_text(text, Path("entry.md")).blocks if b.type == "prose"]
+    assert [b.anchor for b in prose] == ["r1/prose", "r2/prose"], [b.anchor for b in prose]
+
+
 def test_stamping_leaves_every_other_byte_alone(root: Path) -> None:
     entry = parse_text(ENTRY, Path("entry.md"))
     stamped_text = stamp_rounds(entry, 2)
@@ -871,6 +957,376 @@ def test_answers_orphan_a_vanished_ask(root: Path) -> None:
         moved = answers.reconcile(without)
         assert moved == ["pick-one"]
         assert not answers.answers and len(answers.orphans) == 1
+
+
+SUPERSEDE = """
+## prose
+round: 1
+
+The first telling.
+
+## prose
+round: 2
+supersedes: prose
+
+The ==corrected== telling.
+"""
+
+
+def _index_of(root: Path, paths: list[str]) -> RepoIndex:
+    """An index over exactly these paths, without needing a repository behind them."""
+    return RepoIndex({p: root for p in paths})
+
+
+REPO_FILES = [
+    "tools/review/lib/render/markdown.py",
+    "tools/review/lib/entry/parse.py",
+    "libs/base/clean-core/src/clean-core/container/vector.hh",
+    "libs/base/clean-core/docs/TODO.md",
+    "tools/review/TODO.md",
+    ".claude/skills/reviewing-a-pr/SKILL.md",
+]
+
+
+def _tokens(root: Path, body: str, paths: list[str] = REPO_FILES):
+    entry = parse_text(ENTRY + "\n## prose\n\n" + body + "\n", Path("entry.md"))
+    return build_tokens(entry, _index_of(root, paths))
+
+
+def test_a_reference_resolves_three_ways(root: Path) -> None:
+    """The exact path, a unique suffix, and a bare basename — the last two are how people actually write one."""
+    for written in ("tools/review/lib/render/markdown.py", "lib/render/markdown.py", "markdown.py"):
+        tokens = _tokens(root, f"See `{written}` for it.")
+        assert len(tokens) == 1, (written, tokens)
+        assert tokens[0].path == "tools/review/lib/render/markdown.py", (written, tokens[0])
+        assert not tokens[0].problem
+
+
+def test_a_path_under_a_dot_directory_resolves(root: Path) -> None:
+    """A leading dot is part of the name, not punctuation to trim.
+
+    `lstrip("./")` takes a character class, so it ate the dot of `.claude/...` and the reference
+    then matched neither the exact path nor any suffix — the segment is `.claude`, never `claude`.
+    """
+    written = ".claude/skills/reviewing-a-pr/SKILL.md"
+    tokens = _tokens(root, f"See `{written}` for it.")
+    assert len(tokens) == 1, tokens
+    assert tokens[0].path == written, tokens[0]
+    assert not tokens[0].problem, tokens[0].problem
+
+
+def test_a_leading_dot_slash_is_still_dropped(root: Path) -> None:
+    """The prefix the normalization was actually for."""
+    tokens = _tokens(root, "See `./tools/review/lib/render/markdown.py`.")
+    assert tokens[0].path == "tools/review/lib/render/markdown.py", tokens[0]
+    assert not tokens[0].problem
+
+
+def test_an_ambiguous_reference_is_a_problem(root: Path) -> None:
+    """Always fixable by writing a longer path, so failing on it costs nothing and buys a guarantee."""
+    tokens = _tokens(root, "See `TODO.md`.")
+    assert tokens[0].problem and "names 2 files" in tokens[0].problem, tokens[0].problem
+
+
+def test_prose_that_merely_holds_a_dot_is_not_a_reference(root: Path) -> None:
+    """`git.has_merges` is prose about code.
+
+    Only the repository can say which dotted words are file names.
+    """
+    assert not _tokens(root, "`git.has_merges` already knows, and `sr::window.headless` does too.")
+    assert not _tokens(root, "The route is `/favicon.ico`, and the scheme is `vscode://file/x`.")
+
+
+def test_bare_prose_is_not_scanned(root: Path) -> None:
+    """The repo's convention backticks a path; scanning running text makes every sentence a candidate."""
+    assert not _tokens(root, "The file markdown.py is where it lives.")
+    assert _tokens(root, "The file `markdown.py` is where it lives.")
+
+
+def test_a_fenced_block_is_scanned(root: Path) -> None:
+    """A path in a code comment is exactly the case the round asked for."""
+    tokens = _tokens(root, "```cpp\n// see libs/base/clean-core/src/clean-core/container/vector.hh\nint x;\n```")
+    assert len(tokens) == 1 and tokens[0].path.endswith("vector.hh"), tokens
+
+
+def test_new_and_old_say_what_a_path_asserts(root: Path) -> None:
+    """A single 'might not exist' marker would let a stale `new:` sit forever, which is what the strictness is for."""
+    fresh = _tokens(root, "It becomes `new:tools/review/lib/refs/index.py`.")[0]
+    assert fresh.css == "ref-new" and not fresh.problem
+    assert fresh.label == "tools/review/lib/refs/index.py", "the prefix is stripped on render"
+
+    stale = _tokens(root, "It becomes `new:markdown.py`.")[0]
+    assert "already exists" in stale.problem, stale.problem
+
+    gone = _tokens(root, "It removes `old:tools/review/lib/render/linkify.py`.")[0]
+    assert gone.css == "ref-old" and not gone.problem
+
+
+def test_a_missing_path_is_a_problem(root: Path) -> None:
+    tokens = _tokens(root, "See `tools/review/lib/nope.py`.")
+    assert "not a file in this repository" in tokens[0].problem
+
+
+def test_a_line_reference_carries_its_line(root: Path) -> None:
+    token = _tokens(root, "See `markdown.py:63`.")[0]
+    assert token.line == 63 and token.href.endswith("#L63"), token
+
+
+GLOSSARY = """
+## prose
+glossary: true
+
+**atom** — one unit of change the review must account for.
+
+**line space** (spaces) — the net set of added and removed lines.
+"""
+
+
+EXAMPLE = """
+## example  clean-core/vector
+source: libs/base/clean-core/examples/vector.cc:1-40
+run: uv run dev.py example clean-core/vector
+capture: stdout
+"""
+
+
+def test_an_example_needs_exactly_one_of_run_and_cmd(root: Path) -> None:
+    """`run:` is the tool's claim that it produced the output; `cmd:` says it did not."""
+    assert parse_text(ENTRY + EXAMPLE, Path("entry.md")).blocks[-1].type == "example"
+
+    for bad, expected in (
+        ("## example  x\ncapture: stdout\n", "needs a `run:` or a `cmd:`"),
+        ("## example  x\nrun: a\ncmd: b\n", "never both"),
+        ("## example  x\nrun: a\ncapture: video\n", "unknown capture"),
+        ("## example  x\nrun: a\nstatus: fine\n", "unknown example status"),
+    ):
+        try:
+            parse_text(ENTRY + "\n" + bad, Path("entry.md"))
+        except ReviewParseError as e:
+            assert expected in str(e), (bad, str(e))
+            continue
+        raise AssertionError(f"expected {expected!r} for {bad!r}")
+
+
+def test_running_an_example_splices_its_provenance_in(root: Path) -> None:
+    """Output without the command, the commit and the time is an unverifiable claim."""
+    entry = parse_text(ENTRY + EXAMPLE, Path("entry.md"))
+    block = entry.blocks[-1]
+    text = set_block_attrs(entry, [(block, {
+        "output": "attachments/x.txt", "status": "ok", "sha": "abc123def456", "at": "2026-08-26T21:00:00",
+    })])
+
+    again = parse_text(text, Path("entry.md"))
+    updated = again.blocks[-1]
+    assert updated.attrs["output"] == "attachments/x.txt"
+    assert updated.attrs["sha"] == "abc123def456"
+    # Everything it did not target survives, which is the same promise `stamp_rounds` makes.
+    assert updated.attrs["run"] == "uv run dev.py example clean-core/vector"
+    assert entry.text[:block.start] == text[:block.start]
+
+
+def test_setting_an_attribute_twice_rewrites_rather_than_repeats(root: Path) -> None:
+    entry = parse_text(ENTRY + EXAMPLE, Path("entry.md"))
+    once = set_block_attrs(entry, [(entry.blocks[-1], {"status": "ok"})])
+    twice = parse_text(once, Path("entry.md"))
+    final = set_block_attrs(twice, [(twice.blocks[-1], {"status": "failed"})])
+    assert final.count("status:") == 1, final[-300:]
+    assert parse_text(final, Path("entry.md")).blocks[-1].attrs["status"] == "failed"
+
+
+def test_a_glossary_block_declares_its_terms(root: Path) -> None:
+    """Marked rather than scraped, so a paragraph that is not a term can be reported instead of dropped."""
+    entry = parse_text(ENTRY + GLOSSARY, Path("018-glossary.md"), slug="018-glossary")
+    terms = terms_in(entry)
+    assert [t.term for t in terms] == ["atom", "line space"], terms
+    assert terms[1].aliases == ("spaces",)
+    assert not malformed_in(entry)
+
+
+def test_a_paragraph_that_is_not_a_term_is_reported(root: Path) -> None:
+    """A term nobody finds out is missing is exactly what marking the block is for."""
+    text = ENTRY + "\n## prose\nglossary: true\n\n**atom**: the wrong dash entirely.\n"
+    problems = malformed_in(parse_text(text, Path("018-glossary.md"), slug="018-glossary"))
+    assert len(problems) == 1 and "not `**term**" in problems[0], problems
+
+
+def test_a_term_is_matched_in_whatever_form_the_text_used(root: Path) -> None:
+    """Whole-word, case-insensitive, longest first, with naive plurals both ways."""
+    entry = parse_text(ENTRY + GLOSSARY, Path("018-glossary.md"), slug="018-glossary")
+    provider = GlossaryProvider(terms=terms_in(entry))
+    found = {t.text for t in provider.tokens("Every Atom in the line spaces, but not atomic or spacer.")}
+    assert "Atom" in found and "line spaces" in found, found
+    assert not any(f in ("atomic", "spacer") for f in found), found
+
+
+def test_the_glossary_entry_does_not_annotate_itself(root: Path) -> None:
+    """Underlining a definition inside its own definition says nothing."""
+    entry = parse_text(ENTRY + GLOSSARY, Path("018-glossary.md"), slug="018-glossary")
+    provider = GlossaryProvider(terms=terms_in(entry))
+    assert not provider.tokens("an atom here", skip_entry="018-glossary")
+
+
+def test_the_tree_folds_single_child_chains(root: Path) -> None:
+    """`a/b` on one line with `c` and `d` under it, and `e` back at the root — a location, not a histogram."""
+    html = tree_html(["a/b/c.txt", "a/b/d.txt", "e.txt"], {"a/b/c.txt": (3, 1)})
+    rows = re.findall(r'<div class="tree-(dir|file)"[^>]*>((?:(?!</div>).)*)', html)
+    shown = [(kind, re.sub("<[^>]+>", "", body).strip()) for kind, body in rows]
+    assert shown[0] == ("dir", "a/b/"), shown
+    assert [s for k, s in shown if k == "file"] == ["c.txt+3-1", "d.txt+0-0", "e.txt+0-0"], shown
+
+
+def test_the_tree_carries_its_depth(root: Path) -> None:
+    """Indent is a custom property, not leading spaces — HTML collapses a run of spaces, so they never showed."""
+    html = tree_html(["a/b/c.txt", "e.txt"], {})
+    found = re.findall(r'class="tree-(?:dir|file)" style="--d:(\d+)"[^>]*>(?:<[^>]+>)*([\w./]+)', html)
+    depths = {name: depth for depth, name in found}
+    assert depths.get("c.txt") == "1", depths
+    assert depths.get("e.txt") == "0", depths
+
+
+def test_the_tree_says_what_it_dropped(root: Path) -> None:
+    """A silent truncation reads as 'that is the whole change' when it is not."""
+    many = [f"pkg/dir{n // 20}/file{n}.txt" for n in range(400)]
+    html = tree_html(many, {})
+    assert "more files under" in html, "a capped tree has to name what it left out"
+
+
+def test_a_commit_sha_is_confirmed_against_git(root: Path) -> None:
+    """Asking git rather than writing a better regex is what drops a blob id out of a lockfile diff."""
+    asked = []
+
+    def confirm(candidates):
+        asked.append(list(candidates))
+        return {"cefb3b9a"}
+
+    provider = CommitProvider(confirm=confirm)
+    tokens = provider.tokens("landed in cefb3b9a, unlike deadbeef, and short ab12 is a word")
+    assert [t.text for t in tokens] == ["cefb3b9a"], tokens
+    assert "ab12" not in asked[0], "fewer than seven hex characters is a word, not a candidate"
+    assert "deadbeef" in asked[0], "git decides, not the length"
+
+
+def test_a_favicon_is_derived_from_the_review_name(root: Path) -> None:
+    """Several reviews in several tabs is the normal case, and one checked-in icon makes them all look the same."""
+    one, two = favicon_svg("pr-147"), favicon_svg("review-ux")
+    # A number in the name is the discriminator: `pr-146` and `pr-147` would both initial to `P1`.
+    assert ">147<" in one, one
+    assert ">RU<" in two, two
+    assert favicon_svg("pr-146") != one, "two reviews must not look the same"
+    assert favicon_svg("pr-147") == one, "an icon has to be stable, or you stop recognising the tab"
+
+
+def test_a_forge_url_is_derived_or_absent(root: Path) -> None:
+    """A repository with no forge is a valid thing to review, so this degrades to no link."""
+    assert forge_url("git@github.com:solidean/shaped-core.git", "abc") == \
+        "https://github.com/solidean/shaped-core/commit/abc"
+    assert forge_url("https://github.com/solidean/shaped-core.git", "abc") == \
+        "https://github.com/solidean/shaped-core/commit/abc"
+    assert forge_url("", "abc") == ""
+    assert forge_url("/srv/git/bare.git", "abc") == ""
+
+
+def test_a_superseded_block_leaves_the_live_ones(root: Path) -> None:
+    """Rounds stay immutable and the file stays append-only, so a correction is a new block rather than an edit."""
+    entry = parse_text(ENTRY + SUPERSEDE, Path("entry.md"))
+    prose = [b for b in entry.blocks if b.type == "prose"]
+    assert prose[0].is_superseded and prose[0].superseded_by == "r2/prose"
+    assert not prose[1].is_superseded
+    assert prose[0] not in entry.live_blocks and prose[1] in entry.live_blocks
+
+
+def test_supersedes_must_name_an_earlier_block_in_this_entry(root: Path) -> None:
+    """Within one entry is what keeps the struck original and its replacement on the same screen."""
+    try:
+        parse_text(ENTRY + "\n## prose\nsupersedes: nothing-like-this\n\nA correction.\n", Path("entry.md"))
+    except ReviewParseError as e:
+        assert "no earlier block" in str(e)
+        return
+    raise AssertionError("a supersedes naming nothing must be an error, not a silent no-op")
+
+
+def test_a_superseded_ask_discharges_nothing(root: Path) -> None:
+    """Otherwise a replaced ask would double-count against the coverage gate."""
+    text = ENTRY + "\n## ask  pick-again\nsupersedes: pick-one\ndischarges: CHANGE-AAAA\n\nWhich way now?\n\n- radio: yes\n"
+    entry = parse_text(text, Path("entry.md"))
+    assert [b.name for b in entry.asks] == ["pick-again"]
+    assert entry.discharged_changes() == ["CHANGE-AAAA"], "the replacement discharges; the original no longer does"
+
+
+def test_an_answered_ask_cannot_be_superseded(root: Path) -> None:
+    """Otherwise the answer sits under a question the maintainer never saw, which is what immutability prevents."""
+    text = ENTRY + "\n## ask  pick-again\nsupersedes: pick-one\n\nReworded.\n\n- radio: yes\n"
+    entry = parse_text(text, Path("entry.md"))
+    try:
+        check_supersedes(entry, {"pick-one"})
+    except ReviewParseError as e:
+        assert "follows: pick-one" in str(e)
+        return
+    raise AssertionError("superseding an answered ask must be refused, naming `follows:` as the remedy")
+
+
+def test_a_new_span_is_marked_and_a_code_span_is_not(root: Path) -> None:
+    """The rephrase case is why this exists: three words changed, unreadable as a diff."""
+    html = render_markdown("The ==corrected== telling, not `a == b`.")
+    assert '<mark class="new">corrected</mark>' in html, html
+    assert "<mark" not in html.split("<code>")[1], "a code span holding == must be left alone"
+
+
+def test_a_comment_is_tentative_until_the_round_is_finalized(root: Path) -> None:
+    """Nothing reaches the agent until a round is sent, so a remark can still be deleted right up to that point."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    answers = AnswerFile.load(Path(root) / "x.json", "040-a")
+
+    block = entry.blocks[0]
+    made = answers.comment(comment_id="", text="why this way?", block=block.anchor,
+                           change="", offset=-1, round_number=1)
+    assert made.id == "c1"
+    assert not answers.comments_since(0), "a tentative comment is not part of a round"
+
+    answers.finalize(1)
+    assert [c.id for c in answers.comments_since(0)] == ["c1"]
+    assert not answers.comments_since(1), "the watermark excludes the round it names"
+
+
+def test_a_finalized_comment_cannot_be_edited(root: Path) -> None:
+    """The round that quoted it has to keep reading correctly, exactly as a finalized answer does."""
+    answers = AnswerFile.load(Path(root) / "x.json", "040-a")
+    answers.comment(comment_id="", text="the original", block="r1/prose", change="", offset=-1, round_number=1)
+    answers.finalize(1)
+    answers.comment(comment_id="c1", text="a rewrite", block="r1/prose", change="", offset=-1, round_number=2)
+    assert answers.comments["c1"].text == "the original"
+
+
+def test_deleting_a_comment_is_saving_it_empty(root: Path) -> None:
+    answers = AnswerFile.load(Path(root) / "x.json", "040-a")
+    answers.comment(comment_id="", text="never mind", block="r1/prose", change="", offset=-1, round_number=1)
+    assert answers.comment(comment_id="c1", text="  ", block="r1/prose", change="", offset=-1, round_number=1) is None
+    assert not answers.comments
+    # Ids stay monotonic, so a later comment never reuses the deleted one's anchor.
+    answers.comment(comment_id="", text="a second thought", block="r1/prose", change="", offset=-1, round_number=1)
+    assert list(answers.comments) == ["c1"]
+
+
+def test_a_comment_is_addressed_by_reference(root: Path) -> None:
+    """Outstanding is computed from `addresses:`, the way an undischarged change is, rather than tracked."""
+    entry = parse_text(ENTRY, Path("entry.md"))
+    assert not entry.addressed_comments()
+
+    answered = parse_text(ENTRY + "\n## prose\naddresses: c1 c2\n\nBoth noted; no change to the first.\n",
+                          Path("entry.md"))
+    assert answered.addressed_comments() == {"c1", "c2"}
+
+
+def test_a_comment_survives_a_round_trip_through_the_answers_file(root: Path) -> None:
+    path = Path(root) / "x.json"
+    answers = AnswerFile.load(path, "040-a")
+    answers.comment(comment_id="", text="on this hunk", block="", change="CHANGE-AAAA", offset=3, round_number=2)
+    answers.save()
+
+    reloaded = AnswerFile.load(path, "040-a")
+    comment = reloaded.comments["c1"]
+    assert comment.is_line and comment.change == "CHANGE-AAAA" and comment.offset == 3
+    assert "CHANGE-AAAA" in comment.where() and "line 4" in comment.where()
 
 
 def test_since_reports_only_finalized_answers(root: Path) -> None:

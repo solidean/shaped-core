@@ -66,6 +66,10 @@ def collect(ctx: Context, name: str) -> dict:
         "answered": answered,
         "tentative": tentative,
         "open": open_entries,
+        "unaddressed": [
+            {"entry": slug, "id": c.id, "where": c.where()}
+            for slug, c in ctx.unaddressed_comments(paths, entries)
+        ],
     }
 
     if cfg.has_changeset:
@@ -97,6 +101,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     print(f"  answered   {s['answered']}/{s['asks']}" + (f", {s['tentative']} not yet handed back" if s["tentative"] else ""))
     if "changes" in s:
         print(f"  changes    {s['discharged']}/{s['changes']} discharged")
+
+    # Reported before it blocks: `validate` refuses to hand back a round while one of these is unanswered.
+    if s["unaddressed"]:
+        print(review.console.yellow(f"  comments   {len(s['unaddressed'])} with no answer yet"))
+        for row in s["unaddressed"]:
+            print(review.console.yellow(f"    {row['entry']}  {row['id']}  on {row['where']}"))
 
     if s["open"]:
         print(f"  open       {len(s['open'])} entr{'y' if len(s['open']) == 1 else 'ies'}")

@@ -60,6 +60,7 @@ class ReviewConfig:
     head_spec: str = ""
     context: int = 8
     coalesce_gap: int = 20
+    run_prefixes: list[str] = field(default_factory=list)
     watermark: int = 0
     tool_version: int = TOOL_VERSION
     created: str = ""
@@ -123,6 +124,9 @@ def dump(cfg: ReviewConfig) -> str:
         _emit("base_spec", cfg.base_spec),
         _emit("head_spec", cfg.head_spec),
         "",
+        "# What `review run` may execute, as command prefixes. A lint on intent rather than a boundary.",
+        _emit("run_prefixes", cfg.run_prefixes),
+        "",
         "# Ingest parameters, recorded so change ids reproduce. Changing them re-ingests.",
         _emit("context", cfg.context),
         _emit("coalesce_gap", cfg.coalesce_gap),
@@ -139,7 +143,7 @@ _KNOWN = {
     "name", "title", "goals", "created", "tool_version",
     "repo", "upstream",
     "base", "head", "base_spec", "head_spec",
-    "context", "coalesce_gap", "watermark",
+    "context", "coalesce_gap", "watermark", "run_prefixes",
 }
 
 
@@ -177,6 +181,7 @@ def load(path: Path) -> ReviewConfig:
         head_spec=str(raw.get("head_spec", "")),
         context=int(raw.get("context", 8)),
         coalesce_gap=int(raw.get("coalesce_gap", 20)),
+        run_prefixes=[str(p) for p in raw.get("run_prefixes", [])],
         watermark=int(raw.get("watermark", 0)),
         tool_version=version,
         created=str(raw.get("created", "")),

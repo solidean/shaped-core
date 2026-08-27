@@ -23,6 +23,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="an entry id, slug or substring; omit to list every entry")
     p.add_argument("--all", action="store_true", help="print every entry in full")
     p.add_argument("--unanswered", action="store_true", help="only entries with an ask nobody has answered")
+    p.add_argument("--history", action="store_true",
+                   help="include superseded blocks, which is what the maintainer read rather than what the entry says")
     return p
 
 
@@ -64,6 +66,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         return
 
     for entry, answers in pairs:
-        print(review.render_entry(entry, answers))
+        print(review.render_entry(entry, answers, history=args.history))
         for warning in review.word_warnings(entry):
             print(review.console.yellow(warning))
