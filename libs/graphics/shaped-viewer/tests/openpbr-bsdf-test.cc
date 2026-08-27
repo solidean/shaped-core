@@ -9,6 +9,8 @@
 #include <shaped-viewer/all.hh>
 #include <sv_test_shaders.hh>
 
+#include <cstdio> // DIAGNOSTIC (temporary): flushed markers survive a fastfail, which loses buffered output
+
 // What the OpenPBR closure in shaders/openpbr.hlsli actually RETURNS, measured rather than assumed.
 //
 // Every other GPU test in this library asserts that something ran.
@@ -391,6 +393,8 @@ sg::context_handle make_probe_context()
 // `try_async_blocking_get`, which does not complete from inside a pool worker.
 TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
 {
+    std::fprintf(stderr, "[marker] closure-probe: enter\n");
+    std::fflush(stderr);
     auto const ctx_h = make_probe_context();
     if (ctx_h == nullptr)
         SKIP("no Direct3D 12 device (hardware or WARP)");
@@ -434,8 +438,14 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
                  {probe_mode::albedo, probe_mode::pdf_norm, probe_mode::reciprocity, probe_mode::medium})
                 cases.push_back({.wo = wo, .mode = mode, .samples = samples_per_block, .seed = 7u, .s = ns.s});
 
+    std::fprintf(stderr, "[marker] closure-probe: dispatching %d cases\n", int(cases.size()));
+    std::fflush(stderr);
+
     auto const results = run_probe(ctx, cases);
     REQUIRE(results.size() == cases.size());
+
+    std::fprintf(stderr, "[marker] closure-probe: readback done\n");
+    std::fflush(stderr);
 
     auto const modes_per_direction = 4;
     auto const directions = isize(sizeof(probe_directions) / sizeof(probe_directions[0]));

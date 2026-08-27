@@ -7,6 +7,8 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
+#include <cstdio> // DIAGNOSTIC (temporary): flushed markers survive a fastfail, which loses buffered output
+
 // The furnace test for the INTEGRATOR, which is the half `openpbr-bsdf-test` cannot reach.
 //
 // That one measures the closure directly, so nothing it asserts says anything about the walk through a medium: the distance
@@ -232,6 +234,8 @@ image_stats trace_furnace(sg::context& ctx,
 // `try_async_blocking_get`, which does not complete from inside a pool worker.
 TEST("sv - a lossless interior is invisible under a uniform environment", nx::config::main_thread)
 {
+    std::fprintf(stderr, "[marker] furnace: enter\n");
+    std::fflush(stderr);
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
@@ -308,7 +312,13 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
                                    .geometry = sv::triangle_geometry::create_from_positions(positions),
                                    .material = id};
 
+        std::fprintf(stderr, "[marker] furnace: case '%.*s'\n", int(c.name.size()), c.name.data());
+        std::fflush(stderr);
+
         auto const stats = trace_furnace(ctx, resources, mesh, environment, 12);
+
+        std::fprintf(stderr, "[marker] furnace: case done\n");
+        std::fflush(stderr);
         auto const mean = luminance_of(stats.mean);
         auto const expected = luminance_of(environment);
 
