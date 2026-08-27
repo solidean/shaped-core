@@ -36,11 +36,13 @@ EXAMPLE("vdoc/cube-viewer")
 
     // The panel layout the last session left behind, restored before the first frame.
     // Under this example's own name: the editor opens the same file, and its layout is not this one's.
-    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value())
+    // Skipped under capture: a reference image shows a first run, not whatever the last session left here.
+    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value() && !app->is_capturing())
         app->imgui().load_settings(ini.value());
 
     // The camera the last session left behind, or a default for a first run.
-    auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
+    auto camera = app->is_capturing() ? cube_editor::orbit_camera()
+                                     : doc.value().load_camera().value_or(cube_editor::orbit_camera());
 
     cc::println("{} entities over {} revisions; drag to orbit, scroll to zoom",
                 doc.value().current().entities().size(), doc.value().timeline().size());

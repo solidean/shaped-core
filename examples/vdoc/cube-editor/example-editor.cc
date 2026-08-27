@@ -151,10 +151,12 @@ EXAMPLE("vdoc/cube-editor")
 
     // The panel layout lives in the workspace too, so no imgui.ini is written anywhere.
     // It must be restored before the first frame, and under a name of its own — the viewer example opens this same file.
-    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value())
+    // Skipped under capture: a reference image shows a first run, not whatever the last session left here.
+    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value() && !app->is_capturing())
         app->imgui().load_settings(ini.value());
 
-    auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
+    auto camera = app->is_capturing() ? cube_editor::orbit_camera()
+                                     : doc.value().load_camera().value_or(cube_editor::orbit_camera());
     auto selected = vdoc::entity_id();
     auto orbiting = false;
 

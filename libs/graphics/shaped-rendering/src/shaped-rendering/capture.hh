@@ -3,7 +3,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
-#include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/texture.hh> // sg::texture_2d, which sg's fwd.hh does not name
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 

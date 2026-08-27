@@ -35,17 +35,21 @@ _DEFAULT_MECHANISM = "sv"
 
 # The mechanisms that exist, and what each one is expected to PRODUCE.
 #
-# `sv` is a run driven through sv::interactive: it reads the SC_CAPTURE_* variables, needs no code in the example, and must leave an image at the path it was given.
+# `sv` is a run driven through sv::interactive: it reads the SC_CAPTURE_* variables and needs no code in the example.
+# `custom` is a program that answers the same variables itself, which is what an app owning its own loop must do —
+# `examples/vdoc/cube-editor` is the worked example.
 # `transcript` is a text example, whose artifact is its stdout.
 #
 # Declaring this is what removes the guessing.
 # Deciding after the fact — "an image appeared, so it was graphical" — reads a failed image capture as a successful text
 # one, which is how a broken capture becomes a committed transcript.
-# An example rendering through sr rather than sv has no mechanism yet, and so is simply not capturable.
-MECHANISMS = ("sv", "transcript")
+MECHANISMS = ("sv", "custom", "transcript")
 
 # The mechanisms whose artifact is an image file at SC_CAPTURE_OUT.
-IMAGE_MECHANISMS = ("sv",)
+#
+# `sv` and `custom` differ only in who implements the protocol, never in the contract: an image must appear at the path the run was given.
+# That is why both are here, and why dev.py needs no branch on which one it got.
+IMAGE_MECHANISMS = ("sv", "custom")
 
 
 @dataclass(frozen=True)

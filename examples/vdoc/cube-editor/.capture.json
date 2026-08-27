@@ -1,0 +1,26 @@
+// Which examples in this directory can be captured, and how.
+//
+// Both of these render through sr directly — their own window, swapchain and renderer, no sv anywhere — so they
+// answer the capture protocol themselves, in cube_app.cc. That is what `"mechanism": "custom"` records: dev.py's
+// contract is the same either way (an image must appear at SC_CAPTURE_OUT), and only who implements it differs.
+//
+// `accumulate` is frames drawn rather than samples converged: this is a raster pass, so the image is finished as
+// soon as it is drawn, and the few frames exist to let imgui settle its layout.
+{
+    "vdoc/cube-viewer": {
+        "mechanism": "custom",
+        "size": "1280x720",
+        "accumulate": 4,
+        "captures": [
+            {}
+        ]
+    },
+    "vdoc/cube-editor": {
+        "mechanism": "custom",
+        "size": "1280x720",
+        "accumulate": 4,
+        "captures": [
+            {}
+        ]
+    }
+}

@@ -101,12 +101,21 @@ Capture is opt-in, through a `.capture.json` beside the example source, keyed by
 
 **An example with no entry is never launched by a sweep.**
 That is what makes "the sweep opens no window" true by construction rather than by detection, and it is the whole reason the sweep is allowed to exist where `--all` is not.
-It also means an example rendering through something other than `sv::interactive` is simply not capturable yet, rather than being launched and quietly ignoring the request.
-The two `vdoc/cube-*` examples own their own window, swapchain and renderer, so they have no mechanism to declare.
+It also means an example rendering through something other than `sv::interactive` is never launched and left to quietly ignore the request.
 
-`mechanism` says how the run is driven and what it must produce.
-`sv` is a run through `sv::interactive`, which must leave an image at the path it was given; `transcript` is a text example, whose artifact is its stdout.
-Declaring it is what stops a failed image capture from being filed as a successful transcript.
+`mechanism` says who answers the protocol, and what the run must produce.
+
+- **`sv`** — a run through `sv::interactive`, which answers it for you.
+  The example needs no capture code at all.
+- **`custom`** — a program that answers the same environment variables itself.
+  That is what an application owning its own window, swapchain and loop has to do.
+  [cube_app.cc](../../examples/vdoc/cube-editor/cube_app.cc) is the worked example.
+  It brings the window system up headless, renders into a texture instead of a back buffer, and writes the image on the last frame.
+  Both `vdoc/cube-*` examples are captured that way, imgui panels and all.
+- **`transcript`** — a text example, whose artifact is its stdout.
+
+`sv` and `custom` differ only in who implements it: the contract is the same, so an image must appear at the path the run was given.
+Declaring the mechanism is what stops a failed image capture from being filed as a successful transcript.
 
 Everything else is optional and is a **default the flags override**, so iterating on framing never means editing the file.
 `size`, `format`, `accumulate` and `timeout` may sit on the example or on a single capture, and the latter wins.
@@ -153,6 +162,11 @@ That is a deliberate non-goal rather than an omission.
 A non-graphical example is captured through the same envelope: the same flag, the same folder, the same report.
 What it produces is its transcript rather than an image.
 Those are not committed yet, because a committed transcript is only worth something with a CI diff behind it.
+
+**A capture should show a first run.**
+An application that restores session state — a camera, a panel layout — has to decide what a reference image reflects.
+Restoring it would bake local state into a committed file, so the same refresh would produce a different picture on every machine.
+The `vdoc/cube-*` examples skip their saved camera and imgui layout when `is_capturing()`, which is what makes their images reproducible.
 
 ## Declaring one
 
