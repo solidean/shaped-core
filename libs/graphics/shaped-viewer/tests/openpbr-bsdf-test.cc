@@ -191,7 +191,18 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
     std::fprintf(stderr, "[marker] probe: submitting\n");
     std::fflush(stderr);
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    std::fprintf(stderr, "[marker] probe: submitted\n");
+    std::fflush(stderr);
+    try
+    {
+        ctx.advance_epoch_and_wait_for_idle();
+    }
+    catch (sg::device_lost_exception const&)
+    {
+        std::fprintf(stderr, "[marker] probe: DEVICE LOST\n");
+        std::fflush(stderr);
+        throw;
+    }
     std::fprintf(stderr, "[marker] probe: gpu idle\n");
     std::fflush(stderr);
     // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.

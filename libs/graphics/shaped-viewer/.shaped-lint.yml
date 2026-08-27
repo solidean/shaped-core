@@ -19,4 +19,9 @@ rules:
   - kind: allow-include
     value: <cstdio>
     reason: TEMPORARY — flushed crash markers for the arm64 fastfail investigation; remove with them
-    files: tests/openpbr-bsdf-test.cc, tests/volumetric-furnace-test.cc
+    files: tests/openpbr-bsdf-test.cc
+
+  - kind: allow-include
+    value: <cstdio>
+    reason: TEMPORARY — flushed crash markers for the arm64 fastfail investigation; remove with them
+    files: tests/volumetric-furnace-test.cc
