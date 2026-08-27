@@ -12,7 +12,7 @@ namespace
 using algo = cc::compression_algorithm;
 using framing = cc::compression_framing;
 
-constexpr algo all_algorithms[] = {algo::zstd, algo::lz4};
+constexpr algo all_algorithms[] = {algo::zstd, algo::lz4, algo::deflate};
 
 [[nodiscard]] cc::vector<byte> repetitive_bytes(isize size)
 {
@@ -561,4 +561,195 @@ TEST("compression - a dictionary for the wrong algorithm is rejected")
 
     auto out = cc::vector<byte>::create_uninitialized(1024);
     CHECK(cc::compress_into(corpus[1], out, {.algorithm = algo::zstd, .dictionary = &dict}).has_error());
+}
+
+// --- deflate ----------------------------------------------------------------------------------------------
+//
+// Deflate is the only algorithm with three container formats rather than two, so most of what is worth pinning here is
+// about which framing means which wrapper and what each one can carry.
+
+TEST("compression - deflate's framed output really is a gzip file")
+{
+    // The point of deflate is that something else reads the bytes, so the wrapper is the contract rather than an
+    // implementation detail: 1f 8b is gzip's magic and 08 is the only compression method gzip ever uses.
+    auto const blob = cc::compress(repetitive_bytes(2000), {.algorithm = algo::deflate});
+
+    REQUIRE(blob.size() > 18);
+    CHECK(u8(blob[0]) == 0x1f);
+    CHECK(u8(blob[1]) == 0x8b);
+    CHECK(u8(blob[2]) == 0x08);
+}
+
+TEST("compression - deflate's zlib framing round trips")
+{
+    auto const payload = repetitive_bytes(9000);
+    auto const cfg = cc::compression_config{.algorithm = algo::deflate, .framing = framing::zlib};
+
+    auto const blob = cc::compress(payload, cfg);
+    auto const back = cc::decompress(blob, {.algorithm = algo::deflate, .framing = framing::zlib});
+    REQUIRE(back.has_value());
+    CHECK(same_bytes(back.value(), payload));
+}
+
+TEST("compression - the zlib wrapper sits between gzip and raw in size")
+{
+    // gzip carries a 10-byte header plus a CRC-32 and a length; the zlib wrapper carries two bytes plus an Adler-32;
+    // raw carries nothing at all.
+    auto const payload = repetitive_bytes(64);
+
+    auto const gzip = cc::compress(payload, {.algorithm = algo::deflate});
+    auto const zlib = cc::compress(payload, {.algorithm = algo::deflate, .framing = framing::zlib});
+    auto const raw = cc::compress(payload, {.algorithm = algo::deflate, .framing = framing::raw});
+
+    CHECK(raw.size() < zlib.size());
+    CHECK(zlib.size() < gzip.size());
+}
+
+TEST("compression - the zlib wrapper is deliberately not sniffable")
+{
+    // Its two header bytes are a checksum constraint rather than a magic, so detecting it would claim payload bytes as
+    // deflate roughly once in every 31 blobs.
+    // A format storing one has to record that it did.
+    auto const blob = cc::compress(repetitive_bytes(3000), {.algorithm = algo::deflate, .framing = framing::zlib});
+
+    CHECK(!cc::detect_algorithm(blob).has_value());
+    CHECK(cc::decompress(blob, {.framing = framing::zlib}).has_error());
+}
+
+TEST("compression - zlib framing belongs to deflate alone")
+{
+    auto const payload = repetitive_bytes(500);
+    auto out = cc::vector<byte>::create_uninitialized(4096);
+
+    for (auto const a : {algo::zstd, algo::lz4})
+        CHECK(cc::compress_into(payload, out, {.algorithm = a, .framing = framing::zlib}).has_error());
+}
+
+TEST("compression - a framing mismatch is loud rather than guessed at")
+{
+    // Decoding is strict on purpose: zlib's own 15 + 32 auto-detect would quietly accept a gzip stream where the caller
+    // said zlib, and a framing that silently tolerates being wrong is a format bug waiting to happen.
+    auto const payload = repetitive_bytes(4000);
+    auto const gzip = cc::compress(payload, {.algorithm = algo::deflate});
+
+    CHECK(cc::decompress(gzip, {.algorithm = algo::deflate, .framing = framing::zlib}).has_error());
+
+    auto const zlib = cc::compress(payload, {.algorithm = algo::deflate, .framing = framing::zlib});
+    CHECK(cc::decompress(zlib, {.algorithm = algo::deflate}).has_error());
+}
+
+TEST("compression - a raw deflate blob can still be grown into")
+{
+    // Unlike a raw lz4 block, a raw deflate stream is self-terminating: it has no length, but it does say where it
+    // ends, so cc::decompress can grow into one without being told the size.
+    auto const payload = repetitive_bytes(6000);
+    auto const cfg = cc::compression_config{.algorithm = algo::deflate, .framing = framing::raw};
+
+    auto const back = cc::decompress(cc::compress(payload, cfg), {.algorithm = algo::deflate, .framing = framing::raw});
+    REQUIRE(back.has_value());
+    CHECK(same_bytes(back.value(), payload));
+}
+
+TEST("compression - deflate levels are zlib's own 1..9")
+{
+    auto const payload = repetitive_bytes(50000);
+
+    // 0 is the default on this scale rather than zlib's "store", and anything outside 1..9 clamps rather than failing.
+    for (auto const level : {-5, 0, 1, 6, 9, 100})
+    {
+        auto const back = cc::decompress(cc::compress(payload, {.algorithm = algo::deflate, .level = level}));
+        REQUIRE(back.has_value());
+        CHECK(same_bytes(back.value(), payload));
+    }
+}
+
+TEST("compression - deflate's compress_bound never under-reports, on every framing")
+{
+    for (auto const f : {framing::frame, framing::zlib, framing::raw})
+        for (auto const size : {isize(0), isize(1), isize(97), isize(8192)})
+        {
+            auto const payload = random_bytes(size, u64(size) * 17 + 3);
+            auto const cfg = cc::compression_config{.algorithm = algo::deflate, .framing = f};
+
+            auto const bound = cc::compress_bound(size, cfg);
+            auto out = cc::vector<byte>::create_uninitialized(bound);
+
+            auto const written = cc::compress_into(payload, out, cfg);
+            REQUIRE(written.has_value());
+            CHECK(written.value() <= bound);
+        }
+}
+
+TEST("compression - a gzip frame declares its size, the other two do not")
+{
+    auto const payload = repetitive_bytes(7777);
+
+    auto const declared = cc::decompressed_size(cc::compress(payload, {.algorithm = algo::deflate}));
+    REQUIRE(declared.has_value());
+    CHECK(declared.value() == payload.size());
+
+    // Unlike lz4, gzip writes its length even for empty content, so 0 here means zero rather than "unknown".
+    cc::span<byte const> const empty;
+    auto const none = cc::decompressed_size(cc::compress(empty, {.algorithm = algo::deflate}));
+    REQUIRE(none.has_value());
+    CHECK(none.value() == 0);
+
+    for (auto const f : {framing::zlib, framing::raw})
+    {
+        auto const blob = cc::compress(payload, {.algorithm = algo::deflate, .framing = f});
+        CHECK(!cc::decompressed_size(blob, {.algorithm = algo::deflate, .framing = f}).has_value());
+    }
+}
+
+TEST("compression - gzip framing cannot carry a dictionary")
+{
+    // deflateSetDictionary refuses a gzip-wrapped stream, and the gzip header has nowhere to record which dictionary
+    // applies — so this is an error rather than a dictionary that is silently ignored.
+    auto const corpus = sample_corpus(20);
+    auto const dict = cc::compression_dictionary::from_bytes(algo::deflate, corpus[0]);
+
+    auto out = cc::vector<byte>::create_uninitialized(4096);
+    CHECK(cc::compress_into(corpus[1], out, {.algorithm = algo::deflate, .dictionary = &dict}).has_error());
+}
+
+TEST("compression - a deflate dictionary round trips under zlib and raw framing")
+{
+    auto const corpus = sample_corpus(20);
+    auto const dict = cc::compression_dictionary::from_bytes(algo::deflate, corpus[0]);
+
+    CHECK(dict.algorithm() == algo::deflate);
+    CHECK(dict.id() != 0); // the Adler-32 a zlib header stores as DICTID, which is what a format records
+
+    for (auto const f : {framing::zlib, framing::raw})
+    {
+        auto const cfg = cc::compression_config{.algorithm = algo::deflate, .framing = f, .dictionary = &dict};
+        auto const blob = cc::compress(corpus[5], cfg);
+
+        auto const back = cc::decompress(blob, {.algorithm = algo::deflate, .framing = f, .dictionary = &dict});
+        REQUIRE(back.has_value());
+        CHECK(same_bytes(back.value(), corpus[5]));
+    }
+}
+
+TEST("compression - a zlib-framed stream needing a dictionary says so")
+{
+    auto const corpus = sample_corpus(20);
+    auto const dict = cc::compression_dictionary::from_bytes(algo::deflate, corpus[0]);
+
+    auto const cfg = cc::compression_config{.algorithm = algo::deflate, .framing = framing::zlib, .dictionary = &dict};
+    auto const blob = cc::compress(corpus[3], cfg);
+
+    // The zlib header records the DICTID, so inflate can tell the caller a dictionary is missing rather than producing garbage.
+    CHECK(cc::decompress(blob, {.algorithm = algo::deflate, .framing = framing::zlib}).has_error());
+}
+
+TEST("compression - deflate has no dictionary trainer")
+{
+    auto const corpus = sample_corpus(20);
+
+    auto views = cc::vector<cc::span<byte const>>();
+    for (auto const& s : corpus)
+        views.push_back(s);
+
+    CHECK(cc::compression_dictionary::train(algo::deflate, views, 4096).has_error());
 }

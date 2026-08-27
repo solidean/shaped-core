@@ -13,7 +13,7 @@ namespace
 using algo = cc::compression_algorithm;
 using framing = cc::compression_framing;
 
-constexpr algo all_algorithms[] = {algo::zstd, algo::lz4};
+constexpr algo all_algorithms[] = {algo::zstd, algo::lz4, algo::deflate};
 
 [[nodiscard]] cc::vector<byte> line_payload(isize lines)
 {
@@ -37,12 +37,12 @@ constexpr algo all_algorithms[] = {algo::zstd, algo::lz4};
 }
 
 /// Compress `payload` through the streaming writer, in chunks, and return the frame it produced.
-[[nodiscard]] cc::vector<byte> stream_compress(cc::span<byte const> payload, algo a, isize chunk)
+[[nodiscard]] cc::vector<byte> stream_compress(cc::span<byte const> payload, algo a, isize chunk, framing f = framing::frame)
 {
     auto sink = cc::vector<byte>::create_uninitialized(payload.size() * 2 + 4096);
     auto sink_adapter = cc::span_write_stream_adapter(sink);
 
-    auto writer = cc::compressing_write_stream_adapter::create(sink_adapter, {.algorithm = a});
+    auto writer = cc::compressing_write_stream_adapter::create(sink_adapter, {.algorithm = a, .framing = f});
     REQUIRE(writer.has_value());
 
     {
@@ -240,6 +240,36 @@ TEST("compression stream - raw framing has nothing to stream")
     auto source = cc::span_read_stream_adapter(cc::span<byte const>(sink));
     CHECK(cc::decompressing_read_stream_adapter::create(source, {.algorithm = algo::zstd, .framing = framing::raw})
               .has_error());
+}
+
+TEST("compression stream - deflate's zlib framing streams like gzip does")
+{
+    // `raw` is the only framing without a wrapper to resume into; the zlib wrapper is a header and a trailing
+    // Adler-32, so it streams exactly as a gzip frame does.
+    auto const payload = line_payload(400);
+    auto const blob = stream_compress(payload, algo::deflate, 777, framing::zlib);
+
+    auto source = cc::span_read_stream_adapter(cc::span<byte const>(blob));
+    auto reader
+        = cc::decompressing_read_stream_adapter::create(source, {.algorithm = algo::deflate, .framing = framing::zlib});
+    REQUIRE(reader.has_value());
+
+    cc::read_stream in = reader.value().stream();
+    auto const back = in.read_all();
+    REQUIRE(back.has_value());
+    CHECK(same_bytes(back.value(), payload));
+}
+
+TEST("compression stream - a streamed gzip frame is a gzip file")
+{
+    // The streaming writer emits the same container the one-shot path does, which is what lets it hand bytes to
+    // something that only speaks gzip.
+    auto const blob = stream_compress(line_payload(50), algo::deflate, 512);
+
+    REQUIRE(blob.size() > 18);
+    CHECK(u8(blob[0]) == 0x1f);
+    CHECK(u8(blob[1]) == 0x8b);
+    CHECK(u8(blob[2]) == 0x08);
 }
 
 TEST("compression stream - a decompressing stream must be told its algorithm")

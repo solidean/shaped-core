@@ -5,8 +5,9 @@
 
 // The seam every compression algorithm plugs into.
 //
-// Adding an algorithm means four edits, and the fourth is the one that compiles cleanly when forgotten:
-// an enum value, a .cc defining a table, a line in backend_for, its sources in clean-core's CMakeLists — and a line in cc::detect_algorithm, without which framed blobs of it are never sniffed.
+// Adding an algorithm means six edits, and the ones at the end are those that compile cleanly when forgotten:
+// an enum value, a .cc defining a table, a line in backend_for, its sources and its link in clean-core's CMakeLists, an allow-include entry in .shaped-lint.yml for the upstream header
+// — and a line in cc::detect_algorithm, without which framed blobs of it are never sniffed.
 //
 // Each upstream header stays inside its own backend TU, which is why every entry point speaks in cc types and an untyped context pointer.
 
@@ -61,7 +62,8 @@ struct compression_backend
     //
     // A context of its own, because both codecs keep frame state across calls here and neither can resume a frame
     // from a context that has served a whole-buffer call.
-    // `frame` framing only: a raw lz4 blob is one block with no continuation, so there is nothing to stream.
+    // Not `raw`: a raw lz4 blob is one block with no continuation, and a raw zstd blob has no header to resume from.
+    // Deflate's `zlib` framing streams like `frame` does, its wrapper being a header and a trailing checksum.
 
     [[nodiscard]] void* (*create_stream_compressor)(compression_config const& cfg);
     void (*destroy_stream_compressor)(void* state);
@@ -88,6 +90,7 @@ struct compression_backend
 
 [[nodiscard]] compression_backend const& zstd_backend();
 [[nodiscard]] compression_backend const& lz4_backend();
+[[nodiscard]] compression_backend const& deflate_backend();
 
 [[nodiscard]] compression_backend const& backend_for(compression_algorithm algorithm);
 

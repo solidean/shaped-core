@@ -11,10 +11,11 @@ namespace
 {
 using sd = cc::seek_dir;
 
-/// Streaming needs a frame to resume into, which `raw` framing is the removal of.
+/// Streaming needs a wrapper to resume into, which `raw` framing is the removal of.
+/// Deflate's `zlib` framing has one — a header and a trailing Adler-32 — so it streams exactly as `frame` does.
 [[nodiscard]] bool is_streamable(cc::compression_framing framing)
 {
-    return framing == cc::compression_framing::frame;
+    return framing != cc::compression_framing::raw;
 }
 } // namespace
 
@@ -26,8 +27,8 @@ cc::result<cc::decompressing_read_stream_adapter> cc::decompressing_read_stream_
     CC_RETURN_IF_ERROR(impl::validate_decompression_config(cfg));
 
     if (!is_streamable(cfg.framing))
-        return cc::error("decompressing stream: raw framing carries no frame to stream, so only `frame` can be read "
-                         "this way");
+        return cc::error("decompressing stream: raw framing carries no wrapper to stream, so it cannot be read this "
+                         "way");
 
     // The algorithm has to be settled before a context exists, and nothing has been read yet to sniff — create() does
     // not touch the inner stream.
@@ -198,8 +199,8 @@ cc::result<cc::compressing_write_stream_adapter> cc::compressing_write_stream_ad
     CC_RETURN_IF_ERROR(impl::validate_compression_config(cfg));
 
     if (!is_streamable(cfg.framing))
-        return cc::error("compressing stream: raw framing has no frame to stream into, so only `frame` can be written "
-                         "this way");
+        return cc::error("compressing stream: raw framing has no wrapper to stream into, so it cannot be written this "
+                         "way");
 
     auto adapter = compressing_write_stream_adapter();
     adapter._inner = cc::move(inner);

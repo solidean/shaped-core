@@ -27,10 +27,13 @@
 ///
 /// zstd is the default, and the right answer unless measured otherwise: far better ratio than lz4 at comparable speed, with low levels fast enough for most hot paths.
 /// lz4 is for when decompression speed is the whole requirement — GB/s, at a noticeably worse ratio.
+/// deflate is the interoperability codec: slower and worse than either, and the only one a zip, a gzip or a PNG stream can be read with.
+/// Reach for it when some other format dictates the algorithm, never to store our own bytes.
 enum class cc::compression_algorithm : cc::u8
 {
     zstd = 0,
     lz4 = 1,
+    deflate = 2,
 };
 
 /// Whether the output describes itself.
@@ -44,10 +47,18 @@ enum class cc::compression_algorithm : cc::u8
 /// A raw zstd blob is still a frame with its magic and flags removed, so cc::decompress can grow into it as usual.
 /// A raw lz4 blob leaves the frame API entirely for the block API, and carries no length, checksum or terminator at all.
 /// So a raw lz4 blob additionally requires the caller to know its uncompressed size, and cc::decompress_into is the only way to read one.
+/// A raw deflate blob is a bare deflate stream: no wrapper, but still self-terminating, so cc::decompress can read one once told the algorithm.
+///
+/// `zlib` is DEFLATE ONLY, and using it with another algorithm is an error rather than a silent fallback.
+/// Deflate is the one algorithm with three container formats rather than two, and this is the third: the RFC 1950 wrapper, two header bytes and an Adler-32.
+/// `frame` is gzip for deflate — the framing with a real magic, which is the one thing cc::detect_algorithm can recognize.
+/// The zlib wrapper opens with a checksum constraint rather than a magic, so it is deliberately NOT sniffed and a format storing one must record that it did.
+/// It is what PNG's IDAT stream and most `Content-Encoding: deflate` payloads actually are.
 enum class cc::compression_framing : cc::u8
 {
     frame = 0,
     raw = 1,
+    zlib = 2,
 };
 
 struct cc::compression_config
@@ -63,6 +74,9 @@ struct cc::compression_config
     /// lz4:  positive selects the high-compression codec, up to 12, where 12 is far slower for a modest gain.
     ///       Negative is "acceleration", roughly N times faster to compress at a worse ratio.
     ///       `frame` and `raw` read this scale slightly differently — a frame starts high-compression at 2, not 1, and reads -N as acceleration N+1.
+    /// deflate: 1..9 upward, default 6, and there is nothing below 1.
+    ///       Negative clamps to 1 rather than meaning anything of its own.
+    ///       zlib's own level 0 ("store, do not compress") is not reachable here, 0 being the default on this scale; deflate falls back to stored blocks per block anyway.
     int level = 0;
 
     compression_framing framing = compression_framing::frame;
@@ -70,6 +84,9 @@ struct cc::compression_config
     /// Must outlive every call using this config, and its algorithm must match the one above.
     /// Decompression must be given the same dictionary, or it fails.
     /// A mismatched algorithm is an ordinary error from cc::compress_into, but an assert from the cc::compressor constructor, which has no way to report it.
+    ///
+    /// deflate cannot carry one under `frame` framing: gzip has no field to record which dictionary applies, and zlib refuses the combination outright.
+    /// Use `zlib` or `raw` framing for a dictionary there.
     compression_dictionary const* dictionary = nullptr;
 };
 
@@ -81,8 +98,8 @@ struct cc::decompression_config
     /// Sniffing reads a frame magic, so it cannot work on `raw` output and is not guaranteed to keep working as algorithms are added.
     cc::optional<compression_algorithm> algorithm = {};
 
-    /// Must match how the data was produced.
-    /// `raw` additionally requires an explicit `algorithm`, there being no header to read one from.
+    /// Must match how the data was produced, and it is checked strictly rather than auto-detected.
+    /// `raw` and `zlib` additionally require an explicit `algorithm`, neither carrying a magic to read one from.
     compression_framing framing = compression_framing::frame;
 
     /// Must outlive the call, and must be the same dictionary the data was compressed with.
@@ -138,8 +155,12 @@ namespace cc
 
 /// The uncompressed size the frame declares, without decompressing it.
 ///
-/// nullopt for `raw` framing, which declares nothing, and when the algorithm can be neither read from the config nor sniffed.
+/// nullopt for `raw` and `zlib` framing, neither of which declares anything, and when the algorithm can be neither read from the config nor sniffed.
 /// Also nullopt for an lz4 frame whose content is empty, because lz4 spells "no declared size" and "zero bytes" the same way; zstd reports 0 for that same payload.
+///
+/// A gzip frame is the one case where this is a HINT rather than a fact.
+/// gzip stores its length in the trailer, modulo 2^32, so it wraps on content past 4 GB and describes only the last member of a concatenated stream.
+/// cc::decompress uses it to size one allocation and never as a bound, and neither should a caller.
 [[nodiscard]] cc::optional<isize> decompressed_size(cc::span<byte const> data, decompression_config cfg = {});
 } // namespace cc
 

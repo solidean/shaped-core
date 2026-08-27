@@ -49,10 +49,10 @@ Add entries as we discover them, and remove them as they land.
 - **CRC32 and Adler32.**
   Wanted by every container format that stores a per-member checksum — zip, gzip, PNG — so this lands with the first of those rather than before it.
   Neither is a hash in the `common/hash.hh` sense and neither is cryptographic; they belong next to the codecs, not next to `blake3`.
-- **Further compression algorithms, deflate first.**
-  Deflate is what a zip or gzip container needs, and it slots in as one `compression_algorithm` value plus one backend file.
-  Its three framings — raw deflate, zlib and gzip — are exactly what `compression_framing` already models, which is why that is an axis rather than a bool.
-  Adding it also means a line in `cc::detect_algorithm`, which is the edit that compiles cleanly when forgotten.
+  Both now exist in the tree, vendored with zlib and reached only by `deflate_backend.cc`; exposing them is a matter of deciding the API, not of finding an implementation.
+- **Further compression algorithms.**
+  Deflate landed over vendored zlib — `compression_algorithm::deflate`, with `frame` meaning gzip and a third `compression_framing::zlib` for the RFC 1950 wrapper.
+  Nothing else is queued; brotli would be the next interop codec if some format demanded it, and would slot in the same way.
 - **Async compression.**
   `compress_async`, mirroring `algorithm/sort_async.hh`: explicit extra API over the synchronous core, never a hidden worker pool.
   zstd's own multithreading is deliberately not enabled, so this would chunk over `cc::async` instead and keep the memory cost where the caller can see it.

@@ -32,6 +32,8 @@ cc::impl::compression_backend const& cc::impl::backend_for(compression_algorithm
         return zstd_backend();
     case compression_algorithm::lz4:
         return lz4_backend();
+    case compression_algorithm::deflate:
+        return deflate_backend();
     }
 
     CC_UNREACHABLE("unknown compression algorithm");
@@ -42,13 +44,22 @@ cc::result<cc::unit> cc::impl::validate_compression_config(compression_config co
     if (cfg.dictionary != nullptr && cfg.dictionary->algorithm() != cfg.algorithm)
         return cc::error("compression: the dictionary was built for a different algorithm");
 
+    if (cfg.framing == compression_framing::zlib && cfg.algorithm != compression_algorithm::deflate)
+        return cc::error("compression: `zlib` framing is the RFC 1950 wrapper around deflate, and no other algorithm "
+                         "has one");
+
     return cc::unit{};
 }
 
 cc::result<cc::unit> cc::impl::validate_decompression_config(decompression_config const& cfg)
 {
-    if (cfg.framing == compression_framing::raw && !cfg.algorithm.has_value())
-        return cc::error("decompression: raw framing carries no magic, so the algorithm must be given explicitly");
+    if (cfg.framing != compression_framing::frame && !cfg.algorithm.has_value())
+        return cc::error("decompression: only `frame` framing carries a magic, so any other framing needs the "
+                         "algorithm given explicitly");
+
+    if (cfg.framing == compression_framing::zlib && cfg.algorithm.value() != compression_algorithm::deflate)
+        return cc::error("decompression: `zlib` framing is the RFC 1950 wrapper around deflate, and no other algorithm "
+                         "has one");
 
     if (cfg.dictionary != nullptr && cfg.algorithm.has_value() && cfg.dictionary->algorithm() != cfg.algorithm.value())
         return cc::error("decompression: the dictionary was built for a different algorithm");
@@ -134,14 +145,17 @@ cc::optional<cc::compression_algorithm> cc::detect_algorithm(cc::span<byte const
         return compression_algorithm::zstd;
     if (impl::lz4_backend().matches_magic(data))
         return compression_algorithm::lz4;
+    // Only deflate's gzip framing is sniffable; its zlib wrapper is a checksum constraint rather than a magic.
+    if (impl::deflate_backend().matches_magic(data))
+        return compression_algorithm::deflate;
 
     return {};
 }
 
 cc::optional<isize> cc::decompressed_size(cc::span<byte const> data, decompression_config cfg)
 {
-    // Raw framing declares nothing by definition, and a sniff on it would read payload bytes as a header.
-    if (cfg.framing == compression_framing::raw)
+    // Only `frame` framing declares anything, and a sniff on the others would read payload bytes as a header.
+    if (cfg.framing != compression_framing::frame)
         return {};
 
     auto const algorithm = resolve_algorithm(data, cfg);

@@ -1,0 +1,20 @@
+# Pin and license for the upstream vendored here.
+# vendor-zlib.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: zlib
+    homepage: https://zlib.net
+    source: git
+    repo: https://github.com/madler/zlib
+    track: tags
+    tag: v1.3.1
+    digest_algo: git-commit
+    pin_hash: 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf
+    license: Zlib
+    license_files: [LICENSE]
+    used_by: clean-core — cc::compress / cc::decompress, the Deflate algorithm
+    notes: |
+      The whole repository is under the zlib license, so there is no per-directory split to navigate as there is with LZ4 or Zstandard.
+      What is vendored is still a subset: the stdio `gzFile` layer is dropped, because streaming here goes through cc::read_stream rather than FILE*.
+      That subset choice is a build concern rather than a license one, and vendor-zlib.py records it.
