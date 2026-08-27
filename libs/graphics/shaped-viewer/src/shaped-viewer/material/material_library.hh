@@ -99,7 +99,8 @@ namespace impl
 
 /// The material library every viewer draws from: the caller's provider if they set one, otherwise the built-in default.
 /// Created on the first call and shared by every caller after.
-/// Not thread-safe, like the rest of viewer setup.
+/// The ACQUISITION is thread-safe — two threads asking at once get one object, not two.
+/// What it hands back is not: the library itself carries the same single-threaded contract the rest of viewer setup does.
 [[nodiscard]] cc::result<material_library*> acquire_material_library();
 
 /// Registers the builtin types into `lib` — `sv::builtin_material::openpbr`, `pbr` and `unlit`.
