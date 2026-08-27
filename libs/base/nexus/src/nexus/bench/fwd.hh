@@ -24,6 +24,7 @@ enum class warning_kind : u8;
 enum class warning_severity : u8;
 
 struct run_config;
+struct report_style;
 struct statistics;
 struct warning;
 struct recorded_quantity;

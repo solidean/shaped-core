@@ -77,6 +77,19 @@ void nx::bench::impl::bind(iteration& it, run_state* state)
     it._state = state;
 }
 
+void nx::bench::impl::begin_batch(iteration& it, bool warmup)
+{
+    it._items = 0;
+    it._warmup = warmup;
+}
+
+isize nx::bench::impl::take_items(iteration& it)
+{
+    auto const n = it._items;
+    it._items = 0;
+    return n;
+}
+
 void nx::bench::iteration::pause()
 {
     if (_state == nullptr || _state->is_paused)
@@ -93,26 +106,14 @@ void nx::bench::iteration::resume()
     _state->is_paused = false;
 }
 
-void nx::bench::iteration::items(isize n)
-{
-    if (_state == nullptr || _state->is_warmup)
-        return;
-    _state->items += n;
-}
-
 void nx::bench::iteration::record(cc::string_view name, cc::rec::unit const& unit, f64 value)
 {
-    if (_state == nullptr || _state->is_warmup)
+    if (_state == nullptr || _warmup)
         return;
 
     auto& q = _state->quantity_for(name, &unit);
     q.sum += value;
     ++q.count;
-}
-
-bool nx::bench::iteration::is_warmup() const
-{
-    return _state != nullptr && _state->is_warmup;
 }
 
 nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
@@ -133,10 +134,16 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
     auto const time_batch = [&](isize count)
     {
         state.begin_batch();
+        impl::begin_batch(it, state.is_warmup);
 
         auto const t0 = cc::current_cycles();
         body(count, it);
         auto const t1 = cc::current_cycles();
+
+        // Collected once per batch rather than per iteration, which is what lets iteration::items inline to one add.
+        auto const declared = impl::take_items(it);
+        if (!state.is_warmup)
+            state.items += declared;
 
         auto const gross = t1 - t0;
         auto const net = gross > state.paused_ticks ? gross - state.paused_ticks : u64(0);
@@ -272,7 +279,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.warnings.push_back({
             .kind = warning_kind::body_deleted,
             .severity = warning_severity::error,
-            .detail = cc::format("{:.2} ns per iteration is below the empty-loop floor of {:.2} ns, so the body was "
+            .detail = cc::format("{:.2f} ns per iteration is below the empty-loop floor of {:.2f} ns, so the body was "
                                  "optimized away — pass its result to nx::bench::sink",
                                  r.time.median * 1e9, cal.empty_iteration_secs * 1e9),
         });
@@ -282,7 +289,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.warnings.push_back({
             .kind = warning_kind::overhead_significant,
             .severity = warning_severity::warning,
-            .detail = cc::format("the harness is about {:.1}% of the measured per-iteration time — give the body an "
+            .detail = cc::format("the harness is about {:.1f}% of the measured per-iteration time — give the body an "
                                  "inner loop and take the void(isize) form, which has no per-iteration cost at all",
                                  r.overhead_fraction * 100),
         });
@@ -294,7 +301,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
             .kind = warning_kind::did_not_converge,
             .severity = warning_severity::warning,
             .detail = cc::format(
-                "stopped at {} samples over {:.2} s with a relative error of {:.1}%, short of the {:.1}% asked for",
+                "stopped at {} samples over {:.2f} s with a relative error of {:.1f}%, short of the {:.1f}% asked for",
                 r.samples.size(), elapsed, r.time.relative_error() * 100, cfg.target_relative_error * 100),
         });
     }
@@ -304,7 +311,8 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.warnings.push_back({
             .kind = warning_kind::paused_fraction_high,
             .severity = warning_severity::warning,
-            .detail = cc::format("{:.0}% of the span was spent paused, so the pause pairs are a large part of what was "
+            .detail = cc::format("{:.0f}% of the span was spent paused, so the pause pairs are a large part of what "
+                                 "was "
                                  "measured — move the setup out of the loop, or take the void(isize) form",
                                  r.paused_fraction * 100),
         });

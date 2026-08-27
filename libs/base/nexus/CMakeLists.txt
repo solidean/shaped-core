@@ -22,6 +22,7 @@ add_library(nexus
     src/nexus/pgo.cc
     src/nexus/bench/barriers.cc
     src/nexus/bench/calibration.cc
+    src/nexus/bench/report.cc
     src/nexus/bench/run.cc
     src/nexus/bench/statistics.cc
     src/nexus/bench/hardware_counters.cc
@@ -77,6 +78,7 @@ target_sources(nexus
     src/nexus/bench/fwd.hh
     src/nexus/bench/barriers.hh
     src/nexus/bench/calibration.hh
+    src/nexus/bench/report.hh
     src/nexus/bench/result.hh
     src/nexus/bench/run.hh
     src/nexus/bench/run_config.hh
@@ -195,6 +197,7 @@ if(SC_BUILD_TESTS)
         tests/bench-barriers-test.cc
         tests/bench-statistics-test.cc
         tests/bench-run-test.cc
+        tests/bench-report-test.cc
         tests/bench-hardware-counters-test.cc
         tests/bench-cache-traversal-test.cc
         tests/fuzz-engine-test.cc

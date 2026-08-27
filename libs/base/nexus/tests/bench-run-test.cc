@@ -2,6 +2,7 @@
 #include <clean-core/record/stat.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/bench/calibration.hh>
+#include <nexus/bench/report.hh>
 #include <nexus/bench/run.hh>
 #include <nexus/test.hh>
 
@@ -256,25 +257,47 @@ TEST("bench - calibration report", nx::config::manual)
     auto const& cal = nx::bench::calibrated();
 
     cc::println("harness floor on this machine:");
-    cc::println("  seconds per tick      {:.4} ns", cal.seconds_per_tick * 1e9);
+    cc::println("  seconds per tick      {:.4f} ns", cal.seconds_per_tick * 1e9);
     cc::println("  cheap cycle counter   {}", cal.has_cheap_counter ? "yes" : "no");
-    cc::println("  empty iteration       {:.3} ns", cal.empty_iteration_secs * 1e9);
-    cc::println("  clock pair            {:.3} ns", cal.clock_pair_secs * 1e9);
-
-    auto acc = u64(0);
-    auto const r = nx::bench::run("void() body", [&] { acc = work(acc); });
-
+    cc::println("  empty iteration       {:.3f} ns", cal.empty_iteration_secs * 1e9);
+    cc::println("  clock pair            {:.3f} ns", cal.clock_pair_secs * 1e9);
     cc::println("");
-    cc::println("a minimal void() body:");
-    cc::println("  median                {:.3} ns/iteration", r.time.median * 1e9);
-    cc::println("  ci95                  [{:.3}, {:.3}] ns", r.time.ci95_low * 1e9, r.time.ci95_high * 1e9);
-    cc::println("  relative error        {:.2}%", r.time.relative_error() * 100);
-    cc::println("  batch size            {}", r.batch_size);
-    cc::println("  samples               {} over {:.3} s", r.samples.size(), r.measured_seconds);
-    cc::println("  outliers              {}", r.time.outliers);
-    cc::println("  harness overhead      {:.2}% of per-iteration time", r.overhead_fraction * 100);
-    cc::println("  converged             {}", r.converged ? "yes" : "no");
 
-    for (auto const& w : r.warnings)
-        cc::println("  warning               {}", w.detail);
+    auto const style = nx::bench::report_style::for_console();
+
+    // One loop: the full block, since there is nothing to compare against.
+    auto acc = u64(0);
+    auto single = cc::vector<nx::bench::result>();
+    single.push_back(nx::bench::run("a minimal void() body", [&] { acc = work(acc); }));
+    cc::print(nx::bench::format_report("one loop", single, style));
+
+    // Several loops in one benchmark: the comparison table.
+    auto loops = cc::vector<nx::bench::result>();
+    loops.push_back(nx::bench::run("one multiply-add",
+                                   [&](nx::bench::iteration& it)
+                                   {
+                                       acc = work(acc);
+                                       it.items(1);
+                                   }));
+    // NOT work() composed four times.
+    // Composing an affine function gives another affine function, so clang folds the four into one, and the report
+    // then measures the optimizer rather than four operations.
+    loops.push_back(nx::bench::run("four xorshifts",
+                                   [&](nx::bench::iteration& it)
+                                   {
+                                       acc ^= acc << 13;
+                                       acc ^= acc >> 7;
+                                       acc ^= acc << 17;
+                                       acc ^= acc >> 5;
+                                       nx::bench::sink(acc);
+                                       it.items(4);
+                                   }));
+    cc::println("");
+    cc::print(nx::bench::format_report("several loops", loops, style));
+
+    auto md = style;
+    md.markdown = true;
+    md.color = false;
+    cc::println("");
+    cc::print(nx::bench::format_report("the same, markdown-safe", loops, md));
 }

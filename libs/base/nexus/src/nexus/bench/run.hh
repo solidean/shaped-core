@@ -27,6 +27,12 @@ void advance(iteration& it, isize index);
 
 /// Points a fresh handle at the run it belongs to, which is the engine's first act.
 void bind(iteration& it, run_state* state);
+
+/// Resets the per-batch counters the handle carries inline, and says whether this batch is measured.
+void begin_batch(iteration& it, bool warmup);
+
+/// Reads back what the batch declared, and clears it.
+isize take_items(iteration& it);
 } // namespace nx::bench::impl
 
 /// The handle a body receives, and the only way to say anything about the iteration being measured.
@@ -51,7 +57,11 @@ struct nx::bench::iteration
     /// Additive within an iteration, so calling it twice with 3 and 4 declares seven.
     /// A body that never calls it reports no rate at all, which is deliberately distinct from reporting one item per
     /// iteration.
-    void items(isize n);
+    ///
+    /// **Inline, and it has to be.** As an out-of-line call it cost about 0.7 ns an iteration, which on a one-nanosecond
+    /// body is most of the measurement — the counter lives in the handle for exactly that reason, and the engine reads
+    /// it once per batch rather than being told per iteration.
+    void items(isize n) { _items += n; }
 
     /// Record a quantity this iteration produced, against what it means.
     ///
@@ -65,15 +75,22 @@ struct nx::bench::iteration
     [[nodiscard]] isize index() const { return _index; }
 
     /// Whether this iteration is a warmup one, whose timings and quantities are all discarded.
-    [[nodiscard]] bool is_warmup() const;
+    [[nodiscard]] bool is_warmup() const { return _warmup; }
 
 private:
     friend struct impl::run_state;
     friend void impl::advance(iteration& it, isize index);
     friend void impl::bind(iteration& it, impl::run_state* state);
+    friend void impl::begin_batch(iteration& it, bool warmup);
+    friend isize impl::take_items(iteration& it);
 
     impl::run_state* _state = nullptr;
     isize _index = 0;
+
+    /// Counted in the handle rather than through the state, so `items` inlines to one add.
+    /// The engine collects it once per batch.
+    isize _items = 0;
+    bool _warmup = false;
 };
 
 namespace nx::bench
@@ -141,8 +158,9 @@ result run(cc::string_view name, run_config const& cfg, Body&& body)
     }
     else
     {
-        static_assert(requires { body(); }, "a benchmark body must be callable as void(), void(nx::bench::iteration&) "
-                                            "or void(isize)");
+        static_assert(
+            requires { body(); }, "a benchmark body must be callable as void(), void(nx::bench::iteration&) "
+                                  "or void(isize)");
         return impl::run_measured(name, cfg,
                                   [&](isize count, iteration&)
                                   {
