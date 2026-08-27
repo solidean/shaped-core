@@ -5,16 +5,31 @@
 
 // Forward declarations and the logical counter vocabulary for the nx::bench benchmarking helpers.
 //
-// The first and currently only topic is hardware performance counters: cycles, instructions retired, branch mispredictions, cache misses.
-// They are measured around a single invocation of a callable, and addressed by the platform-independent nx::bench::hw_counter enum.
-// The native — possibly cryptic — name and a best-effort description travel alongside each counter in hardware_counters.hh's query API.
+// Three topics live here.
+// The measured run — run.hh, run_config.hh, result.hh — is the benchmarking harness proper: a callable, sampled and
+// reported with statistics that say how much of the number to believe.
+// The optimization barriers — barriers.hh — are what keep a measured body from being deleted.
+// Hardware performance counters — hardware_counters.hh — are cycles, instructions retired, branch mispredictions and
+// cache misses, measured around an invocation of a callable and addressed by the platform-independent hw_counter enum.
+// The native — possibly cryptic — name and a best-effort description travel alongside each counter in
+// hardware_counters.hh's query API.
 
 namespace nx::bench
 {
 using namespace cc::primitive_defines;
 
-// Declared ahead of the definition below so that one can be written qualified.
+// Declared ahead of the definitions below so that one can be written qualified.
 enum class hw_counter : u8;
+enum class warning_kind : u8;
+enum class warning_severity : u8;
+
+struct run_config;
+struct statistics;
+struct warning;
+struct recorded_quantity;
+struct result;
+struct iteration;
+struct calibration;
 
 } // namespace nx::bench
 
