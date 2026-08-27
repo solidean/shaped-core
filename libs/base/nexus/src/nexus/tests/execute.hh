@@ -5,6 +5,7 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/bench/result.hh>
 #include <nexus/fwd.hh>
 #include <nexus/tests/schedule.hh>
 
@@ -48,6 +49,13 @@ struct nx::test_execution
 
     // Metrics recorded by nx::pgo during this test (typically a PGO benchmark). Empty for normal tests.
     cc::vector<recorded_metric> metrics;
+
+    // Loops measured by nx::bench::run during this test, in declaration order.
+    // Empty for everything but a BENCHMARK.
+    //
+    // Order is what the comparison table keys its baseline on, so this is a vector rather than a map: the first loop
+    // declared is the baseline unless one asked to be it.
+    cc::vector<bench::result> benchmarks;
 
     struct section
     {
@@ -176,6 +184,14 @@ void report_check_result(check_result result);
 // Appends a metric to the active test's execution, and is a no-op when no test is running.
 // nx::pgo is the public face.
 void record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better);
+
+// Appends a measured loop to the active test's execution, and is a no-op when no test is running — which is what lets
+// nx::bench::run be called from a plain function, or from an application, and simply hand its result back.
+//
+// **A result carrying an error-severity warning fails the test here.**
+// A body that was optimized away has produced no number at all, and a benchmark reporting one would be worse than a
+// benchmark that failed.
+void record_benchmark_result(bench::result result);
 
 // Crash-context hook (cc::crash_context_hook): writes the currently running test and section index to stderr.
 // Registered with cc::add_crash_context_hook, so a fatal fault points at the offending test.

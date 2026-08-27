@@ -9,6 +9,7 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/args/ambient.hh>
+#include <nexus/bench/report.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
@@ -194,6 +195,13 @@ int nx::run(int argc, char** argv)
             return 0;
         }
 
+        // Same for benchmarks: `dev.py benchmark` probes every binary to resolve a name, and most carry none.
+        if (config.selected_bucket == nx::config::test_bucket::benchmark)
+        {
+            cc::println("No benchmarks in this binary");
+            return 0;
+        }
+
         // Same for examples: `dev.py example` probes every binary to resolve a name, and most carry none.
         if (config.selected_bucket == nx::config::test_bucket::example)
         {
@@ -250,6 +258,22 @@ int nx::run(int argc, char** argv)
     {
         cc::print(write_catch2_results_xml(execution));
         return execution.count_failed_tests() > 0 ? 1 : 0;
+    }
+
+    // Print what the benchmarks measured.
+    //
+    // One report per BENCHMARK rather than one for the whole run: the loops inside one body are what get compared, and
+    // a table spanning two benchmarks would invite a comparison between numbers measured minutes apart.
+    {
+        auto const style = nx::bench::report_style::for_console();
+        for (auto const& exec : execution.executions)
+        {
+            if (exec.benchmarks.empty())
+                continue;
+
+            cc::println();
+            cc::print(nx::bench::format_report(exec.instance.declaration->name, exec.benchmarks, style));
+        }
     }
 
     // Print any metrics recorded via nx::pgo (PGO benchmarks). Console-only mirror of the perf JSON sidecar.

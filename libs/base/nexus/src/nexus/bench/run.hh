@@ -19,7 +19,12 @@ struct run_state;
 ///
 /// `body` runs `count` iterations and is called once per batch, so the indirect call is amortized over the whole batch
 /// and the per-iteration cost is whatever the caller's own loop compiles to.
-result run_measured(cc::string_view name, run_config const& cfg, cc::function_ref<void(isize count, iteration& it)> body);
+/// `body_owns_loop` is the void(isize) form, where the harness contributes nothing between iterations — so the
+/// overhead figure is zero by construction rather than merely small, and its warning must not fire.
+result run_measured(cc::string_view name,
+                    run_config const& cfg,
+                    bool body_owns_loop,
+                    cc::function_ref<void(isize count, iteration& it)> body);
 
 /// Moves the handle to the next iteration.
 /// The harness's own loop calls this; a body never does, which is why it is not a member.
@@ -134,11 +139,11 @@ result run(cc::string_view name, run_config const& cfg, Body&& body)
     if constexpr (requires { body(isize(0)); })
     {
         // The body owns its own loop, so there is nothing for the harness to put between iterations.
-        return impl::run_measured(name, cfg, [&](isize count, iteration&) { body(count); });
+        return impl::run_measured(name, cfg, true, [&](isize count, iteration&) { body(count); });
     }
     else if constexpr (requires(iteration& probe) { body(probe); })
     {
-        return impl::run_measured(name, cfg,
+        return impl::run_measured(name, cfg, false,
                                   [&](isize count, iteration& it)
                                   {
                                       if (cfg.clobber_each_iteration)
@@ -161,7 +166,7 @@ result run(cc::string_view name, run_config const& cfg, Body&& body)
         static_assert(
             requires { body(); }, "a benchmark body must be callable as void(), void(nx::bench::iteration&) "
                                   "or void(isize)");
-        return impl::run_measured(name, cfg,
+        return impl::run_measured(name, cfg, false,
                                   [&](isize count, iteration&)
                                   {
                                       if (cfg.clobber_each_iteration)

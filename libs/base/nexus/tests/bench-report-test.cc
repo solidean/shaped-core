@@ -2,6 +2,8 @@
 #include <clean-core/record/stat.hh>
 #include <nexus/bench/report.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/registry.hh>
+#include <nexus/tests/schedule.hh>
 
 // The uncertainty notation, against the examples the design was settled on.
 //
@@ -216,4 +218,43 @@ TEST("bench - a table names the loop a warning came from")
 
     // Under a table, an unattributed warning says nothing about which row produced it.
     CHECK(table.contains("beta: ran out of samples"));
+}
+
+// The BENCHMARK macro's own wiring, checked against the registry rather than against the macro text.
+//
+// These are ordinary TESTs so they run in a normal sweep: the declarations they inspect live in the benchmark bucket
+// and never run here, which is exactly the property being asserted.
+TEST("bench - BENCHMARK declares the bucket, exclusivity and the main thread")
+{
+    auto const& registry = nx::get_static_test_registry();
+
+    auto const* found = static_cast<nx::test_declaration const*>(nullptr);
+    for (auto const& decl : registry.declarations)
+        if (decl.name == "nx::bench - the barriers")
+            found = &decl;
+
+    REQUIRE(found != nullptr);
+
+    CHECK(found->test_config.bucket == nx::config::test_bucket::benchmark);
+
+    // Nothing else may run alongside: two tests sharing a machine share its caches and its memory bandwidth, so a
+    // timing taken while another runs is a timing of the pair.
+    CHECK(found->test_config.exclusive_global);
+
+    CHECK(found->test_config.main_thread);
+
+    // Left to the author, deliberately — an async benchmark needs the pool, and a microbenchmark does not care.
+    CHECK(found->test_config.scheduler == nx::config::scheduler_mode::shared);
+}
+
+TEST("bench - a benchmark stays out of a normal sweep")
+{
+    auto const& registry = nx::get_static_test_registry();
+
+    auto config = nx::test_schedule_config{};
+    CHECK(!config.filters.empty() == false); // an unfiltered sweep of the normal bucket
+
+    for (auto const& decl : registry.declarations)
+        if (decl.test_config.bucket == nx::config::test_bucket::benchmark)
+            CHECK(!config.would_run(decl));
 }

@@ -475,7 +475,7 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
             metrics.clear();
         });
 
-    // Only a normal test must contain a CHECK/REQUIRE; a manual test or PGO benchmark may legitimately have none.
+    // Only a normal test must contain a CHECK/REQUIRE; a manual test, a benchmark or a PGO benchmark may legitimately have none.
     // A driver that dispatches parametrized tests (nested non-empty) is exempt too, since its assertions live in the dispatched children rather than its own body.
     bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal
                              && ctx.execution->nested.empty();
@@ -1138,6 +1138,38 @@ void nx::impl::record_metric(cc::string_view name, double value, cc::string_view
         ctx->off_thread_metrics.lock([&](cc::vector<nx::recorded_metric>& out) { out.push_back(cc::move(metric)); });
 }
 
+void nx::impl::record_benchmark_result(bench::result result)
+{
+    auto* const ctx = current_context();
+    if (ctx == nullptr)
+        return; // no active test — nx::bench::run outside a benchmark just hands its result back
+
+    auto* const execution = ctx->execution;
+    if (execution == nullptr)
+        return;
+
+    // An error-severity warning means the number is meaningless rather than merely imprecise, so the benchmark has
+    // failed.
+    // Reported as a check, so it lands in the JUnit report and the console summary like any other failure.
+    for (auto const& w : result.warnings)
+    {
+        if (w.severity != bench::warning_severity::error)
+            continue;
+
+        auto failure = check_result{};
+        failure.kind = check_kind::check;
+        failure.expr = cc::format("nx::bench::run(\"{}\")", result.name);
+        failure.passed = false;
+        failure.diagnostic = w.detail;
+        failure.location = execution->instance.declaration->location;
+        report_check_result(cc::move(failure));
+    }
+
+    // Recorded on the body's own thread only: a benchmark is exclusive and main-thread, so there is no off-thread path
+    // to bucket for, unlike a metric.
+    execution->benchmarks.push_back(cc::move(result));
+}
+
 void nx::impl::report_check_result(check_result result)
 {
     // Capture mode: a tool such as the fuzz engine is driving user code that is expected to fail often.
@@ -1547,10 +1579,14 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
 
         any_main_thread = true;
         CC_ASSERT(instance.declaration->test_config.scheduler != nx::config::scheduler_mode::own_pool,
-                  "nx::main_thread cannot be combined with own_pool: a private pool's worker is never the main thread");
+                  "nx::main_thread cannot be combined with own_pool: a private pool's worker is never the main "
+                  "thread. BENCHMARK bakes main_thread in, so a benchmark of thread scaling has to be a plain TEST "
+                  "with nx::config::benchmark instead");
         CC_ASSERT(!instance.declaration->is_async(), "an ASYNC_TEST cannot use nx::main_thread: the graph it returns "
                                                      "is driven by the phase's scheduler, not by the thread the body "
-                                                     "started on");
+                                                     "started on. BENCHMARK bakes main_thread in, so an async "
+                                                     "benchmark has to be a plain ASYNC_TEST with "
+                                                     "nx::config::benchmark instead");
     }
     CC_ASSERT(!any_main_thread || cc::current_thread_id() == cc::thread_id::main,
               "a test asked for nx::main_thread, but execute_tests is not running on the main thread; a binary running "

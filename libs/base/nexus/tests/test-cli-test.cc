@@ -44,6 +44,7 @@ TEST("test cli - the bucket flags")
 {
     CHECK(parse({"--manual"}).selected_bucket == nx::config::test_bucket::manual);
     CHECK(parse({"--pgo-benchmarks"}).selected_bucket == nx::config::test_bucket::pgo_benchmark);
+    CHECK(parse({"--benchmarks"}).selected_bucket == nx::config::test_bucket::benchmark);
     CHECK(parse({"--examples"}).selected_bucket == nx::config::test_bucket::example);
 
     // A bucket flag pins the sweep, so an exact name may no longer cross out of it.
@@ -254,8 +255,8 @@ TEST("test cli - help describes the flags the parser actually has")
     // The whole point of generating it: the block this replaced listed no flags whatsoever.
     auto const help = nx::test_schedule_config::cli_help_text();
 
-    for (auto const* const flag :
-         {"--manual", "--pgo-benchmarks", "--examples", "--jobs", "--junit-xml", "--pgo-json", "--list-tests-json",
-          "--match-files", "--match-names", "--record", "--no-recording", "--list-tests", "--reporter", "--test-args"})
+    for (auto const* const flag : {"--manual", "--pgo-benchmarks", "--benchmarks", "--examples", "--jobs",
+                                   "--junit-xml", "--pgo-json", "--list-tests-json", "--match-files", "--match-names",
+                                   "--record", "--no-recording", "--list-tests", "--reporter", "--test-args"})
         CHECK(help.contains(flag));
 }

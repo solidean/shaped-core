@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <nexus/bench/calibration.hh>
 #include <nexus/bench/statistics.hh>
+#include <nexus/tests/execute.hh>
 
 using namespace cc::primitive_defines;
 
@@ -118,6 +119,7 @@ void nx::bench::iteration::record(cc::string_view name, cc::rec::unit const& uni
 
 nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
                                                 run_config const& cfg,
+                                                bool body_owns_loop,
                                                 cc::function_ref<void(isize count, iteration& it)> body)
 {
     auto const& cal = bench::calibrated();
@@ -267,7 +269,8 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.quantities.push_back(cc::move(out));
     }
 
-    if (cal.empty_iteration_secs > 0 && r.time.median > 0)
+    // Zero for the void(isize) form: the body owns its loop, so nothing of the harness sits between iterations.
+    if (!body_owns_loop && cal.empty_iteration_secs > 0 && r.time.median > 0)
         r.overhead_fraction = cal.empty_iteration_secs / r.time.median;
 
     // ---------------------------------------------------------------------------------------------------------
@@ -284,7 +287,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
                                  r.time.median * 1e9, cal.empty_iteration_secs * 1e9),
         });
     }
-    else if (cfg.warn_on_overhead && r.overhead_fraction > overhead_warn_fraction)
+    else if (!body_owns_loop && cfg.warn_on_overhead && r.overhead_fraction > overhead_warn_fraction)
     {
         r.warnings.push_back({
             .kind = warning_kind::overhead_significant,
@@ -328,6 +331,11 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
                                  r.samples.size()),
         });
     }
+
+    // Hand a copy to the running test, so a BENCHMARK's loops are collected and reported without the body doing
+    // anything about it.
+    // A no-op outside a test, which is what keeps `run` usable from ordinary code and from an application.
+    nx::impl::record_benchmark_result(r);
 
     return r;
 }

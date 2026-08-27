@@ -196,6 +196,14 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
         },
         "sweep the pgo-benchmark bucket");
     args.action(
+        {"benchmarks"},
+        [&]
+        {
+            config.selected_bucket = config_ns::test_bucket::benchmark;
+            state.explicit_bucket = true;
+        },
+        "sweep the benchmark bucket");
+    args.action(
         {"examples"},
         [&]
         {

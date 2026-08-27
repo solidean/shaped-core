@@ -5,6 +5,8 @@
 #include <clean-core/container/span.hh>
 #include <nexus/bench/fwd.hh>
 
+#include <type_traits>
+
 #if defined(CC_COMPILER_MSVC)
 #include <intrin.h> // _ReadWriteBarrier
 #endif
@@ -74,7 +76,16 @@ CC_FORCE_INLINE T&& keep(T&& v) noexcept
     impl::observe(&reinterpret_cast<byte const volatile&>(v));
     _ReadWriteBarrier();
 #else
-    asm volatile("" : : "r,m"(v));
+    // The constraint is split rather than written once as "r,m".
+    //
+    // Offered both, the compiler is free to pick "m" for anything already addressable, which means a spill to memory
+    // for a value that was sitting in a register.
+    // Demanding "r" where the value fits in one leaves it nothing to spill, and "m" is only reached for what could not
+    // have been in a register anyway.
+    if constexpr (std::is_trivially_copyable_v<std::remove_cvref_t<T>> && sizeof(v) <= sizeof(void*))
+        asm volatile("" : : "r"(v));
+    else
+        asm volatile("" : : "m"(v));
 #endif
     return cc::forward<T>(v);
 }

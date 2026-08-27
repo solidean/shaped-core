@@ -198,6 +198,7 @@ if(SC_BUILD_TESTS)
         tests/bench-statistics-test.cc
         tests/bench-run-test.cc
         tests/bench-report-test.cc
+        tests/bench-self-benchmark.cc
         tests/bench-hardware-counters-test.cc
         tests/bench-cache-traversal-test.cc
         tests/fuzz-engine-test.cc

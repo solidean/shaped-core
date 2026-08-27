@@ -72,6 +72,20 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 // Extra config items compose as with TEST, e.g. PGO_BENCHMARK("name", seed(42)).
 #define PGO_BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, pgo_benchmark __VA_OPT__(, ) __VA_ARGS__)
 
+// A benchmark: a body that measures something with nx::bench::run, in the benchmark bucket.
+// Swept only via --benchmarks, or named exactly, and never in a normal run; `dev.py benchmark <match>` is the driver.
+// Its body needs no CHECK — a benchmark reports numbers rather than pinning an invariant.
+//
+// Three things are baked in, and everything else is left to the author:
+//   `benchmark`    the bucket, plus `exclusive_global` so nothing else runs alongside and shares the machine
+//   `main_thread`  the body runs on the thread nx::run was entered on
+//
+// **main_thread rules out two combinations**, and both assert rather than misbehaving quietly:
+// `own_pool` (a private pool's worker is never the main thread) and an async body.
+// So a benchmark of thread scaling or of async code needs a macro of its own, which does not exist yet — declare it as
+// a plain TEST with nx::config::benchmark and no main_thread until it does.
+#define BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, benchmark, main_thread __VA_OPT__(, ) __VA_ARGS__)
+
 // An example: a runnable demonstration of an API in practice, in the example bucket.
 // Swept only via --examples, or named exactly, and never in a normal run; `dev.py example <match>` runs exactly one.
 // Its body needs no CHECK — an example shows how a library FEELS to use, which is precisely what a test's testability bias filters out.
