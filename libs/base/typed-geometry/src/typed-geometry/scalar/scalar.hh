@@ -66,6 +66,46 @@ template <class T>
     return scalar_traits<T>::log(x);
 }
 
+// Base two, exactly — an exponent adjustment rather than a multiply, and lossless where the result is representable.
+// This is what a shared-exponent pixel format, a half-float conversion or a fixed-point normalization is made of,
+// so it is deliberately separate from the approximate tg::pow / tg::exp above.
+// All require a scalar with has_pow2.
+
+/// 2^n, exactly.
+/// n outside the scalar's exponent range saturates to infinity or zero, as scale_by_pow2 does.
+template <class T>
+[[nodiscard]] T pow2(int n)
+    requires(tg::traits::has_pow2<T>)
+{
+    return scalar_traits<T>::scale_by_pow2(tg::one<T>(), n);
+}
+
+/// x * 2^n, exact for every result the scalar can represent, saturating to +-infinity or zero beyond that.
+template <class T>
+[[nodiscard]] T scale_by_pow2(T x, int n)
+    requires(tg::traits::has_pow2<T>)
+{
+    return scalar_traits<T>::scale_by_pow2(x, n);
+}
+
+/// The exponent of x against base two — floor(log2(|x|)), exactly and without a logarithm.
+/// x must be finite and non-zero.
+template <class T>
+[[nodiscard]] int exponent_of(T x)
+    requires(tg::traits::has_pow2<T>)
+{
+    return scalar_traits<T>::split_pow2(x).exponent;
+}
+
+/// Both halves at once: x == significand * 2^exponent with the significand in [1, 2), NOT frexp's [0.5, 1).
+/// x must be finite and non-zero.
+template <class T>
+[[nodiscard]] pow2_split<T> split_pow2(T x)
+    requires(tg::traits::has_pow2<T>)
+{
+    return scalar_traits<T>::split_pow2(x);
+}
+
 // Rounding — each returns the same scalar type rather than an integer, so the caller decides what to narrow to.
 // All require a scalar with has_rounding.
 

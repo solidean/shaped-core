@@ -315,6 +315,7 @@ tg::traits::is_finite<ObjT>;               // bool — is the point set bounded?
 tg::scalar_traits<T>;                     // specialize this to teach tg about a new scalar type
 tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr bool flags
 tg::traits::has_abs<T>;  tg::traits::has_exponential<T>;  tg::traits::has_rounding<T>;
+tg::traits::has_pow2<T>;                  // the exact base-two family; f32/f64 only
 tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the trait (symbolic-friendly)
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
@@ -327,11 +328,17 @@ tg::atan2(y, x);                          // (T, T) -> angle<T>     — requires
 tg::pow(base, exp);                       // (T, T) -> T            — same T both sides; requires has_exponential<T>
 tg::exp(x); tg::log(x);                   // T -> T                 — log needs x > 0
 tg::round(x); tg::floor(x); tg::ceil(x);  // T -> T                 — requires has_rounding<T>; float-only
+tg::pow2<T>(n);                           // int -> T               — 2^n exactly; requires has_pow2<T>
+tg::scale_by_pow2(x, n);                  // (T, int) -> T          — x * 2^n exactly (C's ldexp)
+tg::exponent_of(x);                       // T -> int               — floor(log2(|x|)); x finite and non-zero
+tg::split_pow2(x);                        // T -> tg::pow2_split<T> {significand, exponent}
 tg::pi<T>;                                // inline constexpr T  (scalar/constants.hh)
 // scalars: f32/f64 have the lot (via std:: — see docs/TODO.md); all integer types except plain `char`
 // get one/is_zero/is_one + abs (signed/unsigned char count; `char` does not); bool is special.
 // round/floor/ceil return T, not an int — narrow explicitly: int(tg::round(x)).
 // tg::abs on the most negative integer is UB — that value has no representable magnitude.
+// split_pow2's significand is in [1, 2), NOT C frexp's [0.5, 1): x == significand * 2^exponent, so
+// exponent is floor(log2(|x|)). Porting frexp-shaped code means adjusting the exponent by one.
 ```
 
 ## Umbrellas
