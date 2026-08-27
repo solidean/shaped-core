@@ -122,6 +122,13 @@ static_assert(sizeof(probe_case) == 320, "probe_case must match sv::probe_case i
 constexpr int blocks_per_case = 32;
 constexpr u32 samples_per_block = 2048;
 
+/// How many cases one dispatch may carry.
+///
+/// The whole set in a single dispatch is tens of millions of closure evaluations, which on a slow software device runs long
+/// enough to trip a driver's watchdog — and that arrives as a lost device rather than as a slow test.
+/// Splitting costs one command list per chunk and changes no number, since the cases are independent.
+constexpr isize cases_per_dispatch = 16;
+
 [[nodiscard]] float abs_of(float v)
 {
     return v < 0.0f ? -v : v;
@@ -138,7 +145,7 @@ struct probe_result
 ///
 /// Everything is built inline rather than behind a routine: nothing a viewer runs dispatches this shader, so a routine
 /// would put test-only machinery in the library.
-cc::vector<probe_result> run_probe(sg::context& ctx, cc::span<probe_case const> cases)
+cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
 {
     auto const shader = sv_test::shaders::bsdf_probe.compute.BsdfProbe->acquire(ctx);
     (void)cc::try_async_blocking_get(shader); // no async pool here, so drive the compile inline
@@ -195,6 +202,21 @@ cc::vector<probe_result> run_probe(sg::context& ctx, cc::span<probe_case const> 
     for (auto& r : out)
         r.mean = r.mean / cc::max(r.samples, 1.0f);
 
+    return out;
+}
+
+/// Dispatches every case, in chunks small enough that no single dispatch runs long enough to be killed.
+cc::vector<probe_result> run_probe(sg::context& ctx, cc::span<probe_case const> cases)
+{
+    auto out = cc::vector<probe_result>();
+    out.reserve(cases.size());
+
+    for (auto begin = isize(0); begin < cases.size(); begin += cases_per_dispatch)
+    {
+        auto const count = cc::min(cases_per_dispatch, cases.size() - begin);
+        for (auto const& r : run_probe_chunk(ctx, cases.subspan({.offset = begin, .size = count})))
+            out.push_back(r);
+    }
     return out;
 }
 

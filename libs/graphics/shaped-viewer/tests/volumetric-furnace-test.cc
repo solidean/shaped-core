@@ -143,7 +143,11 @@ image_stats trace_furnace(sg::context& ctx,
 
         // Long enough that a path crossing the interface twice and bouncing internally still finishes.
         // Scattering events do not count against this — they have their own cap — so it bounds surface crossings alone.
-        fc.samples_per_pixel = 24;
+        //
+        // Few samples per dispatch and more dispatches, for the same total.
+        // A scattering interior is the heaviest thing the integrator does, and one long dispatch is what trips a driver's
+        // watchdog on a slow device — which arrives as a lost device rather than as a slow test.
+        fc.samples_per_pixel = 8;
         fc.max_bounces = 12;
         fc.seed = u32(f) + 1u;
         fc.accum_frame = u32(f);
@@ -177,7 +181,12 @@ image_stats trace_furnace(sg::context& ctx,
 
         // The routine degrades to a no-op when its shaders do not build, and every number below would then be read off a
         // target nothing ever wrote.
-        REQUIRE(sv::pathtrace_routine::is_ready(*cmd));
+        //
+        // Read here but asserted AFTER the list is submitted, which is not a style preference: a `REQUIRE` throws, and
+        // unwinding past a recorded-but-unsubmitted command list asserts inside its destructor.
+        // A second assertion while the first is unwinding is an immediate `abort`, which loses the message that would have
+        // said what went wrong — see the viewer TODO's entry on exactly this.
+        auto const ready = sv::pathtrace_routine::is_ready(*cmd);
 
         // Only the last frame is read: the target holds the running mean of every frame folded in so far, so the
         // intermediate ones say nothing the final one does not.
@@ -187,6 +196,8 @@ image_stats trace_furnace(sg::context& ctx,
 
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch_and_wait_for_idle();
+
+        REQUIRE(ready);
 
         if (!readback.is_valid())
             continue;
@@ -263,18 +274,24 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
     // Pure scattering: white transmission color means no absorption at all, so the walk conserves every photon and only
     // moves it around.
     // This is the case the whole test exists for.
+    // Optical depth about 3 across the cube, which is thick enough that most paths scatter several times and thin enough
+    // that they get out.
+    //
+    // This matters more than it looks: an albedo-1 walk escaping a slab of optical depth T takes on the order of T^2
+    // scattering events, so a much denser interior would run into the integrator's own 256-event cap — and the test would
+    // then be measuring that cap rather than the estimator.
     auto scattering = base_bindings();
     scattering.push_back(binding::of("transmission_depth", 0.25f));
     scattering.push_back(binding::of("transmission_color", tg::vec3f(1, 1, 1)));
-    scattering.push_back(binding::of("transmission_scatter", tg::vec3f(4, 4, 4)));
+    scattering.push_back(binding::of("transmission_scatter", tg::vec3f(0.6f, 0.6f, 0.6f)));
     cases.push_back({.name = "scattering interior", .bindings = cc::move(scattering)});
 
     // The same walk with absorption, which must come back darker — the control that separates "the medium is lossless"
     // from "the medium was never entered".
     auto absorbing = base_bindings();
     absorbing.push_back(binding::of("transmission_depth", 0.25f));
-    absorbing.push_back(binding::of("transmission_color", tg::vec3f(0.3f, 0.3f, 0.3f)));
-    absorbing.push_back(binding::of("transmission_scatter", tg::vec3f(2, 2, 2)));
+    absorbing.push_back(binding::of("transmission_color", tg::vec3f(0.5f, 0.5f, 0.5f)));
+    absorbing.push_back(binding::of("transmission_scatter", tg::vec3f(0.4f, 0.4f, 0.4f)));
     cases.push_back({.name = "absorbing interior", .bindings = cc::move(absorbing), .lossless = false});
 
     auto& lib = *sv::acquire_material_library().value();
@@ -291,7 +308,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
                                    .geometry = sv::triangle_geometry::create_from_positions(positions),
                                    .material = id};
 
-        auto const stats = trace_furnace(ctx, resources, mesh, environment, 6);
+        auto const stats = trace_furnace(ctx, resources, mesh, environment, 12);
         auto const mean = luminance_of(stats.mean);
         auto const expected = luminance_of(environment);
 
