@@ -11,17 +11,3 @@ rules:
     value: <memory>
     reason: sg hands out command lists as std::unique_ptr<sg::command_list> — polymorphic, so not cc::unique_ptr (shaped-graphics/docs/coding-guidelines.md argues it). fwd.hh is sv's single door to it; everything else includes fwd.hh
     files: src/shaped-viewer/fwd.hh
-
-  # TEMPORARY, and to be removed with the markers it exists for.
-  # The arm64 CI leg dies through __fastfail, which loses buffered output — so the only way to see how far it got is a
-  # write that has already left the process, and an explicit fflush is what guarantees that.
-  # cc::rec's console path buffers, which is exactly what does not survive here.
-  - kind: allow-include
-    value: <cstdio>
-    reason: TEMPORARY — flushed crash markers for the arm64 fastfail investigation; remove with them
-    files: tests/openpbr-bsdf-test.cc
-
-  - kind: allow-include
-    value: <cstdio>
-    reason: TEMPORARY — flushed crash markers for the arm64 fastfail investigation; remove with them
-    files: tests/volumetric-furnace-test.cc

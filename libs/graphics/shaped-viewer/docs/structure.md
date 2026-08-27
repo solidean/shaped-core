@@ -129,7 +129,8 @@ The whole sv API compiles everywhere, though: without a backend a routine simply
   If a second library wants it, promoting a generational version into clean-core is the next step.
 - **TLAS is rebuilt every frame**, since refit/update is not implemented in sg yet; `tlas_id` exists for a future prebuilt/persistent TLAS.
 - **Texture download** exists in sg as `cmd.download.bytes_from_texture`, but the trace stays on the proven UAV-write-then-blit path.
-  Pixel-level tests have not been written against it yet.
+  Two tests read pixels back through it now — `volumetric-furnace-test` and `openpbr-bsdf-test` — and both are skipped on Windows on ARM, where that path fastfails.
+  See the known issue in [TODO.md](TODO.md).
 - **Compositing is a raster blit, not a compute copy**, and that is sg's constraint rather than a preference.
   A swapchain backbuffer is created render-target-only (`DXGI_USAGE_RENDER_TARGET_OUTPUT`, no UAV), and there is no GPU texture-to-texture copy.
   A compute compositor would have to write an offscreen UAV and then blit *that* to the backbuffer — one extra full-screen pass.
