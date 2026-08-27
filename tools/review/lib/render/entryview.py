@@ -18,6 +18,7 @@ from ..entry.answers import Answer, AnswerFile, Comment
 from ..entry.parse import Block, Entry
 from .highlight import highlight_code, highlight_diff
 from .markdown import render as render_markdown
+from .markdown import render_inline
 
 _COLLAPSED_TIERS = ("context/cold", "context/repo")
 
@@ -100,7 +101,8 @@ def _answer_card(answer: Answer) -> str:
     )
 
 
-def _ask_form(entry: Entry, block: Block, answer: Answer | None, prompt_hash: str) -> str:
+def _ask_form(entry: Entry, block: Block, answer: Answer | None, prompt_hash: str,
+              repo: Path | None = None) -> str:
     selected = set(answer.selected) if answer else []
     text = answer.text if answer else ""
 
@@ -110,10 +112,14 @@ def _ask_form(entry: Entry, block: Block, answer: Answer | None, prompt_hash: st
         group = f"{entry.slug}::{block.name}" if option.kind == "radio" else f"{entry.slug}::{block.name}::{index}"
         checked = " checked" if option.label in selected else ""
         rec = '<span class="rec">recommended</span>' if option.recommended else ""
+
+        # Rendered for DISPLAY only; `value` keeps the label byte for byte.
+        # The label is also the answer key — answers are stored against it, and the ask's immutability hash covers the
+        # ordered options — so decorating the stored string would orphan every answer already given.
         inputs.append(
             f'<label class="opt opt-{option.kind}">'
             f'<input type="{control}" name="{_esc(group)}" value="{_esc(option.label)}"{checked}>'
-            f'<span class="opt-label">{_esc(option.label)}</span>{rec}</label>'
+            f'<span class="opt-label">{render_inline(option.label, repo=repo)}</span>{rec}</label>'
         )
 
     return (
@@ -256,7 +262,7 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
         if answer is not None and not answer.tentative:
             body = _answer_card(answer)
         else:
-            body = _ask_form(entry, block, answer, prompt_hash)
+            body = _ask_form(entry, block, answer, prompt_hash, repo=repo)
 
         return (f'<section class="ask" id="ask-{_esc(block.name)}">{follows_html}'
                 f'<div class="ask-prose">{prose}</div>{discharges}{body}</section>')

@@ -266,6 +266,9 @@ One entry can therefore carry five questions discharging five different change s
 - `discharges:` lists the change ids this question accounts for.
 - `follows:` names the earlier ask this is a follow-up to.
 - Option lines are `- radio:`, `- check:` or `- rank:`; a trailing `(recommended)` is recognised and shown as a badge.
+- **An option label is markdown**, rendered the way a `prose` block is, and its references resolve like any other.
+  So a backticked path becomes a link, and one that resolves to nothing is a validation error — `raw:` is the escape there too.
+  What the page renders is a display copy: the stored answer keeps the label byte for byte, since it is the answer key and the ask's immutability hash covers it.
 - A freeform text box is **always** added by the server, never authored.
   Forgetting it is not possible.
 

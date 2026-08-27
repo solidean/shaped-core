@@ -564,6 +564,44 @@ def test_every_block_type_renders(root: Path) -> None:
         assert needle in html, f"{needle!r} missing from the rendered entry"
 
 
+def test_option_labels_render_but_keep_their_value(root: Path) -> None:
+    """An option label is markdown for the reader and the answer key for the tool, and those must not be one string.
+
+    It rendered as escaped plain text for the life of the tool, so a backticked symbol showed its backticks, a link
+    showed its brackets, and the `raw:` escape — which an author only reaches for because `validate` demanded it — was
+    visible in the question.
+
+    The `value` must stay byte for byte, though.
+    Answers are stored against it and the ask's immutability hash covers the ordered options, so decorating the stored
+    string would orphan every answer already given.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.render.entryview import render_entry
+
+    lines = [
+        "---", "id: 1", "title: t", "---", "",
+        "## context/cold", "", "Context.", "",
+        "## context/repo", "", "Context.", "",
+        "## context/delta", "", "Context.", "",
+        "## ask  a-question", "", "Which way?", "",
+        "- radio: keep `sv::interactive` as it is",
+        "- radio: put it under `raw:build/<preset>/captures/`",
+        "",
+    ]
+    entry = parse_text("\n".join(lines), root / "entries" / "010-x.md", slug="010-x")
+    html = render_entry(
+        entry, AnswerFile(root / "a.json"),
+        repo=root, paths=ReviewPaths(root), ledger=Ledger(root / "ledger.jsonl"), hash_of=hash_ask,
+    )
+
+    assert "<code>sv::interactive</code>" in html, "an option's markdown must render"
+    assert "raw:build" not in html.split('class="opt-label"')[2], "`raw:` must not reach the reader"
+
+    # The stored value keeps both spellings exactly, backticks and `raw:` included.
+    assert 'value="keep `sv::interactive` as it is"' in html
+    assert 'value="put it under `raw:build/&lt;preset&gt;/captures/`"' in html
+
+
 def test_duplicate_ask_names_are_rejected(root: Path) -> None:
     text = ENTRY + "\n## ask  pick-one\n\nAgain?\n\n- radio: no\n"
     try:
