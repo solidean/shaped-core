@@ -2,8 +2,11 @@
 
 #include <clean-core/common/time.hh>
 #include <clean-core/record/desc.hh>
+#include <clean-core/record/scope.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/bench/calibration.hh>
+#include <nexus/bench/hardware_counters.hh>
 #include <nexus/bench/statistics.hh>
 #include <nexus/tests/execute.hh>
 
@@ -269,6 +272,43 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.quantities.push_back(cc::move(out));
     }
 
+    // ---------------------------------------------------------------------------------------------------------
+    // Hardware counters, in their own passes.
+    //
+    // AFTER the timing, never during it: reading a counter inside a measured region would change the thing being
+    // measured, and a machine without PMU access would then produce different timings from one with it.
+    // That also means the body is invoked again — which is exactly why this harness takes a callable.
+    // ---------------------------------------------------------------------------------------------------------
+    if (cfg.measure_counters && r.batch_size > 0)
+    {
+        state.is_warmup = true; // items and quantities are already counted; a counter pass must not double them
+        state.begin_batch();
+        impl::begin_batch(it, true);
+
+        auto const measurement
+            = bench::measure_hw_counters([&] { body(r.batch_size, it); }, {.measure_all = cfg.multiplex_counters});
+
+        state.is_warmup = false;
+        r.counter_iterations = r.batch_size;
+
+        for (auto const& sample : measurement.samples)
+        {
+            // Elapsed time is already the subject of everything above, measured far more carefully than one pass.
+            if (!sample.valid || sample.id == hw_counter::elapsed_nanoseconds)
+                continue;
+
+            auto reading = counter_reading{.id = sample.id, .name = sample.name, .total = sample.value};
+            reading.per_iteration = f64(sample.value) / f64(r.batch_size);
+            if (r.items > 0 && r.measured_iterations > 0)
+            {
+                auto const items_per_iteration = f64(r.items) / f64(r.measured_iterations);
+                if (items_per_iteration > 0)
+                    reading.per_item = reading.per_iteration / items_per_iteration;
+            }
+            r.counters.push_back(cc::move(reading));
+        }
+    }
+
     // Zero for the void(isize) form: the body owns its loop, so nothing of the harness sits between iterations.
     if (!body_owns_loop && cal.empty_iteration_secs > 0 && r.time.median > 0)
         r.overhead_fraction = cal.empty_iteration_secs / r.time.median;
@@ -330,6 +370,22 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
                                  "range",
                                  r.samples.size()),
         });
+    }
+
+    // What this loop measured, into the one event stream.
+    //
+    // Emitted HERE rather than per sample, and never inside a timed region: cc::rec is cheap but not free, and one
+    // event on a nanosecond body would be most of the measurement.
+    // So a recording carries the loop's results and its shape, and the per-iteration timeline is simply not available.
+    {
+        CC_RECORD_SCOPE("nx::bench loop");
+        CC_RECORD_STAT("bench/median seconds", cc::rec::unit_seconds, r.time.median);
+        CC_RECORD_STAT("bench/samples", cc::rec::unit_count, f64(r.samples.size()));
+        CC_RECORD_STAT("bench/batch size", cc::rec::unit_count, f64(r.batch_size));
+        CC_RECORD_STAT("bench/measured seconds", cc::rec::unit_seconds, r.measured_seconds);
+        CC_RECORD_STAT("bench/relative error", cc::rec::unit_ratio, r.time.relative_error());
+        if (r.items_per_second > 0)
+            CC_RECORD_STAT("bench/items per second", cc::rec::unit_hertz, r.items_per_second);
     }
 
     // Hand a copy to the running test, so a BENCHMARK's loops are collected and reported without the body doing

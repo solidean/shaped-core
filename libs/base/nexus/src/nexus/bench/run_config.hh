@@ -69,6 +69,20 @@ struct nx::bench::run_config
     /// Off under single_shot, where harness cost against a one-second body is not something anyone needs telling about.
     bool warn_on_overhead = true;
 
+    /// Measure hardware counters, in passes run after the timing has converged.
+    ///
+    /// **Never inside a timed region**, so an unavailable PMU costs the timings nothing and a present one does not
+    /// change them either.
+    /// One extra pass over the body, which is nothing next to a half-second of sampling and is the whole cost of a
+    /// single_shot workload — which is why single_shot turns it off.
+    bool measure_counters = true;
+
+    /// Measure every requested counter, re-running the body once per subset that fits the hardware.
+    ///
+    /// Only a few PMU counters can be programmed at once, so a single pass silently drops the rest.
+    /// Off by default: the multiplication is paid by every benchmark, and the default counter set mostly fits.
+    bool multiplex_counters = false;
+
     /// This loop is what the others in the same benchmark are compared against.
     /// With no loop marked, the first one declared is the baseline; see the comparison report.
     bool is_baseline = false;
@@ -95,6 +109,9 @@ struct nx::bench::run_config
         c.max_time_secs = 60;
         c.min_samples = 8;
         c.warn_on_overhead = false;
+        // One counter pass over a body this expensive is another whole run of it, which is the thing single_shot
+        // exists to avoid.
+        c.measure_counters = false;
         return c;
     }
 };

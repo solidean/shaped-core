@@ -137,6 +137,26 @@ struct nx::bench::recorded_quantity
     f64 per_second = 0;
 };
 
+/// One hardware counter, measured over a separate pass after the timing was done.
+///
+/// Counts are far less noisy than times — a retired-instruction count is usually identical run to run — which is why
+/// they can decide a comparison in a fraction of the samples timing would need.
+/// Less noisy is not exact, though: a cache-miss count moves between runs, and these carry no interval, so read them
+/// as a magnitude rather than as a measurement.
+struct nx::bench::counter_reading
+{
+    hw_counter id = {};
+    cc::string name;
+
+    /// The raw count over `result::counter_iterations`.
+    u64 total = 0;
+
+    f64 per_iteration = 0;
+
+    /// Per item declared through `iteration::items`, or 0 when the body declared none.
+    f64 per_item = 0;
+};
+
 /// Everything one measured run produced.
 ///
 /// Returned by `nx::bench::run`, which is what makes the harness usable outside a BENCHMARK: inside a run it is
@@ -171,6 +191,16 @@ struct nx::bench::result
     f64 items_per_second = 0;
 
     cc::vector<recorded_quantity> quantities;
+
+    /// Hardware counters, from passes run AFTER timing converged.
+    ///
+    /// Empty where the machine has no PMU access, which is the common first experience on a fresh Windows box.
+    /// Nothing is read inside a timed region, so the timings are identical whether or not these were available.
+    cc::vector<counter_reading> counters;
+
+    /// Iterations the counter passes covered, which is what `counter_reading::total` is over.
+    isize counter_iterations = 0;
+
     cc::vector<warning> warnings;
 
     /// The harness's own estimated per-iteration cost, as a fraction of the measured per-iteration time.

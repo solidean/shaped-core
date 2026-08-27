@@ -28,6 +28,7 @@ struct report_style;
 struct statistics;
 struct warning;
 struct recorded_quantity;
+struct counter_reading;
 struct result;
 struct iteration;
 struct calibration;

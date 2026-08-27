@@ -248,6 +248,9 @@ int nx::run(int argc, char** argv)
             cc::println("pin   requested, {}", benchmark_pinned ? "achieved on core 0" : "REFUSED by the platform");
         }
 
+        // The counters backend prints its own one-time notice when the PMU is unreachable, naming the grant script
+        // to run — so nothing is said here rather than saying it twice and worse.
+
         // The first reading is what the second is a delta against, so this one only primes the OS counters.
         benchmark_load_before = nx::bench::sample_load();
     }

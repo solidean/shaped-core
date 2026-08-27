@@ -307,6 +307,17 @@ void append_block(cc::string& out, result const& r, nx::bench::report_style cons
             out.appendf("  {}      {}\n", q.name, nx::bench::format_quantity(q.total, q.unit));
     }
 
+    // Counters, where the machine had a PMU to read.
+    // Per item as well as per iteration where the body declared items, since that is the figure that stays comparable
+    // across input sizes.
+    for (auto const& c : r.counters)
+    {
+        if (c.per_item > 0)
+            out.appendf("  {:<10} {:.2f} per iteration   {:.2f} per item\n", c.name, c.per_iteration, c.per_item);
+        else
+            out.appendf("  {:<10} {:.2f} per iteration\n", c.name, c.per_iteration);
+    }
+
     out.appendf("  overhead   {:.1f}% of per-iteration time\n", r.overhead_fraction * 100);
     append_warnings(out, r, style, false);
 }

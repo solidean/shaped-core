@@ -99,6 +99,19 @@ void write_loop(json::array_writer& loops, cc::string_view test, nx::bench::resu
         }
     }
 
+    loop.write("counter_iterations", r.counter_iterations);
+    {
+        auto counters = loop.write_array("counters");
+        for (auto const& c : r.counters)
+        {
+            auto entry = counters.write_object(json::layout::compact);
+            entry.write("name", c.name);
+            entry.write("total", c.total);
+            entry.write("per_iteration", c.per_iteration);
+            entry.write("per_item", c.per_item);
+        }
+    }
+
     {
         auto warnings = loop.write_array("warnings");
         for (auto const& w : r.warnings)

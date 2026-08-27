@@ -301,3 +301,51 @@ TEST("bench - calibration report", nx::config::manual)
     cc::println("");
     cc::print(nx::bench::format_report("the same, markdown-safe", loops, md));
 }
+
+TEST("bench - counters are measured in their own passes, and can be turned off")
+{
+    auto cfg = quick();
+    cfg.measure_counters = false;
+
+    auto acc = u64(0);
+    auto const without = nx::bench::run("no counters", cfg, [&] { acc = work(acc); });
+    CHECK(without.counters.empty());
+    CHECK(without.counter_iterations == 0);
+
+    cfg.measure_counters = true;
+    auto const with = nx::bench::run("counters", cfg, [&] { acc = work(acc); });
+
+    // A counter pass covers one batch, and it runs AFTER the timing rather than inside it.
+    CHECK(with.counter_iterations == with.batch_size);
+
+    // The baseline reference-cycle counter needs no PMU access, so it is there on any machine with a cycle counter.
+    // Everywhere else this is legitimately empty, which is why the assertion is conditional rather than absolute.
+    for (auto const& c : with.counters)
+    {
+        CHECK(c.total > 0);
+        CHECK(c.per_iteration > 0);
+    }
+}
+
+TEST("bench - a counter pass does not double-count items or quantities")
+{
+    auto cfg = quick();
+    cfg.measure_counters = true;
+
+    auto const r = nx::bench::run("counted", cfg,
+                                  [&](nx::bench::iteration& it)
+                                  {
+                                      nx::bench::sink(it.index());
+                                      it.items(1);
+                                  });
+
+    // The counter pass re-runs the body, so the items it declares must not land in the total: one per MEASURED
+    // iteration, and the extra batch contributes none.
+    CHECK(r.items == r.measured_iterations);
+}
+
+TEST("bench - single_shot leaves counters off, since a pass is another whole run of the body")
+{
+    auto const cfg = nx::bench::run_config::single_shot();
+    CHECK(!cfg.measure_counters);
+}
