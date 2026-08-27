@@ -114,6 +114,7 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
     // Scoped, so a REQUIRE below cannot leak capture mode into every test that runs after this one.
     auto const on = cc::scoped_environment_variable(sv::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sv::capture_output_env_var, path);
+    auto const which = cc::scoped_environment_variable(sv::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sv::capture_size_env_var, "96x64");
     auto const acc = cc::scoped_environment_variable(sv::capture_accumulate_env_var, "4"); // WARP traces in software
     auto const lim = cc::scoped_environment_variable(sv::capture_timeout_env_var, "120");
@@ -122,10 +123,25 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
 
     auto frames = 0;
+    auto front_applied = 0;
+    auto front_first_frames = 0;
+    auto side_applied = 0;
+
     for (auto f : sv::interactive(ctx, "sv-test/capture"))
     {
         auto view = f.window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+
+        // Both are declared every frame, and only the one named by the environment ever runs.
+        f.register_capture("front",
+                           [&](sv::capture_context const& c)
+                           {
+                               ++front_applied;
+                               front_first_frames += c.first_frame ? 1 : 0;
+                               CHECK(c.name == "front");
+                               CHECK(c.size == size);
+                           });
+        f.register_capture("side", [&](sv::capture_context const&) { ++side_applied; });
 
         auto scene = view.add_scene();
         scene.add_mesh(mesh);
@@ -140,6 +156,15 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
 
     // Read it back with a real decoder rather than checking that the file is non-empty: a truncated image is
     // non-empty, and that is the whole failure being guarded against.
+    // The named capture ran on every frame, and reported its first exactly once — which is what a callback doing
+    // one-shot setup relies on.
+    CHECK(front_applied == frames);
+    CHECK(front_first_frames == 1);
+
+    // A capture nobody asked for is inert.
+    // Registering one costs an example nothing on a run taking a different shot, and nothing at all on an interactive run.
+    CHECK(side_applied == 0);
+
     // Scoped, because the adapter holds the file open and Windows will not remove one that is.
     {
         auto reread = cc::file_read_stream_adapter::open(path);

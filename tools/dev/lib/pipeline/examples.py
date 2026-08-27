@@ -135,6 +135,24 @@ def collect_examples(
     return sorted(examples, key=lambda e: e.name)
 
 
+def select_examples(examples: list[Example], match: str) -> list[Example]:
+    """Every example `match` selects, for a sweep — the many-match sibling of `resolve_example`.
+
+    Deliberately not the same function.
+    Running one example must refuse an ambiguous match, because running "the first one that matched" would silently run
+    the wrong thing.
+    A sweep wants exactly the opposite, and an empty match means the whole corpus.
+
+    That is only safe because a sweep is headless.
+    `--all` is refused for running examples precisely because it would open every window there is, and a capture opens none.
+    """
+    if not match:
+        return list(examples)
+
+    needle = match.lower()
+    return [e for e in examples if needle in e.name.lower()]
+
+
 def resolve_example(examples: list[Example], match: str) -> tuple[Example | None, str | None]:
     """The one example `match` names, or a diagnostic explaining why not.
 

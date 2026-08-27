@@ -36,9 +36,13 @@ inline constexpr cc::string_view capture_output_env_var = "SC_CAPTURE_OUT";
 /// The offscreen resolution, as `<width>x<height>`.
 inline constexpr cc::string_view capture_size_env_var = "SC_CAPTURE_SIZE";
 
-/// Print every registered capture name, one per line, and exit without writing anything.
+/// Print every registered capture name and exit without writing anything.
 /// It runs one frame to find out, since registration happens while a frame is authored.
 inline constexpr cc::string_view capture_list_env_var = "SC_CAPTURE_LIST";
+
+/// What each listed name is printed behind, so a reader can tell them from whatever else the program writes to stdout.
+/// A bare name would be indistinguishable from a test runner's own summary line, which is exactly the bug this prevents.
+inline constexpr cc::string_view capture_list_prefix = "sv-capture: ";
 
 /// How many frames every traced view must have accumulated before the image counts as settled.
 inline constexpr cc::string_view capture_accumulate_env_var = "SC_CAPTURE_ACCUMULATE";

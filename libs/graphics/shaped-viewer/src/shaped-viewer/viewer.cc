@@ -816,7 +816,7 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         // A library does not print, but a listing IS this run's requested output and has no other channel to reach
         // the tool that asked for it.
         for (auto const& name : session.registered_names())
-            cc::println("{}", name);
+            cc::println("{}{}", capture_list_prefix, name);
 
         session.mark_done();
         request_close();
