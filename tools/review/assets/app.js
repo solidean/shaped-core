@@ -69,7 +69,17 @@ function entryMark(row) {
   return { text: "○", cls: "" };
 }
 
+// The nav row preview is off.
+//
+// It works, and the whole entry in a popover is genuinely useful, but a full render is slow enough to open that
+// the hover feels laggy, and it survives a pointer moving into the main content by a path the leave handler
+// does not see — so it sits over what you were trying to read.
+// Both are fixable with a hover delay and a pointer-position check rather than a leave event, and neither is
+// worth doing blind. Flip this to re-enable; everything behind it is intact.
+const PREVIEW_ENTRIES = false;
+
 function renderNav() {
+  entryPeekCache.clear();
   const data = state.data;
   const shown = data.title || data.name;
   el("review-name").textContent = shown;
@@ -112,6 +122,10 @@ function renderNav() {
 
     item.append(id, title, group, flag);
     item.addEventListener("click", () => selectEntry(row.slug));
+    if (PREVIEW_ENTRIES && !row.error) {
+      item.addEventListener("mouseenter", () => peekEntry(item, row.slug));
+      item.addEventListener("mouseleave", schedulePopoverClose);
+    }
     list.appendChild(item);
   }
 }
@@ -343,7 +357,7 @@ function wireForms() {
 
 // Which regions each provider's tokens may be decorated in. Server-side defaults, togglable here without a
 // re-render, which is what "configurable even if the option is not exposed" means.
-const ANNOTATE = { file: true, glossary: true, commit: true, symbol: true };
+const ANNOTATE = { file: true, dir: true, glossary: true, commit: true, symbol: true };
 
 function regionOf(node) {
   if (node.closest("pre, code, .difflines")) return node.closest(".difflines") ? "diff" : "code";
@@ -366,7 +380,8 @@ function annotate(root, tokens) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const targets = [];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node.parentElement.closest("a, mark, .annot, textarea, .comment-composer")) continue;
+    // `code.raw` is the author's opt-out: a span that looks like a reference and is not.
+    if (node.parentElement.closest("a, mark, .annot, textarea, .comment-composer, code.raw")) continue;
     targets.push(node);
   }
 
@@ -391,6 +406,21 @@ function annotate(root, tokens) {
   }
 }
 
+// A term was matched whole-word on the Python side, and the literal it emitted carries no record of that.
+// So `round` would be found inside `around` here, and — since a term is drawn once per block — the real
+// occurrence further along would then get nothing. Worse than not matching at all, which is the outcome
+// the glossary is explicitly trying to avoid.
+//
+// Paths and shas keep matching as substrings: a filename inside a longer run of word characters is a
+// different situation, and the current behaviour there is right.
+const WORD = /[A-Za-z0-9_]/;
+
+function isWholeWord(text, at, length) {
+  const before = at > 0 ? text[at - 1] : "";
+  const after = at + length < text.length ? text[at + length] : "";
+  return !WORD.test(before) && !WORD.test(after);
+}
+
 function wrapNode(node, tokens) {
   const text = node.nodeValue;
   const hits = [];
@@ -399,11 +429,12 @@ function wrapNode(node, tokens) {
     for (;;) {
       const at = text.indexOf(token.text, from);
       if (at < 0) break;
+      from = at + token.text.length;
+      if (token.kind === "glossary" && !isWholeWord(text, at, token.text.length)) continue;
       // No nesting and no overlap: the first provider to claim a span owns it.
       if (!hits.some((h) => at < h.end && at + token.text.length > h.start)) {
         hits.push({ start: at, end: at + token.text.length, token });
       }
-      from = at + token.text.length;
     }
   }
   if (!hits.length) return [];
@@ -435,6 +466,11 @@ function decorate(token) {
     el.dataset.path = token.path;
     el.dataset.line = String(token.line || 0);
     el.addEventListener("mouseenter", () => peek(el));
+    el.addEventListener("mouseleave", schedulePopoverClose);
+  }
+  if (token.kind === "dir") {
+    el.dataset.dir = token.path;
+    el.addEventListener("mouseenter", () => peekTree(el));
     el.addEventListener("mouseleave", schedulePopoverClose);
   }
   if (token.kind === "commit") {
@@ -479,12 +515,26 @@ function popover() {
   return box;
 }
 
-function showPopover(anchor, html) {
+// `beside` puts the box past the anchor's right edge instead of under it, and aligns its top with the anchor.
+//
+// A nav row is the case: opening downwards covers the rows below the one being hovered, so the list you are
+// scanning disappears under the preview of the thing you were scanning it for.
+function showPopover(anchor, html, { beside = false } = {}) {
   const box = popover();
   clearTimeout(popoverTimer);
   box.innerHTML = html;
   box.hidden = false;
   const rect = anchor.getBoundingClientRect();
+
+  if (beside) {
+    const room = window.innerWidth - rect.right - 16;
+    box.style.maxWidth = Math.max(320, room) + "px";
+    box.style.left = Math.min(rect.right + 10, window.innerWidth - box.offsetWidth - 8) + "px";
+    box.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - box.offsetHeight - 8)) + "px";
+    return;
+  }
+
+  box.style.maxWidth = "";
   box.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - box.offsetWidth - 8)) + "px";
   const below = rect.bottom + 6;
   box.style.top = (below + box.offsetHeight > window.innerHeight ? rect.top - box.offsetHeight - 6 : below) + "px";
@@ -495,20 +545,95 @@ function schedulePopoverClose() {
   popoverTimer = setTimeout(() => { popover().hidden = true; }, 180);
 }
 
+// Line numbers are added here rather than server-side: the highlighter emits one blob, and a gutter is a
+// reading aid rather than part of the content.
+// Splitting the serialized HTML on newlines is safe because pygments closes its spans at every line end,
+// so no element ever straddles the split.
+// Joined with nothing rather than with a newline: `.src-line` is `display: block` and breaks the line itself,
+// while a `pre` renders the newline between two blocks as a second break. That doubled every line's height,
+// which reads exactly like vertical padding on the gutter and is not.
+function withLineNumbers(html, start) {
+  return html.split("\n")
+    .map((text, index) => `<span class="src-line" data-line="${start + index}">` +
+      `<span class="src-no">${start + index}</span>${text}</span>`)
+    .join("");
+}
+
+// The whole file, every time, bounded and scrollable — rather than a window computed around the line.
+//
+// A window has to guess how much you wanted, and it guessed with a rule about comment blocks that was right
+// often enough to be worth having and wrong often enough to be noticed. Scrolling costs the reader nothing
+// and never hides the line above or below the one they asked about.
+// Cached per path rather than per path-and-line, since there is now only one response per file.
 const peekCache = new Map();
 
 async function peek(el) {
-  const key = el.dataset.path + "#" + el.dataset.line;
-  if (!peekCache.has(key)) {
-    const result = await getJSON(
-      `/api/file?path=${encodeURIComponent(el.dataset.path)}&line=${el.dataset.line}`);
+  const path = el.dataset.path;
+  const line = Number(el.dataset.line || 0);
+  if (!peekCache.has(path)) {
+    const result = await getJSON(`/api/file?path=${encodeURIComponent(path)}&line=0&whole=1`);
     if (!result.ok) return;
-    peekCache.set(key, result.body);
+    peekCache.set(path, result.body);
   }
-  const body = peekCache.get(key);
+  const body = peekCache.get(path);
   showPopover(el,
-    `<div class="pop-head">${_esc(body.path)}  <span>lines ${body.start}-${body.end} of ${body.lines}</span></div>` +
-    `<pre class="pg"><code>${body.html}</code></pre>`);
+    `<div class="pop-head">${_esc(body.path)}` +
+    `<span>${line ? `line ${line} of ` : ""}${body.lines} lines</span></div>` +
+    `<pre class="pg pop-scroll"><code>${withLineNumbers(body.html, body.start)}</code></pre>`);
+  focusPopoverLine(line);
+}
+
+// Top when no line was given, and the line itself when one was — a third of the way down, so the lines
+// leading up to it are on screen too.
+function focusPopoverLine(line) {
+  const scroller = popover().querySelector(".pop-scroll");
+  if (!scroller) return;
+  if (!line) {
+    scroller.scrollTop = 0;
+    return;
+  }
+  const target = scroller.querySelector(`.src-line[data-line="${line}"]`);
+  if (!target) return;
+  target.classList.add("src-focus");
+  scroller.scrollTop = Math.max(0, target.offsetTop - scroller.clientHeight / 3);
+}
+
+// The whole entry, in the popover the nav row opens.
+//
+// Reading is what the nav is for, and until now the only way to see whether an entry was the one you meant
+// was to navigate into it and lose your place. Non-interactive on purpose: an ask answered by accident from
+// a hover is worse than no preview at all, so the copy is inert and the real one is a click away.
+const entryPeekCache = new Map();
+
+async function peekEntry(anchor, slug) {
+  if (!entryPeekCache.has(slug)) {
+    const result = await getJSON("/api/entry/" + encodeURIComponent(slug));
+    if (!result.ok || result.body.broken) return;
+    entryPeekCache.set(slug, result.body.html);
+  }
+  showPopover(anchor,
+    `<div class="pop-entry pop-scroll" aria-hidden="true">${entryPeekCache.get(slug)}</div>`,
+    { beside: true });
+  const scroller = popover().querySelector(".pop-scroll");
+  if (scroller) scroller.scrollTop = 0;
+}
+
+// A folder's popover: what is under it, as the same tree the overview draws.
+// The full tree with the overview's own row cap, rather than one level — a folder reference is asking what is
+// in here, and a listing that stops at the first directory answers that for almost no folder in this repo.
+const treeCache = new Map();
+
+async function peekTree(el) {
+  const path = el.dataset.dir;
+  if (!treeCache.has(path)) {
+    const result = await getJSON("/api/tree?path=" + encodeURIComponent(path));
+    if (!result.ok) return;
+    treeCache.set(path, result.body);
+  }
+  const body = treeCache.get(path);
+  showPopover(el,
+    `<div class="pop-head">${_esc(body.path)}/<span>${body.files} files</span></div>` +
+    `<div class="pop-scroll pop-tree">${body.html}</div>`);
 }
 
 const commitCache = new Map();

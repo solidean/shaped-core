@@ -11,6 +11,7 @@ What is left here is markdown, the fence rule, and the one span the block gramma
 
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
 from markdown_it import MarkdownIt
@@ -58,13 +59,41 @@ _MD = _renderer()
 def _fence(self, tokens, index, options, env):
     token = tokens[index]
     info = (token.info or "").strip()
+    # `raw` opts the whole fence out, the way `raw:` does one code span.
+    # A fence holds more of what needs it than a span does — a quoted diff, a shell transcript, a config sample
+    # — because it holds more, and every line of it is scanned.
+    # `raw` alone, or `raw:` in front of the usual `lang:path`.
+    raw = info == "raw" or info.startswith("raw:")
+    if raw:
+        info = info[len("raw:"):].strip() if info.startswith("raw:") else ""
     lang, _, rest = info.partition(":")
     body = highlight_code(token.content.rstrip("\n"), path=rest.strip(), lang=lang.strip())
     label = f'<div class="code-label">{rest.strip()}</div>' if rest.strip() else ""
-    return f'{label}<pre class="pg"><code>{body}</code></pre>\n'
+    opened = '<code class="raw">' if raw else "<code>"
+    return f'{label}<pre class="pg">{opened}{body}</code></pre>\n'
 
 
 _MD.add_render_rule("fence", _fence)
+
+
+# `raw:` on a code span opts it out of every annotation provider.
+#
+# The matchers are deliberately eager — a path is decorated wherever it appears, and unresolved is an error rather
+# than a shrug, because that strictness is what catches a half-remembered path.
+# The cost is that a code span which merely looks like a reference has no way to say it is not one, and narrowing
+# the matcher to fix that would trade a loud false positive for a silent false negative — a typo'd path quietly
+# staying plain, which is the failure the strictness exists to prevent.
+#
+# So the escape is per span and explicit.
+# The prefix is dropped from what the reader sees, and the `raw` class is what the page's walk skips.
+def _code_inline(self, tokens, index, options, env):
+    content = tokens[index].content
+    if content.startswith("raw:"):
+        return f'<code class="raw">{escape(content[len("raw:"):])}</code>'
+    return f"<code>{escape(content)}</code>"
+
+
+_MD.add_render_rule("code_inline", _code_inline)
 
 
 def render(text: str, *, repo: Path | None = None) -> str:

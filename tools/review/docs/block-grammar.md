@@ -175,6 +175,34 @@ A block that declines to act satisfies it, because the obligation is to answer r
 
 Comments live in `answers/<entry>.json`, which the server owns, and are tentative until the round is finalized.
 
+## `raw:` — a span that is not a reference
+
+A backticked path becomes a link, and one that resolves to nothing is a validation error.
+That strictness is what catches a half-remembered path, and its cost is that a code span which merely *looks* like a reference has no way to say so.
+
+`raw:` is that escape, per span.
+
+```markdown
+`raw:origin/main..HEAD` is a revision range, not a folder called `origin`.
+```
+
+The prefix is dropped from what the reader sees, and the span is skipped by every provider — files, folders, glossary terms and shas alike.
+
+**A whole fence opts out the same way**, with `raw` as its info string, or `raw:` in front of the usual `lang:path`.
+
+````markdown
+```raw
+--- a/origin/main
++++ b/origin/main
+```
+````
+
+A fence holds more of what needs this than a span does, because every line of it is scanned: a quoted diff, a shell transcript, a config sample.
+
+**The matchers stay eager on purpose.**
+Narrowing what counts as a reference would trade a loud false positive for a silent one.
+The loud one costs the author a `raw:`; the silent one is a typo'd path staying plain text, which is the failure the strictness exists to prevent.
+
 ## Glossary blocks
 
 `glossary: true` on a `prose` block says its bold leads are terms.

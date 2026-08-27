@@ -1,10 +1,18 @@
 """`run` — execute the `example` blocks and splice their output in.
 
 This is the only place in the tool that ever spawns a process out of an entry, and it is a CLI step on purpose.
-The server renders agent-authored files; a server that also executed commands out of them would be a different
-thing with a different threat model, and there is no reason to combine the two.
+The server renders agent-authored files, and rendering and executing are different operations that have no
+reason to live in the same process.
 
-The allowed command prefixes live in `review.toml` and default to empty.
+`run_prefixes` in `review.toml` is a **lint, not a boundary.**
+It is a prefix test over a string this module then hands to a shell, so everything after the prefix is
+unconstrained — `&&`, `;` and a pipe all pass, and nothing here is trying to stop them.
+What it expresses is intent of scope: `dev.py example` is the blessed place for things meant to be executed to
+show functionality, and a review should be reaching for that rather than for arbitrary commands.
+The failure it prevents is an unintended side effect, not an attack; the tool runs locally, on a checkout the
+person driving it already has.
+
+It defaults to empty, and stays empty for a repository `init` does not recognise.
 Running examples through `dev.py` is a fact about shaped-core, and this tool reviews any git repository — so
 nothing executes in a review where nobody said what may execute.
 
@@ -40,6 +48,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def _allowed(command: str, prefixes: list[str]) -> bool:
+    """Whether the command opens with a blessed prefix.
+
+    A lint on intent rather than a sandbox — see the module docstring.
+    """
     return any(command.strip().startswith(prefix.strip()) for prefix in prefixes if prefix.strip())
 
 
@@ -71,7 +83,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     ran = skipped = refused = 0
 
     for entry in entries:
-        edits: list[tuple[int, int, str]] = []
+        edits: list[tuple] = []
         for block in entry.blocks:
             if block.type != "example" or not block.attrs.get("run"):
                 continue

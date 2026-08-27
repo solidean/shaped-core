@@ -22,7 +22,7 @@ from ..entry.answers import AnswerFile
 from ..entry.parse import Entry
 from .glossary import GlossaryProvider, malformed_in, terms_in
 from .index import RepoIndex
-from .providers import CommitProvider, FileProvider, Token
+from .providers import CommitProvider, DirProvider, FileProvider, Token
 
 # Where a file name is actually written: a code span, a markdown link's destination, or inside a fenced block.
 # Bare prose is deliberately not scanned.
@@ -31,14 +31,24 @@ from .providers import CommitProvider, FileProvider, Token
 # A fence is scanned whole, because a path in a code comment is exactly the case the round asked for.
 _CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
 _LINK_TARGET_RE = re.compile(r"\]\(([^)\s]+)")
-_FENCE_BODY_RE = re.compile(r"^(```|~~~)[^\n]*\n(.*?)(?:^\1|\Z)", re.M | re.S)
+_FENCE_BODY_RE = re.compile(r"^(```|~~~)([^\n]*)\n(.*?)(?:^\1|\Z)", re.M | re.S)
+
+
+def _is_raw(info: str) -> bool:
+    """Whether this fence's info string opts it out, matching what the renderer does with the same string."""
+    info = info.strip()
+    return info == "raw" or info.startswith("raw:")
 
 
 def _referencing_text(text: str) -> list[str]:
-    """The fragments of a block's source a file reference may be written in."""
-    out = [body for _, body in _FENCE_BODY_RE.findall(text)]
+    """The fragments of a block's source a file reference may be written in.
+
+    A `raw:` span and a `raw` fence are left out: that is the author saying this looks like a reference and is
+    not, which is the one thing the matcher cannot work out for itself.
+    """
+    out = [body for _, info, body in _FENCE_BODY_RE.findall(text) if not _is_raw(info)]
     without_fences = _FENCE_BODY_RE.sub("", text)
-    out.extend(_CODE_SPAN_RE.findall(without_fences))
+    out.extend(span for span in _CODE_SPAN_RE.findall(without_fences) if not span.startswith("raw:"))
     out.extend(_LINK_TARGET_RE.findall(without_fences))
     return out
 
@@ -55,13 +65,17 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     A path means the same thing in a code comment as in prose; a sha is safe everywhere; a term is not.
     """
     files = FileProvider(index=index)
+    dirs = DirProvider(index=index)
     commits = CommitProvider(confirm=confirm_shas) if confirm_shas is not None else None
     glossary = GlossaryProvider(terms=terms) if terms else None
     tokens: list[Token] = []
 
     def scan(text: str) -> None:
         for fragment in _referencing_text(text):
+            # Files first: a folder token is only ever the trailing-slash form, so the two cannot claim the
+            # same span, and ordering them keeps the page's longest-first sort from having to break a tie.
             tokens.extend(files.tokens(fragment))
+            tokens.extend(dirs.tokens(fragment))
         if commits is not None:
             tokens.extend(commits.tokens(text))
         if glossary is not None:

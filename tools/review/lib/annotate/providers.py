@@ -98,12 +98,10 @@ class FileProvider:
             if not self.index.looks_like_a_path(ref):
                 continue
             self.seen.add(literal)
-            token = self._token(literal, match.group(1), match.group(2), match.group(3))
-            if token is not None:
-                out.append(token)
+            out.append(self._token(literal, match.group(1), match.group(2), match.group(3)))
         return out
 
-    def _token(self, literal: str, ref: str, start: str | None, end: str | None) -> Token | None:
+    def _token(self, literal: str, ref: str, start: str | None, end: str | None) -> Token:
         intent = PLAIN
         for prefix in _PREFIXES:
             if ref.startswith(prefix):
@@ -136,6 +134,75 @@ class FileProvider:
             css="ref-old" if intent == OLD else "ref", regions=self.regions,
             href=f"/file/{resolution.path}" + (f"#L{line}" if line else ""),
         )
+
+
+# A folder: the same characters as a path, ending in a slash.
+# The trailing slash is what distinguishes a reference from a word, since a directory has no suffix to check
+# against the repository the way `looks_like_a_path` checks a file's.
+# A folder: path characters ending in a slash, never preceded by one.
+# The lookbehind is the same rule the file matcher applies via `looks_like_a_path` — a leading slash means
+# a URL or a route, so `/api/entry/` must not yield a folder reference to `api/entry/`.
+# The lookahead is the mirror of it: a slash with a name after it is part of a longer path, so a file
+# reference never also produces a folder token for the directory it sits in.
+_DIR_RE = re.compile(r"(?<![\w./+:-])((?:new:|old:)?[\w.+-][\w./+-]*/)(?![\w.+-])")
+
+
+@dataclass
+class DirProvider:
+    """Folders, resolved against the same index and held to the same strictness as files.
+
+    A folder is looser to write than a file — `annotate/` is how anyone refers to the package — and that is the
+    argument for resolving it, not for excusing it when it does not resolve.
+    Narrowing what counts as a reference would trade a loud false positive for a silent one: a typo'd path
+    quietly staying plain text, which is the failure this strictness exists to catch.
+    `raw:` is the per-span escape for something that only looks like a reference.
+    """
+
+    index: RepoIndex
+    regions: tuple[str, ...] = (PROSE, CODE, DIFF)
+    kind: str = "dir"
+    seen: set[str] = field(default_factory=set)
+
+    def tokens(self, text: str) -> list[Token]:
+        out: list[Token] = []
+        for match in _DIR_RE.finditer(text):
+            literal = match.group(1)
+            if literal in self.seen:
+                continue
+            ref = literal
+            intent = PLAIN
+            for prefix in _PREFIXES:
+                if ref.startswith(prefix):
+                    intent, ref = (NEW if prefix == "new:" else OLD), ref[len(prefix):]
+                    break
+            # `./` on its own is punctuation, not a reference to the repository root.
+            if "://" in ref or ref.startswith("/") or not ref.strip("./"):
+                continue
+            self.seen.add(literal)
+            shown = literal[len(intent) + 1:] if intent != PLAIN else literal
+            resolution = self.index.resolve_dir(ref)
+
+            if resolution.state == AMBIGUOUS:
+                listed = ", ".join(resolution.candidates[:4]) + ("…" if len(resolution.candidates) > 4 else "")
+                out.append(Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions,
+                                 label=shown,
+                                 problem=f"{ref} names {len(resolution.candidates)} folders: {listed}"))
+                continue
+            if intent == NEW:
+                problem = "" if resolution.state == MISSING else f"{ref} already exists, so it is not new any more"
+                out.append(Token(text=literal, kind=self.kind, css="ref-new", regions=self.regions,
+                                 label=shown, problem=problem))
+                continue
+            if resolution.state == MISSING:
+                if intent == OLD:
+                    out.append(Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown))
+                    continue
+                out.append(Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions,
+                                 label=shown, problem=f"{ref} is not a folder in this repository"))
+                continue
+            out.append(Token(text=literal, kind=self.kind, label=shown, path=resolution.path,
+                             css="ref-old" if intent == OLD else "ref-dir", regions=self.regions))
+        return out
 
 
 # Seven or more hex characters at a word boundary.
@@ -173,5 +240,5 @@ class CommitProvider:
         return out
 
 
-__all__ = ["CODE", "DIFF", "PROSE", "CommitProvider", "FileProvider", "Token",
+__all__ = ["CODE", "DIFF", "PROSE", "CommitProvider", "DirProvider", "FileProvider", "Token",
            "AMBIGUOUS", "MISSING", "RESOLVED"]

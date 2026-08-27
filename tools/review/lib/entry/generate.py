@@ -1,6 +1,6 @@
-"""The two entries the tool writes for itself, and the rule that keeps them safe to rewrite.
+"""The entries the tool writes for itself, and the rule that keeps them safe to rewrite.
 
-Only the overview and the coverage report are generated, and every other entry is authored end to end:
+Only the overview, the catch-all and the coverage report are generated, and every other entry is authored end to end:
 the judgement about what matters in a change is the most useful thing an entry can carry, and nothing mechanical produces it.
 
 A generated block carries `generated: <key>`, and regeneration replaces exactly those blocks.
@@ -22,6 +22,7 @@ from .parse import Entry, parse_file
 from .write import compose, restore_newlines, write_entry
 
 OVERVIEW_SLUG = "015-changes"
+ANYTHING_SLUG = "988-anything-else"
 COVERAGE_SLUG = "990-coverage"
 
 _MAX_COMMITS = 40
@@ -30,6 +31,11 @@ _MAX_COMMITS = 40
 # Past this the leaves of the largest directories fold into a count, and the tail says what it dropped —
 # a silent truncation reads as "that is the whole change" when it is not.
 _MAX_ROWS = 100
+
+# The same cap for a popover, which is a glance rather than a page.
+# A hover that has to be scrolled to its end is answering a different question than the one that opened it,
+# and the tail still names what it left out — so the folder page is where you go for the rest.
+POPOVER_ROWS = 24
 
 
 def _esc(text: str) -> str:
@@ -45,8 +51,12 @@ def _counts(net: LineSpace) -> dict[str, tuple[int, int]]:
     return out
 
 
-def _fold(paths: list[str]) -> dict:
+def _fold(paths: list[str]) -> tuple[str, dict]:
     """The touched files as a tree, with single-child directory chains folded onto one node.
+
+    Returns the folded-away prefix alongside the tree.
+    A row shows its own segment, but a link needs the whole path — and when every file shares a prefix, as they
+    do under one folder, the entire chain collapses and that prefix is the part that went missing.
 
     `libs/base/clean-core/src` is one row rather than four.
     A change is located by its path, so the tree is in path order rather than sorted by size — a tree ordered
@@ -67,42 +77,55 @@ def _fold(paths: list[str]) -> dict:
         node["dirs"] = dict(collapse(child, child_name) for child_name, child in node["dirs"].items())
         return name, node
 
-    _, folded = collapse(root, "")
-    return folded
+    return collapse(root, "")
 
 
-def _tree_html(paths: list[str], counts: dict[str, tuple[int, int]]) -> str:
+def delta_label(counts: dict[str, tuple[int, int]]):
+    """The overview's leaf label: how much of the file this change touched."""
+    def label(path: str) -> str:
+        added, removed = counts.get(path, (0, 0))
+        return (f'<span class="tree-delta"><span class="add">+{added}</span>'
+                f'<span class="del">-{removed}</span></span>')
+    return label
+
+
+def _tree_html(paths: list[str], counts_or_label, *, max_rows: int = _MAX_ROWS) -> str:
     """The tree as rows: a row shows its own segment, and a file row is the link into it.
 
     Linked here rather than by the annotation pass.
     A tree row shows a basename while the link needs the whole path, and the pass matches on the literal text
     it can see — so the one place that knows both is the one that emits the row.
+
+    The leaf label is a callable, because the same tree answers two different questions.
+    The overview asks how much each file changed; a folder popover asks how big each file is.
+    A dict is still accepted, since that is what the overview passed before there was a second caller.
     """
+    label = delta_label(counts_or_label) if isinstance(counts_or_label, dict) else counts_or_label
     rows: list[str] = []
     dropped = [0, 0]  # files, directories
 
+    # Depth is carried as a custom property rather than as leading spaces.
+    # HTML collapses a run of spaces, so the literal indent was there in the source and invisible on the page.
     def walk(node: dict, prefix: str, depth: int) -> None:
-        indent = "  " * depth
         for name, child in node["dirs"].items():
             full = f"{prefix}{name}/"
-            rows.append(f'<div class="tree-dir">{indent}<span>{_esc(name)}/</span></div>')
+            rows.append(f'<div class="tree-dir" style="--d:{depth}"><span>{_esc(name)}/</span></div>')
             walk(child, full, depth + 1)
-        if len(rows) > _MAX_ROWS and node["files"]:
+        if len(rows) > max_rows and node["files"]:
             dropped[0] += len(node["files"])
             dropped[1] += 1
             return
         for name in node["files"]:
             path = f"{prefix}{name}"
-            added, removed = counts.get(path, (0, 0))
             rows.append(
-                f'<div class="tree-file">{indent}'
+                f'<div class="tree-file" style="--d:{depth}">'
                 f'<a class="annot ref" href="/file/{_esc(path)}" target="_blank" rel="noopener"'
                 f' data-path="{_esc(path)}" data-line="0" title="{_esc(path)}">{_esc(name)}</a>'
-                f'<span class="tree-delta"><span class="add">+{added}</span>'
-                f'<span class="del">-{removed}</span></span></div>'
+                f'{label(path)}</div>'
             )
 
-    walk(_fold(paths), "", 0)
+    root_prefix, folded = _fold(paths)
+    walk(folded, f"{root_prefix}/" if root_prefix else "", 0)
     tail = ""
     if dropped[0]:
         tail = (f'<div class="tree-tail">… and {dropped[0]} more files under '
@@ -165,6 +188,45 @@ def overview_body(git: Git, cfg: ReviewConfig, net: LineSpace) -> str:
 
 COVERAGE_TITLE = "Coverage & Finalize"
 OVERVIEW_TITLE = "Changes"
+ANYTHING_TITLE = "Anything else"
+
+
+def anything_body() -> str:
+    """The catch-all, for a remark that belongs to no entry.
+
+    Every comment the tool carries is anchored on something — a block, a line of a diff — which is right for a
+    remark *about* that thing and leaves nowhere to put one the review simply never raised.
+    The alternative is the maintainer attaching it to whichever entry is nearest, where the agent meets it in
+    the wrong context, or dropping it.
+
+    Generated rather than authored so it is always there: a box nobody has to remember to add is a box that
+    catches the thought that arrives while reading something else.
+    """
+    return "\n".join([
+        "## prose",
+        "generated: anything",
+        "",
+        "Anything you thought of while reading that no entry asked about.",
+        "",
+        "A design worry the review never raised, something to do next, a question about the branch, "
+        "a note to yourself for the round after this one.",
+        "It discharges nothing and it is not a finding — it is the place a remark goes when there is no block to hang it on.",
+        "",
+        "Comment on this block for anything you want kept alongside the review rather than handed back as an answer.",
+        "",
+        # The ask carries no `generated:` key, so a refresh leaves it alone.
+        # It is written once at creation and then owned by the round that answers it, like any other ask.
+        "## ask  anything-else",
+        "",
+        "Anything outside the entries above?",
+        "",
+        "- radio: nothing to add  (recommended)",
+        "- radio: yes, in the box below",
+    ])
+
+
+def anything_front() -> dict[str, str]:
+    return {"id": "988", "title": ANYTHING_TITLE, "group": "finalize", "state": "open"}
 
 
 def coverage_body(cfg: ReviewConfig, net: LineSpace, ledger: Ledger, discharged: set[str]) -> str:

@@ -32,10 +32,12 @@ async function main() {
 function numberLines(start) {
   const code = document.getElementById("file-body");
   const lines = code.innerHTML.split("\n");
+  // Joined with nothing rather than with a newline: `.src-line` is `display: block` and breaks the line itself,
+  // while a `pre` renders the newline between two blocks as a second break.
   code.innerHTML = lines
-    .map((text, index) => `<span class="src-line" id="L${start + index}">` +
+    .map((text, index) => `<span class="src-line" id="L${start + index}" data-line="${start + index}">` +
       `<span class="src-no">${start + index}</span>${text}</span>`)
-    .join("\n");
+    .join("");
 }
 
 function focusLine(line) {

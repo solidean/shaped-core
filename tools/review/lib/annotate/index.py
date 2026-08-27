@@ -54,6 +54,11 @@ class RepoIndex:
         # `git.has_merges` is prose about code; `vector.hh` is a file.
         # Only the repository can say which is which.
         self.suffixes: set[str] = set()
+        # Directories are every prefix of a tracked path, indexed the same three ways.
+        # They come from the file list rather than from a walk for the same reason the files do: a checkout can
+        # hold a second copy of itself, and an empty directory is not something an entry can refer to anyway.
+        self.dirs: set[str] = set()
+        self._dirs_by_suffix: dict[str, list[str]] = {}
         for path in self.paths:
             parts = path.split("/")
             for start in range(len(parts)):
@@ -61,6 +66,12 @@ class RepoIndex:
             _, dot, suffix = parts[-1].rpartition(".")
             if dot and suffix:
                 self.suffixes.add(suffix.lower())
+            for end in range(1, len(parts)):
+                self.dirs.add("/".join(parts[:end]))
+        for directory in self.dirs:
+            parts = directory.split("/")
+            for start in range(len(parts)):
+                self._dirs_by_suffix.setdefault("/".join(parts[start:]), []).append(directory)
 
     @staticmethod
     def build(repo: Path, review_root: Path | None = None) -> RepoIndex:
@@ -95,7 +106,12 @@ class RepoIndex:
 
     def resolve(self, ref: str) -> Resolution:
         """Resolve one reference, saying which of the three ways it went — or why it did not."""
-        ref = ref.strip().lstrip("./")
+        # A literal `./` prefix, not a character class: `lstrip("./")` also eats the leading dot of
+        # `.claude/skills/...`, and a dot-directory is a perfectly ordinary thing for an entry to name.
+        # A leading `/` never reaches here — `looks_like_a_path` rejects it as a URL or a route.
+        ref = ref.strip()
+        if ref.startswith("./"):
+            ref = ref[2:]
         if not ref:
             return Resolution(MISSING)
         if ref in self._exact:
@@ -106,6 +122,33 @@ class RepoIndex:
         if candidates:
             return Resolution(AMBIGUOUS, candidates=tuple(candidates))
         return Resolution(MISSING)
+
+    def resolve_dir(self, ref: str) -> Resolution:
+        """The same three lookups, against directories.
+
+        A folder is held to the same strictness as a file on purpose.
+        Narrowing what counts as a reference would trade a loud false positive for a silent one — a typo'd path
+        quietly staying plain text, which is the failure the strictness exists to catch.
+        `raw:` is the escape for a span that only looks like a reference.
+        """
+        ref = ref.strip().rstrip("/")
+        if ref.startswith("./"):
+            ref = ref[2:]
+        if not ref:
+            return Resolution(MISSING)
+        if ref in self.dirs:
+            return Resolution(RESOLVED, ref)
+        candidates = self._dirs_by_suffix.get(ref, [])
+        if len(candidates) == 1:
+            return Resolution(RESOLVED, candidates[0])
+        if candidates:
+            return Resolution(AMBIGUOUS, candidates=tuple(candidates))
+        return Resolution(MISSING)
+
+    def under(self, directory: str) -> list[str]:
+        """Every tracked file under this directory, which is what its popover shows."""
+        prefix = directory.rstrip("/") + "/"
+        return [p for p in self.paths if p.startswith(prefix)]
 
     def absolute(self, path: str) -> Path | None:
         """Where a resolved path actually is, which is not always under the repository."""

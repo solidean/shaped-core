@@ -65,6 +65,8 @@ Hand-editable on purpose: retargeting a review or widening its goals should not 
 `context` and `coalesce_gap` are recorded because change ids reproduce only under the parameters that produced them; changing either means a re-ingest.
 `run_prefixes` is what `review run` may execute, empty unless `init` recognised the repository.
 Running examples through `dev.py` is a fact about shaped-core, and this tool reviews any git repository.
+It is a **lint rather than a boundary**: the check is a prefix test and the command then goes to a shell, so everything after the prefix is unconstrained.
+What it says is that `dev.py example` is the blessed place for things meant to be run to show functionality — it guards against an unintended side effect, not against a command that means harm.
 `title` is what the page and the tab show, set by `review title` once the range has actually been read.
 `watermark` is the last finalized round, so the next one is `watermark + 1`.
 `tool_version` guards a format the running tool is too old to understand.

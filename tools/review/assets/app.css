@@ -27,7 +27,13 @@ body {
   font: 15px/1.65 -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
-code, pre, kbd, .difflines { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; font-size: 13px; }
+/* Code sets its own line-height. Without this it inherits the body's 1.65, which is right for prose and
+   turns a listing of short lines into a page of gaps. */
+code, pre, kbd, .difflines {
+  font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
 
 #shell { display: flex; min-height: 100vh; }
 
@@ -536,6 +542,23 @@ a.annot:hover { color: var(--accent); }
 #popover[hidden] { display: none; }
 #popover pre { margin: 6px 0 0; }
 
+/* The peek is the whole file, so the scroll lives on the listing rather than on the popover box. */
+.pop-scroll { max-height: 44vh; overflow: auto; }
+
+.pop-tree { min-width: 34ch; }
+.pop-tree .tree { margin: 4px 0 0; }
+.tree-size { margin-left: auto; color: var(--text-dim); flex: none; padding-left: 12px; }
+
+/* An entry preview is a copy to read, never one to answer in: everything inside it is inert. */
+.pop-entry { width: min(64ch, 80vw); }
+.pop-entry * { pointer-events: none; }
+.pop-entry .comment-slot,
+.pop-entry .ask-actions,
+.pop-entry button,
+.pop-entry textarea { display: none; }
+.pop-entry input { pointer-events: none; }
+.pop-entry .entry-head h1 { font-size: 1.1rem; }
+
 .pop-head {
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -565,7 +588,9 @@ body.file-page { margin: 0; padding: 0 0 40px; background: var(--bg); color: var
 
 body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
 
-.src-line { display: block; padding-left: 8px; }
+.src-line { display: block; padding-left: 8px; line-height: 1.45; }
+/* `vertical-align: top` matters: a baseline-aligned inline-block carries its own descender space into the
+   line box, which is what made every numbered line taller than the same text without a gutter. */
 .src-no {
   display: inline-block;
   width: 5ch;
@@ -573,6 +598,8 @@ body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
   color: var(--text-dim);
   text-align: right;
   user-select: none;
+  vertical-align: top;
+  line-height: inherit;
 }
 
 .src-focus { background: rgba(110, 168, 254, 0.12); }
@@ -604,9 +631,11 @@ body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
 
 .tree { font-family: ui-monospace, monospace; font-size: 0.88rem; margin: 8px 0; }
 
-.tree-dir { color: var(--text-dim); white-space: pre; }
-.tree-file { display: flex; gap: 10px; align-items: baseline; white-space: pre; }
+/* `--d` is the row's depth; the indent is padding rather than spaces, which HTML collapses. */
+.tree-dir { color: var(--text-dim); padding-left: calc(var(--d, 0) * 1.25em); }
+.tree-file { display: flex; gap: 10px; align-items: baseline; padding-left: calc(var(--d, 0) * 1.25em); }
 .tree-file code { background: none; padding: 0; }
+.annot.ref-dir { border-bottom: 1px dotted currentColor; cursor: help; }
 .tree-delta { margin-left: auto; display: flex; gap: 8px; flex: none; }
 .tree-delta .add { color: var(--good); }
 .tree-delta .del { color: var(--bad); }

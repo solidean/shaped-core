@@ -55,8 +55,10 @@ from .lib.annotate.table import (
 from .lib.entry.answers import Answer, AnswerFile, Comment
 from .lib.entry.askhash import canonical as ask_canonical
 from .lib.entry.askhash import hash_ask
-from .lib.entry.generate import COVERAGE_SLUG, COVERAGE_TITLE, OVERVIEW_SLUG, OVERVIEW_TITLE
-from .lib.entry.generate import coverage_body, coverage_front, ensure as ensure_entry, overview_body, overview_front
+from .lib.entry.generate import (ANYTHING_SLUG, ANYTHING_TITLE, COVERAGE_SLUG, COVERAGE_TITLE,
+                                 OVERVIEW_SLUG, OVERVIEW_TITLE)
+from .lib.entry.generate import (anything_body, anything_front, coverage_body, coverage_front,
+                                 ensure as ensure_entry, overview_body, overview_front)
 from .lib.entry.grammar import (
     ACK_PREFIX,
     ACK_PROMPT,
@@ -116,6 +118,8 @@ __all__ = [
     "Block",
     "CONTEXT_EXEMPT_GROUPS",
     "CONTEXT_TIERS",
+    "ANYTHING_SLUG",
+    "ANYTHING_TITLE",
     "COVERAGE_SLUG",
     "COVERAGE_TITLE",
     "Candidate",
@@ -162,6 +166,8 @@ __all__ = [
     "check_supersedes",
     "compose",
     "console",
+    "anything_body",
+    "anything_front",
     "coverage_body",
     "coverage_front",
     "default_root",

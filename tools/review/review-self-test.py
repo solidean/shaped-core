@@ -984,6 +984,7 @@ REPO_FILES = [
     "libs/base/clean-core/src/clean-core/container/vector.hh",
     "libs/base/clean-core/docs/TODO.md",
     "tools/review/TODO.md",
+    ".claude/skills/reviewing-a-pr/SKILL.md",
 ]
 
 
@@ -999,6 +1000,26 @@ def test_a_reference_resolves_three_ways(root: Path) -> None:
         assert len(tokens) == 1, (written, tokens)
         assert tokens[0].path == "tools/review/lib/render/markdown.py", (written, tokens[0])
         assert not tokens[0].problem
+
+
+def test_a_path_under_a_dot_directory_resolves(root: Path) -> None:
+    """A leading dot is part of the name, not punctuation to trim.
+
+    `lstrip("./")` takes a character class, so it ate the dot of `.claude/...` and the reference
+    then matched neither the exact path nor any suffix — the segment is `.claude`, never `claude`.
+    """
+    written = ".claude/skills/reviewing-a-pr/SKILL.md"
+    tokens = _tokens(root, f"See `{written}` for it.")
+    assert len(tokens) == 1, tokens
+    assert tokens[0].path == written, tokens[0]
+    assert not tokens[0].problem, tokens[0].problem
+
+
+def test_a_leading_dot_slash_is_still_dropped(root: Path) -> None:
+    """The prefix the normalization was actually for."""
+    tokens = _tokens(root, "See `./tools/review/lib/render/markdown.py`.")
+    assert tokens[0].path == "tools/review/lib/render/markdown.py", tokens[0]
+    assert not tokens[0].problem
 
 
 def test_an_ambiguous_reference_is_a_problem(root: Path) -> None:
@@ -1148,10 +1169,19 @@ def test_the_glossary_entry_does_not_annotate_itself(root: Path) -> None:
 def test_the_tree_folds_single_child_chains(root: Path) -> None:
     """`a/b` on one line with `c` and `d` under it, and `e` back at the root — a location, not a histogram."""
     html = tree_html(["a/b/c.txt", "a/b/d.txt", "e.txt"], {"a/b/c.txt": (3, 1)})
-    rows = re.findall(r'<div class="tree-(dir|file)">((?:(?!</div>).)*)', html)
+    rows = re.findall(r'<div class="tree-(dir|file)"[^>]*>((?:(?!</div>).)*)', html)
     shown = [(kind, re.sub("<[^>]+>", "", body).strip()) for kind, body in rows]
     assert shown[0] == ("dir", "a/b/"), shown
     assert [s for k, s in shown if k == "file"] == ["c.txt+3-1", "d.txt+0-0", "e.txt+0-0"], shown
+
+
+def test_the_tree_carries_its_depth(root: Path) -> None:
+    """Indent is a custom property, not leading spaces — HTML collapses a run of spaces, so they never showed."""
+    html = tree_html(["a/b/c.txt", "e.txt"], {})
+    found = re.findall(r'class="tree-(?:dir|file)" style="--d:(\d+)"[^>]*>(?:<[^>]+>)*([\w./]+)', html)
+    depths = {name: depth for depth, name in found}
+    assert depths.get("c.txt") == "1", depths
+    assert depths.get("e.txt") == "0", depths
 
 
 def test_the_tree_says_what_it_dropped(root: Path) -> None:

@@ -30,6 +30,7 @@ from ..core.log import record
 from ..core.paths import ReviewPaths
 from ..entry.answers import AnswerFile
 from ..entry.askhash import hash_ask
+from ..entry.generate import POPOVER_ROWS, _tree_html as tree_html
 from ..entry.grammar import ReviewParseError
 from ..entry.parse import Entry, parse_file
 from ..git.run import Git
@@ -59,6 +60,9 @@ class ReviewApp:
         self.watcher = watcher
         self._index: RepoIndex | None = None
         self._index_key: tuple | None = None
+        self._terms: list | None = None
+        self._terms_digest: str = ""
+        self._head_sha: str = ""
 
     def config(self):
         return config_module.load(self.paths.config)
@@ -138,8 +142,27 @@ class ReviewApp:
         return self._index
 
     def terms(self) -> list:
-        """Every glossary term in the review, which is what makes one entry's vocabulary reach the others."""
-        return glossary_terms([e for _, e, err in self.entries() if err is None])
+        """Every glossary term in the review, which is what makes one entry's vocabulary reach the others.
+
+        Keyed on the watcher's digest, unlike `index()` above: the terms come from the entry files, which is
+        exactly what the watcher is watching, while the tracked file set moves independently of this folder.
+        Without a key, fetching one entry re-parses every entry — quadratic in a review's size.
+        """
+        digest = self.watcher.digest
+        if self._terms is None or self._terms_digest != digest:
+            self._terms = glossary_terms([e for _, e, err in self.entries() if err is None])
+            self._terms_digest = digest
+        return self._terms
+
+    def head_sha(self) -> str:
+        """HEAD, resolved once for the life of the server rather than once per entry fetch.
+
+        A review is read against one tree, and `restart` is already the answer for anything that moves
+        under a running server — which is what the staleness marker on an `example` block is measured against.
+        """
+        if not self._head_sha:
+            self._head_sha = Git(self.repo).rev_parse("HEAD") or ""
+        return self._head_sha
 
     def entry_html(self, slug: str) -> tuple[int, dict]:
         for file, entry, error in self.entries():
@@ -151,7 +174,7 @@ class ReviewApp:
             html = render_entry(
                 entry, answers,
                 repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
-                head=Git(self.repo).rev_parse('HEAD') or '',
+                head=self.head_sha(),
             )
             tokens = build_tokens(entry, self.index(), answers=answers,
                                   confirm_shas=Git(self.repo).which_are_commits,
@@ -159,8 +182,13 @@ class ReviewApp:
             return 200, {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
         return 404, {"error": f"no entry {slug!r}"}
 
-    def file_view(self, path: str, line: int, *, whole: bool = False) -> tuple[int, dict]:
-        """A window into one file: a peek by default, the whole thing for the page a click opens.
+    def file_view(self, path: str) -> tuple[int, dict]:
+        """One whole file, highlighted — for the peek popover and for the page a click opens alike.
+
+        Both want the same thing, and a computed window only ever guessed at how much of it.
+        The rule that walked up through the comment block above a line was right often enough to keep and wrong
+        often enough to notice.
+        The reader scrolls instead, which never hides the line above the one they asked about.
 
         Only paths the index resolves are served, so a path outside the tree is a lookup miss rather than
         a case to defend against.
@@ -172,26 +200,29 @@ class ReviewApp:
         if target is None:
             return 404, {"error": f"{resolution.path} left the index"}
         try:
-            lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+            body = target.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
             return 404, {"error": f"{resolution.path} could not be read: {e}"}
 
-        context = self.config().context
-        if whole:
-            start, end = 1, len(lines)
-        elif line <= 0:
-            # No line given means "what is this file", and the answer is its header comment plus the first
-            # declarations under it — which is the "get a feel for it" the peek exists for.
-            start, end = 1, min(len(lines), context * 3)
-        else:
-            # Up through the comment block above the line, then down by the review's own context setting —
-            # already the number the maintainer chose for how much of a hunk they want to see.
-            start, end = _walk_up_through_comments(lines, line), min(len(lines), line + context)
-        body = "\n".join(lines[start - 1:end])
+        count = len(body.splitlines())
         return 200, {
             "path": resolution.path, "absolute": target.resolve().as_posix(),
-            "start": start, "end": end, "lines": len(lines),
+            "start": 1, "end": count, "lines": count,
             "html": highlight_code(body, path=resolution.path),
+        }
+
+    def tree_view(self, path: str) -> tuple[int, dict]:
+        """What is under one folder, as the same tree the overview draws.
+
+        The leaf label is size rather than diff delta: a folder reference asks what is in here, not what moved.
+        """
+        resolution = self.index().resolve_dir(path)
+        if not resolution.ok:
+            return 404, {"error": f"{path!r} is not a folder in the repository under review"}
+        files = self.index().under(resolution.path)
+        return 200, {
+            "path": resolution.path, "files": len(files),
+            "html": tree_html(files, _size_label(self.index()), max_rows=POPOVER_ROWS),
         }
 
     def commit_view(self, sha: str) -> tuple[int, dict]:
@@ -366,6 +397,39 @@ def favicon_svg(name: str) -> str:
     )
 
 
+# Read far enough to be sure, and no further: a NUL in the first block is what every tool uses to call a file
+# binary, and a file with none in 8 kB does not hide one in the middle often enough to pay for reading it all.
+_SNIFF_BYTES = 8192
+
+
+def _size_label(index: RepoIndex):
+    """A leaf's label in a folder tree: lines where the file reads as text, bytes where it does not."""
+    def label(path: str) -> str:
+        target = index.absolute(path)
+        if target is None:
+            return ""
+        try:
+            size = target.stat().st_size
+            head = target.read_bytes()[:_SNIFF_BYTES]
+        except OSError:
+            return ""
+        if b"\0" in head:
+            return f'<span class="tree-size">{_human_bytes(size)}</span>'
+        try:
+            lines = len(target.read_text(encoding="utf-8").splitlines())
+        except (OSError, UnicodeDecodeError):
+            return f'<span class="tree-size">{_human_bytes(size)}</span>'
+        return f'<span class="tree-size">{lines} lines</span>'
+    return label
+
+
+def _human_bytes(size: int) -> str:
+    for unit, cut in (("MB", 1024 * 1024), ("kB", 1024)):
+        if size >= cut:
+            return f"{size / cut:.1f} {unit}"
+    return f"{size} B"
+
+
 def _forge_commit_url(upstream: str, sha: str) -> str:
     """A web URL for a commit, or empty where the remote is not one this can be derived from.
 
@@ -380,47 +444,6 @@ def _forge_commit_url(upstream: str, sha: str) -> str:
     if not url.startswith(("http://", "https://")):
         return ""
     return url.removesuffix(".git").rstrip("/") + f"/commit/{sha}"
-
-
-# A preprocessor directive is not a comment, however much `#` looks like one.
-# Without this a peek at any line near the top of a C++ header walks up through the whole include block.
-_DIRECTIVES = ("include", "pragma", "define", "undef", "if", "ifdef", "ifndef", "else", "elif", "endif", "error")
-
-# How far a peek may walk.
-# A window that runs away is not a peek, and the comment block a reference points at
-# is a few lines, never dozens.
-_WALK_LIMIT = 12
-
-
-def _is_comment(text: str) -> bool:
-    if text.startswith("#"):
-        return not text[1:].lstrip().split(" ")[0].split("(")[0] in _DIRECTIVES
-    return text.startswith(("//", "*", "/*", '"""', "'''", "--", ";"))
-
-
-def _walk_up_through_comments(lines: list[str], line: int) -> int:
-    """Where a peek at `line` starts: the top of the comment block above it.
-
-    In this repository that block is where the load-bearing sentence lives, so a window that starts below it
-    shows the declaration and hides what a reader came for.
-    Blank lines are walked through too, since a doc comment separated by one is still that declaration's comment.
-    """
-    start = min(line, len(lines))
-    probe = start - 1
-    while probe >= 1 and start - probe <= _WALK_LIMIT:
-        text = lines[probe - 1].strip()
-        if not text or _is_comment(text):
-            probe -= 1
-            continue
-        break
-    # Only the comment run itself, not the blank lines above it.
-    while probe + 1 < start and not lines[probe].strip():
-        probe += 1
-    # One line further up when a comment run was actually found, because a docstring sits *below* the `def` it
-    # documents while a `///` block sits above the declaration — this catches the declaration in both languages.
-    if probe + 1 < start:
-        probe -= 1
-    return max(probe + 1, 1)
 
 
 def _error_panel(error: ReviewParseError) -> str:
@@ -499,9 +522,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(code, payload)
             elif route == "/api/file":
                 query = parse_qs(urlparse(self.path).query)
-                code, payload = self.app.file_view(
-                    query.get("path", [""])[0], int(query.get("line", ["0"])[0] or 0),
-                    whole=bool(query.get("whole")))
+                code, payload = self.app.file_view(query.get("path", [""])[0])
+                self._json(code, payload)
+            elif route == "/api/tree":
+                query = parse_qs(urlparse(self.path).query)
+                code, payload = self.app.tree_view(query.get("path", [""])[0])
                 self._json(code, payload)
             elif route == "/api/commit":
                 query = parse_qs(urlparse(self.path).query)

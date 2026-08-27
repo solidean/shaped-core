@@ -235,6 +235,17 @@ class Entry:
         return out
 
 
+def _unquote(value: str) -> str:
+    """Drop one layer of matching quotes, so `id: "018"` and `id: 018` are the same id.
+
+    An id is written both ways — quoted keeps a leading zero in a YAML editor's head — and the difference
+    would otherwise reach every place an id is displayed, where it reads as two different conventions.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
 def _split_front(text: str, path: Path) -> tuple[dict[str, str], int, int]:
     """(front matter, character offset the body starts at, line the body starts on)."""
     if not text.startswith("---"):
@@ -253,7 +264,7 @@ def _split_front(text: str, path: Path) -> tuple[dict[str, str], int, int]:
         key, sep, value = stripped.partition(":")
         if not sep:
             raise ReviewParseError(path, number, f"front matter line {stripped!r} is not `key: value`")
-        front[key.strip()] = value.strip()
+        front[key.strip()] = _unquote(value.strip())
     raise ReviewParseError(path, len(lines), "front matter is never closed",
                            "add a closing `---` line after the last key")
 
@@ -394,18 +405,25 @@ def _assign_block_names(entry: Entry, path: Path) -> None:
         groups.setdefault((block.effective_round, block.type), []).append(block)
 
     for (_, block_type), blocks in groups.items():
-        indexed = len(blocks) > 1
-        for ordinal, block in enumerate(blocks, start=1):
+        for block in blocks:
             explicit = block.attrs.get("name", "")
             if explicit and not ASK_NAME_RE.match(canonical_block_name(explicit)):
                 raise ReviewParseError(path, block.line, f"{explicit!r} is not a usable block name",
                                        "lowercase letters, digits and dashes")
-            if explicit:
-                block.block_name = explicit
+
+        # Only the blocks actually taking a derived name are counted, so a named block does not consume an
+        # ordinal and leave a `prose#2` with no `prose#1` behind it.
+        # The rule the grammar states is all-or-nothing: one on its own is `prose`, and two are `#1` and `#2`.
+        derived = [b for b in blocks if not b.attrs.get("name", "") and not b.is_ask]
+        indexed = len(derived) > 1
+        for ordinal, block in enumerate(derived, start=1):
+            block.block_name = derived_name(block_type, ordinal, indexed=indexed)
+
+        for block in blocks:
+            if block.attrs.get("name", ""):
+                block.block_name = block.attrs["name"]
             elif block.is_ask:
                 block.block_name = block.name
-            else:
-                block.block_name = derived_name(block_type, ordinal, indexed=indexed)
 
     seen: dict[tuple[int, str], Block] = {}
     for block in entry.blocks:
@@ -431,9 +449,8 @@ def _resolve_supersedes(entry: Entry, path: Path) -> None:
         ref = block.supersedes
         if not ref:
             continue
-        _, _, name = ref.rpartition("/")
+        round_part, _, name = ref.rpartition("/")
         wanted = canonical_block_name(name)
-        round_part, _, _ = ref.rpartition("/")
         want_round = int(round_part[1:]) if round_part.startswith("r") and round_part[1:].isdigit() else 0
 
         candidates = [
