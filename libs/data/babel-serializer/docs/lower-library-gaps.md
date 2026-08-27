@@ -121,5 +121,6 @@ expressive than a generic pinned strided span would be, and it is not obvious a 
 Recorded so they do not get re-raised:
 
 - **base64** is a serialization codec, so it belongs in `babel::base64` (`data/base64.hh`), not clean-core.
-- **base64** is a serialization codec, so it belongs in `babel::base64` (`data/base64.hh`), not clean-core.
   [coding-guidelines.md](coding-guidelines.md) has the rule, and `gltf::read_options::resolve_uri` is the seam.
+- **The power-of-two scalar pair** was a gap and is now `tg::pow2` / `tg::scale_by_pow2` / `tg::exponent_of` / `tg::split_pow2`.
+  `babel::hdr` consumes them; the entry is retired rather than kept as history.

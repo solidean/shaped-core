@@ -48,6 +48,16 @@ namespace babel::jpg
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.jpg");
 } // namespace babel::jpg
 
+namespace babel::hdr
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.hdr");
+} // namespace babel::hdr
+
+namespace babel::pfm
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.pfm");
+} // namespace babel::pfm
+
 namespace babel::image
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.image");
