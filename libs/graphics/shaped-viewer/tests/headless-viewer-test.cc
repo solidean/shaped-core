@@ -1,5 +1,10 @@
 #include "viewer_test_env.hh"
 
+#include <babel-serializer/image/image.hh>
+#include <clean-core/platform/environment.hh>
+#include <clean-core/platform/file_path.hh>
+#include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -74,4 +79,77 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
     // What matters is that it climbed at all: a trace that never dispatched leaves it at zero forever.
     CHECK(accumulated > 0);
     CHECK(pending_at_end == 0);
+}
+
+// A capture, end to end: the environment alone turns the loop above into one that writes an image and stops.
+//
+// What this really pins is that the FILE IS COMPLETE.
+// The write stream is buffered and its destructor does not drain, so a missing flush ends every image on a 4096-byte
+// boundary — and a JPEG truncated that way still decodes, flat-filling the tail from the last DC value.
+// That looks exactly like a rendering artifact, which is a far more expensive thing to debug than a short file, so
+// decoding the result back and checking its extent is the assertion that matters here.
+TEST("sv - a capture writes a complete image and ends the loop", nx::config::main_thread)
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    // The OS scratch directory, not the working directory: a test must not leave a file in whatever tree it ran from.
+    auto const path = cc::format("{}/sv-capture-test.jpg", cc::temp_directory_path());
+    auto const size = tg::vec2i(96, 64);
+
+    // Scoped, so a REQUIRE below cannot leak capture mode into every test that runs after this one.
+    auto const on = cc::scoped_environment_variable(sv::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sv::capture_output_env_var, path);
+    auto const dim = cc::scoped_environment_variable(sv::capture_size_env_var, "96x64");
+    auto const acc = cc::scoped_environment_variable(sv::capture_accumulate_env_var, "4"); // WARP traces in software
+    auto const lim = cc::scoped_environment_variable(sv::capture_timeout_env_var, "120");
+
+    auto const box = sv_test::make_cornell_box();
+    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+
+    auto frames = 0;
+    for (auto f : sv::interactive(ctx, "sv-test/capture"))
+    {
+        auto view = f.window().view();
+        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+
+        auto scene = view.add_scene();
+        scene.add_mesh(mesh);
+        scene.add_light({.center = tg::pos3f(0, 1.9f, 0),
+                         .half_extent_u = tg::vec3f(0.4f, 0, 0),
+                         .half_extent_v = tg::vec3f(0, 0, 0.4f),
+                         .emission = tg::vec3f(12, 12, 12)});
+
+        ++frames;
+        REQUIRE(frames < 400); // the capture ends the loop itself; this only stops a hang from becoming a timeout
+    }
+
+    // Read it back with a real decoder rather than checking that the file is non-empty: a truncated image is
+    // non-empty, and that is the whole failure being guarded against.
+    // Scoped, because the adapter holds the file open and Windows will not remove one that is.
+    {
+        auto reread = cc::file_read_stream_adapter::open(path);
+        REQUIRE(reread.has_value());
+        cc::read_stream in = reread.value();
+
+        auto const decoded = babel::image::read(in);
+        REQUIRE(decoded.has_value());
+        CHECK(decoded.value().width == size[0]);
+        CHECK(decoded.value().height == size[1]);
+    }
+    cc::remove_file(path);
 }

@@ -191,6 +191,7 @@ if(SC_BUILD_TESTS)
         PRIVATE
         shaped-viewer
         nexus
+        babel-serializer # the capture test decodes the image back, which is how it catches a truncated write
     )
 
     sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53

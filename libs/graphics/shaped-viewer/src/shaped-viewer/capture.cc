@@ -171,8 +171,17 @@ cc::result<cc::unit> write_capture_image(sg::context& ctx,
 
     auto adapter = cc::file_write_stream_adapter::create(path);
     CC_RETURN_IF_ERROR(adapter);
+
     cc::write_stream out = adapter.value(); // the adapter narrows to the stream babel writes through
-    return babel::image::write(out, img, format_of(path), {.jpg_quality = 88});
+    auto written = babel::image::write(out, img, format_of(path), {.jpg_quality = 88});
+    CC_RETURN_IF_ERROR(written);
+
+    // The adapter buffers, and its destructor does not drain — so without this the file ends at a 4096-byte boundary,
+    // missing whatever was still in the window.
+    // A JPEG truncated that way still DECODES, flat-filling the tail from the last DC value, which is why this looks
+    // like a rendering artifact rather than a broken file.
+    CC_RETURN_IF_ERROR(out.flush());
+    return cc::unit{};
 }
 } // namespace impl
 } // namespace sv
