@@ -177,9 +177,8 @@ class frame_range;
 class frame_iterator;
 struct frame_sentinel;
 
-// capturing a run to an image (see capture.hh)
+// capturing a run to an image (see capture.hh); the protocol itself is sr::capture_request
 struct capture_context;
-struct capture_request;
 
 namespace impl
 {

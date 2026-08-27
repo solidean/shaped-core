@@ -332,7 +332,7 @@ isize viewer::pending_resource_work() const
     return _impl->resources.pending_work_count();
 }
 
-void viewer::install_capture(capture_request req)
+void viewer::install_capture(sr::capture_request req)
 {
     CC_ASSERT(_impl->config.headless, "a capture needs a headless viewer — there is no offscreen target otherwise");
     _impl->capture = cc::make_unique<sv::impl::capture_session>(cc::move(req));
@@ -841,8 +841,8 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     else
         CC_LOG_WARNING("capture: giving up after {}s — writing the image as it stands", session.elapsed_seconds());
 
-    auto const written = sv::impl::write_capture_image(
-        *im.ctx, im.offscreen, tg::vec2i(im.config.width, im.config.height), session.request().output_path);
+    auto const written = sr::write_capture_image(*im.ctx, im.offscreen, tg::vec2i(im.config.width, im.config.height),
+                                                 session.request().output_path);
     if (written.has_error())
         CC_LOG_ERROR("capture: {}", written.error().to_string());
 

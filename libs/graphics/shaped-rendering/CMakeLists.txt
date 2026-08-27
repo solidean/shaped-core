@@ -7,6 +7,7 @@ project(shaped-rendering LANGUAGES CXX)
 # It is also home to the window abstraction.
 add_library(shaped-rendering
     src/shaped-rendering/shaped-rendering.cc
+    src/shaped-rendering/capture.cc
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
@@ -56,6 +57,10 @@ target_include_directories(shaped-rendering
 # sr's public headers name ImDrawData,
 # and imgui's target carries PUBLIC compile definitions that change what imgui.h declares — a consumer that missed them would see a different ImGuiIO layout than imgui.cpp was built with.
 target_link_libraries(shaped-rendering PUBLIC shaped-graphics shaped-shader-library imgui)
+
+# Capture writes an image file, and babel owns image encoding in this repo — a second encoder here would be the wrong
+# trade. PRIVATE: it is what capture.cc uses, never something an sr header hands out.
+target_link_libraries(shaped-rendering PRIVATE babel-serializer)
 
 sc_target_pch(shaped-rendering SG)
 

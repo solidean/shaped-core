@@ -112,12 +112,12 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
     auto const size = tg::vec2i(96, 64);
 
     // Scoped, so a REQUIRE below cannot leak capture mode into every test that runs after this one.
-    auto const on = cc::scoped_environment_variable(sv::capture_request_env_var, "1");
-    auto const out = cc::scoped_environment_variable(sv::capture_output_env_var, path);
-    auto const which = cc::scoped_environment_variable(sv::capture_name_env_var, "front");
-    auto const dim = cc::scoped_environment_variable(sv::capture_size_env_var, "96x64");
-    auto const acc = cc::scoped_environment_variable(sv::capture_accumulate_env_var, "4"); // WARP traces in software
-    auto const lim = cc::scoped_environment_variable(sv::capture_timeout_env_var, "120");
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+    auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
+    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "96x64");
+    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "4"); // WARP traces in software
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
@@ -206,11 +206,11 @@ TEST("sv - a capture nothing registered fails without writing", nx::config::main
     auto const path = cc::format("{}/sv-capture-missing.jpg", cc::temp_directory_path());
     cc::remove_file(path); // a leftover from an earlier run would make the check below vacuous
 
-    auto const on = cc::scoped_environment_variable(sv::capture_request_env_var, "1");
-    auto const out = cc::scoped_environment_variable(sv::capture_output_env_var, path);
-    auto const dim = cc::scoped_environment_variable(sv::capture_size_env_var, "64x48");
-    auto const which = cc::scoped_environment_variable(sv::capture_name_env_var, "no-such-capture");
-    auto const lim = cc::scoped_environment_variable(sv::capture_timeout_env_var, "120");
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "64x48");
+    auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "no-such-capture");
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto frames = 0;
     for (auto f : sv::interactive(ctx, "sv-test/capture-missing"))

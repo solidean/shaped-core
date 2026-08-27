@@ -147,7 +147,7 @@ private:
     /// **Only `sv::interactive` calls this.**
     /// A caller driving `begin_frame` / `end_frame` never gets a session, whatever the environment says, so an
     /// application embedding the viewer cannot have its loop ended out from under it.
-    void install_capture(capture_request req);
+    void install_capture(sr::capture_request req);
 
     /// Runs `body` when `name` is the capture being taken, and notes the name either way for the listing mode.
     ///

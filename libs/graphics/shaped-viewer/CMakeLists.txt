@@ -117,10 +117,6 @@ target_include_directories(shaped-viewer
 
 target_link_libraries(shaped-viewer PUBLIC shaped-rendering)
 
-# Capture writes an image file, and babel owns image encoding in this repo — a second encoder here would be the wrong
-# trade. PRIVATE: it is what capture.cc uses, never something an sv header hands out.
-target_link_libraries(shaped-viewer PRIVATE babel-serializer)
-
 # sv brings its own context up when a caller sets no sv::acquire_context, so it needs one backend to fall back on.
 # PRIVATE: the fallback is an implementation detail, and a consumer that wants a different backend overrides the hook
 # rather than inheriting this one. Which backend the default reaches for is a per-target choice that will grow.

@@ -15,17 +15,17 @@ namespace
 /// the viewer exists, so a body written for the interactive case is also the body that produces a reference image.
 /// An active request with nowhere to write is a caller error rather than a silent no-op — a tool that forgot the path
 /// would otherwise get a run that looked like it worked.
-[[nodiscard]] capture_request apply_capture_config(viewer_config& config)
+[[nodiscard]] sr::capture_request apply_capture_config(viewer_config& config)
 {
-    auto req = capture_request::from_environment();
+    auto req = sr::capture_request::from_environment();
     if (!req.active)
         return req;
 
     if (req.output_path.empty())
     {
-        CC_LOG_ERROR("capture: {} is set but {} names no file — running interactively instead", capture_request_env_var,
-                     capture_output_env_var);
-        return capture_request{};
+        CC_LOG_ERROR("capture: {} is set but {} names no file — running interactively instead",
+                     sr::capture_request_env_var, sr::capture_output_env_var);
+        return sr::capture_request{};
     }
 
     config.headless = true;

@@ -17,9 +17,9 @@
 class sv::impl::capture_session
 {
 public:
-    explicit capture_session(capture_request req) : _request(cc::move(req)) {}
+    explicit capture_session(sr::capture_request req) : _request(cc::move(req)) {}
 
-    [[nodiscard]] capture_request const& request() const { return _request; }
+    [[nodiscard]] sr::capture_request const& request() const { return _request; }
 
     /// Records that `name` was registered this run, for the listing mode.
     /// Registration happens every frame, so this is idempotent by name rather than append-only.
@@ -60,7 +60,7 @@ public:
     void mark_settled_before_writing() { _settled_before_writing = true; }
 
 private:
-    capture_request _request;
+    sr::capture_request _request;
     cc::vector<cc::string> _registered;
 
     bool _applied = false;
