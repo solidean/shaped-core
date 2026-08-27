@@ -115,6 +115,14 @@ struct nx::test_schedule_config
     // Set via --benchmark-json <file>.
     cc::string benchmark_json_file;
 
+    // When non-empty, run() writes a .ccrec of the WHOLE run to this path — warmup, scheduling and everything the
+    // code under test recorded, not just the benchmark's own events.
+    //
+    // The harness emits at loop boundaries only, never inside a timed region, so this costs the measurements nothing.
+    // The per-iteration timeline is therefore not in here, and that is the trade rather than an omission.
+    // Set via --benchmark-rec <file>.
+    cc::string benchmark_rec_file;
+
     // Print the full statistics block under every row of a benchmark table.
     // A single-loop benchmark is always drawn in full, so this changes nothing there.
     bool benchmark_verbose = false;

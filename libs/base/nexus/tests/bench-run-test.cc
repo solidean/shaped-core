@@ -4,6 +4,7 @@
 #include <nexus/bench/calibration.hh>
 #include <nexus/bench/report.hh>
 #include <nexus/bench/run.hh>
+#include <nexus/rec.hh>
 #include <nexus/test.hh>
 
 // The measured run, end to end.
@@ -348,4 +349,32 @@ TEST("bench - single_shot leaves counters off, since a pass is another whole run
 {
     auto const cfg = nx::bench::run_config::single_shot();
     CHECK(!cfg.measure_counters);
+}
+
+TEST("bench - a loop's results reach cc::rec, at its boundary rather than per sample", nx::config::recorded)
+{
+    auto rec = nx::test_recording();
+    if (!rec.is_attached())
+        SKIP("the run has no recorder (--no-recording)");
+
+    auto cfg = quick();
+    cfg.measure_counters = false;
+
+    auto acc = u64(0);
+    auto const r = nx::bench::run("recorded loop", cfg, [&] { acc = work(acc); });
+    rec.sync();
+
+    // One scope per loop, carrying the headline statistics.
+    // This is what --benchmark-rec writes out, and it is emitted OUTSIDE every timed region: one cc::rec event on a
+    // nanosecond body would be most of the measurement.
+    //
+    // Two events under the scope's name, not one: a scope is a begin and an end.
+    CHECK(rec.all().count("nx::bench loop") == 2);
+    CHECK(rec.all().count("bench/median seconds") == 1);
+    CHECK(rec.all().count("bench/samples") == 1);
+    CHECK(rec.all().count("bench/batch size") == 1);
+
+    // Emphatically NOT one per sample: hundreds of samples, one event each.
+    CHECK(r.samples.size() > 1);
+    CHECK(rec.all().count("bench/median seconds") == 1);
 }

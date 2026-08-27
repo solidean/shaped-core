@@ -30,6 +30,17 @@ void end_run_recording(cc::string_view log_dir);
 /// Whether the run stood a recorder up.
 [[nodiscard]] bool run_recording_active();
 
+/// Keep EVERY event of this run, and write it to `path` when the run ends.
+///
+/// Distinct from the per-test bucketing beside it, and deliberately so: a bucket is attributed to one test and a
+/// passing test's bucket is dropped, where this keeps the whole stream — warmup, scheduling, and whatever the code
+/// under test recorded along the way.
+///
+/// **Call it after begin_run_recording and before anything runs.** Events already drained are gone.
+/// Writing happens inside end_run_recording, because a recording holds chunk references and cannot outlive the
+/// shutdown that ends the run — which is the same constraint the failing-test dumps are serialized early for.
+void begin_run_capture(cc::string_view path);
+
 /// Hands the recorder over to a test that drives cc::rec::initialize itself, and takes it back afterwards.
 /// Only legal for an exclusive test: a torn-down recorder is torn down for every thread at once.
 struct recorder_handover_scope

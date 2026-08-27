@@ -259,7 +259,13 @@ int nx::run(int argc, char** argv)
     // Per-test attribution rides the ambient chain instead, so a test that records nothing costs nothing, and a test
     // asking what it recorded gets an answer without anyone parsing history back to the start of the process.
     if (!config.no_recording)
+    {
         nx::impl::begin_run_recording();
+
+        // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
+        // what happened BEFORE the interesting sample as much as the sample itself.
+        nx::impl::begin_run_capture(config.benchmark_rec_file);
+    }
 
     // Execute the scheduled tests
     auto execution = execute_tests(schedule, config);
