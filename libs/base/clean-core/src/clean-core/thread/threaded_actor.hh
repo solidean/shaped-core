@@ -138,6 +138,11 @@ private:
     /// Returns true if any were dispatched.
     virtual bool drain_inbox_messages(bool wait_on_cond_var) = 0;
 
+    /// Wakes a thread blocked in drain_inbox_messages(true), after _is_shutting_down has been set.
+    /// Must take the inbox lock before notifying, because the flag the waiter's predicate reads is not guarded by it:
+    /// a bare notify can land between that predicate check and the wait it is about to enter, and is then lost for good.
+    virtual void wake_after_shutdown_request() = 0;
+
     /// Actor thread entry point: on_thread_init, then a loop of drain + on_process until shutdown drains the
     /// inbox empty, then on_thread_shutdown.
     void execute_actor_thread();
@@ -278,6 +283,13 @@ private:
         this->_inbox.lock([&](cc::vector<cc::variant<MessageT...>>& queue) { queue.emplace_back(cc::move(msg)); });
         this->_inbox_cond_var.notify_one();
         return true;
+    }
+
+    void wake_after_shutdown_request() override
+    {
+        // Empty critical section on purpose: it only has to order this notify against a waiter's predicate check.
+        this->_inbox.lock([](cc::vector<cc::variant<MessageT...>>&) {});
+        this->_inbox_cond_var.notify_one();
     }
 
     bool drain_inbox_messages(bool wait_on_cond_var) override
