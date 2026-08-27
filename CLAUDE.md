@@ -351,6 +351,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Run one example                  | `uv run dev.py example <match>` (no arg lists them all; [examples](docs/guides/examples.md)) |
+| Run a benchmark                  | `uv run dev.py benchmark <match>` (no arg lists them all; defaults to a `release-*` preset; [benchmarking](docs/guides/benchmarking.md)) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
 | Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
@@ -359,7 +360,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
-| Benchmark / compare two implementations | a `nx::config::manual` test — never swept, needs no CHECK, prints its own table ([sort-benchmark.cc](libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model). A microbenchmark harness in nexus is still TODO |
+| Benchmark / compare two implementations | `BENCHMARK` + `nx::bench::run`, run with `uv run dev.py benchmark <match>` ([benchmarking](docs/guides/benchmarking.md)) |
 | Record a tracked metric for PGO  | `PGO_BENCHMARK` + `nx::pgo` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Read hardware performance counters | `uv run dev.py profiling counters` ([docs/guides/profiling.md](docs/guides/profiling.md)) |
 | Find where a build/test/check run's time goes | `uv run dev.py check --fix --profile <file> --profile-type chrome-tracing` ([profiling a run](docs/guides/building-and-testing.md#profiling-a-run)) |

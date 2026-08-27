@@ -23,6 +23,8 @@ Task-oriented how-tos for working in shaped-core.
   (run / merge / report) and the `.llvm-cov.json` sidecar tooling can build on.
 - [pgo.md](pgo.md) — profile-guided optimization with `dev.py pgo`
   (instrument / train / optimize / measure), trained and measured via PGO benchmarks.
+- [benchmarking.md](benchmarking.md) — `BENCHMARK`, `nx::bench::run` and `dev.py benchmark`: measuring
+  something and being able to believe the number — the barriers, the statistics, and how the report is read.
 - [perf-results.md](perf-results.md) — PGO benchmarks (`PGO_BENCHMARK` + `nx::pgo`) and the
   `.pgo.json` metric sidecar contract that `dev.py pgo` builds on.
 - [dependencies.md](dependencies.md) — the `extern/<dep>/dependency.yml` manifests, `dev.py deps list` / `deps licenses`, and the bump workflow.

@@ -27,6 +27,7 @@ from tools import dev  # noqa: E402
 from tools.dev import cmd, console  # noqa: E402
 from tools.dev.cmd import (  # noqa: E402
     assembly,
+    benchmark,
     build,
     check,
     clean,
@@ -59,6 +60,7 @@ COMMANDS = [
     test_web,
     run,
     example,
+    benchmark,
     format,
     lint,
     check,
