@@ -845,6 +845,18 @@ float coat_transmission(bsdf b, float mu)
     return 1.0 - b.coat_weight * (b.coat_f0 * ab.x + ab.y);
 }
 
+/// Whether a refraction about a microfacet at cosine `mu_h` is impossible — the microfacet is past the critical angle.
+///
+/// Only ever true on the way OUT of a denser interior, where `trans_eta` is below 1; from outside, Snell's law always has a
+/// solution and this is false at every angle.
+/// Schlick cannot express it — it has no critical angle and its tail never reaches 1 — which is why the reflectance at such a
+/// microfacet is stated here rather than left to `fresnel_schlick`.
+bool interface_is_tir(bsdf b, float mu_h)
+{
+    float c = saturate(mu_h);
+    return (1.0 - c * c) / max(b.trans_eta * b.trans_eta, 1e-9) >= 1.0;
+}
+
 /// What the dielectric specular layer transmits to the diffuse substrate, in one direction.
 float3 spec_transmission(bsdf b, float mu)
 {
@@ -909,9 +921,10 @@ float coat_crossing(bsdf b, float3 wo, float3 wi)
 /// but they diverge completely as the index approaches 1, where Schlick's grazing tail still climbs to white and the exact
 /// relation correctly goes to nothing.
 ///
-/// Past the critical angle this understates the internal reflection, since Schlick has no critical angle.
-/// The transmitted DIRECTION does not exist there — `refract` reports it and the sample ends — so nothing is created; what
-/// is lost is the energy that should have bounced back inside, which the viewer TODO records.
+/// Past the critical angle Schlick understates the internal reflection, since it has no critical angle and its tail never
+/// reaches 1.
+/// `interface_is_tir` is what states the difference: at such a microfacet there is no transmitted direction at all, the
+/// reflection is total, and `bsdf_eval` returns the full lobe rather than Schlick's share of it.
 float3 interface_transmittance(bsdf b, float mu)
 {
     return saturate(float3(1, 1, 1) - b.spec_weight * fresnel_schlick(max(mu, 1e-6), b.spec_f0));
@@ -1011,7 +1024,18 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
     // need the same albedo table the energy compensation is waiting on.
     float3 f_metal_fresnel = fresnel_f82(mu_h, b.metal_f0, b.metal_tint);
     float3 f_spec_fresnel = fresnel_schlick(mu_h, b.spec_f0);
-    if (b.thin_film_weight > 0.0)
+
+    // Past the critical angle the interface reflects ALL of it, and no approximation of the Fresnel says so on its own.
+    // This is the reflection a refraction could not be: `bsdf_sample_direction` turns a failed refraction into it, and
+    // `bsdf_pdf` carries the density that produced it — the three have to agree or the sample is scored by a lobe that
+    // did not draw it.
+    // A thin wall encloses nothing and light passes straight through it, so it has no critical angle to be past — the same
+    // reason `bsdf_pdf` excludes it and `bsdf_sample_direction` never calls `refract` for one.
+    bool const tir = b.thin_walled == 0.0 && interface_is_tir(b, mu_h);
+    if (tir)
+        f_spec_fresnel = float3(1, 1, 1);
+
+    if (!tir && b.thin_film_weight > 0.0)
     {
         f_metal_fresnel = lerp(f_metal_fresnel,
                                thin_film_reflectance(mu_h, b.metal_f0, b.thin_film_ior, b.thin_film_thickness),
@@ -1148,11 +1172,24 @@ float bsdf_pdf(bsdf b, float3 wo, float3 wi)
 
     float cosine = wi.z / pi;
 
-    return p.fuzz * cosine                                //
-         + p.coat * ggx_pdf(to_coat(b, wo), to_coat(b, wi), b.coat_alpha) //
-         + p.metal * ggx_pdf(wo, wi, b.metal_alpha)    //
-         + p.spec * ggx_pdf(wo, wi, b.spec_alpha)      //
-         + p.diffuse * cosine;
+    float density = p.fuzz * cosine                                            //
+                  + p.coat * ggx_pdf(to_coat(b, wo), to_coat(b, wi), b.coat_alpha) //
+                  + p.metal * ggx_pdf(wo, wi, b.metal_alpha)                   //
+                  + p.spec * ggx_pdf(wo, wi, b.spec_alpha)                     //
+                  + p.diffuse * cosine;
+
+    // The transmission lobe reaches the UPPER hemisphere too, whenever the microfacet it drew is past the critical angle:
+    // there is no refracted direction there, so it reflects instead.
+    // That mass belongs in the density or the reflection it produced is scored by the spec lobe alone, which claims less
+    // than what drew it and inflates every weight formed from it.
+    if (p.transmission > 0.0 && b.thin_walled == 0.0)
+    {
+        float3 h = normalize(wo + wi);
+        if (interface_is_tir(b, dot(wo, h)))
+            density += p.transmission * ggx_pdf(wo, wi, b.spec_alpha);
+    }
+
+    return density;
 }
 
 /// One direction drawn from the closure, with the BSDF and the full pdf there.
@@ -1264,11 +1301,27 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
         {
             wi = refract(-wo, h, 1.0 / b.trans_eta);
 
-            // Total internal reflection: `refract` returns zero, and there is no transmitted direction to hand back.
-            // The reflected lobe already carries that energy through its own Fresnel, so this ends the sample rather
-            // than turning it into a reflection the pdf does not describe.
+            // Total internal reflection: `refract` has no solution about this microfacet, and what physically happens is
+            // that the interface reflects rather than that the path ends.
+            //
+            // Ending it was the old behaviour and it lost the light: a walk inside a solid reaches the boundary outside
+            // the escape cone far more often than inside it — for an index of 1.5 that is most of the hemisphere — so a
+            // subsurface or a thick-glass interior went dark by attrition rather than by absorbing anything.
+            // `bsdf_eval` returns the full lobe at such a microfacet and `bsdf_pdf` carries this density, so the three
+            // agree about a direction the transmission lobe drew but did not transmit.
             if (dot(wi, wi) < 1e-6 || wi.z >= -1e-6)
+            {
+                wi = reflect(-wo, h);
+                if (wi.z <= 0.0)
+                    return r;
+
+                r.medium = medium_none; // it never crossed, so the caller keeps the medium it was already in
+                r.direction = wi;
+                r.value = bsdf_eval(b, wo, wi);
+                r.pdf = bsdf_pdf(b, wo, wi);
+                r.valid = r.pdf > 1e-9;
                 return r;
+            }
             wi = normalize(wi);
         }
     }

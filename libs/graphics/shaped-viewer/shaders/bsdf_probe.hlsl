@@ -41,7 +41,10 @@ struct probe_case
 
     uint samples; ///< samples this work item draws, before the CPU sums the blocks of one case
     uint seed;
-    uint pad0;
+
+    /// Whether the closure is prepared as if the ray were INSIDE the surface, which is where the index ratio inverts.
+    /// Total internal reflection exists only on that side, so a case that leaves this at 0 cannot measure it at all.
+    uint exiting;
     uint pad1;
 
     surface s;
@@ -109,7 +112,7 @@ float probe_consistency_weight(float3 wi, float claimed_pdf)
 /// The estimate one work item contributes, which the CPU sums with its siblings.
 float4 probe_run(probe_case c, uint item)
 {
-    bsdf b = bsdf_prepare(c.s, false, 3u); // from outside, and carrying all three wavelengths
+    bsdf b = bsdf_prepare(c.s, c.exiting != 0u, 3u); // carrying all three wavelengths
     uint rng = item * 9781u + c.seed * 26699u + 1u;
 
     if (c.mode == probe_echo)

@@ -234,13 +234,12 @@ importance-samples the continuation — so what is left is coverage of the model
   The bias the old cap carried is real in principle and was not observable — a lossless furnace at optical depth 36 passes
   against a 256-event cap as well, because the truncated paths are a thin enough tail to sit inside a 6% margin.
   The surface bounces still have no roulette, and `max_bounces` is still a hard cut.
-- **A dense subsurface interior is much darker than its `subsurface_color`**, and roulette was not what was taking it.
+- **A dense subsurface interior is still darker than its `subsurface_color`**, though far less so than it was.
   `openpbr-spheres`' subsurface row is the case: black with sparse red speckle before roulette and after it, at 64 frames
   and at 2048.
-  Index-matching that row's interface — `specular_ior` 1.001, so no total internal reflection and no Fresnel — takes it
-  from black to a dark red, which is what says the interface rather than the walk is where most of it goes.
-  That is the total-internal-reflection entry below, and a subsurface sphere is the configuration that makes it dominant:
-  a walk reaching the boundary outside the escape cone should reflect back inside and keep going, and instead the path ends.
+  Index-matching that row's interface was what located it — the row went from black to a dark red, which said the interface
+  rather than the walk was taking it — and the total-internal-reflection entry below is now fixed, which is what the row's
+  present colour comes from.
   What is left after that is the per-channel survival — `subsurface_color` (0.88, 0.52, 0.42) inverts to albedos of about
   (0.995, 0.922, 0.865) against mean free paths of (0.010, 0.0035, 0.0020) at the sweep's low end, so red outlives green and
   blue by an order of magnitude — plus the missing next-event estimation inside a medium.
@@ -272,10 +271,13 @@ importance-samples the continuation — so what is left is coverage of the model
 - **A ray escaping while still inside a solid is dropped.**
   It travelled an unbounded distance through an absorbing medium, so nothing survives — but that is only true for CLOSED
   geometry, and an open shell authored as solid loses paths rather than being told it is wrong.
-- **Total internal reflection ends the sample rather than reflecting.**
-  `bsdf_sample_direction` returns invalid, and the reflected lobe carries that energy through its own Fresnel — so the
-  energy is accounted for but a path that should have bounced inside the solid terminates instead.
-  It is what makes a thick glass corner darker than it should be.
+- **Total internal reflection reflects now**, in all three of the closure's halves at once.
+  `bsdf_sample_direction` turns a failed `refract` into the reflection about the same microfacet, `bsdf_eval` returns the
+  full lobe there rather than Schlick's share of it — Schlick has no critical angle and its tail never reaches 1 — and
+  `bsdf_pdf` carries that density on the upper hemisphere, so the direction is scored by what drew it.
+  Ending the sample was worth **28% of the light** through a lossless glass object, which is what
+  `volumetric-furnace-test`'s index-1.5 case now measures and what it fails by against a build without this.
+  A thin wall is excluded throughout: it encloses nothing, so it has no critical angle.
 - **The thin film is sampled at three wavelengths**, one per output channel, rather than integrated over the spectrum.
   Its first interference order is faithful and its higher orders alias into colors the spectrum would have averaged away, so
   a film past roughly a micron drifts.

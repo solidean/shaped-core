@@ -266,9 +266,9 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
 
     // An index-matched interface, so the surface neither bends nor reflects what crosses it.
     //
-    // That is not a convenience: at any other index a path bouncing inside meets total internal reflection, which this
-    // closure ends rather than reflecting — so the object would lose energy for a reason that has nothing to do with the
-    // medium under test, and the furnace would fail without saying why.
+    // That is what isolates the MEDIUM: a real index puts a Fresnel and a critical angle between the environment and the
+    // interior, and a case built on one measures the two together.
+    // The glass case below is the one that measures them together on purpose.
     using binding = sv::material_attribute_binding;
 
     auto cases = cc::vector<furnace_case>();
@@ -283,6 +283,19 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
     };
 
     cases.push_back({.name = "clear interior", .bindings = base_bindings()});
+
+    // The same clear interior at a REAL index, which is what makes total internal reflection happen.
+    //
+    // At 1.5 a path bouncing inside meets the critical angle at most of the boundary, and it used to end there — so this
+    // case could not exist and the one above index-matched the interface to avoid it.
+    // Now that a failed refraction reflects instead, a lossless glass object has to return the environment like any other,
+    // and this is the assertion that says so: it is the only place the TIR path is measured against a known answer rather
+    // than against a bound.
+    auto glass = cc::vector<binding>();
+    glass.push_back(binding::of("specular_ior", 1.5f));
+    glass.push_back(binding::of("specular_roughness", 0.05f));
+    glass.push_back(binding::of("transmission_weight", 1.0f));
+    cases.push_back({.name = "glass interior at index 1.5", .bindings = cc::move(glass)});
 
     // Pure scattering: white transmission color means no absorption at all, so the walk conserves every photon and only
     // moves it around.
@@ -366,7 +379,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
 
     // The clear interior and the scattering one must agree with each other as well as with the environment: they differ
     // only in the walk, so a difference between them IS the walk's error, with the interface divided out.
-    REQUIRE(lossless_means.size() == 3);
+    REQUIRE(lossless_means.size() == 4);
     for (auto i = isize(1); i < lossless_means.size(); ++i)
         CHECK(abs_of(lossless_means[0] - lossless_means[i]) <= 0.05f * luminance_of(environment))
             .dump("clear", lossless_means[0])

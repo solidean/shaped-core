@@ -102,7 +102,9 @@ struct probe_case
 
     u32 samples = 0;
     u32 seed = 1;
-    u32 pad0 = 0;
+
+    /// Prepares the closure as if the ray were inside the surface — 1 for the cases that measure the way OUT.
+    u32 exiting = 0;
     u32 pad1 = 0;
 
     probe_surface s = {};
@@ -226,6 +228,12 @@ struct named_surface
 {
     cc::string_view name;
     probe_surface s;
+
+    /// Measured from inside the interface rather than from outside it.
+    ///
+    /// The index ratio inverts there, which is the only side a critical angle exists on — so every case that leaves this
+    /// false is blind to total internal reflection however transmissive its surface is.
+    bool exiting = false;
 };
 
 /// A white furnace needs a surface that absorbs NOTHING, which is what makes its albedo exactly 1.
@@ -353,6 +361,22 @@ cc::vector<named_surface> surfaces_under_test()
                     .transmission_dispersion_scale = 1.0f,
                     .transmission_dispersion_abbe_number = 20.0f}});
 
+    // The same interfaces from INSIDE, which is where a refraction can fail.
+    //
+    // Past the critical angle there is no transmitted direction and the interface reflects instead, so these are the cases
+    // that hold `bsdf_sample_direction`, `bsdf_eval` and `bsdf_pdf` to agreeing about a direction the transmission lobe
+    // drew and did not transmit.
+    // Without them the closure's whole internal half is unmeasured: every case above prepares with `exiting` false.
+    out.push_back({"glass, smooth, from inside", {.specular_roughness = 0.08f, .transmission_weight = 1.0f}, true});
+    out.push_back({"glass, rough, from inside", {.specular_roughness = 0.45f, .transmission_weight = 1.0f}, true});
+    out.push_back({"glass, dense, from inside",
+                   {.specular_roughness = 0.2f, .specular_ior = 2.0f, .transmission_weight = 1.0f},
+                   true});
+    out.push_back({"subsurface, from inside", {.specular_roughness = 0.3f, .subsurface_weight = 1.0f}, true});
+    out.push_back({"thin walled, from inside",
+                   {.specular_roughness = 0.3f, .transmission_weight = 1.0f, .geometry_thin_walled = 1.0f},
+                   true});
+
     out.push_back({"anisotropic, tangent rotated",
                    {.specular_roughness = 0.4f,
                     .specular_roughness_anisotropy = 0.9f,
@@ -445,7 +469,12 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
         for (auto const& wo : probe_directions)
             for (auto const mode :
                  {probe_mode::albedo, probe_mode::pdf_norm, probe_mode::reciprocity, probe_mode::medium})
-                cases.push_back({.wo = wo, .mode = mode, .samples = samples_per_block, .seed = 7u, .s = ns.s});
+                cases.push_back({.wo = wo,
+                                 .mode = mode,
+                                 .samples = samples_per_block,
+                                 .seed = 7u,
+                                 .exiting = ns.exiting ? 1u : 0u,
+                                 .s = ns.s});
 
     auto const results = run_probe(ctx, cases);
     REQUIRE(results.size() == cases.size());
@@ -477,8 +506,23 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
             // reflects about 6% more at grazing than `sheen_albedo` charges the layers below it for.
             // Both are the fits the viewer TODO names tabulated albedos as the replacement for, so this bound is what
             // will tighten when they land.
+            // Measured from INSIDE, the bound is in different units, and that is the closure's convention rather than a
+            // concession.
+            //
+            // `transmission_btdf` deliberately omits the radiance-compression factor because this tracer transports
+            // importance from the camera rather than radiance from the light, and the two differ by the square of the
+            // index ratio.
+            // Entering, that leaves the integral bounded by 1; leaving, by the square of the ratio the other way round —
+            // so an exiting case is divided by it and held to the same bound as every other case.
+            // Without this the internal cases read about 2.25 for an index of 1.5 and 4 for one of 2, which is that
+            // factor exactly and says nothing about the closure.
+            auto const importance_scale = ns.exiting ? 1.0f / (ns.s.specular_ior * ns.s.specular_ior) : 1.0f;
+
             for (auto c = 0; c < 3; ++c)
-                CHECK(albedo.mean[c] <= 1.06f).context(where).dump("albedo", albedo.mean);
+                CHECK(albedo.mean[c] * importance_scale <= 1.06f)
+                    .context(where)
+                    .dump("albedo", albedo.mean)
+                    .dump("importance scale", importance_scale);
 
             // The white furnace: a surface that absorbs nothing reflects everything.
             // This is the assertion energy compensation exists to satisfy — without it a rough metal loses the
@@ -506,7 +550,7 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
 
             // A lobe that returns nothing at all passes every bound above, so this is what separates "conserves energy"
             // from "was never wired up".
-            auto const brightness = albedo.mean[0] + albedo.mean[1] + albedo.mean[2];
+            auto const brightness = (albedo.mean[0] + albedo.mean[1] + albedo.mean[2]) * importance_scale;
             CHECK(brightness > 0.02f).context(where).dump("albedo", albedo.mean);
 
             // The interior a sample reported must agree with the side it actually went to.
