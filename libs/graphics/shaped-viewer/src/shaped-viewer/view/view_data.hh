@@ -46,6 +46,16 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(1) << kind_shift) | u64(layer);
 }
 
+/// Whether `id` is an accumulation slot, whatever layer it belongs to.
+///
+/// For a caller folding over every traced layer of a view rather than naming one.
+/// Asking about layer 0 is the mistake this exists to prevent: a view whose first layer is a layout or a ui overlay
+/// has its trace at index 1, and `accumulation(0)` then names a slot that does not exist.
+[[nodiscard]] constexpr bool is_accumulation(u64 id)
+{
+    return (id >> kind_shift) == 1;
+}
+
 /// The traced layer's primary-hit geometry: `float4(normal.xyz, hit_t)`, with `hit_t < 0` where the ray escaped.
 ///
 /// Written fresh every recorded frame rather than accumulated, and kept alongside the accumulator so a later frame

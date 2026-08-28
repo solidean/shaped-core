@@ -260,8 +260,12 @@ cc::string_view view_ref::display_name() const
 
 u32 view_ref::accumulated_frames() const
 {
-    auto const* const slot = _frame->state_of(_view).temporal.get_ptr(temporal_id::accumulation(0));
-    return slot == nullptr ? 0 : slot->accum_frame;
+    return impl::min_accumulated_frames(_frame->state_of(_view));
+}
+
+bool view_ref::is_accumulation_converged(cc::optional<u32> frames) const
+{
+    return impl::is_accumulation_converged(_frame->state_of(_view), frames);
 }
 
 // ---- window_ref ------------------------------------------------------------------------------------------

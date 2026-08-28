@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/keyed_cache.hh>
 #include <shaped-viewer/impl/view_state.hh>
@@ -56,6 +57,14 @@ public:
     /// Defaults to the first traced layer's accumulator, which is the one a single-layer view has.
     /// For tests and debug overlays — the trace needs none of it.
     [[nodiscard]] u32 accumulated_frames(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
+
+    /// The lowest accumulated-frame count across every traced layer of `id`, and 0 for a view with none.
+    /// See `impl::min_accumulated_frames`, which is the rule.
+    [[nodiscard]] u32 min_accumulated_frames(view_id id) const;
+
+    /// Whether every traced layer of `id` has reached `frames`, or has stopped climbing and never will.
+    /// See `impl::is_accumulation_converged`, which is the rule; false for a view that is not here.
+    [[nodiscard]] bool is_accumulation_converged(view_id id, cc::optional<u32> frames = {}) const;
 
     [[nodiscard]] isize count() const { return _entries.count(); }
     [[nodiscard]] isize payload_bytes() const { return _entries.payload_bytes(); }

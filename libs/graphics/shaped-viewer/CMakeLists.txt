@@ -176,6 +176,7 @@ if(SC_BUILD_TESTS)
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
+        tests/view-convergence-test.cc
         tests/bindless-tables-test.cc
         tests/material-resolution-test.cc
         tests/material-shader-generator-test.cc
