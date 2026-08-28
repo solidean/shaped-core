@@ -64,12 +64,27 @@ def _sibling_c_compiler(cxx: Path) -> Path:
     return cxx  # e.g. clang-cl drives both C and C++
 
 
+# The first exec of a large binary on a cold CI runner is not instant — an image's scanner reads it through before it
+# runs, and a --version probe that took 10s is what made a green Windows job report "no version-20 compiler".
+# A probe needing longer than this is broken rather than slow.
+_VERSION_PROBE_TIMEOUT_SECS = 60
+
+
 def compiler_major(exe: str) -> int | None:
-    """Major version of a compiler given by name or path (from its --version banner), or None."""
+    """Major version of a compiler given by name or path (from its --version banner), or None.
+
+    A probe that times out raises instead of returning None.
+    The caller cannot tell a timeout apart from "not a compiler", and reporting one as the other sends the reader after
+    a missing toolchain that is in fact installed.
+    """
     if not (Path(exe).is_file() or shutil.which(exe)):
         return None
     try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10)
+        out = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=_VERSION_PROBE_TIMEOUT_SECS
+        )
+    except subprocess.TimeoutExpired as e:  # before SubprocessError, which it derives from
+        raise ToolsetError(f"probing {exe!r} for its version timed out after {_VERSION_PROBE_TIMEOUT_SECS}s") from e
     except (OSError, subprocess.SubprocessError):
         return None
     m = re.search(r"(\d+)\.\d+\.\d+", out.stdout)  # clang "... version 22.1.8"; gcc "... 14.3.0"
