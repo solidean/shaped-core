@@ -14,9 +14,8 @@ throughput in M alloc+free pairs/s and in GB/s, versus allocation size (log2 X).
 Each variant is a line; cache-line placement is encoded as solid (same) vs dashed
 (diff), variant family as color.
 
-The sidecar carries the median and its confidence interval, computed over hundreds of samples.
-This script used to scrape `RESULT,` CSV rows off stdout and median three timed runs itself; the
-harness does that better, so it does not any more.
+The sidecar carries the median and its confidence interval, computed over hundreds of samples, so
+nothing here re-derives a statistic.
 
     uv run libs/base/clean-core/scripts/plot-node-allocation-design.py
     uv run .../plot-node-allocation-design.py --input run.bench.json --out /tmp

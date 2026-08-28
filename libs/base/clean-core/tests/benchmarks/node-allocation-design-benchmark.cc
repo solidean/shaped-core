@@ -24,11 +24,11 @@
 //   system          cc::system_memory_resource (platform malloc), same batch pattern
 //   node            the REAL shipped cc::node_allocator (not a mock) -- the line to trust for actual perf
 //
-// Workload: allocate a fixed batch of N, free all N in a fixed permuted order, repeat; 3 runs.
-// Metric is millions of alloc+free pairs/s AND GB/s (= pairs/s * size).
-// Machine-readable rows are printed as
-//   RESULT,<variant>,<size>,<run>,<mops>,<gbps>
-// for scripts/plot-node-allocation-design.py to parse into SVGs.
+// Workload: allocate a fixed batch of N, free all N in a fixed permuted order, repeat.
+// Metric is millions of alloc+free pairs/s AND GB/s, both derived by the harness from what each loop declares.
+// scripts/plot-node-allocation-design.py reads the `--json` sidecar and turns it into SVGs; loop names are
+//   <variant> @<size>B
+// which is the contract between the two.
 //
 // OFF IN THE TREE.
 // Flip the flag below to 1 to rerun the experiment.
@@ -347,8 +347,6 @@ struct VarNode
 ///
 /// The loop name is `<variant> @<size>B`, which is what scripts/plot-node-allocation-design.py splits on when it
 /// reads the benchmark's JSON sidecar.
-/// It used to scrape `RESULT,` CSV rows off stdout and median three timed runs itself; the sidecar carries the median
-/// and its interval already, computed over hundreds of samples rather than three.
 template <class Var>
 void measure(char const* name, isize size, Var& v)
 {
