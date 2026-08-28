@@ -8,13 +8,14 @@
 // PGO benchmark: prints the full table and records the byte-at-a-time points (where the abstraction cost
 // lives) via nx::pgo.
 
-#include "bench_util.hh"
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh> // cc::print / cc::format
 #include <clean-core/string/string.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
@@ -169,48 +170,66 @@ cc::string granularity_label(isize chunk_n)
     return cc::format("{} KiB", chunk_n / 1024);
 }
 
-void run()
+/// One measured transfer, recording the bytes moved so the harness derives B/s itself.
+template <class Body>
+nx::bench::result measure(cc::string_view name, nx::bench::run_config const& cfg, Body&& body)
+{
+    return nx::bench::run(name, cfg,
+                          [&](nx::bench::iteration& it)
+                          {
+                              nx::bench::sink(body());
+                              it.record("bytes", cc::rec::unit_bytes, f64(total_bytes));
+                          });
+}
+
+double bytes_per_second_of(nx::bench::result const& r)
+{
+    auto const* const bytes = r.find_quantity("bytes");
+    return bytes != nullptr ? bytes->per_second : 0.0;
+}
+
+/// The four paths at every granularity.
+///
+/// No explicit warmup is needed: the harness discards a warmup pass per loop, which warms that path's code and the
+/// file cache.
+/// Each chunk's write loops run before its read loops, so the files exist when the reads are measured.
+/// A fresh post-build run can still read low across the whole table — that is machine state rather than per-metric
+/// cache, so run on an idle machine and discard the first run.
+void run(nx::bench::run_config const& cfg, bool record_representative)
 {
     paths const p;
     auto cc_buf = cc::vector<byte>::create_filled(max_chunk, byte(0xA5));
     // std path takes a char*; char aliases anything, so the std side reuses cc_buf rather than a second buffer.
     char* const std_buf = reinterpret_cast<char*>(cc_buf.data());
 
-    // No explicit warmup: bench::measure_units_per_sec already discards one full pass per measurement, which warms that path's code and file cache.
-    // Each chunk's write rows run before its read rows, so the files exist when the reads are measured.
-    // A fresh post-build run can still read low across the whole table — that is machine state rather than per-metric cache, so run on an idle machine and discard the first run.
     isize const chunks[] = {1, 2, 4, 8, 16, 64, 256, max_chunk};
-
-    cc::println("\n=== file stream throughput (MB/s, {} MiB per pass, open->transfer->close) ===",
-                total_bytes / (1024 * 1024));
-    cc::println("{:<16} {:>10} {:>10} {:>10} {:>10}", "granularity", "cc write", "std write", "cc read", "std read");
-    cc::println("{:<16} {:>10} {:>10} {:>10} {:>10}", "-----------", "--------", "---------", "-------", "--------");
+    auto const* const bps = &nx::bench::unit_bytes_per_second;
 
     for (isize const chunk_n : chunks)
     {
         auto const cc_chunk = cc::span<byte const>(cc_buf).first_n(chunk_n);
         auto const cc_chunk_mut = cc::span<byte>(cc_buf).first_n(chunk_n);
+        auto const label = granularity_label(chunk_n);
 
-        double const cc_w = mbps(bench::measure_units_per_sec(
-            double(total_bytes), [&] { return cc_write(p.cc_view(), cc_chunk, chunk_n); }));
-        double const std_w = mbps(
-            bench::measure_units_per_sec(double(total_bytes), [&] { return std_write(p.std_file, std_buf, chunk_n); }));
+        auto const cc_w
+            = measure(cc::format("cc write @{}", label), cfg, [&] { return cc_write(p.cc_view(), cc_chunk, chunk_n); });
+        auto const std_w
+            = measure(cc::format("std write @{}", label), cfg, [&] { return std_write(p.std_file, std_buf, chunk_n); });
 
-        // both files now exist (last write pass left them populated) -> reads hit the page cache
-        double const cc_r = mbps(bench::measure_units_per_sec(
-            double(total_bytes), [&] { return cc_read(p.cc_view(), cc_chunk_mut, chunk_n); }));
-        double const std_r = mbps(
-            bench::measure_units_per_sec(double(total_bytes), [&] { return std_read(p.std_file, std_buf, chunk_n); }));
+        // Both files now exist (the last write pass left them populated), so the reads hit the page cache.
+        auto const cc_r = measure(cc::format("cc read @{}", label), cfg,
+                                  [&] { return cc_read(p.cc_view(), cc_chunk_mut, chunk_n); });
+        auto const std_r
+            = measure(cc::format("std read @{}", label), cfg, [&] { return std_read(p.std_file, std_buf, chunk_n); });
 
-        cc::println("{:<16} {:>10.0f} {:>10.0f} {:>10.0f} {:>10.0f}", granularity_label(chunk_n), cc_w, std_w, cc_r,
-                    std_r);
-
-        if (chunk_n == 1)
+        // The 1 B granularity is the one the PGO report tracks: it is where the per-call cost dominates, so it is
+        // where a codegen change actually shows up.
+        if (record_representative && chunk_n == 1)
         {
-            nx::pgo::report("cc write@1B", cc_w * 1e6, nx::bench::unit_bytes_per_second);
-            nx::pgo::report("std write@1B", std_w * 1e6, nx::bench::unit_bytes_per_second);
-            nx::pgo::report("cc read@1B", cc_r * 1e6, nx::bench::unit_bytes_per_second);
-            nx::pgo::report("std read@1B", std_r * 1e6, nx::bench::unit_bytes_per_second);
+            nx::pgo::report("cc write@1B", bytes_per_second_of(cc_w), *bps);
+            nx::pgo::report("std write@1B", bytes_per_second_of(std_w), *bps);
+            nx::pgo::report("cc read@1B", bytes_per_second_of(cc_r), *bps);
+            nx::pgo::report("std read@1B", bytes_per_second_of(std_r), *bps);
         }
     }
 
@@ -220,5 +239,19 @@ void run()
 
 PGO_BENCHMARK("bench-file-stream (cc vs std)")
 {
-    run();
+    // File I/O does not converge to the default 2%: the page cache, the writeback thread and the OS scheduler all
+    // move between samples, and no sample count fixes that.
+    // Asking for 10% is what this measurement can actually deliver, and it is still far tighter than the differences
+    // the report is read for.
+    run({.min_time_secs = 0.1, .max_samples = 512, .target_relative_error = 0.10}, /*record_representative*/ true);
+}
+
+// The full granularity table, as a comparison per chunk size.
+//
+// A sweep across granularities: comparing a 1 B transfer against a 64 KiB one is a statement about the chunk size
+// rather than about cc against std, so the rows carry no baseline and the byte rate is what stays comparable.
+BENCHMARK("bench-file-stream - granularity sweep")
+{
+    run({.min_time_secs = 0.05, .max_samples = 128, .target_relative_error = 0.10, .no_baseline = true},
+        /*record_representative*/ false);
 }

@@ -8,23 +8,23 @@
 // Both a cc::string_view corpus and a cc::string corpus are measured.
 // cc::string stores <= 39 bytes inline (SSO), so for short keys it also exercises the small-string layout an actual map would hold.
 //
-// The PGO_BENCHMARKs print and record a few representative throughput points via nx::pgo for the PGO speedup report; they never CHECK.
-// The full length tables come from the manual sweeps at the bottom of this file.
-// Run them explicitly, e.g. `uv run dev.py test --preset release-clang "bench-string-hash"`, or sweep with `<binary> --pgo-benchmarks`.
+// The PGO_BENCHMARKs record a few representative throughput points via nx::pgo for the PGO speedup report.
+// The full length tables come from the sweep BENCHMARKs beside them.
+// Run them with `uv run dev.py benchmark "bench-string-hash"`, or sweep the PGO ones with `<binary> --pgo-benchmarks`.
 
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/record/stat.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
-
-#include <chrono>
-#include <cstdio>
 
 using namespace cc::primitive_defines;
 
@@ -155,100 +155,91 @@ corpus make_corpus(isize length, cc::random& rng)
 }
 
 // --- timing -----------------------------------------------------------------------------------------
-u64 volatile g_sink = 0;
 
-// Hashes every key in `keys`, repeating the full pass until at least ~50 ms elapsed, and returns GB/s over the bytes actually processed.
-// `keys` is anything iterable whose elements expose .data()/.size().
+/// Hashes every key in `keys` once per iteration, recording the bytes covered so the harness derives B/s itself.
+/// `keys` is anything iterable whose elements expose .data()/.size().
 template <class Keys, class Hasher>
-double measure_gbps(Keys const& keys, Hasher hasher)
+nx::bench::result measure(cc::string_view name, nx::bench::run_config const& cfg, Keys const& keys, Hasher hasher)
 {
-    using clock = std::chrono::steady_clock;
-
-    size_t bytes_per_pass = 0;
+    auto bytes_per_pass = f64(0);
     for (auto const& k : keys)
-        bytes_per_pass += size_t(k.size());
+        bytes_per_pass += f64(k.size());
 
-    u64 acc = 0;
-    for (auto const& k : keys) // warm caches / branch predictors
-        acc ^= hasher(k.data(), size_t(k.size()));
+    return nx::bench::run(name, cfg,
+                          [&](nx::bench::iteration& it)
+                          {
+                              u64 acc = 0;
+                              for (auto const& k : keys)
+                                  acc ^= hasher(k.data(), size_t(k.size()));
+                              nx::bench::sink(acc);
 
-    long long reps = 1;
-    double seconds = 0;
-    for (;;)
-    {
-        auto const t0 = clock::now();
-        for (long long r = 0; r < reps; ++r)
-            for (auto const& k : keys)
-                acc ^= hasher(k.data(), size_t(k.size()));
-        seconds = std::chrono::duration<double>(clock::now() - t0).count();
-
-        if (seconds >= 0.05 || reps >= (1ll << 22))
-            break;
-        reps *= 2;
-    }
-    g_sink = acc; // keep the work observable
-
-    double const total_bytes = double(bytes_per_pass) * double(reps);
-    return total_bytes / seconds / 1e9;
+                              it.items(isize(keys.size())); // keys hashed
+                              it.record("bytes", cc::rec::unit_bytes, bytes_per_pass);
+                          });
 }
 
-// Sweeps `lengths`, printing one xxh3/fnv1a/mul row each.
-// When `record`, the points nearest 8 B and 64 KiB are reported as guide metrics.
-// Pass the representative-only lengths for a fast PGO benchmark, or the full sweep (record=false) for the human analysis table.
-// Each length regenerates a multi-MB corpus, so a full sweep is expensive; the guide path deliberately visits only the two recorded lengths.
-void run_sweep(char const* corpus_kind, bool use_strings, cc::span<isize const> lengths, bool record)
+/// The byte throughput off a measured loop, which is what the PGO report tracks.
+double bytes_per_second_of(nx::bench::result const& r)
+{
+    auto const* const bytes = r.find_quantity("bytes");
+    return bytes != nullptr ? bytes->per_second : 0.0;
+}
+
+/// Every hasher over one corpus, as loops of one comparison table.
+///
+/// `use_strings` picks the owning representation over the view one: cc::string stores <= 39 bytes inline, so for short
+/// keys it exercises the small-string layout an actual map would hold.
+void run_length(corpus const& c, bool use_strings, nx::bench::run_config const& cfg, cc::string_view suffix)
+{
+    if (use_strings)
+    {
+        measure(cc::format("xxh3{}", suffix), cfg, c.strings, hash_xxh3);
+        measure(cc::format("fnv1a{}", suffix), cfg, c.strings, hash_fnv1a);
+        measure(cc::format("mul{}", suffix), cfg, c.strings, hash_mul);
+    }
+    else
+    {
+        measure(cc::format("xxh3{}", suffix), cfg, c.views, hash_xxh3);
+        measure(cc::format("fnv1a{}", suffix), cfg, c.views, hash_fnv1a);
+        measure(cc::format("mul{}", suffix), cfg, c.views, hash_mul);
+    }
+}
+
+/// The three hashers at the representative lengths, recorded through nx::pgo.
+void record_representative(char const* corpus_kind, bool use_strings, cc::span<isize const> lengths)
 {
     cc::random rng(0xC0FFEEu);
+    auto const cfg = nx::bench::run_config{.min_time_secs = 0.1, .max_samples = 512};
+    auto const* const bps = &nx::bench::unit_bytes_per_second;
 
-    std::printf("\n=== string hash throughput (GB/s) — %s corpus ===\n", corpus_kind);
-    std::printf("%8s %12s %12s %12s\n", "length", "xxh3", "fnv1a", "mul");
-    std::printf("%8s %12s %12s %12s\n", "------", "------", "------", "------");
-
-    // Track the sweep point nearest each target length so recorded metrics are stable across sweep changes.
-    struct rep_point
-    {
-        isize target;
-        char const* label;
-        isize best_len = -1;
-        double xxh3 = 0, fnv1a = 0, mul = 0;
-    };
-    rep_point reps[] = {{8, "8B"}, {64 * 1024, "64KiB"}};
-    auto const dist = [](isize a, isize b) { return a > b ? a - b : b - a; };
-
-    for (isize const length : lengths)
+    for (auto const length : lengths)
     {
         auto const c = make_corpus(length, rng);
+        auto const label = length >= 1024 ? cc::format("{}KiB", length / 1024) : cc::format("{}B", length);
+        auto const suffix = cc::format("@{} ({})", label, corpus_kind);
 
-        double gbps_xxh3, gbps_fnv1a, gbps_mul;
+        auto const& keys_views = c.views;
+        auto const& keys_strings = c.strings;
+
         if (use_strings)
         {
-            gbps_xxh3 = measure_gbps(c.strings, hash_xxh3);
-            gbps_fnv1a = measure_gbps(c.strings, hash_fnv1a);
-            gbps_mul = measure_gbps(c.strings, hash_mul);
+            nx::pgo::report(cc::format("xxh3{}", suffix),
+                            bytes_per_second_of(measure("xxh3", cfg, keys_strings, hash_xxh3)), *bps);
+            nx::pgo::report(cc::format("fnv1a{}", suffix),
+                            bytes_per_second_of(measure("fnv1a", cfg, keys_strings, hash_fnv1a)), *bps);
+            nx::pgo::report(cc::format("mul{}", suffix),
+                            bytes_per_second_of(measure("mul", cfg, keys_strings, hash_mul)), *bps);
         }
         else
         {
-            gbps_xxh3 = measure_gbps(c.views, hash_xxh3);
-            gbps_fnv1a = measure_gbps(c.views, hash_fnv1a);
-            gbps_mul = measure_gbps(c.views, hash_mul);
+            nx::pgo::report(cc::format("xxh3{}", suffix),
+                            bytes_per_second_of(measure("xxh3", cfg, keys_views, hash_xxh3)), *bps);
+            nx::pgo::report(cc::format("fnv1a{}", suffix),
+                            bytes_per_second_of(measure("fnv1a", cfg, keys_views, hash_fnv1a)), *bps);
+            nx::pgo::report(cc::format("mul{}", suffix), bytes_per_second_of(measure("mul", cfg, keys_views, hash_mul)),
+                            *bps);
         }
-
-        std::printf("%8lld %12.2f %12.2f %12.2f\n", (long long)length, gbps_xxh3, gbps_fnv1a, gbps_mul);
-
-        for (auto& r : reps)
-            if (r.best_len < 0 || dist(length, r.target) < dist(r.best_len, r.target))
-                r = {r.target, r.label, length, gbps_xxh3, gbps_fnv1a, gbps_mul};
     }
-    std::fflush(stdout);
-
-    if (record)
-        for (auto const& r : reps)
-        {
-            cc::string const suffix = cc::string("@") + r.label + " (" + corpus_kind + ")";
-            nx::pgo::report(cc::string("xxh3") + suffix, r.xxh3 * 1e9, nx::bench::unit_bytes_per_second);
-            nx::pgo::report(cc::string("fnv1a") + suffix, r.fnv1a * 1e9, nx::bench::unit_bytes_per_second);
-            nx::pgo::report(cc::string("mul") + suffix, r.mul * 1e9, nx::bench::unit_bytes_per_second);
-        }
 }
 
 // The representative lengths the PGO benchmarks sweep: one short key (8 B) and one long (64 KiB).
@@ -258,22 +249,34 @@ constexpr isize guide_lengths[] = {8, 64 * 1024};
 // Lean PGO benchmarks: just the representative lengths, recorded for the PGO speedup report.
 PGO_BENCHMARK("bench-string-hash (string_view)")
 {
-    run_sweep("string_view", false, guide_lengths, /*record*/ true);
+    record_representative("string_view", false, guide_lengths);
 }
 
 PGO_BENCHMARK("bench-string-hash (string)")
 {
-    run_sweep("string", true, guide_lengths, /*record*/ true);
+    record_representative("string", true, guide_lengths);
 }
 
-// Full human-facing sweeps (manual): the complete length tables the docs analyze.
-// Run by exact name.
-TEST("bench-string-hash (string_view, full sweep)", nx::config::manual)
+// The complete length tables the docs analyze.
+//
+// Each length regenerates a multi-MB corpus, so a lower min_time per loop: the shape of the curve is what is read
+// here, not the last digit of any one point.
+BENCHMARK("bench-string-hash - string_view sweep")
 {
-    run_sweep("string_view", false, make_lengths(), /*record*/ false);
+    cc::random rng(0xC0FFEEu);
+    for (auto const length : make_lengths())
+    {
+        auto const c = make_corpus(length, rng);
+        run_length(c, false, {.min_time_secs = 0.02, .max_samples = 64, .no_baseline = true}, cc::format(" @{}", length));
+    }
 }
 
-TEST("bench-string-hash (string, full sweep)", nx::config::manual)
+BENCHMARK("bench-string-hash - string sweep")
 {
-    run_sweep("string", true, make_lengths(), /*record*/ false);
+    cc::random rng(0xC0FFEEu);
+    for (auto const length : make_lengths())
+    {
+        auto const c = make_corpus(length, rng);
+        run_length(c, true, {.min_time_secs = 0.02, .max_samples = 64, .no_baseline = true}, cc::format(" @{}", length));
+    }
 }
