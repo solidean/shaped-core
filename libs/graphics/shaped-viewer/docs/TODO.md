@@ -225,10 +225,25 @@ importance-samples the continuation — so what is left is coverage of the model
   says the assertion has teeth.
   It runs in about 6 seconds on WARP, which is the slowest test sv has and the reason the resolution and frame count are
   as low as they are.
-- **A scattering walk is capped at 256 events and has no Russian roulette.**
-  The cap is a termination guard rather than a quality control, and a dense medium with a high albedo will reach it — which
-  is energy lost rather than a path fairly ended.
-  Roulette is what would end those paths without bias, and it is the same mechanism the surface bounces want.
+- **A scattering walk ends by Russian roulette now**, after 16 events, on the throughput's largest channel.
+  Because `q` is the throughput itself the walk is self-normalizing: a survivor returns to about 1 and the per-event
+  survival probability settles at the medium's albedo, so the expected length is `1 / (1 - albedo)`.
+  `pt_scatter_cap` is 4096 and is the guard behind it, for an albedo of exactly 1 that never rolls a losing draw.
+  What this bought is measured, and it is **cost rather than correctness**: the same subsurface capture runs in about 8-12
+  seconds against 35 for the old 256-event cap, while allowing a walk sixteen times longer.
+  The bias the old cap carried is real in principle and was not observable — a lossless furnace at optical depth 36 passes
+  against a 256-event cap as well, because the truncated paths are a thin enough tail to sit inside a 6% margin.
+  The surface bounces still have no roulette, and `max_bounces` is still a hard cut.
+- **A dense subsurface interior is much darker than its `subsurface_color`**, and roulette was not what was taking it.
+  `openpbr-spheres`' subsurface row is the case: black with sparse red speckle before roulette and after it, at 64 frames
+  and at 2048.
+  Index-matching that row's interface — `specular_ior` 1.001, so no total internal reflection and no Fresnel — takes it
+  from black to a dark red, which is what says the interface rather than the walk is where most of it goes.
+  That is the total-internal-reflection entry below, and a subsurface sphere is the configuration that makes it dominant:
+  a walk reaching the boundary outside the escape cone should reflect back inside and keep going, and instead the path ends.
+  What is left after that is the per-channel survival — `subsurface_color` (0.88, 0.52, 0.42) inverts to albedos of about
+  (0.995, 0.922, 0.865) against mean free paths of (0.010, 0.0035, 0.0020) at the sweep's low end, so red outlives green and
+  blue by an order of magnitude — plus the missing next-event estimation inside a medium.
 - **Next-event estimation never happens inside a medium.**
   A scattering event turns and continues, picking up light only when it eventually exits, so a lit interior converges far
   more slowly than a lit surface does.

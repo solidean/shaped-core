@@ -290,14 +290,27 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
     // Optical depth about 3 across the cube, which is thick enough that most paths scatter several times and thin enough
     // that they get out.
     //
-    // This matters more than it looks: an albedo-1 walk escaping a slab of optical depth T takes on the order of T^2
-    // scattering events, so a much denser interior would run into the integrator's own 256-event cap — and the test would
-    // then be measuring that cap rather than the estimator.
+    // Kept thin deliberately, so this case measures the estimator on a walk that is easy to get out of.
+    // The dense one below is what exercises a walk long enough to have been ended by a budget.
     auto scattering = base_bindings();
     scattering.push_back(binding::of("transmission_depth", 0.25f));
     scattering.push_back(binding::of("transmission_color", tg::vec3f(1, 1, 1)));
     scattering.push_back(binding::of("transmission_scatter", tg::vec3f(0.6f, 0.6f, 0.6f)));
     cases.push_back({.name = "scattering interior", .bindings = cc::move(scattering)});
+
+    // The same walk at optical depth about 36, which is the densest interior this test can afford.
+    //
+    // An albedo-1 walk escaping a slab of optical depth T takes on the order of T^2 events for the paths that penetrate
+    // deepest, so this is the case that exercises a long walk rather than a few turns.
+    // It is NOT a regression test for the walk's termination: it passes against a 256-event cap as well, because the paths
+    // a cap truncates are a thin enough tail that the loss stays inside this test's 6% margin.
+    // What it does cover is a density nothing else here reaches, and it is affordable only because roulette ends the walk —
+    // it costs about a third less than the same case against an uncapped budget.
+    auto dense = base_bindings();
+    dense.push_back(binding::of("transmission_depth", 0.02f));
+    dense.push_back(binding::of("transmission_color", tg::vec3f(1, 1, 1)));
+    dense.push_back(binding::of("transmission_scatter", tg::vec3f(0.6f, 0.6f, 0.6f)));
+    cases.push_back({.name = "dense scattering interior", .bindings = cc::move(dense)});
 
     // The same walk with absorption, which must come back darker — the control that separates "the medium is lossless"
     // from "the medium was never entered".
@@ -353,8 +366,9 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
 
     // The clear interior and the scattering one must agree with each other as well as with the environment: they differ
     // only in the walk, so a difference between them IS the walk's error, with the interface divided out.
-    REQUIRE(lossless_means.size() == 2);
-    CHECK(abs_of(lossless_means[0] - lossless_means[1]) <= 0.05f * luminance_of(environment))
-        .dump("clear", lossless_means[0])
-        .dump("scattering", lossless_means[1]);
+    REQUIRE(lossless_means.size() == 3);
+    for (auto i = isize(1); i < lossless_means.size(); ++i)
+        CHECK(abs_of(lossless_means[0] - lossless_means[i]) <= 0.05f * luminance_of(environment))
+            .dump("clear", lossless_means[0])
+            .dump("scattering", lossless_means[i]);
 }

@@ -59,7 +59,7 @@ void PathTraceRayGen()
         //
         // A random walk through skin or marble takes dozens of them before it comes back out, and a budget shared with the
         // surface bounces would make a dense medium simply black — the walk would run out before it ever escaped.
-        // They get their own, much larger cap, which is a termination guard rather than a quality control.
+        // What ends a long walk is Russian roulette below; `pt_scatter_cap` is only the guard behind it.
         int scatters = 0;
 
         int b = 0;
@@ -144,8 +144,35 @@ void PathTraceRayGen()
                     dir = scattered;
 
                     ++scatters;
-                    if (scatters > 256 || !pt_is_finite(throughput))
+                    if (!pt_is_finite(throughput))
                         break;
+
+                    // Russian roulette, which is what ends a long walk without taking its energy with it.
+                    //
+                    // A hard cap alone is a bias: every path still walking when it is reached is dropped carrying whatever
+                    // it had, so a medium dense enough that few paths finish comes back dark by construction rather than
+                    // because little light left it.
+                    // Roulette ends a path with probability `1 - q` and scales the survivors by `1 / q`, so what it removes
+                    // is the work rather than the expectation.
+                    //
+                    // `q` is the throughput's largest channel, which makes this self-normalizing: a survivor comes back to
+                    // about 1 and the per-event survival probability settles at the medium's albedo, so the walk's expected
+                    // length is `1 / (1 - albedo)` rather than unbounded.
+                    // The floor keeps one draw from killing all but a twentieth of the paths, since a survivor scaled by
+                    // twenty is a firefly.
+                    if (scatters > pt_roulette_after)
+                    {
+                        float q = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.05, 1.0);
+                        if (pt_rand(rng) >= q)
+                            break;
+                        throughput /= q;
+                    }
+
+                    // The guard behind the roulette rather than the thing that ends a walk: an albedo at 1 exactly never
+                    // rolls a losing draw, and no dispatch may run forever.
+                    if (scatters > pt_scatter_cap)
+                        break;
+
                     continue; // NOT a bounce: the surface budget is untouched
                 }
 

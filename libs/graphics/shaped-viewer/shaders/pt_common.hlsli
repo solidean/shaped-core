@@ -9,6 +9,16 @@
 
 static const float PT_PI = 3.14159265358979323846;
 
+// How many scattering events a walk takes before Russian roulette starts ending it.
+//
+// Not from the first event: killing a short walk adds variance to paths that would have finished on their own, and the
+// walks this exists for are the long ones. Sixteen is well past what a thin or moderately dense interior needs.
+static const int pt_roulette_after = 16;
+
+// The hard ceiling on one walk, which the roulette should reach only for a medium that absorbs nothing at all.
+// A guard against a dispatch that never ends rather than a quality control — see the roulette in pathtrace.hlsl.
+static const int pt_scatter_cap = 4096;
+
 cbuffer FrameConstants : register(b0)
 {
     Camera camera; // pinhole camera basis (see sv::camera_gpu::from)
