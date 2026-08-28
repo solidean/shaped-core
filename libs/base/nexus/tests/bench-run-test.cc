@@ -18,6 +18,24 @@ using namespace cc::primitive_defines;
 namespace
 {
 // Small enough to keep the suite fast, large enough that every code path in the engine still runs.
+// Whether the pause warning is EARNED on this machine, by the same condition run.cc fires it on.
+//
+// Which way it goes is a property of the box rather than of the harness: a counter read is a couple of instructions
+// on x86 and costs more than most bodies on WASM, where `calibration::has_cheap_counter` is false.
+// So a test that pins the answer passes where it was written and fails somewhere else — which is exactly what
+// happened, in both directions at once, on macOS and under Emscripten.
+//
+// The invariant that does hold everywhere is that the warning appears exactly when the condition does.
+bool pause_warning_is_earned(nx::bench::result const& r)
+{
+    // The share of measured per-iteration time above which the pair's two clock reads are a real part of the answer.
+    // Mirrors `paused_warn_fraction` in nexus/bench/run.cc, which is file-local there.
+    constexpr auto paused_warn_fraction = 0.05;
+
+    auto const& cal = nx::bench::calibrated();
+    return cal.clock_pair_secs > 0 && r.time.median > 0 && cal.clock_pair_secs > r.time.median * paused_warn_fraction;
+}
+
 nx::bench::run_config quick()
 {
     auto c = nx::bench::run_config::standard();
@@ -152,9 +170,10 @@ TEST("bench - pause excludes its span from the measurement")
     // Most of the wall time went into the paused span, which is reported.
     CHECK(r.paused_fraction > 0.5);
 
-    // But it is NOT what the warning fires on: the measured body here is a single mix, far cheaper than the clock
-    // pair, so the pair genuinely is a real part of the answer and the warning is earned on those grounds.
-    CHECK(r.find_warning(nx::bench::warning_kind::paused_fraction_high) != nullptr);
+    // But it is NOT what the warning fires on.
+    // The warning is about the pair's cost against what was MEASURED, and those are different numbers — so it tracks
+    // the clock rather than the pause, whichever way that comes out on this machine.
+    CHECK((r.find_warning(nx::bench::warning_kind::paused_fraction_high) != nullptr) == pause_warning_is_earned(r));
 }
 
 TEST("bench - recorded quantities aggregate by their unit")
@@ -411,6 +430,7 @@ TEST("bench - a pause around expensive setup is not warned about")
     // optimizer, and the ratio is not what this test is about.
     CHECK(r.paused_fraction > 0.1);
 
-    // This is: a pause is cheap against work this size, so the warning must stay silent.
-    CHECK(r.find_warning(nx::bench::warning_kind::paused_fraction_high) == nullptr);
+    // This is: measured work this size dwarfs a pause pair on a machine whose clock is cheap, and does not on one
+    // whose clock is not — so what the test pins is the rule, not the verdict.
+    CHECK((r.find_warning(nx::bench::warning_kind::paused_fraction_high) != nullptr) == pause_warning_is_earned(r));
 }
