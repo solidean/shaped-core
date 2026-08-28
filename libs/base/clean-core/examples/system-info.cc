@@ -1,7 +1,9 @@
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/system_info.hh>
+#include <clean-core/platform/system_metrics.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -121,6 +123,46 @@ EXAMPLE("clean-core/system-info")
     cc::println("  {:<16} {}", "containerized", limits.containerized ? "yes" : "no");
     cc::println("  {:<16} {}", "hypervisor", limits.hypervisor_present ? "present" : "none");
     cc::println("  {:<16} {}", "workers", cc::recommended_worker_count());
+
+    cc::println("");
+    cc::println("live");
+    auto const memory = cc::query_memory_usage();
+    if (memory.has_value())
+    {
+        auto const& m = memory.value();
+        cc::println("  {:<16} {} / {} ({:.0f}%)", "memory in use", bytes_as_text(m.used_bytes),
+                    bytes_as_text(m.total_bytes), 100.0f * m.used_ratio());
+        if (m.swap_used_bytes.has_value() && m.swap_total_bytes.has_value())
+            cc::println("  {:<16} {} / {}", "swap in use", bytes_as_text(m.swap_used_bytes.value()),
+                        bytes_as_text(m.swap_total_bytes.value()));
+        if (m.commit_used_bytes.has_value() && m.commit_limit_bytes.has_value())
+            cc::println("  {:<16} {} / {}", "commit charge", bytes_as_text(m.commit_used_bytes.value()),
+                        bytes_as_text(m.commit_limit_bytes.value()));
+    }
+    else
+    {
+        cc::println("  {:<16} (unavailable: {})", "memory in use", memory.error().detail);
+    }
+
+    // A load is a rate, so it needs an interval to be a load at all — hence a sampler and a wait rather than a call.
+    auto sampler = cc::cpu_load_sampler();
+    cc::this_thread_sleep_secs(0.25);
+    auto const load = sampler.sample();
+    if (load.has_value())
+    {
+        cc::println("  {:<16} {:.0f}% over {:.2f} s", "cpu load", 100.0f * load.value().total,
+                    load.value().interval_secs);
+
+        auto per_core = cc::string();
+        for (auto const core : load.value().per_core)
+            per_core += cc::format("{:>4.0f}", 100.0f * core);
+        if (!per_core.empty())
+            cc::println("  {:<16}{}", "per core %", per_core);
+    }
+    else
+    {
+        cc::println("  {:<16} (unavailable: {})", "cpu load", load.error().detail);
+    }
 
     cc::println("");
     cc::println("OS");

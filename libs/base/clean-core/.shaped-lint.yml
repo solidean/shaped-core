@@ -257,6 +257,16 @@ rules:
     files: src/clean-core/platform/system_info.cc
 
   - kind: allow-include
+    value: [<mach/mach.h>, <mach/mach_host.h>, <mach/processor_info.h>, <sys/sysctl.h>]
+    reason: host_statistics and host_processor_info are Darwin's only CPU and memory counters
+    files: src/clean-core/platform/system_metrics.cc
+
+  - kind: allow-include
+    value: <unistd.h>
+    reason: sysconf(_SC_CLK_TCK), the unit /proc/stat counts in
+    files: src/clean-core/platform/system_metrics.cc
+
+  - kind: allow-include
     value: [<sched.h>, <unistd.h>]
     reason: sched_getaffinity is the mask a container narrows, and sysconf is the fallback count
     files: src/clean-core/platform/resource_limits.cc

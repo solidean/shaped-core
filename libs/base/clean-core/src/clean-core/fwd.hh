@@ -76,6 +76,15 @@ struct system_info;        // what machine this is, gathered once (platform/syst
 enum class identity_field; // one identifying fact about the machine, requested by name (platform/system_identifier.hh)
 struct system_identifier;  // the identifying facts that were asked for, and only those
 struct resource_limits; // what THIS process may use, as opposed to what the machine has (platform/resource_limits.hh)
+
+enum class query_status : u8; // why a live system query could not answer (platform/system_metrics.hh)
+enum class metric : u8;       // one live quantity a dashboard can ask about
+struct query_error;
+struct cpu_counters;    // monotone CPU time as the OS accumulated it
+struct cpu_counter_set; // those counters, per machine and per core
+struct cpu_load;        // how busy the CPU was over one sampling interval
+struct memory_usage;    // physical memory as it stands right now
+class cpu_load_sampler; // CPU load, differenced against this sampler's previous reading
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>
