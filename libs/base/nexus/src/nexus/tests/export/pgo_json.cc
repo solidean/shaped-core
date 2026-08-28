@@ -1,9 +1,10 @@
-#include "perf_json.hh"
+#include "pgo_json.hh"
 
 #include <babel-serializer/data/json.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/record/desc.hh>
 
-cc::string nx::write_perf_json(cc::string_view suite_name, nx::test_schedule_execution const& execution)
+cc::string nx::write_pgo_json(cc::string_view suite_name, nx::test_schedule_execution const& execution)
 {
     namespace json = babel::json;
 
@@ -27,8 +28,8 @@ cc::string nx::write_perf_json(cc::string_view suite_name, nx::test_schedule_exe
                 m.write("test", test);
                 m.write("name", metric.name);
                 m.write("value", metric.value);
-                m.write("unit", metric.unit);
-                m.write("higher_is_better", metric.higher_is_better);
+                m.write("unit", metric.unit_symbol());
+                m.write("higher_is_better", metric.higher_is_better());
             }
         }
     }

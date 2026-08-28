@@ -102,6 +102,23 @@ that produces a `cc::error` — the GLB chunk walk, the buffer trim, the bufferV
 validation pass, and `view_of` (which goes through `span::is_subspan` first, purely to get a fallible answer).
 A `try_subdata` would delete that whole class of boilerplate, here and in every future binary format.
 
+### `trim` and a whitespace `split` on `cc::string_view`
+
+**Wanted:** `cc::string_view::trimmed()` (leading and trailing `cc::is_space` removed) and a whitespace `split`
+that yields the tokens of a view — either as a range or into a caller's `cc::vector<cc::string_view>`.
+
+**Why:** every ASCII-headered format walks the same two operations.
+Radiance HDR splits its `-Y h +X w` resolution line and trims both halves of each `KEY=value` line; PFM walks its
+five-token header one token at a time; a future PPM/PGM, OBJ material library or `.mtl` reader wants exactly this.
+None of it is format knowledge — it is string handling that clean-core does not offer yet.
+
+**Today:** `hdr.cc` hand-rolls `trimmed` and `split_tokens`, and `pfm.cc` hand-rolls `next_token`, each marked with
+a one-line comment saying `cc` has no equivalent.
+`cc::is_space` from [char_predicates.hh](../../../base/clean-core/src/clean-core/string/char_predicates.hh) already
+does the classification, so only the iteration is missing.
+A line iterator on `cc::string_view` would retire `hdr.cc`'s `next_line` too, though that one also strips a `\r`,
+which is arguably the caller's business.
+
 ### A pinned strided view
 
 **Wanted:** `pinned_data::as_strided<T>(stride)`, or a `cc::pinned_strided_data<T>` pairing a `strided_span` with a pin.
@@ -121,5 +138,6 @@ expressive than a generic pinned strided span would be, and it is not obvious a 
 Recorded so they do not get re-raised:
 
 - **base64** is a serialization codec, so it belongs in `babel::base64` (`data/base64.hh`), not clean-core.
-- **base64** is a serialization codec, so it belongs in `babel::base64` (`data/base64.hh`), not clean-core.
   [coding-guidelines.md](coding-guidelines.md) has the rule, and `gltf::read_options::resolve_uri` is the seam.
+- **The power-of-two scalar pair** was a gap and is now `tg::pow2_by_int` / `tg::scale_by_pow2` / `tg::exponent_of` / `tg::split_pow2`.
+  `babel::hdr` consumes them; the entry is retired rather than kept as history.

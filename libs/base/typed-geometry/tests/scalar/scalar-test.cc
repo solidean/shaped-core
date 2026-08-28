@@ -5,6 +5,8 @@
 
 #include <type_traits>
 
+using namespace cc::primitive_defines;
+
 static_assert(tg::traits::has_sqrt<float>, "f32 has sqrt");
 static_assert(!tg::traits::has_sqrt<int>, "i32 has no sqrt");
 static_assert(tg::traits::has_trigonometry<double>, "f64 has trigonometry");
@@ -15,6 +17,22 @@ static_assert(tg::traits::has_rounding<double>, "f64 has rounding");
 static_assert(!tg::traits::has_rounding<int>, "rounding an integer is the identity, so it is not offered");
 static_assert(tg::traits::has_abs<int>, "integers have abs");
 static_assert(!tg::traits::has_abs<bool>, "bool has no magnitude");
+static_assert(tg::traits::has_pow2<float>, "f32 has the exact base-two operations");
+static_assert(!tg::traits::has_pow2<int>, "shifting an integer truncates, so it is a different operation");
+
+// The exponent must be an integer type, so `scale_by_pow2(x, 1.5f)` is a compile error rather than a silent
+// truncation to 1 — the whole point of the family being exact.
+template <class T, class N>
+concept scales_by_pow2 = requires(T x, N n) { tg::scale_by_pow2(x, n); };
+template <class T, class N>
+concept has_pow2_by_int = requires(N n) { tg::pow2_by_int<T>(n); };
+
+static_assert(scales_by_pow2<float, int>);
+static_assert(scales_by_pow2<double, i64>);
+static_assert(!scales_by_pow2<float, float>);
+static_assert(!scales_by_pow2<float, bool>, "bool is excluded, as it is for cc::byte_order_scalar");
+static_assert(has_pow2_by_int<float, int>);
+static_assert(!has_pow2_by_int<float, float>);
 
 TEST("tg scalar - one / is_zero / is_one")
 {
@@ -83,6 +101,63 @@ TEST("tg scalar - pow / exp / log")
     // log and exp invert each other
     CHECK(tgtest::approx(tg::log(tg::exp(2.5)), 2.5));
     CHECK(tgtest::approx(tg::exp(tg::log(2.5)), 2.5));
+}
+
+TEST("tg scalar - pow2_by_int / scale_by_pow2")
+{
+    // exact, not approximate: this is an exponent adjustment, so equality is the right assertion
+    CHECK(tg::pow2_by_int<float>(0) == 1.0f);
+    CHECK(tg::pow2_by_int<float>(10) == 1024.0f);
+    CHECK(tg::pow2_by_int<double>(-3) == 0.125);
+
+    CHECK(tg::scale_by_pow2(3.0f, 4) == 48.0f);
+    CHECK(tg::scale_by_pow2(3.0, -2) == 0.75);
+    CHECK(tg::scale_by_pow2(-1.5f, 1) == -3.0f);
+    CHECK(tg::scale_by_pow2(0.0f, 7) == 0.0f); // zero has no exponent to shift
+
+    // a mantissa the scalar holds exactly survives any in-range shift, which a pow() round-trip would not promise
+    auto const odd = 1.0f + 1.0f / 8388608.0f; // 1 + 2^-23, the last representable step above one
+    CHECK(tg::scale_by_pow2(odd, 60) == odd * tg::pow2_by_int<float>(60));
+
+    // out of range saturates rather than wrapping
+    CHECK(tg::scale_by_pow2(1.0f, 400) > 1e38f);
+    CHECK(tg::scale_by_pow2(1.0f, -400) == 0.0f);
+}
+
+TEST("tg scalar - exponent_of / split_pow2")
+{
+    // the significand is in [1, 2), so the exponent is floor(log2(|x|)) — NOT frexp's [0.5, 1) convention
+    auto const eight = tg::split_pow2(8.0f);
+    CHECK(eight.significand == 1.0f);
+    CHECK(eight.exponent == 3);
+
+    auto const twelve = tg::split_pow2(12.0);
+    CHECK(twelve.significand == 1.5);
+    CHECK(twelve.exponent == 3);
+
+    CHECK(tg::exponent_of(1.0f) == 0);
+    CHECK(tg::exponent_of(0.5f) == -1);
+    CHECK(tg::exponent_of(1023.0f) == 9); // floor, so just under 1024 is still 9
+    CHECK(tg::exponent_of(1024.0f) == 10);
+
+    // the sign rides on the significand, leaving the exponent a pure magnitude
+    auto const negative = tg::split_pow2(-5.0);
+    CHECK(negative.significand == -1.25);
+    CHECK(negative.exponent == 2);
+
+    // the split is lossless: reassembling returns the original value
+    for (auto const value : {1.0f, 0.1f, 1e20f, -3.75f, 1e-20f})
+    {
+        auto const split = tg::split_pow2(value);
+        CHECK(tg::scale_by_pow2(split.significand, split.exponent) == value);
+    }
+
+    // subnormals are normalized rather than reported with a zero exponent, which a raw exponent-field read would do
+    auto const subnormal = 1e-42f;
+    auto const split = tg::split_pow2(subnormal);
+    CHECK(split.significand >= 1.0f);
+    CHECK(split.significand < 2.0f);
+    CHECK(tg::scale_by_pow2(split.significand, split.exponent) == subnormal);
 }
 
 TEST("tg scalar - round / floor / ceil")

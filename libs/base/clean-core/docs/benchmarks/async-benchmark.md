@@ -11,16 +11,18 @@ The single-thread number comes first on purpose: if driving a node is expensive,
 | work-stealing pool | [pool-benchmark.cc](../../tests/benchmarks/async/pool-benchmark.cc) | scaling across five fork-join shapes, and the per-node scheduling cost |
 | grain & fork floor | [grain-benchmark.cc](../../tests/benchmarks/async/grain-benchmark.cc) | at what leaf size fork-join overhead stops dominating, and what the second thread costs |
 
-The first three are `GUIDE_BENCHMARK`s, recording representative points via `nx::guide` for the perf gate.
-The single-thread and pool ones each also have a manual full-sweep twin that prints the whole table; the born-ready ladder has none, since its rows are cumulative and it always runs all of them.
-The fourth is manual-only: two of its three entry points emit CSV for the plot scripts beside it, and the third prints a round-trip table.
+The first three also carry a `PGO_BENCHMARK`, recording representative points via `nx::pgo` for the perf gate.
+Every file's human-facing entry points are `BENCHMARK`s, run with `uv run dev.py benchmark <match>`.
+The two sweeps in the fourth file feed the plot scripts beside it, which read the JSON sidecar rather than the console.
 None runs in the normal test sweep; every one is reachable by exact name.
 
 ## Method
 
-All four share [bench_util.hh](../../tests/benchmarks/bench_util.hh): an adaptive timer that repeats a pass until ~50 ms have elapsed.
-That is wrapped in a **median of 5** independent measurements, each with its own warmup pass.
-Results are XOR-folded into `bench::sink` so nothing is dead-code-eliminated.
+All four are nexus `BENCHMARK`s, so each figure is a median over hundreds of samples carrying a 95% confidence interval — see [benchmarking](../../../../../docs/guides/benchmarking.md).
+Results reach `nx::bench::sink` so nothing is dead-code-eliminated.
+
+**The numbers below predate that harness**, which medians hundreds of samples and brackets each with a confidence interval.
+They are re-measured when this write-up is next revised.
 
 Four constraints hold across the files, and breaking any of them corrupts the numbers silently rather than loudly.
 
@@ -153,13 +155,11 @@ Read the `w=1` line first — one worker plus the participating caller is the mi
 
 ## Running them
 
-The guide benchmarks and their full-sweep twins are excluded from normal sweeps; an exact (non-wildcard) name runs a test regardless of bucket.
+The PGO benchmarks and their full-sweep twins are excluded from normal sweeps; an exact (non-wildcard) name runs a test regardless of bucket.
 
 ```bash
-# guide points, recorded for the perf gate
-uv run dev.py test "bench-async (single-thread drive)" --preset release-clang
-uv run dev.py test "bench-async born-ready decomposition" --preset release-clang
-uv run dev.py test "bench-async-pool (work-stealing)" --preset release-clang
+# every table in every file
+uv run dev.py benchmark "bench-async" --timeout 0
 
 # the human-facing tables
 uv run dev.py --mirror-test-output test "bench-async (single-thread drive - full sweep)"
@@ -170,9 +170,9 @@ The grain sweeps run for minutes, so `--timeout 0` is not optional — `dev.py` 
 Either drive them directly, or let the plot scripts do it and chart the result:
 
 ```bash
-uv run dev.py --mirror-test-output test "bench-async-grain (sweep)" --preset release-clang --timeout 0
-uv run dev.py --mirror-test-output test "bench-async-fork-floor (thread sweep)" --preset release-clang --timeout 0
-uv run dev.py --mirror-test-output test "bench-async-latency (round-trip)" --preset release-clang
+uv run dev.py benchmark "bench-async-grain - grain x size sweep" --timeout 0
+uv run dev.py benchmark "bench-async-grain - fork floor thread sweep" --timeout 0
+uv run dev.py benchmark "bench-async-grain - drive round-trip"
 
 uv run libs/base/clean-core/tests/benchmarks/async/grain-plot.py
 uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py
@@ -180,7 +180,7 @@ uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py
 
 Each plot script saves its raw stdout next to the PNGs, so `--input raw.txt` re-plots a capture for free.
 
-Three disassembly probes are pinned symbols kept alive by their guide benchmarks — two on the born-ready ladder, one on the driven leaf:
+Three disassembly probes are pinned symbols kept alive by their PGO benchmarks — two on the born-ready ladder, one on the driven leaf:
 
 ```bash
 uv run dev.py assembly show make_async_lazy_probe          # cold lazy node: must show exactly ONE alloc path
@@ -192,4 +192,4 @@ uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe
 
 `--skip 2` on the driven leaf is not optional: the first enqueue grows the scheduler's queue vector from zero capacity, a real allocator call the reused-scheduler steady state never pays.
 
-Use a `release` preset and an otherwise-idle machine, and discard the first post-build run — see [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
+Use a `release` preset and an otherwise-idle machine, and discard the first post-build run — see [docs/guides/benchmarking.md](../../../../../docs/guides/benchmarking.md).

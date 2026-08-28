@@ -4,10 +4,10 @@ Mirrors the coverage pipeline's shape (captured steps, JSON sidecars) but for
 `-fprofile-generate` / `-fprofile-use`:
 
   instrument: build the *-pgo-generate preset (SC_PGO_GENERATE → -fprofile-generate)
-  train:      run the guide benchmarks on it with LLVM_PROFILE_FILE → *.profraw,
+  train:      run the PGO benchmarks on it with LLVM_PROFILE_FILE → *.profraw,
               then `llvm-profdata merge` → build/pgo/pgo.profdata
   optimize:   build the *-pgo-use preset (SC_PGO_USE consumes that profile)
-  measure:    run the guide benchmarks on baseline (release) and pgo-use, diff the
+  measure:    run the PGO benchmarks on baseline (release) and pgo-use, diff the
               recorded metrics into a speedup table
 
 The merged profile lands at a stable source-relative path (build/pgo/pgo.profdata)
@@ -68,10 +68,10 @@ def pgo_train(
     gen_preset: Preset, binary_names: list[str], *, root: Path,
     timeout: float | None = None, mirror: bool = False, verbose: bool = False,
 ) -> dict:
-    """Run the guide benchmarks on the instrumented build and merge the profile.
+    """Run the PGO benchmarks on the instrumented build and merge the profile.
 
     Cleans the profraw directory first so a stale run can't pollute the merge,
-    drives every test binary's guide-benchmark bucket with a distinct
+    drives every test binary's pgo-benchmark bucket with a distinct
     LLVM_PROFILE_FILE, then `llvm-profdata merge -sparse` into build/pgo/pgo.profdata.
     Raises PgoError if llvm-profdata is missing or no profraw was produced.
     """
@@ -95,8 +95,8 @@ def pgo_train(
     profile.parent.mkdir(parents=True, exist_ok=True)
     if not raws:
         raise PgoError(
-            f"no *.profraw produced under {profraw} — the instrumented binaries ran no guide benchmarks "
-            f"(add a GUIDE_BENCHMARK), or instrumentation is off (is this a *-pgo-generate preset?)"
+            f"no *.profraw produced under {profraw} — the instrumented binaries ran no PGO benchmarks "
+            f"(add a PGO_BENCHMARK), or instrumentation is off (is this a *-pgo-generate preset?)"
         )
 
     merge = run_step(
@@ -136,7 +136,7 @@ def pgo_measure(
     build_first: bool = True, timeout: float | None = None,
     mirror: bool = False, verbose: bool = False,
 ) -> dict:
-    """Run the guide benchmarks on baseline + pgo-use and diff the recorded metrics.
+    """Run the PGO benchmarks on baseline + pgo-use and diff the recorded metrics.
 
     With `build_first`, both presets are built incrementally so a standalone `pgo measure` works; the pgo-use build needs the profile to already exist.
     Returns {ok, baseline_preset, pgo_preset, metrics, baseline_count, pgo_count}.

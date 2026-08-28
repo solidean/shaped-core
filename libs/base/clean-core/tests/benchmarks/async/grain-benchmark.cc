@@ -13,6 +13,10 @@
 //
 // How to read the output, and the fork floor its small-n end runs into, are in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 //
+// Every sweep runs on a pool of `default_worker_count()` workers, which is hardware concurrency MINUS ONE.
+// Driving makes the calling thread participate as a worker, so P workers would put P+1 threads on P cores and measure the oversubscription rather than the grain.
+// So the pool width is the run header's core count less one, which is why it is not reported per point.
+//
 // Three constraints that are not obvious and will quietly corrupt the numbers if broken:
 //
 // * `mix` must not be affine.
@@ -24,22 +28,21 @@
 //   One more member spills it into a heap-boxed cc::unique_function, putting an allocation in every task and making this a benchmark of malloc.
 //   It is written on the driving thread before the root is submitted and only read afterwards, so the pool's own submit/steal synchronization publishes it.
 // * One pool for the entire sweep.
-//   Constructing one is ~100 us of thread spawning, and per-point construction would land inside measure_units_per_sec's adaptive loop and dominate every short pass.
+//   Constructing one is ~100 us of thread spawning, and per-point construction would land inside the harness's sampling loop and dominate every short pass.
 //
 // Only grain <= n is measured: a grain above n never splits, so those points would all duplicate the single-leaf curve.
 // Each grain line therefore starts at x == grain.
 
-#include "../bench_util.hh"
-
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/thread.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/test.hh>
 
-#include <cstdio>
 #include <type_traits>
 
 using cc::i32;
@@ -187,43 +190,52 @@ cc::vector<i32> make_random(isize n)
     return v;
 }
 
-// One CSV row per (case, n, grain), prefixed so it survives whatever else lands on stdout -- grain-plot.py greps for the marker rather than trying to bound a table.
-// Flushed per row so a long sweep shows progress.
-void emit(char const* name, isize n, isize grain, double ns_per_elem)
-{
-    std::printf("GRAINCSV %s,%lld,%lld,%.6f\n", name, (long long)n, (long long)grain, ns_per_elem);
-    std::fflush(stdout);
-}
+/// What one sweep point is allowed to cost.
+///
+/// A point here is one of several hundred, so it gets 20 ms of samples after 10 ms of warmup rather than the default
+/// half second -- dozens of batches still stand behind every median, and the whole sweep stays near a minute.
+/// Counters are off for the same reason: an extra pass per point buys nothing a sweep is asking about.
+///
+/// `no_baseline` because a sweep has none.
+/// Grain 1 at n=1 and grain 8192 at n=1M are different questions rather than two answers to one, so a comparison
+/// against whichever ran first would be noise with a percent sign on it.
+///
+/// 10% is this workload's honest precision, not a relaxed standard.
+/// Every point drives a real thread pool, so a point's cost includes whatever the OS scheduler did during it, and no
+/// amount of sampling averages that down to the 2% default.
+/// Asking for 2% here buys a page of warnings saying so and no better numbers.
+/// The curves this sweep draws span four decades on a log axis, where 10% is a marker's width.
+constexpr auto sweep_config = nx::bench::run_config{
+    .min_time_secs = 0.02,
+    .max_time_secs = 0.5,
+    .min_samples = 8,
+    .target_relative_error = 0.10,
+    .warmup_time_secs = 0.01,
+    .measure_counters = false,
+    .no_baseline = true,
+};
 
-void run_all()
+void run_sweep()
 {
-    // Hardware concurrency MINUS ONE: driving makes this thread participate as a worker, so P workers
-    // would put P+1 threads on P cores and measure the oversubscription rather than the grain.
-    int const p = cc::async_thread_pool::default_worker_count();
-    std::printf("\n### cc::async_thread_pool grain sweep (median of 5, %d workers + this thread) ###\n", p);
-    std::printf("# ns per input element; grain <= n only; one pool reused across every point\n");
-
-    cc::async_thread_pool pool(p);
+    cc::async_thread_pool pool(cc::async_thread_pool::default_worker_count());
     auto data = make_random(max_n);
     g_data = data.data();
 
-    std::printf("GRAINCSV case,n,grain,ns_per_elem\n");
-
+    // `<case> n=<n> grain=<g>` is the contract with grain-plot.py, which reads the JSON sidecar rather than stdout.
     for (isize grain = 1; grain <= max_grain; grain *= 2)
     {
         g_grain = grain;
         for (isize n = grain; n <= max_n; n *= 2)
         {
             auto const rg = range{.off = 0, .count = i32(n)};
-            double const ns = 1e9
-                            / bench::median_units_per_sec(double(n),
-                                                          [&]
-                                                          {
-                                                              auto root = async_pfor(rg);
-                                                              pool.participate_until_ready(*root);
-                                                              return u64(g_data[0]);
-                                                          });
-            emit("pfor", n, grain, ns);
+            nx::bench::run(cc::format("pfor n={} grain={}", n, grain), sweep_config,
+                           [&](nx::bench::iteration& it)
+                           {
+                               auto root = async_pfor(rg);
+                               pool.participate_until_ready(*root);
+                               nx::bench::sink(g_data[0]);
+                               it.items(n);
+                           });
         }
     }
 
@@ -233,20 +245,16 @@ void run_all()
         for (isize n = grain; n <= max_n; n *= 2)
         {
             auto const rg = range{.off = 0, .count = i32(n)};
-            double const ns = 1e9
-                            / bench::median_units_per_sec(double(n),
-                                                          [&]
-                                                          {
-                                                              auto root = async_reduce(rg);
-                                                              pool.participate_until_ready(*root);
-                                                              return u64(*root->try_value());
-                                                          });
-            emit("reduce", n, grain, ns);
+            nx::bench::run(cc::format("reduce n={} grain={}", n, grain), sweep_config,
+                           [&](nx::bench::iteration& it)
+                           {
+                               auto root = async_reduce(rg);
+                               pool.participate_until_ready(*root);
+                               nx::bench::sink(*root->try_value());
+                               it.items(n);
+                           });
         }
     }
-
-    std::printf("\nPlot it: uv run libs/base/clean-core/tests/benchmarks/async/grain-plot.py\n");
-    std::fflush(stdout);
 }
 
 // The fork floor: what does the SECOND thread cost?
@@ -255,19 +263,18 @@ void run_all()
 // That plateau, not per-node cost, is what makes small graphs expensive, and it should be the pool waking a worker to take a published sibling.
 //
 // This sweeps the two axes that tell those apart, at grain 1 so every element is its own node:
-//   pool size 1..8 — a FIXED handoff cost stays flat here, whereas a contention effect grows.
-//   n 1..32        — how the floor amortizes as the graph gets real work to do.
+//   pool size 1..8 -- a FIXED handoff cost stays flat here, whereas a contention effect grows.
+//   n 1..32        -- how the floor amortizes as the graph gets real work to do.
 //
 // Read the w=1 line first: one worker plus the participating caller is the minimum fork, so it is the floor's floor.
 // Anything above it that grows with w is the pool getting in its own way.
+//
+// No items are declared here, deliberately.
+// The figure wanted is the cost of the whole pass rather than a per-element one, and the median IS that.
 void run_fork_floor()
 {
     int const p = cc::recommended_worker_count();
     int const w_max = p < floor_max_workers ? p : floor_max_workers;
-    std::printf("\n### fork floor: parallel-for, grain 1 (median of 5, %d workers max, %d hardware threads) ###\n",
-                w_max, p);
-    std::printf("# total ns per pass; one pool per worker count, reused across that count's n sweep\n");
-    std::printf("FLOORCSV workers,n,ns_total\n");
 
     auto data = make_random(floor_max_n);
     g_data = data.data();
@@ -279,22 +286,15 @@ void run_fork_floor()
         for (isize n = 1; n <= floor_max_n; ++n)
         {
             auto const rg = range{.off = 0, .count = i32(n)};
-            // units = 1 pass, so this reads back as total ns for the whole graph rather than per element
-            double const ns = 1e9
-                            / bench::median_units_per_sec(1.0,
-                                                          [&]
-                                                          {
-                                                              auto root = async_pfor(rg);
-                                                              pool.participate_until_ready(*root);
-                                                              return u64(g_data[0]);
-                                                          });
-            std::printf("FLOORCSV %d,%lld,%.3f\n", w, (long long)n, ns);
-            std::fflush(stdout);
+            nx::bench::run(cc::format("w={} n={}", w, n), sweep_config,
+                           [&]
+                           {
+                               auto root = async_pfor(rg);
+                               pool.participate_until_ready(*root);
+                               nx::bench::sink(g_data[0]);
+                           });
         }
     }
-
-    std::printf("\nPlot it: uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py\n");
-    std::fflush(stdout);
 }
 
 // Why every grain line in the sweep converges on the same cost at small n: that is not per-node cost, since a node is ~50-100 ns inline.
@@ -303,55 +303,43 @@ void run_fork_floor()
 // Two context switches would be a constant, whereas contention on the shared injection mutex grows with the number of idle workers scanning it.
 void run_latency()
 {
-    std::printf("\n=== drive round-trip, one trivial node (median of 5) ===\n");
-    std::printf("%-10s %15s\n", "workers", "ns/roundtrip");
-    std::printf("%-10s %15s\n", "-------", "------------");
-
     int const p = cc::recommended_worker_count();
     for (int w : {1, 2, 4, 8, 16, 32, 64})
     {
         if (w > p)
             continue;
         cc::async_thread_pool pool(w);
-        double const ns
-            = 1e9
-            / bench::median_units_per_sec(1.0,
-                                          [&]
-                                          {
-                                              auto root = cc::make_async_lazy<i64>([](cc::async_context<i64>& actx)
-                                                                                   { return actx.success(i64(1)); });
-                                              pool.participate_until_ready(*root);
-                                              return u64(*root->try_value());
-                                          });
-        std::printf("%-10d %15.1f\n", w, ns);
-        std::fflush(stdout);
+        nx::bench::run(
+            cc::format("w={}", w), {.no_baseline = true},
+            [&]
+            {
+                auto root = cc::make_async_lazy<i64>([](cc::async_context<i64>& actx) { return actx.success(i64(1)); });
+                pool.participate_until_ready(*root);
+                nx::bench::sink(*root->try_value());
+            });
     }
 }
 } // namespace
 
 // Grain x size sweep for parallel-for and reduction.
-// ~5 minutes, so --timeout 0 is not optional: dev.py kills a test binary at 60 s by default and would cut the table off mid-sweep.
-// Run by exact name:
-//   uv run dev.py --mirror-test-output test "bench-async-grain (sweep)" --preset release-clang --timeout 0
+// ~1 min, so `--timeout 0` is not optional: dev.py kills a benchmark binary at 60 s by default and would cut the sweep off partway through.
+//   uv run dev.py benchmark "bench-async-grain - grain x size sweep" --timeout 0
 // or let grain-plot.py drive it and chart the result.
-TEST("bench-async-grain (sweep)", nx::config::manual)
+BENCHMARK("bench-async-grain - grain x size sweep")
 {
-    run_all();
+    run_sweep();
 }
 
 // The floor every grain line in the sweep hits at small n, isolated.
-// Run by exact name:
-TEST("bench-async-latency (round-trip)", nx::config::manual)
-{
-    run_latency();
-}
-
-// Does the fork floor scale with pool size?
-// ~4 min, so --timeout 0 again.
-// Run by exact name:
-TEST("bench-async-fork-floor (thread sweep)", nx::config::manual)
+BENCHMARK("bench-async-grain - fork floor thread sweep")
 {
     run_fork_floor();
+}
+
+// The foreign-thread round trip on its own, against pool size.
+BENCHMARK("bench-async-grain - drive round-trip")
+{
+    run_latency();
 }
 
 #endif // CC_HAS_THREADS

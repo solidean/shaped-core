@@ -6,20 +6,19 @@
 // and the level worth paying for moves with them.
 //
 // Run it with
-//   uv run dev.py test "bench-compress" --preset release-clang --timeout 0 --manual
-
-#include "bench_util.hh"
+//   uv run dev.py benchmark "bench-compress"
 
 #include <clean-core/bytes/compression.hh>
 #include <clean-core/bytes/compression_dictionary.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/bench/run.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/test.hh>
-
-#include <cstdio>
 
 using namespace cc::primitive_defines;
 
@@ -78,82 +77,72 @@ using algo = cc::compression_algorithm;
     return out;
 }
 
-struct row
+/// One config, measured both ways.
+///
+/// Two loops rather than one so compression and decompression compare against each other in the table, and the
+/// compression RATIO rides along as a recorded quantity: it is the number this benchmark exists for, and it is a
+/// property of the payload and the config rather than of the clock.
+void measure(cc::string_view label,
+             cc::span<byte const> payload,
+             cc::compression_config cfg,
+             nx::bench::run_config const& run_cfg)
 {
-    cc::string label;
-    isize original = 0;
-    isize compressed = 0;
-    double compress_mb_s = 0;
-    double decompress_mb_s = 0;
-};
-
-[[nodiscard]] row measure(cc::string_view label, cc::span<byte const> payload, cc::compression_config cfg)
-{
-    auto out = row{.label = cc::string(label), .original = payload.size()};
-
     auto compressor = cc::compressor(cfg);
     auto const blob = compressor.compress(payload);
-    out.compressed = blob.size();
 
-    auto const mb = double(payload.size()) / (1024.0 * 1024.0);
+    auto const ratio = blob.size() > 0 ? f64(payload.size()) / f64(blob.size()) : 0.0;
+    auto const payload_bytes = f64(payload.size());
 
-    out.compress_mb_s = bench::measure_units_per_sec(mb,
-                                                     [&]
-                                                     {
-                                                         auto const b = compressor.compress(payload);
-                                                         return u64(b.size());
-                                                     });
+    nx::bench::run(cc::format("{} compress", label), run_cfg,
+                   [&](nx::bench::iteration& it)
+                   {
+                       auto const b = compressor.compress(payload);
+                       nx::bench::sink(b.size());
+
+                       it.record("bytes", cc::rec::unit_bytes, payload_bytes);
+                       it.record("ratio", nx::bench::unit_speedup, ratio);
+                   });
 
     auto decompressor
         = cc::decompressor({.algorithm = cfg.algorithm, .framing = cfg.framing, .dictionary = cfg.dictionary});
-    out.decompress_mb_s = bench::measure_units_per_sec(mb,
-                                                       [&]
-                                                       {
-                                                           auto const b = decompressor.decompress(blob);
-                                                           return u64(b.has_value() ? b.value().size() : 0);
-                                                       });
 
-    return out;
+    nx::bench::run(cc::format("{} decompress", label), run_cfg,
+                   [&](nx::bench::iteration& it)
+                   {
+                       auto const b = decompressor.decompress(blob);
+                       nx::bench::sink(b.has_value() ? b.value().size() : 0);
+
+                       it.record("bytes", cc::rec::unit_bytes, payload_bytes);
+                       it.record("ratio", nx::bench::unit_speedup, ratio);
+                   });
 }
 
-void print_table(cc::string_view title, cc::span<row const> rows)
-{
-    // cc::string is not null-terminated, so every printf of one goes through the %.*s form.
-    std::printf("\n%.*s\n", int(title.size()), title.data());
-    std::printf("  %-26s %10s %10s %8s %12s %12s\n", "config", "original", "packed", "ratio", "comp MB/s", "decomp MB/s");
-    for (auto const& r : rows)
-    {
-        auto const ratio = r.compressed > 0 ? double(r.original) / double(r.compressed) : 0.0;
-        std::printf("  %-26.*s %10lld %10lld %7.2fx %12.1f %12.1f\n", int(r.label.size()), r.label.data(),
-                    (long long)r.original, (long long)r.compressed, ratio, r.compress_mb_s, r.decompress_mb_s);
-    }
-}
+/// Sweeps compare points that measure different amounts of work, so they carry no baseline.
+constexpr auto sweep_config = nx::bench::run_config{.min_time_secs = 0.05, .max_samples = 128, .no_baseline = true};
 
-void sweep_levels(cc::string_view title, cc::span<byte const> payload)
+void sweep_levels(cc::string_view shape, cc::span<byte const> payload)
 {
-    auto rows = cc::vector<row>();
-
     for (auto const level : {-5, -1, 0, 3, 9, 15, 19})
-        rows.push_back(measure(cc::format("zstd {}", level), payload, {.algorithm = algo::zstd, .level = level}));
+        measure(cc::format("{} zstd {}", shape, level), payload, {.algorithm = algo::zstd, .level = level}, sweep_config);
 
     for (auto const level : {-8, -1, 0, 6, 12})
-        rows.push_back(measure(cc::format("lz4 {}", level), payload, {.algorithm = algo::lz4, .level = level}));
+        measure(cc::format("{} lz4 {}", shape, level), payload, {.algorithm = algo::lz4, .level = level}, sweep_config);
 
     // Deflate is here to be interoperable rather than to win, so what the sweep is for is knowing the size of the gap.
     for (auto const level : {1, 6, 9})
-        rows.push_back(measure(cc::format("deflate {}", level), payload, {.algorithm = algo::deflate, .level = level}));
-
-    print_table(title, rows);
+        measure(cc::format("{} deflate {}", shape, level), payload, {.algorithm = algo::deflate, .level = level},
+                sweep_config);
 }
 } // namespace
 
-TEST("bench-compress (level sweep over our payload shapes)", nx::config::manual)
+// The two payload shapes shaped-core actually stores: ~256 kB of JSON-ish text, and 1 MB of structured binary.
+BENCHMARK("bench-compress - level sweep over our payload shapes")
 {
-    sweep_levels("document-sized vdoc records (~256 kB of JSON-ish text)", vdoc_document(4000));
-    sweep_levels("bytecode-like (1 MB of structured binary, not text)", bytecode_like(1 << 20, 0xB17EC0DE));
+    sweep_levels("json-ish", vdoc_document(4000));
+    sweep_levels("bytecode", bytecode_like(1 << 20, 0xB17EC0DE));
 }
 
-TEST("bench-compress (small blobs, with and without a dictionary)", nx::config::manual)
+BENCHMARK("bench-compress - small blobs, with and without a dictionary")
 {
     // The case a dictionary exists for, and the one where the level barely matters: a few hundred bytes is too short
     // for the codec to learn anything from before it ends.
@@ -173,40 +162,35 @@ TEST("bench-compress (small blobs, with and without a dictionary)", nx::config::
     // One representative record, measured both ways.
     // The interesting number is the ratio rather than the throughput: at this size the per-call overhead dominates
     // either way.
+    // These four ARE comparable to one another — one payload, four configs — so they keep the baseline column.
     auto const& one = samples[7];
-    auto rows = cc::vector<row>();
+    constexpr auto cfg = nx::bench::run_config{.min_time_secs = 0.05, .max_samples = 128};
 
-    rows.push_back(measure("zstd 3, no dict", one, {.algorithm = algo::zstd, .level = 3}));
-    rows.push_back(measure("zstd 3, dict", one, {.algorithm = algo::zstd, .level = 3, .dictionary = &trained.value()}));
-    rows.push_back(measure("zstd 19, dict", one, {.algorithm = algo::zstd, .level = 19, .dictionary = &trained.value()}));
-    rows.push_back(measure("lz4 0, no dict", one, {.algorithm = algo::lz4}));
-
-    print_table(cc::format("one ~90 byte vdoc record, dictionary trained on {} of them", corpus_size), rows);
+    measure("zstd 3, no dict", one, {.algorithm = algo::zstd, .level = 3}, cfg);
+    measure("zstd 3, dict", one, {.algorithm = algo::zstd, .level = 3, .dictionary = &trained.value()}, cfg);
+    measure("zstd 19, dict", one, {.algorithm = algo::zstd, .level = 19, .dictionary = &trained.value()}, cfg);
+    measure("lz4 0, no dict", one, {.algorithm = algo::lz4}, cfg);
 }
 
-TEST("bench-compress (framing overhead on small blobs)", nx::config::manual)
+BENCHMARK("bench-compress - framing overhead on small blobs")
 {
     // What `raw` framing is actually worth, which is the whole reason it is an axis rather than an option nobody uses.
-    auto rows = cc::vector<row>();
-
     for (auto const records : {isize(1), isize(4), isize(16)})
     {
         auto const payload = vdoc_document(records);
 
-        rows.push_back(measure(cc::format("zstd frame  {} rec", records), payload, {.algorithm = algo::zstd}));
-        rows.push_back(measure(cc::format("zstd raw    {} rec", records), payload,
-                               {.algorithm = algo::zstd, .framing = cc::compression_framing::raw}));
-        rows.push_back(measure(cc::format("lz4 frame   {} rec", records), payload, {.algorithm = algo::lz4}));
-        rows.push_back(measure(cc::format("lz4 raw     {} rec", records), payload,
-                               {.algorithm = algo::lz4, .framing = cc::compression_framing::raw}));
+        measure(cc::format("zstd frame {} rec", records), payload, {.algorithm = algo::zstd}, sweep_config);
+        measure(cc::format("zstd raw {} rec", records), payload,
+                {.algorithm = algo::zstd, .framing = cc::compression_framing::raw}, sweep_config);
+        measure(cc::format("lz4 frame {} rec", records), payload, {.algorithm = algo::lz4}, sweep_config);
+        measure(cc::format("lz4 raw {} rec", records), payload,
+                {.algorithm = algo::lz4, .framing = cc::compression_framing::raw}, sweep_config);
 
         // Deflate is the one algorithm with three wrappers rather than two, so its framing row has an extra entry.
-        rows.push_back(measure(cc::format("deflate gzip {} rec", records), payload, {.algorithm = algo::deflate}));
-        rows.push_back(measure(cc::format("deflate zlib {} rec", records), payload,
-                               {.algorithm = algo::deflate, .framing = cc::compression_framing::zlib}));
-        rows.push_back(measure(cc::format("deflate raw  {} rec", records), payload,
-                               {.algorithm = algo::deflate, .framing = cc::compression_framing::raw}));
+        measure(cc::format("deflate gzip {} rec", records), payload, {.algorithm = algo::deflate}, sweep_config);
+        measure(cc::format("deflate zlib {} rec", records), payload,
+                {.algorithm = algo::deflate, .framing = cc::compression_framing::zlib}, sweep_config);
+        measure(cc::format("deflate raw {} rec", records), payload,
+                {.algorithm = algo::deflate, .framing = cc::compression_framing::raw}, sweep_config);
     }
-
-    print_table("frame vs raw, small payloads", rows);
 }

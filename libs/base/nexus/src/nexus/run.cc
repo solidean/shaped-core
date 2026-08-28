@@ -9,13 +9,16 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/args/ambient.hh>
+#include <nexus/bench/environment.hh>
+#include <nexus/bench/report.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
+#include <nexus/tests/export/bench_json.hh>
 #include <nexus/tests/export/catch2.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
-#include <nexus/tests/export/perf_json.hh>
+#include <nexus/tests/export/pgo_json.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
@@ -186,11 +189,18 @@ int nx::run(int argc, char** argv)
     // Check if any tests were scheduled
     if (schedule.instances.empty())
     {
-        // A guide-benchmark sweep over a binary that has none is not an error: `dev.py pgo` runs
-        // --guide-benchmarks across every test binary, and most contain no guide benchmarks.
-        if (config.selected_bucket == nx::config::test_bucket::guide_benchmark)
+        // A pgo-benchmark sweep over a binary that has none is not an error: `dev.py pgo` runs
+        // --pgo-benchmarks across every test binary, and most contain no PGO benchmarks.
+        if (config.selected_bucket == nx::config::test_bucket::pgo_benchmark)
         {
-            cc::println("No guide benchmarks in this binary");
+            cc::println("No PGO benchmarks in this binary");
+            return 0;
+        }
+
+        // Same for benchmarks: `dev.py benchmark` probes every binary to resolve a name, and most carry none.
+        if (config.selected_bucket == nx::config::test_bucket::benchmark)
+        {
+            cc::println("No benchmarks in this binary");
             return 0;
         }
 
@@ -213,11 +223,49 @@ int nx::run(int argc, char** argv)
         cc::println();
     }
 
+    // A benchmark number is a statement about a machine, so the machine goes first — and it is meant to be copied
+    // along with the result rather than read once.
+    // Keyed on what was SCHEDULED rather than on which bucket was swept: naming a benchmark exactly pulls it in
+    // across the bucket rule, and that run wants the machine described just as much as a sweep does.
+    auto has_benchmarks = false;
+    for (auto const& instance : schedule.instances)
+        if (instance.declaration != nullptr
+            && instance.declaration->test_config.bucket == nx::config::test_bucket::benchmark)
+            has_benchmarks = true;
+
+    auto benchmark_load_before = nx::bench::load_sample{};
+    auto benchmark_pinned = false;
+    if (has_benchmarks)
+    {
+        auto const& sys = nx::bench::describe_system();
+        cc::println("host  {} {}  |  {}  |  {} logical cores  |  build {}  CC_ASSERT={}{}", sys.os, sys.arch, sys.cpu,
+                    sys.logical_cores, sys.build, sys.assertions_enabled ? "on" : "off",
+                    sys.is_provisional ? "  (system info provisional)" : "");
+
+        if (config.benchmark_pin)
+        {
+            benchmark_pinned = nx::bench::try_pin_to_core(0);
+            cc::println("pin   requested, {}", benchmark_pinned ? "achieved on core 0" : "REFUSED by the platform");
+        }
+
+        // The counters backend prints its own one-time notice when the PMU is unreachable, naming the grant script
+        // to run — so nothing is said here rather than saying it twice and worse.
+
+        // The first reading is what the second is a delta against, so this one only primes the OS counters.
+        benchmark_load_before = nx::bench::sample_load();
+    }
+
     // Stand the recorder up for the WHOLE run, never per test.
     // Per-test attribution rides the ambient chain instead, so a test that records nothing costs nothing, and a test
     // asking what it recorded gets an answer without anyone parsing history back to the start of the process.
     if (!config.no_recording)
+    {
         nx::impl::begin_run_recording();
+
+        // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
+        // what happened BEFORE the interesting sample as much as the sample itself.
+        nx::impl::begin_run_capture(config.benchmark_rec_file);
+    }
 
     // Execute the scheduled tests
     auto execution = execute_tests(schedule, config);
@@ -236,12 +284,12 @@ int nx::run(int argc, char** argv)
                          written.error().to_string());
     }
 
-    // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::guide). Also additive.
-    if (!config.perf_json_file.empty())
+    // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::pgo). Also additive.
+    if (!config.pgo_json_file.empty())
     {
-        auto const written = write_report_file(config.perf_json_file, write_perf_json(suite_name(), execution));
+        auto const written = write_report_file(config.pgo_json_file, write_pgo_json(suite_name(), execution));
         if (!written.has_value())
-            cc::eprintln("Error: could not write perf JSON file: {}: {}", config.perf_json_file,
+            cc::eprintln("Error: could not write perf JSON file: {}: {}", config.pgo_json_file,
                          written.error().to_string());
     }
 
@@ -252,7 +300,56 @@ int nx::run(int argc, char** argv)
         return execution.count_failed_tests() > 0 ? 1 : 0;
     }
 
-    // Print any metrics recorded via nx::guide (guide benchmarks). Console-only mirror of the perf JSON sidecar.
+    if (has_benchmarks)
+    {
+        auto const after = nx::bench::sample_load();
+
+        // A clock ratio that moved means the frequency changed or contention appeared, which is exactly the condition
+        // worth warning about — and it measures the core the benchmark ran on rather than the machine as a whole.
+        auto const drift
+            = benchmark_load_before.ticks_per_ns > 0
+                ? (after.ticks_per_ns - benchmark_load_before.ticks_per_ns) / benchmark_load_before.ticks_per_ns
+                : 0.0;
+
+        cc::println();
+        cc::print(cc::format("load  clock {:.3f} -> {:.3f} ticks/ns ({:+.1f}%)", benchmark_load_before.ticks_per_ns,
+                             after.ticks_per_ns, drift * 100));
+        if (after.cpu_busy_fraction >= 0)
+            cc::print(cc::format("  |  machine {:.0f}% busy", after.cpu_busy_fraction * 100));
+        cc::println();
+
+        if (benchmark_pinned)
+            nx::bench::unpin();
+    }
+
+    // Write the benchmark sidecar if requested.
+    // Additive, like the reports above it.
+    if (!config.benchmark_json_file.empty())
+    {
+        auto const written = write_report_file(config.benchmark_json_file, write_bench_json(suite_name(), execution));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write benchmark JSON file: {}: {}", config.benchmark_json_file,
+                         written.error().to_string());
+    }
+
+    // Print what the benchmarks measured.
+    //
+    // One report per BENCHMARK rather than one for the whole run: the loops inside one body are what get compared, and
+    // a table spanning two benchmarks would invite a comparison between numbers measured minutes apart.
+    {
+        auto style = nx::bench::report_style::for_console();
+        style.verbose = config.benchmark_verbose;
+        for (auto const& exec : execution.executions)
+        {
+            if (exec.benchmarks.empty())
+                continue;
+
+            cc::println();
+            cc::print(nx::bench::format_report(exec.instance.declaration->name, exec.benchmarks, style));
+        }
+    }
+
+    // Print any metrics recorded via nx::pgo (PGO benchmarks). Console-only mirror of the perf JSON sidecar.
     {
         bool has_metrics = false;
         for (auto const& exec : execution.executions)
@@ -268,9 +365,11 @@ int nx::run(int argc, char** argv)
             for (auto const& exec : execution.executions)
                 for (auto const& metric : exec.metrics)
                 {
-                    char const* const dir = metric.higher_is_better ? "(higher is better)" : "(lower is better)";
-                    cc::println("  {} | {} = {} {} {}", exec.instance.declaration->name, metric.name, metric.value,
-                                metric.unit, dir);
+                    // Formatted through the unit, so a byte rate reads as 27.1 GiB/s rather than as eleven digits.
+                    // That is the payoff of a metric carrying a cc::rec::unit rather than a label.
+                    char const* const dir = metric.higher_is_better() ? "(higher is better)" : "(lower is better)";
+                    cc::println("  {} | {} = {} {}", exec.instance.declaration->name, metric.name,
+                                nx::bench::format_quantity(metric.value, metric.unit), dir);
                 }
         }
     }

@@ -19,7 +19,13 @@ add_library(nexus
     src/nexus/args/impl/suggest.cc
     src/nexus/rec.cc
     src/nexus/test.cc
-    src/nexus/guide.cc
+    src/nexus/pgo.cc
+    src/nexus/bench/barriers.cc
+    src/nexus/bench/calibration.cc
+    src/nexus/bench/environment.cc
+    src/nexus/bench/report.cc
+    src/nexus/bench/run.cc
+    src/nexus/bench/statistics.cc
     src/nexus/bench/hardware_counters.cc
     src/nexus/tests/alias.cc
     src/nexus/tests/check.cc
@@ -31,7 +37,8 @@ add_library(nexus
     src/nexus/tests/export/xml.cc
     src/nexus/tests/export/catch2.cc
     src/nexus/tests/export/junit.cc
-    src/nexus/tests/export/perf_json.cc
+    src/nexus/tests/export/bench_json.cc
+    src/nexus/tests/export/pgo_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/runner.cc
@@ -69,8 +76,18 @@ target_sources(nexus
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
-    src/nexus/guide.hh
+    src/nexus/pgo.hh
     src/nexus/bench/fwd.hh
+    src/nexus/bench/barriers.hh
+    src/nexus/bench/calibration.hh
+    src/nexus/bench/environment.hh
+    src/nexus/bench/impl/platform_load.hh
+    src/nexus/bench/report.hh
+    src/nexus/bench/result.hh
+    src/nexus/bench/run.hh
+    src/nexus/bench/run_config.hh
+    src/nexus/bench/units.hh
+    src/nexus/bench/statistics.hh
     src/nexus/bench/hardware_counters.hh
     src/nexus/bench/bench.hh
     src/nexus/tests/alias.hh
@@ -86,7 +103,8 @@ target_sources(nexus
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
-    src/nexus/tests/export/perf_json.hh
+    src/nexus/tests/export/bench_json.hh
+    src/nexus/tests/export/pgo_json.hh
     src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh
@@ -119,7 +137,7 @@ target_link_libraries(nexus
     PUBLIC
     clean-core
     # nexus is a leaf: the harness sits on top of the libraries it tests, so babel::json writing the
-    # listing and perf sidecars is a dependency going DOWN, not an upward one.
+    # listing and pgo sidecars is a dependency going DOWN, not an upward one.
     #
     # babel-data rather than babel-serializer, and that constraint is nexus' rather than babel's: EVERY *-test binary
     # in the repo links nexus, so whatever nexus depends on is a tax the whole tree pays and a link every test binary
@@ -133,15 +151,18 @@ target_link_libraries(nexus
 # the runtime source of truth is always nx::bench::available_hw_counters().
 if(WIN32)
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_windows.cc)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/platform_load_windows.cc)
     # advapi32: the ETW control + real-time consumer APIs (StartTrace / TraceSetInformation / OpenTrace /
     # ProcessTrace / ControlTrace) plus the token APIs used to enable SeSystemProfilePrivilege.
     target_link_libraries(nexus PUBLIC advapi32)
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=1)
 elseif(LINUX)
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_linux.cc)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/platform_load_linux.cc)
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=1)
 else()
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_none.cc)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/platform_load_none.cc)
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=0)
 endif()
 
@@ -182,6 +203,11 @@ if(SC_BUILD_TESTS)
         tests/test-invocable-test.cc
         tests/test-alias-test.cc
         tests/test-typed-value-test.cc
+        tests/bench-barriers-test.cc
+        tests/bench-statistics-test.cc
+        tests/bench-run-test.cc
+        tests/bench-report-test.cc
+        tests/bench-self-benchmark.cc
         tests/bench-hardware-counters-test.cc
         tests/bench-cache-traversal-test.cc
         tests/fuzz-engine-test.cc

@@ -14,15 +14,27 @@
 //   3. an additivity check — the loop again with that many EXTRA hashes injected.
 // If (3) grows by (2), the isolated number composes and the share is real rather than arithmetic.
 //
+// **The control sits at the edge of what this measurement resolves, and runs disagree.**
+// Doubling the hashing has read both `~same` as (1) and around +9%, against an isolated (2) of well under a
+// millisecond on a 30 ms loop.
+// Read that as the answer to the standing question rather than as a number: a cost whose DOUBLING is this hard to
+// see is not one a profile of the loop would show either.
+// Tightening it would mean a quiet machine and a far longer run, which is what to do if the question is ever reopened.
+//
 // The medium comes from the conformance fixture, so "open" here is the same open the suite tests.
+// Each size and medium is its own table of three loops, and **the additivity check IS the comparison column**: the
+// injected row's percentage over the plain one is what the isolated hashing figure has to account for.
+//
 // Run e.g.
-//   uv run dev.py test "bench-vdoc-loop" --target versioned-document-file-test --preset release-clang --timeout 0
+//   uv run dev.py benchmark "bench-vdoc-loop" --timeout 0
 
 #include "../conformance/store_fixture.hh"
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
-#include <nexus/guide.hh>
+#include <nexus/bench/run.hh>
+#include <nexus/bench/units.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <versioned-document/op.hh>
 #include <versioned-document/op_builder.hh>
@@ -30,7 +42,6 @@
 #include <versioned-document/snapshot_document.hh>
 
 #include <chrono>
-#include <cstdio>
 
 using namespace cc::primitive_defines;
 using namespace vdoc::file;
@@ -43,13 +54,6 @@ using clock_type = std::chrono::steady_clock;
 [[nodiscard]] double seconds_since(clock_type::time_point t0)
 {
     return std::chrono::duration<double>(clock_type::now() - t0).count();
-}
-
-[[nodiscard]] double median_of(cc::vector<double> values)
-{
-    // Only the middle element has to end up where a full sort would put it, which sort_at does in O(n).
-    cc::sort_at(values, values.size() / 2);
-    return values[values.size() / 2];
 }
 
 /// A document of a realistic editing session: `ops` ops, each giving one new entity a handful of properties.
@@ -206,18 +210,60 @@ struct stage_times
     return seconds;
 }
 
+/// What one loop measurement is allowed to cost.
+///
+/// Unbatched, because a pass is milliseconds and each one needs its own freshly seeded medium: batching would time
+/// several passes as one span and there is nothing to amortize a clock over anyway.
+/// 5% rather than 2% is what a measurement crossing a filesystem can honestly claim.
+constexpr auto loop_config = nx::bench::run_config{
+    .min_time_secs = 0.3,
+    .max_time_secs = 3.0,
+    .min_samples = 8,
+    .target_relative_error = 0.05,
+    .warmup_time_secs = 0.05,
+    .batch = false,
+    .measure_counters = false,
+};
+
+/// Files each stage of a pass as a fraction of it.
+///
+/// Shares rather than absolute times: the pass total is already the median column, so a share recovers the absolute
+/// figure and puts five stages in five narrow columns instead of five wide ones.
+void record_stages(nx::bench::iteration& it, stage_times const& times)
+{
+    auto const whole = times.total();
+    if (whole <= 0)
+        return;
+
+    it.record("open", nx::bench::unit_cost_share, times.open / whole);
+    it.record("materialize", nx::bench::unit_cost_share, times.materialize / whole);
+    it.record("edit", nx::bench::unit_cost_share, times.edit / whole);
+    it.record("publish", nx::bench::unit_cost_share, times.publish / whole);
+    it.record("close", nx::bench::unit_cost_share, times.close / whole);
+}
+
 struct loop_measurement
 {
     isize ops = 0;
     isize properties = 0;
     isize payload_bytes = 0;
-    stage_times times;
-    double hashing_seconds = 0;
-    double additivity_delta = 0;
+    nx::bench::result loop;
+    nx::bench::result injected;
+    nx::bench::result hashing;
 };
 
-/// Seeds a document of `ops` ops, then measures the loop over it.
-[[nodiscard]] loop_measurement measure(store_impl const& impl, isize ops, isize edits, bool record)
+/// Seeds a document of `ops` ops, then measures the loop over it three ways.
+///
+/// The three rows are the three ways the header names, and they are in one table on purpose:
+///
+///   * `loop` is the baseline.
+///   * `loop + one extra hash round` re-hashes every loaded op once more, so its comparison column is the cost of
+///     exactly the work the loop already does — the additivity control.
+///   * `hashing alone` runs those same hashes over the same bytes with no loop around them.
+///
+/// If the second row's excess over the first matches the third row's median, the isolated figure composes and the
+/// share is a measurement rather than a ratio of two unrelated numbers.
+[[nodiscard]] loop_measurement measure(store_impl const& impl, cc::string_view label, isize ops, isize edits)
 {
     // The history is built ONCE, because building it is the expensive part and it is not what is being measured.
     auto seed = vdoc::op_graph();
@@ -227,6 +273,7 @@ struct loop_measurement
     // **Every pass gets its own medium, seeded identically.**
     // A pass appends its edits, and the loop is superlinear in document size — so reusing one medium would make each
     // pass slower than the last, and any delta between two series would measure that growth instead of the injection.
+    // It is PAUSED out of every pass below, which is the only reason a per-pass reseed is affordable at all.
     auto const seeded_medium = [&]
     {
         auto medium = impl.make_medium();
@@ -245,99 +292,100 @@ struct loop_measurement
     out.properties = seed.materialize(head).property_count();
     out.payload_bytes = mean_payload_bytes(seed, seeded);
 
-    auto opens = cc::vector<double>();
-    auto materializes = cc::vector<double>();
-    auto edits_s = cc::vector<double>();
-    auto publishes = cc::vector<double>();
-    auto closes = cc::vector<double>();
-    auto totals = cc::vector<double>();
-
     auto loaded = isize(0);
-    for (isize run = 0; run < 5; ++run)
+    auto const measure_pass = [&](cc::string_view name, isize extra_hashes)
     {
-        auto const medium = seeded_medium();
-        auto const times = run_loop(*medium, edits, 0, loaded);
-        opens.push_back(times.open);
-        materializes.push_back(times.materialize);
-        edits_s.push_back(times.edit);
-        publishes.push_back(times.publish);
-        closes.push_back(times.close);
-        totals.push_back(times.total());
-    }
+        return nx::bench::run(name, loop_config,
+                              [&](nx::bench::iteration& it)
+                              {
+                                  it.pause();
+                                  auto const medium = seeded_medium();
+                                  it.resume();
 
-    out.times = stage_times{.open = median_of(opens),
-                            .materialize = median_of(materializes),
-                            .edit = median_of(edits_s),
-                            .publish = median_of(publishes),
-                            .close = median_of(closes)};
-    auto const measured_total = median_of(totals);
+                                  auto const times = run_loop(*medium, edits, extra_hashes, loaded);
+                                  record_stages(it, times);
+                              });
+    };
 
-    out.hashing_seconds = seconds_hashing(seed, seeded, edits);
+    out.loop = measure_pass(cc::format("{} loop", label), 0);
+    out.injected = measure_pass(cc::format("{} loop + one extra hash round", label), 1);
 
-    // The control: the same loop, with every loaded op hashed a second time.
-    // If the loop grows by what that hashing costs alone, the isolated figure composes — and the shares below are a
-    // measurement rather than a ratio of two unrelated numbers.
-    auto injected = cc::vector<double>();
-    for (isize run = 0; run < 3; ++run)
-    {
-        auto const medium = seeded_medium();
-        injected.push_back(run_loop(*medium, edits, 1, loaded).total());
-    }
+    out.hashing = nx::bench::run(cc::format("{} hashing alone", label), loop_config,
+                                 [&] { nx::bench::sink(seconds_hashing(seed, seeded, edits)); });
 
-    out.additivity_delta = median_of(injected) - measured_total;
+    return out;
+}
+
+} // namespace
+
+// The representative size, recorded: an editing session's worth of history, saved once more.
+PGO_BENCHMARK("bench-vdoc-loop (open / edit / publish / close)")
+{
+    auto const impl = sqlite_impl();
+    if (!impl.is_available())
+        return; // SQLite was not compiled in, so there is no file to measure a loop against
+
+    auto const m = measure(impl, "sqlite", 2000, 50);
+
+    nx::pgo::report_time_for("loop-total", m.loop.time.median);
+    nx::pgo::report_time_for("op-hashing-total", m.hashing.time.median);
 
     // Two shares, because only the second is a number worth watching.
     // Against the whole loop hashing is invisible; against the OPEN — where the loader re-hashes every op it reads —
     // it is a real fraction, and it is the one that grows with history length.
-    auto const share_of_loop = 100.0 * out.hashing_seconds / measured_total;
-    auto const share_of_open = 100.0 * out.hashing_seconds / out.times.open;
+    auto const* const open_share = m.loop.find_quantity("open");
+    auto const share_of_loop = m.loop.time.median > 0 ? m.hashing.time.median / m.loop.time.median : 0.0;
+    auto const open_secs = open_share != nullptr ? open_share->per_iteration * m.loop.time.median : 0.0;
 
-    std::printf("%-10s ops=%5lld props=%6lld payload=%4lld B | loop %7.1f ms (open %6.1f, materialize %5.1f, edit "
-                "%7.1f, publish %6.1f, close %5.1f) | hashing %5.2f ms = %4.1f%% of loop, %4.1f%% of open | injected "
-                "+%5.2f ms\n",
-                impl.name.data(), (long long)out.ops, (long long)out.properties, (long long)out.payload_bytes,
-                measured_total * 1000, out.times.open * 1000, out.times.materialize * 1000, out.times.edit * 1000,
-                out.times.publish * 1000, out.times.close * 1000, out.hashing_seconds * 1000, share_of_loop,
-                share_of_open, out.additivity_delta * 1000);
-
-    if (record)
-    {
-        nx::guide::report_time_for("loop-total", measured_total);
-        nx::guide::report_time_for("loop-open", out.times.open);
-        nx::guide::report_time_for("loop-publish", out.times.publish);
-        nx::guide::report_time_for("op-hashing-total", out.hashing_seconds);
-        nx::guide::report_raw("hash-share-of-loop", share_of_loop, "%", /*higher_is_better =*/false);
-        nx::guide::report_raw("hash-share-of-open", share_of_open, "%", /*higher_is_better =*/false);
-    }
-
-    return out;
-}
-} // namespace
-
-// The representative size, recorded: an editing session's worth of history, saved once more.
-GUIDE_BENCHMARK("bench-vdoc-loop (open / edit / publish / close)")
-{
-    auto const impl = sqlite_impl();
-    if (!impl.is_available())
-    {
-        std::printf("SQLite was not compiled in, so the loop cannot be measured against a file\n");
-        return;
-    }
-
-    (void)measure(impl, 2000, 50, /*record =*/true);
+    nx::pgo::report_time_for("loop-open", open_secs);
+    nx::pgo::report("hash-share-of-loop", share_of_loop, nx::bench::unit_cost_share);
+    if (open_secs > 0)
+        nx::pgo::report("hash-share-of-open", m.hashing.time.median / open_secs, nx::bench::unit_cost_share);
 }
 
 // The human-facing sweep the write-up analyses: three document sizes, on both arms.
-TEST("bench-vdoc-loop (full sweep)", nx::config::manual)
+//
+// One benchmark per (medium, size) rather than one table of all six.
+// The comparison column is the injected hashing against the plain loop, and that only means something within one
+// medium at one size — a 200-op in-memory row against an 8,000-op SQLite one compares two different questions.
+BENCHMARK("bench-vdoc-loop - in-memory, 200 ops")
 {
-    isize const sizes[] = {200, 2000, 8000};
+    auto const impl = in_memory_impl();
+    if (impl.is_available())
+        (void)measure(impl, "200 ops", 200, 50);
+}
 
-    for (auto const& impl : {in_memory_impl(), sqlite_impl()})
-    {
-        if (!impl.is_available())
-            continue;
+BENCHMARK("bench-vdoc-loop - in-memory, 2000 ops")
+{
+    auto const impl = in_memory_impl();
+    if (impl.is_available())
+        (void)measure(impl, "2000 ops", 2000, 50);
+}
 
-        for (auto const ops : sizes)
-            (void)measure(impl, ops, 50, /*record =*/false);
-    }
+BENCHMARK("bench-vdoc-loop - in-memory, 8000 ops")
+{
+    auto const impl = in_memory_impl();
+    if (impl.is_available())
+        (void)measure(impl, "8000 ops", 8000, 50);
+}
+
+BENCHMARK("bench-vdoc-loop - sqlite, 200 ops")
+{
+    auto const impl = sqlite_impl();
+    if (impl.is_available())
+        (void)measure(impl, "200 ops", 200, 50);
+}
+
+BENCHMARK("bench-vdoc-loop - sqlite, 2000 ops")
+{
+    auto const impl = sqlite_impl();
+    if (impl.is_available())
+        (void)measure(impl, "2000 ops", 2000, 50);
+}
+
+BENCHMARK("bench-vdoc-loop - sqlite, 8000 ops")
+{
+    auto const impl = sqlite_impl();
+    if (impl.is_available())
+        (void)measure(impl, "8000 ops", 8000, 50);
 }

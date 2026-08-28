@@ -10,16 +10,18 @@ The win is the exposed buffer window: small reads and writes inline to a pointer
 
 ## Method
 
-Each timed pass is end-to-end — **open → transfer 4 MiB → close** — repeated by the adaptive timer ([bench_util.hh](../../tests/benchmarks/bench_util.hh)) for ~50 ms.
+Each timed pass is end-to-end — **open → transfer 4 MiB → close**.
+The nexus benchmark harness medians hundreds of them and brackets the result with a 95% confidence interval; see [benchmarking](../../../../../docs/guides/benchmarking.md).
+
+**The numbers quoted below predate that harness**, and are re-measured when this write-up is next revised.
 Granularities per direction: 1 byte via `put`/`get`, then 2 / 4 / 8 / 16 / 64 / 256 B and 64 KiB via `write`/`read`.
 The cc 1-byte path uses the window directly (`writable_bytes()`/`produce()`, `ready_bytes()`/`consume()`), and `std` uses `ofstream::put` / `ifstream::get`.
 Every larger size uses `write`/`read` on both.
 Files are opened binary.
 
-`bench::measure_units_per_sec` **discards one warmup pass per measurement** before it times.
-So each metric faults its own code path and warms its file before timing, and repeated passes then stay in the page / write-back cache.
+The harness **warms up before it times**, so each loop faults its own code path and warms its file before the first sample.
+Repeated passes then stay in the page / write-back cache.
 So the number measures the **stream layer's CPU cost, not the disk**.
-nexus itself runs the benchmark body once, with no framework-level repeat or warmup; the per-metric warmup is the bench helper's.
 At 4 MiB per pass the open/close is well under a percent of the time.
 
 ## Results
@@ -76,7 +78,7 @@ Worth adding if bulk file copies become a hot path.
 ## Running it
 
 ```bash
-# guide benchmark: prints the table, records the 1 B points into the .perf.json sidecar
+# PGO benchmark: prints the table, records the 1 B points into the .pgo.json sidecar
 uv run dev.py --mirror-output test "bench-file-stream (cc vs std)" --preset release-clang
 ```
 

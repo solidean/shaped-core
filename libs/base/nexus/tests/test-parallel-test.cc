@@ -1,3 +1,4 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
@@ -333,32 +334,53 @@ TEST("parallel - main_thread and own_pool cannot be combined", no_scheduler)
 TEST("parallel - a failing check names what ran beside it", no_scheduler)
 {
     // A -jN failure is usually about what it ran BESIDE, and the report otherwise names only the test that failed.
-    // The overlap is forced rather than hoped for: the failing test waits for a partner to be live, and the partner stays live until it has failed.
-    // Both waits are bounded, so a machine that refuses to overlap fails the CHECK below instead of hanging.
+    // The overlap is forced rather than hoped for: the failing test waits for a partner to be LIVE, and the partner stays live until it has failed.
+    //
+    // `live` counts tests currently inside their body rather than tests entered, which is what makes it an overlap detector:
+    // a run that executed them back to back leaves it at 1, so the wait below runs out instead of reporting an overlap that never happened.
+    // Both waits are bounded in wall-clock rather than in spins, because a spin budget is a bet on how fast the machine is —
+    // 2M pauses is tens of milliseconds, less than a loaded runner spends handing the second test to a worker.
     cc::atomic<int> live = {0};
     cc::atomic<bool> has_failed = {false};
+    cc::atomic<bool> overlapped = {false};
+
+    // The bound is a deadlock guard rather than a budget: it is hundreds of times what the hand-off costs, so only a broken
+    // one reaches it, and a broken one reports instead of hanging the suite.
+    auto const wait_until = [](auto&& done)
+    {
+        auto const deadline = cc::current_time_steady_secs() + 5.0;
+        while (!done() && cc::current_time_steady_secs() < deadline)
+            cc::spin_pause();
+        return done();
+    };
 
     nx::test_registry reg;
     reg.add_declaration("partner", {},
                         [&]
                         {
                             live.fetch_add(1, cc::memory_order_acq_rel);
-                            for (auto spin = 0; spin < 2000000 && !has_failed.load(cc::memory_order_acquire); ++spin)
-                                cc::spin_pause();
+                            wait_until([&] { return has_failed.load(cc::memory_order_acquire); });
                             CHECK(true);
+                            live.fetch_sub(1, cc::memory_order_acq_rel);
                         });
     reg.add_declaration("failing", {},
                         [&]
                         {
                             live.fetch_add(1, cc::memory_order_acq_rel);
-                            for (auto spin = 0; spin < 2000000 && live.load(cc::memory_order_acquire) < 2; ++spin)
-                                cc::spin_pause();
+                            auto const beside = wait_until([&] { return live.load(cc::memory_order_acquire) >= 2; });
+                            overlapped.store(beside, cc::memory_order_release);
                             CHECK(false); // the failure under test
                             has_failed.store(true, cc::memory_order_release);
+                            live.fetch_sub(1, cc::memory_order_acq_rel);
                         });
 
     auto const schedule = nx::test_schedule::create({}, reg);
     auto const exec = nx::execute_tests(schedule, with_jobs(4));
+
+    // Required rather than hoped for: `with_jobs(4)` stands up three workers besides the thread driving the run, so a body
+    // parked in its wait leaves the other test to one of them whatever the machine's core count is.
+    // A timeout here is therefore a defect in that hand-off, and the message check below would have nothing to check.
+    REQUIRE(overlapped.load(cc::memory_order_acquire));
 
     REQUIRE(exec.executions.size() == 2);
     auto const& failing = exec.executions[1];

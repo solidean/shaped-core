@@ -190,7 +190,7 @@ def summarize_perf(metrics: list[dict]) -> None:
     The signed % and the green/red coloring carry the direction instead.
     """
     if not metrics:
-        print(console.yellow("  no comparable metrics (did the guide benchmarks record any?)"), file=sys.stderr)
+        print(console.yellow("  no comparable metrics (did the PGO benchmarks record any?)"), file=sys.stderr)
         return
 
     name_w = max((len(f"{m['test']} | {m['name']}") for m in metrics), default=10)

@@ -249,8 +249,8 @@ Two things must come with the guard, or flipping it back on is a bad afternoon:
 - Any script that drives it fails with a message naming the flag, rather than on an empty parse.
 
 Candidates are experiments only.
-`GUIDE_BENCHMARK` benchmarks are tracked perf gates feeding [perf-results](../guides/perf-results.md) and the PGO report — those stay compiled in.
-Of clean-core's benchmark TUs, only the design sweep lacked a `GUIDE_BENCHMARK`, which is a decent smell test.
+`PGO_BENCHMARK` benchmarks are tracked perf gates feeding [perf-results](../guides/perf-results.md) and the PGO report — those stay compiled in.
+Of clean-core's benchmark TUs, only the design sweep lacked a `PGO_BENCHMARK`, which is a decent smell test.
 
 ## What is left on the table
 

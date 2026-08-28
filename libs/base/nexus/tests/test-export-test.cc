@@ -1,15 +1,19 @@
 #include <babel-serializer/data/json.hh>
 #include <clean-core/string/string.hh>
-#include <nexus/guide.hh>
+#include <nexus/bench/run.hh>
+#include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
+#include <nexus/tests/export/bench_json.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
-#include <nexus/tests/export/perf_json.hh>
+#include <nexus/tests/export/pgo_json.hh>
 #include <nexus/tests/export/xml.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
+
+using namespace cc::primitive_defines;
 
 namespace
 {
@@ -141,7 +145,7 @@ TEST("schedule - would_run honors buckets and disabled, filter_matches ignores t
     // Explicit bucket mode: a name in another bucket matches by name but is excluded by the bucket gate.
     // That is the "matched but wrong bucket" case, and an exact name does not override a flag.
     {
-        char const* const args[] = {"prog", "--guide-benchmarks", "alpha"};
+        char const* const args[] = {"prog", "--pgo-benchmarks", "alpha"};
         auto const cfg = config_from(args);
         CHECK(cfg.filter_matches(alpha));
         CHECK(!cfg.would_run(alpha));
@@ -292,14 +296,14 @@ TEST("export - perf JSON carries every metric a run recorded", no_scheduler)
     reg.add_declaration("bench", {},
                         []
                         {
-                            nx::guide::report_elements_per_sec("keys", 1250.5);
-                            nx::guide::report_time_for("per_op", 0.25);
+                            nx::pgo::report_elements_per_sec("keys", 1250.5);
+                            nx::pgo::report_time_for("per_op", 0.25);
                         });
 
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
 
-    auto const doc = babel::json::read(nx::write_perf_json("my-suite", exec)).value();
+    auto const doc = babel::json::read(nx::write_pgo_json("my-suite", exec)).value();
     auto const root = doc.root();
 
     CHECK(root["suite"].as_string() == "my-suite");
@@ -311,7 +315,7 @@ TEST("export - perf JSON carries every metric a run recorded", no_scheduler)
     auto const keys = entry_named(metrics, "keys");
     CHECK(keys["test"].as_string() == "bench");
     CHECK(keys["value"].as_double() == 1250.5);
-    CHECK(keys["unit"].as_string() == "1/s");
+    CHECK(keys["unit"].as_string() == "/s"); // nx::bench::unit_items_per_second's symbol
     CHECK(keys["higher_is_better"].as_bool());
 
     auto const per_op = entry_named(metrics, "per_op");
@@ -333,4 +337,144 @@ TEST("export - junit report for an all-pass run has no failure elements", no_sch
     CHECK(xml.contains("tests=\"2\""));
     CHECK(xml.contains("failures=\"0\""));
     CHECK(!xml.contains("<failure"));
+}
+
+TEST("export - the benchmark sidecar carries the samples, not just a summary", no_scheduler)
+{
+    nx::test_registry reg;
+
+    // The benchmark bucket, and not incidentally: nx::bench::run collects into the running test only for a BENCHMARK,
+    // so that a PGO benchmark or a plain test using the same machinery gets its result handed back instead.
+    reg.add_declaration("bench", {.bucket = nx::config::test_bucket::benchmark},
+                        []
+                        {
+                            auto cfg = nx::bench::run_config::standard();
+                            cfg.min_time_secs = 0.001;
+                            cfg.max_time_secs = 0.05;
+                            cfg.min_samples = 8;
+                            cfg.max_samples = 16;
+                            cfg.warmup_time_secs = 0.001;
+
+                            auto acc = u64(0);
+                            nx::bench::run("a loop", cfg,
+                                           [&](nx::bench::iteration& it)
+                                           {
+                                               acc += 1;
+                                               nx::bench::sink(acc);
+                                               it.items(2);
+                                           });
+                        });
+
+    // The sweep has to select that bucket too, or nothing is scheduled at all.
+    auto const config = nx::test_schedule_config{.selected_bucket = nx::config::test_bucket::benchmark};
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+
+    auto const doc = babel::json::read(nx::write_bench_json("my-suite", exec)).value();
+    auto const root = doc.root();
+
+    CHECK(root["suite"].as_string() == "my-suite");
+
+    // The machine, whose absence would make every number here uninterpretable — and the flag that says whether any of
+    // it is still a placeholder, which it no longer is.
+    CHECK(root["system"]["logical_cores"].as_double() >= 1);
+    CHECK(!root["system"]["is_provisional"].as_bool());
+
+    auto const loops = root["loops"];
+    REQUIRE(loops.size() == 1);
+
+    auto const loop = loops[0];
+    CHECK(loop["test"].as_string() == "bench");
+    CHECK(loop["loop"].as_string() == "a loop");
+    CHECK(loop["measured_iterations"].as_double() > 0);
+    CHECK(loop["statistics"]["median"].as_double() > 0);
+
+    // Two items per measured iteration, declared through the handle.
+    CHECK(loop["items"].as_double() == loop["measured_iterations"].as_double() * 2);
+
+    // The point of the sidecar: a consumer holding the samples can recompute any statistic this design got wrong.
+    auto const samples = loop["samples"];
+    CHECK(samples.size() == loop["statistics"]["samples"].as_double());
+    CHECK(samples.size() >= 8);
+}
+
+TEST("export - the benchmark sidecar names the baseline the console drew", no_scheduler)
+{
+    // The RESOLVED baseline rather than the config flag.
+    // With nothing marked, the first loop declared is the baseline and the report says so, so a sidecar writing
+    // `config.is_baseline` would answer `false` for every row of a table that visibly has one.
+    auto const measure = [](cc::string_view name)
+    {
+        auto cfg = nx::bench::run_config::standard();
+        cfg.min_time_secs = 0.001;
+        cfg.max_time_secs = 0.05;
+        cfg.min_samples = 8;
+        cfg.max_samples = 16;
+        cfg.warmup_time_secs = 0.001;
+        return [name, cfg]
+        {
+            auto acc = u64(0);
+            nx::bench::run(name, cfg, [&] { nx::bench::sink(++acc); });
+        };
+    };
+
+    nx::test_registry reg;
+    reg.add_declaration("two loops", {.bucket = nx::config::test_bucket::benchmark},
+                        [&]
+                        {
+                            measure("first")();
+                            measure("second")();
+                        });
+
+    auto const config = nx::test_schedule_config{.selected_bucket = nx::config::test_bucket::benchmark};
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+
+    auto const doc = babel::json::read(nx::write_bench_json("my-suite", exec)).value();
+    auto const loops = doc.root()["loops"];
+    REQUIRE(loops.size() == 2);
+
+    CHECK(loops[0]["loop"].as_string() == "first");
+    CHECK(loops[0]["is_baseline"].as_bool());
+    CHECK(!loops[1]["is_baseline"].as_bool());
+
+    // A table nobody opted out of still has a comparison column, which is what `no_baseline` reports.
+    CHECK(!loops[0]["no_baseline"].as_bool());
+    CHECK(!loops[1]["no_baseline"].as_bool());
+}
+
+TEST("export - a sweep's loops carry no baseline at all", no_scheduler)
+{
+    // One loop setting `no_baseline` drops the comparison from the whole table, so no row may claim to be the
+    // baseline: a consumer that divided one row by another would be reporting the input sizes rather than the code.
+    nx::test_registry reg;
+    reg.add_declaration("a sweep", {.bucket = nx::config::test_bucket::benchmark},
+                        []
+                        {
+                            auto cfg = nx::bench::run_config::standard();
+                            cfg.min_time_secs = 0.001;
+                            cfg.max_time_secs = 0.05;
+                            cfg.min_samples = 8;
+                            cfg.max_samples = 16;
+                            cfg.warmup_time_secs = 0.001;
+                            cfg.no_baseline = true;
+
+                            auto acc = u64(0);
+                            nx::bench::run("n=1", cfg, [&] { nx::bench::sink(++acc); });
+                            nx::bench::run("n=2", cfg, [&] { nx::bench::sink(++acc); });
+                        });
+
+    auto const config = nx::test_schedule_config{.selected_bucket = nx::config::test_bucket::benchmark};
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+
+    auto const doc = babel::json::read(nx::write_bench_json("my-suite", exec)).value();
+    auto const loops = doc.root()["loops"];
+    REQUIRE(loops.size() == 2);
+
+    for (auto i = 0; i < 2; ++i)
+    {
+        CHECK(!loops[i]["is_baseline"].as_bool());
+        CHECK(loops[i]["no_baseline"].as_bool());
+    }
 }

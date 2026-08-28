@@ -1,19 +1,70 @@
 #include <babel-serializer/image/image.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/string/format.hh>
 
 // The aggregator delegates to the low-level codecs and never includes the stb backend directly.
+#include <babel-serializer/image/hdr.hh>
 #include <babel-serializer/image/jpg.hh>
+#include <babel-serializer/image/pfm.hh>
 #include <babel-serializer/image/png.hh>
 
 namespace babel::image
 {
 namespace
 {
-/// The aggregator's sample type for a low-level decode.
-/// Both codecs produce 8-bit samples today, so this is where u16 / f32 will branch.
-component component_of_decode()
+/// The sample type each container decodes to.
+/// This is the one place the mapping lives, so `read` and `encode` cannot disagree about it.
+component component_of(format fmt)
 {
+    switch (fmt)
+    {
+    case format::png:
+    case format::jpg:
+        return component::u8;
+    case format::hdr:
+    case format::pfm:
+        return component::f32;
+    }
     return component::u8;
+}
+
+cc::string_view name_of(format fmt)
+{
+    switch (fmt)
+    {
+    case format::png:
+        return "png";
+    case format::jpg:
+        return "jpg";
+    case format::hdr:
+        return "hdr";
+    case format::pfm:
+        return "pfm";
+    }
+    return "?";
+}
+
+cc::string_view name_of(component comp)
+{
+    switch (comp)
+    {
+    case component::u8:
+        return "u8";
+    case component::u16:
+        return "u16";
+    case component::f32:
+        return "f32";
+    }
+    return "?";
+}
+
+cc::result<cc::unit> check_encode_component(image const& img, format fmt)
+{
+    auto const expected = component_of(fmt);
+    if (img.comp != expected)
+        return cc::error(cc::format("image encode: {} stores {} samples, but the image carries {}", //
+                                    name_of(fmt), name_of(expected), name_of(img.comp)));
+    return cc::unit{};
 }
 } // namespace
 
@@ -36,6 +87,15 @@ isize image::row_stride() const
     return isize(width) * isize(channels) * isize(bytes_per_component());
 }
 
+cc::span<float const> image::samples_f32() const
+{
+    if (comp != component::f32)
+        return {};
+
+    auto const floats = cc::span<byte const>(pixels).try_reinterpret_as<float const>();
+    return floats.has_value() ? floats.value() : cc::span<float const>();
+}
+
 cc::result<format> detect_format(cc::span<byte const> bytes)
 {
     // PNG opens with the 8-byte signature; the first four bytes are enough to disambiguate.
@@ -47,7 +107,16 @@ cc::result<format> detect_format(cc::span<byte const> bytes)
     if (bytes.size() >= 2 && bytes[0] == byte(0xFF) && bytes[1] == byte(0xD8))
         return format::jpg;
 
-    return cc::error("image: unrecognized format (magic bytes match neither PNG nor JPEG)");
+    // Radiance opens with "#?", whatever identifier follows it (RADIANCE, RGBE, ...).
+    if (bytes.size() >= 2 && bytes[0] == byte('#') && bytes[1] == byte('?'))
+        return format::hdr;
+
+    // PFM opens with "PF" (colour) or "Pf" (grey), and the format requires whitespace right after it.
+    if (bytes.size() >= 3 && bytes[0] == byte('P') && (bytes[1] == byte('F') || bytes[1] == byte('f'))
+        && (bytes[2] == byte('\n') || bytes[2] == byte('\r') || bytes[2] == byte(' ') || bytes[2] == byte('\t')))
+        return format::pfm;
+
+    return cc::error("image: unrecognized format (magic bytes match none of PNG, JPEG, Radiance HDR and PFM)");
 }
 
 cc::result<image> read(cc::span<byte const> bytes)
@@ -66,7 +135,8 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::png::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of_decode()};
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::png)};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -75,7 +145,28 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::jpg::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of_decode()};
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::jpg)};
+        result.pixels = cc::move(d.pixels);
+        return cc::move(result);
+    }
+    case format::hdr:
+    {
+        auto decoded = babel::hdr::read(bytes);
+        CC_RETURN_IF_ERROR(decoded);
+        auto& d = decoded.value();
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::hdr)};
+        result.pixels = cc::move(d.pixels);
+        return cc::move(result);
+    }
+    case format::pfm:
+    {
+        auto decoded = babel::pfm::read(bytes);
+        CC_RETURN_IF_ERROR(decoded);
+        auto& d = decoded.value();
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::pfm)};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -99,6 +190,8 @@ cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options 
     if (img.is_empty())
         return cc::error("image encode: empty image");
 
+    CC_RETURN_IF_ERROR(check_encode_component(img, fmt));
+
     switch (fmt)
     {
     case format::png:
@@ -112,6 +205,18 @@ cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options 
         auto jd = babel::jpg::data{.width = img.width, .height = img.height, .channels = img.channels};
         jd.pixels = img.pixels;
         return babel::jpg::encode(jd, {.quality = opts.jpg_quality});
+    }
+    case format::hdr:
+    {
+        auto hd = babel::hdr::data{.width = img.width, .height = img.height, .channels = img.channels};
+        hd.pixels = img.pixels;
+        return babel::hdr::encode(hd);
+    }
+    case format::pfm:
+    {
+        auto pd = babel::pfm::data{.width = img.width, .height = img.height, .channels = img.channels};
+        pd.pixels = img.pixels;
+        return babel::pfm::encode(pd);
     }
     }
 

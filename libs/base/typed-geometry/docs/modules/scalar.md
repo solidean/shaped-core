@@ -70,7 +70,8 @@ The raw `scalar_traits` kernels still work in plain radian `T`: the angle typing
 ### Capabilities are grouped, and rounding returns the scalar
 
 The `has_*` flags name families rather than single functions, so a new scalar opts into a coherent set at a time.
-Today: `has_sqrt`, `has_abs`, `has_trigonometry`, `has_exponential` (`pow`/`exp`/`log`) and `has_rounding` (`round`/`floor`/`ceil`).
+Today: `has_sqrt`, `has_abs`, `has_trigonometry`, `has_exponential` (`pow`/`exp`/`log`), `has_rounding` (`round`/`floor`/`ceil`)
+and `has_pow2` (`pow2_by_int`/`scale_by_pow2`/`exponent_of`/`split_pow2`).
 A scalar that can do one member of a family can essentially always do the rest, and a per-function flag would multiply the seam without buying precision.
 
 `round`/`floor`/`ceil` return the **scalar** type, not an integer.
@@ -78,6 +79,23 @@ An integer result forces a width choice tg has no basis to make, and the `f32` �
 
 `pow` takes base and exponent as the *same* `T`.
 A mixed-type overload would silently promote, which is how a `f32` pipeline quietly becomes `f64` — the cast belongs at the call site.
+
+### Base two is exact, so it is its own family
+
+`has_pow2` sits apart from `has_exponential` because the two answer different questions.
+`pow`/`exp`/`log` are approximate transcendentals over a real exponent.
+`pow2_by_int`/`scale_by_pow2`/`exponent_of`/`split_pow2` are **exact** operations on the binary exponent — an exponent-field adjustment, never a multiply.
+`tg::pow(2.0f, e)` is not a substitute for `tg::pow2_by_int<f32>(e)`, and a symbolic or fixed-point scalar can easily have one family without the other.
+Integers stay out: shifting one truncates, which is a different operation wearing the same name.
+
+The names are deliberately not C's `frexp` and `ldexp` — those abbreviate nothing a reader can recover — and one of the semantics is deliberately different with them.
+**`split_pow2`'s significand is in `[1, 2)`, not `frexp`'s `[0.5, 1)`.**
+That is what the IEEE-754 exponent field already means, so `exponent_of(x)` is `floor(log2(|x|))` and `split_pow2(8.0f)` reads as `{1, 3}` rather than `{0.5, 4}`.
+Porting `frexp`-shaped code means adjusting the exponent by one, and the different name is precisely what makes that adjustment visible rather than a silent factor of two.
+
+Zero and the non-finites are a **precondition**, not a fallback: `frexp` quietly reports exponent 0 for all three, which turns a bug into plausible-looking data.
+`split_pow2` and `exponent_of` assert instead, and every real caller has already branched on zero for its own reasons.
+Subnormals are normalized rather than reported with a zero exponent — which is the trap a naive read of the exponent field falls into.
 
 ## See also
 

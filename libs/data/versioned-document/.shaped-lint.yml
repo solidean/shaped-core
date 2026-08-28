@@ -16,6 +16,6 @@ rules:
 
   - kind: allow-include
     value: <cstdio>
-    reason: a guide benchmark prints a fixed-width table a human reads next to its write-up, which cc::format does not lay out — the same reason clean-core's benchmarks reach for it, and it never leaves tests/benchmarks/.
+    reason: a PGO benchmark prints a fixed-width table a human reads next to its write-up, which cc::format does not lay out — the same reason clean-core's benchmarks reach for it, and it never leaves tests/benchmarks/.
     files:
       - tests/benchmarks/**
