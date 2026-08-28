@@ -124,7 +124,9 @@ Low-level PNG reader + writer; see [png.hh](../src/babel-serializer/image/png.hh
 Runs on the vendored libspng, which is also what reads and writes the ancillary chunks: gAMA, sRGB, iCCP, tEXt / zTXt / iTXt and pHYs.
 `channels` follows the file rather than a fixed output shape, and a tRNS chunk becomes an alpha channel.
 
-- `[planned]` **16-bit output** — `bit_depth` already reports the file's own depth, but `pixels` are narrowed to 8-bit whatever it says.
+16-bit files decode to `u16` samples and re-encode at that width, host-endian in memory and big-endian on disk.
+Sub-byte depths (1/2/4) unpack to `u8`, so `bit_depth` is the only place they survive.
+
 - `[planned]` **the remaining chunks** — cHRM, bKGD, sBIT and tIME, each an added field rather than an API change.
 
 ### jpg [done]
@@ -155,7 +157,7 @@ The aggregator: a plain pixel buffer, `detect_format` from the magic bytes, and 
 See [image.hh](../src/babel-serializer/image/image.hh).
 
 - `[done]` **the f32 sample path** — HDR and PFM decode to `component::f32`, and `encode` rejects an image whose `comp` the target format cannot store.
-- `[planned]` **16-bit samples** — `component::u16` is still reserved and unproduced, waiting on a 16-bit PNG decode path.
+- `[done]` **16-bit samples** — a 16-bit PNG decodes to `component::u16` and re-encodes at that width; PNG is the one format spanning two sample types.
 
 ### Other image formats [planned]
 

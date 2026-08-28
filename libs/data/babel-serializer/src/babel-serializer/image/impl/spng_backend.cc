@@ -56,57 +56,64 @@ cc::result<babel::png::color_type> map_color_type(u8 v)
     }
 }
 
-/// How to ask libspng for this file's pixels, and what we keep afterwards.
-///
-/// `channels` is the count the PNG's own color type implies — 1 grey, 2 grey+alpha, 3 rgb, 4 rgba, plus one
-/// for a tRNS chunk that turns into an alpha channel.
-/// `fmt` is the closest 8-bit output libspng actually offers for that file, and `produced` is its channel count.
-/// The two differ only where libspng has no matching narrow format, and `produced` is then always 4,
-/// so the surplus channels are dropped afterwards.
-struct decode_plan
+/// Samples per pixel in the file itself, before any conversion.
+/// Indexed is the one that does not survive as-is, so it never reaches here.
+int native_channels(u8 color_type)
 {
-    int fmt = SPNG_FMT_RGBA8;
-    int produced = 4;
-    int channels = 4;
-};
-
-decode_plan plan_decode(spng_ihdr const& ihdr, bool has_trns)
-{
-    switch (ihdr.color_type)
+    switch (color_type)
     {
     case SPNG_COLOR_TYPE_GRAYSCALE:
-    {
-        auto const channels = has_trns ? 2 : 1;
-        // G8 and GA8 are the only narrow formats libspng implements, and both refuse a 16-bit file.
-        if (ihdr.bit_depth <= 8)
-            return {.fmt = has_trns ? SPNG_FMT_GA8 : SPNG_FMT_G8, .produced = channels, .channels = channels};
-        return {.fmt = SPNG_FMT_RGBA8, .produced = 4, .channels = channels};
-    }
+        return 1;
     case SPNG_COLOR_TYPE_GRAYSCALE_ALPHA:
-        // GA8 is grayscale-only in libspng (see its check_decode_fmt), so this one always narrows.
-        return {.fmt = SPNG_FMT_RGBA8, .produced = 4, .channels = 2};
+        return 2;
     case SPNG_COLOR_TYPE_TRUECOLOR:
-    case SPNG_COLOR_TYPE_INDEXED:
-    {
-        auto const channels = has_trns ? 4 : 3;
-        return {.fmt = has_trns ? SPNG_FMT_RGBA8 : SPNG_FMT_RGB8, .produced = channels, .channels = channels};
-    }
+        return 3;
     default:
-        return {.fmt = SPNG_FMT_RGBA8, .produced = 4, .channels = 4};
+        return 4;
     }
 }
 
-/// Drop the channels libspng had to invent, rewriting `pixels` from rgba8 down to 1 (grey) or 2 (grey + alpha).
-/// In place and forward: the destination index trails the source index for every pixel.
-void narrow_from_rgba8(cc::vector<byte>& pixels, isize pixel_count, int channels)
+/// Which libspng output to ask for, and what it means once we have it.
+///
+/// `channels` is the count the PNG's own color type implies — 1 grey, 2 grey+alpha, 3 rgb, 4 rgba, plus one
+/// for a tRNS chunk that turns into an alpha channel.
+/// Every file maps to a format that produces exactly that count, so nothing is decoded and then thrown away.
+struct decode_plan
 {
-    for (isize i = 0; i < pixel_count; ++i)
+    int fmt = SPNG_FMT_RGBA8;
+    int channels = 4;
+    babel::png::component decoded = babel::png::component::u8;
+};
+
+/// SPNG_FMT_PNG is "no conversion": native channel count, native depth, de-interlaced, and byte-swapped to host
+/// order for a 16-bit file.
+/// It is the right ask wherever the file's own layout is already what we want, which needs two things to hold —
+/// the depth must be 8 or 16, since it leaves 1/2/4-bit samples packed, and there must be no tRNS chunk to
+/// expand, since it applies none.
+/// Everywhere else a converting format does the work: G8 / GA8 unpack sub-byte grey, RGB8 / RGBA8 de-palettize,
+/// and the GA16 / RGBA16 pair is what turns tRNS into alpha at 16 bits.
+decode_plan plan_decode(spng_ihdr const& ihdr, bool has_trns)
+{
+    auto const wide = ihdr.bit_depth == 16;
+    auto const decoded = wide ? babel::png::component::u16 : babel::png::component::u8;
+
+    // Only color types 0, 2 and 3 may carry tRNS, so alpha is always the channel being added here.
+    if (has_trns)
     {
-        pixels[i * channels] = pixels[i * 4]; // grey := red, which is what libspng expanded it from
-        if (channels == 2)
-            pixels[i * channels + 1] = pixels[i * 4 + 3];
+        if (ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE)
+            return {.fmt = wide ? SPNG_FMT_GA16 : SPNG_FMT_GA8, .channels = 2, .decoded = decoded};
+        return {.fmt = wide ? SPNG_FMT_RGBA16 : SPNG_FMT_RGBA8, .channels = 4, .decoded = decoded};
     }
-    pixels.resize_down_to(pixel_count * channels);
+
+    // Indexed is always 8-bit on disk and never stays indexed, so it is the one case with no native layout to keep.
+    if (ihdr.color_type == SPNG_COLOR_TYPE_INDEXED)
+        return {.fmt = SPNG_FMT_RGB8, .channels = 3, .decoded = babel::png::component::u8};
+
+    // Grey below 8 bits is packed, and G8 is the format that unpacks it.
+    if (ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE && ihdr.bit_depth < 8)
+        return {.fmt = SPNG_FMT_G8, .channels = 1, .decoded = babel::png::component::u8};
+
+    return {.fmt = SPNG_FMT_PNG, .channels = native_channels(ihdr.color_type), .decoded = decoded};
 }
 
 /// Read every ancillary chunk png::data models.
@@ -308,20 +315,17 @@ cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
         .width = int(ihdr.width),
         .height = int(ihdr.height),
         .channels = plan.channels,
-        .bit_depth = int(ihdr.bit_depth), // the file's own depth; the pixels below are always 8-bit
+        .bit_depth = int(ihdr.bit_depth),
         .color = color.value(),
         .interlace = ihdr.interlace_method == SPNG_INTERLACE_ADAM7 ? babel::png::interlace_method::adam7
                                                                    : babel::png::interlace_method::none,
-        .decoded = babel::png::component::u8,
+        .decoded = plan.decoded,
     };
 
     result.pixels.resize_to_uninitialized(isize(size));
     // SPNG_DECODE_TRNS is what turns a tRNS chunk into the alpha channel `plan` budgeted for.
     if (auto const err = spng_decode_image(guard.ctx, result.pixels.data(), size, plan.fmt, SPNG_DECODE_TRNS); err != 0)
         return cc::error(spng_message("decode_image", err));
-
-    if (plan.produced != plan.channels)
-        narrow_from_rgba8(result.pixels, isize(ihdr.width) * isize(ihdr.height), plan.channels);
 
     // Chunks stored after IDAT are only reachable once the image is decoded, and a file carrying none is not an error.
     spng_decode_chunks(guard.ctx);
@@ -340,7 +344,8 @@ cc::result<cc::vector<byte>> spng_encode_png(babel::png::data const& img, int co
     auto color = spng_color_type_for(img.channels); // not const: CC_RETURN_IF_ERROR moves the error out
     CC_RETURN_IF_ERROR(color);
 
-    auto const needed = isize(img.width) * isize(img.height) * isize(img.channels);
+    auto const wide = img.decoded == babel::png::component::u16;
+    auto const needed = isize(img.width) * isize(img.height) * isize(img.channels) * (wide ? 2 : 1);
     if (img.pixels.size() < needed)
         return cc::error(cc::format("png encode: pixel buffer too small ({} < {})", img.pixels.size(), needed));
 
@@ -352,13 +357,15 @@ cc::result<cc::vector<byte>> spng_encode_png(babel::png::data const& img, int co
     if (auto const err = spng_set_png_stream(guard.ctx, &append_to_vector, &out); err != 0)
         return cc::error(spng_message("set_png_stream", err));
 
-    auto ihdr = spng_ihdr{.width = u32(img.width),
-                          .height = u32(img.height),
-                          .bit_depth = 8, // babel decodes to 8-bit, so that is all there is to write back
-                          .color_type = u8(color.value()),
-                          .compression_method = 0,
-                          .filter_method = 0,
-                          .interlace_method = SPNG_INTERLACE_NONE};
+    auto ihdr = spng_ihdr{
+        .width = u32(img.width),
+        .height = u32(img.height),
+        // From `decoded` rather than `bit_depth`: the latter describes a file that was read, not one being written.
+        .bit_depth = u8(wide ? 16 : 8),
+        .color_type = u8(color.value()),
+        .compression_method = 0,
+        .filter_method = 0,
+        .interlace_method = SPNG_INTERLACE_NONE};
     if (auto const err = spng_set_ihdr(guard.ctx, &ihdr); err != 0)
         return cc::error(spng_message("set_ihdr", err));
 
@@ -371,7 +378,8 @@ cc::result<cc::vector<byte>> spng_encode_png(babel::png::data const& img, int co
     auto meta = encode_metadata();
     CC_RETURN_IF_ERROR(meta.apply(guard.ctx, img));
 
-    // SPNG_FMT_PNG: the pixels already match the IHDR above, so libspng converts nothing.
+    // SPNG_FMT_PNG: the pixels already match the IHDR above, so the only thing libspng touches is byte order,
+    // swapping 16-bit samples from host into the big-endian the format stores.
     if (auto const err
         = spng_encode_image(guard.ctx, img.pixels.data(), size_t(needed), SPNG_FMT_PNG, SPNG_ENCODE_FINALIZE);
         err != 0)

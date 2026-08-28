@@ -37,7 +37,8 @@ enum class babel::image::format : babel::u8
 };
 
 /// Decoded sample type.
-/// `u8` for PNG / JPEG, `f32` for HDR / PFM; `u16` is API-ready (16-bit PNG) and not produced yet.
+/// `u8` for PNG / JPEG, `u16` for a 16-bit PNG (host-endian), `f32` for HDR / PFM.
+/// PNG is the one format that spans two: which one a decode produced is what `comp` says.
 enum class babel::image::component : babel::u8
 {
     u8,

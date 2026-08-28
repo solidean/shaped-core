@@ -1,4 +1,5 @@
 #include <babel-serializer/image/image.hh>
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 
@@ -12,20 +13,30 @@ namespace babel::image
 {
 namespace
 {
-/// The sample type each container decodes to.
+/// The sample types a container can hold.
 /// This is the one place the mapping lives, so `read` and `encode` cannot disagree about it.
-component component_of(format fmt)
+///
+/// PNG is the one format that is not a single answer — 8- and 16-bit are both PNG — so its decode carries its own
+/// in `babel::png::data::decoded`, and `read` asserts the result back against this.
+bool format_accepts(format fmt, component comp)
 {
     switch (fmt)
     {
     case format::png:
+        return comp == component::u8 || comp == component::u16;
     case format::jpg:
-        return component::u8;
+        return comp == component::u8;
     case format::hdr:
     case format::pfm:
-        return component::f32;
+        return comp == component::f32;
     }
-    return component::u8;
+    return false;
+}
+
+/// The aggregator's spelling of a PNG decode's own sample type.
+component component_of(babel::png::component c)
+{
+    return c == babel::png::component::u16 ? component::u16 : component::u8;
 }
 
 cc::string_view name_of(format fmt)
@@ -58,12 +69,27 @@ cc::string_view name_of(component comp)
     return "?";
 }
 
+/// What a format can store, for the error below — PNG is the one that names two.
+cc::string_view accepted_of(format fmt)
+{
+    switch (fmt)
+    {
+    case format::png:
+        return "u8 or u16";
+    case format::jpg:
+        return "u8";
+    case format::hdr:
+    case format::pfm:
+        return "f32";
+    }
+    return "?";
+}
+
 cc::result<cc::unit> check_encode_component(image const& img, format fmt)
 {
-    auto const expected = component_of(fmt);
-    if (img.comp != expected)
+    if (!format_accepts(fmt, img.comp))
         return cc::error(cc::format("image encode: {} stores {} samples, but the image carries {}", //
-                                    name_of(fmt), name_of(expected), name_of(img.comp)));
+                                    name_of(fmt), accepted_of(fmt), name_of(img.comp)));
     return cc::unit{};
 }
 } // namespace
@@ -136,7 +162,8 @@ cc::result<image> read(cc::span<byte const> bytes)
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
         auto result
-            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::png)};
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(d.decoded)};
+        CC_ASSERT(format_accepts(format::png, result.comp), "a PNG decode produced a sample type PNG cannot store");
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -145,8 +172,7 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::jpg::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result
-            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::jpg)};
+        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::u8};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -155,8 +181,7 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::hdr::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result
-            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::hdr)};
+        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::f32};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -165,8 +190,7 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::pfm::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result
-            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::pfm)};
+        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::f32};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -196,7 +220,12 @@ cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options 
     {
     case format::png:
     {
-        auto pd = babel::png::data{.width = img.width, .height = img.height, .channels = img.channels};
+        auto pd = babel::png::data{
+            .width = img.width,
+            .height = img.height,
+            .channels = img.channels,
+            // PNG is the format that accepts two sample types, so `comp` is what picks the written depth.
+            .decoded = img.comp == component::u16 ? babel::png::component::u16 : babel::png::component::u8};
         pd.pixels = img.pixels; // aggregator owns only the packed buffer; hand it to the codec
         return babel::png::encode(pd);
     }

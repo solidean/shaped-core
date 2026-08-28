@@ -21,15 +21,19 @@ struct write_options;
 //
 // WHAT IS POPULATED TODAY.
 // Everything below, read by the libspng backend: the IHDR fields, the pixels, and the ancillary chunks.
-// Pixels are 8-bit samples, expanded / de-palettized / de-interlaced.
-// `bit_depth` is the file's native depth (1/2/4/8/16), while the decoded `pixels` are always 8-bit
-// (`decoded == component::u8`); a 16-bit path is future work.
+// Pixels are expanded / de-palettized / de-interlaced.
 //
 // `channels` follows the file rather than a fixed output shape: 1 grey, 2 grey+alpha, 3 rgb, 4 rgba,
 // and one more than that wherever a tRNS chunk becomes an alpha channel.
 //
+// `decoded` is the sample type, and follows the file too: `u16` for a 16-bit PNG, `u8` for every other depth.
+// Sub-byte depths (1/2/4) are unpacked to `u8`, so `bit_depth` — the file's own depth, verbatim — is the only
+// place those survive.
+// **16-bit samples are HOST-endian**, while the format stores them big-endian; the codec swaps in both
+// directions, so a u16 view of `pixels` is directly readable and encode takes the same.
+//
 //   auto const img = babel::png::read(bytes).value();
-//   auto const stride = img.width * img.channels; // tightly packed, top-left origin
+//   auto const stride = img.width * img.channels * (img.decoded == babel::png::component::u16 ? 2 : 1);
 
 /// Native PNG color type (IHDR byte 25). `palette` is de-palettized to rgb/rgba by the decoder — see `channels`.
 enum class babel::png::color_type : babel::u8
@@ -48,7 +52,8 @@ enum class babel::png::interlace_method : babel::u8
     adam7, // 1
 };
 
-/// Sample type of the decoded `pixels`. Only `u8` is produced today; `u16` (16-bit PNG) is API-ready.
+/// Sample type of the decoded `pixels`: `u16` for a 16-bit PNG, `u8` for every other depth.
+/// A `u16` sample is host-endian, not the format's big-endian.
 enum class babel::png::component : babel::u8
 {
     u8,
@@ -84,7 +89,7 @@ struct babel::png::data
     int bit_depth = 8;                   // IHDR bit depth byte, verbatim: 1/2/4/8/16 in a valid file, unvalidated
     color_type color = color_type::rgba; // native IHDR color type (parsed natively)
     interlace_method interlace = interlace_method::none; // native IHDR interlace (parsed natively)
-    component decoded = component::u8;                   // sample type of `pixels`
+    component decoded = component::u8;                   // sample type of `pixels`, host-endian
     cc::vector<byte> pixels;                             // row-major, top-left origin, tightly packed
 
     cc::optional<double> gamma;                 // gAMA
@@ -128,8 +133,10 @@ namespace babel::png
 {
 
 /// Encode `img`'s pixels and metadata to PNG file bytes.
-/// Always 8-bit and non-interlaced, whatever `bit_depth` and `interlace` say — those describe a file that was read, not one being written.
-/// The color type follows `channels`, so a decode / encode round-trip preserves both the pixels and the chunks above them.
+/// The written depth comes from `decoded` (8 or 16) and the color type from `channels`, so a decode / encode
+/// round-trip preserves the samples at their own width, plus the chunks above them.
+/// `bit_depth` and `interlace` are ignored — they describe a file that was read, not one being written, so a
+/// sub-byte-depth PNG re-encodes as 8-bit and an Adam7 one re-encodes non-interlaced.
 [[nodiscard]] cc::result<cc::vector<byte>> encode(data const& img, write_options opts = {});
 
 /// Encode and write to a stream.

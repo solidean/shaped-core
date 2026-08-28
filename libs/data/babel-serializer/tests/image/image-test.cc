@@ -49,6 +49,31 @@ img::image make_float_gradient(int width, int height, int channels)
     return out;
 }
 
+/// A 16-bit gradient as a packed byte buffer of HOST-endian u16 samples, which is what the codec reads and writes.
+///
+/// A round-trip through the codec cannot tell host order from big-endian, since a missing swap on both sides
+/// cancels out; what it does pin is that the two directions agree, which is what a caller depends on.
+/// That the order is the HOST's rests on libspng's u16_row_to_host / u16_row_to_bigendian, both applied for
+/// every format except SPNG_FMT_RAW, which babel never asks for.
+cc::vector<byte> make_gradient16(int width, int height, int channels)
+{
+    auto samples = cc::vector<u16>();
+    samples.resize_to_uninitialized(i64(width) * height * channels);
+    for (auto y = 0; y < height; ++y)
+        for (auto x = 0; x < width; ++x)
+            for (auto c = 0; c < channels; ++c)
+            {
+                auto const idx = (i64(y) * width + x) * channels + c;
+                // Spread across the full 16-bit range, so a value that survived only its high byte would show.
+                samples[idx] = u16((x * 4099 + y * 277 + c * 21031) & 0xFFFF);
+            }
+
+    auto out = cc::vector<byte>();
+    out.resize_to_uninitialized(samples.size() * 2);
+    cc::memcpy(out.data(), samples.data(), size_t(out.size()));
+    return out;
+}
+
 bool pixels_equal(cc::span<byte const> a, cc::span<byte const> b)
 {
     if (a.size() != b.size())
@@ -202,6 +227,76 @@ TEST("png - compression level trades size against time, losslessly")
     CHECK(pixels_equal(d.value().pixels, src.pixels));
 
     CHECK(babel::png::encode(pd, {.compression_level = 10}).has_error());
+}
+
+TEST("png - 16-bit samples round-trip at every channel count")
+{
+    for (auto const channels : {1, 2, 3, 4})
+    {
+        auto src = babel::png::data{.width = 5, .height = 3, .channels = channels, .decoded = babel::png::component::u16};
+        src.pixels = make_gradient16(5, 3, channels);
+
+        auto const encoded = babel::png::encode(src);
+        REQUIRE(encoded.has_value());
+
+        auto const d = babel::png::read(encoded.value());
+        REQUIRE(d.has_value());
+        CHECK(d.value().channels == channels);
+        CHECK(d.value().bit_depth == 16); // written from `decoded`, read back from IHDR
+        CHECK(d.value().decoded == babel::png::component::u16);
+        CHECK(pixels_equal(d.value().pixels, src.pixels)); // lossless at 16 bits too
+        CHECK(d.value().pixels.size() == i64(5) * 3 * channels * 2);
+    }
+}
+
+TEST("png - a 16-bit sample keeps its low byte")
+{
+    // The failure this pins is a silent narrow to 8 bits, which would leave every sample a multiple of 257.
+    auto src = babel::png::data{.width = 2, .height = 1, .channels = 1, .decoded = babel::png::component::u16};
+    src.pixels.resize_to_uninitialized(4);
+    auto const written = cc::vector<u16>{u16(0x1234), u16(0xABCD)};
+    cc::memcpy(src.pixels.data(), written.data(), 4);
+
+    auto const d = babel::png::read(babel::png::encode(src).value());
+    REQUIRE(d.has_value());
+    REQUIRE(d.value().pixels.size() == 4);
+
+    auto read_back = cc::vector<u16>();
+    read_back.resize_to_uninitialized(2);
+    cc::memcpy(read_back.data(), d.value().pixels.data(), 4);
+    CHECK(read_back[0] == 0x1234);
+    CHECK(read_back[1] == 0xABCD);
+}
+
+TEST("png - an 8-bit decode still reports u8")
+{
+    // The 16-bit path must not have widened the ordinary one.
+    auto const d = babel::png::read(img::encode(make_gradient(3, 3, 3), img::format::png).value());
+    REQUIRE(d.has_value());
+    CHECK(d.value().decoded == babel::png::component::u8);
+    CHECK(d.value().bit_depth == 8);
+}
+
+TEST("image - the aggregator carries the sample type both ways")
+{
+    auto src = img::image{.width = 4, .height = 2, .channels = 3, .comp = img::component::u16};
+    src.pixels = make_gradient16(4, 2, 3);
+    CHECK(src.bytes_per_component() == 2);
+    CHECK(src.row_stride() == 4 * 3 * 2);
+
+    auto const encoded = img::encode(src, img::format::png);
+    REQUIRE(encoded.has_value());
+
+    auto const d = img::read(encoded.value());
+    REQUIRE(d.has_value());
+    CHECK(d.value().comp == img::component::u16); // the aggregator used to hardcode u8 here
+    CHECK(pixels_equal(d.value().pixels, src.pixels));
+
+    // Neither format takes f32, and JPEG does not take u16 either — both say so rather than narrowing.
+    auto wrong = src;
+    wrong.comp = img::component::f32;
+    CHECK(img::encode(wrong, img::format::png).has_error());
+    CHECK(img::encode(src, img::format::jpg).has_error());
 }
 
 TEST("png - malformed input is rejected rather than decoded")

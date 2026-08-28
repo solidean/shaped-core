@@ -355,7 +355,7 @@ cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); 
 
 struct image {                        // row-major, top-left origin, tightly packed
     int width; int height; int channels;      // 1 grey / 2 GA / 3 rgb / 4 rgba
-    babel::image::component comp;             // u8 (png/jpg) | f32 (hdr/pfm) | u16 (API-ready)
+    babel::image::component comp;             // u8 (png/jpg) | u16 (16-bit png, host-endian) | f32 (hdr/pfm)
     cc::vector<cc::byte> pixels;
     bool is_empty(); int bytes_per_component(); isize row_stride();
     cc::span<float const> samples_f32();      // the pixels as floats; empty unless comp == f32
@@ -372,14 +372,15 @@ cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::fo
 
 babel::png::data p = babel::png::read(bytes).value();
 p.width; p.height; p.channels; p.pixels;       // channels follow the file: 1 grey / 2 GA / 3 rgb / 4 rgba, +1 for a tRNS chunk
-p.bit_depth; p.color; p.interlace;             // native IHDR fields; pixels are always 8-bit whatever bit_depth says
+p.decoded;                                     // u8, or u16 for a 16-bit PNG — HOST-endian, unlike the file
+p.bit_depth; p.color; p.interlace;             // native IHDR fields; 1/2/4-bit unpacks to u8, so bit_depth is where it survives
 p.gamma; p.srgb_intent; p.icc_profile; p.texts; p.physical;  // gAMA / sRGB / iCCP / tEXt+zTXt+iTXt / pHYs, read AND written
 
 babel::jpg::data j = babel::jpg::read(bytes).value();
 j.bit_depth; j.progressive; j.chroma; j.jfif_density; // native SOF/JFIF fields
 j.icc_profile; j.exif; j.comments;                    // [todo] designed, not yet populated
 
-babel::png::encode(p, {.compression_level = 9});  // -1 (zlib default) .. 9; always 8-bit, non-interlaced
+babel::png::encode(p, {.compression_level = 9});  // -1 (zlib default) .. 9; depth from `decoded`, always non-interlaced
 babel::jpg::encode(j, {.quality = 90});           // + write(stream, ...) for both
 ```
 
