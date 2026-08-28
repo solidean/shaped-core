@@ -161,7 +161,7 @@ See [image.hh](../src/babel-serializer/image/image.hh).
 
 ### Other image formats [planned]
 
-`[planned]` further stb-supported containers (bmp / tga / gif), `.exr`, and the 16-bit decode path behind PNG.
+`[planned]` further stb-supported containers (bmp / tga / gif), and `.exr`.
 
 ## Aggregators
 
