@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <nexus/test.hh>
@@ -207,6 +208,42 @@ TEST("cc::threaded_actor - an actor with a thread of its own registers nothing",
     CHECK(cc::registered_thread_pump_count() == baseline + (CC_HAS_THREADS ? 0 : 1));
     actor->shutdown();
     CHECK(cc::registered_thread_pump_count() == baseline);
+}
+
+namespace
+{
+/// Announces that the actor thread is running, so a test can aim at what the thread does next.
+cc::atomic<bool> g_actor_thread_started = false;
+
+struct signaling_actor : cc::threaded_actor_impl<int>
+{
+    void on_thread_init() override { g_actor_thread_started.store(true); }
+    void on_message(int) override {}
+};
+} // namespace
+
+TEST("cc::threaded_actor - shutdown wakes a thread that is about to sleep", exclusive())
+{
+    // The race: shutdown() flips a flag the actor thread's wait predicate reads, and that flag is not the inbox mutex's.
+    // A notify sent while the thread sits between its last predicate check and the wait it is about to enter is lost,
+    // and the join below then never returns.
+    // That window is only a few instructions wide, so waiting for the thread to announce itself is what makes aiming at
+    // it possible at all — hammering start/shutdown blind just races thread startup, which is a thousand times longer.
+    // The spin then sweeps the shutdown across the handful of steps between the announcement and the wait.
+    auto volatile sink = 0;
+    for (auto i = 0; i < 400; ++i)
+    {
+        g_actor_thread_started.store(false);
+        auto actor = cc::make_and_start_threaded_actor<signaling_actor>();
+
+        while (!g_actor_thread_started.load())
+            sink = sink + 1;
+        for (auto s = 0; s < i; ++s)
+            sink = sink + 1;
+
+        actor->shutdown();
+    }
+    CHECK(true); // reaching here at all is the assertion; a lost wakeup hangs rather than fails
 }
 
 TEST("cc::threaded_actor - shutdown deregisters, so a later sweep never touches the actor", exclusive())
