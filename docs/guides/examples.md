@@ -58,8 +58,8 @@ An example that constructs its own `window_system_description` can override it i
 ### `--capture`, and why you should use it while writing the example
 
 ```bash
-uv run dev.py example shaped-viewer/hello-cube --capture          # write an image, open no window
-uv run dev.py example shaped-viewer/hello-cube --capture front    # one the sidecar declares by name
+uv run dev.py example shaped-viewer/hello-cube --capture   # write an image, open no window
+uv run dev.py example <example> --capture <name>          # one the sidecar declares by name
 ```
 
 **This is the authoring loop for a graphical example, not just a way to refresh a picture.**
@@ -72,7 +72,7 @@ So write the example, capture it, look at the image, and fix the framing.
 That loop is what turns `initial_orbit` from a guess into a decision, and it is the difference between an example that teaches the library on sight and one that merely runs.
 Iterate on it the way you would iterate on a failing test.
 
-The mechanism is environment variables, the same convention `--background` uses, declared in [capture.hh](../../libs/graphics/shaped-viewer/src/shaped-viewer/capture.hh).
+The mechanism is environment variables, the same convention `--background` uses, declared in [capture.hh](../../libs/graphics/shaped-rendering/src/shaped-rendering/capture.hh).
 `SC_CAPTURE` implies headless: no window system is brought up, no swapchain is created, and nothing is presented, so a capture runs where there is no display at all.
 An example needs **no code for any of this** — `sv::interactive` reads the variables, waits for the image to settle, writes it, and ends the loop.
 
@@ -80,7 +80,11 @@ A capture waits for three things together, because each hides something the othe
 Every traced view must have accumulated enough frames, no resource may still owe post-load work, and a trace must actually have dispatched.
 That last one is what stops a routine whose shaders never compiled from writing out a black image at full frame count.
 `--capture-accumulate` and `--capture-timeout` move the thresholds when a scene needs longer.
-A run that spends its whole timeout writes what it has and then fails, so the partial image is there to look at.
+
+A run that spends its whole timeout writes what it has to `<out>.partial.<ext>` and **nothing to the path it was asked for**.
+So the partial image is there to look at, and the capture still counts as failed.
+`dev.py` reads a file at the requested path as the run having succeeded, and the exit code alone cannot tell it otherwise.
+Without that split a sweep would refresh a half-converged image over the committed reference and report it as captured.
 
 ### An example is capturable when it says so
 
@@ -158,6 +162,15 @@ Nothing compares against them and nothing gates on them; they answer "what is th
 A real golden test would need four things this does not have.
 PNG rather than JPEG, a pinned device — two devices do not agree bit-for-bit — a perceptual metric with a tuned threshold, and somewhere to put a failure diff.
 That is a deliberate non-goal rather than an omission.
+
+**So a capture is stable run to run on one machine, and never byte-identical across machines.**
+Two sweeps on the same box produce the same bytes, session state left by the first one included.
+A different driver or a different adapter produces the same *picture* and different bytes, and it always will.
+Re-capturing on your machine therefore dirties the three images whether or not anything changed, which is why refreshing them is a deliberate step rather than something a sweep does on its own.
+
+**What is missing is a similarity score.**
+A reviewer looking at a regenerated image has no cheap way to ask "is this roughly the same picture", so today the answer is to open both and look.
+A `dev.py` subcommand comparing a capture against its committed reference, and printing one number, is the shape that would fix it; nothing of it is built.
 
 A non-graphical example is captured through the same envelope: the same flag, the same folder, the same report.
 What it produces is its transcript rather than an image.
