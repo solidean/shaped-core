@@ -158,10 +158,8 @@ Read the `w=1` line first — one worker plus the participating caller is the mi
 The PGO benchmarks and their full-sweep twins are excluded from normal sweeps; an exact (non-wildcard) name runs a test regardless of bucket.
 
 ```bash
-# guide points, recorded for the perf gate
-uv run dev.py test "bench-async (single-thread drive)" --preset release-clang
-uv run dev.py test "bench-async born-ready decomposition" --preset release-clang
-uv run dev.py test "bench-async-pool (work-stealing)" --preset release-clang
+# every table in every file
+uv run dev.py benchmark "bench-async" --timeout 0
 
 # the human-facing tables
 uv run dev.py --mirror-test-output test "bench-async (single-thread drive - full sweep)"

@@ -82,16 +82,17 @@ The same machine as [clean-core's hash benchmark](../../../../base/clean-core/do
 This is Alder Lake, where AVX-512 is fused off, so BLAKE3's widest path is unavailable — a CPU that has it would make hashing's share smaller still.
 
 Read trends, not third decimals.
-Every figure is a median of five passes, each against its own freshly seeded document.
+Every figure is a median over samples the harness sizes itself, each pass against its own freshly seeded document.
+
+**The numbers below predate that harness**, and are re-measured when this write-up is next revised.
 
 ## Reproducing
 
 ```bash
-uv run dev.py test "bench-vdoc-loop (open / edit / publish / close)" --preset release-clang --timeout 0
-uv run dev.py test "bench-vdoc-loop (full sweep)" --preset release-clang --timeout 0 --manual
+uv run dev.py benchmark "bench-vdoc-loop" --timeout 0
 ```
 
-The first records the representative point as guide metrics; the second prints the table below.
+That is one table per medium and document size, each carrying the loop, the injected control and the isolated hashing.
 See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md) for the pgo-benchmark mechanism.
 
 ## Method

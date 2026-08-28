@@ -4,11 +4,14 @@ What the swap-only formulation costs and what it buys, measured against `std::so
 The benchmark is [tests/benchmarks/sort-benchmark.cc](../../tests/benchmarks/sort-benchmark.cc); run it with
 
 ```bash
-uv run dev.py test "bench-sort - cc::sort vs std::sort" --preset release-clang --timeout 0
+uv run dev.py benchmark "bench-sort" --timeout 0
 ```
 
 Numbers below: Windows, clang-cl, `release-clang`, single run, millions of elements sorted per second.
 Each point is the median of 5 adaptive timings with the cost of restoring the unsorted input measured out separately and subtracted.
+
+**Those numbers predate the nexus benchmark harness**, which medians hundreds of samples and brackets each with a
+confidence interval; they are re-measured when this write-up is next revised.
 `ratio` is `cc / std`, so above 1.0 is `cc::sort` ahead.
 
 ## The two findings
@@ -64,7 +67,7 @@ The pattern wins survive, because they come from the pattern-defeating machinery
 A separate manual test in the same file, run with
 
 ```bash
-uv run dev.py test "bench-sort - sort_async" --preset release-clang --timeout 0
+uv run dev.py benchmark "bench-sort - sort_async" --timeout 0
 ```
 
 Same machine, `i32`, against serial `cc::sort` re-measured on every row so a machine that clocks down mid-sweep moves both columns together.

@@ -68,16 +68,20 @@ Read trends, not third decimals.
 
 This full table is the manual `bench-hash (… full sweep)` benchmark.
 A lean `PGO_BENCHMARK` of the same base name records just the representative points (≈8 B and ≈64 KiB) via `nx::pgo`, for `dev.py pgo`.
-Both are excluded from normal sweeps, and the `"bench-hash"` filter matches both — so name them explicitly:
+`dev.py benchmark` defaults to a release preset; the second line is the assertions-on comparison.
 
 ```bash
-uv run dev.py test "bench-hash" --target clean-core-test --preset release-clang --timeout 0
-uv run dev.py test "bench-hash" --target clean-core-test --preset relwithdebinfo-clang --timeout 0
+uv run dev.py benchmark "bench-hash" --timeout 0
+uv run dev.py benchmark "bench-hash" --preset relwithdebinfo-clang --timeout 0
 ```
 
 See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Results
+**The numbers below predate the nexus benchmark harness.**
+They were taken as a median of five adaptive passes; the harness medians hundreds of samples and brackets each with a
+confidence interval, so these are re-measured when this write-up is next revised.
+
 
 GB/s; higher is better.
 `hob64` = `cc::make_hash_of_bytes` (XXH3-64 wrapper), `hash128` = `cc::hash128::create` (XXH3-128 wrapper), `xxh64`/`xxh128` = the raw xxHash calls.

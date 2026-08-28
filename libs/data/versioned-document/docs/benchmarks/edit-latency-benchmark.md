@@ -156,15 +156,17 @@ Two findings from writing this harness are worth keeping, because both were invi
   The paths and stable values are now hoisted out of the loop, as a real producer would hold them.
 
 ## Reproducing
+**The numbers below predate the nexus benchmark harness.**
+They were taken as a median of five adaptive passes; the harness medians hundreds of samples and brackets each with a
+confidence interval, so these are re-measured when this write-up is next revised.
+
 
 ```bash
-uv run dev.py test "bench-vdoc-edit-latency (one op at a time)" --preset release-clang --timeout 0
-uv run dev.py test "bench-vdoc-edit-latency (full sweep)" --preset release-clang --timeout 0 --manual
-uv run dev.py test "bench-vdoc-layered-frame (three layers, per frame)" --preset release-clang --timeout 0
-uv run dev.py test "bench-vdoc-layered-frame (full sweep)" --preset release-clang --timeout 0 --manual
+uv run dev.py benchmark "bench-vdoc-edit-latency" --timeout 0
+uv run dev.py benchmark "bench-vdoc-layered-frame" --timeout 0
 ```
 
-The first records the representative point (2,000 entities) as guide metrics; the second prints the table above.
+The tail is reported because these run unbatched, so one sample is one edit rather than a batch mean.
 See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md) for the pgo-benchmark mechanism.
 
 ## Method notes
