@@ -90,6 +90,24 @@ Drive-by nits are welcome — collect them into a single trailing point so they 
 
 Each of these was decided in a review; do not re-litigate them, and apply them as rules.
 
+### Posting is a separate instruction, and nothing else is one
+
+**Never post a review anywhere the author can see it — a PR comment, a review, an inline note — without the maintainer saying to post it, in those words, after reading the text.**
+The go-ahead is an act of its own, and no amount of upstream context substitutes for it.
+
+Three things that are routinely mistaken for one, and are not:
+
+- **The goal.** `--goal pr-comment` says what the artifact *is*, not that it may be published; "goal is pr comment" at the start of a session says the same thing and no more.
+- **A round answer.** Approving a draft entry approves the text, which is exactly why the tool refuses to `post` before it and still needs `--confirm` after.
+- **The absence of an objection.** A maintainer who never said "don't post" has not said anything.
+
+This holds for a review conducted entirely in chat too, where there is no draft entry and no `post` gate to stop you.
+The lighter the process, the more the rule is carrying: a chat review that skips the tool has skipped every mechanism that would otherwise ask.
+
+The worked example is a review of #154 that went well and then posted itself.
+The maintainer had opened with "this is a small one, so maybe in-chat is sufficient" and "goal is pr comment", read nothing, and found the comment already on the PR.
+A review the maintainer has not seen is a draft whatever its quality, and publishing one spends their credibility on findings they never agreed to.
+
 ### Docs are for users first, implementors second
 
 A public API doc may state the **intent** in the present tense even where one backend has not caught up.

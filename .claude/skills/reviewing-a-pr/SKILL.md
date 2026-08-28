@@ -11,10 +11,27 @@ Read that guide every time; it is the living record of the reviewer's taste and 
 
 The tool is [tools/review/readme.md](../../../tools/review/readme.md), and its design is [tools/review/docs/_index.md](../../../tools/review/docs/_index.md).
 
+## Never post without an explicit go-ahead
+
+**Nothing this review produces reaches the author until the maintainer has read the text and said to post it.**
+A PR comment, a GitHub review, an inline note — all of it waits.
+This binds every path, including a review done entirely in chat with no entries and no `post` command to gate you.
+
+What does **not** count as a go-ahead:
+
+- **The goal.** `--goal pr-comment`, or "goal is pr comment" in the opening message, says what the artifact is — never that it may be published.
+- **The round answer that approved the draft.** It approved the text; posting is still a separate instruction.
+- **Silence.** No objection is not an approval.
+
+Show the text and ask.
+`post` without `--confirm` dry-runs it, which is the safe way to show what would go out.
+See [Posting is a separate instruction](../../../docs/guides/reviewing-prs.md#posting-is-a-separate-instruction-and-nothing-else-is-one).
+
 ## Use the tool
 
 Drive `review.py` for any review with more than a handful of hunks, which is nearly all of them.
 Chat is fine for a one-line fix; the moment you would be tempted to write "and a few other small things", you needed the ledger.
+A chat review posts nothing on its own either — the rule above binds it exactly as it binds a tool-driven one.
 
 The tool exists because a chat review is a narrative, and a narrative silently skips a file.
 It does not carry any taste — that is still yours and the guide's.
@@ -207,11 +224,11 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
 
 10. **Post.** `uv run review.py post pr-<n> --pr <n>` dry-runs it; `--confirm` publishes.
    It refuses while the draft entry's ask is unanswered, so the gate cannot be skipped by accident.
-   The go-ahead to actually post is a separate instruction from the maintainer, never the round answer alone.
+   The go-ahead to actually post is a separate instruction from the maintainer, never the round answer alone, and never the goal the review was opened with.
 
    `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
    It is a draft: the tool gathered what was decided, it did not decide which points are worth an afternoon.
-   Post only on an explicit go-ahead, as one comment.
+   Post only on an explicit go-ahead from the maintainer, as one comment.
 
 ## Writing entries that are worth answering
 
@@ -292,7 +309,7 @@ When the goal is `pr-comment`, the artifact is **a task list for a fresh agent s
 - **It has to stand alone.** No "as we discussed", no numbering that implies a conversation.
 - Plain backticked `path/to/file.cc:63` beats markdown links there — relative links do not resolve in a comment.
 
-Post only on an explicit go-ahead, as one comment.
+Post only on an explicit go-ahead from the maintainer, as one comment.
 
 ## Feed the guide
 
