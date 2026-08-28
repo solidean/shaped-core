@@ -80,9 +80,15 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
 
         // The TLAS instance's own id is the row of the instance table this item occupies, which is what `InstanceID()` reads.
+        // The opaque override is what makes an any-hit reachable at all: a BLAS is built opaque, and DXR then behaves as
+        // if the hit group carried no any-hit whatever the pipeline attached.
+        // Per instance rather than per BLAS, because "can this cut out" is a property of the MATERIAL — the same mesh
+        // under an opaque material and a cutout one would otherwise need two acceleration structures.
+        auto const hit_group = hit_group_of(out, item.shader_key, resources);
         auto inst = sg::tlas_instance{.blas = mesh->blas,
                                       .instance_id = u32(out.instances.size()),
-                                      .hit_group_offset = hit_group_of(out, item.shader_key, resources)};
+                                      .hit_group_offset = hit_group,
+                                      .opaque_override = !out.hit_groups[hit_group]->can_cut_out};
         pack_transform(inst, item.transform);
         out.instances.push_back(cc::move(inst));
 

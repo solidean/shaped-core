@@ -509,6 +509,14 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
             auto const brightness = albedo.mean[0] + albedo.mean[1] + albedo.mean[2];
             CHECK(brightness > 0.02f).context(where).dump("albedo", albedo.mean);
 
+            // The interior a sample reported must agree with the side it actually went to.
+            //
+            // Exact rather than statistical, and it is the one assertion here that a reflective lobe leaking a
+            // below-horizon direction cannot hide from: such a sample says `medium_none` while pointing through the
+            // surface, and the integrator then carries it into an interior it never entered.
+            // A thin wall transmits into no interior by construction and the probe excludes it.
+            CHECK(medium.mean[0] == 0.0f).context(where).dump("interior/side disagreements", medium.mean[0]);
+
             // Which interior the sampled directions crossed into, which is what the integrator switches its medium on.
             // A surface that transmits must reach one, and must reach the one it actually described.
             auto const& probe_s = ns.s;

@@ -581,7 +581,9 @@ frame viewer::acquire_frame()
         if (st == nullptr || st->style_last_frame != camera_style::fly)
             continue;
 
-        if (!im.window->is_focused())
+        // Headless counts as focused: there is no window to lose focus, and a hand-driven loop stepping `delta` forward
+        // is a legitimate way to script a fly-through, which releasing here would silently break.
+        if (!im.config.headless && !im.window->is_focused())
         {
             st->fly.release_input();
             continue;

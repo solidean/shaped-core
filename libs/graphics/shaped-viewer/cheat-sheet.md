@@ -179,7 +179,7 @@ Gotchas:
 
 ```cpp
 sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; hash128 hash; }
-sv::material_type::create(name, signature, shader)   // -> hashes all three; asserts a name declared twice, and a default that is not its format's size
+sv::material_type::create(name, signature, shader, opacity_attribute = {})  // -> hashes all four; asserts a name declared twice, and a default that is not its format's size
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
 sv::material_signature_entry::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
@@ -197,7 +197,7 @@ lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
 sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
-                                 //   openpbr: the OpenPBR Surface subset (20 attributes) — the type to author against
+                                 //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
@@ -235,6 +235,9 @@ Gotchas:
 - **`material::create` validates nothing** against the type, because it cannot see one.
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
 - **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+- **A cutout is a DECLARATION, not a detection.** `material_type::opacity_attribute` names which attribute the fragment writes `geometry_opacity` from.
+  A permutation can cut out only where something other than the signature's own default supplied that attribute.
+  That is what becomes the instance's `opaque_override`, so a type that leaves it empty keeps the hardware's opaque path on every ray.
 - **`surface` is OpenPBR's parameter set** (`sv::surface`, `shaders/openpbr.hlsli`), not a metallic-roughness struct.
   Every type writes that one vocabulary, which is what lets the integrator evaluate a single layered BSDF whatever the material was authored as.
 - **The generator emits `#define SV_ATTR_SUPPLIED_<name> 0/1` per attribute**, one constant per permutation.

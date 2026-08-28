@@ -145,7 +145,12 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
 /// how many alpha-tested triangles it happened to graze.
 /// Varying with `rng_seed` is what keeps a static view refining rather than settling on one dither pattern.
 ///
-/// Only permutations whose material can actually cut out get one of these attached — see `material_permutation::can_cut_out`.
+/// Only permutations whose material can actually cut out get one of these attached — see `material_permutation::can_cut_out`
+/// — and only an instance whose `opaque_override` is cleared can invoke it, which `view_renderer` sets from the same flag.
+///
+/// UNRESOLVED: the payload declared here is `PtPayload`, and `pt_occluded` reaches this same hit group carrying a
+/// `ShadowPayload`, which DXR leaves undefined. Nothing in the tree binds `opacity`, so no instance is non-opaque today and
+/// the mismatch is unreachable — but it has to be settled before a material does. See libs/graphics/shaped-viewer/docs/TODO.md.
 [shader("anyhit")]
 void PtAnyHit(inout PtPayload payload, in PtAttributes attribs)
 {

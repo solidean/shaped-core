@@ -159,11 +159,15 @@ namespace
 }
 } // namespace
 
-material_type material_type::create(cc::string name, cc::vector<material_signature_entry> signature, cc::string shader)
+material_type material_type::create(cc::string name,
+                                    cc::vector<material_signature_entry> signature,
+                                    cc::string shader,
+                                    cc::string opacity_attribute)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_string(name);
     b.add_string(shader);
+    b.add_string(opacity_attribute);
     b.add_pod(i64(signature.size()));
     for (auto const& d : signature)
     {
@@ -177,6 +181,7 @@ material_type material_type::create(cc::string name, cc::vector<material_signatu
     auto type = material_type{.name = cc::move(name),
                               .signature = cc::move(signature),
                               .shader = cc::move(shader),
+                              .opacity_attribute = cc::move(opacity_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)
@@ -208,6 +213,9 @@ material_type material_type::create(cc::string name, cc::vector<material_signatu
                   "use it");
         CC_ASSERT(d.name != "surface" && d.name != "ctx", "'surface' and 'ctx' are the entry function's own locals");
     }
+
+    CC_ASSERT(type.opacity_attribute.empty() || type.find(type.opacity_attribute) != nullptr,
+              "a material type's opacity_attribute must name an attribute its signature declares");
 
     return type;
 }

@@ -14,7 +14,8 @@
 // The fuzz is a Conty-Estevez sheen rather than the specified Zeltner microflake, the coat tints what passes through it once
 // rather than absorbing along the true refracted path length, and GGX energy compensation uses an analytic fit rather than a
 // tabulated directional albedo.
-// Transmission, subsurface and dispersion are not modelled at all, and `sv::surface` does not carry them.
+// The transmissive and subsurface bases share the specular interface and differ only in what lies beyond it, and a
+// dispersive crossing collapses the path onto one wavelength rather than bending three at once.
 
 namespace sv
 {
@@ -479,6 +480,14 @@ struct bsdf_sample
     ///
     /// The two refracting bases share one lobe, so this is the only thing that says which of them a sample belongs to —
     /// and the integrator needs it, because what happens beyond the interface is entirely a property of the medium.
+    ///
+    /// `medium_none` means the continuation entered no interior, so the caller keeps whatever the incoming segment was
+    /// already travelling through.
+    /// On a solid that leaves exactly one shape: `medium_none` requires `direction.z > 0`, because a direction crossing
+    /// the interface always enters one of the two interiors.
+    /// A thin wall is the exception and the only one — it encloses nothing, so it transmits and still reports
+    /// `medium_none`, with a direction below the surface.
+    /// `probe_medium` asserts both halves, which is what catches a reflective lobe leaking a below-horizon direction.
     uint medium;
 };
 
@@ -1059,7 +1068,7 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
     return f_fuzz + t_fuzz * (f_coat + below_coat);
 }
 
-/// How the five lobes split one outgoing direction's sampling budget.
+/// How the six lobes split one outgoing direction's sampling budget.
 /// Each weight is roughly what its lobe reflects, so a lobe that contributes nothing is never picked.
 lobe_probs bsdf_lobe_probs(bsdf b, float3 wo)
 {
@@ -1168,13 +1177,23 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
 
     lobe_probs p = bsdf_lobe_probs(b, wo);
 
-    // Walk the five in the order the struct lists them, so the pick is a single pass over the cdf.
+    // Walk the six in the order the struct lists them, so the pick is a single pass over the cdf.
     float pick = u.x;
     float3 wi = float3(0, 0, 1);
 
+    // A REFLECTIVE lobe that produced a direction below the horizon has failed, and each one ends the sample itself.
+    //
+    // Rejecting here rather than at the bottom is what keeps the two populations apart: `bsdf_eval` and `bsdf_pdf` both read
+    // a direction below the surface as a transmission, so a below-horizon reflection surviving to them would be valued as a
+    // BTDF and scored against a refraction density that did not produce it — and reported as `medium_none` while pointing
+    // through the surface, which sends the path into an interior it never entered.
+    // On an opaque surface the pdf collapses to zero and the sample is dropped anyway; on a transmissive one nothing
+    // downstream can tell the two apart.
     if (pick < p.fuzz)
     {
         wi = sample_cosine_local(u.yz);
+        if (wi.z <= 0.0)
+            return r;
     }
     else if (pick < p.fuzz + p.coat)
     {
@@ -1186,20 +1205,30 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
 
         float3 h_c = ggx_sample_vndf(wo_c, b.coat_alpha, u.yz);
         wi = from_coat(b, reflect(-wo_c, h_c));
+
+        // The coat's own horizon is not the base's, so this rejects against the frame the closure is evaluated in.
+        if (wi.z <= 0.0)
+            return r;
     }
     else if (pick < p.fuzz + p.coat + p.metal)
     {
         float3 h = ggx_sample_vndf(wo, b.metal_alpha, u.yz);
         wi = reflect(-wo, h);
+        if (wi.z <= 0.0)
+            return r;
     }
     else if (pick < p.fuzz + p.coat + p.metal + p.spec)
     {
         float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
         wi = reflect(-wo, h);
+        if (wi.z <= 0.0)
+            return r;
     }
     else if (pick < p.fuzz + p.coat + p.metal + p.spec + p.diffuse)
     {
         wi = sample_cosine_local(u.yz);
+        if (wi.z <= 0.0)
+            return r;
     }
     else
     {

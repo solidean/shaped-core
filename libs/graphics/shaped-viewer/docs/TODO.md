@@ -278,6 +278,11 @@ importance-samples the continuation — so what is left is coverage of the model
 - **A GGX sample that reflects below the horizon is dropped rather than redistributed**, so `bsdf_pdf` legitimately claims
   less than the full hemisphere — around a tenth of it for a rough lobe.
   That is unbiased and standard, and the probe asserts the direction that matters (never MORE than 1) rather than equality.
+  Each reflective branch of `bsdf_sample_direction` drops it itself rather than letting it fall out at the bottom: below the
+  horizon is where a TRANSMISSION lives, so a reflection surviving that far was valued as a BTDF, scored against a
+  refraction density that never produced it, and reported as `medium_none` while pointing through the surface — which sent
+  the path into an interior it never entered.
+  `probe_medium` now counts that disagreement and the test requires zero, which is exact rather than statistical.
   Multiple-scattering GGX sampling is what would put that mass back, and it is the same tabulated-albedo work as the
   compensation entry below.
 - **Three lobes are approximations, named at the top of `openpbr.hlsli`.**
@@ -306,8 +311,24 @@ importance-samples the continuation — so what is left is coverage of the model
   What it needs is light sampling over emissive triangles — an emitter list built per trace with its own area pdf,
   balanced against the BSDF sampler the way `pt_light_intersect` already balances the rect.
 - **A partly-covered surface is expressible now**, through `PtAnyHit` in `shaders/pt_material_hit.hlsli`.
-  It is attached only to permutations whose material actually writes `geometry_opacity` (`material_permutation::can_cut_out`),
-  because a hit group carrying an any-hit gives up the hardware's opaque fast path for every intersection on it.
+  Reaching it takes two things, and for a while it only had one.
+  The hit group needs the any-hit attached, which `material_permutation::can_cut_out` decides — and that is now a
+  DECLARATION rather than a substring test: a type names its `opacity_attribute`, and a permutation can cut out only where
+  something other than the signature's own default supplied it.
+  The instance then has to be non-opaque, which `view_renderer` sets from the same flag through
+  `sg::tlas_instance::opaque_override`.
+  Without that second half every BLAS sv builds is opaque, and DXR behaves as if no any-hit were attached at all — so the
+  whole path was unreachable and `geometry_opacity` affected nothing.
+- **The any-hit's payload type is unresolved, and it blocks binding `opacity` on anything.**
+  `PtAnyHit` declares `PtPayload`, and `pt_occluded` reaches the same hit group carrying a `ShadowPayload`, which DXR
+  leaves undefined.
+  Nothing in the tree binds `opacity`, so no instance is non-opaque and the mismatch is currently unreachable — but it has
+  to be settled before a material does.
+  Two shapes were tried and neither works: an empty payload for the any-hit is rejected by DXC ("shader must include inout
+  payload structure parameter"), and putting `PtPayload` on the shadow trace as well fails the pipeline build.
+  What is left is a second hit record per permutation, with the shadow ray taking `RayContributionToHitGroupIndex` 1 and
+  its own any-hit compiled against `ShadowPayload` — or `RAY_FLAG_FORCE_OPAQUE` on the shadow trace, which is cheap and
+  makes a cutout cast a solid shadow.
 
 ## Everything else
 

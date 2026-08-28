@@ -408,9 +408,23 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     if (!opts.epilogue_include.empty())
         cc::format_append(src, "\n#include \"{}\"\n", opts.epilogue_include);
 
-    // Read off the FRAGMENT rather than the finished source, which also holds the runtime include's own declaration of the
-    // field and would match every material alike.
-    auto const can_cut_out = r.type->shader.contains(cc::string_view("geometry_opacity"));
+    // Whether THIS permutation can reject an intersection, which is narrower than whether its type could.
+    //
+    // The type names the attribute its fragment writes `geometry_opacity` from, and that attribute's resolved frequency
+    // is what decides the answer.
+    // `material_type` frequency means nothing supplied it, so the fragment clamps the signature's own default and the
+    // value is a compile-time constant.
+    // An any-hit there would run at every intersection to reject nothing, and cost the instance its opaque fast path.
+    auto const can_cut_out = [&]
+    {
+        if (r.type->opacity_attribute.empty())
+            return false;
+
+        for (auto const& a : r.attributes)
+            if (a.name == r.type->opacity_attribute)
+                return a.frequency != material_frequency::material_type;
+        return false;
+    }();
 
     return {.source = cc::move(src),
             .layout = cc::move(layout),

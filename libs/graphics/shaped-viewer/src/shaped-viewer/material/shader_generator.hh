@@ -59,11 +59,15 @@ struct sv::generated_material_shader
     /// The generated text names a register, never a state, so nothing else can recover which state belongs to which register.
     cc::vector<sg::sampler> samplers;
 
-    /// Whether this permutation's fragment ever writes `geometry_opacity`, and so whether a cutout is possible at all.
+    /// Whether a cutout is possible on THIS permutation: its type declares an `opacity_attribute`, and something other
+    /// than the signature's own default supplied it.
     ///
-    /// A fragment that never touches it leaves the default 1, which no any-hit could ever reject — so attaching one would
-    /// cost every intersection a shader invocation and the hardware its opaque fast path, to decide nothing.
-    /// Conservative in the harmless direction: a fragment that writes a constant 1 still counts as able to cut out.
+    /// Both halves are load-bearing.
+    /// A type that never writes `geometry_opacity` leaves the default 1, and a permutation that left its opacity
+    /// attribute unbound writes a compile-time constant — an any-hit in either case runs at every intersection to reject
+    /// nothing, and costs the instance the hardware's opaque fast path to do it.
+    /// This is what `view_renderer` turns into `sg::tlas_instance::opaque_override`, so it decides whether the any-hit
+    /// can be invoked at all rather than only whether one is compiled.
     bool can_cut_out = false;
 
     /// What the compile is cached on: the resolution's shape and how these options spell it (see `material_shader_key`).

@@ -188,7 +188,8 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of_rotation("tangent_frame", tg::quat_f::make_identity()));
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
-    return material_type::create(cc::string(builtin_material::openpbr), cc::move(signature), cc::string(openpbr_shader));
+    return material_type::create(cc::string(builtin_material::openpbr), cc::move(signature), cc::string(openpbr_shader),
+                                 "opacity");
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -216,7 +217,8 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     auto signature = cc::vector<material_signature_entry>();
     signature.push_back(material_signature_entry::of("color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     signature.push_back(material_signature_entry::of("opacity", 1.0f));
-    return material_type::create(cc::string(builtin_material::unlit), cc::move(signature), cc::string(unlit_shader));
+    return material_type::create(cc::string(builtin_material::unlit), cc::move(signature), cc::string(unlit_shader),
+                                 "opacity");
 }
 } // namespace
 

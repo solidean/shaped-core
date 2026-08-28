@@ -58,7 +58,8 @@ StructuredBuffer<probe_case> Cases : register(t0);
 ///   - `probe_albedo`: `xyz` is the summed estimate and `w` the samples that produced it.
 ///   - `probe_pdf_norm`: `x` is the summed estimate, `w` the sample count.
 ///   - `probe_reciprocity`: `x` is the summed absolute difference and `y` the summed magnitude it is relative to.
-///   - `probe_medium`: how many samples crossed into nothing, into the transmissive interior, and into the subsurface one.
+///   - `probe_medium`: how many samples reported an interior disagreeing with the side they went to, how many entered the
+///     transmissive interior, and how many the subsurface one.
 ///   - `probe_echo`: the decoded fields the CPU checks its own packing against.
 RWStructuredBuffer<float4> Results : register(u0);
 
@@ -151,12 +152,23 @@ float4 probe_run(probe_case c, uint item)
         }
         else if (c.mode == probe_medium)
         {
-            // Which interior each drawn direction entered, as three running counts.
+            // Which interior each drawn direction entered, and whether that agreed with the side the direction went to.
+            //
+            // `x` is the DISAGREEMENT count rather than a count of `medium_none`, because the latter is implied by the
+            // other two and nothing was asserting it.
+            // The disagreement is exact rather than statistical: a sample reporting no interior while pointing through the
+            // surface came from a reflective lobe that produced a direction below the horizon, and would be valued as a
+            // BTDF and scored against a refraction density that did not produce it.
+            // A thin wall encloses nothing, so it legitimately transmits into no interior and is the one exclusion.
             float3 u = float3(probe_rand(rng), probe_rand(rng), probe_rand(rng));
             bsdf_sample s = bsdf_sample_direction(b, wo, u);
             if (s.valid)
             {
-                sum.x += s.medium == medium_none ? 1.0 : 0.0;
+                bool const crossed = s.direction.z < 0.0;
+                bool const entered = s.medium != medium_none;
+                bool const thin = c.s.geometry_thin_walled != 0.0;
+
+                sum.x += (crossed != entered && !(crossed && thin)) ? 1.0 : 0.0;
                 sum.y += s.medium == medium_transmission ? 1.0 : 0.0;
                 sum.z += s.medium == medium_subsurface ? 1.0 : 0.0;
             }
