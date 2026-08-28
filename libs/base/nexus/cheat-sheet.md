@@ -83,9 +83,9 @@ To compare two implementations, write a `nx::config::manual` test instead — it
 PGO_BENCHMARK("hash - throughput")     // a test in the pgo_benchmark bucket (implies no-CHECK is fine);
 {                                        //   swept only via `--pgo-benchmarks`, or run by exact name
     double gbps = measure(...);
-    nx::pgo::report_raw("xxh3@8B", gbps, "GB/s", /*higher_is_better=*/true);  // free-form unit + orientation
-    nx::pgo::report_elements_per_sec("keys", n_per_s);  // unit "1/s",  higher is better
-    nx::pgo::report_time_for("op", seconds);            // unit "s",    lower  is better
+    nx::pgo::report("xxh3@8B", bytes_per_s, nx::bench::unit_bytes_per_second);  // the unit carries the orientation
+    nx::pgo::report_elements_per_sec("keys", n_per_s);  // unit_items_per_second, higher is better
+    nx::pgo::report_time_for("op", seconds);            // unit_seconds,          lower  is better
 }
 // Recorded metrics print as a table and, with `--pgo-json <file>`, write a sidecar consumed by `dev.py pgo`.
 ```

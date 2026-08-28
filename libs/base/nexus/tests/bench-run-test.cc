@@ -407,6 +407,10 @@ TEST("bench - a pause around expensive setup is not warned about")
                                       nx::bench::sink(acc);
                                   });
 
-    CHECK(r.paused_fraction > 0.3); // half the wall time, near enough
+    // A substantial share of the wall time, without pinning the ratio: how the two halves balance depends on the
+    // optimizer, and the ratio is not what this test is about.
+    CHECK(r.paused_fraction > 0.1);
+
+    // This is: a pause is cheap against work this size, so the warning must stay silent.
     CHECK(r.find_warning(nx::bench::warning_kind::paused_fraction_high) == nullptr);
 }

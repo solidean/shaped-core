@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/record/stat.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <nexus/pgo.hh>
@@ -135,7 +136,7 @@ TEST("threaded check - a guide metric from a node lands on its test", no_schedul
                             auto n = cc::make_async_lazy<int>(
                                 [](async_context<int>& ctx) -> cc::async_step_status
                                 {
-                                    nx::pgo::report_raw("from-a-worker", 1.0, "1");
+                                    nx::pgo::report("from-a-worker", 1.0, cc::rec::unit_count);
                                     return ctx.success(1);
                                 });
                             CHECK(cc::async_blocking_get_on(pool, n) == 1);

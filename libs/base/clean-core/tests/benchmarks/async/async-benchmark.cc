@@ -14,6 +14,7 @@
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/thread/async.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
@@ -102,7 +103,7 @@ void report(char const* label, isize nodes, double async_ops_per_sec, double dir
     std::printf("%-22s %8lld %13.1f %13.2f %14.2f %9.1fx\n", label, (long long)nodes, a_mops, a_ns, d_ns, tax);
 
     if (record)
-        nx::pgo::report_raw(label, a_ns, "ns/node", /*higher_is_better*/ false);
+        nx::pgo::report(label, a_ns * 1e-9, nx::bench::unit_seconds_per_item);
 }
 
 // Drive a freshly-built root to completion on the calling thread's scheduler, and return its value.

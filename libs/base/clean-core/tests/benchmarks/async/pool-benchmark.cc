@@ -29,6 +29,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/thread.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
@@ -608,10 +609,10 @@ PGO_BENCHMARK("bench-async-pool (work-stealing)")
     auto const pfor = case_pfor(ws);
     auto const tree = case_tree(ws);
 
-    nx::pgo::report_raw("parallel-for speedup@P", pfor.vs_serial, "x", /*higher_is_better*/ true);
-    nx::pgo::report_raw("parallel-for scaling@P (vs 1w)", pfor.vs_one, "x", /*higher_is_better*/ true);
-    nx::pgo::report_raw("spawn-tree ns/node@P", tree.ns_at_p, "ns/node", /*higher_is_better*/ false);
-    nx::pgo::report_raw("spawn-tree scaling@P (vs 1w)", tree.vs_one, "x", /*higher_is_better*/ true);
+    nx::pgo::report("parallel-for speedup@P", pfor.vs_serial, nx::bench::unit_speedup);
+    nx::pgo::report("parallel-for scaling@P (vs 1w)", pfor.vs_one, nx::bench::unit_speedup);
+    nx::pgo::report("spawn-tree ns/node@P", tree.ns_at_p * 1e-9, nx::bench::unit_seconds_per_item);
+    nx::pgo::report("spawn-tree scaling@P (vs 1w)", tree.vs_one, nx::bench::unit_speedup);
 }
 
 // The full canonical set across the worker sweep.

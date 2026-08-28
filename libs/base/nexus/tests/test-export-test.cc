@@ -315,7 +315,7 @@ TEST("export - perf JSON carries every metric a run recorded", no_scheduler)
     auto const keys = entry_named(metrics, "keys");
     CHECK(keys["test"].as_string() == "bench");
     CHECK(keys["value"].as_double() == 1250.5);
-    CHECK(keys["unit"].as_string() == "1/s");
+    CHECK(keys["unit"].as_string() == "/s"); // nx::bench::unit_items_per_second's symbol
     CHECK(keys["higher_is_better"].as_bool());
 
     auto const per_op = entry_named(metrics, "per_op");

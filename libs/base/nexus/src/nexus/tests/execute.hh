@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/platform/source_location.hh>
+#include <clean-core/record/fwd.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/bench/result.hh>
 #include <nexus/fwd.hh>
@@ -33,14 +34,19 @@ struct nx::test_error
     // NOTE: if expr == expanded, C++ TestMate just shows "failed" instead of anything useful, so make sure they are always different
 };
 
-// A single performance metric recorded by a PGO benchmark via nx::pgo (see guide.hh).
-// higher_is_better orients comparisons (throughput vs. latency); unit is a free-form label (e.g. "GB/s", "s").
+// A single performance metric recorded by a PGO benchmark via nx::pgo (see pgo.hh).
+//
+// The unit is a `cc::rec::unit` rather than a label, so it carries the symbol, the prefix base AND the orientation
+// that decides whether a delta is an improvement.
+// It points at a static object the recording site owns, which is what makes storing a pointer safe here.
 struct nx::recorded_metric
 {
     cc::string name;
     double value = 0;
-    cc::string unit;
-    bool higher_is_better = true;
+    cc::rec::unit const* unit = nullptr;
+
+    [[nodiscard]] bool higher_is_better() const;
+    [[nodiscard]] cc::string_view unit_symbol() const;
 };
 
 struct nx::test_execution
@@ -183,7 +189,7 @@ void report_check_result(check_result result);
 
 // Appends a metric to the active test's execution, and is a no-op when no test is running.
 // nx::pgo is the public face.
-void record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better);
+void record_metric(cc::string_view name, double value, cc::rec::unit const& unit);
 
 // Appends a measured loop to the active test's execution, and is a no-op when no test is running — which is what lets
 // nx::bench::run be called from a plain function, or from an application, and simply hand its result back.

@@ -15,6 +15,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh> // cc::print / cc::format
 #include <clean-core/string/string.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
@@ -206,10 +207,10 @@ void run()
 
         if (chunk_n == 1)
         {
-            nx::pgo::report_raw("cc write@1B", cc_w, "MB/s", true);
-            nx::pgo::report_raw("std write@1B", std_w, "MB/s", true);
-            nx::pgo::report_raw("cc read@1B", cc_r, "MB/s", true);
-            nx::pgo::report_raw("std read@1B", std_r, "MB/s", true);
+            nx::pgo::report("cc write@1B", cc_w * 1e6, nx::bench::unit_bytes_per_second);
+            nx::pgo::report("std write@1B", std_w * 1e6, nx::bench::unit_bytes_per_second);
+            nx::pgo::report("cc read@1B", cc_r * 1e6, nx::bench::unit_bytes_per_second);
+            nx::pgo::report("std read@1B", std_r * 1e6, nx::bench::unit_bytes_per_second);
         }
     }
 

@@ -365,9 +365,11 @@ int nx::run(int argc, char** argv)
             for (auto const& exec : execution.executions)
                 for (auto const& metric : exec.metrics)
                 {
-                    char const* const dir = metric.higher_is_better ? "(higher is better)" : "(lower is better)";
-                    cc::println("  {} | {} = {} {} {}", exec.instance.declaration->name, metric.name, metric.value,
-                                metric.unit, dir);
+                    // Formatted through the unit, so a byte rate reads as 27.1 GiB/s rather than as eleven digits.
+                    // That is the payoff of a metric carrying a cc::rec::unit rather than a label.
+                    char const* const dir = metric.higher_is_better() ? "(higher is better)" : "(lower is better)";
+                    cc::println("  {} | {} = {} {}", exec.instance.declaration->name, metric.name,
+                                nx::bench::format_quantity(metric.value, metric.unit), dir);
                 }
         }
     }

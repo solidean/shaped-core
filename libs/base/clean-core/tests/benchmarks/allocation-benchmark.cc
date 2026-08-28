@@ -14,6 +14,7 @@
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
@@ -368,8 +369,8 @@ void run(cc::span<isize const> sizes, bool record)
         if (record && (size == 64 || size == 4096))
         {
             char const* const label = size == 64 ? "64B" : "4KiB";
-            nx::pgo::report_raw(cc::string("mimalloc@") + label, mi, "M ops/s", true);
-            nx::pgo::report_raw(cc::string("system@") + label, sys, "M ops/s", true);
+            nx::pgo::report(cc::string("mimalloc@") + label, mi * 1e6, nx::bench::unit_items_per_second);
+            nx::pgo::report(cc::string("system@") + label, sys * 1e6, nx::bench::unit_items_per_second);
         }
     }
     std::fflush(stdout);

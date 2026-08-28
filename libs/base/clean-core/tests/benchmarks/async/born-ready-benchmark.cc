@@ -23,6 +23,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
@@ -68,7 +69,7 @@ void report(char const* label, double ops_per_sec, double prev_ns, char const* n
         std::printf("%-34s %9.2f %+12.2f   %s\n", label, ns, ns - prev_ns, note);
 
     if (metric != nullptr)
-        nx::pgo::report_raw(metric, ns, "ns/op", /*higher_is_better*/ false);
+        nx::pgo::report(metric, ns * 1e-9, nx::bench::unit_seconds_per_item);
 }
 
 void run(bool record)

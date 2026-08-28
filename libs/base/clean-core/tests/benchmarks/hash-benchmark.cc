@@ -41,6 +41,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/bench/run.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <xxhash.h>
@@ -169,16 +170,14 @@ void run_length(length_point const& point, nx::bench::run_config const& cfg, cc:
 /// Far faster than the full sweep, while still exercising every hash code path.
 constexpr isize representative_lengths[] = {8, 256, 64 * 1024};
 
-/// Decimal GB/s off a measured loop, which is what the PGO report has always tracked.
+/// The byte throughput off a measured loop, which is what the PGO report tracks.
 ///
-/// The console table reads GiB/s instead, because cc::rec::unit_bytes takes binary prefixes and the harness formats
-/// by the unit.
-/// Both are labelled, and the PGO series keeps its decimal figure so the numbers stay comparable across this
-/// migration rather than jumping by 7%.
-double gbps_of(nx::bench::result const& r)
+/// Reported in the harness's own unit rather than converted: a PGO series is compared within one `dev.py pgo measure`
+/// invocation — baseline against pgo-use — so there is no earlier number to stay compatible with.
+double bytes_per_second_of(nx::bench::result const& r)
 {
     auto const* const bytes = r.find_quantity("bytes");
-    return bytes != nullptr ? bytes->per_second / 1e9 : 0.0;
+    return bytes != nullptr ? bytes->per_second : 0.0;
 }
 } // namespace
 
@@ -223,15 +222,16 @@ PGO_BENCHMARK("bench-hash (xxh3 64/128, raw vs wrapper)")
         auto const point = length_point(length, rng);
         auto const label = length >= 1024 ? cc::format("{}KiB", length / 1024) : cc::format("{}B", length);
 
-        nx::pgo::report_raw(cc::format("hob64@{}", label), gbps_of(point.measure("hob64", cfg, hash_hob64)), "GB/s",
-                            true);
-        nx::pgo::report_raw(cc::format("hash128@{}", label), gbps_of(point.measure("hash128", cfg, hash_h128)), "GB/s",
-                            true);
-        nx::pgo::report_raw(cc::format("xxh64@{}", label), gbps_of(point.measure("xxh64", cfg, hash_x64)), "GB/s", true);
-        nx::pgo::report_raw(cc::format("xxh128@{}", label), gbps_of(point.measure("xxh128", cfg, hash_x128)), "GB/s",
-                            true);
-        nx::pgo::report_raw(cc::format("blake3@{}", label), gbps_of(point.measure("blake3", cfg, hash_b3)), "GB/s", true);
-        nx::pgo::report_raw(cc::format("b3raw@{}", label), gbps_of(point.measure("b3raw", cfg, hash_b3raw)), "GB/s",
-                            true);
+        auto const* const bps = &nx::bench::unit_bytes_per_second;
+        nx::pgo::report(cc::format("hob64@{}", label), bytes_per_second_of(point.measure("hob64", cfg, hash_hob64)),
+                        *bps);
+        nx::pgo::report(cc::format("hash128@{}", label), bytes_per_second_of(point.measure("hash128", cfg, hash_h128)),
+                        *bps);
+        nx::pgo::report(cc::format("xxh64@{}", label), bytes_per_second_of(point.measure("xxh64", cfg, hash_x64)), *bps);
+        nx::pgo::report(cc::format("xxh128@{}", label), bytes_per_second_of(point.measure("xxh128", cfg, hash_x128)),
+                        *bps);
+        nx::pgo::report(cc::format("blake3@{}", label), bytes_per_second_of(point.measure("blake3", cfg, hash_b3)), *bps);
+        nx::pgo::report(cc::format("b3raw@{}", label), bytes_per_second_of(point.measure("b3raw", cfg, hash_b3raw)),
+                        *bps);
     }
 }

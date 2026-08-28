@@ -86,6 +86,7 @@ target_sources(nexus
     src/nexus/bench/result.hh
     src/nexus/bench/run.hh
     src/nexus/bench/run_config.hh
+    src/nexus/bench/units.hh
     src/nexus/bench/statistics.hh
     src/nexus/bench/hardware_counters.hh
     src/nexus/bench/bench.hh

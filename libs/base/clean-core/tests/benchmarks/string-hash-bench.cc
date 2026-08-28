@@ -19,6 +19,7 @@
 #include <clean-core/math/random.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
@@ -244,9 +245,9 @@ void run_sweep(char const* corpus_kind, bool use_strings, cc::span<isize const> 
         for (auto const& r : reps)
         {
             cc::string const suffix = cc::string("@") + r.label + " (" + corpus_kind + ")";
-            nx::pgo::report_raw(cc::string("xxh3") + suffix, r.xxh3, "GB/s", true);
-            nx::pgo::report_raw(cc::string("fnv1a") + suffix, r.fnv1a, "GB/s", true);
-            nx::pgo::report_raw(cc::string("mul") + suffix, r.mul, "GB/s", true);
+            nx::pgo::report(cc::string("xxh3") + suffix, r.xxh3 * 1e9, nx::bench::unit_bytes_per_second);
+            nx::pgo::report(cc::string("fnv1a") + suffix, r.fnv1a * 1e9, nx::bench::unit_bytes_per_second);
+            nx::pgo::report(cc::string("mul") + suffix, r.mul * 1e9, nx::bench::unit_bytes_per_second);
         }
 }
 

@@ -22,6 +22,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <versioned-document/op.hh>
@@ -306,8 +307,9 @@ struct loop_measurement
         nx::pgo::report_time_for("loop-open", out.times.open);
         nx::pgo::report_time_for("loop-publish", out.times.publish);
         nx::pgo::report_time_for("op-hashing-total", out.hashing_seconds);
-        nx::pgo::report_raw("hash-share-of-loop", share_of_loop, "%", /*higher_is_better =*/false);
-        nx::pgo::report_raw("hash-share-of-open", share_of_open, "%", /*higher_is_better =*/false);
+        // As a 0..1 share rather than a percentage: the unit carries the range and the orientation.
+        nx::pgo::report("hash-share-of-loop", share_of_loop / 100.0, nx::bench::unit_cost_share);
+        nx::pgo::report("hash-share-of-open", share_of_open / 100.0, nx::bench::unit_cost_share);
     }
 
     return out;

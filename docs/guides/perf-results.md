@@ -28,15 +28,22 @@ Declare it with `PGO_BENCHMARK` — a `TEST` that sets the bucket — and report
 PGO_BENCHMARK("hash - throughput")
 {
     double const gbps = measure(/* ... */);
-    nx::pgo::report_raw("xxh3@8B", gbps, "GB/s", /*higher_is_better=*/true);
+    nx::pgo::report("xxh3@8B", bytes_per_second, nx::bench::unit_bytes_per_second);
 }
 ```
 
-`report_elements_per_sec` and `report_time_for` are shorthands that fix the unit and the orientation for you.
+`report_elements_per_sec` and `report_time_for` are shorthands over the two most common units.
 The [nexus cheat-sheet](../../libs/base/nexus/cheat-sheet.md) lists all three.
 
-Each call records a `(name, value, unit, higher_is_better)` tuple onto the running test.
-The orientation is what lets readers and tooling compare runs correctly, so a speedup reads as positive whether the metric is throughput or latency.
+Each call records a `(name, value, unit)` triple onto the running test, and **the unit carries the orientation**.
+Whether more is better is a property of the quantity rather than of the call site, so it is not a parameter a caller
+can get backwards — a latency reported as higher-is-better would make every speedup read the wrong way round.
+
+`nexus/bench/units.hh` has the rate units (`unit_bytes_per_second`, `unit_items_per_second`, `unit_seconds_per_item`,
+`unit_speedup`, `unit_cost_share`), `clean-core/record/stat.hh` has the rest, and a caller defines its own next to the
+code that records it.
+The unit also decides how the console mirror prints, so a byte rate reads as `27.1 GiB/s` rather than as eleven
+digits.
 Calls are a no-op outside a running test, so guarding is never needed.
 Record a **small, stable** set of representative points — one short and one long input, say — rather than an entire sweep, so deltas stay meaningful and low-noise.
 Printing full tables alongside is fine, and [clean-core's benchmarks](../../libs/base/clean-core/tests/benchmarks/) do.
@@ -64,7 +71,7 @@ The shape is one flat array, each entry tagged with its test:
 {
   "suite": "clean-core-test",
   "metrics": [
-    {"test": "bench-hash (…)", "name": "xxh64@8B", "value": 2.58, "unit": "GB/s", "higher_is_better": true}
+    {"test": "bench-hash (…)", "name": "xxh64@8B", "value": 2580000000.0, "unit": "B/s", "higher_is_better": true}
   ]
 }
 ```

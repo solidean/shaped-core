@@ -1121,7 +1121,17 @@ void nx::impl::report_running_test() noexcept
         cc::eprint("running test: <none>\n");
 }
 
-void nx::impl::record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better)
+bool nx::recorded_metric::higher_is_better() const
+{
+    return unit != nullptr && unit->higher_is_better;
+}
+
+cc::string_view nx::recorded_metric::unit_symbol() const
+{
+    return unit != nullptr ? cc::string_view(unit->symbol) : cc::string_view();
+}
+
+void nx::impl::record_metric(cc::string_view name, double value, cc::rec::unit const& unit)
 {
     auto* const ctx = current_context();
     if (ctx == nullptr)
@@ -1131,7 +1141,7 @@ void nx::impl::record_metric(cc::string_view name, double value, cc::string_view
     if (execution == nullptr)
         return;
 
-    auto metric = nx::recorded_metric{cc::string(name), value, cc::string(unit), higher_is_better};
+    auto metric = nx::recorded_metric{cc::string(name), value, &unit};
     if (is_own_test_body(ctx))
         execution->metrics.push_back(cc::move(metric));
     else
