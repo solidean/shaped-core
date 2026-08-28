@@ -117,6 +117,11 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    Four anchor a review with a changeset: **orientation** at `010`, **glossary** at `018`, the findings between, and **verdict** at `980`.
    The set is prose rather than code, so it grows by writing a file there — never by teaching the tool a new entry.
 
+   **A changeset touching an example, a capture sidecar or a reference image also owes an [example-showcase](../../../tools/review/docs/entry-types/example-showcase.md) at `02x`.**
+   The example's body and every image go in inline, so the maintainer judges a demonstration rather than a hunk.
+   Open the image; do not infer it from the code.
+   The only exemption is a touch that could not change what the example shows.
+
 7. **Hand it over and wait.**
    ```bash
    uv run review.py serve pr-<n> --no-open &     # background: the shell caps below how long a review takes

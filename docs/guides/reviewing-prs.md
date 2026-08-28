@@ -235,6 +235,35 @@ The viewer's TODO records it honestly: two materials sampling with different fil
 The missing capability is a per-hit-group local root signature, and that genuinely waits for sg.
 Asserting on a *conflicting* state for an already-claimed register does not, costs nothing, and turns an unexplainable image into a message.
 
+### A change that touches an example is reviewed by looking at the example
+
+**Put the example's source and every image it produces in front of the maintainer, as an entry.**
+The [example-showcase](../../tools/review/docs/entry-types/example-showcase.md) type is the shape; this is why it is not optional.
+
+An example is a thing someone will read and a reference image is a thing someone will look at, and the diff shows neither.
+Approving a hunk in an example is approving a demonstration nobody demonstrated, and `Bin 0 -> 31695 bytes` is a picture nobody saw.
+Small examples go in whole, larger ones as a summary plus the code that carries the point, and every committed image goes in inline.
+
+**This applies to every changeset touching an example, a capture sidecar or a reference image.**
+The only exemption is a touch that could not change what the example shows — a rename, a formatting sweep, a bulk include fix.
+
+**Open the image.
+Do not infer it from the code.**
+This is where the findings are, because a run that neither crashes nor asserts routinely shows nothing worth looking at.
+That is the argument [examples.md](examples.md) itself makes for capturing while authoring.
+A review that reads the hunks and not the picture inherits exactly that blind spot.
+
+pr-150 is the worked case, on the branch that added headless capture.
+`vdoc/cube-viewer`'s committed reference image showed its imgui panel about 110 pixels wide, every sentence wrapping to two or three words a line and one breaking mid-word.
+The cause was one missing `SetNextWindowSize` beside a `SetNextWindowPos`, next to a sibling example that has both.
+It had been invisible for as long as the example existed, because both examples restore a saved layout.
+`ImGuiCond_FirstUseEver` then means the developer's own window — dragged wide once, months ago — is what they had seen ever since.
+Nothing in the diff could have shown it, and the image showed it immediately.
+The same pass found an em-dash the imgui font cannot draw, rendering as `?`, and `hello-cube`'s six declared face colours reduced to one legible face by an overhead light three stops into clipping.
+
+**Findings from an image live in that entry**, beside the picture that is their evidence, rather than in a finding entry of their own.
+And **offer the deferral**: an imperfect example is not a reason to hold a change.
+
 ### A gap the author names is where to look, and often where to defer
 
 **The layer a PR body flags as unexercised is where the defects are**, and it is worth going there first.

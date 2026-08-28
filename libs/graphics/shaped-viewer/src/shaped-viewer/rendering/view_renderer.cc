@@ -207,10 +207,6 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
     return h;
 }
 
-/// Frames a view may accumulate before it stops weighting new samples in.
-/// The running mean is kept in half floats, so its weight has to stay well inside their precision.
-constexpr u32 accumulation_frame_cap = 4096;
-
 /// Bytes one accumulation target costs, for the cache's budget: rgba16_float is 8 bytes a pixel.
 [[nodiscard]] isize accumulation_bytes(tg::vec2i size)
 {

@@ -197,6 +197,45 @@ Gotchas:
   An app drawing its own cursor over the 3D view is left alone.
   Copy and paste reach the system clipboard.
 
+## Capture
+
+How a tool asks a program that renders to produce an image instead of a window.
+Environment rather than API, because the program being driven is one `dev.py` did not write — the same reason `sr::background_request_env_var` exists.
+It lives here rather than in sv because two unrelated programs answer it.
+`sv::interactive` does it for a caller who wrote no capture code at all.
+An app owning its own window, swapchain and loop does it itself — `examples/vdoc/cube-editor/cube_app.cc` is the worked example.
+The authoring workflow is [docs/guides/examples.md](../../../docs/guides/examples.md).
+
+```cpp
+#include <shaped-rendering/capture.hh>
+
+sr::capture_request_env_var        // "SC_CAPTURE" — on means HEADLESS: render, do not present, do not open a window
+sr::capture_name_env_var           // "SC_CAPTURE_NAME"       — which named capture; unset is the program's default view
+sr::capture_output_env_var         // "SC_CAPTURE_OUT"        — where the image goes; the extension picks jpg or png
+sr::capture_size_env_var           // "SC_CAPTURE_SIZE"       — "<width>x<height>"
+sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — frames to be satisfied for; what "satisfied" means is the program's
+sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up
+
+auto const req = sr::capture_request::from_environment();  // -> capture_request; every var, defaults for the unset
+req.active                         // -> bool; everything below is meaningless when false
+req.name / req.output_path         // -> cc::string
+req.size                           // -> tg::vec2i, default 1920x1080
+req.accumulate_frames              // -> u32, default 60
+req.timeout_seconds                // -> double, default 60
+
+sr::write_capture_image(ctx, tex, path)  // -> cc::result<cc::unit>; blocking readback, bgra8 -> RGB, format from the extension
+```
+
+- **`active` with an empty `output_path` is a caller error**, not a silent no-op — a tool that forgot the path would otherwise get a run that looked like it worked.
+- **A name the program does not offer must be an ERROR**, never a quiet fall back to the default view.
+  Nothing discovers these names, so a renamed capture would go on producing an image under the old name's filename and nobody would look.
+- **`write_capture_image` takes its extent from the texture**, which is why it takes no size.
+  A caller that disagreed by less than the texture's height walked the readback at the wrong stride and got a sheared image.
+  The texture must be `bgra8_unorm` with `copy_src` usage, and it asserts the format.
+- **It flushes the write stream itself**, because `cc::file_write_stream_adapter`'s destructor does not drain.
+  A JPEG truncated on a 4096-byte boundary still DECODES, flat-filling the tail from the last DC value.
+  So a missing flush reads as a rendering artifact rather than as a broken file.
+
 ## Pipeline cache
 
 One pipeline per key, built once — the reusable form of the "small vector of {format, pipeline} plus a find-or-create" a routine otherwise grows.

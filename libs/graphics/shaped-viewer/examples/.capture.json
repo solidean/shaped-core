@@ -1,0 +1,19 @@
+// Which examples in this directory can be captured, and how.
+//
+// An example not named here is never launched by a capture sweep — that is what makes "the sweep opens no window"
+// true by construction rather than by detection. See docs/guides/examples.md.
+//
+// Every key is optional except the entry itself: `mechanism` (how the run is driven), `size`, `format`,
+// `accumulate` (frames every traced view must converge for) and `timeout` (seconds before it gives up).
+// `captures` lists the images to take; an entry with no `name` is the view the example's own body leaves, and a named
+// one must match a `frame::register_capture` in the source or the run fails.
+{
+    "shaped-viewer/hello-cube": {
+        "mechanism": "sv",
+        "size": "1280x720",
+        "format": "jpg",
+        "captures": [
+            {}
+        ]
+    }
+}

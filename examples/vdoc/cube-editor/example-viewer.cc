@@ -36,11 +36,13 @@ EXAMPLE("vdoc/cube-viewer")
 
     // The panel layout the last session left behind, restored before the first frame.
     // Under this example's own name: the editor opens the same file, and its layout is not this one's.
-    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value())
+    // Skipped under capture: a reference image shows a first run, not whatever the last session left here.
+    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value() && !app->is_capturing())
         app->imgui().load_settings(ini.value());
 
     // The camera the last session left behind, or a default for a first run.
-    auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
+    auto camera = app->is_capturing() ? cube_editor::orbit_camera()
+                                     : doc.value().load_camera().value_or(cube_editor::orbit_camera());
 
     cc::println("{} entities over {} revisions; drag to orbit, scroll to zoom",
                 doc.value().current().entities().size(), doc.value().timeline().size());
@@ -62,10 +64,17 @@ EXAMPLE("vdoc/cube-viewer")
                 camera.zoom(e.as_mouse_wheel().delta[1]);
         }
 
+        // Sized as well as placed, and for the same reason the editor is.
+        // Without a size imgui auto-fits the window to its widest WIDGET, which here is a short line of text — so
+        // every `TextWrapped` below wraps to two or three words and one breaks mid-word.
+        // It stayed invisible while both examples restored a saved layout: `FirstUseEver` means a window dragged
+        // wide once is what you keep seeing, and only a first run shows the default.
         ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(320, 300), ImGuiCond_FirstUseEver);
         ImGui::Begin("cube viewer");
         ImGui::Text("%d cubes", int(doc.value().current().entities().size()));
-        ImGui::Text("%d revisions", int(doc.value().timeline().size()));
+        auto const revisions = int(doc.value().timeline().size());
+        ImGui::Text(revisions == 1 ? "%d revision" : "%d revisions", revisions);
         ImGui::Separator();
         ImGui::TextWrapped("The camera is workspace state, not document state: moving it writes no op and leaves "
                            "the document saved.");
@@ -76,14 +85,19 @@ EXAMPLE("vdoc/cube-viewer")
         app->end_frame(doc.value().current(), camera, vdoc::entity_id());
 
         // Empty on nearly every frame: imgui only asks for a save a few seconds after something moved.
-        if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value())
+        if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value() && !app->is_capturing())
             doc.value().store_ui_settings(ui_name, ini.value());
     }
 
-    // Written on every exit, and flushed by the store's close(). No op, no ref move, no dirty document.
-    doc.value().store_ui_settings(ui_name, app->imgui().settings());
-    doc.value().store_camera(camera);
-    cc::println("camera stored in the workspace — reopen to land exactly here");
+    // Written on exit, and flushed by the store's close(). No op, no ref move, no dirty document.
+    // Skipped under capture, which is the other half of loading nothing: a capture moved no camera, so writing its
+    // default back would replace whatever the last real session left here.
+    if (!app->is_capturing())
+    {
+        doc.value().store_ui_settings(ui_name, app->imgui().settings());
+        doc.value().store_camera(camera);
+        cc::println("camera stored in the workspace — reopen to land exactly here");
+    }
 }
 
 #endif // SR_HAS_WINDOW

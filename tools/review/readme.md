@@ -121,6 +121,11 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   A whole fence opts out the same way, with `raw` or `raw:` in front of its usual `lang:path` info string.
   The matchers stay eager on purpose: narrowing them would trade a loud false positive for a typo'd path silently staying plain.
 - **Hovering a file reference shows the whole file**, bounded and scrollable, scrolled to the line when one was named.
+  **An image is drawn rather than decoded as text** — a hovered `.png` / `.jpg` / `.svg` paints in the popover, with its
+  pixel size and file size in the head line, and the file page shows it the same way.
+  Any other binary says what it is and stops; before this every viewer assumed text, so a committed JPEG went through
+  the highlighter as a screen of replacement characters.
+  `lib/render/media.py` is the classifier, and `/raw?path=` serves the bytes for the image types alone.
   A nav row can show the whole entry the same way, inert, but that preview is **off** — `PREVIEW_ENTRIES` in
   `tools/review/assets/app.js` turns it back on once its hover timing is worth fixing.
 - **`generate` writes three entries**: the overview at `015`, the catch-all at `988`, and the coverage report at `990`.

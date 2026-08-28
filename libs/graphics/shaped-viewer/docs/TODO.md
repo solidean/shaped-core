@@ -161,8 +161,16 @@ What is left is narrower than it was:
 - Let a view pick its controller: `sv::viewer` drives an orbit controller per view, so `fps_camera_controller` is only reachable by a caller running its own event pump.
   A view losing the cursor or the window losing focus must reach the controller's `release_input`, or a held key keeps flying.
   `pathtraced-window-manual-test.cc` still hand-rolls its own fly camera and can drop it once this lands.
-- `render_settings::max_accumulated_frames`, replacing the file-scope `accumulation_frame_cap` in `view_renderer.cc`.
+- `render_settings::max_accumulated_frames`, replacing the process-wide `sv::accumulation_frame_cap` in `render_settings.hh`.
+  It is public rather than file-scope because a caller waiting for convergence has to tell "not there yet" from "as good as it gets" — `view_ref::is_accumulation_converged` applies it.
   It must then be excluded from the trace hash — lowering the cap should not restart the image.
+- **`shaped-viewer/hello-cube`'s reference image shows one of its six face colours.**
+  The example declares a `base_color` per face and spends half its body building them, which is the thing a reader opens it to understand.
+  In `examples/hello-cube.jpg` the overhead light at emission 14 blows the top face to white, and the third visible face is lit by the sky alone and reads as pale grey rather than purple.
+  Only the red face survives.
+  Turning the light down and lowering the elevation a little would put three distinguishable colours in frame; `uv run dev.py example shaped-viewer/hello-cube --capture` is the loop for it.
+  Left as it is on purpose — the image shows the viewer working, which is what it is mainly for.
+
 - Multi-window compositing (multi-view within one window is done; the window system is one-per-process, so this needs shared ownership across viewers).
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
