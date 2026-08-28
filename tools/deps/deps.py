@@ -647,8 +647,10 @@ def split_expression(expression: str) -> list[str]:
     """The identifiers in an SPDX expression.
 
     `A OR B` is allowed only when every branch is, since we may end up relying on any of them.
+    `A AND B` for the same reason from the other direction: both bind at once, so both must be acceptable.
+    An operand may still carry a `WITH` exception, which stays attached — `Apache-2.0 WITH LLVM-exception` is one identifier.
     """
-    return [part.strip() for part in re.split(r"\bOR\b", expression) if part.strip()]
+    return [part.strip() for part in re.split(r"\bOR\b|\bAND\b", expression) if part.strip()]
 
 
 def check_policy(upstreams: list, allowed: set[str], denied: dict[str, str]) -> list[str]:
@@ -681,7 +683,10 @@ def collect(upstreams: list) -> tuple[list[Bundle], list[str]]:
         paths = up.license_paths()
         for path in paths:
             # A dependency under several licenses gets one file each, suffixed from the source file's own name.
-            suffix = "" if len(paths) == 1 else "-" + path.name.lower().removeprefix("license").strip("._-")
+            # A plainly-named LICENSE leaves nothing to suffix with, and is the primary text anyway, so it keeps the bare slug —
+            # libspng's BSD-2-Clause `LICENSE` next to the libpng notice its SIMD code carries is the case.
+            stem = path.name.lower().removeprefix("license").strip("._-")
+            suffix = "-" + stem if len(paths) > 1 and stem else ""
             filename = f"{up.slug}{suffix}.txt"
             if path.is_file():
                 bundles.append(Bundle(filename, path.read_text(encoding="utf-8", errors="replace"), up.name))

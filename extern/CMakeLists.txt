@@ -33,6 +33,11 @@ option(SC_USE_VENDORED_ZLIB "Build the in-tree vendored zlib (OFF expects an ext
 # Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
 option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an external `stb` target)" ON)
 
+# libspng, committed in-source: two files, and the PNG half of babel-serializer's image codecs.
+# It is the smallest thing vendored here, which is why it is in-source rather than fetched.
+# Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
+option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
+
 # Dear ImGui, tracked on the docking branch.
 # Consumed by shaped-rendering, which draws it through sg —
 # upstream's own per-API backends are not vendored, so nothing here pulls in native graphics calls.
@@ -90,6 +95,10 @@ endif()
 
 if(SC_USE_VENDORED_STB)
     add_subdirectory(stb)
+endif()
+
+if(SC_USE_VENDORED_SPNG)
+    add_subdirectory(libspng)
 endif()
 
 if(SC_USE_VENDORED_IMGUI)
