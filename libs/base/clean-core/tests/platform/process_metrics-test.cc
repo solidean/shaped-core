@@ -91,9 +91,9 @@ TEST("cc process_metrics - a sampled load is cores, not a percentage")
     CHECK(load.value().interval_secs > 0);
     CHECK(load.value().cores_used >= 0.0f);
 
-    // A sleeping process cannot have used more than the machine has to give.
+    // A process cannot use more cores than the machine has, whatever the sampling interval does to the arithmetic.
     if (auto const cores = cc::get_system_info().logical_cores(); cores > 0)
-        CHECK(load.value().cores_used <= f32(cores) + 1.0f);
+        CHECK(load.value().cores_used <= f32(cores));
 
     CHECK(load.value().machine_fraction >= 0.0f);
     CHECK(load.value().machine_fraction <= 1.0f);

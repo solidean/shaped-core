@@ -262,7 +262,7 @@ rules:
     files: src/clean-core/platform/network_devices.cc
 
   - kind: allow-include
-    value: [<ifaddrs.h>, <net/if.h>, <net/if_dl.h>]
+    value: [<ifaddrs.h>, <net/if.h>, <net/if_dl.h>, <sys/socket.h>]
     reason: getifaddrs carries Darwin's per-interface counters in its if_data
     files: src/clean-core/platform/network_devices.cc
 
@@ -297,7 +297,7 @@ rules:
     files: src/clean-core/platform/process_metrics.cc
 
   - kind: allow-include
-    value: [<mach/mach.h>, <mach/mach_host.h>, <mach/processor_info.h>, <sys/sysctl.h>]
+    value: [<mach/mach.h>, <mach/mach_host.h>, <mach/processor_info.h>, <sys/sysctl.h>, <unistd.h>]
     reason: host_statistics and host_processor_info are Darwin's only CPU and memory counters
     files: src/clean-core/platform/system_metrics.cc
 
@@ -337,7 +337,7 @@ rules:
     files: src/clean-core/platform/system_identifier.cc
 
   - kind: allow-include
-    value: [<ifaddrs.h>, <net/if_dl.h>, <netpacket/packet.h>]
+    value: [<ifaddrs.h>, <net/if.h>, <net/if_dl.h>, <netpacket/packet.h>, <sys/socket.h>]
     reason: getifaddrs is the only portable route to an interface's hardware address, and the two link-layer headers are its per-OS address structs
     files: src/clean-core/platform/system_identifier.cc
 

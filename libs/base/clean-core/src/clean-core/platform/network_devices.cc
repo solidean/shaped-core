@@ -25,6 +25,7 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <sys/socket.h> // AF_LINK
 
 #endif
 

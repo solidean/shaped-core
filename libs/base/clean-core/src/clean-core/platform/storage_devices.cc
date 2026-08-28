@@ -200,7 +200,12 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
                        .total_bytes = i64(m.f_blocks) * block,
                        .free_bytes = i64(m.f_bfree) * block,
                        .available_bytes = i64(m.f_bavail) * block,
+#if defined(MNT_REMOVABLE)
                        .removable = (m.f_flags & MNT_REMOVABLE) != 0});
+#else
+                       // Older Darwin SDKs do not define it, and a mount flag is not worth failing a build over.
+                       .removable = false});
+#endif
     }
 
     return out;
@@ -258,7 +263,10 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
         auto const fs = third < 0 ? after_path : after_path.subview_clamped(0, third);
 
         auto mount = cc::string(path);
-        auto stats = statvfs{};
+
+        // `struct` is load-bearing: statvfs names both a type and a function, and the bare tag resolves to the
+        // function, which is what makes the almost-always-auto spelling fail to compile here.
+        struct statvfs stats = {};
         if (::statvfs(mount.c_str_materialize(), &stats) != 0)
             continue;
 

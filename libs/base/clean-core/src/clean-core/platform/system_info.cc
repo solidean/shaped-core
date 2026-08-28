@@ -618,18 +618,23 @@ void fill_topology(cc::system_info& info)
             break;
 
         auto entry = cc::numa_node{.index = node};
+
+        // "Node 0 MemTotal:  65432 kB" — the key carries the node number, so it is matched by prefix rather than by
+        // an exact field name.
         auto rest = cc::string_view(meminfo.value());
         auto line = cc::string_view();
         while (cc::impl::next_line(rest, line))
-            if (line.contains("MemTotal:"))
-                if (auto const kb = value_after(line, ':'); kb.has_value())
-                {
-                    auto number = cc::impl::trimmed(kb.value());
-                    if (auto const space = number.find(' '); space >= 0)
-                        number = number.subview_clamped(0, space);
-                    if (auto const value = cc::from_string<i64>(number); value.has_value())
-                        entry.memory_bytes = value.value() * 1024;
-                }
+        {
+            auto const colon = line.find(':');
+            if (colon < 0 || !line.subview_clamped(0, colon).contains("MemTotal"))
+                continue;
+
+            auto number = cc::impl::trimmed(line.subview(colon + 1));
+            if (auto const space = number.find(' '); space >= 0)
+                number = number.subview_clamped(0, space);
+            if (auto const value = cc::from_string<i64>(number); value.has_value())
+                entry.memory_bytes = value.value() * 1024;
+        }
 
         info.numa_nodes.push_back(entry);
     }

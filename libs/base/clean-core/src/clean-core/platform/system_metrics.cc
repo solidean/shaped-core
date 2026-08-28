@@ -17,6 +17,7 @@
 #include <mach/mach_host.h>
 #include <mach/processor_info.h>
 #include <sys/sysctl.h>
+#include <unistd.h> // sysconf(_SC_PAGESIZE)
 
 #elif defined(CC_OS_LINUX) || defined(CC_OS_ANDROID)
 
@@ -232,7 +233,7 @@ cc::result<cc::memory_usage, cc::query_error> read_memory()
         != KERN_SUCCESS)
         return cc::error(read_failed("host_statistics64(HOST_VM_INFO64)"));
 
-    auto const page = i64(::getpagesize());
+    auto const page = i64(::sysconf(_SC_PAGESIZE));
 
     auto out = cc::memory_usage();
     out.total_bytes = total;

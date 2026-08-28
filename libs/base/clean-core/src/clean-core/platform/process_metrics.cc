@@ -400,8 +400,14 @@ cc::result<cc::process_cpu_load, cc::query_error> cc::process_cpu_sampler::sampl
 
     if (auto const cores = cc::get_system_info().logical_cores(); cores > 0)
     {
-        auto const fraction = out.cores_used / f32(cores);
-        out.machine_fraction = fraction > 1 ? 1.0f : fraction;
+        // Clamped to the machine, for the same reason the machine's own load is clamped, and it is not cosmetic.
+        // Process CPU time is quantized far more coarsely than the steady clock — 15.6 ms on Windows — so a short
+        // interval divides a rounded-up numerator by an exact denominator and reports more cores than the machine has.
+        // Seen at 33.4 on a 32-core box over a 20 ms sample.
+        if (out.cores_used > f32(cores))
+            out.cores_used = f32(cores);
+
+        out.machine_fraction = out.cores_used / f32(cores);
     }
 
     _previous = cc::move(current.value());

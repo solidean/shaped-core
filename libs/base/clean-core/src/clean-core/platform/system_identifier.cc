@@ -22,7 +22,9 @@
 #elif defined(CC_OS_MACOS) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
 
 #include <ifaddrs.h>
+#include <net/if.h> // IFF_LOOPBACK
 #include <net/if_dl.h>
+#include <sys/socket.h> // AF_LINK
 #include <sys/sysctl.h>
 #include <unistd.h>
 
@@ -31,7 +33,9 @@
 #elif defined(CC_OS_LINUX) || defined(CC_OS_ANDROID)
 
 #include <ifaddrs.h>
+#include <net/if.h> // IFF_LOOPBACK
 #include <netpacket/packet.h>
+#include <sys/socket.h> // AF_PACKET
 #include <unistd.h>
 
 #include <cstdlib>
