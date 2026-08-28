@@ -143,6 +143,11 @@ The moment a recording travels — to another machine, or merely past its proces
 So a serialized recording carries the table: for every mapped binary its base, its size, its path, and its identity.
 `cc::symbolizer(recording.modules())` resolves against it in a session of its own, loading each module at the base the recording used rather than wherever this process would have put it.
 
+A recorded path that is a UNC path, or sits on a network drive, is deliberately not opened by default.
+The debug-info library loads a module's image lazily, inside the first resolve rather than at load time.
+So an unreachable path does not fail at load — it costs a network timeout per address, and the table already names the frame without it.
+`cc::symbolize_options::load_remote_images` opts back in where the share is known to answer, and rewriting the path to a local copy is the alternative that needs no flag.
+
 **The identity matters as much as the base.**
 Two builds of the same path are different binaries, and resolving against the wrong one produces confident nonsense rather than an error.
 On Windows it is the PE `TimeDateStamp` and `SizeOfImage` as hex — literally the key a symbol server URL is built from.

@@ -23,8 +23,27 @@
 namespace cc
 {
 struct symbol_info;
+struct symbolize_options;
 struct symbolizer;
 } // namespace cc
+
+/// What a foreign symbolizer does with a module it would have to reach across the network to open.
+struct cc::symbolize_options
+{
+    /// Whether to open a module image on a UNC path or a network drive.
+    ///
+    /// Off by default, and the reason is a cost rather than a correctness one.
+    /// The debug-info library opens an image lazily, inside the FIRST resolve rather than at load time, so a path
+    /// whose server does not answer costs a network timeout per address instead of failing — and a foreign table
+    /// exists to read a recording from another machine, where such paths are the norm.
+    ///
+    /// Turn it on when the share is known to answer, and the binaries are only reachable there.
+    /// The cost of leaving it off is names: those frames resolve to `module+offset` from the recorded table, and
+    /// no debug info is consulted for them at all, a symbol server included.
+    /// The alternative that needs no flag is rewriting `loaded_module::path` to a local copy before constructing —
+    /// only `base` and `size` have to match the recording.
+    bool load_remote_images = false;
+};
 
 /// What an address turned out to be, as far as the debug info goes.
 ///
@@ -75,7 +94,11 @@ struct cc::symbolizer
     /// The addresses are then interpreted exactly as the recording process meant them, whatever this process happens
     /// to have loaded and wherever it happens to have loaded it.
     /// A module whose binary cannot be found still contributes its name and the offset into it.
-    explicit symbolizer(cc::span<cc::loaded_module const> modules);
+    ///
+    /// A module whose path is a UNC path or sits on a network drive is NOT opened, and contributes name and offset
+    /// only — the debug-info library would otherwise wait out a network timeout on the first resolve against it.
+    /// `symbolize_options::load_remote_images` turns that off for a share known to answer.
+    explicit symbolizer(cc::span<cc::loaded_module const> modules, cc::symbolize_options opts = {});
 
     ~symbolizer();
 

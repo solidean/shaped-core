@@ -8,6 +8,8 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
+#include <chrono> // steady_clock — one test here asserts a bound in wall-clock time, and says why
+
 using namespace cc::primitive_defines;
 
 // Symbolization is the half of a stack capture that costs money, so what is asserted here is that it resolves what it
@@ -277,10 +279,14 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     // A recording from a machine whose binaries are not here: the paths resolve to nothing, and the table is all a
     // reader has.
     // Degrading to `module+offset` is the difference between a frame you can look up and a bare address.
+    //
+    // The drive must be one every machine has, and not one a developer might have mapped.
+    // What this pins is a path that is REACHABLE and absent, so the load is attempted and fails; the unreachable
+    // case is its own test below, and the two reach `module+offset` down different paths.
     cc::loaded_module const invented = {
         .base = 0x4000'0000,
         .size = 0x1000,
-        .path = "Z:/nowhere/ghost.exe",
+        .path = "C:/nowhere/ghost.exe",
         .identity = "DEADBEEF1000",
     };
 
@@ -291,4 +297,44 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     CHECK(info.module == "ghost.exe");
     CHECK(info.module_offset == 0x123);
     CHECK(info.to_string() == "ghost.exe+0x123");
+}
+
+TEST("symbolize - a module on an unreachable path resolves without waiting for the network")
+{
+    if (!cc::symbolizer::is_available())
+        SKIP("no symbolization on this platform");
+
+    // A UNC path to a host that does not answer, which is the shape a foreign table takes whenever the recording
+    // came from a machine whose shares are not reachable from this one.
+    //
+    // The debug-info library loads a module's image lazily, inside the FIRST resolve rather than at load time, so
+    // registering such a module costs a network timeout per address — tens of seconds each — instead of failing.
+    // Not registering it loses nothing: the module table below already names the frame.
+    //
+    // This is a wall-clock assertion, which is worth the fragility only because the bug IS the wall clock: the
+    // behaviour is identical either way and the cost is the whole difference.
+    // The bound is deliberately far above what the work needs (microseconds) and far below what one timeout costs.
+    //
+    // Only the DEFAULT is pinned here.
+    // `symbolize_options::load_remote_images` opts back into opening these, and exercising it means waiting out
+    // exactly the timeout it exists to allow — so no test does.
+    cc::loaded_module const unreachable = {
+        .base = 0x5000'0000,
+        .size = 0x1000,
+        .path = "\\\\192.0.2.1\\share\\ghost.exe", // 192.0.2.0/24 is reserved for documentation, so nothing answers
+        .identity = "DEADBEEF2000",
+    };
+
+    auto const t0 = std::chrono::steady_clock::now();
+
+    cc::symbolizer sym(cc::span<cc::loaded_module const>(&unreachable, 1));
+    for (auto i = 0; i < 8; ++i)
+    {
+        auto const& info = sym.resolve(reinterpret_cast<void const*>(u64(0x5000'0000) + u64(i)));
+        CHECK(info.module == "ghost.exe");
+        CHECK(info.module_offset == u64(i));
+    }
+
+    auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    CHECK(seconds < 2.0);
 }
