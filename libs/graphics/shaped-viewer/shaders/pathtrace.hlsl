@@ -122,15 +122,15 @@ void PathTraceRayGen()
 
                 // The pdf of what actually happened, averaged over the channel the distance could have been drawn against.
                 float3 pdf3 = reaches_surface ? transmittance : (medium_sigma_t * transmittance);
-                float pdf = (pdf3.x + pdf3.y + pdf3.z) / 3.0;
-                if (pdf <= 1e-12)
+                float dist_pdf = (pdf3.x + pdf3.y + pdf3.z) / 3.0;
+                if (dist_pdf <= 1e-12)
                     break;
 
                 if (!reaches_surface)
                 {
                     // A real scattering event: the path turns here and never reaches the surface the trace found.
                     // The phase function is its own pdf, so the turn itself carries no weight beyond the albedo.
-                    throughput *= (transmittance * medium_sigma_t * medium_albedo) / pdf;
+                    throughput *= (transmittance * medium_sigma_t * medium_albedo) / dist_pdf;
 
                     origin = origin + dir * t;
 
@@ -176,7 +176,7 @@ void PathTraceRayGen()
                     continue; // NOT a bounce: the surface budget is untouched
                 }
 
-                throughput *= transmittance / pdf;
+                throughput *= transmittance / dist_pdf;
             }
             else if (inside && hit_t > 0.0)
             {

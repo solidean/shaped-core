@@ -7,6 +7,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::abs
 
 // The furnace test for the INTEGRATOR, which is the half `openpbr-bsdf-test` cannot reach.
 //
@@ -19,10 +20,14 @@
 // So the image must come back flat, at exactly the environment's value, and any energy the walk loses or invents shows up as
 // a deviation from it.
 //
-// Three cases, because a flat image alone does not prove the medium was ever entered:
+// The cases are what separate the interface from the walk, because a flat image alone does not prove the medium was ever
+// entered:
 //
 //   - a clear index-matched interior, which isolates the interface from the walk,
+//   - a clear GLASS interior at index 1.5, the only place total internal reflection is measured against a known answer
+//     rather than against a bound,
 //   - a purely scattering interior, which is the walk itself and must still return the environment,
+//   - the same walk at optical depth about 36, which is a walk long enough to have been ended by a budget,
 //   - an absorbing interior, which must come back DARKER — the control that proves the medium is not simply ignored.
 
 namespace
@@ -78,11 +83,6 @@ struct image_stats
     float min_luminance = 0.0f;
     float max_luminance = 0.0f;
 };
-
-[[nodiscard]] float abs_of(float v)
-{
-    return v < 0.0f ? -v : v;
-}
 
 [[nodiscard]] float luminance_of(tg::vec3f c)
 {
@@ -358,7 +358,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
             // The margin covers the interface's own single-scattering GGX loss plus what is left of the Monte-Carlo
             // spread at this budget; it does not cover a walk that loses or invents energy, which is a fixed offset and
             // shows up well outside it.
-            CHECK(abs_of(mean - expected) <= 0.06f * expected).context(c.name).dump("mean luminance", mean);
+            CHECK(tg::abs(mean - expected) <= 0.06f * expected).context(c.name).dump("mean luminance", mean);
 
             // Flat, not merely correct on average: a walk that lost energy only where the object is thickest would still
             // average out, and the spread is what catches it.
@@ -381,7 +381,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
     // only in the walk, so a difference between them IS the walk's error, with the interface divided out.
     REQUIRE(lossless_means.size() == 4);
     for (auto i = isize(1); i < lossless_means.size(); ++i)
-        CHECK(abs_of(lossless_means[0] - lossless_means[i]) <= 0.05f * luminance_of(environment))
+        CHECK(tg::abs(lossless_means[0] - lossless_means[i]) <= 0.05f * luminance_of(environment))
             .dump("clear", lossless_means[0])
             .dump("scattering", lossless_means[i]);
 }

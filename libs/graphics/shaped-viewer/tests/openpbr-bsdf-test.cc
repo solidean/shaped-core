@@ -9,18 +9,23 @@
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/all.hh>
 #include <sv_test_shaders.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::abs
 
 // What the OpenPBR closure in shaders/openpbr.hlsli actually RETURNS, measured rather than assumed.
 //
 // Every other GPU test in this library asserts that something ran.
-// These assert on the numbers that came back, through `shaders/bsdf_probe.hlsl` — three estimators whose expected value is
-// known in closed form, so a tolerance here is a statement about a named approximation and nothing else:
+// These assert on the numbers that came back, through `shaders/bsdf_probe.hlsl`, over estimators whose expected value is
+// known in closed form — so a tolerance here is a statement about a named approximation and nothing else:
 //
 //   - the directional albedo, which must not exceed 1 and must REACH 1 for a surface that absorbs nothing,
 //   - the mass `bsdf_pdf` claims against what `bsdf_sample_direction` draws, which may not exceed 1,
-//   - `f(wo, wi)` against `f(wi, wo)`, which Helmholtz reciprocity requires to be equal.
+//   - `f(wo, wi)` against `f(wi, wo)`, which Helmholtz reciprocity requires to be equal,
+//   - which interior a sampled direction entered against the side it went to, which must agree exactly — the assertion a
+//     reflective lobe leaking a below-horizon direction cannot hide from,
+//   - the transmitted lobe's channel ratios, which are its colour and nothing else,
+//   - and a layout echo pinning `probe_surface` against the `sv::surface` the GPU decodes.
 //
-// A lobe added to the closure belongs in `surfaces_under_test` below, and is then held to all three at once.
+// A lobe added to the closure belongs in `surfaces_under_test` below, and is then held to all of them at once.
 
 namespace
 {
@@ -92,6 +97,7 @@ enum class probe_mode : u32
     reciprocity = 2,
     echo = 3,
     medium = 4,
+    transmitted = 5,
 };
 
 /// `sv::probe_case` from shaders/bsdf_probe.hlsl, lane-for-lane.
@@ -131,11 +137,6 @@ constexpr u32 samples_per_block = 2048;
 /// enough to trip a driver's watchdog — and that arrives as a lost device rather than as a slow test.
 /// Splitting costs one command list per chunk and changes no number, since the cases are independent.
 constexpr isize cases_per_dispatch = 16;
-
-[[nodiscard]] float abs_of(float v)
-{
-    return v < 0.0f ? -v : v;
-}
 
 /// One case's summed result, already divided by the samples that produced it.
 struct probe_result
@@ -236,6 +237,10 @@ struct named_surface
     bool exiting = false;
 };
 
+/// What the coat of the "glass under a tinted coat" case below absorbs, and what `probe_transmitted` compares against.
+/// Three clearly different channels, so a ratio check has something to fail on.
+constexpr tg::vec3f tinted_coat_color = tg::vec3f(0.9f, 0.5f, 0.2f);
+
 /// A white furnace needs a surface that absorbs NOTHING, which is what makes its albedo exactly 1.
 /// Everything else here is a realistic configuration, held only to energy conservation.
 cc::vector<named_surface> surfaces_under_test()
@@ -320,6 +325,15 @@ cc::vector<named_surface> surfaces_under_test()
                     .specular_roughness = 0.25f,
                     .transmission_weight = 0.5f,
                     .coat_weight = 1.0f,
+                    .coat_roughness = 0.1f}});
+
+    // Glass under a COLOURED coat, which is the one case whose transmitted lobe has a colour of its own.
+    // `probe_transmitted` below reads its channel ratios back; nothing else in the closure tints this configuration.
+    out.push_back({"glass under a tinted coat",
+                   {.specular_roughness = 0.15f,
+                    .transmission_weight = 1.0f,
+                    .coat_weight = 1.0f,
+                    .coat_color = tinted_coat_color,
                     .coat_roughness = 0.1f}});
 
     // The subsurface base, which refracts through the same interface the transparent one does and differs only in the
@@ -535,7 +549,7 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
             // Only a tabulated albedo over both axes closes it, which is the same entry the two overshoots above wait on.
             if (is_furnace)
                 for (auto c = 0; c < 3; ++c)
-                    CHECK(abs_of(albedo.mean[c] - 1.0f) <= 0.08f).context(where).dump("albedo", albedo.mean);
+                    CHECK(tg::abs(albedo.mean[c] - 1.0f) <= 0.08f).context(where).dump("albedo", albedo.mean);
 
             // What `bsdf_pdf` claims, measured against what `bsdf_sample_direction` draws.
             //
@@ -578,6 +592,52 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
             // dominated by whichever surface happens to be brightest.
             auto const relative = reciprocity.mean[0] / cc::max(reciprocity.mean[1], 1e-9f);
             CHECK(relative <= 1e-3f).context(where).dump("relative asymmetry", relative);
+        }
+    }
+
+    // What the coat does to what passes THROUGH it, which every bound above is blind to.
+    //
+    // The estimators above bound magnitudes, so a factor at or below 1 missing from the transmission branch only loses
+    // light and passes all of them; the sampler's lobe probabilities omit the tint too, so there is no pdf mismatch to
+    // surface as noise either.
+    // A ratio is what remains: on this surface the coat's tint is the only coloured factor the transmitted lobe carries,
+    // so the ratios are exact rather than statistical and the tolerance is float arithmetic alone.
+    {
+        auto const* const tinted = [&]() -> named_surface const*
+        {
+            for (auto const& ns : surfaces)
+                if (ns.name == "glass under a tinted coat")
+                    return &ns;
+            return nullptr;
+        }();
+        REQUIRE(tinted != nullptr);
+
+        auto tint_cases = cc::vector<probe_case>();
+        for (auto const& wo : probe_directions)
+            tint_cases.push_back(
+                {.wo = wo, .mode = probe_mode::transmitted, .samples = samples_per_block, .seed = 11u, .s = tinted->s});
+
+        auto const tint_results = run_probe(ctx, tint_cases);
+        REQUIRE(tint_results.size() == tint_cases.size());
+
+        for (auto di = isize(0); di < tint_results.size(); ++di)
+        {
+            auto const& m = tint_results[di].mean;
+            auto const where = cc::format("glass under a tinted coat @ wo.z = {}", probe_directions[di][2]);
+
+            // A lobe that transmitted nothing would make every ratio below 0/0, so the magnitude is checked first.
+            REQUIRE(m[1] > 1e-4f);
+
+            for (auto c = 0; c < 3; ++c)
+            {
+                auto const expected = tinted_coat_color[c] / tinted_coat_color[1];
+                auto const measured = m[c] / m[1];
+                CHECK(tg::abs(measured - expected) <= 1e-3f)
+                    .context(where)
+                    .dump("channel", c)
+                    .dump("measured ratio", measured)
+                    .dump("expected ratio", expected);
+            }
         }
     }
 }

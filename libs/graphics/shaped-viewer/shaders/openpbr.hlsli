@@ -898,8 +898,8 @@ float3 coat_darkening_factor(bsdf b)
 
 /// What two crossings of the coat cost, for a pair that may straddle the surface.
 ///
-/// A transmitted direction leaves on the far side, where the coat is not — so only the entry crossing is charged, and the
-/// exit is charged at the mirrored cosine as the closest thing to it this model has.
+/// A transmitted direction leaves on the far side, where the coat is not — but the model has no better exit cosine than
+/// the mirrored one, so both crossings are charged and the exit uses `abs(wi.z)`.
 float coat_crossing(bsdf b, float3 wo, float3 wi)
 {
     float3 wo_c = to_coat(b, wo);
@@ -1000,7 +1000,10 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
         float t_coat_x = coat_crossing(b, wo, wi);
         float t_fuzz_x = fuzz_transmission(b, wo.z) * fuzz_transmission(b, abs(wi.z));
 
-        return f_btdf * tint * t_coat_x * t_fuzz_x * (1.0 - b.metalness);
+        // The coat tints what passes through it once, on this branch as on the reflecting one.
+        float3 coat_absorption = lerp(float3(1, 1, 1), b.coat_tint, b.coat_weight);
+
+        return f_btdf * tint * t_coat_x * coat_absorption * t_fuzz_x * (1.0 - b.metalness);
     }
 
     if (wi.z <= 0.0)

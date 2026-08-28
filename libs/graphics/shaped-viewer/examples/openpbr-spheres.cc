@@ -16,9 +16,13 @@ using namespace cc::primitive_defines;
 // Everything is the builtin `openpbr` material type — `sv::builtin_material::openpbr` — with a handful of attributes bound; an
 // attribute no row mentions keeps the specification's own default.
 //
-// `make_rows` is the list, in the order they are laid out from the camera: dielectric, metal, coated, fuzz, anisotropic,
-// thin film, coat normal, glass, thin walled, absorbing, dispersion, subsurface, scattering, opacity, diffuse.
+// `make_rows` is the list: dielectric, metal, coated, fuzz, anisotropic, thin film, coat normal, glass, thin walled,
+// absorbing, dispersion, subsurface, scattering, opacity, diffuse.
 // Each carries its own comment where the parameters need one.
+//
+// They are laid out in BLOCKS rather than in one file running away from the camera, filled in reading order: near-left,
+// near-right, far-left, far-right.
+// Depth is what a row's legibility is spent on and there is only so much of it — see `rows_per_block`.
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/openpbr-spheres
@@ -28,6 +32,24 @@ namespace
 constexpr int column_count = 7; // roughness samples per row
 constexpr float sphere_radius = 0.45f;
 constexpr float spacing = 1.15f;
+
+/// How the fifteen rows are broken up, since fifteen of them behind one another is not something a camera can fix.
+///
+/// What separates two rows on screen is `spacing * sin(elevation)`, and elevation falls away toward the horizon whatever the
+/// camera does: fifteen rows in one file put the far ones at about 19 degrees, a third of a diameter apart, which is the
+/// overlapping-crescents look.
+/// Raising `spacing` lifts the far rows out of the frame long before it separates them.
+///
+/// So the rows are laid out as BLOCKS in two dimensions — four rows deep, two blocks across, reading like text: near-left,
+/// near-right, far-left, far-right.
+/// Four deep keeps even the last row above 33 degrees, and two across keeps the footprint near the frame's own aspect, so
+/// what fills the picture is spheres rather than floor.
+constexpr int rows_per_block = 4;
+constexpr int blocks_across = 2;
+
+/// Bare floor between neighbouring blocks, so the grid reads as four groups rather than as one wide slab.
+constexpr float block_gap_x = 2.0f;
+constexpr float block_gap_z = 2.5f;
 
 /// An indexed UV sphere of `radius`, centered on the origin, wound so every face's geometric normal points outward.
 ///
@@ -159,7 +181,9 @@ struct sweep_row
 
     auto rows = cc::vector<sweep_row>();
 
-    rows.push_back({.name = "dielectric", .shared = {binding::of("base_color", tg::vec3f(0.62f, 0.64f, 0.68f))}});
+    // A mid grey rather than the near-white this started as: the row is about ROUGHNESS, and at a brighter base its
+    // columns clip together into one white ball each and the sweep stops reading as a sweep.
+    rows.push_back({.name = "dielectric", .shared = {binding::of("base_color", tg::vec3f(0.42f, 0.44f, 0.48f))}});
 
     rows.push_back(
         {.name = "metal",
@@ -329,8 +353,18 @@ struct sweep_row
             // Laid out ON the floor: columns run across in x, rows run away in z, and every sphere rests on the ground
             // rather than floating in a wall.
             // That is what makes the grid something to walk into rather than something to look at.
-            float const x = (float(c) - float(column_count - 1) * 0.5f) * spacing;
-            float const z = float(r) * spacing;
+            //
+            // Only `rows_per_block` rows go behind one another; the rest start a new block beside or behind them, so the
+            // grid grows across the frame rather than into the distance where nothing is separable.
+            auto const block = int(r) / rows_per_block;
+            auto const depth = int(r) % rows_per_block;
+
+            float const block_pitch_x = float(column_count - 1) * spacing + block_gap_x;
+            float const block_pitch_z = float(rows_per_block) * spacing + block_gap_z;
+
+            float const x = (float(c) - float(column_count - 1) * 0.5f) * spacing
+                          + (float(block % blocks_across) - float(blocks_across - 1) * 0.5f) * block_pitch_x;
+            float const z = float(depth) * spacing + float(block / blocks_across) * block_pitch_z;
 
             out.push_back(
                 sv::mesh{.name = cc::format("{}-{}", row.name, c),
@@ -364,8 +398,13 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
 
     // Everything below follows the grid rather than being set to fit it: a row added to `make_rows` must not fall off the
     // floor, out of the light, or behind the camera.
-    float const grid_depth = float(make_rows().size() - 1) * spacing;
-    float const grid_width = float(column_count - 1) * spacing;
+    auto const row_count = int(make_rows().size());
+    auto const block_count = (row_count + rows_per_block - 1) / rows_per_block;
+    auto const block_bands = (block_count + blocks_across - 1) / blocks_across;
+
+    float const grid_width
+        = float(column_count - 1) * spacing * float(blocks_across) + block_gap_x * float(blocks_across - 1);
+    float const grid_depth = float(rows_per_block * block_bands - 1) * spacing + block_gap_z * float(block_bands - 1);
 
     auto const floor = sv::mesh{.name = "ground",
                                 .geometry = sv::triangle_geometry::create_from_positions(
@@ -381,19 +420,18 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
 
         // Above and behind the grid, pitched down far enough that it reads as a GRID rather than as a corridor.
         //
-        // Eye height is what decides how many rows are legible, and it is not a matter of taste: fifteen rows over sixteen
-        // units of floor subtend about 12 degrees from standing height, so the near row takes most of a 60-degree frame and
-        // everything behind it collapses toward the vanishing point.
-        // From 8 units up they subtend about 33, and the narrower lens is what turns that into most of the frame rather
-        // than a strip in the middle of it: the grid is 7 wide against 16 deep, so a 60-degree lens close enough to fill
-        // the width cannot hold the far rows, and one far enough to hold them leaves the width mostly floor.
-        // The pitch is the depression to the middle row, so the near and far ends sit equally far off centre.
+        // The blocked layout is what makes a camera possible at all: the grid is about 16 wide against 11 deep, which
+        // perspective compresses to roughly the frame's own aspect, so what fills the picture is spheres rather than floor.
+        // From 13 units up the last row still sits about 34 degrees above the horizon, which is two thirds of a diameter
+        // between rows; the same fifteen rows in one file put the far ones at 19 and half-buried in the row in front.
+        // The pitch is the depression to the middle of the grid, so the near and far ends sit equally far off centre, and
+        // the lens is what the NEAR CORNERS need — they are the widest thing in the frame, not the far ones.
         //
         // Seeded once — after that the controller owns it, so this is where you START rather than where you are held.
-        view.initial_fps({.position = tg::pos3d(0, 8.0, -6.0),
+        view.initial_fps({.position = tg::pos3d(0, 13.0, -9.0),
                           .yaw = tg::angle_d::make_from_degree(0.0),
-                          .pitch = tg::angle_d::make_from_degree(-35.0),
-                          .vertical_fov = tg::angle_d::make_from_degree(45.0)});
+                          .pitch = tg::angle_d::make_from_degree(-43.0),
+                          .vertical_fov = tg::angle_d::make_from_degree(38.0)});
 
         // Right-drag looks, WASD moves, E and Q rise and fall, the wheel retunes the speed.
         // Re-asserted every frame, which is the contract: dropping the call hands the view back to the orbit controller.
@@ -410,13 +448,17 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
         //
         // The emission falls as the rect grows: a light this large would otherwise blow out everything under it, and what
         // matters here is that each row is lit the same as its neighbours rather than that the scene is bright.
+        //
+        // The constant is a stop below what a bright image would want, and the dielectric row is why: its base_color is
+        // near-white, so at the brighter level its columns all clip and a roughness sweep stops reading as a sweep.
+        // The fuzz and subsurface rows are the floor on the other side — they are the darkest thing here and still legible.
         float const light_u = grid_width * 0.5f + 2.0f;
         float const light_v = grid_depth * 0.5f + 2.0f;
 
         scene.add_light({.center = tg::pos3f(0, 7.0f, grid_depth * 0.5f),
                          .half_extent_u = tg::vec3f(light_u, 0, 0),
                          .half_extent_v = tg::vec3f(0, 0, light_v),
-                         .emission = tg::vec3f(1, 1, 1) * (260.0f / (light_u * light_v))});
+                         .emission = tg::vec3f(1, 1, 1) * (150.0f / (light_u * light_v))});
 
         scene.background(sv::background::studio().scaled(0.6f));
     }

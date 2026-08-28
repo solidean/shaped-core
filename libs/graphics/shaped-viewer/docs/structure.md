@@ -123,6 +123,15 @@ The whole sv API compiles everywhere, though: without a backend a routine simply
 - **The BSDF is sv's own**, in `shaders/openpbr.hlsli`: the OpenPBR Surface subset the path tracer shades through, plus the GGX / Fresnel / sheen primitives under it.
   A shared shader BRDF library in shaped-rendering is the natural home once a second consumer appears, and the primitives are the half that would move.
   The flat `pbr_raytrace_routine` still has its own `shaders/pbr.hlsli`, which is one of the reasons to retire that routine.
+- **The shader-side `sv::` namespace is provisional**, and a new shader type should not land at its top level by default.
+  It replaced the old `sv_` prefix and now holds four unrelated groups flat: the microfacet and Fresnel primitives
+  (`ggx_*`, `fresnel_*`, `sheen_*`, `oren_nayar`, `dispersive_ior`, `thin_film_reflectance`, `luminance`), the shading frame
+  (`frame`, `make_frame`, `to_local`, `perturb_frame`, …), the material model (`surface`, `bsdf`, `bsdf_*`, `medium_*`), and
+  the generated-shader runtime (`instance`, `attribute_desc`, `shading_context`, `interpolate_*`).
+  Names a layer above or below will want are already in it — `sv::surface`, `sv::luminance`, and `sv::frame`, which is an
+  orthonormal shading basis in HLSL and the immediate-mode frame in C++.
+  The split is deliberately deferred rather than skipped: it wants doing together with the move of the primitives to
+  shaped-rendering above, since that move decides which group leaves and what the rest is named around.
 - **Meshing primitives belong in typed-geometry.** Both examples hand-roll their geometry: a cube in `hello-cube`, a UV sphere in `openpbr-spheres`.
   Two callers is enough to want a `tg::` sphere / box tessellation.
 - **The id-pool now exists** as `sv::impl::lru_pool<Id, Record>` (budget + idle eviction, LRU).

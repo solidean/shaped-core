@@ -501,7 +501,8 @@ The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 
 **Temporal accumulation** rides on that persistent target: `accum_frame == 0` overwrites, anything above blends into it in place at a weight of `1 / (accum_frame + 1)`.
-Nothing caps it — the target is `rgba32_float` and the mean is exact, so a view left alone converges to ground truth rather than settling near it.
+It stops at `sv::accumulation_frame_cap` (4096), which bounds GPU LOAD rather than the estimate.
+The target is `rgba32_float` and the mean stays exact, so what the cap costs is only a mean nobody is still looking at.
 Restarting is therefore the whole policy, and the signal is a hash of the bytes the trace uploads — camera, size, lights, background, settings, every instance transform, geometry identity.
 Hashing what is uploaded rather than what the view holds is what keeps it from drifting away from the shader.
 The camera is in it deliberately: every sample the target holds was drawn through one eye, which is what makes the mean the image this frame is asking for.

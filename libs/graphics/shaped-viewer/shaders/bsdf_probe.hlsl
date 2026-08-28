@@ -28,6 +28,7 @@ static const uint probe_pdf_norm = 1;
 static const uint probe_reciprocity = 2;
 static const uint probe_echo = 3;
 static const uint probe_medium = 4;
+static const uint probe_transmitted = 5;
 
 /// One measurement to make — mirrors `sv_test::probe_case` lane-for-lane, so keep the two in lockstep.
 ///
@@ -63,6 +64,8 @@ StructuredBuffer<probe_case> Cases : register(t0);
 ///   - `probe_reciprocity`: `x` is the summed absolute difference and `y` the summed magnitude it is relative to.
 ///   - `probe_medium`: how many samples reported an interior disagreeing with the side they went to, how many entered the
 ///     transmissive interior, and how many the subsurface one.
+///   - `probe_transmitted`: the summed estimate over the samples that left on the FAR side only, so its channel RATIOS are
+///     the transmitted lobe's own colour.
 ///   - `probe_echo`: the decoded fields the CPU checks its own packing against.
 RWStructuredBuffer<float4> Results : register(u0);
 
@@ -175,6 +178,17 @@ float4 probe_run(probe_case c, uint item)
                 sum.y += s.medium == medium_transmission ? 1.0 : 0.0;
                 sum.z += s.medium == medium_subsurface ? 1.0 : 0.0;
             }
+        }
+        else if (c.mode == probe_transmitted)
+        {
+            // The same estimator `probe_albedo` runs, restricted to the samples that crossed.
+            //
+            // The magnitude is not the point: every factor on the transmission branch except the coat's tint is colourless,
+            // so the three channels differ by that tint alone and their RATIOS are exact whatever the sample budget.
+            float3 u = float3(probe_rand(rng), probe_rand(rng), probe_rand(rng));
+            bsdf_sample s = bsdf_sample_direction(b, wo, u);
+            if (s.valid && s.direction.z < 0.0)
+                sum += s.value * abs(s.direction.z) / s.pdf;
         }
         else // probe_reciprocity
         {

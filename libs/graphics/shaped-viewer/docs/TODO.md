@@ -219,11 +219,12 @@ importance-samples the continuation — so what is left is coverage of the model
   formulation would buy, for a path that has already paid the collapse.
 - **The walk is measured now**, by `tests/volumetric-furnace-test.cc`: a lossless object under a uniform environment is
   invisible, so the traced image must come back at the environment's own radiance.
-  Three cases separate what could otherwise pass vacuously — a clear index-matched interior isolating the interface, a
-  purely scattering one which is the walk itself, and an absorbing one that must come back darker.
+  The cases separate what could otherwise pass vacuously — a clear index-matched interior isolating the interface, a clear
+  glass one at index 1.5 where total internal reflection is measured against a known answer, a purely scattering one which is
+  the walk itself, the same walk at optical depth about 36, and an absorbing one that must come back darker.
   An 8% loss injected per scattering event moves the scattering case by 26% and leaves the clear one exact, which is what
   says the assertion has teeth.
-  It runs in about 6 seconds on WARP, which is the slowest test sv has and the reason the resolution and frame count are
+  It runs in about 7 seconds on WARP, second only to the closure probe, which is the reason its resolution and frame count are
   as low as they are.
 - **A scattering walk ends by Russian roulette now**, after 16 events, on the throughput's largest channel.
   Because `q` is the throughput itself the walk is self-normalizing: a survivor returns to about 1 and the per-event
@@ -323,10 +324,11 @@ importance-samples the continuation — so what is left is coverage of the model
   directional albedo.
   Each is a self-contained replacement, and the sheen is the one that most visibly deviates.
 - **The closure is measured; the IMAGE still is not.**
-  `shaders/bsdf_probe.hlsl` plus `tests/openpbr-bsdf-test.cc` run three estimators over `sv::bsdf` on the GPU and read the
-  numbers back — directional albedo, the mass `bsdf_pdf` claims against what `bsdf_sample_direction` draws, and Helmholtz
-  reciprocity — across eleven surfaces at three incidences each.
-  A lobe added to the closure goes in `surfaces_under_test` and is then held to all three.
+  `shaders/bsdf_probe.hlsl` plus `tests/openpbr-bsdf-test.cc` run estimators over `sv::bsdf` on the GPU and read the numbers
+  back — directional albedo, the mass `bsdf_pdf` claims against what `bsdf_sample_direction` draws, Helmholtz reciprocity,
+  which interior a sampled direction entered against the side it went to, the transmitted lobe's channel ratios, and a layout
+  echo pinning the struct against the GPU's own decode — over `surfaces_under_test` at three incidences each.
+  A lobe added to the closure goes in `surfaces_under_test` and is then held to all of them.
   What that does not cover is anything above the closure: the integrator, the accumulation blend and the layout composite
   still have no readback, and `pathtraced-window-manual-test` is the only confirmation of those.
 - **Two of the energy bounds are a fit's error rather than a lobe's.**

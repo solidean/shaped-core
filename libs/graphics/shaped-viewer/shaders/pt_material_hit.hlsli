@@ -167,7 +167,10 @@ bool pt_cutout_rejects(PtAttributes attribs)
         return false; // fully covered: the common case, and it accepts without drawing anything
 
     uint2 px = DispatchRaysIndex().xy;
-    uint h = pt_hash(px.x + px.y * 65536u + rng_seed * 9781u + PrimitiveIndex() * 2654435761u);
+    // The instance is in the hash as well as the primitive: without it two instances sharing one geometry draw the SAME `u`
+    // at the same primitive in the same pixel, so stacked identical alpha-tested cards cut out identically instead of
+    // independently.
+    uint h = pt_hash(px.x + px.y * 65536u + rng_seed * 9781u + PrimitiveIndex() * 2654435761u + InstanceID() * 2246822519u);
     float u = float(h) * (1.0 / 4294967296.0);
 
     return surface.geometry_opacity < u;
@@ -303,7 +306,6 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
         payload.medium_sigma_t = in_sigma_t;
         payload.medium_albedo = in_albedo;
         payload.medium_g = in_g;
-        payload.channel = payload.channel;
         return;
     }
 
@@ -369,7 +371,6 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
         payload.medium_sigma_t = in_sigma_t;
         payload.medium_albedo = in_albedo;
         payload.medium_g = in_g;
-        payload.channel = payload.channel;
     }
 
     payload.rng = rng;

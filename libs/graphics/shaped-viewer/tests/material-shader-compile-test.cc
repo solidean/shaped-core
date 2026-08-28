@@ -254,19 +254,8 @@ TEST("sv - the openpbr closest-hit compiles with the full layered BSDF")
     auto const id = materials.acquire(sv::material::create("openpbr", type, {}));
 
     auto const resolved = sv::resolve_material(materials, id, make_mesh());
-    auto const g = sv::generate_material_shader(resolved, {.epilogue_include = "pt_material_hit.hlsli"});
 
-    auto const& lib = *sv_test::shared_env().lib;
-    auto const shader
-        = lib.compile_source(g.source, sg::shader_stage::closest_hit, "PtClosestHit", sg::shader_format::dxil,
-                             {.include_dir = "sv_shaders", .label = "<generated openpbr closest-hit>"});
-
-    REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get(shader);
-    if (shader->has_error())
-        FAIL(cc::format("{}\n--- source ---\n{}", shader->try_error()->underlying().to_string(), g.source));
-    REQUIRE(shader->has_value());
-    CHECK(shader->try_value()->bytecode.size() > 0);
+    check_hit_compiles(resolved, "<generated openpbr closest-hit>");
 }
 
 #endif // SLIB_HAS_DXC
