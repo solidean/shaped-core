@@ -44,7 +44,7 @@ void cc::threaded_actor_base::begin_shutdown()
     CC_ASSERT(!_is_shutting_down.load(), "begin_shutdown() must be called at most once");
 
     _is_shutting_down.store(true);
-    _inbox_cond_var.notify_one();
+    wake_after_shutdown_request();
 }
 
 void cc::threaded_actor_base::shutdown()
