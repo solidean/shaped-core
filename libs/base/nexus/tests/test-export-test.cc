@@ -397,3 +397,84 @@ TEST("export - the benchmark sidecar carries the samples, not just a summary", n
     CHECK(samples.size() == loop["statistics"]["samples"].as_double());
     CHECK(samples.size() >= 8);
 }
+
+TEST("export - the benchmark sidecar names the baseline the console drew", no_scheduler)
+{
+    // The RESOLVED baseline rather than the config flag.
+    // With nothing marked, the first loop declared is the baseline and the report says so, so a sidecar writing
+    // `config.is_baseline` would answer `false` for every row of a table that visibly has one.
+    auto const measure = [](cc::string_view name)
+    {
+        auto cfg = nx::bench::run_config::standard();
+        cfg.min_time_secs = 0.001;
+        cfg.max_time_secs = 0.05;
+        cfg.min_samples = 8;
+        cfg.max_samples = 16;
+        cfg.warmup_time_secs = 0.001;
+        return [name, cfg]
+        {
+            auto acc = u64(0);
+            nx::bench::run(name, cfg, [&] { nx::bench::sink(++acc); });
+        };
+    };
+
+    nx::test_registry reg;
+    reg.add_declaration("two loops", {.bucket = nx::config::test_bucket::benchmark},
+                        [&]
+                        {
+                            measure("first")();
+                            measure("second")();
+                        });
+
+    auto const config = nx::test_schedule_config{.selected_bucket = nx::config::test_bucket::benchmark};
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+
+    auto const doc = babel::json::read(nx::write_bench_json("my-suite", exec)).value();
+    auto const loops = doc.root()["loops"];
+    REQUIRE(loops.size() == 2);
+
+    CHECK(loops[0]["loop"].as_string() == "first");
+    CHECK(loops[0]["is_baseline"].as_bool());
+    CHECK(!loops[1]["is_baseline"].as_bool());
+
+    // A table nobody opted out of still has a comparison column, which is what `no_baseline` reports.
+    CHECK(!loops[0]["no_baseline"].as_bool());
+    CHECK(!loops[1]["no_baseline"].as_bool());
+}
+
+TEST("export - a sweep's loops carry no baseline at all", no_scheduler)
+{
+    // One loop setting `no_baseline` drops the comparison from the whole table, so no row may claim to be the
+    // baseline: a consumer that divided one row by another would be reporting the input sizes rather than the code.
+    nx::test_registry reg;
+    reg.add_declaration("a sweep", {.bucket = nx::config::test_bucket::benchmark},
+                        []
+                        {
+                            auto cfg = nx::bench::run_config::standard();
+                            cfg.min_time_secs = 0.001;
+                            cfg.max_time_secs = 0.05;
+                            cfg.min_samples = 8;
+                            cfg.max_samples = 16;
+                            cfg.warmup_time_secs = 0.001;
+                            cfg.no_baseline = true;
+
+                            auto acc = u64(0);
+                            nx::bench::run("n=1", cfg, [&] { nx::bench::sink(++acc); });
+                            nx::bench::run("n=2", cfg, [&] { nx::bench::sink(++acc); });
+                        });
+
+    auto const config = nx::test_schedule_config{.selected_bucket = nx::config::test_bucket::benchmark};
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+
+    auto const doc = babel::json::read(nx::write_bench_json("my-suite", exec)).value();
+    auto const loops = doc.root()["loops"];
+    REQUIRE(loops.size() == 2);
+
+    for (auto i = 0; i < 2; ++i)
+    {
+        CHECK(!loops[i]["is_baseline"].as_bool());
+        CHECK(loops[i]["no_baseline"].as_bool());
+    }
+}

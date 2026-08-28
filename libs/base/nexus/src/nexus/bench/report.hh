@@ -58,6 +58,13 @@ namespace nx::bench
 /// A value with its unit's prefix and symbol, and no uncertainty — for a count, a size, a rate.
 [[nodiscard]] cc::string format_quantity(f64 value, cc::rec::unit const* unit);
 
+/// The index of the loop `loops` is compared against: the first one declared, unless one set `is_baseline`.
+///
+/// Here rather than inside the report because the sidecar has to name the same loop the console drew as the
+/// baseline, and a second copy of "the first, unless one asked" is how the two answers drift apart.
+/// Returns -1 for an empty span, and for a table that opted out of comparison entirely with `no_baseline`.
+[[nodiscard]] isize baseline_index(cc::span<result const> loops);
+
 /// The report for one benchmark's loops.
 ///
 /// **One loop gets a block, several get a table**, because the two shapes buy different things.

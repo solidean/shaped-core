@@ -5,6 +5,7 @@
 #include <clean-core/record/desc.hh>
 #include <nexus/bench/calibration.hh>
 #include <nexus/bench/environment.hh>
+#include <nexus/bench/report.hh>
 
 using namespace cc::primitive_defines;
 
@@ -65,7 +66,7 @@ void write_statistics(json::object_writer& out, nx::bench::statistics const& s)
     stats.write("relative_error", s.relative_error());
 }
 
-void write_loop(json::array_writer& loops, cc::string_view test, nx::bench::result const& r)
+void write_loop(json::array_writer& loops, cc::string_view test, nx::bench::result const& r, bool is_baseline, bool no_baseline)
 {
     auto loop = loops.write_object();
     loop.write("test", test);
@@ -78,7 +79,12 @@ void write_loop(json::array_writer& loops, cc::string_view test, nx::bench::resu
     loop.write("converged", r.converged);
     loop.write("overhead_fraction", r.overhead_fraction);
     loop.write("paused_fraction", r.paused_fraction);
-    loop.write("is_baseline", r.config.is_baseline);
+    // The RESOLVED baseline, not the config flag: with nothing marked, the first loop declared is the baseline, and
+    // writing the flag would say `false` for every row of a table the console drew one baseline in.
+    loop.write("is_baseline", is_baseline);
+    // Whether this loop's table has a comparison column at all — a sweep measures a different amount of work per row,
+    // so dividing one row by another says something about the input sizes rather than about the code.
+    loop.write("no_baseline", no_baseline);
 
     if (r.items > 0)
     {
@@ -173,8 +179,12 @@ cc::string nx::write_bench_json(cc::string_view suite_name, nx::test_schedule_ex
             for (auto const& exec : execution.executions)
             {
                 CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
-                for (auto const& r : exec.benchmarks)
-                    write_loop(loops, exec.instance.declaration->name, r);
+
+                // One test's loops are one table, which is the span the baseline is resolved over — the same call the
+                // console report makes, so the two can never name different rows.
+                auto const baseline = bench::baseline_index(exec.benchmarks);
+                for (auto i = isize(0); i < exec.benchmarks.size(); ++i)
+                    write_loop(loops, exec.instance.declaration->name, exec.benchmarks[i], i == baseline, baseline < 0);
             }
         }
     }

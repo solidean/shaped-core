@@ -333,8 +333,11 @@ void append_block(cc::string& out, result const& r, nx::bench::report_style cons
     if (r.items > 0)
     {
         auto const* count = &cc::rec::unit_count;
+        // Divided as f64: a body declaring fewer items than iterations reads `0 per iteration` under integer division,
+        // beside a non-zero rate.
+        auto const per_iteration = r.measured_iterations > 0 ? f64(r.items) / f64(r.measured_iterations) : f64(0);
         out.appendf("  items      {}/s   {} per iteration\n", nx::bench::format_quantity(r.items_per_second, count),
-                    r.measured_iterations > 0 ? r.items / r.measured_iterations : 0);
+                    nx::bench::format_quantity(per_iteration, count));
     }
 
     for (auto const& q : r.quantities)
@@ -362,6 +365,25 @@ void append_block(cc::string& out, result const& r, nx::bench::report_style cons
 }
 } // namespace
 
+isize nx::bench::baseline_index(cc::span<result const> loops)
+{
+    if (loops.empty())
+        return -1;
+
+    // A sweep has no meaningful baseline, and opting out belongs to the sweep rather than to a guess here: an earlier
+    // version dropped the column once there were more than three loops, which quietly took it away from a four-row
+    // comparison that wanted it.
+    for (auto const& r : loops)
+        if (r.config.no_baseline)
+            return -1;
+
+    for (auto i = isize(0); i < loops.size(); ++i)
+        if (loops[i].config.is_baseline)
+            return i;
+
+    return 0;
+}
+
 cc::string nx::bench::format_report(cc::string_view title, cc::span<result const> loops, report_style const& style)
 {
     auto out = cc::string();
@@ -377,25 +399,10 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
         return out;
     }
 
-    // The baseline is the first loop declared, unless one asked to be it.
-    auto baseline = isize(0);
-    for (auto i = isize(0); i < loops.size(); ++i)
-        if (loops[i].config.is_baseline)
-        {
-            baseline = i;
-            break;
-        }
-
     // The comparison column shows against the first loop declared, unless one asked to be the baseline — or unless a
-    // loop opted the table out of comparison entirely.
-    //
-    // A sweep has no meaningful baseline, and opting out belongs to the sweep rather than to a guess here: an earlier
-    // version dropped the column once there were more than three loops, which quietly took it away from a four-row
-    // comparison that wanted it.
-    auto show_comparison = true;
-    for (auto const& r : loops)
-        if (r.config.no_baseline)
-            show_comparison = false;
+    // loop opted the table out of comparison entirely, which is what a -1 means.
+    auto const baseline = bench::baseline_index(loops);
+    auto const show_comparison = baseline >= 0;
 
     auto const* secs = &cc::rec::unit_seconds;
 

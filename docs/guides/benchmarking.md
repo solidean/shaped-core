@@ -101,7 +101,7 @@ BENCHMARK("sort - ours against the standard's")
 Measuring them together is the point: two numbers from separate runs happened at different times on a machine whose
 state changed in between.
 
-**A difference whose interval spans zero prints as `~same`, not as a number.**
+**A ratio whose interval spans 1.0 prints as `~same`, not as a number.**
 The comparison interval is built conservatively from the two medians' own intervals, so it can only ever be too wide —
 it never claims a difference that is not there.
 
@@ -195,6 +195,58 @@ Every existing benchmark header used to say "pass `--preset release-clang`" by h
 
 A match may select several benchmarks, unlike `dev.py example` — running a family together is the normal case.
 Benchmarks in one binary share a process, so they share one system summary and one `.ccrec`.
+
+## The `.bench.json` sidecar
+
+`--json` writes one document per binary: the machine, the calibration, and every loop with every sample it took.
+It is the format tooling reads instead of scraping the console — the three plot scripts under
+`libs/base/clean-core/tests/benchmarks/` are the current consumers.
+
+```json
+{
+  "suite": "nexus-test",
+  "system": {"os": "windows", "arch": "x64", "cpu": "unknown", "logical_cores": 20,
+             "build": "release", "assertions_enabled": false, "is_provisional": true},
+  "calibration": {"seconds_per_tick": 3.4e-10, "empty_iteration_secs": 1.1e-10,
+                  "clock_pair_secs": 1.3e-08, "has_cheap_counter": true},
+  "loops": [
+    {
+      "test": "nx::bench - the barriers",
+      "loop": "empty loop",
+      "batch_size": 8962691, "measured_iterations": 4293128989, "warmup_iterations": 33554431,
+      "measured_seconds": 0.5, "converged": true,
+      "overhead_fraction": 0, "paused_fraction": 0,
+      "is_baseline": true, "no_baseline": false,
+      "statistics": {"samples": 479, "median": 1.117e-10, "min": 1.11e-10, "max": 2.08e-10,
+                     "mean": 1.16e-10, "trimmed_mean": 1.13e-10, "mad": 3.7e-13,
+                     "p95": 1.36e-10, "p99": 1.87e-10,
+                     "ci95_low": 1.116e-10, "ci95_high": 1.118e-10,
+                     "ci_is_sample_range": false, "outliers": 65, "relative_error": 0.0005},
+      "quantities": [{"name": "bytes", "unit": "B", "unit_singular": "byte",
+                      "total": 0, "per_iteration": 0, "per_second": 0}],
+      "counter_iterations": 8962691,
+      "counters": [{"name": "ref_cycles", "total": 2931064, "per_iteration": 0.327, "per_item": 0}],
+      "warnings": [{"kind": "did_not_converge", "severity": "warning", "detail": "..."}],
+      "samples": [1.1169e-10, 1.1753e-10]
+    }
+  ]
+}
+```
+
+What a consumer needs to know beyond the field names:
+
+- **Every time is in seconds**, and every statistic is per iteration.
+- **`test` is what groups loops into a table.** Loops sharing a `test` are the rows the console drew together.
+- **`is_baseline` is the RESOLVED baseline**, not the config flag — exactly the row the console labelled `baseline`.
+  `no_baseline` is true for every loop of a table that opted out of comparison, where dividing one row by another says
+  something about the input sizes rather than about the code.
+- **`items` and `items_per_second` are absent** when the body declared no items, which is deliberately distinct from
+  declaring one item per iteration.
+- **`ci_is_sample_range`** says the sample count supported no interval, so `ci95_low` / `ci95_high` are the range.
+- **`p95` and `p99` mean something only when `batch_size` is 1.** Under batching a sample is a batch mean.
+- **`samples` is in the order taken**, not sorted, so drift across a run is visible there and nowhere else.
+- **A non-finite reading is `null`** rather than invalid JSON.
+- **`--repeat` and several binaries each get their own file**, with the binary and the repeat folded into the stem.
 
 ## What a benchmark is, to nexus
 
