@@ -45,6 +45,13 @@ _DEFAULT_MECHANISM = "sv"
 # one, which is how a broken capture becomes a committed transcript.
 MECHANISMS = ("sv", "custom", "transcript")
 
+# The container formats an image capture may ask for.
+#
+# Checked here rather than trusted, because the extension is the WHOLE rule downstream: `sr::write_capture_image`
+# picks the encoder from it and falls back to JPEG, and the refresh step copies only a known image suffix.
+# So an unknown format writes JPEG bytes under a name nothing recognises, and the refresh silently skips it.
+FORMATS = ("jpg", "jpeg", "png")
+
 # The mechanisms whose artifact is an image file at SC_CAPTURE_OUT.
 #
 # `sv` and `custom` differ only in who implements the protocol, never in the contract: an image must appear at the path the run was given.
@@ -132,6 +139,8 @@ def load_sidecar(directory: Path) -> dict[str, ExampleCapture]:
         )
         if entry.mechanism not in MECHANISMS:
             raise SidecarError(f"{path}: {name!r} asks for mechanism {entry.mechanism!r}; known: {', '.join(MECHANISMS)}")
+        if entry.fmt not in FORMATS:
+            raise SidecarError(f"{path}: {name!r} asks for format {entry.fmt!r}; known: {', '.join(FORMATS)}")
         if not isinstance(entry.captures, list) or not entry.captures:
             raise SidecarError(f"{path}: {name!r} must list at least one capture")
 
@@ -165,12 +174,19 @@ def captures_for(example, root: Path) -> list[Capture] | None:
                 f"{directory / SIDECAR_NAME}: a capture of {example.name!r} has unknown key(s): {', '.join(sorted(unknown))}"
             )
 
+        fmt = spec.get("format", entry.fmt)
+        if fmt not in FORMATS:
+            raise SidecarError(
+                f"{directory / SIDECAR_NAME}: a capture of {example.name!r} asks for format {fmt!r}; "
+                f"known: {', '.join(FORMATS)}"
+            )
+
         out.append(Capture(
             example=example.name,
             name=spec.get("name", ""),
             mechanism=entry.mechanism,
             size=spec.get("size", entry.size),
-            fmt=spec.get("format", entry.fmt),
+            fmt=fmt,
             accumulate=spec.get("accumulate", entry.accumulate),
             timeout=spec.get("timeout", entry.timeout),
         ))

@@ -49,8 +49,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "With NAME, take the capture of that name. Both must be declared in the example's "
                         ".capture.json sidecar; an example without one is not capturable.")
     p.add_argument("--capture-out", metavar="PATH",
-                   help="Where --capture writes. Defaults to build/<preset>/captures/<name>/<shot>/capture.jpg; "
-                        "the extension picks the format.")
+                   help="Where --capture writes. Defaults to build/<preset>/captures/<name>/<shot>/capture.<format>, "
+                        "the format the sidecar declares; the extension picks it either way. "
+                        "One capture only — a sweep refuses it, since every shot would land on the same file.")
     p.add_argument("--capture-size", metavar="WxH",
                    help="Override the resolution the sidecar declares")
     p.add_argument("--capture-accumulate", metavar="N", type=int,
@@ -78,6 +79,12 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     preset = presets[0]
+
+    # One path cannot hold a sweep: every shot would overwrite the last, and their stdout, stderr and manifest
+    # would land in one directory too.
+    # Refused rather than ignored, so the intent is not silently dropped.
+    if args.update_captures is not None and args.capture_out:
+        ctx.die("--capture-out names one file, so it cannot be combined with --update-captures")
 
     if args.refresh_captures is not None and args.update_captures is None:
         _refresh(ctx, preset, args.refresh_captures)
@@ -164,7 +171,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 # A sweep bounds each run: the interactive default of no timeout is right for a window somebody is watching and
 # wrong for a corpus refresh, where one example that never settles would hang the whole thing.
 _SWEEP_TIMEOUT_SECONDS = 300.0
-
 
 
 def _sweep(ctx: Context, preset, targets, examples: list, args: argparse.Namespace) -> None:
