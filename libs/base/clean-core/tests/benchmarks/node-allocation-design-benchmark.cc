@@ -47,10 +47,12 @@
 #include <clean-core/math/bit.hh>
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/node_allocation.hh>
+#include <clean-core/record/stat.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/test.hh>
 
-#include <chrono>
 #include <cstdio>
 
 #if defined(_WIN32)
@@ -61,7 +63,6 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-using clock = std::chrono::steady_clock;
 
 constexpr isize batch_n = 10;      // nodes allocated/freed per iteration (well within one slab)
 constexpr isize iters = 1'000'000; // iterations per timed run
@@ -342,53 +343,37 @@ struct VarNode
 
 // --- harness --------------------------------------------------------------------------------------------
 
-template <class Var>
-double one_run(Var& v, u64& acc)
-{
-    byte* nodes[batch_n] = {};
-    auto const t0 = clock::now();
-    for (isize it = 0; it < iters; ++it)
-    {
-        for (isize i = 0; i < batch_n; ++i)
-            nodes[i] = v.alloc();
-        for (isize i = 0; i < batch_n; ++i)
-        {
-            byte* const p = nodes[free_order[i]];
-            acc ^= reinterpret_cast<u64>(p);
-            v.free(p);
-        }
-    }
-    double const seconds = std::chrono::duration<double>(clock::now() - t0).count();
-    return double(iters * batch_n) / seconds / 1e6; // M pairs/s
-}
-
+/// One variant at one size, as one measured loop.
+///
+/// The loop name is `<variant> @<size>B`, which is what scripts/plot-node-allocation-design.py splits on when it
+/// reads the benchmark's JSON sidecar.
+/// It used to scrape `RESULT,` CSV rows off stdout and median three timed runs itself; the sidecar carries the median
+/// and its interval already, computed over hundreds of samples rather than three.
 template <class Var>
 void measure(char const* name, isize size, Var& v)
 {
     v.hydrate();
 
-    // warmup: reach steady state (local/remote migration) and warm caches
     byte* nodes[batch_n] = {};
-    u64 acc = 0;
-    for (int w = 0; w < warmup_iters; ++w)
-    {
-        for (isize i = 0; i < batch_n; ++i)
-            nodes[i] = v.alloc();
-        for (isize i = 0; i < batch_n; ++i)
-            v.free(nodes[free_order[i]]);
-    }
 
-    double best = 0;
-    for (int r = 0; r < runs; ++r)
-    {
-        double const mops = one_run(v, acc);
-        double const gbps = mops * double(size) / 1000.0; // pairs/s * bytes -> GB/s
-        best = mops > best ? mops : best;
-        std::printf("RESULT,%s,%lld,%d,%.2f,%.4f\n", name, (long long)size, r, mops, gbps);
-    }
-    std::printf("  %-16s %5lld B : %7.1f M pairs/s   %7.2f GB/s\n", name, (long long)size, best,
-                best * double(size) / 1000.0);
-    bench::sink ^= acc;
+    nx::bench::run(cc::format("{} @{}B", name, size),
+                   {.min_time_secs = 0.1, .max_samples = 512, .target_relative_error = 0.05, .no_baseline = true},
+                   [&](nx::bench::iteration& it)
+                   {
+                       u64 acc = 0;
+                       for (isize i = 0; i < batch_n; ++i)
+                           nodes[i] = v.alloc();
+                       for (isize i = 0; i < batch_n; ++i)
+                       {
+                           byte* const p = nodes[free_order[i]];
+                           acc ^= reinterpret_cast<u64>(p);
+                           v.free(p);
+                       }
+                       nx::bench::sink(acc);
+
+                       it.items(batch_n); // alloc+free pairs
+                       it.record("bytes", cc::rec::unit_bytes, f64(batch_n) * f64(size));
+                   });
 
     v.teardown();
 }
@@ -415,8 +400,6 @@ CC_DONT_INLINE u64 design_hotloop_probe(Var& v, byte** nodes, int const* free_pe
 template <isize Size>
 void sweep()
 {
-    std::printf("\n--- size %lld B (slab metadata in %s) ---\n", (long long)Size,
-                "cache line 0; diff variants use line 1 for remote");
     {
         VarAtomic<Size> v;
         measure("atomic", Size, v);
@@ -465,14 +448,10 @@ void sweep()
 } // namespace
 
 // Full design sweep across the small size classes.
-// Manual: analyzed via scripts/plot-node-allocation-design.py.
-TEST("bench-node-design (fast-path variants)", nx::config::manual)
+// Analyzed via scripts/plot-node-allocation-design.py, which reads the --json sidecar.
+BENCHMARK("bench-node-design - fast-path variants")
 {
     g_tls_owner = 0x51D2; // any nonzero per-thread id for the step2_tls owner token
-
-    std::printf("\n=== node-allocation design benchmark: alloc %lld / free %lld (permuted), x%lld iters, %d runs ===\n",
-                (long long)batch_n, (long long)batch_n, (long long)iters, runs);
-    std::printf("RESULT,variant,size,run,mops,gbps\n"); // machine-readable header
 
     sweep<1>();
     sweep<2>();
@@ -492,16 +471,14 @@ TEST("bench-node-design (fast-path variants)", nx::config::manual)
         byte* probe_nodes[batch_n] = {};
         VarStep2<16, true, false> vm;
         vm.hydrate();
-        bench::sink ^= design_hotloop_probe(vm, probe_nodes, free_order);
+        nx::bench::sink(design_hotloop_probe(vm, probe_nodes, free_order));
         vm.teardown();
 
         VarNode<16> vn;
         vn.hydrate();
-        bench::sink ^= design_hotloop_probe(vn, probe_nodes, free_order);
+        nx::bench::sink(design_hotloop_probe(vn, probe_nodes, free_order));
         vn.teardown();
     }
-
-    std::fflush(stdout);
 }
 
 #endif // CC_BENCH_NODE_ALLOCATION_DESIGN

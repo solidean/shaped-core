@@ -8,22 +8,27 @@
 The benchmark is compiled out in the tree: set CC_BENCH_NODE_ALLOCATION_DESIGN to 1
 at the top of tests/benchmarks/node-allocation-design-benchmark.cc before running this.
 
-Executes `bench-node-design (fast-path variants)` via dev.py (or parses a captured
-run with --input), medians the 3 runs per (variant, size), and writes two SVGs:
+Executes `bench-node-design - fast-path variants` via `dev.py benchmark` and reads
+its JSON sidecar (or parses a captured sidecar with --input), then writes two SVGs:
 throughput in M alloc+free pairs/s and in GB/s, versus allocation size (log2 X).
 Each variant is a line; cache-line placement is encoded as solid (same) vs dashed
 (diff), variant family as color.
 
+The sidecar carries the median and its confidence interval, computed over hundreds of samples.
+This script used to scrape `RESULT,` CSV rows off stdout and median three timed runs itself; the
+harness does that better, so it does not any more.
+
     uv run libs/base/clean-core/scripts/plot-node-allocation-design.py
-    uv run .../plot-node-allocation-design.py --input run.txt --out /tmp
+    uv run .../plot-node-allocation-design.py --input run.bench.json --out /tmp
 """
 
 from __future__ import annotations
 
 import argparse
-import statistics
+import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import matplotlib
@@ -33,7 +38,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 
 ROOT = Path(__file__).resolve().parents[4]  # scripts -> clean-core -> base -> libs -> repo root
-TEST_NAME = "bench-node-design (fast-path variants)"
+BENCHMARK_NAME = "bench-node-design - fast-path variants"
 
 # Draw order + style per variant.
 # Okabe-Ito colorblind-safe palette; solid = metadata in one cache line, dashed = remote bitmap on a 2nd line, and the references (single/mimalloc/system) get their own dashes.
@@ -54,43 +59,54 @@ STYLE: dict[str, tuple] = {
 }
 
 
-def capture_benchmark(preset: str, target: str) -> str:
-    """Run the benchmark through dev.py with mirrored output and return its stdout."""
-    cmd = ["uv", "run", "dev.py", "--mirror-output", "test", TEST_NAME,
-           "--target", target, "--preset", preset, "--timeout", "0"]
-    print(f"running: {' '.join(cmd)}  (cwd={ROOT})", file=sys.stderr)
-    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
-    if proc.returncode != 0:
-        sys.stderr.write(proc.stdout)
-        sys.stderr.write(proc.stderr)
-        raise SystemExit(f"benchmark run failed (exit {proc.returncode})")
-    if "RESULT," not in proc.stdout:
-        # The likely cause by far, and the failure it would otherwise become — an empty plot — says nothing.
-        raise SystemExit(
-            f"{TEST_NAME!r} produced no RESULT rows.\n"
-            f"The benchmark is compiled out in the tree: set CC_BENCH_NODE_ALLOCATION_DESIGN to 1 in\n"
-            f"libs/base/clean-core/tests/benchmarks/node-allocation-design-benchmark.cc and rerun."
-        )
-    return proc.stdout
+def capture_benchmark(preset: str, target: str) -> dict:
+    """Run the benchmark through dev.py and return its parsed JSON sidecar."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sidecar = Path(tmp) / "design.json"
+        cmd = ["uv", "run", "dev.py", "benchmark", BENCHMARK_NAME,
+               "--target", target, "--preset", preset, "--json", str(sidecar), "--timeout", "0"]
+        print(f"running: {' '.join(cmd)}  (cwd={ROOT})", file=sys.stderr)
+        proc = subprocess.run(cmd, cwd=ROOT, text=True)
+        if proc.returncode != 0:
+            raise SystemExit(f"benchmark run failed (exit {proc.returncode})")
+
+        # dev.py suffixes the sidecar with the binary it came from, so several binaries never overwrite one another.
+        written = sorted(Path(tmp).glob("design*.json"))
+        if not written:
+            # The likely cause by far, and the failure it would otherwise become — an empty plot — says nothing.
+            raise SystemExit(
+                f"{BENCHMARK_NAME!r} wrote no sidecar.\n"
+                f"The benchmark is compiled out in the tree: set CC_BENCH_NODE_ALLOCATION_DESIGN to 1 in\n"
+                f"libs/base/clean-core/tests/benchmarks/node-allocation-design-benchmark.cc and rerun."
+            )
+        return json.loads(written[0].read_text(encoding="utf-8"))
 
 
-def parse(text: str) -> dict[str, dict[int, tuple[float, float]]]:
-    """Parse RESULT rows into {variant: {size: (median_mops, median_gbps)}}."""
-    raw: dict[str, dict[int, list[tuple[float, float]]]] = {}
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("RESULT,"):
-            continue
-        _, variant, size, run, mops, gbps = line.split(",")
-        if not size.isdigit():  # skip the header row
-            continue
-        raw.setdefault(variant, {}).setdefault(int(size), []).append((float(mops), float(gbps)))
+def parse(sidecar: dict) -> dict[str, dict[int, tuple[float, float]]]:
+    """Parse the sidecar's loops into {variant: {size: (M pairs/s, GB/s)}}.
+
+    Loop names are `<variant> @<size>B`, which is the contract with the benchmark.
+    Everything else in a loop — the interval, the samples, the outlier count — is there to be used by a richer
+    plot later; this one takes the two throughput figures it has always drawn.
+    """
     out: dict[str, dict[int, tuple[float, float]]] = {}
-    for variant, per_size in raw.items():
-        out[variant] = {
-            sz: (statistics.median(m for m, _ in vals), statistics.median(g for _, g in vals))
-            for sz, vals in per_size.items()
-        }
+    for loop in sidecar.get("loops", []):
+        name = str(loop.get("loop", ""))
+        if " @" not in name or not name.endswith("B"):
+            continue
+        variant, _, size_text = name.partition(" @")
+        size_text = size_text[:-1]
+        if not size_text.isdigit():
+            continue
+
+        mops = float(loop.get("items_per_second", 0.0)) / 1e6
+
+        gbps = 0.0
+        for q in loop.get("quantities", []):
+            if q.get("name") == "bytes":
+                gbps = float(q.get("per_second", 0.0)) / 1e9
+
+        out.setdefault(variant, {})[int(size_text)] = (mops, gbps)
     return out
 
 
@@ -142,16 +158,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--preset", default="release-clang", help="build preset (default: release-clang)")
     ap.add_argument("--target", default="clean-core-test", help="test target (default: clean-core-test)")
-    ap.add_argument("--input", metavar="FILE", help="parse a captured benchmark run instead of executing it")
+    ap.add_argument("--input", metavar="FILE", help="parse a captured .bench.json sidecar instead of executing it")
     ap.add_argument("--out", default=".", metavar="DIR", help="output directory for the SVGs (default: .)")
     args = ap.parse_args()
 
-    text = Path(args.input).read_text(encoding="utf-8", errors="replace") if args.input \
+    sidecar = json.loads(Path(args.input).read_text(encoding="utf-8")) if args.input \
         else capture_benchmark(args.preset, args.target)
 
-    data = parse(text)
+    data = parse(sidecar)
     if not data:
-        raise SystemExit("no RESULT rows found — did the benchmark run?")
+        raise SystemExit("the sidecar carried no `<variant> @<size>B` loops — did the benchmark run?")
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
