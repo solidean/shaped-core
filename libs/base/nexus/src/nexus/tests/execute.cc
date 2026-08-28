@@ -1148,6 +1148,14 @@ void nx::impl::record_benchmark_result(bench::result result)
     if (execution == nullptr)
         return;
 
+    // Only a BENCHMARK collects and reports.
+    //
+    // A PGO benchmark, or a plain test, may use nx::bench::run perfectly well — and then it wants the result handed
+    // back rather than a comparison table it never asked for printed underneath it.
+    auto const* const decl = execution->instance.declaration;
+    if (decl == nullptr || decl->test_config.bucket != config::test_bucket::benchmark)
+        return;
+
     // An error-severity warning means the number is meaningless rather than merely imprecise, so the benchmark has
     // failed.
     // Reported as a check, so it lands in the JUnit report and the console summary like any other failure.
@@ -1161,7 +1169,7 @@ void nx::impl::record_benchmark_result(bench::result result)
         failure.expr = cc::format("nx::bench::run(\"{}\")", result.name);
         failure.passed = false;
         failure.diagnostic = w.detail;
-        failure.location = execution->instance.declaration->location;
+        failure.location = decl->location;
         report_check_result(cc::move(failure));
     }
 

@@ -98,6 +98,12 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 
 ## What is not obvious
 
+- **A review is scratch, so nothing outside it may cite an entry.**
+  Entry numbers, ask names and round numbers are addresses within one folder under `.tmp/` that is deleted, renumbered
+  and re-ingested freely.
+  A commit message, a source comment, a doc or a PR description that says "per `080`" or "`050/barrier-home` settled
+  this" is a dangling reference the moment the folder goes, and it reads as authority to someone who cannot follow it.
+  Carry the *reasoning* out instead — the decision and why — and leave the address behind.
 - **Answers save themselves as they are typed**, as tentative.
   Nothing reaches the agent until a round is finalized.
 - **Typed text is never discarded.** A question that changed under an answer keeps the text against the new wording; a question that disappeared keeps the answer as an orphan.

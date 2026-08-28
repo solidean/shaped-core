@@ -342,7 +342,10 @@ TEST("export - junit report for an all-pass run has no failure elements", no_sch
 TEST("export - the benchmark sidecar carries the samples, not just a summary", no_scheduler)
 {
     nx::test_registry reg;
-    reg.add_declaration("bench", {},
+
+    // The benchmark bucket, and not incidentally: nx::bench::run collects into the running test only for a BENCHMARK,
+    // so that a PGO benchmark or a plain test using the same machinery gets its result handed back instead.
+    reg.add_declaration("bench", {.bucket = nx::config::test_bucket::benchmark},
                         []
                         {
                             auto cfg = nx::bench::run_config::standard();
@@ -362,8 +365,10 @@ TEST("export - the benchmark sidecar carries the samples, not just a summary", n
                                            });
                         });
 
-    auto schedule = nx::test_schedule::create({}, reg);
-    auto exec = nx::execute_tests(schedule, {});
+    // The sweep has to select that bucket too, or nothing is scheduled at all.
+    auto const config = nx::test_schedule_config{.selected_bucket = nx::config::test_bucket::benchmark};
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
 
     auto const doc = babel::json::read(nx::write_bench_json("my-suite", exec)).value();
     auto const root = doc.root();

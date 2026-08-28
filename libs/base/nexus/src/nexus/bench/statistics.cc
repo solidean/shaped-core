@@ -165,3 +165,11 @@ nx::bench::warning const* nx::bench::result::find_warning(warning_kind kind) con
             return &w;
     return nullptr;
 }
+
+nx::bench::recorded_quantity const* nx::bench::result::find_quantity(cc::string_view name) const
+{
+    for (auto const& q : quantities)
+        if (q.name == name)
+            return &q;
+    return nullptr;
+}

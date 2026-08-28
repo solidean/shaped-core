@@ -364,14 +364,39 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
     for (auto const& r : loops)
         name_width = cc::max(name_width, isize(r.name.size()));
 
+    // A column per quantity the loops recorded, in first-seen order.
+    //
+    // Without this a benchmark that records bytes gets its rate into the JSON and nowhere a reader looks: the table
+    // would show only time and items, and the figure the author went to the trouble of recording would be missing.
+    auto quantity_names = cc::vector<cc::string>();
+    for (auto const& r : loops)
+        for (auto const& q : r.quantities)
+        {
+            auto seen = false;
+            for (auto const& known : quantity_names)
+                if (known == q.name)
+                    seen = true;
+            if (!seen)
+                quantity_names.push_back(q.name);
+        }
+
     auto const bar = style.markdown ? cc::string_view(" | ") : cc::string_view("   ");
     if (style.markdown)
-        out.appendf("\n| {} | median | items/s |{}\n", cc::string_view("name"), show_comparison ? " vs base |" : "");
-    else
-        out.appendf("\n");
+    {
+        out.appendf("\n| {} | median | items/s", cc::string_view("name"));
+        for (auto const& q : quantity_names)
+            out.appendf(" | {}", q);
+        out.appendf("{}\n", show_comparison ? " | vs base |" : " |");
 
-    if (style.markdown)
-        out.appendf("|---|---|---|{}\n", show_comparison ? "---|" : "");
+        out.appendf("|---|---|---");
+        for (auto i = isize(0); i < quantity_names.size(); ++i)
+            out.appendf("|---");
+        out.appendf("{}\n", show_comparison ? "|---|" : "|");
+    }
+    else
+    {
+        out.appendf("\n");
+    }
 
     // One scale for the whole column, taken from the slowest row.
     // Picking it per row would put `89[7] ps` beside `1.82[2] ns`, which is two conversions a reader has to do before
@@ -397,6 +422,23 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
         row.appendf("{}{}", bar,
                     r.items_per_second > 0 ? format_quantity(r.items_per_second, &cc::rec::unit_count) + "/s"
                                            : cc::string("-"));
+
+        for (auto const& wanted : quantity_names)
+        {
+            auto const* const q = r.find_quantity(wanted);
+            if (q == nullptr)
+            {
+                row.appendf("{}-", bar);
+                continue;
+            }
+
+            // A rate where the unit sums, and the value itself where it averages: a mean of ratios per second is
+            // nonsense, and the unit is what says which of the two this is.
+            if (q->per_second > 0)
+                row.appendf("{}{}/s", bar, format_quantity(q->per_second, q->unit));
+            else
+                row.appendf("{}{}", bar, format_quantity(q->total, q->unit));
+        }
 
         if (show_comparison)
             row.appendf("{}{}", bar, format_comparison(loops[baseline], r, style));

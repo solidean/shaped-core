@@ -221,4 +221,8 @@ struct nx::bench::result
     [[nodiscard]] bool has_error() const;
 
     [[nodiscard]] warning const* find_warning(warning_kind kind) const;
+
+    /// The quantity this loop recorded under `name`, or nullptr.
+    /// What a PGO benchmark reads to turn one measured loop into one tracked number.
+    [[nodiscard]] recorded_quantity const* find_quantity(cc::string_view name) const;
 };

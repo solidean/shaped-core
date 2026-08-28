@@ -22,13 +22,11 @@
 // `as_bytes` is force-inlined so the only difference between the wrapper and raw columns is the wrapper's own out-of-line call, not benchmark plumbing.
 // Under /Ob1 an unmarked helper would itself stay out-of-line.
 //
-// PGO_BENCHMARK runs only the three representative lengths (≈8 B, ≈256 B and ≈64 KiB) and records them via nx::pgo for the PGO speedup report.
+// PGO_BENCHMARK runs only the three representative lengths (~8 B, ~256 B and ~64 KiB) and records them via nx::pgo for the PGO speedup report.
 // 256 B is there for BLAKE3: an op payload is a few hundred bytes, so that is the size its cost is actually argued about at.
-// The full length table comes from the manual sweep at the bottom of this file.
+// The full length table comes from the sweep BENCHMARK below it.
 // Run e.g.
-//   uv run dev.py test "bench-hash" --target clean-core-test --preset release-clang --timeout 0
-
-#include "bench_util.hh"
+//   uv run dev.py benchmark "bench-hash"
 
 #include <blake3.h>
 #include <clean-core/bytes/blake3.hh>
@@ -39,12 +37,13 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/record/stat.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <xxhash.h>
-
-#include <cstdio>
 
 using namespace cc::primitive_defines;
 
@@ -55,124 +54,184 @@ CC_FORCE_INLINE cc::span<byte const> as_bytes(char const* p, size_t n)
     return cc::span<char const>(p, isize(n)).as_bytes();
 }
 
-// Sweeps `lengths`, printing one throughput row each.
-// When `record`, the points nearest 8 B and 64 KiB are also reported as guide metrics.
-// Pass the representative-only lengths for a fast PGO benchmark, or the full sweep (record=false) for the human analysis table.
-void run(cc::span<isize const> lengths, bool record)
+/// The length sweep the docs analyze: 1..32 (every length), then +8 up to 64, then *1.5 up to ~100k.
+///
+/// Benchmark DATA rather than harness, so it lives next to the only benchmark that sweeps it.
+cc::vector<isize> hash_lengths()
 {
-    cc::random rng(0xABCDEFu);
-
-    std::printf("\n=== byte hash throughput (GB/s) — distinct keys ===\n");
-    std::printf("%8s %12s %12s %12s %12s %12s %12s\n", "length", "hob64", "hash128", "xxh64", "xxh128", "blake3",
-                "b3raw");
-    std::printf("%8s %12s %12s %12s %12s %12s %12s\n", "------", "-----", "-------", "-----", "------", "------",
-                "-----");
-
-    // Track the sweep point nearest each target length so the recorded metrics stay stable regardless of the exact sweep membership.
-    // Values are filled in below and reported after the loop.
-    struct rep_point
+    cc::vector<isize> lengths;
+    for (isize l = 1; l <= 32; ++l)
+        lengths.push_back(l);
+    for (isize l = 40; l <= 64; l += 8)
+        lengths.push_back(l);
+    for (isize l = 64;;)
     {
-        isize target;
-        char const* label;
-        isize best_len = -1;
-        double hob = 0, h128 = 0, x64 = 0, x128 = 0, b3 = 0, b3raw = 0;
-    };
-    rep_point reps[] = {{8, "8B"}, {256, "256B"}, {64 * 1024, "64KiB"}};
-    auto const dist = [](isize a, isize b) { return a > b ? a - b : b - a; };
+        isize next = isize(double(l) * 1.5);
+        if (next <= l)
+            next = l + 1;
+        if (next > 100000)
+            break;
+        lengths.push_back(next);
+        l = next;
+    }
+    return lengths;
+}
 
-    for (isize const length : lengths)
+/// One buffer of `count` distinct keys of `length` bytes, and the loop that hashes it.
+///
+/// Every hasher is one loop, so the six of them become one comparison table per length — which is the shape the docs
+/// read, without this file printing a table of its own.
+struct length_point
+{
+    isize length = 0;
+    isize count = 0;
+    cc::vector<char> buffer;
+
+    explicit length_point(isize len, cc::random& rng) : length(len)
     {
-        isize count = (8 * 1024 * 1024) / length;
-        count = cc::clamp(count, isize(64), isize(200000));
-
-        cc::vector<char> buffer;
+        count = cc::clamp((8 * 1024 * 1024) / len, isize(64), isize(200000));
         buffer.resize_to_uninitialized(count * length);
         for (isize i = 0; i < buffer.size(); ++i)
             buffer[i] = char(rng.uniform(0, 255));
-
-        double const bytes_per_pass = double(count) * double(length);
-
-        auto const gbps = [&](auto hasher)
-        {
-            return bench::measure_units_per_sec(bytes_per_pass,
-                                                [&]
-                                                {
-                                                    u64 acc = 0;
-                                                    for (isize i = 0; i < count; ++i)
-                                                        acc ^= hasher(buffer.data() + i * length, size_t(length));
-                                                    return acc;
-                                                })
-                 / 1e9;
-        };
-
-        double const g_hob = gbps([](char const* p, size_t n) { return cc::make_hash_of_bytes(as_bytes(p, n), 0); });
-        double const g_h128 = gbps(
-            [](char const* p, size_t n)
-            {
-                auto const h = cc::hash128::create(as_bytes(p, n), 0);
-                return h.low ^ h.high;
-            });
-        double const g_x64 = gbps([](char const* p, size_t n) { return u64(XXH3_64bits_withSeed(p, n, 0)); });
-        double const g_x128 = gbps(
-            [](char const* p, size_t n)
-            {
-                auto const h = XXH3_128bits_withSeed(p, n, 0);
-                return u64(h.low64 ^ h.high64);
-            });
-
-        double const g_b3 = gbps(
-            [](char const* p, size_t n)
-            {
-                auto const h = cc::blake3::create(as_bytes(p, n));
-                return h.l0 ^ h.l1 ^ h.l2 ^ h.l3;
-            });
-        double const g_b3raw = gbps(
-            [](char const* p, size_t n)
-            {
-                blake3_hasher hasher;
-                blake3_hasher_init(&hasher);
-                blake3_hasher_update(&hasher, p, n);
-
-                u64 digest = 0;
-                blake3_hasher_finalize(&hasher, reinterpret_cast<uint8_t*>(&digest), sizeof(digest));
-                return digest;
-            });
-
-        std::printf("%8lld %12.2f %12.2f %12.2f %12.2f %12.2f %12.2f\n", (long long)length, g_hob, g_h128, g_x64,
-                    g_x128, g_b3, g_b3raw);
-
-        for (auto& r : reps)
-            if (r.best_len < 0 || dist(length, r.target) < dist(r.best_len, r.target))
-                r = {r.target, r.label, length, g_hob, g_h128, g_x64, g_x128, g_b3, g_b3raw};
     }
-    std::fflush(stdout);
 
-    if (record)
-        for (auto const& r : reps)
-        {
-            nx::pgo::report_raw(cc::string("hob64@") + r.label, r.hob, "GB/s", true);
-            nx::pgo::report_raw(cc::string("hash128@") + r.label, r.h128, "GB/s", true);
-            nx::pgo::report_raw(cc::string("xxh64@") + r.label, r.x64, "GB/s", true);
-            nx::pgo::report_raw(cc::string("xxh128@") + r.label, r.x128, "GB/s", true);
-            nx::pgo::report_raw(cc::string("blake3@") + r.label, r.b3, "GB/s", true);
-            nx::pgo::report_raw(cc::string("b3raw@") + r.label, r.b3raw, "GB/s", true);
-        }
+    /// Hash every key once, recording the bytes covered so the harness derives B/s itself.
+    template <class Hasher>
+    nx::bench::result measure(cc::string_view name, nx::bench::run_config const& cfg, Hasher hasher) const
+    {
+        return nx::bench::run(name, cfg,
+                              [&](nx::bench::iteration& it)
+                              {
+                                  u64 acc = 0;
+                                  for (isize i = 0; i < count; ++i)
+                                      acc ^= hasher(buffer.data() + i * length, size_t(length));
+                                  nx::bench::sink(acc);
+
+                                  it.items(count); // hashes
+                                  it.record("bytes", cc::rec::unit_bytes, f64(count) * f64(length));
+                              });
+    }
+};
+
+// The six hashers, in the order the docs' table reads.
+u64 hash_hob64(char const* p, size_t n)
+{
+    return cc::make_hash_of_bytes(as_bytes(p, n), 0);
 }
 
-// The representative lengths the PGO benchmark sweeps: one short key (8 B), one op-sized (256 B) and one long (64 KiB), matching the points reported as metrics.
-// Far faster than the full sweep, while still exercising every hash code path.
-constexpr isize guide_lengths[] = {8, 256, 64 * 1024};
+u64 hash_h128(char const* p, size_t n)
+{
+    auto const h = cc::hash128::create(as_bytes(p, n), 0);
+    return h.low ^ h.high;
+}
+
+u64 hash_x64(char const* p, size_t n)
+{
+    return u64(XXH3_64bits_withSeed(p, n, 0));
+}
+
+u64 hash_x128(char const* p, size_t n)
+{
+    auto const h = XXH3_128bits_withSeed(p, n, 0);
+    return u64(h.low64 ^ h.high64);
+}
+
+u64 hash_b3(char const* p, size_t n)
+{
+    auto const h = cc::blake3::create(as_bytes(p, n));
+    return h.l0 ^ h.l1 ^ h.l2 ^ h.l3;
+}
+
+u64 hash_b3raw(char const* p, size_t n)
+{
+    blake3_hasher hasher;
+    blake3_hasher_init(&hasher);
+    blake3_hasher_update(&hasher, p, n);
+
+    u64 digest = 0;
+    blake3_hasher_finalize(&hasher, reinterpret_cast<uint8_t*>(&digest), sizeof(digest));
+    return digest;
+}
+
+/// Every hasher at one length.
+/// `suffix` distinguishes the loops when several lengths land in the same benchmark.
+void run_length(length_point const& point, nx::bench::run_config const& cfg, cc::string_view suffix)
+{
+    point.measure(cc::format("hob64{}", suffix), cfg, hash_hob64);
+    point.measure(cc::format("hash128{}", suffix), cfg, hash_h128);
+    point.measure(cc::format("xxh64{}", suffix), cfg, hash_x64);
+    point.measure(cc::format("xxh128{}", suffix), cfg, hash_x128);
+    point.measure(cc::format("blake3{}", suffix), cfg, hash_b3);
+    point.measure(cc::format("b3raw{}", suffix), cfg, hash_b3raw);
+}
+
+/// The representative lengths: one short key (8 B), one op-sized (256 B) and one long (64 KiB).
+/// Far faster than the full sweep, while still exercising every hash code path.
+constexpr isize representative_lengths[] = {8, 256, 64 * 1024};
+
+/// Decimal GB/s off a measured loop, which is what the PGO report has always tracked.
+///
+/// The console table reads GiB/s instead, because cc::rec::unit_bytes takes binary prefixes and the harness formats
+/// by the unit.
+/// Both are labelled, and the PGO series keeps its decimal figure so the numbers stay comparable across this
+/// migration rather than jumping by 7%.
+double gbps_of(nx::bench::result const& r)
+{
+    auto const* const bytes = r.find_quantity("bytes");
+    return bytes != nullptr ? bytes->per_second / 1e9 : 0.0;
+}
 } // namespace
 
-// Lean PGO benchmark: just the representative lengths, recorded for the PGO speedup report.
-PGO_BENCHMARK("bench-hash (xxh3 64/128, raw vs wrapper)")
+// The three representative lengths, six hashers each.
+BENCHMARK("bench-hash - representative lengths")
 {
-    run(guide_lengths, /*record*/ true);
+    cc::random rng(0xABCDEFu);
+    for (auto const length : representative_lengths)
+    {
+        auto const point = length_point(length, rng);
+        // A sweep across lengths: comparing 8 B against 64 KiB is a statement about the lengths, not the hashers.
+        run_length(point, {.no_baseline = true}, cc::format(" @{}", length));
+    }
 }
 
-// Full human-facing sweep (manual): the complete length table the docs analyze.
-// Run by exact name.
-TEST("bench-hash (xxh3 64/128, raw vs wrapper, full sweep)", nx::config::manual)
+// The complete length table the docs analyze.
+// A lower min_time per loop, because there are several hundred of them and the shape of the curve is what is read
+// here rather than the last digit of any one point.
+BENCHMARK("bench-hash - full length sweep")
 {
-    run(bench::hash_lengths(), /*record*/ false);
+    cc::random rng(0xABCDEFu);
+    for (auto const length : hash_lengths())
+    {
+        auto const point = length_point(length, rng);
+        run_length(point, {.min_time_secs = 0.02, .max_samples = 64, .no_baseline = true}, cc::format(" @{}", length));
+    }
+}
+
+// Lean PGO benchmark: the representative lengths only, recorded for the PGO speedup report.
+//
+// nx::bench::run outside a BENCHMARK reports to nobody and hands its result back, so the same measurement machinery
+// produces the console tables above and the tracked numbers here.
+PGO_BENCHMARK("bench-hash (xxh3 64/128, raw vs wrapper)")
+{
+    cc::random rng(0xABCDEFu);
+    // Enough samples to actually reach the target precision: a tracked number that wobbles is worse than no
+    // number, since dev.py pgo reads it as a speedup.
+    auto const cfg = nx::bench::run_config{.min_time_secs = 0.1, .max_samples = 512};
+
+    for (auto const length : representative_lengths)
+    {
+        auto const point = length_point(length, rng);
+        auto const label = length >= 1024 ? cc::format("{}KiB", length / 1024) : cc::format("{}B", length);
+
+        nx::pgo::report_raw(cc::format("hob64@{}", label), gbps_of(point.measure("hob64", cfg, hash_hob64)), "GB/s",
+                            true);
+        nx::pgo::report_raw(cc::format("hash128@{}", label), gbps_of(point.measure("hash128", cfg, hash_h128)), "GB/s",
+                            true);
+        nx::pgo::report_raw(cc::format("xxh64@{}", label), gbps_of(point.measure("xxh64", cfg, hash_x64)), "GB/s", true);
+        nx::pgo::report_raw(cc::format("xxh128@{}", label), gbps_of(point.measure("xxh128", cfg, hash_x128)), "GB/s",
+                            true);
+        nx::pgo::report_raw(cc::format("blake3@{}", label), gbps_of(point.measure("blake3", cfg, hash_b3)), "GB/s", true);
+        nx::pgo::report_raw(cc::format("b3raw@{}", label), gbps_of(point.measure("b3raw", cfg, hash_b3raw)), "GB/s",
+                            true);
+    }
 }
