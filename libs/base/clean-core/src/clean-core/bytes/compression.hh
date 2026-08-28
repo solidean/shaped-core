@@ -122,7 +122,8 @@ namespace cc
 /// Empty input is valid.
 ///
 /// This form has no failure channel, so what would be an error elsewhere is a PRECONDITION here, and violating one asserts.
-/// The dictionary must match the algorithm, and with lz4 `raw` framing `data` must be under lz4's ~2 GB block limit.
+/// The dictionary must match the algorithm and must not be paired with deflate's gzip framing, which has no field to record it in.
+/// With lz4 `raw` framing `data` must be under lz4's ~2 GB block limit.
 /// cc::compress_into is the fallible form.
 [[nodiscard]] cc::vector<byte> compress(cc::span<byte const> data, compression_config cfg = {});
 
@@ -160,6 +161,7 @@ namespace cc
 ///
 /// A gzip frame is the one case where this is a HINT rather than a fact.
 /// gzip stores its length in the trailer, modulo 2^32, so it wraps on content past 4 GB and describes only the last member of a concatenated stream.
+/// `data` must therefore be the WHOLE blob for gzip, which is also why a decompressing stream — holding one window — reports no hint for it at all.
 /// cc::decompress uses it to size one allocation and never as a bound, and neither should a caller.
 [[nodiscard]] cc::optional<isize> decompressed_size(cc::span<byte const> data, decompression_config cfg = {});
 } // namespace cc

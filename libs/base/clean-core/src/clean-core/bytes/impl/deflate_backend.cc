@@ -266,6 +266,10 @@ struct decompressor_state
     z_stream strm = {};
     int window_bits = 0;
     bool initialized = false;
+
+    /// Whether the stream is gzip-framed, which is the only framing whose members concatenate.
+    /// The streaming path has no config to consult, so this records what the context was built for.
+    bool gzip = false;
 };
 
 [[nodiscard]] cc::result<cc::unit> ensure_inflate_init(decompressor_state* s, cc::decompression_config const& cfg)
@@ -277,6 +281,7 @@ struct decompressor_state
         if (inflateReset(&s->strm) != Z_OK)
             return cc::error("deflate: failed to reset the decompression context");
 
+        s->gzip = cfg.framing == cc::compression_framing::frame;
         return cc::unit{};
     }
 
@@ -291,6 +296,7 @@ struct decompressor_state
         return cc::error(cc::format("deflate: failed to create the decompression context: {}", zError(ret)));
 
     s->window_bits = bits;
+    s->gzip = cfg.framing == cc::compression_framing::frame;
     s->initialized = true;
     return cc::unit{};
 }
@@ -315,15 +321,28 @@ void destroy_decompressor(void* state)
     delete s;
 }
 
-[[nodiscard]] bool matches_magic(cc::span<byte const> data)
+/// Whether `rest` opens with as much of gzip's magic as it holds, for a caller that may be looking at a partial window.
+[[nodiscard]] bool starts_gzip_member_prefix(bool gzip, cc::span<byte const> rest)
 {
-    if (data.size() < k_gzip_magic_size)
+    if (!gzip || rest.empty())
         return false;
 
-    // Only gzip is sniffable.
-    // The zlib wrapper opens with a checksum constraint rather than a magic, so accepting it here would claim payload
-    // bytes as deflate roughly once in every 31 blobs.
-    return u8(data[0]) == 0x1f && u8(data[1]) == 0x8b && u8(data[2]) == 8;
+    constexpr u8 magic[k_gzip_magic_size] = {0x1f, 0x8b, 0x08};
+    for (isize i = 0; i < cc::min(rest.size(), k_gzip_magic_size); ++i)
+        if (u8(rest[i]) != magic[i])
+            return false;
+
+    return true;
+}
+
+/// Whether `data` opens a gzip member.
+///
+/// Only gzip is sniffable.
+/// The zlib wrapper opens with a checksum constraint rather than a magic, so accepting it here would claim payload
+/// bytes as deflate roughly once in every 31 blobs.
+[[nodiscard]] bool matches_magic(cc::span<byte const> data)
+{
+    return data.size() >= k_gzip_magic_size && starts_gzip_member_prefix(/*gzip*/ true, data);
 }
 
 [[nodiscard]] cc::optional<isize> declared_size(cc::span<byte const> data)
@@ -340,6 +359,14 @@ void destroy_decompressor(void* state)
                     | (u32(u8(data[n - 1])) << 24);
 
     return isize(size);
+}
+
+/// Whether `rest` opens another gzip member, which is the one case a finished inflate stream continues into.
+/// Only gzip framing concatenates: a zlib or raw stream has no magic to recognize a successor by, so trailing bytes
+/// there are not ours to interpret.
+[[nodiscard]] bool starts_gzip_member(cc::compression_framing framing, cc::span<byte const> rest)
+{
+    return framing == cc::compression_framing::frame && rest.size() >= k_gzip_min_size && matches_magic(rest);
 }
 
 /// Run `data` through inflate until the stream ends, taking each output window from `sink`.
@@ -391,7 +418,22 @@ template <class Sink>
         produced += isize(out_before - s->strm.avail_out);
 
         if (ret == Z_STREAM_END)
-            return produced;
+        {
+            // A .gz file is a SEQUENCE of members - `cat a.gz b.gz`, pigz and bgzip all write several - and inflate
+            // stops at the end of one without crossing into the next (zlib.h says so, and gzread is the layer that
+            // does it, which we do not vendor).
+            // So the stream ends here only once the input is spent or what follows is not another member; anything
+            // else would decode a legal file down to its first member and report success.
+            auto const rest = data.subspan({.offset = consumed, .size = data.size() - consumed});
+            if (!starts_gzip_member(cfg.framing, rest))
+                return produced;
+
+            auto const reset = inflateReset(&s->strm);
+            if (reset != Z_OK)
+                return cc::error(
+                    cc::format("deflate: failed to reset between gzip members: {}", zlib_message(s->strm, reset)));
+            continue;
+        }
 
         if (ret == Z_NEED_DICT)
         {
@@ -614,9 +656,26 @@ template <class Sink>
     if (ret != Z_OK && ret != Z_BUF_ERROR && ret != Z_STREAM_END)
         return cc::error(cc::format("deflate streaming decompression failed: {}", zlib_message(s->strm, ret)));
 
-    return cc::impl::stream_decompress_step{.consumed = isize(in_before - s->strm.avail_in),
+    auto const consumed = isize(in_before - s->strm.avail_in);
+    auto finished = ret == Z_STREAM_END;
+
+    // As on the one-shot path: a member ending is not the file ending, so reset and keep going while another member
+    // follows.
+    // Only the bytes already in this window can be looked at, so a boundary that lands inside gzip's three-byte magic
+    // ends the stream — which is why the check is on the prefix rather than on a whole member.
+    if (finished && starts_gzip_member_prefix(s->gzip, in.subspan({.offset = consumed, .size = isize(s->strm.avail_in)})))
+    {
+        auto const reset = inflateReset(&s->strm);
+        if (reset != Z_OK)
+            return cc::error(
+                cc::format("deflate: failed to reset between gzip members: {}", zlib_message(s->strm, reset)));
+
+        finished = false;
+    }
+
+    return cc::impl::stream_decompress_step{.consumed = consumed,
                                             .produced = isize(out_before - s->strm.avail_out),
-                                            .finished = ret == Z_STREAM_END};
+                                            .finished = finished};
 }
 
 constexpr cc::impl::compression_backend backend = {
@@ -629,6 +688,8 @@ constexpr cc::impl::compression_backend backend = {
     .decompress_into = &decompress_into,
     .decompress_to_vector = &decompress_to_vector,
     .declared_size = &declared_size,
+    // gzip keeps ISIZE in the trailer, so only a whole blob can be asked - a prefix has payload bytes there.
+    .declares_size_in_header = false,
     .matches_magic = &matches_magic,
     .train_dictionary = &train_dictionary,
     .dictionary_id = &dictionary_id,

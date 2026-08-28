@@ -63,6 +63,7 @@ cc::decompressing_read_stream_adapter::decompressing_read_stream_adapter(decompr
     _algorithm(rhs._algorithm),
     _state(rhs._state),
     _remaining_hint(rhs._remaining_hint),
+    _total_produced(rhs._total_produced),
     _hint_probed(rhs._hint_probed),
     _frame_finished(rhs._frame_finished)
 {
@@ -84,6 +85,7 @@ cc::decompressing_read_stream_adapter& cc::decompressing_read_stream_adapter::op
     _algorithm = rhs._algorithm;
     _state = rhs._state;
     _remaining_hint = rhs._remaining_hint;
+    _total_produced = rhs._total_produced;
     _hint_probed = rhs._hint_probed;
     _frame_finished = rhs._frame_finished;
     cc::memcpy(_buffer, rhs._buffer, size_t(k_buffer_size));
@@ -124,22 +126,38 @@ cc::result<i64> cc::decompressing_read_stream_adapter::impl_refill(byte*& curr, 
                 break;
         }
 
-        // The declared size comes off the frame header, which is in the very first bytes the inner stream produces.
-        // Reading it once here is what lets read_all() answer remaining_size_hint and allocate exactly once.
-        if (!_hint_probed)
+        // Only a size the frame declares in its HEADER can be read here, `available` being one window of the inner
+        // stream rather than the whole blob.
+        // gzip declares its size in the trailer, so deflate answers no and a gzip stream simply has no hint - reading
+        // the last four bytes of a partial window would return compressed payload as a length.
+        auto const& backend = impl::backend_for(_algorithm);
+        if (!_hint_probed && backend.declares_size_in_header)
         {
             _hint_probed = true;
-            auto const declared = impl::backend_for(_algorithm).declared_size(available);
+            auto const declared = backend.declared_size(available);
             if (declared.has_value())
+            {
                 _remaining_hint = i64(declared.value());
+
+                // The hint is attacker-controlled on untrusted input and read_all() turns it into one reservation, so
+                // a cap the caller set has to bind it too.
+                if (_config.max_output_size >= 0)
+                    _remaining_hint = cc::min(_remaining_hint, i64(_config.max_output_size));
+            }
         }
 
-        auto step = impl::backend_for(_algorithm)
-                        .stream_decompress(_state, available, cc::span<byte>(base + produced, k_buffer_size - produced));
+        // max_output_size is enforced by narrowing what the codec may fill: only this side knows what earlier calls
+        // already produced.
+        auto room = k_buffer_size - produced;
+        if (_config.max_output_size >= 0)
+            room = cc::min(room, isize(i64(_config.max_output_size) - _total_produced));
+
+        auto step = backend.stream_decompress(_state, available, cc::span<byte>(base + produced, room));
         CC_RETURN_IF_ERROR(step);
 
         _inner.consume(step.value().consumed);
         produced += step.value().produced;
+        _total_produced += i64(step.value().produced);
 
         if (step.value().finished)
             _frame_finished = true;
@@ -148,6 +166,14 @@ cc::result<i64> cc::decompressing_read_stream_adapter::impl_refill(byte*& curr, 
         if (step.value().consumed == 0 && step.value().produced == 0 && !_frame_finished)
             break;
     }
+
+    // Nothing left to give and the frame is not done, because the cap ran out rather than the data.
+    // Reporting end-of-data here would hand back a silently truncated payload, which is the one outcome a cap must
+    // never produce — a caller that set one is entitled to hear that it bound.
+    // Bytes decoded before the cap was reached are still delivered; this fires on the pass that follows them.
+    if (produced == leftover && !_frame_finished && _config.max_output_size >= 0
+        && _total_produced >= _config.max_output_size)
+        return cc::error(cc::format("decompressing stream: output exceeds the {} byte limit", _config.max_output_size));
 
     curr = base;
     end = base + produced;

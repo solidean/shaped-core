@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -752,4 +753,143 @@ TEST("compression - deflate has no dictionary trainer")
         views.push_back(s);
 
     CHECK(cc::compression_dictionary::train(algo::deflate, views, 4096).has_error());
+}
+
+// --- deflate interoperability -----------------------------------------------------------------------------
+//
+// Every test above round-trips through our own encoder, which only ever shows that the codec is self-consistent.
+// Deflate exists so that something else reads and writes the bytes, so these decode payloads this codebase did not
+// produce, and check the trailer fields a decoder that ignored them would still pass without.
+
+namespace
+{
+/// A gzip member written by GNU gzip 1.14 (`gzip -9 -n`), byte for byte.
+/// -n keeps the name and timestamp out, which is the only reason this is stable enough to paste here.
+constexpr byte k_gzip_from_gzip[]
+    = {byte(0x1f), byte(0x8b), byte(0x08), byte(0x00), byte(0x00), byte(0x00), byte(0x00), byte(0x00), byte(0x02),
+       byte(0x03), byte(0xcb), byte(0x48), byte(0xcd), byte(0xc9), byte(0xc9), byte(0x57), byte(0x48), byte(0x2b),
+       byte(0xca), byte(0xcf), byte(0x55), byte(0x48), byte(0x54), byte(0x28), byte(0x4a), byte(0x4d), byte(0xcc),
+       byte(0x51), byte(0x48), byte(0xaf), byte(0xca), byte(0x2c), byte(0x50), byte(0x48), byte(0xcb), byte(0xcc),
+       byte(0x49), byte(0xd5), byte(0x51), byte(0x28), byte(0x28), byte(0xca), byte(0x4f), byte(0x29), byte(0x4d),
+       byte(0x4e), byte(0x4d), byte(0x51), byte(0x48), byte(0xaa), byte(0x84), byte(0x08), byte(0x1b), byte(0xea),
+       byte(0x19), byte(0x9a), byte(0x28), byte(0x64), byte(0x96), byte(0x14), byte(0xa7), byte(0xe6), byte(0xa4),
+       byte(0xe9), byte(0x71), byte(0x01), byte(0x00), byte(0x17), byte(0xf0), byte(0x3d), byte(0x95), byte(0x3b),
+       byte(0x00), byte(0x00), byte(0x00)};
+
+constexpr char k_gzip_plaintext[] = "hello from a real gzip file, produced by gzip 1.14 itself.\n";
+
+/// A PNG IDAT stream: the RFC 1950 wrapper is exactly what `zlib` framing means, and PNG is where most of it is met.
+/// One 4x1 RGB scanline — the leading 0 is PNG's per-line filter byte.
+constexpr byte k_png_idat[]
+    = {byte(0x78), byte(0xda), byte(0x63), byte(0xf8), byte(0xcf), byte(0xc0), byte(0xc0), byte(0x00), byte(0xc6),
+       byte(0xff), byte(0xff), byte(0xff), byte(0x07), byte(0x00), byte(0x1d), byte(0xef), byte(0x05), byte(0xfb)};
+
+constexpr u8 k_png_scanline[] = {0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255};
+
+/// CRC-32 (the reflected IEEE polynomial gzip uses), computed bitwise on purpose.
+/// Checking our trailer against zlib's own crc32() would only prove the two calls agree.
+[[nodiscard]] u32 crc32_bitwise(cc::span<byte const> data)
+{
+    auto crc = u32(0xFFFFFFFF);
+    for (auto const b : data)
+    {
+        crc ^= u32(u8(b));
+        for (auto bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ (0xEDB88320u & (~(crc & 1u) + 1u));
+    }
+    return crc ^ 0xFFFFFFFF;
+}
+
+[[nodiscard]] u32 le32_at(cc::span<byte const> data, isize at)
+{
+    return u32(u8(data[at])) | (u32(u8(data[at + 1])) << 8) | (u32(u8(data[at + 2])) << 16)
+         | (u32(u8(data[at + 3])) << 24);
+}
+} // namespace
+
+TEST("compression - a gzip file written by gzip itself decompresses")
+{
+    auto const back = cc::decompress(k_gzip_from_gzip);
+    REQUIRE(back.has_value());
+
+    auto const text = cc::string_view(k_gzip_plaintext);
+    REQUIRE(back.value().size() == text.size());
+    for (isize i = 0; i < text.size(); ++i)
+        CHECK(u8(back.value()[i]) == u8(text[i]));
+
+    // The magic is enough to sniff it, so nothing had to be told what it was.
+    CHECK(cc::detect_algorithm(k_gzip_from_gzip) == algo::deflate);
+    CHECK(cc::decompressed_size(k_gzip_from_gzip).value() == text.size());
+}
+
+TEST("compression - a zlib stream lifted from a PNG IDAT decompresses")
+{
+    auto const back = cc::decompress(k_png_idat, {.algorithm = algo::deflate, .framing = framing::zlib});
+    REQUIRE(back.has_value());
+
+    REQUIRE(back.value().size() == isize(sizeof(k_png_scanline)));
+    for (isize i = 0; i < isize(sizeof(k_png_scanline)); ++i)
+        CHECK(u8(back.value()[i]) == k_png_scanline[i]);
+}
+
+TEST("compression - the gzip trailer carries the payload's CRC-32 and length")
+{
+    // A decoder that wrote neither field would pass every round-trip test in this file, and every other gzip reader
+    // would then reject what it produced.
+    auto const payload = repetitive_bytes(5000);
+    auto const blob = cc::compress(payload, {.algorithm = algo::deflate});
+
+    REQUIRE(blob.size() > 8);
+    CHECK(le32_at(blob, blob.size() - 8) == crc32_bitwise(payload));
+    CHECK(le32_at(blob, blob.size() - 4) == u32(payload.size()));
+}
+
+TEST("compression - a concatenated gzip file decodes every member")
+{
+    // `cat a.gz b.gz`, pigz and bgzip all produce this, and it is a legal .gz.
+    // zlib's inflate stops at the end of one member, so decoding only the first is the silent failure this pins.
+    auto const first = repetitive_bytes(700);
+    auto const second = random_bytes(300, 99);
+
+    auto blob = cc::compress(first, {.algorithm = algo::deflate});
+    blob.push_back_range(cc::compress(second, {.algorithm = algo::deflate}));
+
+    auto expected = cc::vector<byte>();
+    expected.push_back_range(first);
+    expected.push_back_range(second);
+
+    auto const back = cc::decompress(blob);
+    REQUIRE(back.has_value());
+    CHECK(same_bytes(back.value(), expected));
+
+    // ISIZE now describes the LAST member only, which is the second reason it is a hint rather than a size.
+    CHECK(cc::decompressed_size(blob).value() == second.size());
+}
+
+TEST("compression - trailing garbage after a gzip member is not a member")
+{
+    // What follows the trailer is not gzip, so the member ends the decode rather than failing it — the same rule
+    // every gzip reader applies.
+    auto const payload = repetitive_bytes(400);
+
+    auto blob = cc::compress(payload, {.algorithm = algo::deflate});
+    for (auto i = 0; i < 32; ++i)
+        blob.push_back(byte(u8('x')));
+
+    auto const back = cc::decompress(blob, {.algorithm = algo::deflate});
+    REQUIRE(back.has_value());
+    CHECK(same_bytes(back.value(), payload));
+}
+
+TEST("compression - a dictionary under gzip framing is refused with the reason")
+{
+    // compress_into, the stream adapter and cc::compressor all reach the same rule, and all three have to name it
+    // rather than report a context that could not be created.
+    auto const corpus = sample_corpus(20);
+    auto const dict = cc::compression_dictionary::from_bytes(algo::deflate, corpus[0]);
+
+    auto out = cc::vector<byte>::create_uninitialized(4096);
+    auto const written = cc::compress_into(corpus[1], out, {.algorithm = algo::deflate, .dictionary = &dict});
+    REQUIRE(written.has_error());
+    CHECK(cc::string_view(written.error().to_string()).contains("dictionary"));
 }

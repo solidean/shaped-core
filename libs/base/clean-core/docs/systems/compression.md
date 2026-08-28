@@ -111,7 +111,7 @@ At 16 records (1147 B) raw deflate also took the best ratio of any framing measu
 
 ## Raw framing is worth more for lz4 than for zstd
 
-`raw` strips the self-describing header — see [compression.hh](../../src/clean-core/bytes/compression.hh) for what the two backends each leave behind.
+`raw` strips the self-describing header — see [compression.hh](../../src/clean-core/bytes/compression.hh) for what each of the three backends leaves behind.
 
 On a single 72-byte record it saves 4 bytes under zstd (81 → 77) and **25 bytes under lz4** (99 → 74), because lz4's frame header is much the heavier of the two.
 
@@ -125,6 +125,10 @@ The format has to record the algorithm, and for lz4 the uncompressed size as wel
 Deflate is the one algorithm with three wrappers rather than two, so `framing` carries a third value for it.
 `frame` is gzip, `zlib` is the RFC 1950 wrapper that PNG's IDAT stream and most `Content-Encoding: deflate` payloads actually are, and `raw` is a bare deflate stream.
 Only gzip is sniffable, its `1f 8b` being a real magic; the zlib wrapper opens with a checksum constraint instead, so a format storing one has to record that it did.
+
+A `.gz` is a sequence of members rather than one stream, which `cat a.gz b.gz`, pigz and bgzip all produce, and decoding one decodes them all.
+The declared size then covers only the last member, which is the second reason gzip's is a hint rather than a size.
+A decompressing stream holds one window rather than the trailer, so it reports no size hint for gzip at all.
 
 ## Spending level on incompressible data is pure waste
 

@@ -329,6 +329,8 @@ constexpr cc::impl::compression_backend backend = {
     .decompress_into = &decompress_into,
     .decompress_to_vector = &decompress_to_vector,
     .declared_size = &declared_size,
+    // zstd writes its content size into the frame header, so a streaming reader can read it off the first window.
+    .declares_size_in_header = true,
     .matches_magic = &matches_magic,
     .train_dictionary = &train_dictionary,
     .dictionary_id = &dictionary_id,

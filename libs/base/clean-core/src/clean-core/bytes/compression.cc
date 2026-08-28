@@ -48,6 +48,13 @@ cc::result<cc::unit> cc::impl::validate_compression_config(compression_config co
         return cc::error("compression: `zlib` framing is the RFC 1950 wrapper around deflate, and no other algorithm "
                          "has one");
 
+    // The backend guards this too, but two of the four entry points into it have no error channel to report it
+    // through: create_stream_compressor can only return nullptr, and cc::compress can only assert.
+    // Stating it here is what makes all four name the actual rule.
+    if (cfg.algorithm == compression_algorithm::deflate && cfg.framing == compression_framing::frame
+        && cfg.dictionary != nullptr && !cfg.dictionary->is_empty())
+        return cc::error("deflate: gzip framing cannot carry a dictionary - use `zlib` or `raw` framing for one");
+
     return cc::unit{};
 }
 
@@ -97,6 +104,11 @@ cc::result<isize> cc::compress_into(cc::span<byte const> data, cc::span<byte> ou
 
 cc::vector<byte> cc::compress(cc::span<byte const> data, compression_config cfg)
 {
+    // Checked here rather than left to the assert below, so a rejected config reports which rule it broke instead of a
+    // buffer size that was never the problem.
+    auto const valid = impl::validate_compression_config(cfg);
+    CC_ASSERT(valid.has_value(), valid.error().to_string().c_str_materialize());
+
     auto out = cc::vector<byte>::create_uninitialized(compress_bound(data.size(), cfg));
 
     auto const written = compress_into(data, out, cfg);
@@ -169,7 +181,9 @@ cc::optional<isize> cc::decompressed_size(cc::span<byte const> data, decompressi
 
 cc::compressor::compressor(compression_config cfg) : _config(cfg)
 {
-    CC_ASSERT(impl::validate_compression_config(cfg).has_value(), "the dictionary was built for a different algorithm");
+    // The validator carries several rules now, so its own message is the only one that names the right cause.
+    auto const valid = impl::validate_compression_config(cfg);
+    CC_ASSERT(valid.has_value(), valid.error().to_string().c_str_materialize());
     _state = impl::backend_for(_config.algorithm).create_compressor(_config);
 }
 

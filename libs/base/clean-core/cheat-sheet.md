@@ -619,6 +619,8 @@ cc::decompress(blob, {.algorithm = a, .max_output_size = n});  // untrusted inpu
 cc::decompress_into(blob, out, cfg);       // -> result<isize>; the only form that reads an lz4 `raw` blob
 cc::detect_algorithm(blob);                // -> optional<algorithm>; nullopt on raw and on garbage
 cc::decompressed_size(blob);               // -> optional<isize> the frame declares, without decompressing
+// gzip declares its size in the TRAILER, so decompressed_size wants the WHOLE blob and a streaming reader gets no hint
+// a .gz is a SEQUENCE of members: `cat a.gz b.gz` decodes to both, and its declared size then covers only the last
 cc::compressor c(cfg);  c.compress(bytes); // reuse tier for MANY SMALL blobs; not thread-safe, one per thread
 cc::decompressor d(cfg);  d.decompress(blob);
 // level is the ALGORITHM'S own scale, never normalized; 0 = its default. zstd 1..22 (default 3), negatives are fast modes
@@ -641,6 +643,7 @@ dict.algorithm();  dict.id();  dict.bytes();           // id() is what a format 
 cc::decompressing_read_stream_adapter::create(inner, {.algorithm = a});  // -> result<adapter>; not seekable
 cc::compressing_write_stream_adapter::create(inner, cfg);
 w.finish();                                // -> result<i64>; MUST be called or the frame is unreadable
+// the adapters honour algorithm (required when reading), framing and max_output_size; a dictionary is NOT carried
 ```
 
 ## Comparators
