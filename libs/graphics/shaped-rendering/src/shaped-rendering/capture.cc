@@ -1,4 +1,5 @@
 #include <babel-serializer/image/image.hh>
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/platform/environment.hh>
@@ -6,8 +7,6 @@
 #include <clean-core/string/from_string.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/capture.hh>
-
-#include <chrono>
 
 namespace sr
 {
@@ -29,11 +28,6 @@ namespace
         return {};
 
     return tg::vec2i(w, h);
-}
-
-[[nodiscard]] double now_seconds()
-{
-    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 /// The container format `path`'s extension names, defaulting to JPEG.
@@ -91,11 +85,12 @@ capture_request capture_request::from_environment()
     return req;
 }
 
-cc::result<cc::unit> write_capture_image(sg::context& ctx,
-                                         sg::texture_2d const& texture,
-                                         tg::vec2i size,
-                                         cc::string_view path)
+cc::result<cc::unit> write_capture_image(sg::context& ctx, sg::texture_2d const& texture, cc::string_view path)
 {
+    CC_ASSERT(texture.format() == sg::pixel_format::bgra8_unorm, "a capture target must be bgra8_unorm");
+
+    auto const size = tg::vec2i(texture.width(), texture.height());
+
     auto future = ctx.download.bytes_from_texture(texture.raw());
     auto const bytes = ctx.wait_for(future);
     if (!bytes.has_value())

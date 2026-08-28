@@ -9,6 +9,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/impl/capture_session.hh> // sv::impl::partial_capture_path
 
 using namespace cc::primitive_defines;
 
@@ -228,4 +229,74 @@ TEST("sv - a capture nothing registered fails without writing", nx::config::main
     // And nothing was written.
     // A file here would be the default view wearing the requested name.
     CHECK(cc::file_read_stream_adapter::open(path).has_error());
+}
+
+// A capture that runs out of clock must leave NOTHING at the path it was given.
+//
+// dev.py reads a file at that path as the run having succeeded — the exit code alone cannot tell it otherwise — so an
+// unsettled image left there is refreshed over the committed reference image and reported as captured.
+// A half-converged reference picture is exactly the artifact nobody re-checks once it looks plausible, which is what
+// makes this worth a test rather than a comment.
+// The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
+TEST("sv - a capture that times out writes beside the requested path, not to it", nx::config::main_thread)
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    auto const path = cc::format("{}/sv-capture-timeout.jpg", cc::temp_directory_path());
+    auto const partial = sv::impl::partial_capture_path(path);
+    cc::remove_file(path);
+    cc::remove_file(partial); // leftovers from an earlier run would make both checks below vacuous
+
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "64x48");
+
+    // Above the accumulation cap, so no amount of waiting reaches it, against a clock that runs out almost at once.
+    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "100000");
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "2");
+
+    auto const box = sv_test::make_cornell_box();
+    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+
+    auto frames = 0;
+    for (auto f : sv::interactive(ctx, "sv-test/capture-timeout"))
+    {
+        auto view = f.window().view();
+        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+        view.add_scene().add_mesh(mesh);
+
+        ++frames;
+        REQUIRE(frames < 4000); // the timeout ends the loop; this only stops a hang from becoming a test timeout
+    }
+
+    // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.
+    CHECK(cc::file_read_stream_adapter::open(path).has_error());
+
+    // And the partial is a complete file, decodable, so it is worth opening.
+    {
+        auto reread = cc::file_read_stream_adapter::open(partial);
+        REQUIRE(reread.has_value());
+        cc::read_stream in = reread.value();
+
+        auto const decoded = babel::image::read(in);
+        REQUIRE(decoded.has_value());
+        CHECK(decoded.value().width == 64);
+        CHECK(decoded.value().height == 48);
+    }
+    cc::remove_file(partial);
 }

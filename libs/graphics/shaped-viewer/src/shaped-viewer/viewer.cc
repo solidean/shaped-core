@@ -825,24 +825,44 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         return;
     }
 
-    // One count per trace that refreshed, since only a traced layer accumulates and a view without one would
-    // otherwise hold the whole run at zero forever.
-    auto accumulated = cc::vector<u32>();
+    // Every refreshing trace's view, asked whether it has converged rather than how far it has counted.
+    // Per view rather than per trace: `is_accumulation_converged` folds over all of that view's traced layers, which
+    // is what "the image is finished" actually means when a view carries more than one.
+    auto any_traced = false;
+    auto views_converged = true;
+    auto lowest = u32(0);
     for (auto const& tr : plan.traces)
-        if (tr.refresh)
-            accumulated.push_back(im.views.accumulated_frames(tr.id, temporal_id::accumulation(tr.layer)));
+    {
+        if (!tr.refresh)
+            continue;
 
-    auto const settled = session.is_settled(accumulated, im.resources.pending_work_count(), traces_ran);
+        if (!any_traced)
+            lowest = im.views.min_accumulated_frames(tr.id);
+        else
+            lowest = cc::min(lowest, im.views.min_accumulated_frames(tr.id));
+
+        any_traced = true;
+        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate_frames);
+    }
+
+    auto const settled = session.is_settled(views_converged, any_traced, im.resources.pending_work_count(), traces_ran);
     if (!settled && !session.is_out_of_time())
         return;
 
     if (settled)
         session.mark_settled_before_writing();
-    else
-        CC_LOG_WARNING("capture: giving up after {}s — writing the image as it stands", session.elapsed_seconds());
 
-    auto const written = sr::write_capture_image(*im.ctx, im.offscreen, tg::vec2i(im.config.width, im.config.height),
-                                                 session.request().output_path);
+    // Only a settled run may write to the path it was asked for: dev.py reads a file there as the capture having
+    // succeeded, so an unsettled image left at that path would be refreshed over the committed reference.
+    auto const path = session.settled_before_writing() ? cc::string(session.request().output_path)
+                                                       : sv::impl::partial_capture_path(session.request().output_path);
+    if (!session.settled_before_writing())
+        CC_LOG_WARNING("capture: giving up after {}s at {}/{} accumulated frames — writing what it has to {}, and "
+                       "nothing to {}",
+                       session.elapsed_seconds(), lowest, session.request().accumulate_frames, path,
+                       session.request().output_path);
+
+    auto const written = sr::write_capture_image(*im.ctx, im.offscreen, path);
     if (written.has_error())
         CC_LOG_ERROR("capture: {}", written.error().to_string());
 

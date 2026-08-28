@@ -43,13 +43,19 @@ public:
     /// How long the run has taken so far, in seconds.
     [[nodiscard]] double elapsed_seconds() const;
 
-    /// Whether every traced view has settled: enough accumulated frames, nothing still owing post-load work, and a
-    /// trace that actually dispatched.
+    /// Whether the image is finished: every traced view converged, nothing still owing post-load work, and a trace
+    /// that actually dispatched.
     ///
-    /// `traced_views` is one accumulated-frame count per refreshing trace in the plan.
-    /// A frame with no traced view at all cannot report a dispatch, so `traces_ran` is only consulted when there was
-    /// something to run — otherwise a 2D-only view could never settle.
-    [[nodiscard]] bool is_settled(cc::span<u32 const> traced_views, isize pending_work, bool traces_ran) const;
+    /// `views_converged` is the caller's fold over every refreshing trace, through
+    /// `view_store::is_accumulation_converged` — which is the rule, and which is why this takes an answer rather than
+    /// a list of counts.
+    /// Comparing counts here is what it used to do, and a layer that stops at `sv::accumulation_frame_cap` made an
+    /// accumulate target above the cap unreachable: the run burned its whole timeout on an image that had converged.
+    ///
+    /// `any_traced` says whether there was a refreshing trace at all.
+    /// A frame with none cannot report a dispatch, so `traces_ran` is only consulted when there was something to run —
+    /// otherwise a 2D-only view could never settle.
+    [[nodiscard]] bool is_settled(bool views_converged, bool any_traced, isize pending_work, bool traces_ran) const;
 
     /// Whether the image has already been written, so the run is finishing rather than still converging.
     [[nodiscard]] bool is_done() const { return _done; }
@@ -73,12 +79,12 @@ private:
 
 namespace sv::impl
 {
-/// Reads `texture` back, converts it to RGB and writes it to `path`, picking the format from the extension.
+/// Where an unsettled capture's image goes: `<out>.partial.<ext>`, or `<out>.partial` when it has no extension.
 ///
-/// Blocking: it waits on the download, which is what a capture wants — the run is over either way.
-/// The texture must carry `copy_src` usage and be `bgra8_unorm`, which is what a headless viewer's target is.
-[[nodiscard]] cc::result<cc::unit> write_capture_image(sg::context& ctx,
-                                                       sg::texture_2d const& texture,
-                                                       tg::vec2i size,
-                                                       cc::string_view path);
+/// A run that spent its whole timeout must leave NOTHING at the requested path.
+/// dev.py reads a file there as the capture having succeeded, and a sweep would then refresh a half-converged image
+/// over the committed reference and report it as captured.
+/// The image is still written, and written beside it, because looking at what the run managed is how the timeout
+/// gets fixed.
+[[nodiscard]] cc::string partial_capture_path(cc::string_view path);
 } // namespace sv::impl

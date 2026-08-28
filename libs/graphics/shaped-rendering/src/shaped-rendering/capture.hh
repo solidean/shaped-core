@@ -82,10 +82,13 @@ namespace sr
 {
 /// Reads `texture` back, converts it to RGB and writes it to `path`, picking the format from the extension.
 ///
+/// The image's extent is the texture's own, so a caller cannot disagree with it.
+/// An earlier signature took the size separately, and the only guard caught a size larger than the texture — a
+/// smaller one walked the readback at the wrong stride and produced a sheared image that read as a rendering bug.
+///
 /// Blocking: it waits on the download, which is what a capture wants — the run is over either way.
-/// The texture must carry `copy_src` usage and be `bgra8_unorm`, which is what a capture target is.
+/// The texture must carry `copy_src` usage and must be `bgra8_unorm`: the channel swap below is written for it.
 [[nodiscard]] cc::result<cc::unit> write_capture_image(sg::context& ctx,
                                                        sg::texture_2d const& texture,
-                                                       tg::vec2i size,
                                                        cc::string_view path);
 } // namespace sr
