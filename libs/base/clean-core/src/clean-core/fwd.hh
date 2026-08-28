@@ -75,6 +75,7 @@ struct numa_node;
 struct system_info;        // what machine this is, gathered once (platform/system_info.hh)
 enum class identity_field; // one identifying fact about the machine, requested by name (platform/system_identifier.hh)
 struct system_identifier;  // the identifying facts that were asked for, and only those
+struct resource_limits; // what THIS process may use, as opposed to what the machine has (platform/resource_limits.hh)
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>

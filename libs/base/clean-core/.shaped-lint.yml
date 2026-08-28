@@ -257,6 +257,16 @@ rules:
     files: src/clean-core/platform/system_info.cc
 
   - kind: allow-include
+    value: [<sched.h>, <unistd.h>]
+    reason: sched_getaffinity is the mask a container narrows, and sysconf is the fallback count
+    files: src/clean-core/platform/resource_limits.cc
+
+  - kind: allow-include
+    value: [<intrin.h>, <cpuid.h>]
+    reason: the CPUID hypervisor bit, which is the only in-process hint that this is a VM
+    files: src/clean-core/platform/resource_limits.cc
+
+  - kind: allow-include
     value: <sys/utsname.h>
     reason: uname, the kernel version Linux reports nowhere else
     files: src/clean-core/platform/system_info.cc
@@ -264,6 +274,11 @@ rules:
   - kind: allow-include
     value: <cstdlib>
     reason: std::getenv is the only route to the startup timezone and locale
+    files: src/clean-core/platform/system_info.cc
+
+  - kind: allow-include
+    value: <unistd.h>
+    reason: sysconf for the page size, and the logical core count on the targets that report nothing else
     files: src/clean-core/platform/system_info.cc
 
   - kind: allow-include

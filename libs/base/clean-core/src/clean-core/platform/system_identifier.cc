@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
+#include <clean-core/platform/impl/text_file.hh>
 #include <clean-core/platform/system_identifier.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
@@ -29,7 +30,6 @@
 
 #elif defined(CC_OS_LINUX) || defined(CC_OS_ANDROID)
 
-#include <clean-core/streams/file_stream.hh>
 #include <ifaddrs.h>
 #include <netpacket/packet.h>
 #include <unistd.h>
@@ -265,28 +265,6 @@ namespace cc
 {
 namespace
 {
-cc::optional<cc::string> read_trimmed_file(cc::string_view path)
-{
-    auto adapter = cc::file_read_stream_adapter::open(path);
-    if (adapter.has_error())
-        return {};
-
-    auto bytes = adapter.value().stream().read_all();
-    if (bytes.has_error())
-        return {};
-
-    auto const& data = bytes.value();
-    auto text = cc::string_view(reinterpret_cast<char const*>(data.data()), data.size());
-    while (!text.empty() && cc::is_space(text.front()))
-        text = text.subview(1);
-    while (!text.empty() && cc::is_space(text.back()))
-        text = text.subview_clamped(0, text.size() - 1);
-
-    if (text.empty())
-        return {};
-    return cc::string(text);
-}
-
 cc::optional<cc::string> query_hostname()
 {
     char buffer[256] = {};
@@ -306,9 +284,9 @@ cc::optional<cc::string> query_username()
 cc::optional<cc::string> query_machine_id()
 {
     // /etc/machine-id is the systemd one; the dbus copy is what a machine without systemd has.
-    if (auto id = read_trimmed_file("/etc/machine-id"); id.has_value())
+    if (auto id = cc::impl::read_trimmed_file("/etc/machine-id"); id.has_value())
         return id;
-    return read_trimmed_file("/var/lib/dbus/machine-id");
+    return cc::impl::read_trimmed_file("/var/lib/dbus/machine-id");
 }
 
 void query_mac_addresses(cc::vector<cc::string>& out)
@@ -337,7 +315,8 @@ void query_disk_serials(cc::vector<cc::string>& out)
     // Only the whole-disk devices carry a serial; a partition inherits its parent's and would double-report it.
     auto try_device = [&out](cc::string const& name)
     {
-        if (auto serial = read_trimmed_file(cc::format("/sys/block/{}/device/serial", name)); serial.has_value())
+        if (auto serial = cc::impl::read_trimmed_file(cc::format("/sys/block/{}/device/serial", name));
+            serial.has_value())
             out.push_back(cc::move(serial.value()));
     };
 

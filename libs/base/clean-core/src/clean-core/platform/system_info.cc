@@ -1,8 +1,8 @@
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/platform/impl/text_file.hh>
 #include <clean-core/platform/system_info.hh>
-#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 
@@ -32,6 +32,10 @@
 #include <cpuid.h> // __get_cpuid, for the brand string /proc/cpuinfo omits on some kernels
 #endif
 
+#elif defined(CC_OS_EMSCRIPTEN)
+
+#include <unistd.h> // sysconf, the one machine fact a wasm target can answer
+
 #endif
 
 using namespace cc::primitive_defines;
@@ -40,50 +44,6 @@ namespace cc
 {
 namespace
 {
-// --- text helpers ---
-//
-// cc has no whitespace-trimming or line-splitting helper yet, and the /proc and /sys parsers below want both.
-// Local until it grows one.
-
-cc::string_view trimmed(cc::string_view s)
-{
-    while (!s.empty() && cc::is_space(s.front()))
-        s = s.subview(1);
-    while (!s.empty() && cc::is_space(s.back()))
-        s = s.subview_clamped(0, s.size() - 1);
-    return s;
-}
-
-/// The next line, and advances `rest` past it.
-/// Returns false once nothing is left.
-bool next_line(cc::string_view& rest, cc::string_view& out)
-{
-    if (rest.empty())
-        return false;
-
-    auto const nl = rest.find('\n');
-    if (nl < 0)
-    {
-        out = rest;
-        rest = {};
-    }
-    else
-    {
-        out = rest.subview_clamped(0, nl);
-        rest = rest.subview(nl + 1);
-    }
-    return true;
-}
-
-/// The part after the first `sep`, trimmed, or nothing when the line does not carry one.
-cc::optional<cc::string_view> value_after(cc::string_view line, char sep)
-{
-    auto const at = line.find(sep);
-    if (at < 0)
-        return {};
-    return trimmed(line.subview(at + 1));
-}
-
 constexpr cc::string_view architecture_name()
 {
 #if defined(CC_ARCH_X64)
@@ -134,7 +94,7 @@ cc::string x86_brand_string()
                 brand[leaf * 16 + u32(i) * 4 + u32(b)] = char((regs[i] >> (b * 8)) & 0xFF);
     }
 
-    return cc::string(trimmed(cc::string_view(brand)));
+    return cc::string(cc::impl::trimmed(cc::string_view(brand)));
 }
 
 cc::string x86_vendor_string()
@@ -391,7 +351,7 @@ cc::optional<cc::string> sysctl_string(char const* name)
     if (::sysctlbyname(name, buffer.data(), &size, nullptr, 0) != 0)
         return {};
 
-    return cc::string(trimmed(cc::string_view(buffer.data())));
+    return cc::string(cc::impl::trimmed(cc::string_view(buffer.data())));
 }
 
 /// One perflevel, which is Darwin's own name for a core class and maps onto it exactly.
@@ -492,35 +452,11 @@ namespace cc
 {
 namespace
 {
-/// A whole /proc or /sys file as text, or nothing when it cannot be read.
-/// Those files report a size of zero, so this reads until the stream ends rather than trusting a length.
-cc::optional<cc::string> read_text_file(cc::string_view path)
-{
-    auto adapter = cc::file_read_stream_adapter::open(path);
-    if (adapter.has_error())
-        return {};
-
-    auto bytes = adapter.value().stream().read_all();
-    if (bytes.has_error())
-        return {};
-
-    auto const& data = bytes.value();
-    return cc::string(cc::string_view(reinterpret_cast<char const*>(data.data()), data.size()));
-}
-
-cc::optional<i64> read_int_file(cc::string_view path)
-{
-    auto const text = read_text_file(path);
-    if (!text.has_value())
-        return {};
-    return cc::from_string<i64>(trimmed(text.value()));
-}
-
 /// The count of CPUs a "0-3,8" style cpu-list names, which is how sysfs spells every set of cores.
 i32 count_cpu_list(cc::string_view list)
 {
     auto total = i32(0);
-    auto rest = trimmed(list);
+    auto rest = cc::impl::trimmed(list);
     while (!rest.empty())
     {
         auto const comma = rest.find(',');
@@ -545,7 +481,7 @@ i32 count_cpu_list(cc::string_view list)
 /// A sysfs cache size, which is written as "32K" or "8192K" rather than as bytes.
 cc::optional<i64> parse_cache_size(cc::string_view text)
 {
-    auto s = trimmed(text);
+    auto s = cc::impl::trimmed(text);
     if (s.empty())
         return {};
 
@@ -570,15 +506,15 @@ void fill_caches(cc::vector<cc::cpu_cache_level>& out, i32 cpu)
     {
         auto const dir = cc::format("/sys/devices/system/cpu/cpu{}/cache/index{}", cpu, index);
 
-        auto const level = read_int_file(cc::format("{}/level", dir));
+        auto const level = cc::impl::read_int_file(cc::format("{}/level", dir));
         if (!level.has_value())
             break;
 
-        auto const type = read_text_file(cc::format("{}/type", dir));
+        auto const type = cc::impl::read_text_file(cc::format("{}/type", dir));
         auto kind = cc::cache_kind::unified;
         if (type.has_value())
         {
-            auto const t = trimmed(type.value());
+            auto const t = cc::impl::trimmed(type.value());
             if (t == "Data")
                 kind = cc::cache_kind::data;
             else if (t == "Instruction")
@@ -586,20 +522,21 @@ void fill_caches(cc::vector<cc::cpu_cache_level>& out, i32 cpu)
         }
 
         auto size = cc::optional<i64>();
-        if (auto const text = read_text_file(cc::format("{}/size", dir)); text.has_value())
+        if (auto const text = cc::impl::read_text_file(cc::format("{}/size", dir)); text.has_value())
             size = parse_cache_size(text.value());
         if (!size.has_value())
             continue;
 
         auto shared = i32(1);
-        if (auto const list = read_text_file(cc::format("{}/shared_cpu_list", dir)); list.has_value())
+        if (auto const list = cc::impl::read_text_file(cc::format("{}/shared_cpu_list", dir)); list.has_value())
             shared = count_cpu_list(list.value());
 
-        out.push_back({.level = i32(level.value()),
-                       .kind = kind,
-                       .size_bytes = size.value(),
-                       .line_size_bytes = i32(read_int_file(cc::format("{}/coherency_line_size", dir)).value_or(0)),
-                       .sharing_cores = shared});
+        out.push_back(
+            {.level = i32(level.value()),
+             .kind = kind,
+             .size_bytes = size.value(),
+             .line_size_bytes = i32(cc::impl::read_int_file(cc::format("{}/coherency_line_size", dir)).value_or(0)),
+             .sharing_cores = shared});
     }
 }
 
@@ -607,7 +544,7 @@ void fill_topology(cc::system_info& info)
 {
     // `possible` rather than `online`: Android routinely parks cores, and a parked core is still part of the machine.
     auto cpu_count = i32(0);
-    if (auto const possible = read_text_file("/sys/devices/system/cpu/possible"); possible.has_value())
+    if (auto const possible = cc::impl::read_text_file("/sys/devices/system/cpu/possible"); possible.has_value())
         cpu_count = count_cpu_list(possible.value());
     if (cpu_count <= 0)
         cpu_count = i32(::sysconf(_SC_NPROCESSORS_CONF));
@@ -627,7 +564,7 @@ void fill_topology(cc::system_info& info)
     for (auto cpu = 0; cpu < cpu_count; ++cpu)
     {
         auto const base = cc::format("/sys/devices/system/cpu/cpu{}", cpu);
-        auto const capacity = read_int_file(cc::format("{}/cpu_capacity", base)).value_or(0);
+        auto const capacity = cc::impl::read_int_file(cc::format("{}/cpu_capacity", base)).value_or(0);
 
         auto* found = static_cast<class_accum*>(nullptr);
         for (auto& c : classes)
@@ -642,8 +579,8 @@ void fill_topology(cc::system_info& info)
         found->logical += 1;
 
         // core_id is unique only within a package, so the pair is what identifies a physical core.
-        auto const core_id = read_int_file(cc::format("{}/topology/core_id", base)).value_or(cpu);
-        auto const package = read_int_file(cc::format("{}/topology/physical_package_id", base)).value_or(0);
+        auto const core_id = cc::impl::read_int_file(cc::format("{}/topology/core_id", base)).value_or(cpu);
+        auto const package = cc::impl::read_int_file(cc::format("{}/topology/physical_package_id", base)).value_or(0);
         auto const key = i32(package * 4096 + core_id);
 
         auto known = false;
@@ -676,18 +613,18 @@ void fill_topology(cc::system_info& info)
 
     for (auto node = 0; node < 64; ++node)
     {
-        auto const meminfo = read_text_file(cc::format("/sys/devices/system/node/node{}/meminfo", node));
+        auto const meminfo = cc::impl::read_text_file(cc::format("/sys/devices/system/node/node{}/meminfo", node));
         if (!meminfo.has_value())
             break;
 
         auto entry = cc::numa_node{.index = node};
         auto rest = cc::string_view(meminfo.value());
         auto line = cc::string_view();
-        while (next_line(rest, line))
+        while (cc::impl::next_line(rest, line))
             if (line.contains("MemTotal:"))
                 if (auto const kb = value_after(line, ':'); kb.has_value())
                 {
-                    auto number = trimmed(kb.value());
+                    auto number = cc::impl::trimmed(kb.value());
                     if (auto const space = number.find(' '); space >= 0)
                         number = number.subview_clamped(0, space);
                     if (auto const value = cc::from_string<i64>(number); value.has_value())
@@ -698,27 +635,6 @@ void fill_topology(cc::system_info& info)
     }
 }
 
-/// One `key=value` or `key: value` field out of a whole file's text.
-cc::optional<cc::string> field_from(cc::string_view text, cc::string_view key, char sep)
-{
-    auto rest = text;
-    auto line = cc::string_view();
-    while (next_line(rest, line))
-    {
-        auto const at = line.find(sep);
-        if (at < 0)
-            continue;
-        if (trimmed(line.subview_clamped(0, at)) != key)
-            continue;
-
-        auto value = trimmed(line.subview(at + 1));
-        if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
-            value = value.subview_clamped(1, value.size() - 2);
-        return cc::string(value);
-    }
-    return {};
-}
-
 void fill_platform(cc::system_info& info)
 {
 #if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
@@ -726,23 +642,23 @@ void fill_platform(cc::system_info& info)
     info.cpu_vendor = cc::x86_vendor_string();
 #endif
 
-    if (auto const cpuinfo = read_text_file("/proc/cpuinfo"); cpuinfo.has_value())
+    if (auto const cpuinfo = cc::impl::read_text_file("/proc/cpuinfo"); cpuinfo.has_value())
     {
         if (info.cpu_brand.empty())
-            if (auto model = field_from(cpuinfo.value(), "model name", ':'); model.has_value())
+            if (auto model = cc::impl::field_from(cpuinfo.value(), "model name", ':'); model.has_value())
                 info.cpu_brand = cc::move(model.value());
         if (info.cpu_brand.empty())
-            if (auto hardware = field_from(cpuinfo.value(), "Hardware", ':'); hardware.has_value())
+            if (auto hardware = cc::impl::field_from(cpuinfo.value(), "Hardware", ':'); hardware.has_value())
                 info.cpu_brand = cc::move(hardware.value());
         if (info.cpu_vendor.empty())
-            if (auto vendor = field_from(cpuinfo.value(), "vendor_id", ':'); vendor.has_value())
+            if (auto vendor = cc::impl::field_from(cpuinfo.value(), "vendor_id", ':'); vendor.has_value())
                 info.cpu_vendor = cc::move(vendor.value());
     }
 
     fill_topology(info);
 
-    if (auto const meminfo = read_text_file("/proc/meminfo"); meminfo.has_value())
-        if (auto const total = field_from(meminfo.value(), "MemTotal", ':'); total.has_value())
+    if (auto const meminfo = cc::impl::read_text_file("/proc/meminfo"); meminfo.has_value())
+        if (auto const total = cc::impl::field_from(meminfo.value(), "MemTotal", ':'); total.has_value())
         {
             auto number = cc::string_view(total.value());
             if (auto const space = number.find(' '); space >= 0)
@@ -755,11 +671,11 @@ void fill_platform(cc::system_info& info)
         info.page_size_bytes = i64(page);
 
     info.os_name = "Linux";
-    if (auto const release = read_text_file("/etc/os-release"); release.has_value())
+    if (auto const release = cc::impl::read_text_file("/etc/os-release"); release.has_value())
     {
-        if (auto name = field_from(release.value(), "NAME", '='); name.has_value())
+        if (auto name = cc::impl::field_from(release.value(), "NAME", '='); name.has_value())
             info.os_name = cc::move(name.value());
-        if (auto version = field_from(release.value(), "VERSION_ID", '='); version.has_value())
+        if (auto version = cc::impl::field_from(release.value(), "VERSION_ID", '='); version.has_value())
             info.os_version = cc::move(version.value());
     }
 
@@ -773,9 +689,9 @@ void fill_platform(cc::system_info& info)
     }
 
     // /proc/uptime's first field is seconds since boot, so the boot instant is now minus that.
-    if (auto const uptime = read_text_file("/proc/uptime"); uptime.has_value())
+    if (auto const uptime = cc::impl::read_text_file("/proc/uptime"); uptime.has_value())
     {
-        auto first = trimmed(uptime.value());
+        auto first = cc::impl::trimmed(uptime.value());
         if (auto const space = first.find(' '); space >= 0)
             first = first.subview_clamped(0, space);
         if (auto const secs = cc::from_string<f64>(first); secs.has_value())
@@ -784,8 +700,8 @@ void fill_platform(cc::system_info& info)
 
     if (auto const* tz = std::getenv("TZ"); tz != nullptr && tz[0] != '\0')
         info.timezone_at_start = cc::string(cc::string_view(tz));
-    else if (auto const zone = read_text_file("/etc/timezone"); zone.has_value())
-        info.timezone_at_start = cc::string(trimmed(zone.value()));
+    else if (auto const zone = cc::impl::read_text_file("/etc/timezone"); zone.has_value())
+        info.timezone_at_start = cc::string(cc::impl::trimmed(zone.value()));
 
     for (auto const* name : {"LC_ALL", "LC_CTYPE", "LANG"})
         if (auto const* value = std::getenv(name); value != nullptr && value[0] != '\0')
@@ -806,11 +722,17 @@ namespace cc
 {
 namespace
 {
-/// Nothing is filled in rather than guessed.
-/// A heap size reported as "total RAM" would read exactly like a real answer, which is the failure mode this design
-/// exists to avoid.
-void fill_platform(cc::system_info&)
+/// A logical core count is the one thing these targets can answer, so it is the one thing filled in.
+/// Everything else stays empty rather than guessed: a wasm heap size reported as "total RAM" would read exactly like a
+/// real answer, which is the failure mode this design exists to avoid.
+void fill_platform(cc::system_info& info)
 {
+#if defined(CC_OS_EMSCRIPTEN)
+    if (auto const online = ::sysconf(_SC_NPROCESSORS_ONLN); online > 0)
+        info.core_classes.push_back({.physical_cores = i32(online), .logical_cores = i32(online)});
+#else
+    (void)info;
+#endif
 }
 } // namespace
 } // namespace cc

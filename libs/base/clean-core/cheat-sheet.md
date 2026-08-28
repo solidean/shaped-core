@@ -787,7 +787,8 @@ auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold
 
 #include <clean-core/thread/thread.hh>
 cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux; no-op where unavailable)
-int p = cc::num_hardware_threads();       // >= 1 always; a "don't know" (0) from the platform becomes 1
+i32 p = cc::recommended_worker_count();   // >= 1 always; machine, affinity mask and cgroup quota, whichever binds
+                                          //   (platform/resource_limits.hh) — the number to size a pool from
 auto id = cc::current_thread_id();        // cc::thread_id (enum class : u64); equality only — NOT the OS id a debugger shows
 cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread; nothing does it implicitly
                                           //   cc::thread_id::invalid (0) is the "no thread" sentinel

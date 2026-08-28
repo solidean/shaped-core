@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/platform/resource_limits.hh>
 
 // The concurrent scheduler needs OS threads; this file compiles to nothing where they are unavailable (wasm).
 #if CC_HAS_THREADS
@@ -261,7 +262,7 @@ void run_all()
 // Anything above it that grows with w is the pool getting in its own way.
 void run_fork_floor()
 {
-    int const p = cc::num_hardware_threads();
+    int const p = cc::recommended_worker_count();
     int const w_max = p < floor_max_workers ? p : floor_max_workers;
     std::printf("\n### fork floor: parallel-for, grain 1 (median of 5, %d workers max, %d hardware threads) ###\n",
                 w_max, p);
@@ -306,7 +307,7 @@ void run_latency()
     std::printf("%-10s %15s\n", "workers", "ns/roundtrip");
     std::printf("%-10s %15s\n", "-------", "------------");
 
-    int const p = cc::num_hardware_threads();
+    int const p = cc::recommended_worker_count();
     for (int w : {1, 2, 4, 8, 16, 32, 64})
     {
         if (w > p)

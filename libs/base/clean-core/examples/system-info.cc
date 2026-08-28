@@ -1,3 +1,4 @@
+#include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/system_info.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -107,6 +108,19 @@ EXAMPLE("clean-core/system-info")
         else
             cc::println("  numa node {:<6} (size unavailable)", node.index);
     }
+
+    cc::println("");
+    cc::println("limits");
+    auto const limits = cc::query_resource_limits();
+    if (limits.cpu_quota.has_value())
+        cc::println("  {:<16} {:.2f} CPUs", "cpu quota", limits.cpu_quota.value());
+    else
+        cc::println("  {:<16} (none)", "cpu quota");
+    print_bytes("memory limit", limits.memory_limit_bytes);
+    cc::println("  {:<16} {}", "affinity", limits.affinity_cores);
+    cc::println("  {:<16} {}", "containerized", limits.containerized ? "yes" : "no");
+    cc::println("  {:<16} {}", "hypervisor", limits.hypervisor_present ? "present" : "none");
+    cc::println("  {:<16} {}", "workers", cc::recommended_worker_count());
 
     cc::println("");
     cc::println("OS");
