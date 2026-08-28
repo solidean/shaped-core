@@ -38,6 +38,7 @@ A single-file example shares its library's `examples/` folder with its siblings;
 
 Anything `dev.py` does not recognize is forwarded to the example, so `dev.py example x -- --my-flag` reaches its `main`.
 There is deliberately **no `--all`**: executing the whole corpus would open every window it has, and nobody wants that.
+The capture sweep below is the one exception, and it is allowed because it cannot do that: it runs only what a sidecar declares capturable, and every such example runs headless.
 
 ### `--background`, for a run that should not take over the screen
 
@@ -50,9 +51,135 @@ The mechanism is an environment variable, `SC_REQUEST_BACKGROUND`.
 An env var rather than an API because `dev.py` launches a program it did not write, and neither nexus nor the example itself is in the conversation.
 It is an escape hatch, named in one place so a real API can replace it later without hunting for `getenv` calls.
 The shared reader is `cc::is_environment_flag_set` ([clean-core/platform/environment.hh](../../libs/base/clean-core/src/clean-core/platform/environment.hh)).
-Preview rendering will use the same convention.
+`SC_CAPTURE` below follows the same convention.
 
 An example that constructs its own `window_system_description` can override it in either direction; one that does not gets the environment's answer for free.
+
+### `--capture`, and why you should use it while writing the example
+
+```bash
+uv run dev.py example shaped-viewer/hello-cube --capture   # write an image, open no window
+uv run dev.py example <example> --capture <name>          # one the sidecar declares by name
+```
+
+**This is the authoring loop for a graphical example, not just a way to refresh a picture.**
+Whoever writes one cannot see what they wrote — an agent never can, and a person only sees it by stopping to look.
+A run that neither crashes nor asserts routinely shows nothing worth looking at.
+The camera is inside the geometry, the light is behind it, the interesting face is turned away, or the whole thing is a speck in the middle of a grey field.
+None of that fails anything.
+
+So write the example, capture it, look at the image, and fix the framing.
+That loop is what turns `initial_orbit` from a guess into a decision, and it is the difference between an example that teaches the library on sight and one that merely runs.
+Iterate on it the way you would iterate on a failing test.
+
+The mechanism is environment variables, the same convention `--background` uses, declared in [capture.hh](../../libs/graphics/shaped-rendering/src/shaped-rendering/capture.hh).
+`SC_CAPTURE` implies headless: no window system is brought up, no swapchain is created, and nothing is presented, so a capture runs where there is no display at all.
+An example needs **no code for any of this** — `sv::interactive` reads the variables, waits for the image to settle, writes it, and ends the loop.
+
+A capture waits for three things together, because each hides something the others cannot see.
+Every traced view must have accumulated enough frames, no resource may still owe post-load work, and a trace must actually have dispatched.
+That last one is what stops a routine whose shaders never compiled from writing out a black image at full frame count.
+`--capture-accumulate` and `--capture-timeout` move the thresholds when a scene needs longer.
+
+A run that spends its whole timeout writes what it has to `<out>.partial.<ext>` and **nothing to the path it was asked for**.
+So the partial image is there to look at, and the capture still counts as failed.
+`dev.py` reads a file at the requested path as the run having succeeded, and the exit code alone cannot tell it otherwise.
+Without that split a sweep would refresh a half-converged image over the committed reference and report it as captured.
+
+### An example is capturable when it says so
+
+Capture is opt-in, through a `.capture.json` beside the example source, keyed by example name:
+
+```json
+{
+    "shaped-viewer/hello-cube": {
+        "mechanism": "sv",
+        "size": "1280x720",
+        "format": "jpg",
+        "captures": [
+            {}
+        ]
+    }
+}
+```
+
+**An example with no entry is never launched by a sweep.**
+That is what makes "the sweep opens no window" true by construction rather than by detection, and it is the whole reason the sweep is allowed to exist where `--all` is not.
+It also means an example rendering through something other than `sv::interactive` is never launched and left to quietly ignore the request.
+
+`mechanism` says who answers the protocol, and what the run must produce.
+
+- **`sv`** — a run through `sv::interactive`, which answers it for you.
+  The example needs no capture code at all.
+- **`custom`** — a program that answers the same environment variables itself.
+  That is what an application owning its own window, swapchain and loop has to do.
+  [cube_app.cc](../../examples/vdoc/cube-editor/cube_app.cc) is the worked example.
+  It brings the window system up headless, renders into a texture instead of a back buffer, and writes the image on the last frame.
+  Both `vdoc/cube-*` examples are captured that way, imgui panels and all.
+- **`transcript`** — a text example, whose artifact is its stdout.
+
+`sv` and `custom` differ only in who implements it: the contract is the same, so an image must appear at the path the run was given.
+Declaring the mechanism is what stops a failed image capture from being filed as a successful transcript.
+
+Everything else is optional and is a **default the flags override**, so iterating on framing never means editing the file.
+`size`, `format`, `accumulate` and `timeout` may sit on the example or on a single capture, and the latter wins.
+That is where a scene needing longer to converge says so, without a line in the source.
+
+Full-line `//` comments are stripped before parsing, so the file reads like configuration despite being JSON.
+JSON rather than YAML because `dev.py` declares `dependencies = []` and is worth keeping that way — see [dev-py-driver.md](../dev-py-driver.md).
+
+### Named captures, for an example that shows more than one thing
+
+```cpp
+f.register_capture("front", [&](sv::capture_context const& c) { view.camera(front_camera); });
+```
+
+The body runs inline, where it is declared, on every frame — and only when that capture is the one being taken.
+So it may simply force what it wants, and whatever the example writes after it still wins.
+On an interactive run nothing is taken, so it never runs at all.
+
+**The name must appear in both places**, and a disagreement fails rather than falling back.
+A sidecar naming a capture the source does not register stops on the first frame and writes nothing; asking for one the sidecar does not declare fails before the binary is even launched.
+Without that, renaming a callback would go on producing the default view under the old name's filename, and a sweep would refresh it into the repository reporting success.
+
+**It must be idempotent after its first frame.**
+Any change to what the image depends on restarts the accumulation, so a callback writing a slightly different value every frame never converges: the run spends its whole timeout and then fails.
+`capture_context::first_frame` is where one-shot setup goes.
+
+### Refreshing the reference images
+
+```bash
+uv run dev.py example --update-captures "shaped-viewer/"   # capture, then copy next to the examples
+uv run dev.py example --refresh-captures "hello"           # copy only, for a subset of what was captured
+```
+
+Capturing and refreshing are two steps on purpose.
+A capture writes only under `build/<preset>/captures/`, so it dirties no tracked file and anyone can run it at any time, including CI.
+Refreshing is the step that touches the source tree, and it copies only the captures that succeeded.
+
+**The committed images are documentation, not golden tests.**
+Nothing compares against them and nothing gates on them; they answer "what is this example supposed to look like" for a reader, a reviewer or an agent.
+A real golden test would need four things this does not have.
+PNG rather than JPEG, a pinned device — two devices do not agree bit-for-bit — a perceptual metric with a tuned threshold, and somewhere to put a failure diff.
+That is a deliberate non-goal rather than an omission.
+
+**So a capture is stable run to run on one machine, and never byte-identical across machines.**
+Two sweeps on the same box produce the same bytes, session state left by the first one included.
+A different driver or a different adapter produces the same *picture* and different bytes, and it always will.
+Re-capturing on your machine therefore dirties the three images whether or not anything changed, which is why refreshing them is a deliberate step rather than something a sweep does on its own.
+
+**What is missing is a similarity score.**
+A reviewer looking at a regenerated image has no cheap way to ask "is this roughly the same picture", so today the answer is to open both and look.
+A `dev.py` subcommand comparing a capture against its committed reference, and printing one number, is the shape that would fix it; nothing of it is built.
+
+A non-graphical example is captured through the same envelope: the same flag, the same folder, the same report.
+What it produces is its transcript rather than an image.
+Those are not committed yet, because a committed transcript is only worth something with a CI diff behind it.
+
+**A capture should show a first run.**
+An application that restores session state — a camera, a panel layout — has to decide what a reference image reflects.
+Restoring it would bake local state into a committed file, so the same refresh would produce a different picture on every machine.
+The `vdoc/cube-*` examples skip their saved camera and imgui layout when `is_capturing()`, which is what makes their images reproducible.
 
 ## Declaring one
 
@@ -77,7 +204,8 @@ What follows from the bucket:
   `EXAMPLE("x", no_scheduler)` is how an example that wants to install its own opts out of that.
 
 **The name is a slash path**, and it is load-bearing.
-It is the CLI argument, the gallery entry and — once preview rendering lands — the screenshot slug, so it is written as its own identifier rather than as a sentence.
+It is the CLI argument, the gallery entry and the capture slug, so it is written as its own identifier rather than as a sentence.
+As the slug it names both `build/<preset>/captures/` and the committed reference image.
 By convention the first segment is the library the example is about.
 
 ## Where they live
@@ -144,8 +272,8 @@ Two exemptions:
 * **Execution.** CI builds every example and runs none.
 
 Building without running is a real gap: an example can compile against an API it no longer uses correctly.
-That is accepted for now.
-A dry-run mode, which would exercise an example's setup without opening its window, is the eventual answer.
+`--capture` is the half of the answer that exists — it runs an example's whole setup with no window and no display, so CI *could* run one.
+What is still missing is the check on the far side: nothing compares the result against anything, so a run that produces a wrong image still passes.
 
 ## Platform-gated examples
 

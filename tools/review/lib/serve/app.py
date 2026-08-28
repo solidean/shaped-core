@@ -19,7 +19,7 @@ import time
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from ..annotate.index import RepoIndex
 from ..annotate.table import build as build_tokens, glossary_terms, to_json as tokens_to_json
@@ -37,6 +37,7 @@ from ..git.run import Git
 from ..goals.skeleton import describe, groups_for
 from ..render.entryview import render_entry
 from ..render.highlight import css as highlight_css, highlight_code
+from ..render.media import BINARY, IMAGE, classify, human_bytes
 from .watch import Watcher, compute_digest
 
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
@@ -199,6 +200,20 @@ class ReviewApp:
         target = self.index().absolute(resolution.path)
         if target is None:
             return 404, {"error": f"{resolution.path} left the index"}
+        # What the file IS decides the viewer, and it is decided before anything reads it as text.
+        # A committed JPEG went through `read_text(errors="replace")` and into the highlighter otherwise, which is
+        # slow, says nothing, and is exactly what a review carrying reference images hovers first.
+        kind = classify(target)
+        common = {"path": resolution.path, "absolute": target.resolve().as_posix(),
+                  "kind": kind.kind, "bytes": kind.size, "size": human_bytes(kind.size)}
+
+        if kind.kind == IMAGE:
+            return 200, {**common, "mime": kind.mime, "dimensions": kind.dimensions,
+                         "src": f"/raw?path={quote(resolution.path)}"}
+
+        if kind.kind == BINARY:
+            return 200, {**common}
+
         try:
             body = target.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
@@ -206,10 +221,33 @@ class ReviewApp:
 
         count = len(body.splitlines())
         return 200, {
-            "path": resolution.path, "absolute": target.resolve().as_posix(),
+            **common,
             "start": 1, "end": count, "lines": count,
             "html": highlight_code(body, path=resolution.path),
         }
+
+    def raw_file(self, path: str) -> tuple[int, bytes, str]:
+        """One tracked file's bytes, for an `<img>` to point at.
+
+        Same index resolution as `file_view`, so this opens nothing the popover could not already show, and a path
+        outside the tree is a lookup miss rather than a case to defend against.
+        Only the types this knows how to draw are served: an arbitrary-bytes endpoint is a bigger door than the one
+        thing that needs it.
+        """
+        resolution = self.index().resolve(path)
+        if not resolution.ok:
+            return 404, b"not a tracked file", "text/plain; charset=utf-8"
+        target = self.index().absolute(resolution.path)
+        if target is None:
+            return 404, b"left the index", "text/plain; charset=utf-8"
+
+        kind = classify(target)
+        if kind.kind != IMAGE:
+            return 404, b"not an image", "text/plain; charset=utf-8"
+        try:
+            return 200, target.read_bytes(), kind.mime
+        except OSError:
+            return 404, b"could not be read", "text/plain; charset=utf-8"
 
     def tree_view(self, path: str) -> tuple[int, dict]:
         """What is under one folder, as the same tree the overview draws.
@@ -397,37 +435,24 @@ def favicon_svg(name: str) -> str:
     )
 
 
-# Read far enough to be sure, and no further: a NUL in the first block is what every tool uses to call a file
-# binary, and a file with none in 8 kB does not hide one in the middle often enough to pay for reading it all.
-_SNIFF_BYTES = 8192
-
-
 def _size_label(index: RepoIndex):
-    """A leaf's label in a folder tree: lines where the file reads as text, bytes where it does not."""
+    """A leaf's label in a folder tree: lines where the file reads as text, its extent where it does not.
+
+    An image says how big the picture is rather than how big the file is, since that is what a reader is asking.
+    """
     def label(path: str) -> str:
         target = index.absolute(path)
         if target is None:
             return ""
-        try:
-            size = target.stat().st_size
-            head = target.read_bytes()[:_SNIFF_BYTES]
-        except OSError:
-            return ""
-        if b"\0" in head:
-            return f'<span class="tree-size">{_human_bytes(size)}</span>'
+        kind = classify(target)
+        if not kind.is_text:
+            return f'<span class="tree-size">{kind.dimensions or human_bytes(kind.size)}</span>'
         try:
             lines = len(target.read_text(encoding="utf-8").splitlines())
         except (OSError, UnicodeDecodeError):
-            return f'<span class="tree-size">{_human_bytes(size)}</span>'
+            return f'<span class="tree-size">{human_bytes(kind.size)}</span>'
         return f'<span class="tree-size">{lines} lines</span>'
     return label
-
-
-def _human_bytes(size: int) -> str:
-    for unit, cut in (("MB", 1024 * 1024), ("kB", 1024)):
-        if size >= cut:
-            return f"{size / cut:.1f} {unit}"
-    return f"{size} B"
 
 
 def _forge_commit_url(upstream: str, sha: str) -> str:
@@ -524,6 +549,10 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(urlparse(self.path).query)
                 code, payload = self.app.file_view(query.get("path", [""])[0])
                 self._json(code, payload)
+            elif route == "/raw":
+                query = parse_qs(urlparse(self.path).query)
+                code, blob, content_type = self.app.raw_file(query.get("path", [""])[0])
+                self._send(code, blob, content_type, cache=code == 200)
             elif route == "/api/tree":
                 query = parse_qs(urlparse(self.path).query)
                 code, payload = self.app.tree_view(query.get("path", [""])[0])

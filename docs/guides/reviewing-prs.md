@@ -78,6 +78,10 @@ Where they rot, in practice:
 - **Stale identifiers after a rename** — a parameter renamed in the signature and still named by its old name in the `///` above it.
 - **Structure and status tables** (`[done]` / `[in progress]` / `[planned]`) the change should have moved.
 - **Cheat sheets** whose field lists no longer match the struct.
+- **A count in prose, once the set grows.** "Two backends", "both codecs", "`frame` framing only" — each was true when written and false the moment a third member landed.
+  None of them shows up in the diff, because the change that falsified them never touched the line.
+  So when a change adds the Nth member of a set, grep the old cardinality across the subsystem before reading anything else.
+  pr-151 is the worked case: adding deflate beside zstd and lz4 left four such sentences wrong, three of them in files the branch itself edited.
 
 Verify each doc claim against the branch by looking up the symbol, not by reading the sentence.
 
@@ -89,6 +93,24 @@ Drive-by nits are welcome — collect them into a single trailing point so they 
 ## Settled calls
 
 Each of these was decided in a review; do not re-litigate them, and apply them as rules.
+
+### Posting is a separate instruction, and nothing else is one
+
+**Never post a review anywhere the author can see it — a PR comment, a review, an inline note — without the maintainer saying to post it, in those words, after reading the text.**
+The go-ahead is an act of its own, and no amount of upstream context substitutes for it.
+
+Three things that are routinely mistaken for one, and are not:
+
+- **The goal.** `--goal pr-comment` says what the artifact *is*, not that it may be published; "goal is pr comment" at the start of a session says the same thing and no more.
+- **A round answer.** Approving a draft entry approves the text, which is exactly why the tool refuses to `post` before it and still needs `--confirm` after.
+- **The absence of an objection.** A maintainer who never said "don't post" has not said anything.
+
+This holds for a review conducted entirely in chat too, where there is no draft entry and no `post` gate to stop you.
+The lighter the process, the more the rule is carrying: a chat review that skips the tool has skipped every mechanism that would otherwise ask.
+
+The worked example is a review of #154 that went well and then posted itself.
+The maintainer had opened with "this is a small one, so maybe in-chat is sufficient" and "goal is pr comment", read nothing, and found the comment already on the PR.
+A review the maintainer has not seen is a draft whatever its quality, and publishing one spends their credibility on findings they never agreed to.
 
 ### Docs are for users first, implementors second
 
@@ -168,6 +190,27 @@ Its key was `resolved_material::permutation_key`, which covers the resolution's 
 The emitted text also depends on the bindless table counts, the entry point and both include paths.
 A `gpu_resource_manager` configured with non-default budgets generated a shader declaring the *default* array sizes against a group layout of a different size.
 
+### Adding a member behind a seam means re-reading the seam's callers
+
+A vtable, a trait, an enum with a switch — the written contract covers the members that exist, and a caller is free to lean on a property all of them happen to share.
+The Nth member then arrives satisfying the written contract and not the unwritten one.
+Nothing in the diff shows it, because the caller's line did not change.
+
+So when a change plugs a new implementation into an existing seam, list that seam's callers and read each for an assumption only the old members satisfied.
+The tell is a comment at the call site explaining why the call is safe.
+That sentence is the unwritten contract, and it is exactly what nobody rechecks when a member is added.
+
+The worked example is clean-core's `declared_size`.
+It reports the uncompressed size a compressed blob declares, and for zstd and lz4 that number sits in the frame header.
+`decompressing_read_stream_adapter::impl_refill` therefore probed it from the first window of bytes the inner stream had buffered.
+The comment above that probe said so: "the declared size comes off the frame header".
+gzip declares its size in the *trailer*, so on a stream not fully buffered up front the probe read four bytes of compressed payload as a length, and `read_all` reserved on it — up to 4 GB.
+The seam's own contract was never violated, and both halves are correct read on their own.
+
+The generalization the maintainer drew is worth keeping beside it: **trailer metadata is a design smell for anything that cannot assume bounded frames.**
+"Seek to the end and read it properly" works only where the frame ends where the stream ends, which a blob embedded in a container never does.
+So the answer was that deflate has no streaming size hint at all, rather than a cleverer way to find one.
+
 ### "No callers in the repo" is not evidence of dead code
 
 It is evidence only for something the repo alone can use.
@@ -182,6 +225,35 @@ That is a schedule, not ossification.
 
 So **asking to down-pay debt in code the PR is already touching is a good finding**, and worth making concrete: name the call sites and the replacement.
 Asking to clean up code the PR does not touch is not.
+
+### A local helper is either a duplicate or a recorded gap, and it has to say which
+
+Every codec, parser and backend grows a handful of small private helpers — is this character whitespace, read four bytes in a stated byte order, append a string to a byte buffer.
+They are three to twenty lines each, obviously correct in isolation, and written without checking whether `cc` already has them.
+
+**Check the foundational libraries for each one.**
+The cost of the duplicate is not the lines.
+It is that the local copy is a *slightly different* function under the same name, and the difference surfaces later on an input nobody tested.
+
+Three outcomes, and the review's job is to sort each helper into one:
+
+- **It exists in `cc` (or `tg`)** — delete the local copy and call the real one.
+- **It does not exist and belongs there** — record it as a lower-library gap, and leave the local version with a one-line comment saying `cc` has no equivalent yet.
+  That comment is what stops the next reviewer re-raising it, and what stops the next author writing a fifth copy.
+- **It is genuinely specific to this format or backend** — leave it, unexplained is fine.
+
+The recorded-gap half is what makes the rule work in both directions.
+A repo that only ever says "use the `cc` one" pushes authors toward not writing helpers at all, which is worse.
+
+The worked example is pr-152's two native image codecs.
+`cc::is_space` exists in `clean-core/string/char_predicates.hh`, and both codecs defined their own — matching space, `\t`, `\r`, `\n`, but not the `\f` and `\v` that `cc::is_space` matches.
+A PFM header separated by a vertical tab therefore parsed as one glued token and returned a bogus dimensions error.
+`pfm.cc` also hand-rolled 34 lines of byte-order-explicit float load and store.
+`clean-core/common/endian.hh` already had `cc::load_bytes_le/be` and `cc::store_bytes_le/be`, under a header comment naming that exact use case as "the durable-format primitives".
+Meanwhile `trimmed` and `split_tokens` in the same files genuinely had no `cc` equivalent, and belonged in babel's `docs/lower-library-gaps.md` rather than being deleted.
+
+**Grep the foundational library for the helper's name and for what it does, not just its name.**
+`float_from_bytes` finds nothing; `load_bytes` finds the header that made it unnecessary.
 
 ### Portability floor: reject the non-portable thing on the dev box
 
@@ -205,6 +277,35 @@ The worked example is sv's per-permutation samplers.
 The viewer's TODO records it honestly: two materials sampling with different filters silently share the first one's sampler.
 The missing capability is a per-hit-group local root signature, and that genuinely waits for sg.
 Asserting on a *conflicting* state for an already-claimed register does not, costs nothing, and turns an unexplainable image into a message.
+
+### A change that touches an example is reviewed by looking at the example
+
+**Put the example's source and every image it produces in front of the maintainer, as an entry.**
+The [example-showcase](../../tools/review/docs/entry-types/example-showcase.md) type is the shape; this is why it is not optional.
+
+An example is a thing someone will read and a reference image is a thing someone will look at, and the diff shows neither.
+Approving a hunk in an example is approving a demonstration nobody demonstrated, and `Bin 0 -> 31695 bytes` is a picture nobody saw.
+Small examples go in whole, larger ones as a summary plus the code that carries the point, and every committed image goes in inline.
+
+**This applies to every changeset touching an example, a capture sidecar or a reference image.**
+The only exemption is a touch that could not change what the example shows — a rename, a formatting sweep, a bulk include fix.
+
+**Open the image.
+Do not infer it from the code.**
+This is where the findings are, because a run that neither crashes nor asserts routinely shows nothing worth looking at.
+That is the argument [examples.md](examples.md) itself makes for capturing while authoring.
+A review that reads the hunks and not the picture inherits exactly that blind spot.
+
+pr-150 is the worked case, on the branch that added headless capture.
+`vdoc/cube-viewer`'s committed reference image showed its imgui panel about 110 pixels wide, every sentence wrapping to two or three words a line and one breaking mid-word.
+The cause was one missing `SetNextWindowSize` beside a `SetNextWindowPos`, next to a sibling example that has both.
+It had been invisible for as long as the example existed, because both examples restore a saved layout.
+`ImGuiCond_FirstUseEver` then means the developer's own window — dragged wide once, months ago — is what they had seen ever since.
+Nothing in the diff could have shown it, and the image showed it immediately.
+The same pass found an em-dash the imgui font cannot draw, rendering as `?`, and `hello-cube`'s six declared face colours reduced to one legible face by an overhead light three stops into clipping.
+
+**Findings from an image live in that entry**, beside the picture that is their evidence, rather than in a finding entry of their own.
+And **offer the deferral**: an imperfect example is not a reason to hold a change.
 
 ### A gap the author names is where to look, and often where to defer
 
@@ -266,6 +367,55 @@ The check is cheap and specific: grep the constructor of the value, not the type
 **Beware two mechanisms with similar names.**
 The same review asserted a cache key moved on an include edit, against a header saying it does not.
 Both were true — of the DXC compile key and of the slib asset key — and the finding named neither, so it read as contradicting the document it was asking to correct.
+
+### A UB claim is checked against the standard the repo compiles as
+
+C++20 redefined signed left shift as modular rather than undefined, so `255 << 24` is well-defined in this repo's C++23 and yields a negative number.
+A reviewer running on a pre-C++20 reflex files "this is UB", and the author checks the standard and discards the finding.
+
+Worse, the reflex hides the real bug.
+pr-152 is the worked case: `decode_flat_scanline` was filed as signed-overflow UB, and the actual defect was what the well-defined negative value then does.
+A negative `run` passes the `x + run > width` guard, drives `x` negative, and the next iteration memcpys through a pointer below the buffer — an out-of-bounds write rather than an overflow.
+The wrong claim was less severe than the truth.
+
+**Say which construct is undefined and why, and check the version.**
+Shifts, signed overflow, `char` signedness and aggregate init all changed under recent standards.
+
+### Verbatim means pasted
+
+A quoted `///`, doc line or comment is a claim about a file, and it is checked the same way a line number is.
+Retyping one from memory truncates it, moves a comma, or silently merges two lines into a sentence the file does not contain.
+
+pr-152 quoted `clean-core/common/endian.hh` in one sentence.
+The file has it as two lines, and the second one ends `..., and reading it must never depend on the host's.`
+The file has two lines, and the second ends `..., and reading it must never depend on the host's.`
+The truncation landed exactly where the quote stopped supporting the point being made, which is the shape a reader notices.
+
+Paste it, keep its line breaks, and cite the line the paste starts at.
+
+### A rename's call-site list comes from a grep of the name
+
+Listing the sites you happened to read while forming the finding is not the same as listing the sites.
+The ones missed are systematically the ones a reviewer does not visit.
+A comment mentioning the symbol, a family list in a neighbouring header's `///`, a doc that recorded the symbol back when it was a gap.
+
+pr-152 named five places to update for a `tg::pow2` rename and missed four.
+The declaration's own doc comment, a family list in `scalar/traits.hh`, a prose mention in the calling `.cc`, and the retired-gap entry in babel's `lower-library-gaps.md`.
+Every one of them was a plain text match on the name.
+
+An instruction the author has to complete themselves is not an instruction.
+
+### A bound is checked against every path the code dispatches to
+
+When a finding recommends replacing a constant limit with one derived from the input, enumerate the code paths that limit has to hold for.
+The derivation is usually worked out against the path the reviewer just read, and a second path with a different expansion factor makes it reject valid input.
+
+pr-152: an allocation ceiling derived from the remaining bytes was correct for HDR's adaptive RLE, which expands at most about 16 pixels per byte.
+`read` dispatches per scanline, and the flat path's `1 1 1 n` marker expands 4 bytes into up to 255 pixels — more once a marker chain is allowed.
+Shipped, it would have rejected legal old-format files.
+
+The honest conclusion was that a run-length format has no linear bound and wants a sane constant instead, which is a different recommendation from the one the maintainer had already approved.
+**Catching this after approval is normal; that is what the adversarial pass is for.** Supersede the recommendation rather than shipping the approved-but-wrong one.
 
 ### Do not hand back work you already did
 

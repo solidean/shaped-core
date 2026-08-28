@@ -441,6 +441,8 @@ sv::view_renderer::execute(cmd, view_data, resources, store) -> sg::texture_2d
                                                           //   the store owns it: holding it past the next execute/begin_frame for that id is invalid
                                                           //   assumes ONE traced layer per view; the plan path below is per (view, layer)
 store.accumulated_frames(view_id) -> u32                  // frames accumulated so far; 0 after a restart. For tests and debug overlays
+store.min_accumulated_frames(id) / .is_accumulation_converged(id, frames = {})
+                                                         // the same folded over EVERY traced layer — what convergence actually means
 
 // The whole frame, from its plan: every trace first, then one pass per refreshing target, the output last.
 sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // output = a sg::color_target, e.g. rt.cleared(clear_color)
@@ -487,7 +489,9 @@ store.begin_frame(u64(ctx.current_epoch()))   // reclaim against the just-finish
 store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_ptr is null when absent; both mark it used
 store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
-store.accumulated_frames(id) -> u32
+store.accumulated_frames(id) -> u32           // one named slot, defaulting to accumulation(0) — the layer, not the view
+store.min_accumulated_frames(id) -> u32       // the lowest across every traced layer; sv::impl::min_accumulated_frames is the rule
+store.is_accumulation_converged(id, frames = {}) -> bool   // every traced layer reached `frames`, or stopped at sv::accumulation_frame_cap
 sv::impl::view_state                 // the record: display_name, controller, camera, placement, zoom, composite, temporal, last_refresh_frame
 sv::impl::temporal_slot              // { texture_2d texture; u64 reset_hash; u32 accum_frame; }
 st.temporal                          // cc::map<u64, temporal_slot> — KEYED by temporal_input::id, not indexed by layer
@@ -517,8 +521,10 @@ sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_functi
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
 
-sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count }
+sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count, headless }
                                  //   title is optional: unset takes the id, up to its ## — so naming a viewer usually titles it too
+                                 //   headless: no window system, no window, no swapchain, nothing presented — composites into an offscreen texture
+                                 //   SC_CAPTURE turns this on by itself and installs a capture, but only for an example its .capture.json declares
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
@@ -540,6 +546,18 @@ auto id = frame.scoped_id(i);  frame.id_seed()                 // RAII id scope,
 frame.push_id(i) / frame.pop_id()                              // the same, explicit — every push needs its pop
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
+frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)
+                                                               //   0 does NOT mean settled, and it never restarts accumulation: that work
+                                                               //   changes a texture's contents, not its id, so accumulated_frames cannot see it
+view.accumulated_frames() -> u32                                // the SLOWEST traced layer's count; 0 for a view with none
+                                                               //   never layer 0 by fiat: a layout or ui layer below the scene puts the trace at 1
+view.is_accumulation_converged(frames = {}) -> bool             // ASK THIS, not the counter: a layer stops at sv::accumulation_frame_cap (4096),
+                                                               //   so a target above the cap is one `accumulated_frames()` can never reach
+                                                               //   unset frames = "finished as far as it can"; false for a view with no traced layer
+frame.register_capture("name", body)                           // a named capture; body runs INLINE here, every frame, only when it is the one taken
+                                                               //   takes sv::capture_context { first_frame, name, size }
+                                                               //   MUST be idempotent after the first frame, or accumulation never settles
+                                                               //   the name must also appear in the example's .capture.json; a mismatch fails, never falls back
 
 // on a view — the layout layer is created lazily, so you only pay for what you name
 view.add_scene()                 -> scene_ref                  // APPENDS a 3D layer; a traced layer is forced to `replace`, so a second one overwrites the first

@@ -80,7 +80,7 @@ void draw_inspector(document& doc, vdoc::entity_id selected)
     auto const* const s = doc.current().get<style>(selected);
     if (p == nullptr || s == nullptr)
     {
-        ImGui::TextUnformatted("nothing selected — click a cube");
+        ImGui::TextUnformatted("nothing selected - click a cube");
         return;
     }
 
@@ -121,7 +121,7 @@ void draw_timeline(document& doc)
     auto const count = int(doc.timeline().size());
     auto revision = doc.revision();
 
-    ImGui::Text("%d revisions", count);
+    ImGui::Text(count == 1 ? "%d revision" : "%d revisions", count);
     if (ImGui::SliderInt("revision", &revision, 0, count - 1))
         doc.show_revision(revision);
 
@@ -129,7 +129,7 @@ void draw_timeline(document& doc)
 
     if (revision != count - 1)
     {
-        ImGui::TextWrapped("Editing from here branches — the revisions after this one are simply left behind.");
+        ImGui::TextWrapped("Editing from here branches - the revisions after this one are simply left behind.");
         if (ImGui::Button("back to the newest"))
             doc.show_revision(count - 1);
     }
@@ -151,10 +151,12 @@ EXAMPLE("vdoc/cube-editor")
 
     // The panel layout lives in the workspace too, so no imgui.ini is written anywhere.
     // It must be restored before the first frame, and under a name of its own — the viewer example opens this same file.
-    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value())
+    // Skipped under capture: a reference image shows a first run, not whatever the last session left here.
+    if (auto const ini = doc.value().load_ui_settings(ui_name); ini.has_value() && !app->is_capturing())
         app->imgui().load_settings(ini.value());
 
-    auto camera = doc.value().load_camera().value_or(cube_editor::orbit_camera());
+    auto camera = app->is_capturing() ? cube_editor::orbit_camera()
+                                     : doc.value().load_camera().value_or(cube_editor::orbit_camera());
     auto selected = vdoc::entity_id();
     auto orbiting = false;
 
@@ -185,7 +187,9 @@ EXAMPLE("vdoc/cube-editor")
         ImGui::SetNextWindowSize(ImVec2(360, 520), ImGuiCond_FirstUseEver);
         ImGui::Begin("cube editor");
 
-        ImGui::TextUnformatted("left-click a cube to select, right-drag to orbit, scroll to zoom");
+        // Wrapped rather than unformatted: at the window's own default width this line runs past the edge and is
+        // simply cut off, which is what the committed reference image showed.
+        ImGui::TextWrapped("left-click a cube to select, right-drag to orbit, scroll to zoom");
         ImGui::Separator();
 
         ImGui::SeparatorText("scene");
@@ -211,14 +215,19 @@ EXAMPLE("vdoc/cube-editor")
         app->end_frame(doc.value().current(), camera, selected);
 
         // Empty on nearly every frame: imgui only asks for a save a few seconds after something moved.
-        if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value())
+        if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value() && !app->is_capturing())
             doc.value().store_ui_settings(ui_name, ini.value());
     }
 
-    // The last few seconds of layout are still only in imgui, so the exit save is unconditional — and must precede `app` going away.
-    doc.value().store_ui_settings(ui_name, app->imgui().settings());
-    doc.value().store_camera(camera);
-    doc.value().save();
+    // The last few seconds of layout are still only in imgui, so the exit save must precede `app` going away.
+    // Skipped under capture, which is the other half of loading nothing: a capture moved no camera and dragged no
+    // panel, so writing its defaults back would replace whatever the last real session arranged.
+    if (!app->is_capturing())
+    {
+        doc.value().store_ui_settings(ui_name, app->imgui().settings());
+        doc.value().store_camera(camera);
+        doc.value().save();
+    }
     cc::println("{} revisions in the document; reopen to find it exactly as you left it", doc.value().timeline().size());
 }
 

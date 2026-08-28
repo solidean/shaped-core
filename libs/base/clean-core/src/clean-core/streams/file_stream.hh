@@ -70,6 +70,11 @@ private:
 
 /// Buffered write adapter over a file, handing out a seekable_write_stream.
 /// Unbounded: a write-flush always frees the whole buffer (curr < end) unless the disk errors.
+///
+/// **Flush before the adapter dies.** The destructor closes the file without draining, so whatever is still in the
+/// window is lost and the file ends on a `k_buffer_size` boundary.
+/// A truncated file is rarely an obvious one: a JPEG cut mid-scan still decodes, flat-filling the tail from the last
+/// value it read, which reads as a bug in whatever produced the pixels rather than in the writing.
 class cc::file_write_stream_adapter
 {
 public:

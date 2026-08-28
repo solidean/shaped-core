@@ -6,6 +6,7 @@
 #include <shaped-viewer/fwd.hh>
 
 // immediate-mode viewer
+#include <shaped-viewer/capture.hh>
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/interactive.hh>

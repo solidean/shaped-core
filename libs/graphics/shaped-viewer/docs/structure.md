@@ -31,6 +31,10 @@ layout_routine                           [done]         the ONE routine that wri
                                                         sv no longer uses sr::blit_routine — compositing lives in one place
 view_renderer                            [done]         allocates every texture a plan names (touching even throttled views) and records one trace per scene_3d layer
 viewer_renderer                          [done]         replays a plan: every trace first, then one layout_routine pass per refreshing target. Nesting falls out of the ordering
+headless capture (capture.hh)            [done]         SC_CAPTURE runs the loop with no window system, no window and no swapchain, composites into an offscreen texture,
+                                                        waits for the image to settle and writes it. An example costs zero lines; docs/guides/examples.md is the workflow.
+                                                        Settled is a conjunction: accumulated frames per traced view, no pending post-load work, AND a trace that dispatched —
+                                                        the last is what stops an uncompiled pipeline from writing a black image at full count
 authoring API (interactive / refs)       [done]         sv::interactive -> frame -> window_ref -> view_ref -> layout_ref / leaf_ref / scene_ref.
                                                         A frame inherits the window surface, which inherits the view surface, so f.add_scene() == f.window().view().add_scene()
 context provider (set_acquire_context)   [done]         an overridable hook, called at most once per process; the default brings up dx12 (hardware, then WARP)

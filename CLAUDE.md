@@ -351,6 +351,8 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Run one example                  | `uv run dev.py example <match>` (no arg lists them all; [examples](docs/guides/examples.md)) |
+| See what a graphical example looks like | `uv run dev.py example <match> --capture` — headless, writes an image, needs no display. **Use it while writing one**: a run that neither crashes nor asserts routinely shows nothing worth looking at |
+| Refresh the committed example images | `uv run dev.py example --update-captures "<matcher>"` (capture + copy; `--refresh-captures` copies only) |
 | Run a benchmark                  | `uv run dev.py benchmark <match>` (no arg lists them all; defaults to a `release-*` preset; [benchmarking](docs/guides/benchmarking.md)) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |

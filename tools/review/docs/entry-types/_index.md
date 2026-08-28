@@ -37,6 +37,11 @@ Take its structure and its examples, and drop anything the change does not have.
   *Applies: when the change adds, removes or reshapes a public symbol — a header, an exported type, a CLI surface.
   Skip it for a change that is entirely internal, or for a tool with no library API.*
 
+- [example-showcase](example-showcase.md) — **the example itself, and the picture it produces.**
+  The body as it reads after the change, and every committed image inline, so the maintainer judges a demonstration rather than a hunk.
+  What comes out of looking — a clipped label, a panel at its auto-fit width, a subject that is not legible — is a finding, and it lives in this entry beside its evidence.
+  *Applies: whenever the change touches an example, a capture sidecar or a reference image, unless the touch is mechanical.*
+
 - [example-evidence](example-evidence.md) — **what the examples actually printed, run rather than described.**
   The one type with a block of its own, because "quote the output" is a claim nobody downstream can check.
   *Applies: when the change adds examples, or reworks existing ones enough that a reader would want to see them run.*
@@ -53,12 +58,13 @@ Take its structure and its examples, and drop anything the change does not have.
 
 ## Where they sit
 
-The numbering is the reading order, and these three anchor it:
+The numbering is the reading order, and the fixed positions anchor it:
 
 ```
 010-orientation.md     the reviewer's own framing        (authored)
 015-changes.md         the range, its commits, its shape (generated)
 018-glossary.md        the vocabulary                    (authored)
+02x-example-*.md       the examples, and their images    (authored)
 0xx-...                the findings                      (authored)
 980-verdict.md         the big picture                   (authored)
 985-draft-comment.md   the artifact, before it is posted (authored)

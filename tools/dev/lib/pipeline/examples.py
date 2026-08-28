@@ -38,6 +38,19 @@ class Example:
     line: int
 
 
+def capture_directory(preset: Preset, example_name: str, shot: str = "") -> Path:
+    """Where one capture's artifacts land: `build/<preset>/captures/<example>/<shot>/`.
+
+    Under the build directory rather than beside the example, because a capture must never dirty the source tree — it is runnable by anyone, at any time, including from CI.
+    Copying the image next to its example is the separate refresh step, and only a capture that succeeded is ever copied.
+
+    That location also inherits what the build directory already has: the gitignore, the log archiving, and the CI
+    upload that makes a runner-only failure diagnosable.
+    """
+    parts = example_name.split("/")
+    return preset.build_dir / "captures" / Path(*parts) / (shot or "default")
+
+
 def is_example_target(target: Target) -> bool:
     """Project convention: example executables are named '*-example'."""
     return target.kind == "EXECUTABLE" and target.name.endswith("-example")
@@ -120,6 +133,24 @@ def collect_examples(
         _store_cache(cache_path, fresh)
 
     return sorted(examples, key=lambda e: e.name)
+
+
+def select_examples(examples: list[Example], match: str) -> list[Example]:
+    """Every example `match` selects, for a sweep — the many-match sibling of `resolve_example`.
+
+    Deliberately not the same function.
+    Running one example must refuse an ambiguous match, because running "the first one that matched" would silently run
+    the wrong thing.
+    A sweep wants exactly the opposite, and an empty match means the whole corpus.
+
+    That is only safe because a sweep is headless.
+    `--all` is refused for running examples precisely because it would open every window there is, and a capture opens none.
+    """
+    if not match:
+        return list(examples)
+
+    needle = match.lower()
+    return [e for e in examples if needle in e.name.lower()]
 
 
 def resolve_example(examples: list[Example], match: str) -> tuple[Example | None, str | None]:

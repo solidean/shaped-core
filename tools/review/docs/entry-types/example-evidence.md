@@ -58,10 +58,10 @@ Does this demonstrate what a reader needs?
 - check: it should also show the failure case
 ```
 
-## What does not exist yet
+## Screenshots are somebody else's block
 
-**Screenshots are a feature of the example, not of this tool.**
-A graphical example has no headless capture mode, and `docs/guides/examples.md` names the slash path as "the screenshot slug, once preview rendering lands", which it has not.
+**A graphical example has a headless capture mode now**, so a screenshot is no longer a manual drop.
+`uv run dev.py example <match> --capture` writes an image with no display, and `--update-captures` sweeps every example a `.capture.json` declares.
 
-Until then a screenshot is a manual capture dropped into `attachments/`, which is fine for the handful of examples a change touches and does not scale to a sweep.
-Name that limit in the entry rather than working around it quietly.
+That belongs in an [example-showcase](example-showcase.md) entry rather than here.
+This type is about output the tool ran and captured; an image wants to be looked at rather than quoted.

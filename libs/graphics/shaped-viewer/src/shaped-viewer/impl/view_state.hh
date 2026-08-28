@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-viewer/fwd.hh>
@@ -131,4 +132,25 @@ struct view_state
     /// The one piece of history with no texture to read it off, so the frame stamps it.
     u64 last_refresh_frame = 0;
 };
+
+// -- Folding over a view's traced layers.
+//
+// One rule in one place, because the alternative already went wrong: `view_ref::accumulated_frames` read
+// `temporal_id::accumulation(0)` by hand while the capture path read the layer its plan named, so a view whose trace
+// was not layer 0 reported zero forever and nothing waiting on it ever finished.
+// Every caller asking "how far has this view got" goes through these two.
+
+/// The lowest accumulated-frame count across every traced layer of `state`, and 0 when it has none.
+///
+/// The lowest rather than the first: a view converges when its slowest layer does.
+[[nodiscard]] u32 min_accumulated_frames(view_state const& state);
+
+/// Whether every traced layer of `state` has reached `frames`, or has stopped climbing and never will.
+///
+/// An unset `frames` asks only the second question — has this view finished as far as it can.
+/// The cap matters because it is reachable: a caller asking for more frames than `sv::accumulation_frame_cap` would
+/// otherwise wait on a counter that stopped moving, which is a capture burning its whole timeout on an image that
+/// was already as converged as it gets.
+/// False for a view with no traced layer at all, since nothing there has converged.
+[[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> frames);
 } // namespace sv::impl

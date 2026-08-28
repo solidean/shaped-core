@@ -9,6 +9,9 @@
 
 namespace sr
 {
+// the capture protocol (see capture.hh)
+struct capture_request;
+
 // Vocabulary types (i32/u32/f32/isize/...) available bare inside sr, not leaked globally.
 using namespace cc::primitive_defines;
 

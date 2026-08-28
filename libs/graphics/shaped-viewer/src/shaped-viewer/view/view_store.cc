@@ -88,4 +88,54 @@ u32 view_store::accumulated_frames(view_id id, u64 temporal_id) const
     auto const* const slot = st->temporal.get_ptr(temporal_id);
     return slot == nullptr ? 0 : slot->accum_frame;
 }
+
+u32 view_store::min_accumulated_frames(view_id id) const
+{
+    auto const* const st = _entries.peek_ptr(id);
+    return st == nullptr ? 0 : impl::min_accumulated_frames(*st);
+}
+
+bool view_store::is_accumulation_converged(view_id id, cc::optional<u32> frames) const
+{
+    auto const* const st = _entries.peek_ptr(id);
+    return st != nullptr && impl::is_accumulation_converged(*st, frames);
+}
+
+namespace impl
+{
+// Defined here rather than in a translation unit of their own: `view_state` is a header-only aggregate, and one fold
+// over its temporal map does not earn a second .cc in the build.
+
+u32 min_accumulated_frames(view_state const& state)
+{
+    auto lowest = cc::optional<u32>();
+    for (auto const& [id, slot] : state.temporal)
+    {
+        if (!temporal_id::is_accumulation(id))
+            continue;
+        if (!lowest.has_value() || slot.accum_frame < lowest.value())
+            lowest = slot.accum_frame;
+    }
+    return lowest.value_or(0);
+}
+
+bool is_accumulation_converged(view_state const& state, cc::optional<u32> frames)
+{
+    auto any = false;
+    for (auto const& [id, slot] : state.temporal)
+    {
+        if (!temporal_id::is_accumulation(id))
+            continue;
+        any = true;
+
+        // Stopped counts as converged: the estimator has stopped weighting new samples in, so waiting longer buys
+        // nothing and a target above the cap would never be reached.
+        auto const stopped = slot.accum_frame >= accumulation_frame_cap;
+        auto const reached = frames.has_value() && slot.accum_frame >= frames.value();
+        if (!stopped && !reached)
+            return false;
+    }
+    return any;
+}
+} // namespace impl
 } // namespace sv
