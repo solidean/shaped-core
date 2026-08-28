@@ -1,6 +1,8 @@
 #include <babel-serializer/image/hdr.hh>
+#include <clean-core/common/endian.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/string/string_view.hh>
@@ -22,10 +24,19 @@ constexpr float k_black_cutoff = 1e-32f;
 constexpr float k_saturation_cutoff = 1.70141183e38f;
 
 // A file claiming more than this many pixels is rejected before anything is allocated.
-constexpr isize k_max_pixels = isize(1) << 32;
+// 2^28 is a 16384 x 16384 image, past any real .hdr, and it caps a decode at roughly 3 GB across the packed
+// RGBE buffer and the floats it expands into.
+// A bound derived from the bytes that remain, the way pfm.cc does it, is not available here: one flat repeat
+// marker expands four bytes into up to 255 << 16 pixels, so the input length bounds neither dimension.
+constexpr isize k_max_pixels = isize(1) << 28;
+
+// The largest shift a chain of consecutive `1 1 1 n` markers may reach.
+// 255 << 16 already overruns every scanline width the format allows, so nothing legitimate is lost, and a
+// shift of 32 or more would be undefined behaviour outright.
+constexpr int k_max_repeat_shift = 16;
 
 // --- RGBE <-> f32 ----------------------------------------------------------------------------------------
-// The whole conversion is base-two arithmetic on a shared exponent, so it goes through tg::pow2 / tg::exponent_of
+// The whole conversion is base-two arithmetic on a shared exponent, so it goes through tg::pow2_by_int / tg::exponent_of
 // rather than a multiply: every scale below is a power of two, and none of them costs precision.
 
 void rgbe_to_floats(byte const* rgbe, float* out)
@@ -41,7 +52,12 @@ void rgbe_to_floats(byte const* rgbe, float* out)
 
     // The mantissas are NOT offset by half a step on the way back: the encoder below rounds rather than
     // truncating, so the pair is already centered, and an exactly-zero channel stays exactly zero.
-    auto const scale = tg::pow2<double>(exponent - (128 + 8));
+    // That pairing is OURS, and it is not what a foreign file was written against.
+    // stb_image_write and Radiance's own writer truncate the mantissa, and neither compensates on the way
+    // back, so a .hdr from either reads about half a mantissa step low here.
+    // A `write_options { bool round_mantissas = true; }` is where stb-exact output would go if it is ever
+    // wanted; there is deliberately no knob on `read`, which cannot know which writer produced a file.
+    auto const scale = tg::pow2_by_int<double>(exponent - (128 + 8));
     out[0] = float(double(int(u8(rgbe[0]))) * scale);
     out[1] = float(double(int(u8(rgbe[1]))) * scale);
     out[2] = float(double(int(u8(rgbe[2]))) * scale);
@@ -82,7 +98,7 @@ void floats_to_rgbe(float const* rgb, byte* out)
     // Radiance biases the exponent by 128 over a mantissa in [0.5, 1), one below tg's [1, 2) — hence the extra 1.
     // The mantissa scale then falls out as a pure power of two, since `largest` divided by its own exponent is the mantissa.
     auto const exponent = tg::exponent_of(largest) + 1 + 128;
-    auto const scale = tg::pow2<double>((128 + 8) - exponent);
+    auto const scale = tg::pow2_by_int<double>((128 + 8) - exponent);
 
     out[0] = quantize_mantissa(rgb[0], scale);
     out[1] = quantize_mantissa(rgb[1], scale);
@@ -99,6 +115,7 @@ struct line_view
     isize next = 0;
 };
 
+/// cc::string_view has no line iterator yet.
 line_view next_line(cc::span<byte const> bytes, isize pos)
 {
     auto end = pos;
@@ -112,30 +129,27 @@ line_view next_line(cc::span<byte const> bytes, isize pos)
     return {.text = text, .next = end < bytes.size() ? end + 1 : end};
 }
 
-bool is_space(char c)
-{
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
-
+/// cc::string_view has no trim yet.
 cc::string_view trimmed(cc::string_view s)
 {
-    while (!s.empty() && is_space(s.front()))
+    while (!s.empty() && cc::is_space(s.front()))
         s.remove_prefix(1);
-    while (!s.empty() && is_space(s.back()))
+    while (!s.empty() && cc::is_space(s.back()))
         s.remove_suffix(1);
     return s;
 }
 
 /// Split a line on whitespace runs, appending to `out`.
+/// cc::string_view has no split yet.
 void split_tokens(cc::string_view line, cc::vector<cc::string_view>& out)
 {
     auto pos = isize(0);
     while (pos < line.size())
     {
-        while (pos < line.size() && is_space(line[pos]))
+        while (pos < line.size() && cc::is_space(line[pos]))
             ++pos;
         auto const start = pos;
-        while (pos < line.size() && !is_space(line[pos]))
+        while (pos < line.size() && !cc::is_space(line[pos]))
             ++pos;
         if (pos > start)
             out.push_back(line.subview({.start = start, .end = pos}));
@@ -217,28 +231,26 @@ cc::result<cc::unit> decode_flat_scanline(cc::span<byte const> bytes, isize& pos
         if (x == 0)
             return cc::error("hdr: repeat marker at the start of a scanline has nothing to repeat");
 
-        auto const run = int(u8(bytes[pos + 3])) << shift;
+        // Both guards are load-bearing: past k_max_repeat_shift the shift itself is undefined, and the run
+        // is formed in i64 so that a wide one is rejected here rather than wrapping `x` negative below.
+        if (shift > k_max_repeat_shift)
+            return cc::error("hdr: repeat marker chain is longer than any legal run");
+
+        auto const run = i64(u8(bytes[pos + 3])) << shift;
         pos += 4;
-        if (x + run > width)
+        if (run < 0 || i64(x) + run > i64(width))
             return cc::error("hdr: repeat run overruns the scanline");
 
         auto const* const previous = row + (x - 1) * 4;
-        for (auto i = 0; i < run; ++i)
-            cc::memcpy(row + (x + i) * 4, previous, 4);
+        for (auto i = i64(0); i < run; ++i)
+            cc::memcpy(row + (i64(x) + i) * 4, previous, 4);
         shift += 8;
-        x += run;
+        x += int(run);
     }
     return cc::unit{};
 }
 
 // --- encoding --------------------------------------------------------------------------------------------
-
-void append_text(cc::vector<byte>& out, cc::string_view text)
-{
-    auto const old = out.size();
-    out.resize_to_uninitialized(old + text.size());
-    cc::memcpy(out.data() + old, text.data(), size_t(text.size()));
-}
 
 /// Emit one component plane of a scanline as runs and literals.
 void encode_rle_plane(cc::vector<byte>& out, byte const* row, int width, int component)
@@ -383,7 +395,7 @@ cc::result<data> read(cc::span<byte const> bytes)
         auto* const row = rgbe.data() + isize(y) * result.width * 4;
 
         auto const has_rle_marker = pos + 4 <= bytes.size() && u8(bytes[pos]) == 2 && u8(bytes[pos + 1]) == 2
-                                 && (int(u8(bytes[pos + 2])) << 8 | int(u8(bytes[pos + 3]))) == result.width;
+                                 && int(cc::load_bytes_be<u16>(bytes, pos + 2)) == result.width;
         auto const rle_width = result.width >= k_min_rle_width && result.width <= k_max_rle_width;
 
         if (has_rle_marker && rle_width)
@@ -433,16 +445,18 @@ cc::result<cc::vector<byte>> encode(data const& img, write_options opts)
 
     auto out = cc::vector<byte>();
 
-    append_text(out, "#?RADIANCE\n");
-    append_text(out, img.format == pixel_format::xyze ? "FORMAT=32-bit_rle_xyze\n" : "FORMAT=32-bit_rle_rgbe\n");
+    out.push_back_range(cc::string_view("#?RADIANCE\n").as_bytes());
+    out.push_back_range(cc::string_view(img.format == pixel_format::xyze ? "FORMAT=32-bit_rle_xyze\n" //
+                                                                         : "FORMAT=32-bit_rle_rgbe\n")
+                            .as_bytes());
     if (img.exposure.has_value())
-        append_text(out, cc::format("EXPOSURE={}\n", img.exposure.value()));
+        out.push_back_range(cc::format("EXPOSURE={}\n", img.exposure.value()).as_bytes());
     if (img.pixel_aspect.has_value())
-        append_text(out, cc::format("PIXASPECT={}\n", img.pixel_aspect.value()));
+        out.push_back_range(cc::format("PIXASPECT={}\n", img.pixel_aspect.value()).as_bytes());
     if (!img.software.empty())
-        append_text(out, cc::format("SOFTWARE={}\n", img.software));
-    append_text(out, "\n");
-    append_text(out, cc::format("-Y {} +X {}\n", img.height, img.width));
+        out.push_back_range(cc::format("SOFTWARE={}\n", img.software).as_bytes());
+    out.push_back_range(cc::string_view("\n").as_bytes());
+    out.push_back_range(cc::format("-Y {} +X {}\n", img.height, img.width).as_bytes());
 
     auto const use_rle = opts.run_length_encode && img.width >= k_min_rle_width && img.width <= k_max_rle_width;
 

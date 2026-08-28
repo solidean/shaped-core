@@ -3,6 +3,7 @@
 #include <babel-serializer/fwd.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/streams/stream.hh> // cc::read_stream / cc::write_stream
 
@@ -81,12 +82,14 @@ namespace babel::pfm
 } // namespace babel::pfm
 
 /// PFM encode knobs.
-/// The scale factor is not one of them — it travels in `data::scale`, so a decoded file re-encodes to the same header.
+/// Defaulted, they buy round-trip fidelity: a decoded file re-encodes to the same header, because the scale
+/// factor travels in `data::scale` and the byte order in `data::byte_order`.
 struct babel::pfm::write_options
 {
     /// Byte order to write the samples in, which is also the sign of the scale line.
-    /// Little-endian is what every current platform reads fastest and what most writers emit.
-    endianness byte_order = endianness::little;
+    /// Unset takes the image's own `byte_order`, which is little-endian for a freshly built `data` and the
+    /// file's own order for a decoded one.
+    cc::optional<endianness> byte_order = {};
 };
 
 namespace babel::pfm

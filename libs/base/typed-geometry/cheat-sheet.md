@@ -328,8 +328,8 @@ tg::atan2(y, x);                          // (T, T) -> angle<T>     — requires
 tg::pow(base, exp);                       // (T, T) -> T            — same T both sides; requires has_exponential<T>
 tg::exp(x); tg::log(x);                   // T -> T                 — log needs x > 0
 tg::round(x); tg::floor(x); tg::ceil(x);  // T -> T                 — requires has_rounding<T>; float-only
-tg::pow2<T>(n);                           // int -> T               — 2^n exactly; requires has_pow2<T>
-tg::scale_by_pow2(x, n);                  // (T, int) -> T          — x * 2^n exactly (C's ldexp)
+tg::pow2_by_int<T>(n);                    // int -> T               — 2^n exactly; requires has_pow2<T>
+tg::scale_by_pow2(x, n);                  // (T, int) -> T          — x * 2^n exactly (C's ldexp); n must be integral
 tg::exponent_of(x);                       // T -> int               — floor(log2(|x|)); x finite and non-zero
 tg::split_pow2(x);                        // T -> tg::pow2_split<T> {significand, exponent}
 tg::pi<T>;                                // inline constexpr T  (scalar/constants.hh)

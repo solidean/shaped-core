@@ -27,6 +27,14 @@ struct write_options;
 // the relative error is ~0.2% of that maximum, and a channel far below it loses precision accordingly.
 // It is a lossy encoding of the f32 values handed to `encode`, unlike PFM, which stores the bits.
 //
+// OUR ENCODER ROUNDS THE MANTISSA; THE COMMON WRITERS TRUNCATE IT.
+// Rounding on the way out is what lets the decoder read a mantissa back unshifted, which keeps an exactly-zero
+// channel exactly zero — the pairing is ours, and a round-trip through this codec is centered.
+// stb_image_write and Radiance's own writer truncate instead, so a foreign `.hdr` decodes about half a mantissa
+// step low, systematically rather than as noise.
+// That is inside the ~0.2% budget above, and `read` takes no knob for it: nothing in a file says which writer
+// produced it.
+//
 //   auto const img = babel::hdr::read(bytes).value();
 //   auto const rgb = img.samples_f32(); // width * height * 3 linear radiance values, top-left origin
 

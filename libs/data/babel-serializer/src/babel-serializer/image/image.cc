@@ -44,15 +44,26 @@ cc::string_view name_of(format fmt)
     return "?";
 }
 
+cc::string_view name_of(component comp)
+{
+    switch (comp)
+    {
+    case component::u8:
+        return "u8";
+    case component::u16:
+        return "u16";
+    case component::f32:
+        return "f32";
+    }
+    return "?";
+}
+
 cc::result<cc::unit> check_encode_component(image const& img, format fmt)
 {
     auto const expected = component_of(fmt);
     if (img.comp != expected)
-        return cc::error(cc::format("image encode: {} stores {} samples, but the image carries {}", name_of(fmt),
-                                    expected == component::f32 ? "f32" : "u8", //
-                                    img.comp == component::f32   ? "f32"
-                                    : img.comp == component::u16 ? "u16"
-                                                                 : "u8"));
+        return cc::error(cc::format("image encode: {} stores {} samples, but the image carries {}", //
+                                    name_of(fmt), name_of(expected), name_of(img.comp)));
     return cc::unit{};
 }
 } // namespace
@@ -124,7 +135,8 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::png::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::u8};
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::png)};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -133,7 +145,8 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::jpg::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::u8};
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::jpg)};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -142,7 +155,8 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::hdr::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::f32};
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::hdr)};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -151,7 +165,8 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto decoded = babel::pfm::read(bytes);
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
-        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::f32};
+        auto result
+            = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(format::pfm)};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }

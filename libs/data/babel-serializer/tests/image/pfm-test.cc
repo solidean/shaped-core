@@ -40,6 +40,16 @@ bool samples_equal(cc::span<float const> a, cc::span<float const> b)
     return true;
 }
 
+bool bytes_equal(cc::span<byte const> a, cc::span<byte const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < a.size(); ++i)
+        if (a[i] != b[i])
+            return false;
+    return true;
+}
+
 void append_text(cc::vector<byte>& out, cc::string_view text)
 {
     for (auto const c : text)
@@ -103,6 +113,29 @@ TEST("pfm - big-endian files carry the same values and a positive scale")
     REQUIRE(decoded.has_value());
     CHECK(decoded.value().byte_order == pfm::endianness::big);
     CHECK(samples_equal(decoded.value().samples_f32(), src.samples_f32()));
+}
+
+TEST("pfm - a decoded big-endian file re-encodes to the same header")
+{
+    auto const src = make_gradient(6, 2, 3);
+
+    auto const big = pfm::encode(src, {.byte_order = pfm::endianness::big});
+    REQUIRE(big.has_value());
+
+    auto const decoded = pfm::read(big.value());
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded.value().byte_order == pfm::endianness::big);
+
+    // Default options take the image's own byte order, so the scale line keeps its positive sign
+    // and the whole file comes back byte for byte.
+    auto const again = pfm::encode(decoded.value());
+    REQUIRE(again.has_value());
+    CHECK(bytes_equal(again.value(), big.value()));
+
+    auto const header_size = again.value().size() - isize(6) * 2 * 3 * isize(sizeof(float));
+    auto const header = cc::span<byte const>(again.value()).subspan({.start = 0, .end = header_size});
+    for (auto const b : header)
+        CHECK(b != byte('-'));
 }
 
 TEST("pfm - rows go out bottom-to-top")

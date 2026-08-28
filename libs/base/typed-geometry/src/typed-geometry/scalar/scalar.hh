@@ -5,6 +5,8 @@
 #include <typed-geometry/scalar/constants.hh>
 #include <typed-geometry/scalar/traits.hh>
 
+#include <type_traits>
+
 /// Curated scalar include: the traits and constants, plus the free scalar operations that dispatch through them.
 /// Prefer these free functions over std:: math so exotic scalar types keep working.
 ///
@@ -73,19 +75,22 @@ template <class T>
 
 /// 2^n, exactly.
 /// n outside the scalar's exponent range saturates to infinity or zero, as scale_by_pow2 does.
-template <class T>
-[[nodiscard]] T pow2(int n)
-    requires(tg::traits::has_pow2<T>)
+/// The name says `by_int` because the exponent is an exact integer: `pow2` alone would read as an approximate
+/// `T -> T`, which is a different function and the one that would sit beside tg::exp and tg::log.
+template <class T, class N>
+[[nodiscard]] T pow2_by_int(N n)
+    requires(tg::traits::has_pow2<T> && std::is_integral_v<N> && !std::is_same_v<N, bool>)
 {
-    return scalar_traits<T>::scale_by_pow2(tg::one<T>(), n);
+    return scalar_traits<T>::scale_by_pow2(tg::one<T>(), int(n));
 }
 
 /// x * 2^n, exact for every result the scalar can represent, saturating to +-infinity or zero beyond that.
-template <class T>
-[[nodiscard]] T scale_by_pow2(T x, int n)
-    requires(tg::traits::has_pow2<T>)
+/// n must be an integer type: a float exponent would truncate silently, so it is a compile error instead.
+template <class T, class N>
+[[nodiscard]] T scale_by_pow2(T x, N n)
+    requires(tg::traits::has_pow2<T> && std::is_integral_v<N> && !std::is_same_v<N, bool>)
 {
-    return scalar_traits<T>::scale_by_pow2(x, n);
+    return scalar_traits<T>::scale_by_pow2(x, int(n));
 }
 
 /// The exponent of x against base two — floor(log2(|x|)), exactly and without a logarithm.

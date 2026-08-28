@@ -1,6 +1,8 @@
 #include <babel-serializer/image/pfm.hh>
+#include <clean-core/common/endian.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/string/string_view.hh>
@@ -12,11 +14,6 @@ namespace
 // A file claiming more than this many samples is rejected before anything is allocated.
 constexpr isize k_max_samples = isize(1) << 32;
 
-bool is_space(char c)
-{
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
-
 /// One whitespace-delimited header token, plus where the byte after it sits.
 struct token_view
 {
@@ -24,62 +21,21 @@ struct token_view
     isize next = 0;
 };
 
+/// cc::string_view has no whitespace split yet, so the header is walked token by token here.
 token_view next_token(cc::span<byte const> bytes, isize pos)
 {
     auto const* const chars = reinterpret_cast<char const*>(bytes.data());
 
-    while (pos < bytes.size() && is_space(chars[pos]))
+    while (pos < bytes.size() && cc::is_space(chars[pos]))
         ++pos;
 
     auto const start = pos;
-    while (pos < bytes.size() && !is_space(chars[pos]))
+    while (pos < bytes.size() && !cc::is_space(chars[pos]))
         ++pos;
 
     return {.text = cc::string_view(chars + start, pos - start), .next = pos};
 }
 
-/// Assemble one f32 from four file bytes in the order the header declared.
-float float_from_bytes(byte const* src, endianness order)
-{
-    auto bits = u32(0);
-    if (order == endianness::little)
-        bits = u32(u8(src[0])) | u32(u8(src[1])) << 8 | u32(u8(src[2])) << 16 | u32(u8(src[3])) << 24;
-    else
-        bits = u32(u8(src[3])) | u32(u8(src[2])) << 8 | u32(u8(src[1])) << 16 | u32(u8(src[0])) << 24;
-
-    auto value = 0.0f;
-    cc::memcpy(&value, &bits, sizeof(value));
-    return value;
-}
-
-/// The inverse: lay one f32 down in the declared order, whatever the host's own is.
-void float_to_bytes(float value, byte* dst, endianness order)
-{
-    auto bits = u32(0);
-    cc::memcpy(&bits, &value, sizeof(bits));
-
-    if (order == endianness::little)
-    {
-        dst[0] = byte(u8(bits & 0xFF));
-        dst[1] = byte(u8(bits >> 8 & 0xFF));
-        dst[2] = byte(u8(bits >> 16 & 0xFF));
-        dst[3] = byte(u8(bits >> 24 & 0xFF));
-    }
-    else
-    {
-        dst[0] = byte(u8(bits >> 24 & 0xFF));
-        dst[1] = byte(u8(bits >> 16 & 0xFF));
-        dst[2] = byte(u8(bits >> 8 & 0xFF));
-        dst[3] = byte(u8(bits & 0xFF));
-    }
-}
-
-void append_text(cc::vector<byte>& out, cc::string_view text)
-{
-    auto const old = out.size();
-    out.resize_to_uninitialized(old + text.size());
-    cc::memcpy(out.data() + old, text.data(), size_t(text.size()));
-}
 } // namespace
 
 cc::span<float const> data::samples_f32() const
@@ -129,7 +85,7 @@ cc::result<data> read(cc::span<byte const> bytes)
     result.scale = scale.value() < 0.0f ? -scale.value() : scale.value();
 
     // Exactly one whitespace byte separates the header from the samples, and it belongs to neither.
-    if (scale_token.next >= bytes.size() || !is_space(reinterpret_cast<char const*>(bytes.data())[scale_token.next]))
+    if (scale_token.next >= bytes.size() || !cc::is_space(reinterpret_cast<char const*>(bytes.data())[scale_token.next]))
         return cc::error("pfm: header is not followed by a single whitespace byte");
     auto const first_sample = scale_token.next + 1;
 
@@ -147,12 +103,18 @@ cc::result<data> read(cc::span<byte const> bytes)
     auto* const out = reinterpret_cast<float*>(result.pixels.data());
     auto const row_samples = isize(result.width) * result.channels;
 
+    // The byte order is fixed for the whole file, so the branch is hoisted out of the sample loop.
     for (auto y = 0; y < result.height; ++y)
     {
-        auto const* const src = bytes.data() + first_sample + isize(y) * row_samples * isize(sizeof(float));
+        auto const src = first_sample + isize(y) * row_samples * isize(sizeof(float));
         auto* const dst = out + isize(result.height - 1 - y) * row_samples;
-        for (auto i = isize(0); i < row_samples; ++i)
-            dst[i] = float_from_bytes(src + i * isize(sizeof(float)), result.byte_order);
+
+        if (result.byte_order == endianness::little)
+            for (auto i = isize(0); i < row_samples; ++i)
+                dst[i] = cc::load_bytes_le<float>(bytes, src + i * isize(sizeof(float)));
+        else
+            for (auto i = isize(0); i < row_samples; ++i)
+                dst[i] = cc::load_bytes_be<float>(bytes, src + i * isize(sizeof(float)));
     }
 
     return cc::move(result);
@@ -184,20 +146,28 @@ cc::result<cc::vector<byte>> encode(data const& img, write_options opts)
 
     auto out = cc::vector<byte>();
 
-    append_text(out, img.channels == 3 ? "PF\n" : "Pf\n");
-    append_text(out, cc::format("{} {}\n", img.width, img.height));
-    append_text(out, cc::format("{}\n", opts.byte_order == endianness::little ? -magnitude : magnitude));
+    auto const order = opts.byte_order.value_or(img.byte_order);
+
+    out.push_back_range(cc::string_view(img.channels == 3 ? "PF\n" : "Pf\n").as_bytes());
+    out.push_back_range(cc::format("{} {}\n", img.width, img.height).as_bytes());
+    out.push_back_range(cc::format("{}\n", order == endianness::little ? -magnitude : magnitude).as_bytes());
 
     auto const row_samples = isize(img.width) * img.channels;
     auto const header_size = out.size();
     out.resize_to_uninitialized(header_size + sample_count * isize(sizeof(float)));
 
+    // As on the way in, one order for the whole file, so the branch sits outside the sample loop.
     for (auto y = 0; y < img.height; ++y)
     {
         auto const* const src = samples.data() + isize(img.height - 1 - y) * row_samples;
-        auto* const dst = out.data() + header_size + isize(y) * row_samples * isize(sizeof(float));
-        for (auto i = isize(0); i < row_samples; ++i)
-            float_to_bytes(src[i], dst + i * isize(sizeof(float)), opts.byte_order);
+        auto const dst = header_size + isize(y) * row_samples * isize(sizeof(float));
+
+        if (order == endianness::little)
+            for (auto i = isize(0); i < row_samples; ++i)
+                cc::store_bytes_le<float>(out, dst + i * isize(sizeof(float)), src[i]);
+        else
+            for (auto i = isize(0); i < row_samples; ++i)
+                cc::store_bytes_be<float>(out, dst + i * isize(sizeof(float)), src[i]);
     }
 
     return cc::move(out);

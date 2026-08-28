@@ -71,7 +71,7 @@ The raw `scalar_traits` kernels still work in plain radian `T`: the angle typing
 
 The `has_*` flags name families rather than single functions, so a new scalar opts into a coherent set at a time.
 Today: `has_sqrt`, `has_abs`, `has_trigonometry`, `has_exponential` (`pow`/`exp`/`log`), `has_rounding` (`round`/`floor`/`ceil`)
-and `has_pow2` (`pow2`/`scale_by_pow2`/`exponent_of`/`split_pow2`).
+and `has_pow2` (`pow2_by_int`/`scale_by_pow2`/`exponent_of`/`split_pow2`).
 A scalar that can do one member of a family can essentially always do the rest, and a per-function flag would multiply the seam without buying precision.
 
 `round`/`floor`/`ceil` return the **scalar** type, not an integer.
@@ -84,8 +84,8 @@ A mixed-type overload would silently promote, which is how a `f32` pipeline quie
 
 `has_pow2` sits apart from `has_exponential` because the two answer different questions.
 `pow`/`exp`/`log` are approximate transcendentals over a real exponent.
-`pow2`/`scale_by_pow2`/`exponent_of`/`split_pow2` are **exact** operations on the binary exponent — an exponent-field adjustment, never a multiply.
-`tg::pow(2.0f, e)` is not a substitute for `tg::pow2<f32>(e)`, and a symbolic or fixed-point scalar can easily have one family without the other.
+`pow2_by_int`/`scale_by_pow2`/`exponent_of`/`split_pow2` are **exact** operations on the binary exponent — an exponent-field adjustment, never a multiply.
+`tg::pow(2.0f, e)` is not a substitute for `tg::pow2_by_int<f32>(e)`, and a symbolic or fixed-point scalar can easily have one family without the other.
 Integers stay out: shifting one truncates, which is a different operation wearing the same name.
 
 The names are deliberately not C's `frexp` and `ldexp` — those abbreviate nothing a reader can recover — and one of the semantics is deliberately different with them.

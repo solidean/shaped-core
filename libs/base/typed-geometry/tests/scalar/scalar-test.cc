@@ -5,6 +5,8 @@
 
 #include <type_traits>
 
+using namespace cc::primitive_defines;
+
 static_assert(tg::traits::has_sqrt<float>, "f32 has sqrt");
 static_assert(!tg::traits::has_sqrt<int>, "i32 has no sqrt");
 static_assert(tg::traits::has_trigonometry<double>, "f64 has trigonometry");
@@ -17,6 +19,20 @@ static_assert(tg::traits::has_abs<int>, "integers have abs");
 static_assert(!tg::traits::has_abs<bool>, "bool has no magnitude");
 static_assert(tg::traits::has_pow2<float>, "f32 has the exact base-two operations");
 static_assert(!tg::traits::has_pow2<int>, "shifting an integer truncates, so it is a different operation");
+
+// The exponent must be an integer type, so `scale_by_pow2(x, 1.5f)` is a compile error rather than a silent
+// truncation to 1 — the whole point of the family being exact.
+template <class T, class N>
+concept scales_by_pow2 = requires(T x, N n) { tg::scale_by_pow2(x, n); };
+template <class T, class N>
+concept has_pow2_by_int = requires(N n) { tg::pow2_by_int<T>(n); };
+
+static_assert(scales_by_pow2<float, int>);
+static_assert(scales_by_pow2<double, i64>);
+static_assert(!scales_by_pow2<float, float>);
+static_assert(!scales_by_pow2<float, bool>, "bool is excluded, as it is for cc::byte_order_scalar");
+static_assert(has_pow2_by_int<float, int>);
+static_assert(!has_pow2_by_int<float, float>);
 
 TEST("tg scalar - one / is_zero / is_one")
 {
@@ -87,12 +103,12 @@ TEST("tg scalar - pow / exp / log")
     CHECK(tgtest::approx(tg::exp(tg::log(2.5)), 2.5));
 }
 
-TEST("tg scalar - pow2 / scale_by_pow2")
+TEST("tg scalar - pow2_by_int / scale_by_pow2")
 {
     // exact, not approximate: this is an exponent adjustment, so equality is the right assertion
-    CHECK(tg::pow2<float>(0) == 1.0f);
-    CHECK(tg::pow2<float>(10) == 1024.0f);
-    CHECK(tg::pow2<double>(-3) == 0.125);
+    CHECK(tg::pow2_by_int<float>(0) == 1.0f);
+    CHECK(tg::pow2_by_int<float>(10) == 1024.0f);
+    CHECK(tg::pow2_by_int<double>(-3) == 0.125);
 
     CHECK(tg::scale_by_pow2(3.0f, 4) == 48.0f);
     CHECK(tg::scale_by_pow2(3.0, -2) == 0.75);
@@ -101,7 +117,7 @@ TEST("tg scalar - pow2 / scale_by_pow2")
 
     // a mantissa the scalar holds exactly survives any in-range shift, which a pow() round-trip would not promise
     auto const odd = 1.0f + 1.0f / 8388608.0f; // 1 + 2^-23, the last representable step above one
-    CHECK(tg::scale_by_pow2(odd, 60) == odd * tg::pow2<float>(60));
+    CHECK(tg::scale_by_pow2(odd, 60) == odd * tg::pow2_by_int<float>(60));
 
     // out of range saturates rather than wrapping
     CHECK(tg::scale_by_pow2(1.0f, 400) > 1e38f);

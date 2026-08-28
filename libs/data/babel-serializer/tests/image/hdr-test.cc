@@ -324,6 +324,34 @@ TEST("hdr - the old '1 1 1 n' repeat marker is honored")
     }
 }
 
+TEST("hdr - a chain of repeat markers is rejected before the shift overflows")
+{
+    // Each `1 1 1 0` marker advances nothing but the shift, so a long enough chain would shift past an int's
+    // width and then form a negative run — which the copy loop would write below the row.
+    auto bytes = cc::vector<byte>();
+    append_text(bytes, "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 8\n");
+
+    bytes.push_back(byte(u8(128))); // one real pixel, so a marker has something to repeat
+    bytes.push_back(byte(0));
+    bytes.push_back(byte(0));
+    bytes.push_back(byte(u8(129)));
+
+    for (auto i = 0; i < 4; ++i) // four zero-count markers: shift reaches 32
+    {
+        bytes.push_back(byte(1));
+        bytes.push_back(byte(1));
+        bytes.push_back(byte(1));
+        bytes.push_back(byte(0));
+    }
+
+    bytes.push_back(byte(1)); // ... and one that would apply that shift
+    bytes.push_back(byte(1));
+    bytes.push_back(byte(1));
+    bytes.push_back(byte(u8(255)));
+
+    CHECK(!hdr::read(bytes).has_value());
+}
+
 TEST("hdr - round-trips through the read_stream overload")
 {
     auto const src = make_gradient(16, 4);

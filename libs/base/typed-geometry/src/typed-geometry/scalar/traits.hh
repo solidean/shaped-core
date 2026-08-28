@@ -12,7 +12,7 @@
 /// Every scalar capability is routed through tg::scalar_traits<T>, a primary template specialized per scalar type.
 /// The tg::traits::* helpers and the free functions in scalar.hh are thin wrappers over its entries.
 /// That is tg::one, tg::sqrt, tg::abs, the trigonometry, tg::pow / tg::exp / tg::log, tg::round / tg::floor / tg::ceil,
-/// and the exact base-two family tg::pow2 / tg::scale_by_pow2 / tg::exponent_of / tg::split_pow2.
+/// and the exact base-two family tg::pow2_by_int / tg::scale_by_pow2 / tg::exponent_of / tg::split_pow2.
 /// libs/base/typed-geometry/docs/modules/scalar.md has the why.
 ///
 /// The kernels here are the *raw numeric* layer: sin/cos take a bare radian T and return T, atan2 takes two T and returns radians.
