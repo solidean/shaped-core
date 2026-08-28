@@ -1,5 +1,10 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/record/event_view.hh>
+#include <clean-core/record/listener.hh>
+#include <clean-core/record/recording.hh>
+#include <clean-core/record/stamp.hh>
+#include <clean-core/record/system.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/context/context.hh>
@@ -102,4 +107,32 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
         cc::println("  load           {:.0f}%", 100.0f * load.value().total);
     else
         cc::println("  load           (unavailable: {})", load.error().to_string());
+}
+
+TEST("sg dx12 - a recording is stamped with the GPU", nx::config::exclusive())
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+
+    auto listener = cc::rec::recording_listener();
+    {
+        auto const registration = cc::rec::register_listener(listener);
+        cc::rec::emit_stamp(cc::rec::stamp_moment::open);
+        cc::rec::flush_blocking();
+        cc::rec::unregister_listener(registration);
+    }
+
+    // The whole point of the contributor seam: cc has no idea GPUs exist, and the recording still says which one is in
+    // the machine.
+    auto section = cc::string();
+    listener.result().for_each_event(
+        [&section](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() == cc::rec::event_kind::stamp && cc::string_view(e.name()) == "sg.gpu")
+                section = cc::string(e.payload_as_text());
+        });
+
+    CHECK(!section.empty());
+    CHECK(cc::string_view(section).contains("gpu.name="));
+    CHECK(cc::string_view(section).contains("gpu.vendor_id="));
 }

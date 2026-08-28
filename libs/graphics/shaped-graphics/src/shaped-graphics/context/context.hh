@@ -189,7 +189,11 @@ protected:
 
     /// Records which adapter the backend picked.
     /// Called once during creation, before the context is handed out; the adapter cannot change afterwards.
-    void set_adapter_info(adapter_info info) { _adapter = cc::move(info); }
+    /// Records which GPU this context runs on, and stamps it into recordings.
+    ///
+    /// The stamp registration happens here rather than at backend start-up because this is the one point every backend
+    /// already goes through, and the first adapter to arrive is the one a recording describes.
+    void set_adapter_info(adapter_info info);
 
     /// Drives cooperative work until `future` is ready or nothing anywhere reports more.
     /// Collapses to a single false test where every semantic thread has an OS thread of its own; without them it is what makes a blocking wait terminate.
