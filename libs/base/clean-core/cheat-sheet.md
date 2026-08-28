@@ -1030,6 +1030,10 @@ cc::symbolizer sym(rec.modules());           // a RECORDED table instead, in a d
 sym.resolve(addr).to_string();               // -> "render_frame at renderer.cc:42", or "app.exe+0x1234", or <unknown>
 // The recorded table is what makes a dump from another run — or from a process that has died — readable at all.
 // A module whose binary is missing still degrades to "app.exe+0x1234", never to a confident wrong name.
+// A module on a UNC or network path is not opened at all: it degrades the same way, rather than waiting out a
+// network timeout on the first resolve against it. No debug info is consulted for it, a symbol server included.
+cc::symbolizer sym(rec.modules(), {.load_remote_images = true});  // opt back in, for a share known to answer
+// The no-flag alternative: rewrite loaded_module::path to a local copy — only base and size must match the recording.
 
 cc::rec::reconfigure_sampling(cfg);          // LIVE: takes effect next tick, no stop/restart, loses no samples
 cc::rec::current_sampling_config();          // what it is running with now — drive a UI checkbox off this
