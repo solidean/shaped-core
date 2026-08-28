@@ -1,6 +1,8 @@
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/stat.hh>
+#include <clean-core/string/string_view.hh>
 #include <nexus/bench/environment.hh>
 #include <nexus/bench/report.hh>
 #include <nexus/test.hh>
@@ -167,6 +169,53 @@ TEST("bench - the baseline is the first loop unless one asks to be it")
     CHECK(!table.contains("-50"));
 }
 
+TEST("bench - a column no row fills is not printed")
+{
+    // A sweep measuring whole passes: no loop declares items, and a sweep has no baseline either.
+    auto loops = cc::vector<nx::bench::result>{
+        loop_with("w=1", 0.001, 0.00099, 0.00101),
+        loop_with("w=2", 0.002, 0.00198, 0.00202),
+    };
+    for (auto& r : loops)
+        r.config.no_baseline = true;
+
+    auto const table = nx::bench::format_report("sweep", loops, plain());
+
+    // Both the items/s and the comparison column would otherwise be a column of dashes.
+    // That reads as data missing rather than as data never asked for, which is the failure this pins.
+    CHECK(!table.contains('-'));
+    CHECK(table.contains("w=1"));
+    CHECK(table.contains("w=2"));
+}
+
+TEST("bench - a column is as wide as its widest entry")
+{
+    // The two medians render at different widths, so an unpadded median column knocks the items column right of it out
+    // of line -- which is the whole reason a table beats a list of numbers.
+    auto loops = cc::vector<nx::bench::result>{
+        loop_with("row-a", 0.00095, 0.0009, 0.001),
+        loop_with("row-b", 0.001, 0.00099, 0.00101),
+    };
+    for (auto& r : loops)
+    {
+        r.items = 1000;
+        r.items_per_second = 1000.0; // identical text in that cell, so only the median's padding can move it
+    }
+
+    auto const rendered = nx::bench::format_report("aligned", loops, plain());
+    auto const table = cc::string_view(rendered);
+
+    // Where the items cell falls in its own line, which is equal across rows exactly when the median column is padded.
+    auto const items_column = [&](cc::string_view row)
+    {
+        auto const at = table.find(row);
+        CC_ASSERT(at >= 0, "row is missing from the table");
+        return table.find("/s", at) - table.rfind('\n', at);
+    };
+
+    CHECK(items_column("row-a") == items_column("row-b"));
+}
+
 TEST("bench - markdown mode emits a table that survives a paste into a doc")
 {
     auto style = plain();
@@ -202,6 +251,26 @@ TEST("bench - a table renders its median column in one unit")
     CHECK(table.contains(" ms"));
     CHECK(!table.contains(" ns"));
     CHECK(!table.contains(" us"));
+}
+
+TEST("bench - a table with nothing to compare scales each row on its own")
+{
+    // The same three decades, as a sweep.
+    // Nothing is read across the rows here, so one shared scale would spell the fast end "0.0000010[0] ms" -- six
+    // leading zeroes standing in for a number the reader would rather see as 1 ns.
+    auto loops = cc::vector<nx::bench::result>{
+        loop_with("n=1", 1e-9, 0.99e-9, 1.01e-9),
+        loop_with("n=2", 1e-6, 0.99e-6, 1.01e-6),
+        loop_with("n=3", 1e-3, 0.99e-3, 1.01e-3),
+    };
+    for (auto& r : loops)
+        r.config.no_baseline = true;
+
+    auto const table = nx::bench::format_report("sweep", loops, plain());
+
+    CHECK(table.contains(" ns"));
+    CHECK(table.contains(" us"));
+    CHECK(table.contains(" ms"));
 }
 
 TEST("bench - a table names the loop a warning came from")

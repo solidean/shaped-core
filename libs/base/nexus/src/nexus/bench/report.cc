@@ -110,6 +110,27 @@ cc::string fixed(f64 v, isize decimals)
     }
 }
 
+/// Printed width, counting what a terminal shows rather than what the string holds.
+///
+/// A muted digit is `\x1b[90m7\x1b[0m` -- nine bytes of which one is visible -- so measuring bytes would pad a
+/// coloured cell by eight columns too few and knock every column to its right out of line.
+isize display_width(cc::string_view s)
+{
+    auto width = isize(0);
+    for (auto i = isize(0); i < isize(s.size()); ++i)
+    {
+        if (s[i] != '\x1b')
+        {
+            ++width;
+            continue;
+        }
+        // An SGR sequence runs to its terminating 'm'; nothing else here emits an escape.
+        while (i < isize(s.size()) && s[i] != 'm')
+            ++i;
+    }
+    return width;
+}
+
 cc::string unit_suffix(cc::rec::unit const* unit, cc::string_view prefix)
 {
     auto const symbol = unit != nullptr ? cc::string_view(unit->symbol) : cc::string_view();
@@ -365,10 +386,6 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
 
     auto const* secs = &cc::rec::unit_seconds;
 
-    auto name_width = isize(4);
-    for (auto const& r : loops)
-        name_width = cc::max(name_width, isize(r.name.size()));
-
     // A column per quantity the loops recorded, in first-seen order.
     //
     // Without this a benchmark that records bytes gets its rate into the JSON and nowhere a reader looks: the table
@@ -385,74 +402,124 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
                 quantity_names.push_back(q.name);
         }
 
-    auto const bar = style.markdown ? cc::string_view(" | ") : cc::string_view("   ");
-    if (style.markdown)
-    {
-        out.appendf("\n| {} | median | items/s", cc::string_view("name"));
-        for (auto const& q : quantity_names)
-            out.appendf(" | {}", q);
-        out.appendf("{}\n", show_comparison ? " | vs base |" : " |");
+    // A column no row fills is noise, and a benchmark measuring whole passes rather than elements fills none of this
+    // one -- so the sweep that declares no items gets no items column, on the same argument that drops the comparison.
+    auto show_items = false;
+    for (auto const& r : loops)
+        if (r.items_per_second > 0)
+            show_items = true;
 
-        out.appendf("|---|---|---");
-        for (auto i = isize(0); i < quantity_names.size(); ++i)
-            out.appendf("|---");
-        out.appendf("{}\n", show_comparison ? "|---|" : "|");
-    }
-    else
-    {
-        out.appendf("\n");
-    }
-
-    // One scale for the whole column, taken from the slowest row.
+    // One scale for the whole time column, taken from the slowest row.
     // Picking it per row would put `89[7] ps` beside `1.82[2] ns`, which is two conversions a reader has to do before
     // the comparison the table exists for.
+    //
+    // **A table with no comparison scales per row instead.**
+    // The shared scale is what makes a column readable *down*, and that is worth having only where the rows are being
+    // read against each other.
+    // A sweep spans decades by construction, so one scale spells its small end `0.00010[8] ms` -- six leading zeroes
+    // for a number every reader would rather see as 108 ns.
     auto slowest = f64(0);
     for (auto const& r : loops)
         slowest = cc::max(slowest, r.time.median);
     auto const column_scale = apply_prefix(slowest > 0 ? slowest : 1.0, secs->prefix_base);
 
-    for (auto i = isize(0); i < loops.size(); ++i)
+    // Every cell is rendered before any is printed, because a column is only as wide as its widest entry and that is
+    // not known until the last row exists.
+    // Appending straight to the output instead is what leaves `56.[7] ns` and `54.2[7] ns` in the same column.
+    auto header = cc::vector<cc::string>();
+    header.push_back(cc::string("name"));
+    header.push_back(cc::string("median"));
+    if (show_items)
+        header.push_back(cc::string("items/s"));
+    for (auto const& q : quantity_names)
+        header.push_back(q);
+    if (show_comparison)
+        header.push_back(cc::string("vs base"));
+
+    auto rows = cc::vector<cc::vector<cc::string>>();
+    rows.reserve(loops.size());
+    for (auto const& r : loops)
     {
-        auto const& r = loops[i];
         auto const half = (r.time.ci95_high - r.time.ci95_low) * 0.5;
+        auto scaled_row = show_comparison ? column_scale : apply_prefix(r.time.median, secs->prefix_base);
+        if (show_comparison)
+            scaled_row.value = r.time.median / column_scale.factor;
 
-        auto row = cc::string();
-        row.appendf("{}", r.name);
-        while (isize(row.size()) < name_width)
-            row += ' ';
-
-        auto scaled_row = column_scale;
-        scaled_row.value = r.time.median / column_scale.factor;
-        row.appendf("{}{}", bar, format_uncertain_at(half, secs, style, scaled_row));
-        row.appendf("{}{}", bar,
-                    r.items_per_second > 0 ? format_quantity(r.items_per_second, &cc::rec::unit_count) + "/s"
-                                           : cc::string("-"));
+        auto row = cc::vector<cc::string>();
+        row.push_back(cc::string(r.name));
+        row.push_back(format_uncertain_at(half, secs, style, scaled_row));
+        if (show_items)
+            row.push_back(r.items_per_second > 0 ? format_quantity(r.items_per_second, &cc::rec::unit_count) + "/s"
+                                                 : cc::string("-"));
 
         for (auto const& wanted : quantity_names)
         {
             auto const* const q = r.find_quantity(wanted);
             if (q == nullptr)
             {
-                row.appendf("{}-", bar);
+                row.push_back(cc::string("-"));
                 continue;
             }
 
             // A rate where the unit sums, and the value itself where it averages: a mean of ratios per second is
             // nonsense, and the unit is what says which of the two this is.
             if (q->per_second > 0)
-                row.appendf("{}{}/s", bar, format_quantity(q->per_second, q->unit));
+                row.push_back(format_quantity(q->per_second, q->unit) + "/s");
             else
-                row.appendf("{}{}", bar, format_quantity(q->total, q->unit));
+                row.push_back(format_quantity(q->total, q->unit));
         }
 
         if (show_comparison)
-            row.appendf("{}{}", bar, format_comparison(loops[baseline], r, style));
+            row.push_back(format_comparison(loops[baseline], r, style));
 
-        if (style.markdown)
-            out.appendf("| {} |\n", row);
-        else
-            out.appendf("  {}\n", row);
+        rows.push_back(cc::move(row));
     }
+
+    auto widths = cc::vector<isize>();
+    for (auto i = isize(0); i < header.size(); ++i)
+        widths.push_back(isize(0));
+    if (style.markdown)
+        for (auto i = isize(0); i < header.size(); ++i)
+            widths[i] = display_width(header[i]);
+    for (auto const& row : rows)
+        for (auto i = isize(0); i < row.size(); ++i)
+            widths[i] = cc::max(widths[i], display_width(row[i]));
+
+    auto const bar = style.markdown ? cc::string_view(" | ") : cc::string_view("   ");
+
+    // The trailing cell is left unpadded: in plain text that would be invisible trailing whitespace, and a markdown
+    // table does not need it to line up.
+    auto const emit_row = [&](cc::vector<cc::string> const& row)
+    {
+        auto line = cc::string();
+        for (auto i = isize(0); i < row.size(); ++i)
+        {
+            if (i > 0)
+                line += bar;
+            line += row[i];
+            if (i + 1 < row.size())
+                for (auto pad = display_width(row[i]); pad < widths[i]; ++pad)
+                    line += ' ';
+        }
+        if (style.markdown)
+            out.appendf("| {} |\n", line);
+        else
+            out.appendf("  {}\n", line);
+    };
+
+    out.appendf("\n");
+    if (style.markdown)
+    {
+        emit_row(header);
+        // The separator is written tight rather than through emit_row: padding it to the column widths would spell
+        // the rule as `| ------- |`, which renders the same and reads as a row of content in the source.
+        out.appendf("|");
+        for (auto i = isize(0); i < header.size(); ++i)
+            out.appendf("---|");
+        out.appendf("\n");
+    }
+    for (auto const& row : rows)
+        emit_row(row);
 
     for (auto const& r : loops)
     {

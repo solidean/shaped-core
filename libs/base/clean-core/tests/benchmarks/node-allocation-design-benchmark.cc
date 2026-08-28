@@ -41,7 +41,6 @@
 
 #if CC_BENCH_NODE_ALLOCATION_DESIGN
 
-#include "bench_util.hh"
 #include "node-allocation-design-refill.hh"
 
 #include <clean-core/math/bit.hh>

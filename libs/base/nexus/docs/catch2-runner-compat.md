@@ -98,7 +98,7 @@ Only the `normal` bucket is subject to the "no CHECK/REQUIRE is a failure" rule,
 Two ways to reach a test outside the swept bucket, and no others:
 
 - **Its bucket's flag**, which sweeps that bucket by substring — `--manual bench` runs every manual test whose name contains `bench`, while a bare `bench` matches none of them.
-- **Its exact name** — `dev.py test "bench-async-grain (sweep)"` runs that manual test on its own.
+- **Its exact name** — `dev.py test "bench-sort - cc::sort vs std::sort"` runs that one benchmark on its own.
   This works only without a bucket flag, since a flag pins the sweep to its bucket.
 
 A substring filter **never** crosses a bucket.

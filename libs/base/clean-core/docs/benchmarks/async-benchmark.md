@@ -170,9 +170,9 @@ The grain sweeps run for minutes, so `--timeout 0` is not optional — `dev.py` 
 Either drive them directly, or let the plot scripts do it and chart the result:
 
 ```bash
-uv run dev.py --mirror-test-output test "bench-async-grain (sweep)" --preset release-clang --timeout 0
-uv run dev.py --mirror-test-output test "bench-async-fork-floor (thread sweep)" --preset release-clang --timeout 0
-uv run dev.py --mirror-test-output test "bench-async-latency (round-trip)" --preset release-clang
+uv run dev.py benchmark "bench-async-grain - grain x size sweep" --timeout 0
+uv run dev.py benchmark "bench-async-grain - fork floor thread sweep" --timeout 0
+uv run dev.py benchmark "bench-async-grain - drive round-trip"
 
 uv run libs/base/clean-core/tests/benchmarks/async/grain-plot.py
 uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py
