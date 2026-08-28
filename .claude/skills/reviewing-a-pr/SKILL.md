@@ -77,6 +77,13 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
 
 ## The flow
 
+**A `design` review skips steps 1 through 5.**
+There is no branch to fetch, no changeset to account for and no coverage gate — `init` takes no `--range` and refuses
+one — so it starts at step 6, writing entries.
+Its groups are `framing`, `topics`, `open-questions`, `tooling`, `finalize`, and
+[entry-types/design-topic.md](../../../tools/review/docs/entry-types/design-topic.md) is the shape.
+Name it with `title` as usual, and hand it over the same way.
+
 1. **Fetch and pin.**
    ```bash
    git fetch origin main --quiet

@@ -92,8 +92,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         ctx.die(f"{ctx.rel(paths.root)} already holds a review; --force re-initializes it")
 
     design_only = goals == ["design"]
+
+    # A design review has no changeset, so a range would be silently ignored — which reads as "the range was accepted"
+    # to whoever passed it out of habit.
+    if design_only and args.range_spec:
+        ctx.die("a design review has no changeset, so --range does nothing; drop it, or add --goal pr-comment")
+
     base = head = base_spec = head_spec = ""
-    if not design_only or args.range_spec:
+    if not design_only:
         base, head, base_spec, head_spec = _resolve_range(ctx, args.range_spec)
 
     cfg = review.ReviewConfig(
