@@ -84,7 +84,7 @@ This is Alder Lake, where AVX-512 is fused off, so BLAKE3's widest path is unava
 Read trends, not third decimals.
 Every figure is a median over samples the harness sizes itself, each pass against its own freshly seeded document.
 
-**The numbers below predate that harness**, and are re-measured when this write-up is next revised.
+**The numbers above predate that harness**, and are re-measured when this write-up is next revised.
 
 ## Reproducing
 
@@ -93,7 +93,8 @@ uv run dev.py benchmark "bench-vdoc-loop" --timeout 0
 ```
 
 That is one table per medium and document size, each carrying the loop, the injected control and the isolated hashing.
-See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md) for the pgo-benchmark mechanism.
+See [docs/guides/benchmarking.md](../../../../../docs/guides/benchmarking.md) for the harness.
+The `PGO_BENCHMARK` beside it records the representative point, which is [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Method
 

@@ -66,7 +66,7 @@ Read trends, not third decimals.
 
 ## Reproducing
 
-This full table is the manual `bench-hash (… full sweep)` benchmark.
+This full table is the `bench-hash - full length sweep` benchmark.
 A lean `PGO_BENCHMARK` of the same base name records just the representative points (≈8 B and ≈64 KiB) via `nx::pgo`, for `dev.py pgo`.
 `dev.py benchmark` defaults to a release preset; the second line is the assertions-on comparison.
 
@@ -75,12 +75,13 @@ uv run dev.py benchmark "bench-hash" --timeout 0
 uv run dev.py benchmark "bench-hash" --preset relwithdebinfo-clang --timeout 0
 ```
 
-See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
+See [docs/guides/benchmarking.md](../../../../../docs/guides/benchmarking.md) for the harness.
+The PGO benchmark beside it feeds `dev.py pgo`, which is [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Results
-**The numbers below predate the nexus benchmark harness.**
-They were taken as a median of five adaptive passes; the harness medians hundreds of samples and brackets each with a
-confidence interval, so these are re-measured when this write-up is next revised.
+
+**The numbers below predate the nexus benchmark harness**, which medians hundreds of samples and brackets each with a confidence interval.
+They are re-measured when this write-up is next revised.
 
 
 GB/s; higher is better.

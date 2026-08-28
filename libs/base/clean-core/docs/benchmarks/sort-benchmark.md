@@ -10,8 +10,9 @@ uv run dev.py benchmark "bench-sort" --timeout 0
 Numbers below: Windows, clang-cl, `release-clang`, single run, millions of elements sorted per second.
 Each point is the median of 5 adaptive timings with the cost of restoring the unsorted input measured out separately and subtracted.
 
-**Those numbers predate the nexus benchmark harness**, which medians hundreds of samples and brackets each with a
-confidence interval; they are re-measured when this write-up is next revised.
+**Those numbers predate the nexus benchmark harness**, which medians hundreds of samples and brackets each with a confidence interval.
+They are re-measured when this write-up is next revised.
+
 `ratio` is `cc / std`, so above 1.0 is `cc::sort` ahead.
 
 ## The two findings
@@ -64,7 +65,7 @@ The pattern wins survive, because they come from the pattern-defeating machinery
 
 ## Parallel: `cc::sort_async`
 
-A separate manual test in the same file, run with
+A separate benchmark in the same file, run with
 
 ```bash
 uv run dev.py benchmark "bench-sort - sort_async" --timeout 0
@@ -122,7 +123,7 @@ The shipped default is **4096**, one step off the measured optimum — it keeps 
 
 * Only Windows / clang-cl.
   The insertion-sort threshold (16) and the block-partition gate were picked to be measured, not guessed, and neither has been swept yet.
-* `sort_multi` against sort-indices-then-permute has its own manual test in the same file, not tabulated here.
+* `sort_multi` against sort-indices-then-permute is `bench-sort - sort_multi vs sort_indices then permute`, not tabulated here.
 * `sort_async` on anything but `i32`, and on any pattern beyond the three above.
   A wide element type would shift the balance toward the parallel side, since it makes the serial partition more expensive without changing the scheduling cost.
 * `std::sort` is the only baseline; there is no comparison against pdqsort upstream, which would separate "our formulation" from "pdqsort itself".

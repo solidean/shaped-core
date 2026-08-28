@@ -53,7 +53,8 @@ Printing full tables alongside is fine, and [clean-core's benchmarks](../../libs
 PGO benchmarks live in their own bucket, so they **never run in a normal `dev.py test` sweep**.
 Not even when a substring filter matches their names: `dev.py test "hash"` leaves them alone.
 Naming a test by its **exact** name runs it regardless of bucket, so `dev.py test "hash - throughput"` still works.
-The bucket model itself — `normal` / `manual` / `pgo_benchmark`, plus the orthogonal `disabled` — belongs to [catch2-runner-compat.md](../../libs/base/nexus/docs/catch2-runner-compat.md).
+The bucket model itself is `normal` / `manual` / `pgo_benchmark` / `benchmark` / `example`, plus the orthogonal `disabled`.
+It belongs to [catch2-runner-compat.md](../../libs/base/nexus/docs/catch2-runner-compat.md).
 
 ## Running and the sidecar
 

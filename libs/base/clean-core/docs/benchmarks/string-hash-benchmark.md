@@ -35,7 +35,7 @@ Read trends, not third decimals.
 
 ## Reproducing
 
-These full tables are the manual `bench-string-hash (… full sweep)` benchmarks.
+These full tables are the `bench-string-hash - string sweep` and `bench-string-hash - string_view sweep` benchmarks.
 Lean `PGO_BENCHMARK`s of the same base names record just the representative points (≈8 B and ≈64 KiB) via `nx::pgo`, for `dev.py pgo`.
 The full sweep regenerates a multi-MB corpus per length, so it is far slower.
 `dev.py benchmark` defaults to a release preset; the second line is the assertions-on comparison.
@@ -45,7 +45,8 @@ uv run dev.py benchmark "bench-string-hash" --timeout 0
 uv run dev.py benchmark "bench-string-hash" --preset relwithdebinfo-clang --timeout 0
 ```
 
-See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
+See [docs/guides/benchmarking.md](../../../../../docs/guides/benchmarking.md) for the harness.
+The PGO benchmarks beside them feed `dev.py pgo`, which is [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Hashers
 
@@ -57,9 +58,9 @@ See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
   Not a vetted hash — a competent speed foil for the small-string regime.
 
 ## Results
-**The numbers below predate the nexus benchmark harness.**
-They were taken as a median of five adaptive passes; the harness medians hundreds of samples and brackets each with a
-confidence interval, so these are re-measured when this write-up is next revised.
+
+**The numbers below predate the nexus benchmark harness**, which medians hundreds of samples and brackets each with a confidence interval.
+They are re-measured when this write-up is next revised.
 
 
 GB/s; higher is better.

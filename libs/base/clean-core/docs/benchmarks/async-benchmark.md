@@ -21,8 +21,8 @@ None runs in the normal test sweep; every one is reachable by exact name.
 All four are nexus `BENCHMARK`s, so each figure is a median over hundreds of samples carrying a 95% confidence interval — see [benchmarking](../../../../../docs/guides/benchmarking.md).
 Results reach `nx::bench::sink` so nothing is dead-code-eliminated.
 
-**The numbers quoted below predate that harness.**
-They were taken as a median of five adaptive passes, and are re-measured when this write-up is next revised.
+**The numbers below predate that harness**, which medians hundreds of samples and brackets each with a confidence interval.
+They are re-measured when this write-up is next revised.
 
 Four constraints hold across the files, and breaking any of them corrupts the numbers silently rather than loudly.
 
@@ -192,4 +192,4 @@ uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe
 
 `--skip 2` on the driven leaf is not optional: the first enqueue grows the scheduler's queue vector from zero capacity, a real allocator call the reused-scheduler steady state never pays.
 
-Use a `release` preset and an otherwise-idle machine, and discard the first post-build run — see [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
+Use a `release` preset and an otherwise-idle machine, and discard the first post-build run — see [docs/guides/benchmarking.md](../../../../../docs/guides/benchmarking.md).

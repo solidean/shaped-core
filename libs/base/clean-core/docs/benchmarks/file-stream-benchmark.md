@@ -19,10 +19,9 @@ The cc 1-byte path uses the window directly (`writable_bytes()`/`produce()`, `re
 Every larger size uses `write`/`read` on both.
 Files are opened binary.
 
-`bench::measure_units_per_sec` **discards one warmup pass per measurement** before it times.
-So each metric faults its own code path and warms its file before timing, and repeated passes then stay in the page / write-back cache.
+The harness **warms up before it times**, so each loop faults its own code path and warms its file before the first sample.
+Repeated passes then stay in the page / write-back cache.
 So the number measures the **stream layer's CPU cost, not the disk**.
-nexus itself runs the benchmark body once, with no framework-level repeat or warmup; the per-metric warmup is the bench helper's.
 At 4 MiB per pass the open/close is well under a percent of the time.
 
 ## Results

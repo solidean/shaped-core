@@ -26,7 +26,7 @@ TEST("group - what it does")             // registered at static-init; name is m
 TEST("slow thing", nx::config::disabled) // trailing configs (variadic):
 { /* ... */ }                            //   nx::config::disabled  — skipped unless explicitly named
 TEST("bench x", nx::config::manual)      //   nx::config::manual    — never swept automatically; run via an
-{ /* prints, no CHECK */ }               //     exact name or `--manual` (may have zero CHECKs, e.g. benchmarks)
+{ /* prints, no CHECK */ }               //     exact name or `--manual` (may have zero CHECKs, like a benchmark)
 TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RNG seed
 // Multiple configs compose: TEST("x", nx::config::disabled, nx::config::seed(7)) { }
 
@@ -129,7 +129,8 @@ Defaults to a **release** preset — the only `dev.py` subcommand that does, bec
 ## PGO benchmarks (PGO metrics)
 
 A **tracking signal**, not a benchmarking framework: a few stable points per subject, consumed by `dev.py pgo`.
-To compare two implementations, write a `nx::config::manual` test instead — it never runs in a sweep, needs no CHECK, and prints whatever table you want.
+To compare two implementations, write a `BENCHMARK` instead — the section above.
+The two live happily in one file: a `BENCHMARK` sweeping the space, and a `PGO_BENCHMARK` pinning two stable points out of it.
 
 ```cpp
 #include <nexus/pgo.hh>
@@ -285,7 +286,9 @@ uv run dev.py test                       # build + run the whole suite
 // --test-args "<line>", or everything after a bare --, is a command line for the SELECTED TEST itself,
 //   readable from its body through nx::test_args(). Replaces whatever nx::config::args declared.
 // Bucket / perf CLI: --manual (sweep manual bucket), --pgo-benchmarks (sweep pgo-benchmark bucket),
-// --examples (sweep example bucket), --pgo-json <file> (write recorded-metric sidecar).
+// --benchmarks (sweep benchmark bucket), --examples (sweep example bucket).
+// --pgo-json <file> (recorded-metric sidecar), --benchmark-json <file> (full results + every sample),
+//   --benchmark-rec <file> (a .ccrec of the whole run), --benchmark-verbose, --benchmark-pin.
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
 //   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.
@@ -427,7 +430,7 @@ TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test driv
 - **`SKIP` does not yet interact cleanly with `SECTION`** (known limitation).
 - **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` above, not Catch2 generators.
 - **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, and type-parametrized (templated) tests.
-  Use `.context()` / `.note()` / `.dump()` for messages, and `PGO_BENCHMARK` + `nx::pgo` for benchmarks.
+  Use `.context()` / `.note()` / `.dump()` for messages, and `BENCHMARK` + `nx::bench` for benchmarks.
 
 [docs/catch2-runner-compat.md](docs/catch2-runner-compat.md) has the exact CLI subset and how IDE discovery works.
 [docs/_index.md](docs/_index.md) indexes the rest, including the hardware counters and the perf-metric workflow.

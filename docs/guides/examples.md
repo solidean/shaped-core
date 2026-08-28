@@ -193,7 +193,7 @@ EXAMPLE("clean-core/vector")
 }
 ```
 
-`EXAMPLE` is a nexus declaration in its own selection bucket, alongside `TEST` and `PGO_BENCHMARK` ([nexus/test.hh](../../libs/base/nexus/src/nexus/test.hh)).
+`EXAMPLE` is a nexus declaration in its own selection bucket, alongside `TEST`, `BENCHMARK` and `PGO_BENCHMARK` ([nexus/test.hh](../../libs/base/nexus/src/nexus/test.hh)).
 What follows from the bucket:
 
 * **A sweep never selects it.** Not `dev.py test`, not `--manual`, not a bulk "run disabled too" request.

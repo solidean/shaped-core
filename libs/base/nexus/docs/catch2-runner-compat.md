@@ -41,7 +41,12 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 | `-c <name>` | Adds a section filter |
 | `--manual` | Selects the *manual* bucket for sweeps (see below). Not a Catch2 flag |
 | `--pgo-benchmarks` | Selects the *pgo_benchmark* bucket (perf benchmarks; see [perf-results.md](../../../../docs/guides/perf-results.md)). Not a Catch2 flag |
+| `--benchmarks` | Selects the *benchmark* bucket (see [benchmarking.md](../../../../docs/guides/benchmarking.md)). Not a Catch2 flag |
 | `--pgo-json <file>` | Writes recorded `nx::pgo` metrics to `<file>` (additive). Not a Catch2 flag |
+| `--benchmark-json <file>` | Writes the full benchmark results — every statistic and every sample — to `<file>` (additive). Not a Catch2 flag |
+| `--benchmark-rec <file>` | Writes a `.ccrec` of the whole run to `<file>`; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
+| `--benchmark-verbose` | Prints the full statistics block under every row of a benchmark table. Not a Catch2 flag |
+| `--benchmark-pin` | Pins the run to one core before the benchmarks, reporting whether the platform allowed it. Not a Catch2 flag |
 | `--record` | Buckets every test's `cc::rec` events and writes a recording for each failing one, whatever the tests' own configs say (see [recording.md](recording.md)). Not a Catch2 flag |
 | `--no-recording` | Leaves `cc::rec` down for the whole run: no per-test buckets, no console logger, no failure dumps (see [recording.md](recording.md)). Not a Catch2 flag |
 | `--list-tests-json <file>` | Writes a JSON listing of every registered test (with eligibility under the other args) to `<file>` — `-` means stdout — then exits 0 without running anything. Used by `dev.py test` to pre-select binaries. Not a Catch2 flag |
@@ -79,8 +84,9 @@ The fallback is decided once per binary, by `resolve_filter_mode`, before anythi
 
 ### Buckets and disabled tests
 
-Every test lives in exactly one **bucket** — `normal` (the default), `manual`, `pgo_benchmark` or `example` — set via `nx::config::manual` / `pgo_benchmark` / `example`.
-A sweep selects exactly one bucket: the default selects `normal`, `--manual` selects `manual`, `--pgo-benchmarks` selects `pgo_benchmark`, `--examples` selects `example`.
+Every test lives in exactly one **bucket** — `normal` (the default), `manual`, `pgo_benchmark`, `benchmark` or `example` — set via `nx::config::manual` / `pgo_benchmark` / `benchmark` / `example`.
+A sweep selects exactly one bucket, and the default selects `normal`.
+`--manual` selects `manual`, `--pgo-benchmarks` selects `pgo_benchmark`, `--benchmarks` selects `benchmark`, and `--examples` selects `example`.
 The bucket set is intentionally extensible.
 
 `disabled` (`enabled = false`) is **orthogonal** to buckets: it can apply to any bucket, and excludes a test from sweeps until it is named exactly or `run_disabled_tests` is set.
@@ -90,6 +96,8 @@ The bucket set is intentionally extensible.
   Swept only under `--manual`.
 - **pgo_benchmark** — perf benchmarks that report metrics via `nx::pgo`, covered by [perf-results.md](../../../../docs/guides/perf-results.md).
   Swept only under `--pgo-benchmarks`.
+- **benchmark** — `BENCHMARK` declarations that measure something with `nx::bench::run`, covered by [benchmarking.md](../../../../docs/guides/benchmarking.md).
+  Swept only under `--benchmarks`, and `dev.py benchmark` is the driver that sends it.
 - **example** — `EXAMPLE` declarations demonstrating an API in practice, covered by [examples.md](../../../../docs/guides/examples.md).
   Swept only under `--examples`, and normally reached one at a time by exact name, which is what `dev.py example` sends.
 
