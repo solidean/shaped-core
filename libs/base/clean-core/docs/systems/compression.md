@@ -1,6 +1,7 @@
 # Compression
 
-Two algorithms behind one API, and the choice between them is not the interesting decision.
+Three algorithms behind one API, and the choice between them is not the interesting decision.
+Deflate is not really a choice at all — it is what you reach for when some other format has already made it for you.
 The ones that actually change what you get are the level, whether the blob is small enough to need a dictionary, and whether the framing is worth its bytes.
 All three go the opposite way from the usual advice once the payload is a few hundred bytes rather than a few megabytes.
 
@@ -69,9 +70,48 @@ Reach for zstd otherwise.
 lz4's high-compression levels are the one configuration to avoid outright: level 12 compressed at 21.6 MB/s for 4.85x, where zstd 3 got 6.96x at 1087 MB/s.
 If lz4's ratio is not good enough, the answer is zstd, not lz4 HC.
 
+## deflate is dominated on every axis, and that is the point
+
+zstd 3 beats deflate 6 on all three measurements at once, on the same ~256 kB of JSON-ish records.
+This table is from a later run than the ones above, so read its throughputs against each other and not against theirs — the ratios are deterministic and do agree across both.
+
+| config | ratio | compress | decompress |
+|---|---|---|---|
+| deflate 1 | 5.74x | 269 MB/s | 734 MB/s |
+| deflate 6 | 6.52x | 84 MB/s | 799 MB/s |
+| deflate 9 | 6.66x | 25 MB/s | 729 MB/s |
+| **zstd 3** | **6.96x** | **533 MB/s** | **2152 MB/s** |
+
+Better ratio, 6.3x the compression speed and 2.7x the decompression speed.
+There is no payload shape in these measurements where deflate is the right answer on the merits, and that is not a defect — a 1996 format losing to a 2015 one is the expected result.
+
+**So the rule is simple: never pick deflate to store our own bytes.**
+Pick it when a zip, a gzip, a PNG stream or an HTTP `Content-Encoding` has already decided, which is the entire reason it is here.
+
+One number does cut the other way.
+Deflate's decompression is the slowest of the three by a wide margin — 799 MB/s against lz4's 3.3 GB/s — so a format that reads far more often than it writes pays for the interoperability every time.
+
+## Raw deflate is the only thing that shrinks a 72-byte record
+
+The framings cost exactly what their wrappers weigh, and on a single ~72-byte record that is the whole file:
+
+| config | packed | ratio |
+|---|---|---|
+| deflate gzip | 88 B | 0.82x |
+| deflate zlib | 76 B | 0.95x |
+| **deflate raw** | **70 B** | **1.03x** |
+| lz4 raw | 74 B | 0.97x |
+| zstd raw | 77 B | 0.94x |
+
+gzip's 10-byte header plus its CRC-32 and length come to 18 bytes, the zlib wrapper's two bytes plus an Adler-32 come to 6, and raw carries nothing.
+Raw deflate is the only configuration measured here that came out smaller than it went in without a dictionary.
+That is a curiosity rather than advice: [the dictionary section](#a-small-blob-does-not-compress-at-all-dictionary-or-nothing) gets 3.13x on the same record.
+
+At 16 records (1147 B) raw deflate also took the best ratio of any framing measured, 4.33x against raw zstd's 4.28x, at a fifth of zstd's decompression speed and one fiftieth of raw lz4's.
+
 ## Raw framing is worth more for lz4 than for zstd
 
-`raw` strips the self-describing header — see [compression.hh](../../src/clean-core/bytes/compression.hh) for what the two backends each leave behind.
+`raw` strips the self-describing header — see [compression.hh](../../src/clean-core/bytes/compression.hh) for what each of the three backends leaves behind.
 
 On a single 72-byte record it saves 4 bytes under zstd (81 → 77) and **25 bytes under lz4** (99 → 74), because lz4's frame header is much the heavier of the two.
 
@@ -81,6 +121,14 @@ Raw lz4 decompressed a 1147-byte blob at 25 GB/s against the frame path's 2.6 GB
 
 The price is that a raw blob describes nothing about itself.
 The format has to record the algorithm, and for lz4 the uncompressed size as well.
+
+Deflate is the one algorithm with three wrappers rather than two, so `framing` carries a third value for it.
+`frame` is gzip, `zlib` is the RFC 1950 wrapper that PNG's IDAT stream and most `Content-Encoding: deflate` payloads actually are, and `raw` is a bare deflate stream.
+Only gzip is sniffable, its `1f 8b` being a real magic; the zlib wrapper opens with a checksum constraint instead, so a format storing one has to record that it did.
+
+A `.gz` is a sequence of members rather than one stream, which `cat a.gz b.gz`, pigz and bgzip all produce, and decoding one decodes them all.
+The declared size then covers only the last member, which is the second reason gzip's is a hint rather than a size.
+A decompressing stream holds one window rather than the trailer, so it reports no size hint for gzip at all.
 
 ## Spending level on incompressible data is pure waste
 

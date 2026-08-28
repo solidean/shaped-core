@@ -32,6 +32,8 @@ cc::impl::compression_backend const& cc::impl::backend_for(compression_algorithm
         return zstd_backend();
     case compression_algorithm::lz4:
         return lz4_backend();
+    case compression_algorithm::deflate:
+        return deflate_backend();
     }
 
     CC_UNREACHABLE("unknown compression algorithm");
@@ -42,13 +44,29 @@ cc::result<cc::unit> cc::impl::validate_compression_config(compression_config co
     if (cfg.dictionary != nullptr && cfg.dictionary->algorithm() != cfg.algorithm)
         return cc::error("compression: the dictionary was built for a different algorithm");
 
+    if (cfg.framing == compression_framing::zlib && cfg.algorithm != compression_algorithm::deflate)
+        return cc::error("compression: `zlib` framing is the RFC 1950 wrapper around deflate, and no other algorithm "
+                         "has one");
+
+    // The backend guards this too, but two of the four entry points into it have no error channel to report it
+    // through: create_stream_compressor can only return nullptr, and cc::compress can only assert.
+    // Stating it here is what makes all four name the actual rule.
+    if (cfg.algorithm == compression_algorithm::deflate && cfg.framing == compression_framing::frame
+        && cfg.dictionary != nullptr && !cfg.dictionary->is_empty())
+        return cc::error("deflate: gzip framing cannot carry a dictionary - use `zlib` or `raw` framing for one");
+
     return cc::unit{};
 }
 
 cc::result<cc::unit> cc::impl::validate_decompression_config(decompression_config const& cfg)
 {
-    if (cfg.framing == compression_framing::raw && !cfg.algorithm.has_value())
-        return cc::error("decompression: raw framing carries no magic, so the algorithm must be given explicitly");
+    if (cfg.framing != compression_framing::frame && !cfg.algorithm.has_value())
+        return cc::error("decompression: only `frame` framing carries a magic, so any other framing needs the "
+                         "algorithm given explicitly");
+
+    if (cfg.framing == compression_framing::zlib && cfg.algorithm.value() != compression_algorithm::deflate)
+        return cc::error("decompression: `zlib` framing is the RFC 1950 wrapper around deflate, and no other algorithm "
+                         "has one");
 
     if (cfg.dictionary != nullptr && cfg.algorithm.has_value() && cfg.dictionary->algorithm() != cfg.algorithm.value())
         return cc::error("decompression: the dictionary was built for a different algorithm");
@@ -86,6 +104,11 @@ cc::result<isize> cc::compress_into(cc::span<byte const> data, cc::span<byte> ou
 
 cc::vector<byte> cc::compress(cc::span<byte const> data, compression_config cfg)
 {
+    // Checked here rather than left to the assert below, so a rejected config reports which rule it broke instead of a
+    // buffer size that was never the problem.
+    auto const valid = impl::validate_compression_config(cfg);
+    CC_ASSERT(valid.has_value(), valid.error().to_string().c_str_materialize());
+
     auto out = cc::vector<byte>::create_uninitialized(compress_bound(data.size(), cfg));
 
     auto const written = compress_into(data, out, cfg);
@@ -134,14 +157,17 @@ cc::optional<cc::compression_algorithm> cc::detect_algorithm(cc::span<byte const
         return compression_algorithm::zstd;
     if (impl::lz4_backend().matches_magic(data))
         return compression_algorithm::lz4;
+    // Only deflate's gzip framing is sniffable; its zlib wrapper is a checksum constraint rather than a magic.
+    if (impl::deflate_backend().matches_magic(data))
+        return compression_algorithm::deflate;
 
     return {};
 }
 
 cc::optional<isize> cc::decompressed_size(cc::span<byte const> data, decompression_config cfg)
 {
-    // Raw framing declares nothing by definition, and a sniff on it would read payload bytes as a header.
-    if (cfg.framing == compression_framing::raw)
+    // Only `frame` framing declares anything, and a sniff on the others would read payload bytes as a header.
+    if (cfg.framing != compression_framing::frame)
         return {};
 
     auto const algorithm = resolve_algorithm(data, cfg);
@@ -155,7 +181,9 @@ cc::optional<isize> cc::decompressed_size(cc::span<byte const> data, decompressi
 
 cc::compressor::compressor(compression_config cfg) : _config(cfg)
 {
-    CC_ASSERT(impl::validate_compression_config(cfg).has_value(), "the dictionary was built for a different algorithm");
+    // The validator carries several rules now, so its own message is the only one that names the right cause.
+    auto const valid = impl::validate_compression_config(cfg);
+    CC_ASSERT(valid.has_value(), valid.error().to_string().c_str_materialize());
     _state = impl::backend_for(_config.algorithm).create_compressor(_config);
 }
 

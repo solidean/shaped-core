@@ -10,7 +10,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 #   src/clean-core/bytes/hash128.cc. Header stays private to that .cc.
 # - blake3 (private): backs cc::blake3 / cc::hash256 (the cryptographic hash); see
 #   src/clean-core/bytes/blake3.cc. Header stays private to that .cc.
-# - zstd, lz4 (private): the two algorithms behind cc::compress / cc::decompress; see
+# - zstd, lz4, zlib (private): the three algorithms behind cc::compress / cc::decompress; see
 #   src/clean-core/bytes/impl/. Each header stays private to its own backend .cc.
 
 # Define the library and its sources
@@ -26,6 +26,7 @@ add_library(clean-core
     src/clean-core/bytes/compression_stream.cc
     src/clean-core/bytes/impl/zstd_backend.cc
     src/clean-core/bytes/impl/lz4_backend.cc
+    src/clean-core/bytes/impl/deflate_backend.cc
 
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
@@ -265,7 +266,7 @@ target_include_directories(clean-core
 # mimalloc backs the default general memory resource; xxhash backs cc::hash128; blake3 backs cc::blake3.
 # PRIVATE: only mimalloc_resource.cc / hash128.cc / blake3.cc include the respective headers;
 # CMake still propagates the static libs to consumers' final link.
-target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3 zstd lz4)
+target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3 zstd lz4 zlib)
 
 # std::thread / pthread_setname_np (cc::threaded_actor, cc::set_current_thread_name) need the
 # platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.

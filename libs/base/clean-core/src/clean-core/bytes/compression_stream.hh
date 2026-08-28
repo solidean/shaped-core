@@ -12,13 +12,21 @@
 // parser reads decompressed bytes straight off the window with nothing copied in between:
 //
 //     auto file = cc::file_read_stream_adapter::open(path).value();
-//     auto gz = cc::decompressing_read_stream_adapter::create(file.stream()).value();
+//     auto gz = cc::decompressing_read_stream_adapter::create(file.stream(), {.algorithm = cc::compression_algorithm::deflate}).value();
 //     cc::read_stream in = gz.stream();
 //     auto const doc = babel::json::read(in);
 //
-// `frame` framing only.
-// A raw lz4 blob is one block with no continuation and a raw zstd blob has no header to resume from, so a stream over
-// either would have nothing to work with; both are rejected at create().
+// The algorithm is not optional on the reading side: nothing has been read yet to sniff when the context is created.
+//
+// Every framing but `raw` streams.
+// A raw lz4 blob is one block with no continuation, a raw zstd blob has no header to resume from, and raw deflate is a
+// bare stream with nothing to resume into, so a stream over any of them would have nothing to work with; `raw` is
+// rejected at create().
+// Deflate's `zlib` wrapper — a header and a trailing Adler-32 — streams exactly as gzip and the lz4 and zstd frames do.
+//
+// WHICH decompression_config FIELDS THESE HONOUR.
+// `algorithm` (required), `framing` and `max_output_size` all bind; `dictionary` does not, and a stream that asks for
+// one fails on the first read rather than at create().
 //
 // LIFETIME, and it is two levels deep here.
 // A stream borrows into its adapter's inline buffer, so the adapter must outlive any stream taken from it and must
@@ -29,7 +37,8 @@
 /// Decompresses an inner read_stream on demand.
 ///
 /// Not seekable, and it cannot be made so: reaching an earlier offset would mean decoding the frame again from the start.
-/// It does answer seek_dir::remaining_size_hint once the frame header declares a size, which is what lets read_all() size its buffer in one allocation.
+/// It does answer seek_dir::remaining_size_hint when the frame declares its size in the HEADER — zstd and lz4 — which is what lets read_all() size its buffer in one allocation.
+/// gzip keeps its size in the trailer, which a stream holding one window has not reached, so a deflate stream reports no hint at all.
 struct cc::decompressing_read_stream_adapter
 {
     /// Fails on a config this cannot stream, and on a create() the backend refuses.
@@ -60,9 +69,13 @@ private:
     compression_algorithm _algorithm = {};
     void* _state = nullptr;
 
-    /// Decompressed bytes still to come, or -1 when the frame did not declare a size.
-    /// Read once off the frame header, then decremented as bytes are produced.
+    /// Decompressed bytes still to come, or -1 when the frame declares no size in its header.
+    /// Read once off the first window, clamped to max_output_size, then decremented as bytes are produced.
     i64 _remaining_hint = -1;
+
+    /// Total decompressed bytes handed out so far, which is what max_output_size is measured against.
+    i64 _total_produced = 0;
+
     bool _hint_probed = false;
     bool _frame_finished = false;
 
