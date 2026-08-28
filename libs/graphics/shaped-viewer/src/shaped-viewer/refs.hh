@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh> // cc::forward
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
@@ -158,6 +159,31 @@ public:
     }
 
     [[nodiscard]] cc::string_view display_name() const;
+
+    /// How many frames this view's SLOWEST traced layer has blended into its accumulated image.
+    ///
+    /// The lowest across every traced layer rather than one layer's, because a view is only as converged as its worst
+    /// one, and layer 0 is frequently not traced at all — a layout or a ui layer below the scene puts the trace at
+    /// index 1, and reading layer 0 then reports 0 forever.
+    ///
+    /// It is 0 on any frame that restarts the accumulation, which is any frame changing what the image depends on —
+    /// the camera, the scene, the resolution, or a shader reload.
+    /// So a caller watching it needs no "has anything changed" rule of its own; this counter already is one.
+    /// 0 for a view with no traced layer, which is indistinguishable from one that just restarted —
+    /// `is_accumulation_converged` is what tells those apart.
+    [[nodiscard]] u32 accumulated_frames() const;
+
+    /// Whether every traced layer of this view has reached `frames`, or has stopped climbing and never will.
+    ///
+    /// **This is what a caller waiting for a converged image should ask**, rather than comparing the counter itself.
+    /// A layer stops at `sv::accumulation_frame_cap`, so a target above it is one the counter can never reach: asking
+    /// for 5000 frames and waiting on `accumulated_frames() >= 5000` waits forever on an image that finished long ago.
+    ///
+    /// An unset `frames` asks only whether this view has finished as far as it can.
+    /// False for a view with no traced layer, since nothing there has converged.
+    /// What it does NOT see is post-load work a resource still owes, which changes a texture's contents rather than
+    /// its id — `frame::pending_resource_work` is that half.
+    [[nodiscard]] bool is_accumulation_converged(cc::optional<u32> frames = {}) const;
 
     [[nodiscard]] view_id id() const;
     [[nodiscard]] view_index index() const { return _view; }

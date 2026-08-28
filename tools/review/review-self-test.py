@@ -45,6 +45,9 @@ from tools.review.lib.entry.write import (  # noqa: E402
     append_text, check_supersedes, compose, immutability_violations, set_block_attrs, stamp_rounds,
 )
 from tools.review.lib.render.markdown import render as render_markdown  # noqa: E402
+from tools.review.lib.render.media import (  # noqa: E402
+    BINARY, IMAGE, TEXT, classify, human_bytes, image_dimensions,
+)
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
 from tools.review.lib.git.run import Git  # noqa: E402
 from tools.review.lib.space.intervals import IntervalList  # noqa: E402
@@ -562,6 +565,113 @@ def test_every_block_type_renders(root: Path) -> None:
     )
     for needle in ("tier-delta-rule", "recommendation", "<pre class=\"pg\">", "class=\"changes\"", "ask-form"):
         assert needle in html, f"{needle!r} missing from the rendered entry"
+
+
+def test_option_labels_render_but_keep_their_value(root: Path) -> None:
+    """An option label is markdown for the reader and the answer key for the tool, and those must not be one string.
+
+    It rendered as escaped plain text for the life of the tool, so a backticked symbol showed its backticks, a link
+    showed its brackets, and the `raw:` escape — which an author only reaches for because `validate` demanded it — was
+    visible in the question.
+
+    The `value` must stay byte for byte, though.
+    Answers are stored against it and the ask's immutability hash covers the ordered options, so decorating the stored
+    string would orphan every answer already given.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.render.entryview import render_entry
+
+    lines = [
+        "---", "id: 1", "title: t", "---", "",
+        "## context/cold", "", "Context.", "",
+        "## context/repo", "", "Context.", "",
+        "## context/delta", "", "Context.", "",
+        "## ask  a-question", "", "Which way?", "",
+        "- radio: keep `sv::interactive` as it is",
+        "- radio: put it under `raw:build/<preset>/captures/`",
+        "",
+    ]
+    entry = parse_text("\n".join(lines), root / "entries" / "010-x.md", slug="010-x")
+    html = render_entry(
+        entry, AnswerFile(root / "a.json"),
+        repo=root, paths=ReviewPaths(root), ledger=Ledger(root / "ledger.jsonl"), hash_of=hash_ask,
+    )
+
+    assert "<code>sv::interactive</code>" in html, "an option's markdown must render"
+    assert "raw:build" not in html.split('class="opt-label"')[2], "`raw:` must not reach the reader"
+
+    # The stored value keeps both spellings exactly, backticks and `raw:` included.
+    assert 'value="keep `sv::interactive` as it is"' in html
+    assert 'value="put it under `raw:build/&lt;preset&gt;/captures/`"' in html
+
+    # And the ANSWERED form renders the same way, since that is the one that stays on screen afterwards.
+    answers = AnswerFile(root / "b.json")
+    answers.upsert(entry.ask("a-question"), selected=["keep `sv::interactive` as it is"], text="", round_number=1)
+    answers.finalize(1)
+    answered = render_entry(
+        entry, answers,
+        repo=root, paths=ReviewPaths(root), ledger=Ledger(root / "ledger.jsonl"), hash_of=hash_ask,
+    )
+    assert "<code>sv::interactive</code>" in answered.split('class="answer-choices"')[1], \
+        "an answered option's markdown must render too"
+
+
+def test_a_file_is_classified_before_anything_reads_it_as_text(root: Path) -> None:
+    """Every viewer here used to assume text, so a committed JPEG went through the highlighter as replacement chars.
+
+    The classification is what the popover and the file page both branch on, so it is the thing worth pinning.
+    An extension we can draw makes a file an image, a NUL in the first block makes it binary, the rest is text.
+    """
+    # A real PNG header, so the dimension sniff reads something rather than a fixture of itself.
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000004d0000002a00806000000") + bytes(32)
+    (root / "shot.png").write_bytes(png)
+    (root / "notes.md").write_text("# plain text\nsecond line\n", encoding="utf-8")
+    (root / "blob.bin").write_bytes(b"MZ" + bytes(4) + b"\xff" * 200)
+
+    shot = classify(root / "shot.png")
+    assert shot.kind == IMAGE, "an extension we can draw is an image"
+    assert shot.mime == "image/png"
+    assert (shot.width, shot.height) == (1232, 672), "the PNG header states its size at a fixed offset"
+    assert shot.dimensions == "1232×672"
+
+    assert classify(root / "notes.md").kind == TEXT
+    assert classify(root / "blob.bin").kind == BINARY, "a NUL in the first block is what makes a file binary"
+
+    # SVG is text and is still drawn: a reader hovering a diagram wants the diagram.
+    (root / "diagram.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'></svg>", encoding="utf-8")
+    assert classify(root / "diagram.svg").kind == IMAGE
+
+    # A file that cannot be read classifies as text, so the caller's own read-and-report path produces the error
+    # rather than this inventing a second one.
+    assert classify(root / "does-not-exist").kind == TEXT
+
+
+def test_a_jpeg_states_its_size_in_a_segment_rather_than_at_an_offset(root: Path) -> None:
+    """PNG and GIF put the size at a fixed offset; JPEG hides it in whichever SOF segment comes first.
+
+    So the marker chain has to be walked, and a chain carrying segments before the frame header is exactly what
+    separates walking it from guessing at an offset.
+    """
+    jpeg = (
+        bytes.fromhex("ffd8")                                          # SOI
+        + bytes.fromhex("ffe000104a46494600010100000100010000")        # APP0/JFIF, skipped by its length
+        + bytes.fromhex("ffdb00060001020304")                          # a quantization table, also skipped
+        + bytes.fromhex("ffc000110802d005000301")                      # SOF0: height 720, width 1280
+    )
+    assert image_dimensions(jpeg) == (1280, 720)
+
+    # A truncated header reports nothing rather than a number it did not read.
+    assert image_dimensions(jpeg[:8]) == (0, 0)
+    assert image_dimensions(b"not an image at all") == (0, 0)
+
+    # GIF states it little-endian, right after the signature.
+    assert image_dimensions(b"GIF89a" + (640).to_bytes(2, "little") + (480).to_bytes(2, "little")) == (640, 480)
+
+
+def test_human_bytes_rounds_to_the_unit_a_reader_wants(root: Path) -> None:
+    assert human_bytes(512) == "512 B"
+    assert human_bytes(31695) == "31.0 kB"
+    assert human_bytes(3 * 1024 * 1024) == "3.0 MB"
 
 
 def test_duplicate_ask_names_are_rejected(root: Path) -> None:

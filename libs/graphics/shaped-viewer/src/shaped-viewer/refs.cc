@@ -258,6 +258,16 @@ cc::string_view view_ref::display_name() const
     return _frame->state_of(_view).display_name;
 }
 
+u32 view_ref::accumulated_frames() const
+{
+    return impl::min_accumulated_frames(_frame->state_of(_view));
+}
+
+bool view_ref::is_accumulation_converged(cc::optional<u32> frames) const
+{
+    return impl::is_accumulation_converged(_frame->state_of(_view), frames);
+}
+
 // ---- window_ref ------------------------------------------------------------------------------------------
 
 view_ref window_ref::default_view() const

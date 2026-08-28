@@ -1,4 +1,5 @@
 #include <clean-core/common/asserts.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
@@ -11,8 +12,10 @@
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
+#include <shaped-viewer/impl/capture_session.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
+#include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/shaders.hh> // sv::shader_package (path tracer)
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
@@ -114,6 +117,16 @@ struct viewer::impl
     cc::unique_ptr<sr::window> window;
     sg::swapchain_handle swapchain;
 
+    /// Headless only: what the frame composites into, in place of a back buffer.
+    /// Persistent rather than transient — a capture reads it back after the frame that wrote it has been submitted.
+    sg::texture_2d offscreen;
+
+    /// Headless only: what `request_close` sets, since there is no window to route it through.
+    bool close_requested = false;
+
+    /// The capture this run is taking, or null on an ordinary interactive run.
+    cc::unique_ptr<sv::impl::capture_session> capture;
+
 
     gpu_resource_manager resources;
 
@@ -176,18 +189,24 @@ cc::result<viewer> viewer::try_create(cc::string_view id_str, viewer_config conf
 
 cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, viewer_config config)
 {
-    auto ws_r = sr::window_system::try_create();
-    if (ws_r.has_error())
-        return cc::error("shaped-viewer: no window backend / display available");
-    auto ws = cc::move(ws_r.value());
+    // Headless brings up neither, so it needs no display and no window backend at all.
+    auto ws = cc::unique_ptr<sr::window_system>();
+    auto win = cc::unique_ptr<sr::window>();
+    if (!config.headless)
+    {
+        auto ws_r = sr::window_system::try_create();
+        if (ws_r.has_error())
+            return cc::error("shaped-viewer: no window backend / display available");
+        ws = cc::move(ws_r.value());
 
-    // An unset title takes the viewer's own name, so naming a viewer is usually all a caller has to do.
-    auto const title = config.title.has_value() ? cc::string_view(config.title.value()) : display_name_of(id_str);
+        // An unset title takes the viewer's own name, so naming a viewer is usually all a caller has to do.
+        auto const title = config.title.has_value() ? cc::string_view(config.title.value()) : display_name_of(id_str);
 
-    auto win_r = ws->try_create_window({.title = title, .width = config.width, .height = config.height});
-    if (win_r.has_error())
-        return cc::error("shaped-viewer: could not create a window");
-    auto win = cc::move(win_r.value());
+        auto win_r = ws->try_create_window({.title = title, .width = config.width, .height = config.height});
+        if (win_r.has_error())
+            return cc::error("shaped-viewer: could not create a window");
+        win = cc::move(win_r.value());
+    }
 
     // Ray tracing must be supported to build the meshes' BLAS; fail cleanly rather than asserting later.
     {
@@ -198,12 +217,31 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
             return cc::error("shaped-viewer: the rendering context reports no ray-tracing support");
     }
 
-    auto sc_r = ctx.try_create_swapchain({.native_window_handle = win->native_window_handle(),
-                                          .buffer_count = config.buffer_count,
-                                          .format = sg::pixel_format::bgra8_unorm});
-    if (sc_r.has_error())
-        return cc::error("shaped-viewer: could not create a swapchain for the window");
-    auto sc = sc_r.value();
+    // The frame's output: a back buffer when there is a window, an offscreen texture when there is not.
+    // Same format either way, so nothing downstream — the layout pipelines above all — sees which one it got.
+    auto sc = sg::swapchain_handle();
+    auto offscreen = sg::texture_2d();
+    if (config.headless)
+    {
+        auto tex_r = ctx.persistent.try_create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                           .width = config.width,
+                                                           .height = config.height,
+                                                           .usage = sg::texture_usage::render_target
+                                                                  | sg::texture_usage::readonly_texture
+                                                                  | sg::texture_usage::copy_src});
+        if (tex_r.has_error())
+            return cc::error("shaped-viewer: could not create the offscreen target for a headless viewer");
+        offscreen = cc::move(tex_r.value());
+    }
+    else
+    {
+        auto sc_r = ctx.try_create_swapchain({.native_window_handle = win->native_window_handle(),
+                                              .buffer_count = config.buffer_count,
+                                              .format = sg::pixel_format::bgra8_unorm});
+        if (sc_r.has_error())
+            return cc::error("shaped-viewer: could not create a swapchain for the window");
+        sc = sc_r.value();
+    }
 
     // The library is process-wide rather than the viewer's, because a *generated* material permutation is compiled from the
     // render path, which has no viewer to reach back to.
@@ -217,6 +255,7 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     im->window_system = cc::move(ws);
     im->window = cc::move(win);
     im->swapchain = cc::move(sc);
+    im->offscreen = cc::move(offscreen);
 
     im->start_time = std::chrono::steady_clock::now();
     return viewer(cc::move(im));
@@ -270,7 +309,15 @@ void viewer::begin_frames()
 bool viewer::is_running() const
 {
     auto const& im = *_impl;
-    if (im.stopped || im.window == nullptr)
+    if (im.stopped)
+        return false;
+
+    // Headless: nothing polls, nothing can be quit, so `request_close` is the only way out and the loop body is what
+    // decides when that is.
+    if (im.config.headless)
+        return !im.close_requested;
+
+    if (im.window == nullptr)
         return false;
     return !im.window->is_close_requested() && !im.window_system->is_quit_requested();
 }
@@ -278,6 +325,32 @@ bool viewer::is_running() const
 gpu_resource_manager& viewer::resources()
 {
     return _impl->resources;
+}
+
+isize viewer::pending_resource_work() const
+{
+    return _impl->resources.pending_work_count();
+}
+
+void viewer::install_capture(sr::capture_request req)
+{
+    CC_ASSERT(_impl->config.headless, "a capture needs a headless viewer — there is no offscreen target otherwise");
+    _impl->capture = cc::make_unique<sv::impl::capture_session>(cc::move(req));
+    _impl->capture->begin();
+}
+
+void viewer::apply_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body, frame& f)
+{
+    auto* const session = _impl->capture.get();
+    if (session == nullptr)
+        return; // an interactive run: a registered capture is inert, exactly as if it had never been declared
+
+    session->note_registered(name);
+    if (!session->is_active(name))
+        return;
+
+    body({.first_frame = session->is_first_application(), .name = name, .size = f.viewport_size()});
+    session->mark_applied();
 }
 
 sv::impl::view_state& viewer::state_of(view_id id)
@@ -362,6 +435,8 @@ void viewer::zoom_at(tg::pos2f window_point, float ticks)
 void viewer::route_input()
 {
     auto& im = *_impl;
+    if (im.window_system == nullptr)
+        return; // headless: no events, and no cursor to route them by
 
     for (auto const& e : im.window_system->events())
     {
@@ -437,27 +512,36 @@ void viewer::route_input()
 frame viewer::acquire_frame()
 {
     auto& im = *_impl;
-    im.window_system->poll_events();
+    if (!im.config.headless)
+        im.window_system->poll_events();
 
     // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
     // texture, which is all its reclaim needs.
     im.views.begin_frame(u64(im.ctx->current_epoch()));
     route_input();
 
-    if (im.window->is_close_requested() || im.window_system->is_quit_requested())
-        return frame{}; // closed — the loop stops on is_running()
-
-    if (im.window->is_minimized())
-        return frame{}; // closed — skip this frame, the window is still open
-
-    try
+    if (im.config.headless)
     {
-        im.current_backbuffer = im.swapchain->acquire_backbuffer();
+        if (im.close_requested)
+            return frame{}; // closed — the loop stops on is_running()
     }
-    catch (sg::device_lost_exception const&)
+    else
     {
-        im.stopped = true;
-        return frame{};
+        if (im.window->is_close_requested() || im.window_system->is_quit_requested())
+            return frame{}; // closed — the loop stops on is_running()
+
+        if (im.window->is_minimized())
+            return frame{}; // closed — skip this frame, the window is still open
+
+        try
+        {
+            im.current_backbuffer = im.swapchain->acquire_backbuffer();
+        }
+        catch (sg::device_lost_exception const&)
+        {
+            im.stopped = true;
+            return frame{};
+        }
     }
     im.current_cmd = im.ctx->create_command_list();
 
@@ -473,7 +557,7 @@ frame viewer::acquire_frame()
 
     auto f = frame{};
     f._viewer = this;
-    f._size = im.current_backbuffer.size();
+    f._size = im.config.headless ? tg::vec2i(im.config.width, im.config.height) : im.current_backbuffer.size();
     f._seconds = std::chrono::duration<double>(now - im.start_time).count();
     f._delta_seconds = delta;
     f._id = im.frame_index;
@@ -515,7 +599,16 @@ frame_range viewer::frames()
 
 void viewer::request_close()
 {
-    if (_impl == nullptr || _impl->window == nullptr)
+    if (_impl == nullptr)
+        return;
+
+    if (_impl->config.headless)
+    {
+        _impl->close_requested = true;
+        return;
+    }
+
+    if (_impl->window == nullptr)
         return;
 
     // Routed through the window so it is the same signal the close button raises, and is_running() needs no second condition.
@@ -666,6 +759,7 @@ void viewer::finish_frame(frame& f)
         if (target.refresh)
             im.views.get_or_create(target.id).last_refresh_frame = f._id;
 
+    auto traces_ran = false;
     try
     {
         // Reclaim stale / over-budget resources and advance to this frame's epoch, before any view resolves its ids or
@@ -675,10 +769,26 @@ void viewer::finish_frame(frame& f)
 
         // With no views authored this places nothing and the clear alone lands, so the window is never left with
         // stale contents.
-        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views,
-                                 im.current_backbuffer.cleared(clear_color));
-        im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
-        im.ctx->advance_epoch(im.swapchain->buffer_count());
+        //
+        // The output is a back buffer or the offscreen texture, and viewer_renderer cannot tell: same format, same
+        // render_target_view, so the whole pass below this is identical either way.
+        auto const output = im.config.headless ? im.offscreen.as_render_target_view() : im.current_backbuffer;
+        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
+
+        // Asked while the list is still ours: `is_ready` reports the last trace recorded onto it, and submitting moves it away.
+        // A frame with no trace has nothing to report, and nothing to be wrong about.
+        traces_ran = plan.traces.empty() || pathtrace_routine::is_ready(*im.current_cmd);
+
+        if (im.config.headless)
+        {
+            im.ctx->submit_command_list(cc::move(im.current_cmd));
+            im.ctx->advance_epoch(im.config.buffer_count);
+        }
+        else
+        {
+            im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
+            im.ctx->advance_epoch(im.swapchain->buffer_count());
+        }
     }
     catch (sg::device_lost_exception const&)
     {
@@ -687,5 +797,76 @@ void viewer::finish_frame(frame& f)
 
     im.current_cmd = nullptr;
     im.current_backbuffer = sg::render_target_view{};
+
+    if (im.capture != nullptr)
+        advance_capture(plan, traces_ran);
+}
+
+void viewer::advance_capture(render_plan const& plan, bool traces_ran)
+{
+    auto& im = *_impl;
+    auto& session = *im.capture;
+    if (session.is_done())
+        return;
+
+    // A capture asked for by name that nothing registered is an error, and it is caught on the FIRST frame rather
+    // than after the timeout: registration happens while a frame is authored, so one frame is all it takes to know.
+    //
+    // The alternative is the quiet one — capturing the default view under the requested name's filename — which is
+    // exactly how a renamed callback would go on producing a plausible, wrong reference image.
+    if (!session.request().name.empty() && session.is_first_application())
+    {
+        CC_LOG_ERROR("capture: nothing registered the capture {}", session.request().name);
+        for (auto const& name : session.registered_names())
+            CC_LOG_ERROR("capture: this frame registered {}", name);
+
+        session.mark_done();
+        request_close();
+        return;
+    }
+
+    // Every refreshing trace's view, asked whether it has converged rather than how far it has counted.
+    // Per view rather than per trace: `is_accumulation_converged` folds over all of that view's traced layers, which
+    // is what "the image is finished" actually means when a view carries more than one.
+    auto any_traced = false;
+    auto views_converged = true;
+    auto lowest = u32(0);
+    for (auto const& tr : plan.traces)
+    {
+        if (!tr.refresh)
+            continue;
+
+        if (!any_traced)
+            lowest = im.views.min_accumulated_frames(tr.id);
+        else
+            lowest = cc::min(lowest, im.views.min_accumulated_frames(tr.id));
+
+        any_traced = true;
+        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate_frames);
+    }
+
+    auto const settled = session.is_settled(views_converged, any_traced, im.resources.pending_work_count(), traces_ran);
+    if (!settled && !session.is_out_of_time())
+        return;
+
+    if (settled)
+        session.mark_settled_before_writing();
+
+    // Only a settled run may write to the path it was asked for: dev.py reads a file there as the capture having
+    // succeeded, so an unsettled image left at that path would be refreshed over the committed reference.
+    auto const path = session.settled_before_writing() ? cc::string(session.request().output_path)
+                                                       : sv::impl::partial_capture_path(session.request().output_path);
+    if (!session.settled_before_writing())
+        CC_LOG_WARNING("capture: giving up after {}s at {}/{} accumulated frames — writing what it has to {}, and "
+                       "nothing to {}",
+                       session.elapsed_seconds(), lowest, session.request().accumulate_frames, path,
+                       session.request().output_path);
+
+    auto const written = sr::write_capture_image(*im.ctx, im.offscreen, path);
+    if (written.has_error())
+        CC_LOG_ERROR("capture: {}", written.error().to_string());
+
+    session.mark_done();
+    request_close();
 }
 } // namespace sv
