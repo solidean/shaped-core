@@ -126,6 +126,28 @@ private:
 
 bucketing_listener g_bucketing;
 
+/// Everything the run recorded, kept whole for `--benchmark-rec`.
+///
+/// No slicing and no attribution: the question this answers is "what happened during the run", which is exactly what
+/// the bucketing listener above throws away in order to answer a different one.
+cc::mutex<cc::rec::recording> g_capture;
+
+struct capture_listener final : cc::rec::listener
+{
+    void on_chunk(cc::rec::chunk_view const& view) override
+    {
+        if (view.bytes.empty())
+            return;
+        g_capture.lock([&](cc::rec::recording& r) { r.append(view); });
+    }
+
+    [[nodiscard]] cc::string_view listener_name() const override { return "nexus run capture"; }
+};
+
+capture_listener g_capture_listener;
+cc::rec::listener_handle g_capture_handle;
+cc::string g_capture_path;
+
 /// nexus's own defaults, with `CC_LOG_*` applied over them.
 ///
 /// Elapsed rather than wall-clock time, because a test run's question is "how far into the run" and not "what time is
@@ -194,6 +216,15 @@ bool nx::impl::run_recording_active()
     return g_active;
 }
 
+void nx::impl::begin_run_capture(cc::string_view path)
+{
+    if (!g_active || path.empty())
+        return;
+
+    g_capture_path = cc::string(path);
+    g_capture_handle = cc::rec::register_listener(g_capture_listener);
+}
+
 void nx::impl::end_run_recording(cc::string_view log_dir)
 {
     if (!g_active)
@@ -219,6 +250,27 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
 
         for (auto const& [name, r] : dumps)
             g_pending_dumps.push_back({cc::string(name), cc::rec::serialize(r)});
+    }
+
+    // The whole-run capture, under the same constraint and for the same reason: serialize while the pool is still
+    // alive, and let go of the recording before shutdown() deletes the chunks it points at.
+    if (!g_capture_path.empty())
+    {
+        auto bytes = cc::vector<byte>();
+        g_capture.lock(
+            [&](cc::rec::recording& r)
+            {
+                bytes = cc::rec::serialize(r);
+                r = {};
+            });
+
+        if (auto const written = cc::rec::save_serialized_recording(bytes, g_capture_path); !written.has_value())
+            cc::eprintln("nexus: could not write the run recording to `{}': {}", g_capture_path,
+                         written.error().to_string());
+
+        cc::rec::unregister_listener(g_capture_handle);
+        g_capture_handle = {};
+        g_capture_path = {};
     }
 
     if (!log_dir.empty())

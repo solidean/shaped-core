@@ -36,6 +36,20 @@ A chat review posts nothing on its own either — the rule above binds it exactl
 The tool exists because a chat review is a narrative, and a narrative silently skips a file.
 It does not carry any taste — that is still yours and the guide's.
 
+### A review is scratch — never cite an entry outside it
+
+Entry numbers, ask names and round numbers address one folder under `.tmp/` that is deleted, renumbered and
+re-ingested freely.
+**They must not appear in anything that outlives it**: a commit message, a source comment, a doc, a PR description, or
+a plan.
+
+"per `080`" and "`050/barrier-home` settled this" are dangling references the moment the folder goes, and worse, they
+read as authority to a reader who cannot follow them.
+Carry the *reasoning* out instead — the decision, and why it was made — and leave the address behind.
+
+Inside the review, cite freely: that is what `follows:`, `supersedes:` and `addresses:` are for, and a later round
+naming an earlier entry is exactly how a thread reads.
+
 ### It is new, and it will misbehave
 
 The tool landed recently and is under active development.

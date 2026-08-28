@@ -39,7 +39,7 @@ The source tree is organized by topic, and the [readme](../libs/base/clean-core/
 
 Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML), so IDE test integration works out of the box.
 This is what every `<lib>-test` binary is built on.
-Beyond `TEST` / `CHECK`, it carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks, and hardware performance counters.
+Beyond `TEST` / `CHECK`, it carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks, and hardware performance counters.
 
 **nexus is a leaf, not a base layer.**
 Nothing in shaped-core links it except test binaries, so the harness sits on top of the libraries it tests even though it lives in `base/`, and it is added last in the root `CMakeLists.txt`.

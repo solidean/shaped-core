@@ -45,6 +45,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         anything, review.anything_front(), "anything",
         review.anything_body(),
         title=review.ANYTHING_TITLE,
+        on_create=review.ANYTHING_ASK,
     )
 
     coverage = paths.entries_dir / f"{review.COVERAGE_SLUG}.md"

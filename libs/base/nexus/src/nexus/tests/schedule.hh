@@ -104,8 +104,37 @@ struct nx::test_schedule_config
     cc::string junit_xml_file;
 
     // When non-empty, run() writes a perf-metrics JSON sidecar to this path, additionally to the console output.
-    // Set via --perf-json <file>; nx::guide records the metrics.
-    cc::string perf_json_file;
+    // Set via --pgo-json <file>; nx::pgo records the metrics.
+    cc::string pgo_json_file;
+
+    // When non-empty, run() writes the benchmark sidecar to this path, additionally to the console output.
+    //
+    // A different schema from the PGO one and a different consumer, which is why the two files are named apart:
+    // <name>.pgo.json tracks a handful of points over time, <name>.bench.json carries a whole run including every
+    // sample.
+    // Set via --benchmark-json <file>.
+    cc::string benchmark_json_file;
+
+    // When non-empty, run() writes a .ccrec of the WHOLE run to this path — warmup, scheduling and everything the
+    // code under test recorded, not just the benchmark's own events.
+    //
+    // The harness emits at loop boundaries only, never inside a timed region, so this costs the measurements nothing.
+    // The per-iteration timeline is therefore not in here, and that is the trade rather than an omission.
+    //
+    // Needs the recorder, so --no-recording turns it off: there is nothing to write a recording out of.
+    // Set via --benchmark-rec <file>.
+    cc::string benchmark_rec_file;
+
+    // Print the full statistics block under every row of a benchmark table.
+    // A single-loop benchmark is always drawn in full, so this changes nothing there.
+    bool benchmark_verbose = false;
+
+    // Pin the run to one core before the benchmarks, and report whether it worked.
+    //
+    // Off by default on purpose: a harness that silently pins will eventually pin onto a core something else is
+    // already using, and that measurement is worse than the unpinned one.
+    // Set via --benchmark-pin.
+    bool benchmark_pin = false;
 
     // The arguments the selected test itself receives, reachable from its body through nx::test_args().
     // Set via --test-args "<line>", or by everything after a bare --.

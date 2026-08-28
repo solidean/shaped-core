@@ -128,5 +128,5 @@ Source: [allocation-benchmark.cc](../../tests/benchmarks/allocation-benchmark.cc
 Reproduce:
 
 ```bash
-uv run dev.py test "bench-alloc (handle & node comparison)" --target clean-core-test --preset release-clang --timeout 0
+uv run dev.py benchmark "bench-alloc" --timeout 0
 ```

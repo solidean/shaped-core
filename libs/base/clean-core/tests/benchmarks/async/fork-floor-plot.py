@@ -7,26 +7,27 @@
 """
 Run the async fork-floor sweep and chart it.
 
-Drives `bench-async-fork-floor (thread sweep)` through dev.py in release, parses the FLOORCSV rows, and writes
-one PNG: x = element count, y = total ns for the whole graph, both log; one line per pool worker count on a
-viridis gradient.
+Drives `bench-async-grain - fork floor thread sweep` through `dev.py benchmark` in release, reads its JSON
+sidecar, and writes one PNG: x = element count, y = total ns for the whole graph, both log; one line per pool
+worker count on a viridis gradient.
 
 The question it answers: a graph that forks even once costs far more than an un-split single node, whatever its size.
 Is that a FIXED handoff cost (lines flat across worker counts) or contention (lines fan out as the pool grows)?
 
 Usage:
     uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py
-    uv run .../fork-floor-plot.py --input raw.txt     # re-plot a previous capture, no re-run
+    uv run .../fork-floor-plot.py --input floor.json  # re-plot a previous capture, no re-run
     uv run .../fork-floor-plot.py --linear-y
 
-The sweep takes ~4 minutes; every run saves its raw stdout next to the PNG so --input can replot for free.
+The sweep takes ~15 s; every run saves its sidecar next to the PNG so --input can replot for free.
 """
 
 import argparse
+import json
 import pathlib
-import re
 import subprocess
 import sys
+import tempfile
 
 import matplotlib
 
@@ -34,45 +35,47 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 
-TEST_NAME = "bench-async-fork-floor (thread sweep)"
+BENCHMARK_NAME = "bench-async-grain - fork floor thread sweep"
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[6]
 
-# FLOORCSV <workers>,<n>,<ns_total> -- the header row is non-numeric and so is skipped for free.
-ROW_RE = re.compile(r"^FLOORCSV\s+(\d+),(\d+),([0-9.eE+-]+)\s*$")
+
+def run_benchmark(preset: str) -> dict:
+    """Run the sweep through `dev.py benchmark` and return its parsed JSON sidecar."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sidecar = pathlib.Path(tmp) / "floor.json"
+        cmd = [
+            "uv", "run", "dev.py", "--plain", "benchmark", BENCHMARK_NAME,
+            "--preset", preset,  # --preset is per-subcommand: it goes after `benchmark`
+            "--json", str(sidecar),
+            "--timeout", "0",  # dev.py's default 60 s per-binary timeout would cut the sweep off partway through
+        ]
+        print(f"$ {' '.join(cmd)}", file=sys.stderr)
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, text=True)
+        if proc.returncode != 0:
+            raise SystemExit(f"dev.py failed (exit {proc.returncode})")
+
+        # dev.py suffixes the sidecar with the binary it came from, so several binaries never overwrite one another.
+        written = sorted(pathlib.Path(tmp).glob("floor*.json"))
+        if not written:
+            raise SystemExit(f"{BENCHMARK_NAME!r} wrote no sidecar -- did it run?")
+        return json.loads(written[0].read_text(encoding="utf-8"))
 
 
-def run_benchmark(preset: str) -> str:
-    """Run the sweep via dev.py and return its stdout — raises if dev.py reports failure."""
-    cmd = [
-        "uv",
-        "run",
-        "dev.py",
-        "--mirror-test-output",  # dev.py is quiet by default; this streams the binary's stdout to ours
-        "--plain",
-        "test",
-        TEST_NAME,
-        "--preset",
-        preset,  # --preset is per-subcommand: it goes after `test`
-        "--timeout",
-        "0",  # ~4 min sweep; dev.py's default 60 s per-binary timeout would kill it mid-table
-    ]
-    print(f"$ {' '.join(cmd)}", file=sys.stderr)
-    proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
-    if proc.returncode != 0:
-        sys.stderr.write(proc.stdout)
-        sys.stderr.write(proc.stderr)
-        raise SystemExit(f"dev.py failed (exit {proc.returncode})")
-    return proc.stdout
+def parse(sidecar: dict) -> dict[int, list[tuple[int, float]]]:
+    """-> {workers: [(n, ns_total), ...] sorted by n}
 
-
-def parse(text: str) -> dict[int, list[tuple[int, float]]]:
-    """-> {workers: [(n, ns_total), ...] sorted by n}"""
+    Loop names are `w=<workers> n=<n>`, which is the contract with the benchmark.
+    The benchmark declares no items, so the median IS the cost of the whole pass -- which is the y axis here.
+    """
     out: dict[int, list[tuple[int, float]]] = {}
-    for line in text.splitlines():
-        m = ROW_RE.match(line.strip())
-        if not m:
+    for loop in sidecar.get("loops", []):
+        parts = str(loop.get("loop", "")).split()
+        if len(parts) != 2 or not parts[0].startswith("w=") or not parts[1].startswith("n="):
             continue
-        out.setdefault(int(m.group(1)), []).append((int(m.group(2)), float(m.group(3))))
+        median = float(loop.get("statistics", {}).get("median", 0.0))
+        if median <= 0:
+            continue
+        out.setdefault(int(parts[0][2:]), []).append((int(parts[1][2:]), median * 1e9))
     for pts in out.values():
         pts.sort()
     return out
@@ -117,7 +120,7 @@ def plot(workers: dict[int, list[tuple[int, float]]], out_path: pathlib.Path, lo
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--preset", default="release-clang", help="dev.py preset (default: release-clang)")
-    ap.add_argument("--input", type=pathlib.Path, help="parse this captured stdout instead of re-running")
+    ap.add_argument("--input", type=pathlib.Path, help="parse this captured .json sidecar instead of re-running")
     ap.add_argument("--out-dir", type=pathlib.Path, help="default: build/bench-async-fork-floor/")
     ap.add_argument("--linear-y", action="store_true", help="linear y axis")
     args = ap.parse_args()
@@ -126,16 +129,16 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.input:
-        text = args.input.read_text()
+        sidecar = json.loads(args.input.read_text(encoding="utf-8"))
     else:
-        text = run_benchmark(args.preset)
-        raw = out_dir / "raw.txt"
-        raw.write_text(text)
+        sidecar = run_benchmark(args.preset)
+        raw = out_dir / "floor.json"
+        raw.write_text(json.dumps(sidecar), encoding="utf-8")
         print(f"wrote {raw}", file=sys.stderr)
 
-    data = parse(text)
+    data = parse(sidecar)
     if not data:
-        raise SystemExit("no FLOORCSV rows found -- did the test run?")
+        raise SystemExit("the sidecar carried no `w=<workers> n=<n>` loops -- did the sweep run?")
 
     plot(data, out_dir / "async-fork-floor.png", log_y=not args.linear_y)
 

@@ -188,13 +188,21 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
         },
         "sweep the manual bucket instead of the normal one");
     args.action(
-        {"guide-benchmarks"},
+        {"pgo-benchmarks"},
         [&]
         {
-            config.selected_bucket = config_ns::test_bucket::guide_benchmark;
+            config.selected_bucket = config_ns::test_bucket::pgo_benchmark;
             state.explicit_bucket = true;
         },
-        "sweep the guide-benchmark bucket");
+        "sweep the pgo-benchmark bucket");
+    args.action(
+        {"benchmarks"},
+        [&]
+        {
+            config.selected_bucket = config_ns::test_bucket::benchmark;
+            state.explicit_bucket = true;
+        },
+        "sweep the benchmark bucket");
     args.action(
         {"examples"},
         [&]
@@ -213,7 +221,13 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
 
     args.group("reports");
     args.arg({"junit-xml"}, config.junit_xml_file, {.desc = "also write a JUnit XML report here", .metavar = "FILE"});
-    args.arg({"perf-json"}, config.perf_json_file, {.desc = "also write nx::guide metrics here", .metavar = "FILE"});
+    args.arg({"pgo-json"}, config.pgo_json_file, {.desc = "also write nx::pgo metrics here", .metavar = "FILE"});
+    args.arg({"benchmark-json"}, config.benchmark_json_file,
+             {.desc = "also write the full benchmark results here", .metavar = "FILE"});
+    args.arg({"benchmark-rec"}, config.benchmark_rec_file,
+             {.desc = "also write a .ccrec of the whole run here", .metavar = "FILE"});
+    args.arg({"benchmark-verbose"}, config.benchmark_verbose, "full statistics under every benchmark row");
+    args.arg({"benchmark-pin"}, config.benchmark_pin, "pin the run to one core before benchmarking");
     args.arg({"list-tests-json"}, config.list_tests_json_file,
              {.desc = "write a JSON listing of every test here (- for stdout) and exit", .metavar = "FILE"});
 

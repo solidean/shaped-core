@@ -35,7 +35,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(inst_p)
     a.profile(inst_p)
 
-    train_p = pgo_sub.add_parser("train", help="Run guide benchmarks on the instrumented build, merge profile")
+    train_p = pgo_sub.add_parser("train", help="Run PGO benchmarks on the instrumented build, merge profile")
     a.preset(train_p)
     a.profile(train_p)
     _add_timeout(train_p)
@@ -44,7 +44,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(opt_p)
     a.profile(opt_p)
 
-    meas_p = pgo_sub.add_parser("measure", help="Run guide benchmarks on baseline + PGO and diff metrics")
+    meas_p = pgo_sub.add_parser("measure", help="Run PGO benchmarks on baseline + PGO and diff metrics")
     a.preset(meas_p)
     a.profile(meas_p)
     _add_timeout(meas_p)
@@ -72,7 +72,7 @@ def _presets(args: argparse.Namespace, ctx: Context) -> tuple[dev.Preset, dev.Pr
 
 
 def _binary_names(ctx: Context, preset: dev.Preset) -> list[str]:
-    """Test binaries to drive (every *-test); guide-benchmark-less ones simply no-op."""
+    """Test binaries to drive (every *-test); pgo-benchmark-less ones simply no-op."""
     return [t.name for t in ctx.discover(preset) if ctx.is_test_target(t)]
 
 

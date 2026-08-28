@@ -25,7 +25,7 @@ One-liner per library:
   [docs/systems/recording.md](libs/base/clean-core/docs/systems/recording.md) is the mechanism.
   **Every library has a recording domain and logs its diagnostics** — a library never prints, and never writes its own `[lib]` prefix.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
-  Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
+  Carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   Namespace `nx`. Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
   **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
@@ -354,6 +354,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Run one example                  | `uv run dev.py example <match>` (no arg lists them all; [examples](docs/guides/examples.md)) |
 | See what a graphical example looks like | `uv run dev.py example <match> --capture` — headless, writes an image, needs no display. **Use it while writing one**: a run that neither crashes nor asserts routinely shows nothing worth looking at |
 | Refresh the committed example images | `uv run dev.py example --update-captures "<matcher>"` (capture + copy; `--refresh-captures` copies only) |
+| Run a benchmark                  | `uv run dev.py benchmark <match>` (no arg lists them all; defaults to a `release-*` preset; [benchmarking](docs/guides/benchmarking.md)) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
 | Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
@@ -362,8 +363,8 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
-| Benchmark / compare two implementations | a `nx::config::manual` test — never swept, needs no CHECK, prints its own table ([sort-benchmark.cc](libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model). A microbenchmark harness in nexus is still TODO |
-| Record a tracked metric for PGO  | `GUIDE_BENCHMARK` + `nx::guide` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
+| Benchmark / compare two implementations | `BENCHMARK` + `nx::bench::run`, run with `uv run dev.py benchmark <match>` ([benchmarking](docs/guides/benchmarking.md)) |
+| Record a tracked metric for PGO  | `PGO_BENCHMARK` + `nx::pgo` — a few stable points, not a benchmarking framework ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Read hardware performance counters | `uv run dev.py profiling counters` ([docs/guides/profiling.md](docs/guides/profiling.md)) |
 | Find where a build/test/check run's time goes | `uv run dev.py check --fix --profile <file> --profile-type chrome-tracing` ([profiling a run](docs/guides/building-and-testing.md#profiling-a-run)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |

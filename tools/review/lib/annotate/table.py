@@ -43,13 +43,17 @@ def _is_raw(info: str) -> bool:
 def _referencing_text(text: str) -> list[str]:
     """The fragments of a block's source a file reference may be written in.
 
-    A `raw:` span and a `raw` fence are left out: that is the author saying this looks like a reference and is
-    not, which is the one thing the matcher cannot work out for itself.
+    A `raw:` span, a `raw:` link destination and a `raw` fence are left out: that is the author saying this looks
+    like a reference and is not, which is the one thing the matcher cannot work out for itself.
+
+    A link destination has to opt out the same way a code span does, and dropping the prefix is not enough on its
+    own — the file matcher's lookbehind rejects a `:`, so a `raw:` left in front makes it start one segment late
+    and report a path the author never wrote.
     """
     out = [body for _, info, body in _FENCE_BODY_RE.findall(text) if not _is_raw(info)]
     without_fences = _FENCE_BODY_RE.sub("", text)
     out.extend(span for span in _CODE_SPAN_RE.findall(without_fences) if not span.startswith("raw:"))
-    out.extend(_LINK_TARGET_RE.findall(without_fences))
+    out.extend(target for target in _LINK_TARGET_RE.findall(without_fences) if not target.startswith("raw:"))
     return out
 
 

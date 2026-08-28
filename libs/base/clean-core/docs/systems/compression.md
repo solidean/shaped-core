@@ -8,7 +8,7 @@ All three go the opposite way from the usual advice once the payload is a few hu
 Every number here comes from [tests/benchmarks/compression-benchmark.cc](../../tests/benchmarks/compression-benchmark.cc), run on payloads shaped-core actually stores.
 That matters: upstream publishes its numbers on Silesia, a corpus of tarred novels and executables, and nothing here looks like that.
 
-Run it yourself with `uv run dev.py test "bench-compress" --preset release-clang --timeout 0 --manual`.
+Run it yourself with `uv run dev.py benchmark "bench-compress" --timeout 0`.
 
 ## A small blob does not compress at all, dictionary or nothing
 

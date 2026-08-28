@@ -59,7 +59,7 @@ The positional argument to `test` is smart: naming a test binary runs that whole
 Before running, dev.py asks each `*-test` binary which tests the filter actually selects (via nexus' `--list-tests-json`) and runs **only the binaries that contain a match**.
 The others are skipped without ever emitting a "did not select any tests" error.
 If the filter matches **nothing in any binary**, the run fails loudly with a diagnostic: the closest test names ("did you mean …"), or, when a name matched but was excluded, the fix.
-That fix is to name a disabled test exactly, or to pass the bucket flag for a `manual` / `guide_benchmark` test.
+That fix is to name a disabled test exactly, or to pass the bucket flag for a `manual` / `pgo_benchmark` / `benchmark` / `example` test.
 A full sweep (no filter) is unchanged: every binary runs, and an empty one is a failure.
 
 ### Selecting by file
@@ -79,7 +79,8 @@ A pattern that is not anchored also matches as a path suffix, which is what make
 `*` stays inside one path segment and `**` crosses them, as everywhere else in the repo.
 
 A file match is a *filter*, not an override: it selects exactly the tests an equivalent list of names would, so the bucket and disabled gates still hold — only an **exact test name** opens those.
-So `dev.py test hash-benchmark.cc` reports that the file's benchmarks are in the `guide_benchmark` bucket, and `dev.py test hash-benchmark.cc --guide-benchmarks` runs them.
+So `dev.py test hash-benchmark.cc` reports that the file's benchmarks are in the `pgo_benchmark` and `benchmark` buckets.
+`dev.py test hash-benchmark.cc --pgo-benchmarks` runs the first of those, and `dev.py benchmark` is how the others are reached.
 
 `--match-files` and `--match-names` (forwarded straight to the runner) pin the reading when the fallback guesses wrong — `--match-files vector` never tries names.
 

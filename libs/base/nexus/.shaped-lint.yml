@@ -22,9 +22,19 @@ rules:
     files: src/nexus/bench/impl/hardware_counters_linux.cc
 
   - kind: allow-include
+    value: <sched.h>
+    reason: sched_setaffinity, the only way to pin a benchmark thread to one core on Linux
+    files: src/nexus/bench/impl/platform_load_linux.cc
+
+  - kind: allow-include
     value: <crt_externs.h>
     reason: _NSGetArgv is the only route to this process's argv on Apple platforms
     files: src/nexus/args/impl/os_args.cc
+
+  - kind: allow-include
+    value: <intrin.h>
+    reason: _ReadWriteBarrier, which is what MSVC has instead of the inline asm it does not support on x64; guarded by CC_COMPILER_MSVC, so clang and gcc never see it
+    files: src/nexus/bench/barriers.hh
 
   - kind: allow-include
     value: <cstdlib>
