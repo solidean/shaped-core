@@ -6,6 +6,7 @@
 #include <clean-core/record/stamp.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/context/context.hh>
 
@@ -53,15 +54,60 @@ TEST("sg dx12 - the memory budget is what this process may use, not what the boa
         CHECK(memory.value().budget_bytes <= board.value());
 }
 
-TEST("sg dx12 - GPU load refuses rather than reporting an idle device")
+TEST("sg dx12 - GPU busy counters are monotone and named per engine")
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
 
-    // D3D12 exposes no utilization query, and the Windows route is not implemented yet.
-    // A zero here would draw as an idle GPU on a machine that is pinned, which is the failure this refuses to make.
-    auto const load = handle->query_gpu_load();
-    CHECK(load.has_error());
+    auto first = handle->read_gpu_counters();
+    if (first.has_error())
+        SKIP("the GPU Engine performance counters are unavailable here");
+
+    CHECK(!first.value().engines.empty());
+    for (auto const& e : first.value().engines)
+    {
+        CHECK(!e.engine.empty());
+        CHECK(e.busy_secs >= 0);
+    }
+
+    auto second = handle->read_gpu_counters();
+    REQUIRE(second.has_value());
+
+    // Matched by name, because the engine set can differ between two readings and pairing by index would difference
+    // two unrelated counters.
+    for (auto const& before : first.value().engines)
+        for (auto const& after : second.value().engines)
+            if (cc::string_view(before.engine) == cc::string_view(after.engine))
+                CHECK(after.busy_secs >= before.busy_secs);
+}
+
+TEST("sg dx12 - a sampled GPU load is the busiest engine, in range")
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+
+    if (!sg::gpu_load_sampler::is_supported(*handle))
+        SKIP("the GPU Engine performance counters are unavailable here");
+
+    auto sampler = sg::gpu_load_sampler(*handle);
+    cc::this_thread_sleep_secs(0.05);
+
+    auto const load = sampler.sample();
+    REQUIRE(load.has_value());
+
+    CHECK(load.value().interval_secs > 0);
+    CHECK(load.value().total >= 0.0f);
+    CHECK(load.value().total <= 1.0f);
+
+    // The total is the MAX across engines, never the sum: a device with four engines would otherwise report over 100%.
+    auto busiest = 0.0f;
+    for (auto const& e : load.value().per_engine)
+    {
+        CHECK(e.busy >= 0.0f);
+        CHECK(e.busy <= 1.0f);
+        busiest = e.busy > busiest ? e.busy : busiest;
+    }
+    CHECK(load.value().total == busiest);
 }
 
 TEST("sg dx12 - a software adapter still answers coherently")
@@ -103,10 +149,25 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
     else
         cc::println("  process budget (unavailable: {})", memory.error().to_string());
 
-    if (auto const load = handle->query_gpu_load(); load.has_value())
-        cc::println("  load           {:.0f}%", 100.0f * load.value().total);
+    // The cumulative counters, because 0% on an idle GPU looks identical to counters that are always zero.
+    if (auto const counters = handle->read_gpu_counters(); counters.has_value())
+        for (auto const& e : counters.value().engines)
+            cc::println("  engine {:<10} {:.1f} s busy since boot", e.engine, e.busy_secs);
+
+    auto sampler = sg::gpu_load_sampler(*handle);
+    cc::this_thread_sleep_secs(0.5);
+    if (auto const load = sampler.sample(); load.has_value())
+    {
+        cc::println("  load           {:.0f}% over {:.2f} s (busiest engine)", 100.0f * load.value().total,
+                    load.value().interval_secs);
+        for (auto const& e : load.value().per_engine)
+            if (e.busy > 0.0f)
+                cc::println("    {:<12} {:.1f}%", e.engine, 100.0f * e.busy);
+    }
     else
+    {
         cc::println("  load           (unavailable: {})", load.error().to_string());
+    }
 }
 
 TEST("sg dx12 - a recording is stamped with the GPU", nx::config::exclusive())

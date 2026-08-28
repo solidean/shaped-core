@@ -52,20 +52,52 @@ call a dashboard makes every frame.
 Without that extension vulkan reports only how big the heaps *are*, which says nothing about what is left, so the query
 refuses rather than passing a static number off as a reading.
 
-## Load is declared and refuses everywhere
+## Load is a rate, so it needs a sampler
 
-`query_gpu_load` exists on `sg::context` and returns an error on every backend today.
+Busy time is a monotone counter, exactly like CPU time.
+A `query_gpu_load()` returning a percentage could only work by keeping a hidden previous reading, which is the thing
+`cc::cpu_load_sampler` exists to avoid — so the shapes match:
 
-Neither D3D12 nor Vulkan exposes utilization at all.
-The routes are OS-level or per-vendor:
+```cpp
+ctx.read_gpu_counters();                           // result<gpu_counters> — monotone busy_secs per engine class
+auto sampler = sg::gpu_load_sampler(ctx);          // holds its own baseline; borrows the context
+auto const load = sampler.sample();                // result<gpu_load>
+load.value().total;                                // f32 in [0,1] — the BUSIEST engine
+load.value().per_engine;                           // which engine that was
+load.value().interval_secs;                        // what the reading covers
+```
 
-- **Windows** — `D3DKMTQueryStatistics`, which is what a task manager uses.
-- **Linux** — `/sys/class/drm/card*/device/gpu_busy_percent`, which amdgpu provides and i915 does not.
-- **macOS** — IOKit `PerformanceStatistics`.
+**A GPU is several engines running at once** — 3D, copy, video decode, video encode — so `total` is the maximum across
+them, never the sum and never the mean.
+The sum could exceed 1 on a four-engine device; the mean hides a saturated copy engine behind three idle ones.
+The maximum is what a task manager shows as "GPU %", and it is the number that answers "is the GPU the bottleneck".
 
-None is implemented.
-The API exists so that adding one later moves no call site, and **a refusal beats a zero**: a zero draws as an idle GPU
-on a machine that is pinned.
+Engines are matched **by name** between two readings, because the reported set can change and pairing by index would
+difference two unrelated counters.
+
+### Windows
+
+The `GPU Engine` performance counters, read through PDH — the same source a task manager uses.
+
+**Raw values rather than formatted ones.**
+`Running Time` is a cumulative 100 ns counter, and PDH will format it into a rate against *its own* previous sample,
+which would put back the hidden baseline the sampler exists to remove.
+
+The counters are per process per engine: an instance is named
+`raw:pid_1234_luid_0x00000000_0x0000C4B7_phys_0_eng_1_engtype_3D`, so a device's 3D busy time is the sum over every
+process using it.
+Grouping by `engtype` turns dozens of instances into the handful of numbers a reader wants.
+
+The PDH query is opened once and shared behind a mutex: opening one walks the performance registry and costs
+milliseconds, and a dashboard reads this every frame.
+
+### Elsewhere
+
+`read_gpu_counters` refuses, and the sampler refuses with it.
+The routes exist but are not implemented: `/sys/class/drm/card*/device/gpu_busy_percent` on Linux, which amdgpu
+provides and i915 does not, and IOKit `PerformanceStatistics` on macOS.
+
+**A refusal beats a zero**: a zero draws as an idle GPU on a machine that is pinned.
 
 ## Stamping a recording
 

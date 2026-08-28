@@ -88,12 +88,3 @@ cc::result<sg::gpu_memory_usage> sg::backend::dx12::dx12_context::query_gpu_memo
     // them would report a budget far larger than anything the device can actually keep resident.
     return sg::gpu_memory_usage{.budget_bytes = i64(info.Budget), .current_usage_bytes = i64(info.CurrentUsage)};
 }
-
-cc::result<sg::gpu_load> sg::backend::dx12::dx12_context::query_gpu_load() const
-{
-    // D3D12 has no utilization query at all.
-    // The Windows route is D3DKMTQueryStatistics, which is what a task manager uses and which this does not implement
-    // yet.
-    // Refusing beats a plausible zero: a zero draws as an idle GPU on a machine that is pinned.
-    return cc::error("GPU load is not implemented on the dx12 backend yet");
-}

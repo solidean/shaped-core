@@ -105,9 +105,8 @@ Absent is reported as absent everywhere; no platform returns a fabricated value.
 
 ## Known gaps
 
-- **GPU load** is declared on `sg::context` and refuses on every backend.
-  The routes are `D3DKMTQueryStatistics` on Windows, `gpu_busy_percent` on Linux, IOKit on macOS, and none is
-  implemented.
+- **GPU load** is real on Windows only, through `sg::gpu_load_sampler`.
+  Linux and macOS refuse: `gpu_busy_percent` and IOKit are the routes and neither is implemented.
 - **Open file descriptors** are absent on Linux: counting them means listing `/proc/self/fd`, and cc has no directory
   walk.
   `FDSize` is not it — that is allocated table slots, a much larger number.

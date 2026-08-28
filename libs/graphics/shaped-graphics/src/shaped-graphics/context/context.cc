@@ -153,10 +153,10 @@ cc::result<gpu_memory_usage> context::query_gpu_memory() const
     return cc::error("this backend does not report GPU memory");
 }
 
-cc::result<gpu_load> context::query_gpu_load() const
+cc::result<gpu_counters> context::read_gpu_counters() const
 {
-    // Not "0% busy": a caller drawing that would show an idle GPU on a machine that is pinned.
-    return cc::error("this backend does not report GPU load");
+    // Not an empty counter set, which a sampler would difference into a confident 0% on a pinned GPU.
+    return cc::error("this backend does not report GPU busy counters");
 }
 
 context::~context()
