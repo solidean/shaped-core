@@ -267,6 +267,21 @@ rules:
     files: src/clean-core/platform/system_info.cc
 
   - kind: allow-include
+    value: [<iphlpapi.h>, <lmcons.h>, <winioctl.h>, <winsock2.h>, <ws2tcpip.h>]
+    reason: GetAdaptersAddresses reports the hardware addresses and needs winsock2's structs, UNLEN bounds a Windows user name, and the storage descriptor carries the disk serial
+    files: src/clean-core/platform/system_identifier.cc
+
+  - kind: allow-include
+    value: [<ifaddrs.h>, <net/if_dl.h>, <netpacket/packet.h>]
+    reason: getifaddrs is the only portable route to an interface's hardware address, and the two link-layer headers are its per-OS address structs
+    files: src/clean-core/platform/system_identifier.cc
+
+  - kind: allow-include
+    value: [<unistd.h>, <cstdlib>]
+    reason: gethostname, and std::getenv for the account name
+    files: src/clean-core/platform/system_identifier.cc
+
+  - kind: allow-include
     value: <pthread.h>
     reason: pthread_setname_np — the POSIX half of cc::set_current_thread_name
     files: src/clean-core/thread/thread.cc
