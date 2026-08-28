@@ -53,8 +53,10 @@ add_library(babel-serializer
     src/babel-serializer/geometry/gltf.cc
     src/babel-serializer/geometry/obj.cc
 
+    src/babel-serializer/image/hdr.cc
     src/babel-serializer/image/image.cc
     src/babel-serializer/image/jpg.cc
+    src/babel-serializer/image/pfm.cc
     src/babel-serializer/image/png.cc
     src/babel-serializer/image/impl/stb_backend.cc
 
@@ -77,8 +79,10 @@ target_sources(babel-serializer
     src/babel-serializer/geometry/obj.hh
 
     # image/impl/*.hh is internal (the stb backend seam) — deliberately NOT in the public FILE_SET.
+    src/babel-serializer/image/hdr.hh
     src/babel-serializer/image/image.hh
     src/babel-serializer/image/jpg.hh
+    src/babel-serializer/image/pfm.hh
     src/babel-serializer/image/png.hh
 
     src/babel-serializer/trace/chrome_trace.hh
@@ -141,7 +145,9 @@ if(SC_BUILD_TESTS)
         tests/geometry/gltf-test.cc
         tests/geometry/obj-test.cc
 
+        tests/image/hdr-test.cc
         tests/image/image-test.cc
+        tests/image/pfm-test.cc
 
         tests/trace/chrome_trace-test.cc
     )

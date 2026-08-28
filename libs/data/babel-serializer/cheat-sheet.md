@@ -7,12 +7,12 @@ Namespace `babel`; headers included by full path from `src/`.
 > [docs/coding-guidelines.md](docs/coding-guidelines.md) owns both rules.
 
 ```cpp
-#include <babel-serializer/all.hh>   // umbrella (base64 + json + markdown + sqlite + obj + gltf + png + jpg + image)
+#include <babel-serializer/all.hh>   // umbrella (base64 + json + markdown + sqlite + obj + gltf + png + jpg + hdr + pfm + image)
 ```
 
 ---
 
-**Recording domain:** `babel` — each format shadows it: `babel.json`, `babel.obj`, `babel.gltf`, `babel.png`, `babel.jpg`, `babel.image`, `babel.markdown`, `babel.sqlite`.
+**Recording domain:** `babel` — each format shadows it: `babel.json`, `babel.obj`, `babel.gltf`, `babel.png`, `babel.jpg`, `babel.hdr`, `babel.pfm`, `babel.image`, `babel.markdown`, `babel.sqlite`.
 Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
 
 ## base64 (`babel::base64`)
@@ -340,26 +340,28 @@ h.reopen(other_rowid);                     // same handle, next row — cheaper 
 // read-only for now; the row's table must be a rowid table (a WITHOUT ROWID one cannot be reached this way)
 ```
 
-## Images (`babel::image` + `babel::png` / `babel::jpg`)
+## Images (`babel::image` + `babel::png` / `babel::jpg` / `babel::hdr` / `babel::pfm`)
 
 Two layers: low-level per-format codecs that expose the format's own metadata, and an aggregator for "just the pixels".
-The backend is the vendored, always-linked **stb** — never visible from a babel header, and never reached by the aggregator.
+`png` / `jpg` decode through the vendored, always-linked **stb** — never visible from a babel header, and never reached by the aggregator.
+`hdr` / `pfm` are fully native and reach no backend at all.
 
 ```cpp
 #include <babel-serializer/image/image.hh>  // aggregator — the "I just want pixels" layer
 
-cc::result<babel::image::image> read(cc::span<cc::byte const> bytes); // auto-detects PNG / JPG
+cc::result<babel::image::image> read(cc::span<cc::byte const> bytes); // auto-detects PNG / JPG / HDR / PFM
 cc::result<babel::image::image> read(cc::read_stream& in);            // slurps, then decodes
-cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); // png / jpg from magic bytes
+cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); // png / jpg / hdr / pfm from magic bytes
 
 struct image {                        // row-major, top-left origin, tightly packed
     int width; int height; int channels;      // 1 grey / 2 GA / 3 rgb / 4 rgba
-    babel::image::component comp;             // u8 (decoded today) | u16 | f32 (API-ready)
+    babel::image::component comp;             // u8 (png/jpg) | f32 (hdr/pfm) | u16 (API-ready)
     cc::vector<cc::byte> pixels;
     bool is_empty(); int bytes_per_component(); isize row_stride();
+    cc::span<float const> samples_f32();      // the pixels as floats; empty unless comp == f32
 };
 
-// writing — babel's first writer. encode -> bytes, or write to a stream. jpg_quality ignored for PNG.
+// writing — babel's first writer. encode -> bytes, or write to a stream. jpg_quality ignored by every other format.
 cc::result<cc::vector<cc::byte>> encode(image const&, babel::image::format fmt, {.jpg_quality = 90});
 cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::format fmt, {...});
 ```
@@ -378,6 +380,27 @@ j.bit_depth; j.progressive; j.chroma; j.jfif_density; // native SOF/JFIF fields
 j.icc_profile; j.exif; j.comments;                    // [todo] designed, not yet populated
 
 babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stream, ...)
+```
+
+```cpp
+#include <babel-serializer/image/hdr.hh>   // low-level Radiance HDR: f32 radiance + the header's variables
+#include <babel-serializer/image/pfm.hh>   // low-level PFM: f32 samples + scale and byte order
+
+babel::hdr::data h = babel::hdr::read(bytes).value();
+h.samples_f32();                               // width * height * 3 linear values, top-left origin
+h.format;                                      // pixel_format::rgbe | ::xyze, from the FORMAT= line
+h.run_length_encoded; h.stored_bottom_up;      // what the file did; `pixels` are normalized either way
+h.exposure; h.pixel_aspect; h.software;        // parsed header variables (cc::optional / cc::string)
+h.variables;                                   // every KEY=value line, in file order
+
+babel::hdr::encode(h, {.run_length_encode = true});  // false writes flat RGBE; a width outside [8, 0x7fff] is flat regardless
+
+babel::pfm::data f = babel::pfm::read(bytes).value();
+f.channels;                                    // 3 for the "PF" magic, 1 for "Pf"
+f.scale;                                       // the header's factor — metadata, NOT applied to the samples
+f.byte_order;                                  // what the file used; `pixels` are always host order
+
+babel::pfm::encode(f, {.byte_order = babel::pfm::endianness::little});  // + write(stream, ...)
 ```
 
 ## Chrome Trace (`trace/chrome_trace.hh`)
@@ -456,7 +479,10 @@ Only what the signatures above cannot tell you.
 - **JPG is lossy, PNG lossless.** Round-trip PNG for exact pixels, and expect small per-channel deltas through JPG.
 - **`channels` is the *decoded* count**, since palette PNGs are de-palettized and Adam7 is de-interlaced.
   The native `color` / `interlace` fields still report the original encoding.
-- **Image pixels are 8-bit today**, whatever the file's native `bit_depth` says; the `u16` / `f32` paths are API-ready but not decoded.
+- **The sample type follows the format.** PNG / JPEG decode to `u8` whatever the file's native `bit_depth` says (`u16` is API-ready but not decoded); HDR / PFM decode to `f32`.
+  `encode` errors on a mismatch rather than reinterpreting the buffer, so check `comp` after a `read` that picked its own format.
+- **HDR is lossy and PFM is not.** RGBE quantizes a pixel's three mantissas against one shared exponent (~0.2% of the pixel's largest channel); PFM stores the bits, so its round-trip is exact.
+- **HDR and PFM both store rows the other way up**, and both are flipped to a top-left origin on read — `stored_bottom_up` reports what the HDR file did.
 - **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
 
 ## Umbrellas
@@ -470,6 +496,8 @@ Only what the signatures above cannot tell you.
 #include <babel-serializer/geometry/gltf.hh> // just glTF / GLB
 #include <babel-serializer/image/png.hh>     // just PNG (low-level)
 #include <babel-serializer/image/jpg.hh>     // just JPG (low-level)
+#include <babel-serializer/image/hdr.hh>     // just Radiance HDR (low-level)
+#include <babel-serializer/image/pfm.hh>     // just PFM (low-level)
 #include <babel-serializer/image/image.hh>   // the image aggregator
 #include <babel-serializer/all.hh>           // everything
 ```

@@ -16,8 +16,13 @@ struct write_options;
 //
 // Every image format decodes to the same shape, a packed pixel buffer, so this is babel's opinionated aggregator:
 // one `image` struct, format-detecting read, explicit-format write.
-// It sits ON TOP of the low-level per-format codecs (babel::png / babel::jpg) and delegates to them.
-// Reach for a low-level codec instead when you need a format's metadata (color profile, gamma, EXIF, ...).
+// It sits ON TOP of the low-level per-format codecs (babel::png / babel::jpg / babel::hdr / babel::pfm) and delegates to them.
+// Reach for a low-level codec instead when you need a format's metadata (color profile, gamma, EXIF, the PFM scale, ...).
+//
+// THE SAMPLE TYPE FOLLOWS THE FORMAT, and a caller that mixes the two gets an error rather than reinterpreted bytes.
+// PNG and JPEG are `u8`; HDR and PFM are `f32`.
+// So `comp` is worth reading after any `read` that did not pick the format itself, and `encode` rejects an image
+// whose `comp` the target format cannot store.
 //
 //   auto const img = babel::image::read(bytes).value();
 //   auto const bytes2 = babel::image::encode(img, babel::image::format::png).value();
@@ -27,10 +32,12 @@ enum class babel::image::format : babel::u8
 {
     png,
     jpg,
+    hdr, // Radiance RGBE — f32 samples, 3 channels
+    pfm, // Portable FloatMap — f32 samples, 1 or 3 channels
 };
 
 /// Decoded sample type.
-/// Only `u8` is produced today; `u16` / `f32` are API-ready (16-bit PNG, HDR).
+/// `u8` for PNG / JPEG, `f32` for HDR / PFM; `u16` is API-ready (16-bit PNG) and not produced yet.
 enum class babel::image::component : babel::u8
 {
     u8,
@@ -54,6 +61,9 @@ struct babel::image::image
 
     /// Bytes per pixel row: width * channels * bytes_per_component().
     [[nodiscard]] isize row_stride() const;
+
+    /// `pixels` viewed as f32 samples — empty unless `comp` is `f32`.
+    [[nodiscard]] cc::span<float const> samples_f32() const;
 };
 
 namespace babel::image
@@ -64,6 +74,7 @@ namespace babel::image
 
 /// Sniff the container format from the leading magic bytes.
 /// Errors if it matches no supported format.
+/// Each of the four has a distinct signature, so this never guesses: `\x89PNG`, `FF D8`, `#?`, `PF` / `Pf`.
 [[nodiscard]] cc::result<format> detect_format(cc::span<byte const> bytes);
 
 /// Decode any supported image, auto-detecting the format and delegating to the matching low-level codec.
@@ -78,16 +89,18 @@ namespace babel::image
 } // namespace babel::image
 
 /// Aggregator write knobs.
-/// `jpg_quality` is ignored for PNG.
+/// Only the one knob a caller is likely to want per format; a low-level codec's `write_options` carries the rest.
 struct babel::image::write_options
 {
-    int jpg_quality = 90; // 1..100
+    int jpg_quality = 90; // 1..100, and ignored by every other format
 };
 
 namespace babel::image
 {
 
 /// Encode `img` to `fmt`'s file bytes, delegating to the matching low-level codec.
+/// `img.comp` must be what the format stores — `u8` for PNG / JPEG, `f32` for HDR / PFM — and the channel count
+/// must be one the format has (3 for HDR; 1 or 3 for PFM).
 [[nodiscard]] cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options opts = {});
 
 /// Encode and write to a stream.

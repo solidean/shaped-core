@@ -1,5 +1,6 @@
 #include "record-test-types.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/container/map.hh>
@@ -200,16 +201,25 @@ REC_TEST("record/sampling - a scope shortens what a sample has to carry")
 
     rec_fixture const fixture(deterministic_config());
 
-    auto const deepest = [&](cc::rec::recording const& r)
+    // What a TYPICAL sample carried, as a median over the run.
+    //
+    // Never the deepest sample: a scope bounds the walk at its OUTER end, so a sample that lands inside a deep call
+    // still carries every frame below the scope.
+    // Two runs' maxima are therefore two independent luckiest landings, and one of those inverts the comparison while
+    // the distributions stay far apart.
+    auto const typical_frames = [&](cc::rec::recording const& r)
     {
-        isize longest = 0;
+        cc::vector<isize> depths;
         r.for_each_event(
             [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
             {
                 if (e.kind() == cc::rec::event_kind::sample)
-                    longest = cc::max(longest, e.field_as_u64_array("frames").size());
+                    depths.push_back(e.field_as_u64_array("frames").size());
             });
-        return longest;
+
+        REQUIRE(!depths.empty());
+        cc::sort(depths);
+        return depths[depths.size() / 2];
     };
 
     auto const unbounded = capture_sampled([] { busy_for_secs(0.2); }, {.rate_hz = 500.0, .stop_at_scope = false});
@@ -225,7 +235,7 @@ REC_TEST("record/sampling - a scope shortens what a sample has to carry")
     REQUIRE(count_samples(bounded) > 0);
 
     // The frames below the scope are what the scope stack already names, so a sample inside one carries fewer.
-    CHECK(deepest(bounded) < deepest(unbounded));
+    CHECK(typical_frames(bounded) < typical_frames(unbounded));
 }
 
 REC_TEST("record/sampling - threads the recorder never heard of are sampled too, without an anchor")

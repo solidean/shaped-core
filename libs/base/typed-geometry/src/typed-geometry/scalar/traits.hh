@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/scalar/fwd.hh>
 
@@ -10,7 +11,8 @@
 ///
 /// Every scalar capability is routed through tg::scalar_traits<T>, a primary template specialized per scalar type.
 /// The tg::traits::* helpers and the free functions in scalar.hh are thin wrappers over its entries.
-/// That is tg::one, tg::sqrt, tg::abs, the trigonometry, tg::pow / tg::exp / tg::log, and tg::round / tg::floor / tg::ceil.
+/// That is tg::one, tg::sqrt, tg::abs, the trigonometry, tg::pow / tg::exp / tg::log, tg::round / tg::floor / tg::ceil,
+/// and the exact base-two family tg::pow2_by_int / tg::scale_by_pow2 / tg::exponent_of / tg::split_pow2.
 /// libs/base/typed-geometry/docs/modules/scalar.md has the why.
 ///
 /// The kernels here are the *raw numeric* layer: sin/cos take a bare radian T and return T, atan2 takes two T and returns radians.
@@ -29,6 +31,20 @@
 ///         static my_scalar sqrt(my_scalar x) { return my_sqrt(x); }
 ///     };
 
+/// A scalar decomposed against base two: `x == significand * 2^exponent`, exactly.
+///
+/// The significand is in [1, 2) and carries x's sign, so `exponent` is `floor(log2(|x|))` and reassembling the pair
+/// returns x's original bit pattern.
+/// That range is deliberately NOT C's `frexp` convention of [0.5, 1) — this one is what the IEEE-754 exponent field
+/// already means, so `split_pow2(8.0f)` reads as `{1, 3}` rather than `{0.5, 4}`.
+/// A caller porting frexp-shaped code adjusts the exponent by one, and the different name is what makes that visible.
+template <class T>
+struct tg::pow2_split
+{
+    T significand = {};
+    int exponent = 0;
+};
+
 /// Primary template — no capabilities by default.
 /// Specialize it per scalar type to opt in; there is deliberately no default one()/sqrt()/..., so a scalar must declare what it supports.
 template <class T>
@@ -39,6 +55,7 @@ struct tg::scalar_traits
     static constexpr bool has_exponential = false;
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = false;
+    static constexpr bool has_pow2 = false;
 };
 
 // std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
@@ -51,6 +68,7 @@ struct tg::scalar_traits<cc::f32>
     static constexpr bool has_exponential = true;
     static constexpr bool has_rounding = true;
     static constexpr bool has_abs = true;
+    static constexpr bool has_pow2 = true;
 
     [[nodiscard]] static constexpr f32 one() { return 1.0f; }
     [[nodiscard]] static constexpr bool is_zero(f32 x) { return x == 0.0f; }
@@ -70,6 +88,19 @@ struct tg::scalar_traits<cc::f32>
     [[nodiscard]] static f32 floor(f32 x) { return std::floor(x); }
     [[nodiscard]] static f32 ceil(f32 x) { return std::ceil(x); }
     [[nodiscard]] static f32 abs(f32 x) { return std::fabs(x); }
+
+    /// x * 2^n, saturating to +-infinity or zero when the result leaves the representable range.
+    [[nodiscard]] static f32 scale_by_pow2(f32 x, int n) { return std::ldexp(x, n); }
+
+    /// x must be finite and non-zero: a subnormal is normalized, but zero and the non-finites have no exponent.
+    [[nodiscard]] static pow2_split<f32> split_pow2(f32 x)
+    {
+        CC_ASSERT(std::isfinite(x) && x != f32(0), "split_pow2 needs a finite, non-zero scalar");
+
+        auto exponent = 0;
+        auto const half = std::frexp(x, &exponent); // in [0.5, 1) — renormalized to [1, 2) below
+        return {.significand = half * f32(2), .exponent = exponent - 1};
+    }
 };
 
 template <>
@@ -80,6 +111,7 @@ struct tg::scalar_traits<cc::f64>
     static constexpr bool has_exponential = true;
     static constexpr bool has_rounding = true;
     static constexpr bool has_abs = true;
+    static constexpr bool has_pow2 = true;
 
     [[nodiscard]] static constexpr f64 one() { return 1.0; }
     [[nodiscard]] static constexpr bool is_zero(f64 x) { return x == 0.0; }
@@ -99,6 +131,19 @@ struct tg::scalar_traits<cc::f64>
     [[nodiscard]] static f64 floor(f64 x) { return std::floor(x); }
     [[nodiscard]] static f64 ceil(f64 x) { return std::ceil(x); }
     [[nodiscard]] static f64 abs(f64 x) { return std::fabs(x); }
+
+    /// x * 2^n, saturating to +-infinity or zero when the result leaves the representable range.
+    [[nodiscard]] static f64 scale_by_pow2(f64 x, int n) { return std::ldexp(x, n); }
+
+    /// x must be finite and non-zero: a subnormal is normalized, but zero and the non-finites have no exponent.
+    [[nodiscard]] static pow2_split<f64> split_pow2(f64 x)
+    {
+        CC_ASSERT(std::isfinite(x) && x != f64(0), "split_pow2 needs a finite, non-zero scalar");
+
+        auto exponent = 0;
+        auto const half = std::frexp(x, &exponent); // in [0.5, 1) — renormalized to [1, 2) below
+        return {.significand = half * f64(2), .exponent = exponent - 1};
+    }
 };
 
 // All integer types are scalars, `signed char` and `unsigned char` included.
@@ -113,6 +158,7 @@ struct tg::scalar_traits<T>
     static constexpr bool has_exponential = false;
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = true;
+    static constexpr bool has_pow2 = false;
 
     [[nodiscard]] static constexpr T one() { return T(1); }
     [[nodiscard]] static constexpr bool is_zero(T x) { return x == T(0); }
@@ -136,6 +182,7 @@ struct tg::scalar_traits<bool>
     static constexpr bool has_exponential = false;
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = false;
+    static constexpr bool has_pow2 = false;
 
     [[nodiscard]] static constexpr bool one() { return true; }
     [[nodiscard]] static constexpr bool is_zero(bool x) { return !x; }
@@ -167,6 +214,11 @@ inline constexpr bool has_rounding = scalar_traits<T>::has_rounding;
 /// true if scalar_traits<T> provides an abs() operation.
 template <class T>
 inline constexpr bool has_abs = scalar_traits<T>::has_abs;
+
+/// true if scalar_traits<T> provides the exact base-two operations scale_by_pow2() and split_pow2().
+/// Integers deliberately do not: shifting one truncates, which is a different operation wearing the same name.
+template <class T>
+inline constexpr bool has_pow2 = scalar_traits<T>::has_pow2;
 
 /// is the value the additive identity? Routed through scalar_traits so symbolic / bigint / ...
 /// scalars can supply a smarter test than a plain comparison.
