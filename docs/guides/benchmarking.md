@@ -177,6 +177,12 @@ better spent on depth.
 | `paused_fraction_high` | a pause/resume pair's two clock reads are a real part of the per-iteration time. **Not** "a lot of wall time was paused" |
 | `too_few_samples` | the sample count supports no interval, so the reported one is the sample range |
 
+**A row of `did_not_converge` warnings is usually a statement about the machine, not about the config.**
+Re-run on a quiet box before touching `target_relative_error` or `max_samples`: the same sweep that warned on ten of
+its sixty-six rows with a build going converged on all of them with nothing else running.
+The `load` line is what says which situation you are in, and loosening the target would delete the signal that told
+you.
+
 ## The driver
 
 ```bash
