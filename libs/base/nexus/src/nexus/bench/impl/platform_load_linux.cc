@@ -93,10 +93,23 @@ f64 nx::bench::impl::sample_cpu_busy_fraction()
     return 1.0 - (f64(d_idle) / f64(d_total));
 }
 
+namespace
+{
+// What the thread was allowed to run on before it was pinned, so unpinning restores that rather than widening.
+//
+// Every CPU in the system is the wrong thing to restore: under a cpuset — a container, a cgroup, a `taskset` — asking
+// for cores the process may not have fails, the thread stays pinned, and nothing says so.
+// Captured on the pin rather than read back in unpin, where the thread's mask is already the pin.
+cpu_set_t g_mask_before_pin;
+bool g_captured_mask_before_pin = false;
+} // namespace
+
 bool nx::bench::impl::pin_current_thread_to_core(int core)
 {
     if (core < 0 || core >= CPU_SETSIZE)
         return false;
+
+    g_captured_mask_before_pin = sched_getaffinity(0, sizeof(g_mask_before_pin), &g_mask_before_pin) == 0;
 
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -106,9 +119,9 @@ bool nx::bench::impl::pin_current_thread_to_core(int core)
 
 void nx::bench::impl::unpin_current_thread()
 {
-    cpu_set_t set;
-    CPU_ZERO(&set);
-    for (auto i = 0; i < CPU_SETSIZE; ++i)
-        CPU_SET(i, &set);
-    (void)sched_setaffinity(0, sizeof(set), &set);
+    if (!g_captured_mask_before_pin)
+        return;
+
+    (void)sched_setaffinity(0, sizeof(g_mask_before_pin), &g_mask_before_pin);
+    g_captured_mask_before_pin = false;
 }
