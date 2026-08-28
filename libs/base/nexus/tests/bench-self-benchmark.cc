@@ -98,7 +98,9 @@ BENCHMARK("nx::bench - reading the clock")
                            nx::bench::sink(cc::current_cycles());
                    });
 
-    nx::bench::run("a pause/resume pair",
+    // The pause warning is off here because the pair's cost IS the subject: measuring it means paying it, and the
+    // warning would be true and useless on every run.
+    nx::bench::run("a pause/resume pair", {.warn_on_pause = false},
                    [&](nx::bench::iteration& it)
                    {
                        it.pause();

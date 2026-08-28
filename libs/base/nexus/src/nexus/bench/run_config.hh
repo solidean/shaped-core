@@ -69,6 +69,12 @@ struct nx::bench::run_config
     /// Off under single_shot, where harness cost against a one-second body is not something anyone needs telling about.
     bool warn_on_overhead = true;
 
+    /// Whether the pause/resume warning may fire at all.
+    ///
+    /// Off for the one loop whose subject IS the pair's cost, where the warning is true and says nothing: measuring
+    /// what a pause costs means paying it, and being told so on every run trains the reader to skip the warnings.
+    bool warn_on_pause = true;
+
     /// Measure hardware counters, in passes run after the timing has converged.
     ///
     /// **Never inside a timed region**, so an unavailable PMU costs the timings nothing and a present one does not

@@ -67,7 +67,7 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 
 #define TEST(name, ...) NX_IMPL_TEST(name, __COUNTER__, __VA_ARGS__)
 
-// A PGO benchmark: a test in the pgo_benchmark bucket that reports metrics via nx::pgo (see guide.hh).
+// A PGO benchmark: a test in the pgo_benchmark bucket that reports metrics via nx::pgo (see pgo.hh).
 // Swept only via --pgo-benchmarks, or named exactly, and never in a normal run.
 // Extra config items compose as with TEST, e.g. PGO_BENCHMARK("name", seed(42)).
 #define PGO_BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, pgo_benchmark __VA_OPT__(, ) __VA_ARGS__)

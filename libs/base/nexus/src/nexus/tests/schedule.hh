@@ -120,6 +120,8 @@ struct nx::test_schedule_config
     //
     // The harness emits at loop boundaries only, never inside a timed region, so this costs the measurements nothing.
     // The per-iteration timeline is therefore not in here, and that is the trade rather than an omission.
+    //
+    // Needs the recorder, so --no-recording turns it off: there is nothing to write a recording out of.
     // Set via --benchmark-rec <file>.
     cc::string benchmark_rec_file;
 

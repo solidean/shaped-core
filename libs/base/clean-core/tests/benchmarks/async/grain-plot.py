@@ -23,8 +23,9 @@ Usage:
     uv run .../grain-plot.py --input sweep.json      # re-plot a previous capture, no re-run
     uv run .../grain-plot.py --preset relwithdebinfo-clang
 
-The sidecar carries the median and its confidence interval over hundreds of samples per point.
-This script used to scrape `GRAINCSV` rows off stdout; the harness does that job better, so it does not any more.
+This script reads `items_per_second` per loop and nothing else; the sidecar also carries the median, its confidence
+interval and every sample, for a plot that wants error bars.
+It used to scrape `GRAINCSV` rows off stdout; the harness does that job better, so it does not any more.
 
 The sweep takes ~20 s; every run saves its sidecar next to the PNGs so --input can replot it for free.
 """

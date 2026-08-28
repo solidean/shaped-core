@@ -357,7 +357,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         });
     }
 
-    if (state.used_pause && cal.clock_pair_secs > 0 && r.time.median > 0
+    if (state.used_pause && cfg.warn_on_pause && cal.clock_pair_secs > 0 && r.time.median > 0
         && cal.clock_pair_secs > r.time.median * paused_warn_fraction)
     {
         r.warnings.push_back({
