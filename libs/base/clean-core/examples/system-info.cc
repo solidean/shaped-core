@@ -1,3 +1,4 @@
+#include <clean-core/platform/process_metrics.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/system_info.hh>
 #include <clean-core/platform/system_metrics.hh>
@@ -162,6 +163,36 @@ EXAMPLE("clean-core/system-info")
     else
     {
         cc::println("  {:<16} (unavailable: {})", "cpu load", load.error().detail);
+    }
+
+    cc::println("");
+    cc::println("this process");
+    auto const self = cc::query_process_usage();
+    if (self.has_value())
+    {
+        auto const& p = self.value();
+        cc::println("  {:<16} {} (peak {})", "resident", bytes_as_text(p.resident_bytes),
+                    bytes_as_text(p.peak_resident_bytes));
+        cc::println("  {:<16} {}", "private", bytes_as_text(p.private_bytes));
+        cc::println("  {:<16} {}", "threads", p.thread_count);
+        if (p.open_handles.has_value())
+            cc::println("  {:<16} {}", "open handles", p.open_handles.value());
+        else
+            cc::println("  {:<16} (unavailable)", "open handles");
+    }
+    else
+    {
+        cc::println("  {:<16} (unavailable: {})", "resident", self.error().detail);
+    }
+
+    auto const own = cc::read_process_cpu_counters();
+    if (own.has_value())
+    {
+        cc::println("  {:<16} {:.3f} s user, {:.3f} s kernel", "cpu time", own.value().user_secs,
+                    own.value().kernel_secs);
+        if (own.value().bytes_read.has_value() && own.value().bytes_written.has_value())
+            cc::println("  {:<16} {} read, {} written", "io", bytes_as_text(own.value().bytes_read.value()),
+                        bytes_as_text(own.value().bytes_written.value()));
     }
 
     cc::println("");

@@ -257,6 +257,21 @@ rules:
     files: src/clean-core/platform/system_info.cc
 
   - kind: allow-include
+    value: [<psapi.h>, <tlhelp32.h>]
+    reason: the working set and its peak, and the thread snapshot that is the only unprivileged thread count
+    files: src/clean-core/platform/process_metrics.cc
+
+  - kind: allow-include
+    value: [<mach/mach.h>, <mach/task.h>]
+    reason: task_info is Darwin's only per-process accounting
+    files: src/clean-core/platform/process_metrics.cc
+
+  - kind: allow-include
+    value: <unistd.h>
+    reason: sysconf(_SC_CLK_TCK), the unit /proc/self/stat counts in
+    files: src/clean-core/platform/process_metrics.cc
+
+  - kind: allow-include
     value: [<mach/mach.h>, <mach/mach_host.h>, <mach/processor_info.h>, <sys/sysctl.h>]
     reason: host_statistics and host_processor_info are Darwin's only CPU and memory counters
     files: src/clean-core/platform/system_metrics.cc

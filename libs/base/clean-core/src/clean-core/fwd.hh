@@ -85,6 +85,12 @@ struct cpu_counter_set; // those counters, per machine and per core
 struct cpu_load;        // how busy the CPU was over one sampling interval
 struct memory_usage;    // physical memory as it stands right now
 class cpu_load_sampler; // CPU load, differenced against this sampler's previous reading
+
+enum class process_id : u64; // a process, for the per-process queries (platform/process_metrics.hh)
+struct process_usage;        // memory and handles this process holds right now
+struct process_cpu_counters; // monotone per-process CPU time and I/O
+struct process_cpu_load;     // how many cores' worth this process used over an interval
+class process_cpu_sampler;
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>
