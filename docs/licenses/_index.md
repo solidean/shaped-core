@@ -19,6 +19,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the PNG and JPEG codecs behind babel::image | [stb.txt](stb.txt) |
 | [xxHash](https://github.com/Cyan4973/xxHash) | v0.8.3 | `BSD-2-Clause` | clean-core — cc::hash128 (the XXH3 128-bit hash) | [xxhash.txt](xxhash.txt) |
+| [zlib](https://zlib.net) | v1.3.1 | `Zlib` | clean-core — cc::compress / cc::decompress, the Deflate algorithm | [zlib.txt](zlib.txt) |
 | [Zstandard](https://github.com/facebook/zstd) | v1.5.7 | `BSD-3-Clause` | clean-core — cc::compress / cc::decompress, the Zstandard algorithm | [zstandard.txt](zstandard.txt) |
 | [Zydis](https://github.com/zyantific/zydis) | v4.1.1 | `MIT` | instruction-tracer — decoding what optimized code actually executed | [zydis.txt](zydis.txt) |
 | [Zycore](https://github.com/zyantific/zycore-c) | 0b2432ced088 | `MIT` | instruction-tracer — folded into the amalgamated Zydis | [zycore.txt](zycore.txt) |

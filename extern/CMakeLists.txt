@@ -23,6 +23,12 @@ option(SC_USE_VENDORED_BLAKE3 "Build the in-tree vendored BLAKE3 (OFF expects an
 option(SC_USE_VENDORED_ZSTD "Build the in-tree vendored Zstandard (OFF expects an external `zstd` target)" ON)
 option(SC_USE_VENDORED_LZ4 "Build the in-tree vendored LZ4 (OFF expects an external `lz4` target)" ON)
 
+# zlib, committed in-source: the Deflate third of cc::compress / cc::decompress, and the same always-present argument applies.
+# Deflate is the interop codec — what reads a zip, a gzip or a PNG stream — while zstd and lz4 own the ratio and speed axes.
+# zlib rather than the faster zlib-ng because it needs no generated config and no per-architecture SIMD detection,
+# so it compiles unchanged on every target; the vendored subset drops the stdio gzFile layer, which cc::read_stream replaces.
+option(SC_USE_VENDORED_ZLIB "Build the in-tree vendored zlib (OFF expects an external `zlib` target)" ON)
+
 # stb single-file image libraries (stb_image + stb_image_write), committed in-source (two small headers).
 # Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
 option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an external `stb` target)" ON)
@@ -74,6 +80,10 @@ endif()
 
 if(SC_USE_VENDORED_LZ4)
     add_subdirectory(lz4)
+endif()
+
+if(SC_USE_VENDORED_ZLIB)
+    add_subdirectory(zlib)
 endif()
 
 if(SC_USE_VENDORED_STB)

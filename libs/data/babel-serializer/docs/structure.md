@@ -26,9 +26,11 @@ src/babel-serializer/
   geometry/    [in progress]   mesh / geometry formats
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
-  image/       [in progress]   image formats (read + write; committed stb backend)
+  image/       [in progress]   image formats (read + write; committed stb backend, plus two native codecs)
     png        [done]          low-level reader + writer (native IHDR fields; rich metadata [todo])
     jpg        [done]          low-level reader + writer (native SOF/JFIF fields; rich metadata [todo])
+    hdr        [done]          low-level reader + writer, fully native — Radiance RGBE, f32 out
+    pfm        [done]          low-level reader + writer, fully native — Portable FloatMap, f32 out
     image      [done]          aggregator: pixel buffer + format-dispatching read/encode/write
 ```
 
@@ -129,16 +131,32 @@ Low-level JPEG reader + writer, same shape; see [jpg.hh](../src/babel-serializer
 - `[planned]` **variable-length metadata** — the ICC profile reassembled across APP2 markers, the APP1 EXIF block, and the COM comments.
   The structural SOF/JFIF fields are already parsed natively.
 
+### hdr [done]
+
+Low-level Radiance HDR reader + writer, and the first image codec with **no backend under it at all**; see [hdr.hh](../src/babel-serializer/image/hdr.hh).
+Both scanline encodings are read: the adaptive per-component RLE, and flat RGBE with the old `1 1 1 n` repeat marker.
+Both resolution orders are normalized to a top-left origin, and every `KEY=value` header line survives.
+Nothing here is `[todo]`.
+
+- The shared exponent is the format's own lossiness, not a gap: three 8-bit mantissas against one exponent give ~0.2% of a pixel's largest channel.
+
+### pfm [done]
+
+Low-level Portable FloatMap reader + writer, also fully native; see [pfm.hh](../src/babel-serializer/image/pfm.hh).
+PFM stores IEEE-754 bits, so the round-trip is **exact** — which is what makes it the format to reach for when values matter more than file size.
+Reading normalizes both of the format's conventions away: rows come back top-first, samples in host byte order, with `byte_order` still reporting what the file used.
+
 ### image [done]
 
 The aggregator: a plain pixel buffer, `detect_format` from the magic bytes, and format-dispatching `read` / `encode` / `write`.
 See [image.hh](../src/babel-serializer/image/image.hh).
 
-- `[planned]` **wider pixel formats** — `component` is `u8` today with `u16` / `f32` reserved, so 16-bit PNG and HDR land without an API break.
+- `[done]` **the f32 sample path** — HDR and PFM decode to `component::f32`, and `encode` rejects an image whose `comp` the target format cannot store.
+- `[planned]` **16-bit samples** — `component::u16` is still reserved and unproduced, waiting on a 16-bit PNG decode path.
 
 ### Other image formats [planned]
 
-`[planned]` further stb-supported containers (bmp / tga / gif / hdr), and the 16-bit and float decode paths behind them.
+`[planned]` further stb-supported containers (bmp / tga / gif), `.exr`, and the 16-bit decode path behind PNG.
 
 ## Aggregators
 

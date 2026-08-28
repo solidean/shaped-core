@@ -127,6 +127,11 @@ void sweep_levels(cc::string_view shape, cc::span<byte const> payload)
 
     for (auto const level : {-8, -1, 0, 6, 12})
         measure(cc::format("{} lz4 {}", shape, level), payload, {.algorithm = algo::lz4, .level = level}, sweep_config);
+
+    // Deflate is here to be interoperable rather than to win, so what the sweep is for is knowing the size of the gap.
+    for (auto const level : {1, 6, 9})
+        measure(cc::format("{} deflate {}", shape, level), payload, {.algorithm = algo::deflate, .level = level},
+                sweep_config);
 }
 } // namespace
 
@@ -180,5 +185,12 @@ BENCHMARK("bench-compress - framing overhead on small blobs")
         measure(cc::format("lz4 frame {} rec", records), payload, {.algorithm = algo::lz4}, sweep_config);
         measure(cc::format("lz4 raw {} rec", records), payload,
                 {.algorithm = algo::lz4, .framing = cc::compression_framing::raw}, sweep_config);
+
+        // Deflate is the one algorithm with three wrappers rather than two, so its framing row has an extra entry.
+        measure(cc::format("deflate gzip {} rec", records), payload, {.algorithm = algo::deflate}, sweep_config);
+        measure(cc::format("deflate zlib {} rec", records), payload,
+                {.algorithm = algo::deflate, .framing = cc::compression_framing::zlib}, sweep_config);
+        measure(cc::format("deflate raw {} rec", records), payload,
+                {.algorithm = algo::deflate, .framing = cc::compression_framing::raw}, sweep_config);
     }
 }

@@ -5,8 +5,9 @@
 
 // The seam every compression algorithm plugs into.
 //
-// Adding an algorithm means four edits, and the fourth is the one that compiles cleanly when forgotten:
-// an enum value, a .cc defining a table, a line in backend_for, its sources in clean-core's CMakeLists — and a line in cc::detect_algorithm, without which framed blobs of it are never sniffed.
+// Adding an algorithm means six edits, and the ones at the end are those that compile cleanly when forgotten:
+// an enum value, a .cc defining a table, a line in backend_for, its sources and its link in clean-core's CMakeLists, an allow-include entry in .shaped-lint.yml for the upstream header
+// — and a line in cc::detect_algorithm, without which framed blobs of it are never sniffed.
 //
 // Each upstream header stays inside its own backend TU, which is why every entry point speaks in cc types and an untyped context pointer.
 
@@ -48,7 +49,14 @@ struct compression_backend
                                                                        cc::span<byte const> data);
 
     /// The uncompressed size the frame declares, or nullopt when it declares none.
+    /// `data` must be the WHOLE blob rather than a prefix of it — deflate reads gzip's trailer, not its header.
     [[nodiscard]] cc::optional<isize> (*declared_size)(cc::span<byte const> data);
+
+    /// Whether declared_size can be answered from the first bytes of a frame.
+    /// A streaming reader only ever holds a prefix, so it may probe for a size hint only when this is true.
+    /// zstd and lz4 declare theirs in the frame header; deflate declares it in gzip's trailer, and a prefix of a gzip
+    /// stream has compressed payload where that trailer would be.
+    bool declares_size_in_header = false;
 
     /// Whether `data` opens with this algorithm's frame magic.
     [[nodiscard]] bool (*matches_magic)(cc::span<byte const> data);
@@ -59,9 +67,10 @@ struct compression_backend
 
     // --- streaming (bytes/compression_stream.hh) ----------------------------------------------------------
     //
-    // A context of its own, because both codecs keep frame state across calls here and neither can resume a frame
+    // A context of its own, because all three codecs keep frame state across calls here and none can resume a frame
     // from a context that has served a whole-buffer call.
-    // `frame` framing only: a raw lz4 blob is one block with no continuation, so there is nothing to stream.
+    // Not `raw`: a raw lz4 blob is one block with no continuation, and a raw zstd blob has no header to resume from.
+    // Deflate's `zlib` framing streams like `frame` does, its wrapper being a header and a trailing checksum.
 
     [[nodiscard]] void* (*create_stream_compressor)(compression_config const& cfg);
     void (*destroy_stream_compressor)(void* state);
@@ -81,6 +90,8 @@ struct compression_backend
 
     /// Decompress from `in` into `out`, moving as much as each side allows.
     /// Partial progress is normal, and `finished` is the only signal that the frame is complete.
+    /// `out` is the caller's whole allowance for this call: decompression_config::max_output_size is enforced by
+    /// narrowing it, since only the caller knows what earlier calls already produced.
     [[nodiscard]] cc::result<stream_decompress_step> (*stream_decompress)(void* state,
                                                                           cc::span<byte const> in,
                                                                           cc::span<byte> out);
@@ -88,6 +99,7 @@ struct compression_backend
 
 [[nodiscard]] compression_backend const& zstd_backend();
 [[nodiscard]] compression_backend const& lz4_backend();
+[[nodiscard]] compression_backend const& deflate_backend();
 
 [[nodiscard]] compression_backend const& backend_for(compression_algorithm algorithm);
 

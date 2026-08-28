@@ -271,6 +271,11 @@ rules:
     files: src/clean-core/bytes/impl/lz4_backend.cc
 
   - kind: allow-include
+    value: <zlib.h>
+    reason: the Deflate algorithm cc::compress forwards to, for gzip, zlib and raw deflate alike
+    files: src/clean-core/bytes/impl/deflate_backend.cc
+
+  - kind: allow-include
     value: <mimalloc.h>
     reason: the allocator cc::mimalloc_resource wraps
     files: src/clean-core/memory/mimalloc_resource.cc

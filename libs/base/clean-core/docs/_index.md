@@ -80,6 +80,7 @@ Deep dives on the internal machinery, including holes and gotchas not obvious fr
   The Traits protocol is provisional and shaped by async's needs; the lifetime and release/adopt contracts are not.
 - [systems/compression](systems/compression.md) — which algorithm, which level, and when a small blob needs a dictionary, measured on payloads we actually store.
   The short version: under a few hundred bytes nothing compresses without a dictionary, and zstd 19 costs 180x zstd 3's time for 24% better ratio.
+  Deflate is the interoperability codec and loses to zstd on ratio and both speeds at once, so it is what a zip, a gzip or a PNG stream forces rather than a choice.
 - [systems/recording](systems/recording.md) — `cc::rec`, one per-thread event stream under logging, profiling, values, stats and tracing.
   What a site costs, the chunk pool and its refcount-as-capture model, why the state preamble is written by the consumer, and the layer rule that lets a listener log without feeding itself.
 - [systems/recording-formats](systems/recording-formats.md) — getting a recording out of the process it made it: the self-describing file format, and the crash dump that writes it without allocating.

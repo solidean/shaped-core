@@ -11,10 +11,11 @@ namespace
 {
 using sd = cc::seek_dir;
 
-/// Streaming needs a frame to resume into, which `raw` framing is the removal of.
+/// Streaming needs a wrapper to resume into, which `raw` framing is the removal of.
+/// Deflate's `zlib` framing has one — a header and a trailing Adler-32 — so it streams exactly as `frame` does.
 [[nodiscard]] bool is_streamable(cc::compression_framing framing)
 {
-    return framing == cc::compression_framing::frame;
+    return framing != cc::compression_framing::raw;
 }
 } // namespace
 
@@ -26,8 +27,8 @@ cc::result<cc::decompressing_read_stream_adapter> cc::decompressing_read_stream_
     CC_RETURN_IF_ERROR(impl::validate_decompression_config(cfg));
 
     if (!is_streamable(cfg.framing))
-        return cc::error("decompressing stream: raw framing carries no frame to stream, so only `frame` can be read "
-                         "this way");
+        return cc::error("decompressing stream: raw framing carries no wrapper to stream, so it cannot be read this "
+                         "way");
 
     // The algorithm has to be settled before a context exists, and nothing has been read yet to sniff — create() does
     // not touch the inner stream.
@@ -62,6 +63,7 @@ cc::decompressing_read_stream_adapter::decompressing_read_stream_adapter(decompr
     _algorithm(rhs._algorithm),
     _state(rhs._state),
     _remaining_hint(rhs._remaining_hint),
+    _total_produced(rhs._total_produced),
     _hint_probed(rhs._hint_probed),
     _frame_finished(rhs._frame_finished)
 {
@@ -83,6 +85,7 @@ cc::decompressing_read_stream_adapter& cc::decompressing_read_stream_adapter::op
     _algorithm = rhs._algorithm;
     _state = rhs._state;
     _remaining_hint = rhs._remaining_hint;
+    _total_produced = rhs._total_produced;
     _hint_probed = rhs._hint_probed;
     _frame_finished = rhs._frame_finished;
     cc::memcpy(_buffer, rhs._buffer, size_t(k_buffer_size));
@@ -123,22 +126,38 @@ cc::result<i64> cc::decompressing_read_stream_adapter::impl_refill(byte*& curr, 
                 break;
         }
 
-        // The declared size comes off the frame header, which is in the very first bytes the inner stream produces.
-        // Reading it once here is what lets read_all() answer remaining_size_hint and allocate exactly once.
-        if (!_hint_probed)
+        // Only a size the frame declares in its HEADER can be read here, `available` being one window of the inner
+        // stream rather than the whole blob.
+        // gzip declares its size in the trailer, so deflate answers no and a gzip stream simply has no hint - reading
+        // the last four bytes of a partial window would return compressed payload as a length.
+        auto const& backend = impl::backend_for(_algorithm);
+        if (!_hint_probed && backend.declares_size_in_header)
         {
             _hint_probed = true;
-            auto const declared = impl::backend_for(_algorithm).declared_size(available);
+            auto const declared = backend.declared_size(available);
             if (declared.has_value())
+            {
                 _remaining_hint = i64(declared.value());
+
+                // The hint is attacker-controlled on untrusted input and read_all() turns it into one reservation, so
+                // a cap the caller set has to bind it too.
+                if (_config.max_output_size >= 0)
+                    _remaining_hint = cc::min(_remaining_hint, i64(_config.max_output_size));
+            }
         }
 
-        auto step = impl::backend_for(_algorithm)
-                        .stream_decompress(_state, available, cc::span<byte>(base + produced, k_buffer_size - produced));
+        // max_output_size is enforced by narrowing what the codec may fill: only this side knows what earlier calls
+        // already produced.
+        auto room = k_buffer_size - produced;
+        if (_config.max_output_size >= 0)
+            room = cc::min(room, isize(i64(_config.max_output_size) - _total_produced));
+
+        auto step = backend.stream_decompress(_state, available, cc::span<byte>(base + produced, room));
         CC_RETURN_IF_ERROR(step);
 
         _inner.consume(step.value().consumed);
         produced += step.value().produced;
+        _total_produced += i64(step.value().produced);
 
         if (step.value().finished)
             _frame_finished = true;
@@ -147,6 +166,14 @@ cc::result<i64> cc::decompressing_read_stream_adapter::impl_refill(byte*& curr, 
         if (step.value().consumed == 0 && step.value().produced == 0 && !_frame_finished)
             break;
     }
+
+    // Nothing left to give and the frame is not done, because the cap ran out rather than the data.
+    // Reporting end-of-data here would hand back a silently truncated payload, which is the one outcome a cap must
+    // never produce — a caller that set one is entitled to hear that it bound.
+    // Bytes decoded before the cap was reached are still delivered; this fires on the pass that follows them.
+    if (produced == leftover && !_frame_finished && _config.max_output_size >= 0
+        && _total_produced >= _config.max_output_size)
+        return cc::error(cc::format("decompressing stream: output exceeds the {} byte limit", _config.max_output_size));
 
     curr = base;
     end = base + produced;
@@ -198,8 +225,8 @@ cc::result<cc::compressing_write_stream_adapter> cc::compressing_write_stream_ad
     CC_RETURN_IF_ERROR(impl::validate_compression_config(cfg));
 
     if (!is_streamable(cfg.framing))
-        return cc::error("compressing stream: raw framing has no frame to stream into, so only `frame` can be written "
-                         "this way");
+        return cc::error("compressing stream: raw framing has no wrapper to stream into, so it cannot be written this "
+                         "way");
 
     auto adapter = compressing_write_stream_adapter();
     adapter._inner = cc::move(inner);
