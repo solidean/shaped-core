@@ -14,10 +14,12 @@
 //   3. an additivity check — the loop again with that many EXTRA hashes injected.
 // If (3) grows by (2), the isolated number composes and the share is real rather than arithmetic.
 //
-// As measured, (3) reads `~same` as (1): a whole extra hash round over every loaded op sits inside the loop's own
-// variance.
-// That is not the control failing — it IS the answer to the standing question, since a cost that cannot be seen after
-// being DOUBLED is not one a profile of the loop would show either.
+// **The control sits at the edge of what this measurement resolves, and runs disagree.**
+// Doubling the hashing has read both `~same` as (1) and around +9%, against an isolated (2) of well under a
+// millisecond on a 30 ms loop.
+// Read that as the answer to the standing question rather than as a number: a cost whose DOUBLING is this hard to
+// see is not one a profile of the loop would show either.
+// Tightening it would mean a quiet machine and a far longer run, which is what to do if the question is ever reopened.
 //
 // The medium comes from the conformance fixture, so "open" here is the same open the suite tests.
 // Each size and medium is its own table of three loops, and **the additivity check IS the comparison column**: the

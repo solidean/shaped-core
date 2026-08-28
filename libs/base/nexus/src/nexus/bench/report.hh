@@ -19,8 +19,8 @@ struct unit;
 /// How a report is drawn, which is about the destination rather than about taste.
 struct nx::bench::report_style
 {
-    /// Draw the unreliable digits muted instead of bracketing them.
-    /// Strictly better where it is available, since it costs no punctuation at all.
+    /// Draw the uncertainty term muted, so the eye lands on the value first.
+    /// The text is the same either way; colour only changes what stands out in it.
     bool color = false;
 
     /// Emit a table that survives being pasted into a `.md` file.
@@ -41,12 +41,14 @@ namespace nx::bench
 {
 /// A value with the digits its uncertainty reaches marked as unreliable.
 ///
-/// `1.83[4] ms` says the 4 is not resolved: the half-width of the interval reaches that decimal place.
-/// Under `color` the same digits are drawn muted and no brackets appear at all.
+/// `1.834 ± 0.004 ms` says the interval reaches the third decimal place, so the value is printed to exactly there
+/// and no further.
+/// Under `color` the uncertainty term is drawn muted, but the text is unchanged.
 ///
-/// **Brackets rather than parentheses, deliberately.**
-/// `12(3)` is standard concise uncertainty notation meaning `12 ± 3`, where here it would mean `123 ± 2` — the same
-/// string read two ways that differ by a factor of ten.
+/// **Written out, rather than in a concise-notation form.**
+/// `1.834(4)` carries the same content in less space and is standard in physics, but a reader who has not met the
+/// notation reads `9(1) ms` as a footnote marker or a typo instead of as `9 ± 1 ms`.
+/// This renderer's first version bracketed the unresolved digits, `9[1] ms`, and that read no better.
 /// Tildes were the other candidate and lose to markdown, where `~4~` is subscript and `~~x~~` is strikethrough.
 ///
 /// A value whose uncertainty reaches every digit it has is not a number with a wide interval; it is a failed

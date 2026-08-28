@@ -45,49 +45,47 @@ nx::bench::result loop_with(cc::string_view name, f64 median, f64 ci_low, f64 ci
 }
 } // namespace
 
-TEST("bench - uncertainty brackets the digits the interval reaches")
+TEST("bench - a value is printed to exactly the decimal place its interval reaches")
 {
-    // 123 +/- 2: the uncertainty's leading digit is at the ones place, so only the last digit is unresolved.
-    CHECK(nx::bench::format_uncertain(123, 2, &cc::rec::unit_count, plain()) == "12[3]");
+    // The uncertainty's leading digit is at the ones place, so both numbers stop there.
+    CHECK(nx::bench::format_uncertain(123, 2, &cc::rec::unit_count, plain()) == "123 \xc2\xb1 2");
 
-    // 123 +/- 15: the leading digit is at the tens place, so both the tens and the ones go.
-    CHECK(nx::bench::format_uncertain(123, 15, &cc::rec::unit_count, plain()) == "1[23]");
+    // A wider interval does not move the decimal place here — it is already at the ones — but it is visibly wider.
+    CHECK(nx::bench::format_uncertain(123, 15, &cc::rec::unit_count, plain()) == "123 \xc2\xb1 15");
 
-    // 1.834 ms +/- 0.004 ms, in seconds — the prefix is picked first, then the digits are marked in those units.
-    CHECK(nx::bench::format_uncertain(0.001834, 0.000004, &cc::rec::unit_seconds, plain()) == "1.83[4] ms");
+    // 1.834 ms +/- 0.004 ms, in seconds: the prefix is picked first, then both numbers are written in those units.
+    CHECK(nx::bench::format_uncertain(0.001834, 0.000004, &cc::rec::unit_seconds, plain()) == "1.834 \xc2\xb1 0.004 ms");
 }
 
-TEST("bench - an uncertainty below every printed digit brackets nothing")
+TEST("bench - an uncertainty below every printed digit is not printed at all")
 {
-    // A femtosecond of noise on a millisecond value: nothing shown is in doubt.
+    // A femtosecond of noise on a millisecond value: nothing shown is in doubt, so there is nothing to qualify.
     auto const s = nx::bench::format_uncertain(0.001834, 1e-15, &cc::rec::unit_seconds, plain());
-    CHECK(!s.contains('['));
+    CHECK(!s.contains("\xc2\xb1"));
     CHECK(s.contains("1.834"));
 }
 
 TEST("bench - a value with no reliable digit reads as a failure, not a wide error bar")
 {
-    // 123 +/- 200: the interval reaches past the leading digit, so there is no number to report.
+    // 123 +/- 200: the interval reaches past the leading digit, so no digit of the value survives it.
     auto const s = nx::bench::format_uncertain(123, 200, &cc::rec::unit_count, plain());
     CHECK(s.contains("unstable"));
-    CHECK(!s.contains('['));
+    CHECK(s.contains("\xc2\xb1"));
 }
 
-TEST("bench - brackets are the plain-text form, muted digits the coloured one")
+TEST("bench - colour mutes the uncertainty without changing the text")
 {
     auto styled = plain();
     styled.color = true;
 
     auto const colored = nx::bench::format_uncertain(123, 2, &cc::rec::unit_count, styled);
 
-    // No bracket pair around the digits — the eye is meant to land on the stable part unaided.
-    // A bare '[' check would be wrong here: an SGR escape is literally "\x1b[90m", brackets and all.
-    CHECK(!colored.contains("[3]"));
-    CHECK(colored.contains("\x1b[")); // an SGR escape wraps the unreliable digits
-    CHECK(colored.contains("12"));
+    CHECK(colored.contains("\x1b[")); // an SGR escape wraps the uncertainty term
+    CHECK(colored.contains("123"));
+    CHECK(colored.contains("\xc2\xb1 2"));
 
-    // The same value without colour takes the bracketed form instead.
-    CHECK(nx::bench::format_uncertain(123, 2, &cc::rec::unit_count, plain()) == "12[3]");
+    // Colour changes what stands out, never what is said: strip the escapes and the two forms are identical.
+    CHECK(nx::bench::format_uncertain(123, 2, &cc::rec::unit_count, plain()) == "123 \xc2\xb1 2");
 }
 
 TEST("bench - quantities carry their unit's prefix base")
@@ -262,7 +260,7 @@ TEST("bench - markdown mode emits a table that survives a paste into a doc")
     CHECK(table.contains("|---|"));
     CHECK(table.contains("| a "));
 
-    // Brackets are markdown-safe, which is why they beat the tilde form the notation nearly took.
+    // The uncertainty notation is markdown-safe, which is why it beat the tilde form the notation nearly took.
     // A tilde would have been read as strikethrough or subscript by a renderer; the only one here is "~same".
     auto const tilde_free = !table.contains('~');
     CHECK(tilde_free);
@@ -288,8 +286,8 @@ TEST("bench - a table renders its median column in one unit")
 TEST("bench - a table with nothing to compare scales each row on its own")
 {
     // The same three decades, as a sweep.
-    // Nothing is read across the rows here, so one shared scale would spell the fast end "0.0000010[0] ms" -- six
-    // leading zeroes standing in for a number the reader would rather see as 1 ns.
+    // Nothing is read across the rows here, so one shared scale would spell the fast end in millionths of a
+    // millisecond, standing in for a number the reader would rather see as 1 ns.
     auto loops = cc::vector<nx::bench::result>{
         loop_with("n=1", 1e-9, 0.99e-9, 1.01e-9),
         loop_with("n=2", 1e-6, 0.99e-6, 1.01e-6),

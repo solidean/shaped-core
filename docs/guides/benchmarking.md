@@ -147,14 +147,16 @@ host  windows x64  |  unknown  |  20 logical cores  |  build release  CC_ASSERT=
 load  clock 2.918 -> 2.918 ticks/ns (+0.0%)  |  machine 8% busy
 
 nx::bench - the barriers
-  empty loop                                 0.112[5] ns   -   baseline
-  two guards per iteration                   0.112[3] ns   -   ~same
-  compiler_barrier                           0.111[9] ns   -   ~same
-  sink over a span (a clobber, not a read)   0.22[9] ns   -   +103.5%
+  empty loop                                 0.1140 ± 0.0002 ns   baseline
+  two guards per iteration                   0.117 ± 0.002 ns     +2.6%
+  compiler_barrier                           0.115 ± 0.001 ns     +0.9%
+  sink over a span (a clobber, not a read)   0.2176 ± 0.0003 ns   +90.9%
 ```
 
-**`0.112[5]` means the 5 is not resolved** — the confidence interval's half-width reaches that digit.
-Under colour those digits are drawn muted instead, with no brackets at all.
+**The value is printed to exactly the decimal place its interval reaches**, and no further.
+So `0.117 ± 0.002` stops at the thousandths because that is where the uncertainty lives, while `0.1140 ± 0.0002`
+earns a fourth decimal.
+Under colour the `± 0.002` is drawn muted, but the text is the same.
 A value whose interval reaches past its leading digit prints as `unstable`, because that is a failed measurement
 rather than a wide error bar.
 

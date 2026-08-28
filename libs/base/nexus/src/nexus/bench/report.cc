@@ -112,8 +112,8 @@ cc::string fixed(f64 v, isize decimals)
 
 /// Printed width, counting what a terminal shows rather than what the string holds.
 ///
-/// A muted digit is `\x1b[90m7\x1b[0m` -- nine bytes of which one is visible -- so measuring bytes would pad a
-/// coloured cell by eight columns too few and knock every column to its right out of line.
+/// A muted uncertainty is wrapped in `\x1b[90m` and `\x1b[0m` -- nine bytes that print as none -- so measuring bytes
+/// would pad a coloured cell by nine columns too few and knock every column to its right out of line.
 isize display_width(cc::string_view s)
 {
     auto width = isize(0);
@@ -121,7 +121,10 @@ isize display_width(cc::string_view s)
     {
         if (s[i] != '\x1b')
         {
-            ++width;
+            // A UTF-8 continuation byte is the tail of a character already counted, so it is worth no column of its
+            // own — without this the two bytes of `±` pad every cell carrying one a column too wide.
+            if ((u8(s[i]) & 0xC0) != 0x80)
+                ++width;
             continue;
         }
         // An SGR sequence runs to its terminating 'm'; nothing else here emits an escape.
@@ -163,10 +166,16 @@ cc::string nx::bench::format_quantity(f64 value, cc::rec::unit const* unit)
 
 namespace
 {
+// U+00B1, written as its own UTF-8 bytes so no source-encoding guess can change what reaches the terminal.
+//
+// The one non-ASCII character this file emits, and a deliberate exception to the rule that keeps the micro prefix as
+// "u": a prefix has a plain ASCII spelling that costs the reader nothing, and a plus-minus sign does not.
+constexpr cc::string_view plus_minus = "\xc2\xb1";
+
 // The shared body, with the scale already chosen.
 //
-// A table has to pick ONE scale for a column: `89[7] ps` beside `1.82[2] ns` is two numbers a reader has to convert
-// before comparing, which is exactly the work the table exists to save.
+// A table has to pick ONE scale for a column: `89 ± 7 ps` beside `1.82 ± 0.02 ns` is two numbers a reader has to
+// convert before comparing, which is exactly the work the table exists to save.
 cc::string format_uncertain_at(f64 half_width,
                                cc::rec::unit const* unit,
                                nx::bench::report_style const& style,
@@ -180,34 +189,30 @@ cc::string format_uncertain_at(f64 half_width,
     auto const value_exp = decimal_exponent(s.value);
     auto const noise_exp = decimal_exponent(h);
 
-    // The uncertainty reaches the leading digit, so there is no reliable digit to show.
+    // The uncertainty sits below every digit that would be printed, so there is nothing left to qualify.
+    if (-noise_exp > 6)
+        return cc::format("{}{}", fixed(s.value, 3), unit_suffix(unit, s.prefix));
+
+    // **Both numbers are printed at the uncertainty's own decimal place.**
+    // A value carrying digits its interval does not reach claims a precision the measurement never had, which is the
+    // failure this rendering exists to prevent.
+    auto const decimals = cc::clamp(-noise_exp, isize(0), isize(6));
+    auto const value_text = fixed(s.value, decimals);
+    auto const noise_text = fixed(h, decimals);
+
+    // The uncertainty reaches the leading digit, so not one digit of the value survives it.
     // That is a failed measurement rather than a wide error bar, and it has to read as one.
     if (noise_exp >= value_exp)
-        return cc::format("unstable (+/-{}{})", fixed(h, cc::clamp(isize(2) - noise_exp, isize(0), isize(6))),
-                          unit_suffix(unit, s.prefix));
+        return cc::format("unstable ({} {} {}{})", value_text, plus_minus, noise_text, unit_suffix(unit, s.prefix));
 
-    // Digits at decimal positions at or below the uncertainty's leading digit are the unreliable ones.
-    // Integer positions are always all printed, so a positive exponent brackets several digits and a negative one
-    // brackets exactly the last.
-    auto const decimals = cc::clamp(-noise_exp, isize(0), isize(6));
-    auto const text = fixed(s.value, decimals);
-
-    auto unreliable = noise_exp < 0 ? isize(1) : noise_exp + 1;
-    if (-noise_exp > 6)
-        unreliable = 0; // the uncertainty sits below everything printed, so every shown digit is real
-
-    auto const digits = isize(text.size());
-    if (unreliable <= 0 || unreliable >= digits)
-        return cc::format("{}{}", text, unit_suffix(unit, s.prefix));
-
-    auto const head = cc::string_view(text).subview_clamped(0, digits - unreliable);
-    auto const tail = cc::string_view(text).subview(digits - unreliable);
-
+    // Only the uncertainty is muted, so the eye lands on the value and the text stays identical either way.
     if (style.color)
-        return cc::format("{}{}{}", head, console::colorize(console::color::bright_black, tail, true),
-                          unit_suffix(unit, s.prefix));
+        return cc::format(
+            "{} {}{}", value_text,
+            console::colorize(console::color::bright_black, cc::format("{} {}", plus_minus, noise_text), true),
+            unit_suffix(unit, s.prefix));
 
-    return cc::format("{}[{}]{}", head, tail, unit_suffix(unit, s.prefix));
+    return cc::format("{} {} {}{}", value_text, plus_minus, noise_text, unit_suffix(unit, s.prefix));
 }
 } // namespace
 
@@ -418,14 +423,14 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
             show_items = true;
 
     // One scale for the whole time column, taken from the slowest row.
-    // Picking it per row would put `89[7] ps` beside `1.82[2] ns`, which is two conversions a reader has to do before
-    // the comparison the table exists for.
+    // Picking it per row would put `89 ± 7 ps` beside `1.82 ± 0.02 ns`, which is two conversions a reader has to do
+    // before the comparison the table exists for.
     //
     // **A table with no comparison scales per row instead.**
     // The shared scale is what makes a column readable *down*, and that is worth having only where the rows are being
     // read against each other.
-    // A sweep spans decades by construction, so one scale spells its small end `0.00010[8] ms` -- six leading zeroes
-    // for a number every reader would rather see as 108 ns.
+    // A sweep spans decades by construction, so one scale spells its small end `0.000108 ± 0.000004 ms` -- four
+    // leading zeroes on each half of a number every reader would rather see as `108 ± 4 ns`.
     auto slowest = f64(0);
     for (auto const& r : loops)
         slowest = cc::max(slowest, r.time.median);
@@ -433,7 +438,7 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
 
     // Every cell is rendered before any is printed, because a column is only as wide as its widest entry and that is
     // not known until the last row exists.
-    // Appending straight to the output instead is what leaves `56.[7] ns` and `54.2[7] ns` in the same column.
+    // Appending straight to the output instead is what puts two differently-sized cells in one column.
     auto header = cc::vector<cc::string>();
     header.push_back(cc::string("name"));
     header.push_back(cc::string("median"));
