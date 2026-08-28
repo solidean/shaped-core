@@ -19,6 +19,10 @@
 /// So something has to hold the previous reading, and here that something is an object the caller owns rather than a
 /// hidden process-wide slot that two subsystems would fight over.
 ///
+/// **A load of 1 means the whole machine is busy**, here and everywhere else in cc.
+/// Never one core: a process using two cores of thirty-two reports 0.0625, not 2.0.
+/// cc::process_cpu_load carries the cores-used figure separately for callers that want it.
+///
 /// **Absence is normal, and it is never faked.**
 /// A query that cannot be answered says so, and says which kind of cannot: never on this platform, refused right now,
 /// or attempted and failed.

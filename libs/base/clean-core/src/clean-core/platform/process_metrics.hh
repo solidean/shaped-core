@@ -85,17 +85,20 @@ struct cc::process_cpu_load
 {
     f64 interval_secs = 0;
 
-    /// **How many cores' worth**, so 2.0 means two cores kept fully busy.
+    /// The load, in [0, 1], where 1 is the whole machine busy.
     ///
-    /// Deliberately not a percentage.
-    /// The two conventions in the wild disagree — a Unix `top` shows 400% for this, a Windows task manager shows 12.5%
-    /// on a 32-core box — and a bare "percent" field would be read as whichever one the reader is used to.
-    /// A count of cores means the same thing to both.
-    f32 cores_used = 0;
-
-    /// `cores_used` divided by the machine's logical cores, in [0, 1].
-    /// The number a bar chart wants, and 0 where the core count is unknown.
+    /// **This is the house convention**: 100% means every core loaded, never one core loaded.
+    /// It is the same scale as cc::cpu_load::total, so a process's share and the machine's total are directly
+    /// comparable and a bar drawn from either means the same thing.
+    /// 0 where the core count is unknown, since the scale is undefined without it.
     f32 machine_fraction = 0;
+
+    /// The same load as a count of cores, so 2.0 is two cores kept fully busy.
+    ///
+    /// The detail behind `machine_fraction`, for a caller sizing work rather than drawing a bar.
+    /// A Unix `top` reports this one and calls it a percentage, which is why the two are separate fields here rather
+    /// than one ambiguous number.
+    f32 cores_used = 0;
 };
 
 /// Per-process CPU load, differenced against this sampler's previous reading.
