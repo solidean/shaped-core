@@ -59,6 +59,7 @@ add_library(clean-core
     src/clean-core/record/value.cc
     src/clean-core/record/log.cc
     src/clean-core/record/console_listener.cc
+    src/clean-core/record/quantity_format.cc
     src/clean-core/record/impl/serialized_format.cc
     src/clean-core/record/serialize.cc
     src/clean-core/record/crash_dump.cc
@@ -234,6 +235,7 @@ target_sources(clean-core
     src/clean-core/record/pinned_value.hh
     src/clean-core/record/value.hh
     src/clean-core/record/stat.hh
+    src/clean-core/record/quantity_format.hh
     src/clean-core/record/log.hh
     src/clean-core/record/scope.hh
     src/clean-core/record/console_listener.hh
@@ -535,6 +537,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-console-test.cc
         tests/record/record-adoption-test.cc
         tests/record/record-frontends-test.cc
+        tests/record/record-quantity-format-test.cc
         tests/record/record-query-test.cc
         tests/record/record-serialize-test.cc
         tests/record/record-trace-test.cc
