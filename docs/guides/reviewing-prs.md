@@ -208,6 +208,35 @@ That is a schedule, not ossification.
 So **asking to down-pay debt in code the PR is already touching is a good finding**, and worth making concrete: name the call sites and the replacement.
 Asking to clean up code the PR does not touch is not.
 
+### A local helper is either a duplicate or a recorded gap, and it has to say which
+
+Every codec, parser and backend grows a handful of small private helpers — is this character whitespace, read four bytes in a stated byte order, append a string to a byte buffer.
+They are three to twenty lines each, obviously correct in isolation, and written without checking whether `cc` already has them.
+
+**Check the foundational libraries for each one.**
+The cost of the duplicate is not the lines.
+It is that the local copy is a *slightly different* function under the same name, and the difference surfaces later on an input nobody tested.
+
+Three outcomes, and the review's job is to sort each helper into one:
+
+- **It exists in `cc` (or `tg`)** — delete the local copy and call the real one.
+- **It does not exist and belongs there** — record it as a lower-library gap, and leave the local version with a one-line comment saying `cc` has no equivalent yet.
+  That comment is what stops the next reviewer re-raising it, and what stops the next author writing a fifth copy.
+- **It is genuinely specific to this format or backend** — leave it, unexplained is fine.
+
+The recorded-gap half is what makes the rule work in both directions.
+A repo that only ever says "use the `cc` one" pushes authors toward not writing helpers at all, which is worse.
+
+The worked example is pr-152's two native image codecs.
+`cc::is_space` exists in `clean-core/string/char_predicates.hh`, and both codecs defined their own — matching space, `\t`, `\r`, `\n`, but not the `\f` and `\v` that `cc::is_space` matches.
+A PFM header separated by a vertical tab therefore parsed as one glued token and returned a bogus dimensions error.
+`pfm.cc` also hand-rolled 34 lines of byte-order-explicit float load and store.
+`clean-core/common/endian.hh` already had `cc::load_bytes_le/be` and `cc::store_bytes_le/be`, under a header comment naming that exact use case as "the durable-format primitives".
+Meanwhile `trimmed` and `split_tokens` in the same files genuinely had no `cc` equivalent, and belonged in babel's `docs/lower-library-gaps.md` rather than being deleted.
+
+**Grep the foundational library for the helper's name and for what it does, not just its name.**
+`float_from_bytes` finds nothing; `load_bytes` finds the header that made it unnecessary.
+
 ### Portability floor: reject the non-portable thing on the dev box
 
 Where a feature exists on the backend we develop against but not on a backend we intend to ship, we **fail everywhere, loudly, on the dev box** rather than let it surface later on the weaker target.
@@ -320,6 +349,55 @@ The check is cheap and specific: grep the constructor of the value, not the type
 **Beware two mechanisms with similar names.**
 The same review asserted a cache key moved on an include edit, against a header saying it does not.
 Both were true — of the DXC compile key and of the slib asset key — and the finding named neither, so it read as contradicting the document it was asking to correct.
+
+### A UB claim is checked against the standard the repo compiles as
+
+C++20 redefined signed left shift as modular rather than undefined, so `255 << 24` is well-defined in this repo's C++23 and yields a negative number.
+A reviewer running on a pre-C++20 reflex files "this is UB", and the author checks the standard and discards the finding.
+
+Worse, the reflex hides the real bug.
+pr-152 is the worked case: `decode_flat_scanline` was filed as signed-overflow UB, and the actual defect was what the well-defined negative value then does.
+A negative `run` passes the `x + run > width` guard, drives `x` negative, and the next iteration memcpys through a pointer below the buffer — an out-of-bounds write rather than an overflow.
+The wrong claim was less severe than the truth.
+
+**Say which construct is undefined and why, and check the version.**
+Shifts, signed overflow, `char` signedness and aggregate init all changed under recent standards.
+
+### Verbatim means pasted
+
+A quoted `///`, doc line or comment is a claim about a file, and it is checked the same way a line number is.
+Retyping one from memory truncates it, moves a comma, or silently merges two lines into a sentence the file does not contain.
+
+pr-152 quoted `clean-core/common/endian.hh` in one sentence.
+The file has it as two lines, and the second one ends `..., and reading it must never depend on the host's.`
+The file has two lines, and the second ends `..., and reading it must never depend on the host's.`
+The truncation landed exactly where the quote stopped supporting the point being made, which is the shape a reader notices.
+
+Paste it, keep its line breaks, and cite the line the paste starts at.
+
+### A rename's call-site list comes from a grep of the name
+
+Listing the sites you happened to read while forming the finding is not the same as listing the sites.
+The ones missed are systematically the ones a reviewer does not visit.
+A comment mentioning the symbol, a family list in a neighbouring header's `///`, a doc that recorded the symbol back when it was a gap.
+
+pr-152 named five places to update for a `tg::pow2` rename and missed four.
+The declaration's own doc comment, a family list in `scalar/traits.hh`, a prose mention in the calling `.cc`, and the retired-gap entry in babel's `lower-library-gaps.md`.
+Every one of them was a plain text match on the name.
+
+An instruction the author has to complete themselves is not an instruction.
+
+### A bound is checked against every path the code dispatches to
+
+When a finding recommends replacing a constant limit with one derived from the input, enumerate the code paths that limit has to hold for.
+The derivation is usually worked out against the path the reviewer just read, and a second path with a different expansion factor makes it reject valid input.
+
+pr-152: an allocation ceiling derived from the remaining bytes was correct for HDR's adaptive RLE, which expands at most about 16 pixels per byte.
+`read` dispatches per scanline, and the flat path's `1 1 1 n` marker expands 4 bytes into up to 255 pixels — more once a marker chain is allowed.
+Shipped, it would have rejected legal old-format files.
+
+The honest conclusion was that a run-length format has no linear bound and wants a sane constant instead, which is a different recommendation from the one the maintainer had already approved.
+**Catching this after approval is normal; that is what the adversarial pass is for.** Supersede the recommendation rather than shipping the approved-but-wrong one.
 
 ### Do not hand back work you already did
 
