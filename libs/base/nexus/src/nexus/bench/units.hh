@@ -62,6 +62,19 @@ inline constexpr cc::rec::unit unit_cost_share = {
     .higher_is_better = false,
 };
 
+/// A ratio against a baseline where MORE IS WORSE: 2 means twice the cost.
+///
+/// The mirror of unit_speedup, and separate from it for the same reason unit_cost_share is separate from
+/// cc::rec::unit_ratio — the number reads identically and means the opposite, so only the unit can say which.
+inline constexpr cc::rec::unit unit_overhead = {
+    .singular = "times",
+    .plural = "times",
+    .symbol = "x",
+    .prefix_base = 0,
+    .aggregate = cc::rec::aggregation::mean,
+    .higher_is_better = false,
+};
+
 /// A ratio against a baseline: 2 means twice as fast.
 /// No prefix at all — a speedup of 1.2 k would be a benchmark that is wrong rather than fast.
 inline constexpr cc::rec::unit unit_speedup = {

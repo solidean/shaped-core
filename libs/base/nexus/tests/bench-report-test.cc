@@ -323,17 +323,48 @@ TEST("bench - a sweep opts out of the comparison column")
     };
 
     // Without the opt-out the table happily prints the nonsense.
+    // Three orders of magnitude apart, so it renders as a factor rather than a percentage.
     auto const compared = nx::bench::format_report("sweep", loops, plain());
     CHECK(compared.contains("baseline"));
-    CHECK(compared.contains('%'));
+    CHECK(compared.contains("x slower"));
 
     // One loop opting out drops the column for the whole table.
     loops[0].config.no_baseline = true;
     auto const swept = nx::bench::format_report("sweep", loops, plain());
     CHECK(!swept.contains("baseline"));
-    CHECK(!swept.contains('%'));
+    CHECK(!swept.contains("x slower"));
 
     // The rows themselves are untouched, and items/s is what stays comparable across a sweep.
     CHECK(swept.contains("n=16"));
     CHECK(swept.contains("n=1000000"));
+}
+
+TEST("bench - a large ratio reads as a factor, not a percentage")
+{
+    // A percentage stops being readable once the ratio leaves the neighbourhood of 1: "+42210%" is a true and useless
+    // way to say 423x, and an async graph against a direct call produces exactly that.
+    auto const slow = cc::vector<nx::bench::result>{
+        loop_with("direct", 1e-9, 0.99e-9, 1.01e-9),
+        loop_with("async", 423e-9, 422e-9, 424e-9),
+    };
+    auto const table = nx::bench::format_report("big", slow, plain());
+    CHECK(table.contains("x slower"));
+    CHECK(!table.contains('%'));
+
+    // The other direction reads as a factor too, rather than as a percentage pinned near -100%.
+    auto const fast = cc::vector<nx::bench::result>{
+        loop_with("slow", 423e-9, 422e-9, 424e-9),
+        loop_with("quick", 1e-9, 0.99e-9, 1.01e-9),
+    };
+    auto const inverted = nx::bench::format_report("big", fast, plain());
+    CHECK(inverted.contains("x faster"));
+
+    // Near 1 it stays a percentage, which is what reads best there.
+    auto const near = cc::vector<nx::bench::result>{
+        loop_with("a", 1e-9, 0.99e-9, 1.01e-9),
+        loop_with("b", 2e-9, 1.99e-9, 2.01e-9),
+    };
+    auto const percent = nx::bench::format_report("near", near, plain());
+    CHECK(percent.contains("+100.0%"));
+    CHECK(!percent.contains("x slower"));
 }

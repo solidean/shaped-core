@@ -242,9 +242,14 @@ cc::string format_comparison(result const& baseline, result const& other, nx::be
         return style.color ? console::colorize(console::color::bright_black, "~same", true) : cc::string("~same");
 
     auto const midpoint = other.time.median / baseline.time.median;
-    auto const percent = (midpoint - 1.0) * 100;
-    auto const faster = percent < 0;
-    auto const text = cc::format("{}{:.1f}%", faster ? "" : "+", percent);
+    auto const faster = midpoint < 1.0;
+
+    // A percentage stops being readable once the ratio leaves the neighbourhood of 1.
+    // "+18424.1%" is a true and useless way to say 184x, and the cases that produce it — an async graph against a
+    // direct call, a cold path against a hot one — are exactly the ones a reader most wants at a glance.
+    auto const text = midpoint >= 10.0 ? cc::format("{:.1f}x slower", midpoint)
+                    : midpoint <= 0.1  ? cc::format("{:.1f}x faster", 1.0 / midpoint)
+                                       : cc::format("{}{:.1f}%", faster ? "" : "+", (midpoint - 1.0) * 100);
 
     if (!style.color)
         return text;
