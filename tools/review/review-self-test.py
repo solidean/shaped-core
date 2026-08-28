@@ -1112,6 +1112,21 @@ def test_a_reference_resolves_three_ways(root: Path) -> None:
         assert not tokens[0].problem
 
 
+def test_raw_opts_a_link_destination_out_the_way_it_opts_a_span_out(root: Path) -> None:
+    """A relative link quoted out of another file resolves against that file, never against the repository root.
+
+    Dropping the prefix without skipping the target is worse than not escaping at all: the file matcher's
+    lookbehind rejects a `:`, so the match starts one segment late and the error names a path nobody wrote.
+    """
+    assert not _tokens(root, "See [the guide](raw:../../../../../docs/guides/perf-results.md) for it.")
+
+    unescaped = _tokens(root, "See [the guide](../../../../../docs/guides/perf-results.md) for it.")
+    assert unescaped and unescaped[0].problem, "an unescaped destination is still resolved, and still fails"
+
+    html = render_markdown("See [the guide](raw:../../a.md).")
+    assert 'href="../../a.md"' in html, html
+
+
 def test_a_path_under_a_dot_directory_resolves(root: Path) -> None:
     """A leading dot is part of the name, not punctuation to trim.
 
