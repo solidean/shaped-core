@@ -97,6 +97,11 @@ struct disk_device;      // one physical storage device
 struct disk_io_counters; // monotone per-device I/O since boot
 struct disk_io_rate;     // what one device moved over a sampling interval
 class disk_io_sampler;
+
+struct network_interface; // one network interface (platform/network_devices.hh)
+struct net_counters;      // monotone per-interface traffic
+struct net_traffic_rate;  // what one interface carried over a sampling interval
+class net_traffic_sampler;
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>

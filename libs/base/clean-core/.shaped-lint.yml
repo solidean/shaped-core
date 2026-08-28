@@ -257,6 +257,16 @@ rules:
     files: src/clean-core/platform/system_info.cc
 
   - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>, <iphlpapi.h>, <netioapi.h>]
+    reason: GetIfTable2 is the per-interface counter table, and it is declared in terms of winsock2's structs
+    files: src/clean-core/platform/network_devices.cc
+
+  - kind: allow-include
+    value: [<ifaddrs.h>, <net/if.h>, <net/if_dl.h>]
+    reason: getifaddrs carries Darwin's per-interface counters in its if_data
+    files: src/clean-core/platform/network_devices.cc
+
+  - kind: allow-include
     value: <winioctl.h>
     reason: IOCTL_DISK_PERFORMANCE and the storage descriptor, the only per-device counters Windows exposes
     files: src/clean-core/platform/storage_devices.cc

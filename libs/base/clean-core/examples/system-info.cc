@@ -1,3 +1,4 @@
+#include <clean-core/platform/network_devices.hh>
 #include <clean-core/platform/process_metrics.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/storage_devices.hh>
@@ -204,6 +205,33 @@ EXAMPLE("clean-core/system-info")
         else
             cc::println("    {:<14} (unavailable: {})", "io", rate.error().detail);
     }
+
+    cc::println("");
+    cc::println("network");
+    auto const interfaces = cc::enumerate_network_interfaces();
+    if (interfaces.empty())
+        cc::println("  {:<18} (unavailable)", "interfaces");
+
+    // Only the ones carrying traffic get a line; a desktop has dozens of virtual adapters that would bury them.
+    auto quiet = 0;
+    for (auto const& n : interfaces)
+    {
+        auto const counters = cc::read_net_counters(n.id);
+        if (!n.is_up || !counters.has_value() || counters.value().bytes_received + counters.value().bytes_sent == 0)
+        {
+            ++quiet;
+            continue;
+        }
+
+        auto const speed = n.link_speed_bps.has_value() ? cc::format("{} Mbit/s", n.link_speed_bps.value() / 1'000'000)
+                                                        : cc::string("? Mbit/s");
+        cc::println("  {:<18} {}{}", n.id, speed, n.is_loopback ? ", loopback" : "");
+        cc::println("    {:<14} {} in, {} out since boot", "totals", bytes_as_text(counters.value().bytes_received),
+                    bytes_as_text(counters.value().bytes_sent));
+    }
+
+    if (quiet > 0)
+        cc::println("  {:<18} {} idle or down", "(other)", quiet);
 
     cc::println("");
     cc::println("this process");

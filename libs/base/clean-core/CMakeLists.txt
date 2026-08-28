@@ -42,6 +42,7 @@ add_library(clean-core
     src/clean-core/platform/system_metrics.cc
     src/clean-core/platform/process_metrics.cc
     src/clean-core/platform/storage_devices.cc
+    src/clean-core/platform/network_devices.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
@@ -144,6 +145,7 @@ target_sources(clean-core
     src/clean-core/platform/system_metrics.hh
     src/clean-core/platform/process_metrics.hh
     src/clean-core/platform/storage_devices.hh
+    src/clean-core/platform/network_devices.hh
     src/clean-core/platform/win32_sanitized.hh
     src/clean-core/platform/intrinsics.hh
 
@@ -459,6 +461,7 @@ if(SC_BUILD_TESTS)
         tests/platform/system_metrics-test.cc
         tests/platform/process_metrics-test.cc
         tests/platform/storage_devices-test.cc
+        tests/platform/network_devices-test.cc
 
         tests/algorithm/sort-test.cc
         tests/algorithm/select-test.cc
