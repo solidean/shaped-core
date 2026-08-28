@@ -35,6 +35,7 @@ add_library(clean-core
     src/clean-core/platform/stack_capture.cc
     src/clean-core/platform/module_table.cc
     src/clean-core/platform/symbolize.cc
+    src/clean-core/platform/system_info.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
@@ -130,6 +131,7 @@ target_sources(clean-core
     src/clean-core/platform/stack_capture.hh
     src/clean-core/platform/module_table.hh
     src/clean-core/platform/symbolize.hh
+    src/clean-core/platform/system_info.hh
     src/clean-core/platform/win32_sanitized.hh
     src/clean-core/platform/intrinsics.hh
 
@@ -277,6 +279,11 @@ target_link_libraries(clean-core PUBLIC Threads::Threads)
 # Windows link set. Private: nothing in our headers names it.
 if(WIN32)
     target_link_libraries(clean-core PRIVATE winmm)
+endif()
+
+# RegGetValueA (the OS build number cc::system_info reports) lives in advapi32, which is likewise not default.
+if(WIN32)
+    target_link_libraries(clean-core PRIVATE advapi32)
 endif()
 
 # Enable conforming preprocessor for MSVC
@@ -433,6 +440,7 @@ if(SC_BUILD_TESTS)
         tests/platform/file_path-test.cc
         tests/platform/stack-capture-test.cc
         tests/platform/symbolize-test.cc
+        tests/platform/system_info-test.cc
 
         tests/algorithm/sort-test.cc
         tests/algorithm/select-test.cc

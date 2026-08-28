@@ -68,6 +68,11 @@ template <class T, class NodeTraits>
 struct poly_node_allocation;
 struct scoped_default_node_allocator; // scoped override of the default node allocator (memory/node_allocation.hh)
 struct scoped_environment_variable; // one environment variable, set for a scope and put back (platform/environment.hh)
+enum class cache_kind : u8;         // what a cache level holds: data, instructions or both (platform/system_info.hh)
+struct cpu_cache_level;             // one level of one core class's cache hierarchy (platform/system_info.hh)
+struct cpu_core_class;              // one group of alike cores, of which a modern CPU has several
+struct numa_node;
+struct system_info; // what machine this is, gathered once (platform/system_info.hh)
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>
