@@ -48,9 +48,10 @@ float3 pt_instance_position(sv::instance inst, uint vertex)
 /// Skips the closest-hit — only visibility matters — and routes to the shadow miss (miss index 1), which is what sets
 /// `visible` on a clear path.
 ///
-/// `FORCE_OPAQUE` is not an optimization here, it is a correctness guard: without it this trace would invoke `PtAnyHit`,
-/// which declares the raygen's payload rather than this one. The cost is that a cutout casts a solid shadow, and the
-/// viewer TODO carries the two fixes that would let a shadow ray see through one.
+/// `RayContributionToHitGroupIndex` is 1, so this selects the permutation's SHADOW hit record rather than its primary one.
+/// A hit group's any-hit is invoked with whatever payload its caller passed, and an any-hit can declare only one type — so
+/// the two rays cannot share a record while they carry different payloads.
+/// The shadow record holds `PtShadowAnyHit` and no closest hit, which is why a cutout still casts the shadow it should.
 bool pt_occluded(float3 origin, float3 dir, float dist)
 {
     ShadowPayload sp;
@@ -61,8 +62,7 @@ bool pt_occluded(float3 origin, float3 dir, float dist)
     ray.Direction = dir;
     ray.TMin = 1e-3;
     ray.TMax = dist;
-    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_FORCE_OPAQUE,
-             0xFF, 0, 0, 1, ray, sp);
+    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, 1, 0, 1, ray, sp);
 
     return sp.visible < 0.5;
 }
@@ -150,15 +150,13 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
 /// how many alpha-tested triangles it happened to graze.
 /// Varying with `rng_seed` is what keeps a static view refining rather than settling on one dither pattern.
 ///
-/// Only permutations whose material can actually cut out get one of these attached — see `material_permutation::can_cut_out`
-/// — and only an instance whose `opaque_override` is cleared can invoke it, which `view_renderer` sets from the same flag.
+/// Only permutations whose material can actually cut out get one attached — see `material_permutation::can_cut_out` — and
+/// only an instance whose `opaque_override` is cleared can invoke it, which `view_renderer` sets from the same flag.
 ///
-/// The payload declared here is `PtPayload`, and only the raygen's trace may reach it: `pt_occluded` carries a
-/// `ShadowPayload`, and an any-hit invoked against a payload type its caller did not pass is undefined under DXR.
-/// `RAY_FLAG_FORCE_OPAQUE` on the shadow trace is what keeps that from happening, and it is an INTERIM — it also makes a
-/// cutout cast a solid shadow. See libs/graphics/shaped-viewer/docs/TODO.md for the two real fixes.
-[shader("anyhit")]
-void PtAnyHit(inout PtPayload payload, in PtAttributes attribs)
+/// Written as a plain function with two thin entry points over it, because DXR needs one any-hit per payload TYPE.
+/// The raygen's ray and a shadow ray reach different hit records carrying different payloads, an any-hit declares exactly
+/// one, and neither of them touches the payload — so this is the entire difference between the two.
+bool pt_cutout_rejects(PtAttributes attribs)
 {
     sv::instance inst = Instances[InstanceID()];
     ByteAddressBuffer index_buffer = gBindlessBuffers[NonUniformResourceIndex(inst.indices)];
@@ -166,13 +164,28 @@ void PtAnyHit(inout PtPayload payload, in PtAttributes attribs)
 
     sv::surface surface = sv_evaluate_material(ctx);
     if (surface.geometry_opacity >= 1.0)
-        return; // fully covered: the common case, and it accepts without drawing anything
+        return false; // fully covered: the common case, and it accepts without drawing anything
 
     uint2 px = DispatchRaysIndex().xy;
     uint h = pt_hash(px.x + px.y * 65536u + rng_seed * 9781u + PrimitiveIndex() * 2654435761u);
     float u = float(h) * (1.0 / 4294967296.0);
 
-    if (surface.geometry_opacity < u)
+    return surface.geometry_opacity < u;
+}
+
+[shader("anyhit")]
+void PtAnyHit(inout PtPayload payload, in PtAttributes attribs)
+{
+    if (pt_cutout_rejects(attribs))
+        IgnoreHit();
+}
+
+/// The same test for a shadow ray, which carries `ShadowPayload` and so needs an entry point of its own.
+/// `pt_occluded` selects this record with `RayContributionToHitGroupIndex` 1.
+[shader("anyhit")]
+void PtShadowAnyHit(inout ShadowPayload payload, in PtAttributes attribs)
+{
+    if (pt_cutout_rejects(attribs))
         IgnoreHit();
 }
 

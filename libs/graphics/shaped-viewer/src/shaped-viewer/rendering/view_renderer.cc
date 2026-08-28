@@ -84,11 +84,13 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // if the hit group carried no any-hit whatever the pipeline attached.
         // Per instance rather than per BLAS, because "can this cut out" is a property of the MATERIAL — the same mesh
         // under an opaque material and a cutout one would otherwise need two acceleration structures.
-        auto const hit_group = hit_group_of(out, item.shader_key, resources);
+        // Two records per permutation — the primary one and the shadow one — so the offset is the permutation's index
+        // doubled, and `pt_occluded` reaches the second by adding 1 at the trace.
+        auto const permutation = hit_group_of(out, item.shader_key, resources);
         auto inst = sg::tlas_instance{.blas = mesh->blas,
                                       .instance_id = u32(out.instances.size()),
-                                      .hit_group_offset = hit_group,
-                                      .opaque_override = !out.hit_groups[hit_group]->can_cut_out};
+                                      .hit_group_offset = permutation * 2,
+                                      .opaque_override = !out.hit_groups[permutation]->can_cut_out};
         pack_transform(inst, item.transform);
         out.instances.push_back(cc::move(inst));
 

@@ -110,8 +110,10 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     // traces nothing, forever.
     auto hits = cc::vector<sg::compiled_shader const*>();
     auto any_hits = cc::vector<sg::compiled_shader const*>();
+    auto shadow_any_hits = cc::vector<sg::compiled_shader const*>();
     hits.reserve(d.hit_groups.size());
     any_hits.reserve(d.hit_groups.size());
+    shadow_any_hits.reserve(d.hit_groups.size());
     for (auto const* const p : d.hit_groups)
     {
         (void)cc::try_async_blocking_get(p->shader);
@@ -120,17 +122,21 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
             return nullptr; // still in flight, or a material that does not compile — retried on a later frame
         hits.push_back(compiled);
 
-        // The cutout test, where the material has one.
+        // The cutout test, where the material has one — twice, because the two rays that reach it carry different payloads.
         // Driven inline for the same reason the closest-hit is.
         auto const* compiled_ah = static_cast<sg::compiled_shader const*>(nullptr);
+        auto const* compiled_sah = static_cast<sg::compiled_shader const*>(nullptr);
         if (p->can_cut_out)
         {
             (void)cc::try_async_blocking_get(p->any_hit);
+            (void)cc::try_async_blocking_get(p->shadow_any_hit);
             compiled_ah = p->any_hit->try_value();
-            if (compiled_ah == nullptr)
+            compiled_sah = p->shadow_any_hit->try_value();
+            if (compiled_ah == nullptr || compiled_sah == nullptr)
                 return nullptr;
         }
         any_hits.push_back(compiled_ah);
+        shadow_any_hits.push_back(compiled_sah);
     }
 
     // The global root signature must cover every binding *any* stage uses, minus the manager's tables — those are the
@@ -142,6 +148,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     for (auto const* const h : hits)
         stages.push_back(h->bindings);
     for (auto const* const h : any_hits)
+        if (h != nullptr)
+            stages.push_back(h->bindings);
+    for (auto const* const h : shadow_any_hits)
         if (h != nullptr)
             stages.push_back(h->bindings);
 
@@ -171,14 +180,27 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
     auto const shadow_miss_h = rpd.add_miss_shader(*compiled_sms);
 
+    // TWO records per permutation, in the order the instances' `hit_group_offset` indexes them: the primary record at
+    // `2 * i`, and the shadow record at `2 * i + 1`.
+    //
+    // A shadow ray cannot share the primary record.
+    // Its any-hit would be invoked carrying a `ShadowPayload` against a declaration of `PtPayload`, and an any-hit declares
+    // exactly one payload type — so the two rays need one record each, and `pt_occluded` selects the second with
+    // `RayContributionToHitGroupIndex` 1.
+    // The shadow record carries no closest hit: the trace skips it.
     auto hit_handles = cc::vector<sg::hit_shader_handle>();
-    hit_handles.reserve(hits.size());
+    hit_handles.reserve(hits.size() * 2);
     for (auto i = isize(0); i < hits.size(); ++i)
     {
         auto group = sg::hit_shader{.closest_hit = *hits[i]};
         if (any_hits[i] != nullptr)
             group.any_hit = *any_hits[i];
         hit_handles.push_back(rpd.add_hit_shader(group));
+
+        auto shadow = sg::hit_shader{};
+        if (shadow_any_hits[i] != nullptr)
+            shadow.any_hit = *shadow_any_hits[i];
+        hit_handles.push_back(rpd.add_hit_shader(shadow));
     }
 
     // The build is async and no pool is guaranteed here, so drive it inline like the compiles above.
@@ -197,7 +219,8 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     variant.raygen = stbd.add_raygen_shader(raygen_h);
     (void)stbd.add_miss_shader(miss_h);
     (void)stbd.add_miss_shader(shadow_miss_h);
-    // In the caller's order, so a hit record's table index is the `hit_group_offset` the instances already carry.
+    // In the order built above, so a permutation's primary record sits at the `hit_group_offset` the instances carry and
+    // its shadow record at the next index.
     for (auto const h : hit_handles)
         (void)stbd.add_hit_shader(h);
     variant.table = ctx.uncached.create_raytracing_shader_table(stbd);

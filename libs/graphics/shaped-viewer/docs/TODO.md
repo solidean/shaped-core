@@ -57,6 +57,21 @@ What is left is the interaction on top of it, in dependency order:
 - **One traced layer per view is still assumed** in `view_renderer::execute`, the single-view convenience the GPU tests
   drive.
   The plan and `trace` are already per `(view, layer)`.
+- **A path runs to completion inside one dispatch**, which is what makes a frame cost the DEEPEST path in it rather than
+  the average one.
+  `PathTraceRayGen` loops `samples_per_pixel` times over `max_bounces` and a pixel is not done until its whole path is, so
+  a scene with one deep corner pays for that corner everywhere — and it is the same property that makes a heavy dispatch
+  trip a driver watchdog rather than merely run slowly.
+  The wavefront answer is one dispatch per bounce, with the path's live state persisted between them rather than held in
+  registers, which also lets a frame carry a path forward instead of finishing it.
+  Two things have to be decided before that is worth starting.
+  The state is a G-buffer by another name — origin, direction, throughput, rng, the medium's three fields, the collapsed
+  wavelength and `prev_pdf`, all per pixel per sample — and this library has just finished deleting one for the
+  accumulation rework, so the trade wants making deliberately rather than by default.
+  And it changes what a frame means to the accumulator: `accum_frame` counts completed estimates and the mean is exact
+  because every sample folded in is a finished path, so either only terminated paths fold in, which makes the effective
+  sample count vary per pixel and gives back the "one eye, one mean" property, or partial radiance folds in and the target
+  is no longer a mean of anything.
 
 ## What the bindless lock does not cover
 
@@ -319,18 +334,16 @@ importance-samples the continuation — so what is left is coverage of the model
   `sg::tlas_instance::opaque_override`.
   Without that second half every BLAS sv builds is opaque, and DXR behaves as if no any-hit were attached at all — so the
   whole path was unreachable and `geometry_opacity` affected nothing.
-- **A cutout casts a SOLID shadow, which is an interim rather than the intended behaviour.**
-  `PtAnyHit` declares `PtPayload` because that is what the raygen's trace carries, and `pt_occluded` carries a
-  `ShadowPayload` — so a shadow ray reaching the same hit group would invoke an any-hit against a payload type its caller
-  never passed, which DXR leaves undefined.
-  `RAY_FLAG_FORCE_OPAQUE` on the shadow trace is what prevents that, at the cost of the shadow.
-  `openpbr-spheres`' opacity row is the first material in the tree to bind `opacity`, so this is live rather than
-  theoretical.
-  Two shapes were tried and neither works.
-  An empty payload for the any-hit is rejected by DXC ("shader must include inout payload structure parameter"), and
-  putting `PtPayload` on the shadow trace as well builds the shaders but fails the pipeline build.
-  What is left is a second hit record per permutation: the shadow ray takes `RayContributionToHitGroupIndex` 1 and its own
-  any-hit compiled against `ShadowPayload`, which costs one more record and one more compile per material.
+- **A cutout costs two hit records and two any-hit compiles per permutation**, which is what it takes for a shadow ray to
+  see through one.
+  An any-hit is invoked with whatever payload its caller passed and declares exactly one type, so the raygen's ray
+  (`PtPayload`) and a shadow ray (`ShadowPayload`) cannot share a record.
+  The primary record sits at `2 * i` and the shadow record at `2 * i + 1`; `pt_occluded` reaches the second with
+  `RayContributionToHitGroupIndex` 1, and the shadow record carries no closest hit because the trace skips it.
+  Two cheaper shapes were tried and neither works: an empty payload for the any-hit is rejected by DXC ("shader must
+  include inout payload structure parameter"), and putting `PtPayload` on the shadow trace as well compiles every shader
+  and then fails the pipeline build.
+  `pt_cutout_rejects` is the test itself, and the two entry points over it differ only in what they declare.
 
 ## Everything else
 

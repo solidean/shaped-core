@@ -48,16 +48,22 @@ void require_compiled(sv::material_permutation const& p)
     if (!p.can_cut_out)
     {
         CHECK(p.any_hit == nullptr);
+        CHECK(p.shadow_any_hit == nullptr);
         return;
     }
 
-    REQUIRE(p.any_hit != nullptr);
-    (void)cc::try_async_blocking_get(p.any_hit);
-    if (p.any_hit->has_error())
-        FAIL(cc::format("{}\n--- source ---\n{}", p.any_hit->try_error()->underlying().to_string(), p.source));
-    REQUIRE(p.any_hit->has_value());
-    CHECK(p.any_hit->try_value()->stage == sg::shader_stage::any_hit);
-    CHECK(p.any_hit->try_value()->bytecode.size() > 0);
+    // Two of them, because the ray that shades and the ray that shadows carry different payloads and an any-hit declares
+    // exactly one — so a permutation that can cut out gets a record and an entry point for each.
+    for (auto const* const node : {&p.any_hit, &p.shadow_any_hit})
+    {
+        REQUIRE(*node != nullptr);
+        (void)cc::try_async_blocking_get(*node);
+        if ((*node)->has_error())
+            FAIL(cc::format("{}\n--- source ---\n{}", (*node)->try_error()->underlying().to_string(), p.source));
+        REQUIRE((*node)->has_value());
+        CHECK((*node)->try_value()->stage == sg::shader_stage::any_hit);
+        CHECK((*node)->try_value()->bytecode.size() > 0);
+    }
 }
 } // namespace
 

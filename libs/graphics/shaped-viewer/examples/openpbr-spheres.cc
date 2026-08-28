@@ -379,11 +379,21 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
     {
         auto view = f.window().view();
 
-        // Eye height at the front of the grid, looking down the rows.
+        // Above and behind the grid, pitched down far enough that it reads as a GRID rather than as a corridor.
+        //
+        // Eye height is what decides how many rows are legible, and it is not a matter of taste: fifteen rows over sixteen
+        // units of floor subtend about 12 degrees from standing height, so the near row takes most of a 60-degree frame and
+        // everything behind it collapses toward the vanishing point.
+        // From 8 units up they subtend about 33, and the narrower lens is what turns that into most of the frame rather
+        // than a strip in the middle of it: the grid is 7 wide against 16 deep, so a 60-degree lens close enough to fill
+        // the width cannot hold the far rows, and one far enough to hold them leaves the width mostly floor.
+        // The pitch is the depression to the middle row, so the near and far ends sit equally far off centre.
+        //
         // Seeded once — after that the controller owns it, so this is where you START rather than where you are held.
-        view.initial_fps({.position = tg::pos3d(0, 1.7, -4.5),
+        view.initial_fps({.position = tg::pos3d(0, 8.0, -6.0),
                           .yaw = tg::angle_d::make_from_degree(0.0),
-                          .pitch = tg::angle_d::make_from_degree(-8.0)});
+                          .pitch = tg::angle_d::make_from_degree(-35.0),
+                          .vertical_fov = tg::angle_d::make_from_degree(45.0)});
 
         // Right-drag looks, WASD moves, E and Q rise and fall, the wheel retunes the speed.
         // Re-asserted every frame, which is the contract: dropping the call hands the view back to the orbit controller.
