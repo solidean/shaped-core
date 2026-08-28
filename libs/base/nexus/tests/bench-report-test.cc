@@ -153,6 +153,24 @@ TEST("bench - a real difference is drawn with its sign")
     CHECK(!table.contains("~same"));
 }
 
+TEST("bench - past a factor of two the comparison is a factor, not a percentage")
+{
+    // A 6x speedup, which is what a scaling sweep at 19 workers looks like.
+    // As a percentage it reads "-83.0%", and nobody turns that into the 5.9x they would go on to quote.
+    auto const speedup = cc::vector<nx::bench::result>{
+        loop_with("serial", 0.0018, 0.00179, 0.00181),
+        loop_with("pool", 0.0003, 0.000299, 0.000301),
+    };
+    CHECK(nx::bench::format_report("speedup", speedup, plain()).contains("6.0x faster"));
+
+    // And the other way, which is the shape an async graph against a direct call takes.
+    auto const slowdown = cc::vector<nx::bench::result>{
+        loop_with("direct", 0.001, 0.00099, 0.00101),
+        loop_with("async", 0.05, 0.0499, 0.0501),
+    };
+    CHECK(nx::bench::format_report("slowdown", slowdown, plain()).contains("50.0x slower"));
+}
+
 TEST("bench - the baseline is the first loop unless one asks to be it")
 {
     auto loops = cc::vector<nx::bench::result>{

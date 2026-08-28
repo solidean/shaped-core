@@ -265,12 +265,13 @@ cc::string format_comparison(result const& baseline, result const& other, nx::be
     auto const midpoint = other.time.median / baseline.time.median;
     auto const faster = midpoint < 1.0;
 
-    // A percentage stops being readable once the ratio leaves the neighbourhood of 1.
-    // "+18424.1%" is a true and useless way to say 184x, and the cases that produce it — an async graph against a
-    // direct call, a cold path against a hot one — are exactly the ones a reader most wants at a glance.
-    auto const text = midpoint >= 10.0 ? cc::format("{:.1f}x slower", midpoint)
-                    : midpoint <= 0.1  ? cc::format("{:.1f}x faster", 1.0 / midpoint)
-                                       : cc::format("{}{:.1f}%", faster ? "" : "+", (midpoint - 1.0) * 100);
+    // A percentage stops being readable once the ratio leaves the neighbourhood of 1, and a factor of two is where
+    // that happens: nobody reads "-83.0%" and thinks "5.9x faster", which is the number they would go on to quote.
+    // Past the boundary a percentage only gets worse — "+18424.1%" is a true and useless way to say 184x.
+    // Inside it the percentage wins, because "-43.4%" is clearer than "1.8x faster" for a difference that small.
+    auto const text = midpoint > 2.0 ? cc::format("{:.1f}x slower", midpoint)
+                    : midpoint < 0.5 ? cc::format("{:.1f}x faster", 1.0 / midpoint)
+                                     : cc::format("{}{:.1f}%", faster ? "" : "+", (midpoint - 1.0) * 100);
 
     if (!style.color)
         return text;

@@ -21,19 +21,19 @@
 // And every fork-join frame must stay at or under the node's 32 B inline slot, which is why the grain sizes are namespace-scope constants rather than captures.
 // A two-child frame captures exactly span(16) + two shared_async(8+8), so adding one capture to any of these silently changes what is measured.
 
-#include "../bench_util.hh"
-
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/thread.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
-#include <cstdio>
 #include <type_traits>
 
 using cc::i32;
@@ -422,45 +422,69 @@ struct sweep_result
     double ns_at_p = 0;
 };
 
-void print_header(char const* title, char const* unit)
-{
-    std::printf("\n=== %s ===\n", title);
-    std::printf("%-10s %13s %13s %12s %12s\n", "workers", "serial", unit, "vs serial", "vs 1w");
-    std::printf("%-10s %13s %13s %12s %12s\n", "-------", "------", "------", "---------", "-----");
-}
+/// What one swept case costs to measure.
+///
+/// Every pass here is milliseconds of real work on a real pool, so 5% is this workload's honest precision and the 2%
+/// default would only buy warnings saying so.
+/// Counters are off because a scaling question is not answered by them, and each extra pass is another multi-ms run.
+constexpr auto sweep_config = nx::bench::run_config{
+    .min_time_secs = 0.2,
+    .max_time_secs = 2.0,
+    .min_samples = 8,
+    .target_relative_error = 0.05,
+    .measure_counters = false,
+};
 
-// Measure one case across `workers` against its serial baseline, and print the table.
-//
-// Two deliberate choices, both learned from wrong numbers and both explained in the benchmark doc:
-//   * the serial baseline is re-measured on EVERY row, immediately next to that row's pool run, and printed as its own column, where it doubles as the run's contamination canary;
-//   * the pool is constructed OUTSIDE the timed pass, since spawning threads is ~100 us and would otherwise land inside measure_units_per_sec's adaptive loop.
+/// Measure one case across `workers` against its serial analog.
+///
+/// The serial row is declared FIRST, so it is the table's baseline and every pool row's comparison column reads as the
+/// user-facing speedup -- "is the pool worth it at all".
+///
+/// **The last row re-measures the serial pass, and is the contamination canary.**
+/// It is identical work to the first row, so its comparison column reading anything but `~same` means the machine
+/// drifted under the sweep and the cross-row numbers are not comparable.
+/// The hand-rolled table this replaced re-measured serial on every row for the same purpose; two measurements
+/// bracketing the sweep say it just as well, and the harness's own intervals decide "same" instead of the reader's eye.
+///
+/// The pool is constructed OUTSIDE the measured body: spawning threads is ~100 us and would otherwise be sampled as
+/// part of the work.
 template <class SerialPass, class AsyncPass>
-sweep_result run_sweep(char const* title,
-                       char const* unit,
-                       double units,
-                       cc::span<int const> workers,
-                       SerialPass&& serial,
-                       AsyncPass&& async_pass)
+sweep_result run_sweep(cc::span<int const> workers, isize items, SerialPass&& serial, AsyncPass&& async_pass)
 {
-    print_header(title, unit);
-
-    sweep_result res;
-    double one_ns = 0;
-    for (int w : workers)
+    auto const measure_serial = [&](cc::string_view name)
     {
-        double const serial_ns = 1e9 / bench::median_units_per_sec(units, serial);
+        return nx::bench::run(name, sweep_config,
+                              [&](nx::bench::iteration& it)
+                              {
+                                  serial(it);
+                                  it.items(items);
+                              });
+    };
 
+    auto const baseline = measure_serial("serial");
+
+    auto res = sweep_result{};
+    auto one_secs = double(0);
+    for (int const w : workers)
+    {
         cc::async_thread_pool pool(w);
-        double const ns = 1e9 / bench::median_units_per_sec(units, [&] { return async_pass(pool); });
+        auto const r = nx::bench::run(cc::format("pool w={}", w), sweep_config,
+                                      [&](nx::bench::iteration& it)
+                                      {
+                                          async_pass(pool, it);
+                                          it.items(items);
+                                      });
         if (w == 1)
-            one_ns = ns;
+            one_secs = r.time.median;
 
-        res.ns_at_p = ns;
-        res.vs_serial = serial_ns / ns;
-        res.vs_one = one_ns > 0 ? one_ns / ns : 0;
-        std::printf("%-10d %13.2f %13.2f %11.2fx %11.2fx\n", w, serial_ns, ns, res.vs_serial, res.vs_one);
+        if (r.time.median <= 0)
+            continue;
+        res.ns_at_p = r.time.median * 1e9 / double(items);
+        res.vs_serial = baseline.time.median / r.time.median;
+        res.vs_one = one_secs > 0 ? one_secs / r.time.median : 0;
     }
-    std::fflush(stdout);
+
+    (void)measure_serial("serial (canary)");
     return res;
 }
 
@@ -476,23 +500,34 @@ sweep_result case_quicksort(cc::span<int const> workers)
     cc::vector<i32> work = src;
     g_data = work.data(); // the frames address the buffer through this; see `range`
 
-    auto const refill = [&] { std::copy(src.begin(), src.end(), work.begin()); };
+    auto const refill = [&]
+    {
+        for (isize i = 0; i < src.size(); ++i)
+            work[i] = src[i];
+    };
     auto const whole = range{.off = 0, .count = i32(qsort_n)};
 
+    // The refill is PAUSED out of both passes rather than paid by both.
+    // It is a ~4 MiB memcpy against a multi-ms sort, so the hand-rolled table could call the bias slight and move on;
+    // with a pause available there is no reason to carry it at all.
     return run_sweep(
-        "parallel quicksort (1<<20 i32)", "ns/elem", double(qsort_n), workers,
-        [&]
+        workers, qsort_n,
+        [&](nx::bench::iteration& it)
         {
+            it.pause();
             refill();
+            it.resume();
             serial_quicksort(cc::span<i32>(work));
-            return u64(work[0]);
+            nx::bench::sink(work[0]);
         },
-        [&](cc::async_thread_pool& pool)
+        [&](cc::async_thread_pool& pool, nx::bench::iteration& it)
         {
+            it.pause();
             refill();
+            it.resume();
             auto root = async_quicksort(whole);
             pool.participate_until_ready(*root);
-            return u64(work[0]);
+            nx::bench::sink(work[0]);
         });
 }
 
@@ -503,17 +538,17 @@ sweep_result case_pfor(cc::span<int const> workers)
     auto const whole = range{.off = 0, .count = i32(pfor_n)};
 
     return run_sweep(
-        "parallel-for transform (1<<22 i32)", "ns/elem", double(pfor_n), workers,
-        [&]
+        workers, pfor_n,
+        [&](nx::bench::iteration&)
         {
             serial_pfor(cc::span<i32>(work));
-            return u64(work[0]);
+            nx::bench::sink(work[0]);
         },
-        [&](cc::async_thread_pool& pool)
+        [&](cc::async_thread_pool& pool, nx::bench::iteration&)
         {
             auto root = async_pfor(whole);
             pool.participate_until_ready(*root);
-            return u64(work[0]);
+            nx::bench::sink(work[0]);
         });
 }
 
@@ -524,13 +559,12 @@ sweep_result case_reduce(cc::span<int const> workers)
     auto const whole = range{.off = 0, .count = i32(reduce_n)};
 
     return run_sweep(
-        "reduction (1<<22 i32)", "ns/elem", double(reduce_n), workers,
-        [&] { return u64(serial_reduce(cc::span<i32 const>(src))); },
-        [&](cc::async_thread_pool& pool)
+        workers, reduce_n, [&](nx::bench::iteration&) { nx::bench::sink(serial_reduce(cc::span<i32 const>(src))); },
+        [&](cc::async_thread_pool& pool, nx::bench::iteration&)
         {
             auto root = async_reduce(whole);
             pool.participate_until_ready(*root);
-            return u64(*root->try_value());
+            nx::bench::sink(*root->try_value());
         });
 }
 
@@ -541,68 +575,41 @@ sweep_result case_nested(cc::span<int const> workers)
     auto const whole = range{.off = 0, .count = i32(nested_n)};
 
     return run_sweep(
-        "nested parallel-for (1<<22 i32)", "ns/elem", double(nested_n), workers,
-        [&]
+        workers, nested_n,
+        [&](nx::bench::iteration&)
         {
             serial_pfor(cc::span<i32>(work));
-            return u64(work[0]);
+            nx::bench::sink(work[0]);
         },
-        [&](cc::async_thread_pool& pool)
+        [&](cc::async_thread_pool& pool, nx::bench::iteration&)
         {
             auto root = async_nested_outer(whole);
             pool.participate_until_ready(*root);
-            return u64(work[0]);
+            nx::bench::sink(work[0]);
         });
 }
 
 sweep_result case_tree(cc::span<int const> workers)
 {
-    constexpr double nodes = double((isize(1) << (tree_depth + 1)) - 1);
+    constexpr isize nodes = (isize(1) << (tree_depth + 1)) - 1;
 
     return run_sweep(
-        "spawn tree (depth 16, 131071 nodes)", "ns/node", nodes, workers, [&] { return u64(serial_tree(tree_depth)); },
-        [&](cc::async_thread_pool& pool)
+        workers, nodes, [&](nx::bench::iteration&) { nx::bench::sink(serial_tree(tree_depth)); },
+        [&](cc::async_thread_pool& pool, nx::bench::iteration&)
         {
             auto root = async_tree(tree_depth);
             pool.participate_until_ready(*root);
-            return u64(*root->try_value());
+            nx::bench::sink(*root->try_value());
         });
 }
 
-void run_all()
-{
-    std::printf("\n### cc::async_thread_pool sweep (median of 5, %d hardware threads; +1 participating caller per row) "
-                "###\n",
-                cc::num_hardware_threads());
-
-    auto const ws = sweep_workers();
-    (void)case_quicksort(ws);
-    (void)case_pfor(ws);
-    (void)case_reduce(ws);
-    (void)case_nested(ws);
-    (void)case_tree(ws);
-
-    std::printf("\nHow to read this (the columns are not equally trustworthy):\n");
-    std::printf("  serial    re-measured on every row, next to that row's pool run. Nothing here changes it, so\n");
-    std::printf("            it is the canary: FLAT down a case = clean; DRIFTING = the machine throttled under\n");
-    std::printf("            sustained load and that case's cross-row numbers are not comparable.\n");
-    std::printf("  vs serial serial ns / pool ns, an ADJACENT pair -- valid even when the canary drifts.\n");
-    std::printf("  vs 1w     the scheduler's own scaling, but 1w and Pw are rows apart in time -- so only trust\n");
-    std::printf("            it where the serial column above it is flat.\n");
-    std::printf("A 'w worker' row runs w+1 THREADS: driving makes the calling thread participate, so the\n");
-    std::printf("sweep tops out at hardware concurrency MINUS ONE and '1w' is a 2-thread config, not a serial\n");
-    std::printf("one. Judge near-linearity against the P-core count, not the thread count: the curve bends at\n");
-    std::printf("the E-core and SMT boundaries by design. The spawn tree's 'vs serial' is expected to be ~0 and\n");
-    std::printf("is not a defect -- its serial analog is a bare recursive call; read its ns/node and 'vs 1w'.\n");
-    std::fflush(stdout);
-}
 } // namespace
 
 // The points that decide the gate, recorded for the perf tracker, at 1 and P workers only.
 //
 // Deliberately not "speedup" for both: parallel-for is the regular case, where speedup-vs-serial is the question a user would actually ask.
 // The spawn tree's leaves do nothing at all, so its cost per node IS the pool's overhead, and its scaling only means anything against itself at one worker.
-// The full sweep below is the human-facing table.
+// The BENCHMARKs below are the human-facing tables.
 PGO_BENCHMARK("bench-async-pool (work-stealing)")
 {
     auto const ws = guide_workers();
@@ -615,12 +622,46 @@ PGO_BENCHMARK("bench-async-pool (work-stealing)")
     nx::pgo::report("spawn-tree scaling@P (vs 1w)", tree.vs_one, nx::bench::unit_speedup);
 }
 
-// The full canonical set across the worker sweep.
-// Run by exact name:
-//   uv run dev.py --mirror-test-output test "bench-async-pool (worker sweep)"
-TEST("bench-async-pool (worker sweep)", nx::config::manual)
+// One BENCHMARK per case rather than one table of all five.
+//
+// The comparison column is the speedup over the serial analog, and that only means something within a case: a
+// quicksort row against a spawn-tree row compares two different workloads and says nothing about either.
+//
+// How to read a table, beyond what the columns say:
+//
+// * A `w` worker row runs w+1 THREADS, since driving makes the calling thread participate.
+//   So the sweep tops out at hardware concurrency MINUS ONE, and `w=1` is a two-thread config rather than a serial one.
+// * Judge near-linearity against the P-CORE count, not the thread count.
+//   The curve bends at the E-core and SMT boundaries by design.
+// * The last row re-measures the serial pass.
+//   Anything but `~same` there means the machine drifted under the sweep, and the rows are not comparable to each other.
+
+BENCHMARK("bench-async-pool - parallel quicksort")
 {
-    run_all();
+    (void)case_quicksort(sweep_workers());
+}
+
+BENCHMARK("bench-async-pool - parallel-for transform")
+{
+    (void)case_pfor(sweep_workers());
+}
+
+BENCHMARK("bench-async-pool - reduction")
+{
+    (void)case_reduce(sweep_workers());
+}
+
+BENCHMARK("bench-async-pool - nested parallel-for")
+{
+    (void)case_nested(sweep_workers());
+}
+
+// The spawn tree's speedup column is expected to read as a large slowdown, and that is not a defect: its serial analog
+// is a bare recursive call, against a whole scheduled node per leaf.
+// Read its ns/node, and its scaling from w=1 to w=P.
+BENCHMARK("bench-async-pool - spawn tree")
+{
+    (void)case_tree(sweep_workers());
 }
 
 #endif // CC_HAS_THREADS

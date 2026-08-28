@@ -11,16 +11,18 @@ The single-thread number comes first on purpose: if driving a node is expensive,
 | work-stealing pool | [pool-benchmark.cc](../../tests/benchmarks/async/pool-benchmark.cc) | scaling across five fork-join shapes, and the per-node scheduling cost |
 | grain & fork floor | [grain-benchmark.cc](../../tests/benchmarks/async/grain-benchmark.cc) | at what leaf size fork-join overhead stops dominating, and what the second thread costs |
 
-The first three are `PGO_BENCHMARK`s, recording representative points via `nx::pgo` for the perf gate.
-The single-thread and pool ones each also have a manual full-sweep twin that prints the whole table; the born-ready ladder has none, since its rows are cumulative and it always runs all of them.
-The fourth is manual-only: two of its three entry points emit CSV for the plot scripts beside it, and the third prints a round-trip table.
+The first three also carry a `PGO_BENCHMARK`, recording representative points via `nx::pgo` for the perf gate.
+Every file's human-facing entry points are `BENCHMARK`s, run with `uv run dev.py benchmark <match>`.
+The two sweeps in the fourth file feed the plot scripts beside it, which read the JSON sidecar rather than the console.
 None runs in the normal test sweep; every one is reachable by exact name.
 
 ## Method
 
-All four share [bench_util.hh](../../tests/benchmarks/bench_util.hh): an adaptive timer that repeats a pass until ~50 ms have elapsed.
-That is wrapped in a **median of 5** independent measurements, each with its own warmup pass.
-Results are XOR-folded into `bench::sink` so nothing is dead-code-eliminated.
+All four are nexus `BENCHMARK`s, so each figure is a median over hundreds of samples carrying a 95% confidence interval — see [benchmarking](../../../../../docs/guides/benchmarking.md).
+Results reach `nx::bench::sink` so nothing is dead-code-eliminated.
+
+**The numbers quoted below predate that harness.**
+They were taken as a median of five adaptive passes, and are re-measured when this write-up is next revised.
 
 Four constraints hold across the files, and breaking any of them corrupts the numbers silently rather than loudly.
 

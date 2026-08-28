@@ -10,7 +10,10 @@ The win is the exposed buffer window: small reads and writes inline to a pointer
 
 ## Method
 
-Each timed pass is end-to-end — **open → transfer 4 MiB → close** — repeated by the adaptive timer ([bench_util.hh](../../tests/benchmarks/bench_util.hh)) for ~50 ms.
+Each timed pass is end-to-end — **open → transfer 4 MiB → close**.
+The nexus benchmark harness medians hundreds of them and brackets the result with a 95% confidence interval; see [benchmarking](../../../../../docs/guides/benchmarking.md).
+
+**The numbers quoted below predate that harness**, and are re-measured when this write-up is next revised.
 Granularities per direction: 1 byte via `put`/`get`, then 2 / 4 / 8 / 16 / 64 / 256 B and 64 KiB via `write`/`read`.
 The cc 1-byte path uses the window directly (`writable_bytes()`/`produce()`, `ready_bytes()`/`consume()`), and `std` uses `ofstream::put` / `ifstream::get`.
 Every larger size uses `write`/`read` on both.
