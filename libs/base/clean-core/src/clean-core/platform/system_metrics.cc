@@ -502,6 +502,9 @@ cc::result<cc::cpu_load, cc::query_error> cc::cpu_load_sampler::sample()
     out.total = cc::busy_ratio(_previous.total, next.total);
     out.per_core = _per_core;
 
+    if (auto const cores = cc::get_system_info().logical_cores(); cores > 0)
+        out.cores_used = out.total * f32(cores);
+
     _previous = cc::move(next);
     _previous_time_secs = now;
 

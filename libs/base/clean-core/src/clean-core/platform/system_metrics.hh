@@ -92,8 +92,15 @@ struct cc::cpu_load
     /// an irregular cadence draw a correct graph.
     f64 interval_secs = 0;
 
-    /// Busy fraction across the whole machine, in [0, 1].
+    /// Busy fraction across the whole machine, in [0, 1], where 1 is every core busy.
     f32 total = 0;
+
+    /// The same load as a count of cores, so 4.0 is four cores' worth busy out of however many there are.
+    ///
+    /// Exactly `total` times the logical core count, carried as its own field so neither reading needs the caller to
+    /// know the core count or to do the multiply.
+    /// 0 where the core count is unknown.
+    f32 cores_used = 0;
 
     /// The same per logical core, in [0, 1] each.
     ///

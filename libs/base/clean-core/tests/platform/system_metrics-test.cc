@@ -56,6 +56,14 @@ TEST("cc system_metrics - a sampled load is a ratio, and says what it covers")
     // The interval is what makes the reading interpretable, so it must be real rather than zero.
     CHECK(load.value().interval_secs > 0);
 
+    // Both readings of the same load, so they must agree: cores_used is total scaled by the core count.
+    if (auto const cores = cc::get_system_info().logical_cores(); cores > 0)
+    {
+        CHECK(load.value().cores_used >= 0.0f);
+        CHECK(load.value().cores_used <= f32(cores));
+        CHECK(load.value().cores_used == load.value().total * f32(cores));
+    }
+
     for (auto const core : load.value().per_core)
     {
         CHECK(core >= 0.0f);

@@ -151,8 +151,8 @@ EXAMPLE("clean-core/system-info")
     auto const load = sampler.sample();
     if (load.has_value())
     {
-        cc::println("  {:<16} {:.0f}% over {:.2f} s", "cpu load", 100.0f * load.value().total,
-                    load.value().interval_secs);
+        cc::println("  {:<16} {:.0f}% ({:.1f} cores) over {:.2f} s", "cpu load", 100.0f * load.value().total,
+                    load.value().cores_used, load.value().interval_secs);
 
         auto per_core = cc::string();
         for (auto const core : load.value().per_core)
