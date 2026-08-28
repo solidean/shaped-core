@@ -54,6 +54,9 @@ void write_statistics(json::object_writer& out, nx::bench::statistics const& s)
     stats.write("mean", s.mean);
     stats.write("trimmed_mean", s.trimmed_mean);
     stats.write("mad", s.mad);
+    // Meaningful only where one sample is one iteration; `batch_size` on the loop is what says whether it was.
+    stats.write("p95", s.p95);
+    stats.write("p99", s.p99);
     stats.write("ci95_low", s.ci95_low);
     stats.write("ci95_high", s.ci95_high);
     // True when the sample count supports no interval at all, so a consumer does not read the sample range as one.

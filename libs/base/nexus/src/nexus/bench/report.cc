@@ -314,6 +314,13 @@ void append_block(cc::string& out, result const& r, nx::bench::report_style cons
     out.appendf("  min {}   mean {}   trimmed {}\n", nx::bench::format_quantity(r.time.min, secs),
                 nx::bench::format_quantity(r.time.mean, secs), nx::bench::format_quantity(r.time.trimmed_mean, secs));
     out.appendf("  spread     mad {}\n", nx::bench::format_quantity(r.time.mad, secs));
+
+    // Printed only where one sample is one iteration.
+    // Under batching a sample is a batch MEAN, so its tail is the tail of an average and reporting it as a latency
+    // percentile would be a claim the numbers do not support.
+    if (!r.config.batch)
+        out.appendf("  tail       p95 {}   p99 {}   max {}\n", nx::bench::format_quantity(r.time.p95, secs),
+                    nx::bench::format_quantity(r.time.p99, secs), nx::bench::format_quantity(r.time.max, secs));
     out.appendf("  samples    {} x {} iterations over {}   {}   {} outlier(s)\n", r.samples.size(), r.batch_size,
                 nx::bench::format_quantity(r.measured_seconds, secs), r.converged ? "converged" : "NOT converged",
                 r.time.outliers);
@@ -476,12 +483,13 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
         rows.push_back(cc::move(row));
     }
 
+    // A quantity column is named by the header and nothing else, so the header is printed unless the only columns are
+    // the self-describing ones.
+    auto const show_header = style.markdown || !quantity_names.empty();
+
     auto widths = cc::vector<isize>();
     for (auto i = isize(0); i < header.size(); ++i)
-        widths.push_back(isize(0));
-    if (style.markdown)
-        for (auto i = isize(0); i < header.size(); ++i)
-            widths[i] = display_width(header[i]);
+        widths.push_back(show_header ? display_width(header[i]) : isize(0));
     for (auto const& row : rows)
         for (auto i = isize(0); i < row.size(); ++i)
             widths[i] = cc::max(widths[i], display_width(row[i]));
@@ -509,9 +517,15 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
     };
 
     out.appendf("\n");
+
+    // The header earns its line as soon as a column has a name a reader cannot guess.
+    // Time and items are self-describing; a recorded quantity is a bare number under nothing at all, and four of them
+    // side by side are unreadable without their names.
+    if (show_header)
+        emit_row(header);
+
     if (style.markdown)
     {
-        emit_row(header);
         // The separator is written tight rather than through emit_row: padding it to the column widths would spell
         // the rule as `| ------- |`, which renders the same and reads as a row of content in the source.
         out.appendf("|");

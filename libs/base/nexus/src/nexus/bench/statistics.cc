@@ -81,6 +81,8 @@ nx::bench::statistics nx::bench::compute_statistics(cc::span<f64 const> samples)
     s.min = sorted[0];
     s.max = sorted[n - 1];
     s.median = sorted_median(sorted);
+    s.p95 = sorted_percentile(sorted, 0.95);
+    s.p99 = sorted_percentile(sorted, 0.99);
 
     auto sum = f64(0);
     for (auto const v : sorted)

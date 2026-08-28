@@ -128,6 +128,20 @@ TEST("bench - one loop is drawn as a block, several as a table")
     CHECK(!table.contains("interval"));
 }
 
+TEST("bench - the tail is reported only where a sample is one iteration")
+{
+    auto batched = cc::vector<nx::bench::result>{loop_with("batched", 0.001, 0.00099, 0.00101)};
+    CHECK(batched[0].config.batch); // the default, and what every throughput benchmark runs
+
+    // Under batching a sample is a batch MEAN, so its 95th percentile is the tail of an average.
+    // Printing that as a latency percentile would be a claim the numbers do not support.
+    CHECK(!nx::bench::format_report("batched", batched, plain()).contains("p95"));
+
+    auto unbatched = batched;
+    unbatched[0].config.batch = false;
+    CHECK(nx::bench::format_report("unbatched", unbatched, plain()).contains("p95"));
+}
+
 TEST("bench - a difference whose interval spans one is drawn as no difference")
 {
     // The two intervals overlap heavily, so the ratio's interval contains 1.

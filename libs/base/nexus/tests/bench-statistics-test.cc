@@ -21,6 +21,23 @@ cc::vector<f64> one_to_ten()
 }
 } // namespace
 
+TEST("bench - the tail percentiles are order statistics of the samples")
+{
+    // 0..100 inclusive, so a percentile lands exactly on its own value and nothing is interpolated.
+    auto samples = cc::vector<f64>();
+    for (auto i = 0; i <= 100; ++i)
+        samples.push_back(f64(i));
+
+    auto const s = nx::bench::compute_statistics(samples);
+
+    CHECK(s.p95 == 95.0);
+    CHECK(s.p99 == 99.0);
+    CHECK(s.max == 100.0);
+
+    // A latency target is written against the tail, so it must not be the median wearing another name.
+    CHECK(s.median == 50.0);
+}
+
 TEST("bench - statistics of a known vector")
 {
     auto const v = one_to_ten();

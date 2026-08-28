@@ -56,6 +56,18 @@ struct nx::bench::statistics
     f64 ci95_high = 0;
     bool ci_is_bound = false;
 
+    /// The 95th and 99th percentiles of the samples.
+    ///
+    /// **Only meaningful with batching OFF** (`run_config::batch = false`), where one sample is one iteration.
+    /// With batching on a sample is a batch MEAN, so its tail is the tail of an average and the slow iteration that a
+    /// frame budget is actually spent against has been averaged away.
+    /// A latency benchmark therefore turns batching off, and pays one clock pair per iteration for the privilege.
+    ///
+    /// Here because a latency target is a claim about the tail: "under a millisecond" is a promise about p95 and the
+    /// worst sample, and a median cannot check it.
+    f64 p95 = 0;
+    f64 p99 = 0;
+
     /// Samples outside the Tukey fences, `[q1 - 1.5*iqr, q3 + 1.5*iqr]`.
     ///
     /// **Counted, never dropped.**

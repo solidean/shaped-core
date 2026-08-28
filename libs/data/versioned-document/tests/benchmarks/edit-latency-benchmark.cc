@@ -18,11 +18,13 @@
 // The two drag shapes look identical to a user and cost very differently, which is the point of measuring both.
 //
 // Run e.g.
-//   uv run dev.py test "bench-vdoc-edit-latency (full sweep)" --preset release-clang --timeout 0 --manual
+//   uv run dev.py benchmark "bench-vdoc-edit-latency" --timeout 0
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/bench/run.hh>
+#include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <versioned-document/incremental_parse.hh>
@@ -36,7 +38,6 @@
 #include <versioned-document/value_builder.hh>
 
 #include <chrono>
-#include <cstdio>
 
 namespace vdoc_bench
 {
@@ -101,45 +102,32 @@ using clock_type = std::chrono::steady_clock;
     return std::chrono::duration<double>(clock_type::now() - t0).count();
 }
 
-/// One stage's per-op timings.
+/// The four stages of one edit, timed inside the measured body and recorded as shares of it.
 ///
-/// A latency target is a claim about the tail, so a median alone cannot check it — p95 and the worst sample are what
-/// a frame budget is actually spent against.
-struct stage_samples
+/// Shares rather than absolute times: the total is already the median column, so a share recovers the absolute figure
+/// and answers "where did the time go" without a second time column per stage.
+/// They are means over the samples, which is what a cost breakdown wants — the TAIL belongs to the total, and that is
+/// what the p95 the target is written against measures.
+struct stage_shares
 {
-    cc::vector<double> seconds;
+    f64 build = 0;   ///< op_builder::build — the diff against the parents
+    f64 add = 0;     ///< op_graph::add
+    f64 advance = 0; ///< rolling the pinned snapshot onto the new head; zero where the shape cannot advance
+    f64 apply = 0;   ///< the typed document at the new head, plus the change summary
 
-    void add(double s) { seconds.push_back(s); }
+    [[nodiscard]] f64 total() const { return build + add + advance + apply; }
 
-    [[nodiscard]] double quantile(double q) const
+    /// Files each stage as a fraction of this edit, on the iteration that produced them.
+    void record_into(nx::bench::iteration& it) const
     {
-        auto sorted = cc::vector<double>::create_copy_of(seconds);
-        cc::sort(sorted);
-        auto const at = isize(q * double(sorted.size() - 1) + 0.5);
-        return sorted[at];
-    }
+        auto const whole = total();
+        if (whole <= 0)
+            return;
 
-    [[nodiscard]] double p50() const { return quantile(0.5); }
-    [[nodiscard]] double p95() const { return quantile(0.95); }
-    [[nodiscard]] double worst() const { return quantile(1.0); }
-};
-
-/// The whole per-op loop, one entry per measured stage.
-struct edit_samples
-{
-    stage_samples build;   ///< op_builder::build — the diff against the parents
-    stage_samples add;     ///< op_graph::add
-    stage_samples advance; ///< rolling the pinned snapshot onto the new head; empty where the shape cannot advance
-    stage_samples apply;   ///< the typed document at the new head, plus the change summary
-
-    /// What an application actually waits for: everything above, per op.
-    [[nodiscard]] stage_samples total() const
-    {
-        auto out = stage_samples();
-        for (isize i = 0; i < build.seconds.size(); ++i)
-            out.add(build.seconds[i] + add.seconds[i] + apply.seconds[i]
-                    + (advance.seconds.empty() ? 0.0 : advance.seconds[i]));
-        return out;
+        it.record("build", nx::bench::unit_cost_share, build / whole);
+        it.record("add", nx::bench::unit_cost_share, add / whole);
+        it.record("advance", nx::bench::unit_cost_share, advance / whole);
+        it.record("apply", nx::bench::unit_cost_share, apply / whole);
     }
 };
 
@@ -222,196 +210,222 @@ struct edit_samples
     return op.build(graph, cache);
 }
 
-void print_stage(char const* name, stage_samples const& s)
-{
-    std::printf("    %-12s p50 %8.3f ms   p95 %8.3f ms   max %8.3f ms\n", name, s.p50() * 1000, s.p95() * 1000,
-                s.worst() * 1000);
-}
-
-struct measurement
-{
-    isize entities = 0;
-    isize samples = 0;
-    edit_samples linear;
-    edit_samples drag_fan;
-    edit_samples drag_chain;
-    isize resident_ops_after_drag = 0;
+/// What a latency measurement is allowed to cost, and why it does not batch.
+///
+/// **`batch = false` is the whole point.** One sample has to be ONE edit, because the claim under test is about the
+/// tail: a batch mean smooths away exactly the slow frame a budget is spent against.
+/// A clock pair costs ~14 ns against an edit of tens of microseconds, so per-iteration timing is free here.
+///
+/// 5% rather than the default 2%: an edit allocates, and an allocator's own variance is not something more sampling
+/// removes.
+constexpr auto latency_config = nx::bench::run_config{
+    .min_time_secs = 0.2,
+    .max_time_secs = 2.0,
+    .min_samples = 64,
+    .target_relative_error = 0.05,
+    .warmup_time_secs = 0.02,
+    .batch = false,
+    .measure_counters = false,
+    .no_baseline = true,
 };
 
-/// Seeds a document of `entities` entities, then times `samples` single-entity edits in each shape.
-[[nodiscard]] measurement measure(isize entities, isize samples, bool record)
+/// A seeded document plus everything an edit needs, built once and then edited many times.
+struct session
 {
-    auto out = measurement{.entities = entities, .samples = samples};
+    vdoc::op_graph graph;
+    vdoc::snapshot_cache cache;
+    vdoc::component_registry registry;
+    vdoc::default_parse_policy policy;
+    vdoc::parse_report report;
+    vdoc::document doc;
+    vdoc::change_summary changes;
+    vdoc::incremental_apply_stats stats;
+    vdoc::op_id head;
+    isize entities = 0;
+};
 
-    auto graph = vdoc::op_graph();
-    auto const base = seed_linear(graph, entities);
+/// Seeds a document of `entities` entities and pins a snapshot where an application would: right after the load.
+[[nodiscard]] cc::unique_ptr<session> open_session(isize entities)
+{
+    auto s = cc::make_unique<session>();
+    s->entities = entities;
+    s->head = seed_linear(s->graph, entities);
 
-    // The snapshot an application pins where it knows the good place is — immediately after the load.
-    auto cache = vdoc::snapshot_cache();
-    cache.install(base, vdoc::snapshot_document::create_owning_copy(graph.materialize(base)), /*pinned =*/true);
+    s->cache.install(s->head, vdoc::snapshot_document::create_owning_copy(s->graph.materialize(s->head)),
+                     /*pinned =*/true);
 
-    auto registry = vdoc::component_registry();
-    registry.register_component<vdoc_bench::wall>();
+    s->registry.register_component<vdoc_bench::wall>();
 
     // Deliberately NOT create_with_local_head: collecting the closure is a walk of the whole history, and a session
     // that built one per frame would pay that before anything else in the loop.
-    auto const policy = vdoc::default_parse_policy::create_with_registry(registry);
+    s->policy = vdoc::default_parse_policy::create_with_registry(s->registry);
 
-    auto report = vdoc::parse_report();
-    auto doc = vdoc::parse(graph.materialize(base, cache), policy, report);
-    CHECK(doc.entity_count() == entities);
+    s->doc = vdoc::parse(s->graph.materialize(s->head, s->cache), s->policy, s->report);
+    CHECK(s->doc.entity_count() == entities);
+    return s;
+}
 
-    auto changes = vdoc::change_summary();
-    auto stats = vdoc::incremental_apply_stats();
+/// One linear edit: build, add, advance the pinned snapshot, apply.
+///
+/// This is the gizmo's op, and the shape ordinary editing produces.
+/// The snapshot rolls onto the new head as part of the edit, so the next build's walk is one op again rather than two
+/// and then three — which is the property that makes a long session flat, and the one this benchmark checks by running
+/// thousands of edits where the hand-rolled version ran fifty.
+stage_shares one_linear_edit(session& s, isize index)
+{
+    auto out = stage_shares();
 
-    // ---- the linear shape: each op extends the last ----------------------------------------------------------------
-    auto head = base;
-    for (isize i = 0; i < samples; ++i)
-    {
-        auto const t_build = clock_type::now();
-        auto op = build_move(graph, cache, head, i % entities, f64(i) + 0.5);
-        out.linear.build.add(seconds_since(t_build));
+    auto const t_build = clock_type::now();
+    auto op = build_move(s.graph, s.cache, s.head, index % s.entities, f64(index) + 0.5);
+    out.build = seconds_since(t_build);
 
-        auto const previous = head;
-        auto const t_add = clock_type::now();
-        head = graph.add(cc::move(op));
-        out.linear.add.add(seconds_since(t_add));
+    auto const previous = s.head;
+    auto const t_add = clock_type::now();
+    s.head = s.graph.add(cc::move(op));
+    out.add = seconds_since(t_add);
 
-        // The op is accepted as history the moment it is added here, so the snapshot rolls onto it and the next
-        // build's walk is one op again rather than two, then three.
-        auto const t_advance = clock_type::now();
-        auto const advanced = vdoc::advance_snapshot(graph, cache, previous, head);
-        out.linear.advance.add(seconds_since(t_advance));
-        CHECK(advanced);
+    auto const t_advance = clock_type::now();
+    auto const advanced = vdoc::advance_snapshot(s.graph, s.cache, previous, s.head);
+    out.advance = seconds_since(t_advance);
+    CC_ASSERT(advanced, "the snapshot must roll onto a single-parent child");
 
-        auto const t_apply = clock_type::now();
-        doc = vdoc::apply(cc::move(doc), graph, previous, head, policy, report, changes, {.cache = &cache}, &stats);
-        out.linear.apply.add(seconds_since(t_apply));
+    auto const t_apply = clock_type::now();
+    s.doc = vdoc::apply(cc::move(s.doc), s.graph, previous, s.head, s.policy, s.report, s.changes, {.cache = &s.cache},
+                        &s.stats);
+    out.apply = seconds_since(t_apply);
 
-        CHECK(stats.took_fast_path);
-        CHECK(doc.entity_count() == entities);
-    }
-
-    // ---- the drag, as a FAN: every frame branches from the same state -----------------------------------------------
-    //
-    // The snapshot deliberately does not advance here, because the frames are siblings of each other.
-    // The apply cannot stay on its fast path either: frame k+1 does not descend from frame k, so evolving the document
-    // from one frame to the next is a full re-parse however small the edit was.
-    auto const before_drag = graph.size();
-    auto drag_frames = cc::vector<vdoc::op_id>();
-    for (isize i = 0; i < samples; ++i)
-    {
-        auto const t_build = clock_type::now();
-        auto op = build_move(graph, cache, head, 0, f64(i) * 0.01);
-        out.drag_fan.build.add(seconds_since(t_build));
-
-        auto const t_add = clock_type::now();
-        auto const frame = graph.add(cc::move(op));
-        out.drag_fan.add.add(seconds_since(t_add));
-        drag_frames.push_back(frame);
-
-        auto const previous = i == 0 ? head : drag_frames[i - 1];
-        auto const t_apply = clock_type::now();
-        doc = vdoc::apply(cc::move(doc), graph, previous, frame, policy, report, changes, {.cache = &cache}, &stats);
-        out.drag_fan.apply.add(seconds_since(t_apply));
-
-        CHECK(doc.entity_count() == entities);
-    }
-
-    // The drag ends: the last frame is accepted as history and the rest are forgotten, which is the only thing that
-    // stops a long session's graph growing with every frame ever drawn.
-    for (isize i = 0; i + 1 < drag_frames.size(); ++i)
-        CHECK(graph.drop_leaf(drag_frames[i]));
-
-    out.resident_ops_after_drag = graph.size() - before_drag;
-    head = drag_frames.back();
-    cache.install(head, vdoc::snapshot_document::create_owning_copy(graph.materialize(head)), /*pinned =*/true);
-
-    // ---- the same drag, CHAINED: each frame extends the previous one ------------------------------------------------
-    //
-    // The behaviour a user sees is identical — one history entry, produced on release — but every frame is now a
-    // single-parent child, which is the shape both the snapshot and the incremental apply are built for.
-    auto chain_frames = cc::vector<vdoc::op_id>();
-    for (isize i = 0; i < samples; ++i)
-    {
-        auto const previous = chain_frames.empty() ? head : chain_frames.back();
-
-        auto const t_build = clock_type::now();
-        auto op = build_move(graph, cache, previous, 0, f64(i) * 0.02);
-        out.drag_chain.build.add(seconds_since(t_build));
-
-        auto const t_add = clock_type::now();
-        auto const frame = graph.add(cc::move(op));
-        out.drag_chain.add.add(seconds_since(t_add));
-        chain_frames.push_back(frame);
-
-        auto const t_advance = clock_type::now();
-        auto const advanced = vdoc::advance_snapshot(graph, cache, previous, frame);
-        out.drag_chain.advance.add(seconds_since(t_advance));
-        CHECK(advanced);
-
-        auto const t_apply = clock_type::now();
-        doc = vdoc::apply(cc::move(doc), graph, previous, frame, policy, report, changes, {.cache = &cache}, &stats);
-        out.drag_chain.apply.add(seconds_since(t_apply));
-
-        CHECK(stats.took_fast_path);
-    }
-
-    auto const linear_total = out.linear.total();
-    auto const fan_total = out.drag_fan.total();
-    auto const chain_total = out.drag_chain.total();
-
-    std::printf("entities=%6lld samples=%4lld\n", (long long)entities, (long long)samples);
-    std::printf("  linear\n");
-    print_stage("build", out.linear.build);
-    print_stage("add", out.linear.add);
-    print_stage("advance", out.linear.advance);
-    print_stage("apply", out.linear.apply);
-    print_stage("TOTAL", linear_total);
-    std::printf("  drag as a fan (%lld frames off one parent, %lld resident once the discarded ones are dropped)\n",
-                (long long)samples, (long long)out.resident_ops_after_drag);
-    print_stage("build", out.drag_fan.build);
-    print_stage("apply", out.drag_fan.apply);
-    print_stage("TOTAL", fan_total);
-    std::printf("  drag as a chain (same behaviour to a user, single-parent edges)\n");
-    print_stage("build", out.drag_chain.build);
-    print_stage("advance", out.drag_chain.advance);
-    print_stage("apply", out.drag_chain.apply);
-    print_stage("TOTAL", chain_total);
-
-    if (record)
-    {
-        nx::pgo::report_time_for("edit-p50", linear_total.p50());
-        nx::pgo::report_time_for("edit-p95", linear_total.p95());
-        nx::pgo::report_time_for("edit-max", linear_total.worst());
-        nx::pgo::report_time_for("edit-build-p95", out.linear.build.p95());
-        nx::pgo::report_time_for("edit-advance-p95", out.linear.advance.p95());
-        nx::pgo::report_time_for("edit-apply-p95", out.linear.apply.p95());
-        nx::pgo::report_time_for("drag-chained-frame-p95", chain_total.p95());
-        nx::pgo::report_time_for("drag-fanned-frame-p95", fan_total.p95());
-    }
-
+    CC_ASSERT(s.stats.took_fast_path, "a single-parent edit must take the incremental path");
     return out;
 }
-/// The per-frame cost of a three-layer stack, which is the shape layering exists for.
-///
-/// A computed base is rewritten wholesale every frame, a user override layer sits on top, and a forced layer above that.
-/// The claim under test is that a frame costs O(dirty entities x layers) rather than O(document) — so `apply` is
-/// measured beside the `rebuild` it avoids, and the gap is what must not close.
-struct layered_samples
-{
-    stage_samples produce; ///< the base layer rewriting everything, diffed down to what actually moved
-    stage_samples apply;   ///< layer_stack::apply
-    stage_samples rebuild; ///< recomposing from nothing instead, for the comparison
 
-    [[nodiscard]] stage_samples frame() const
+/// One whole drag, as a FAN: `frames` frames all branching from the SAME state, then all but the last thrown away.
+///
+/// **The iteration is the whole gesture, not one frame**, and that is what makes it repeatable: the frames it adds are
+/// dropped again and the head goes back where it started, so every iteration sees exactly what the first one saw.
+/// Per-frame latency comes from `it.items(frames)`.
+///
+/// The snapshot deliberately does not advance, because the frames are siblings of each other.
+/// The apply cannot stay on its fast path either: frame k+1 does not descend from frame k, so evolving the document
+/// from one frame to the next is a full re-parse however small the edit was.
+stage_shares one_fanned_drag(session& s, isize frames)
+{
+    auto out = stage_shares();
+    auto drag_frames = cc::vector<vdoc::op_id>();
+
+    for (isize i = 0; i < frames; ++i)
     {
-        auto out = stage_samples();
-        for (isize i = 0; i < produce.seconds.size(); ++i)
-            out.add(produce.seconds[i] + apply.seconds[i]);
-        return out;
+        auto const t_build = clock_type::now();
+        auto op = build_move(s.graph, s.cache, s.head, 0, f64(i) * 0.01);
+        out.build += seconds_since(t_build);
+
+        auto const t_add = clock_type::now();
+        auto const frame = s.graph.add(cc::move(op));
+        out.add += seconds_since(t_add);
+        drag_frames.push_back(frame);
+
+        auto const previous = i == 0 ? s.head : drag_frames[i - 1];
+        auto const t_apply = clock_type::now();
+        s.doc = vdoc::apply(cc::move(s.doc), s.graph, previous, frame, s.policy, s.report, s.changes,
+                            {.cache = &s.cache}, &s.stats);
+        out.apply += seconds_since(t_apply);
     }
-};
+
+    // The drag ends.
+    // Every frame is forgotten, including the last: an accepted drag would keep it, but keeping it here would make the
+    // next iteration start somewhere else and measure a different thing.
+    // Dropping the whole fan is also what stops a long session's graph growing with every frame ever drawn.
+    for (isize i = drag_frames.size() - 1; i >= 0; --i)
+        CC_ASSERT(s.graph.drop_leaf(drag_frames[i]), "a fanned frame is a leaf and must drop");
+
+    s.doc = vdoc::parse(s.graph.materialize(s.head, s.cache), s.policy, s.report);
+    return out;
+}
+
+/// The same drag, CHAINED: each frame extends the previous one.
+///
+/// The behaviour a user sees is identical — one history entry, produced on release — but every frame is now a
+/// single-parent child, which is the shape both the snapshot and the incremental apply are built for.
+/// Measuring the two side by side is the point: they look the same and cost very differently.
+stage_shares one_chained_drag(session& s, isize frames)
+{
+    auto out = stage_shares();
+    auto const base = s.head;
+    auto chain = cc::vector<vdoc::op_id>();
+
+    for (isize i = 0; i < frames; ++i)
+    {
+        auto const previous = chain.empty() ? base : chain.back();
+
+        auto const t_build = clock_type::now();
+        auto op = build_move(s.graph, s.cache, previous, 0, f64(i) * 0.02);
+        out.build += seconds_since(t_build);
+
+        auto const t_add = clock_type::now();
+        auto const frame = s.graph.add(cc::move(op));
+        out.add += seconds_since(t_add);
+        chain.push_back(frame);
+
+        auto const t_advance = clock_type::now();
+        auto const advanced = vdoc::advance_snapshot(s.graph, s.cache, previous, frame);
+        out.advance += seconds_since(t_advance);
+        CC_ASSERT(advanced, "a chained frame is a single-parent child");
+
+        auto const t_apply = clock_type::now();
+        s.doc = vdoc::apply(cc::move(s.doc), s.graph, previous, frame, s.policy, s.report, s.changes,
+                            {.cache = &s.cache}, &s.stats);
+        out.apply += seconds_since(t_apply);
+    }
+
+    // Unwound newest-first, so every drop is of a leaf, and the pinned snapshot goes back to the base the drag started
+    // from -- without which iteration k+1 would edit a document k drags deep.
+    for (isize i = chain.size() - 1; i >= 0; --i)
+        CC_ASSERT(s.graph.drop_leaf(chain[i]), "a chained frame drops newest-first");
+
+    s.cache.install(base, vdoc::snapshot_document::create_owning_copy(s.graph.materialize(base)), /*pinned =*/true);
+    s.doc = vdoc::parse(s.graph.materialize(base, s.cache), s.policy, s.report);
+    s.head = base;
+    return out;
+}
+
+/// Frames in one measured gesture — about a second of dragging at 60 Hz, which is a long one.
+///
+/// A drag is measured as a WHOLE gesture per iteration rather than a frame at a time, because a frame is not
+/// repeatable on its own: the fan's frames pile up against one parent, and only the gesture ending clears them.
+/// `it.items(frames)` is what turns the gesture back into a per-frame latency.
+constexpr isize drag_frames_per_gesture = 60;
+
+/// One drag shape at one document size, as one measured loop.
+nx::bench::result measure_drag(session& s, isize frames, bool fanned)
+{
+    return nx::bench::run(fanned ? cc::string_view("drag, fanned") : cc::string_view("drag, chained"),
+                          {.min_time_secs = 0.2,
+                           .max_time_secs = 2.0,
+                           .min_samples = 32,
+                           .target_relative_error = 0.05,
+                           .warmup_time_secs = 0.02,
+                           .batch = false,
+                           .measure_counters = false},
+                          [&](nx::bench::iteration& it)
+                          {
+                              auto const shares = fanned ? one_fanned_drag(s, frames) : one_chained_drag(s, frames);
+                              shares.record_into(it);
+                              it.items(frames);
+                          });
+}
+
+/// The linear shape at one document size, as one measured loop.
+nx::bench::result measure_linear(isize entities)
+{
+    auto s = open_session(entities);
+    auto index = isize(0);
+
+    return nx::bench::run(cc::format("entities={}", entities), latency_config,
+                          [&](nx::bench::iteration& it)
+                          {
+                              auto const shares = one_linear_edit(*s, index++);
+                              shares.record_into(it);
+                          });
+}
 
 /// One wall's paths and the values that do not change, hoisted out of the frame loop.
 ///
@@ -473,23 +487,36 @@ void produce_wall(vdoc::direct_layer& layer, produced_wall const& wall, cc::opti
         layer.set(wall.paths[p], p == 1 && moved_x.has_value() ? moved_x.value() : wall.values[p]);
 }
 
-[[nodiscard]] layered_samples measure_layered(isize entities, isize samples, bool record)
+/// The per-frame cost of a three-layer stack, which is the shape layering exists for.
+///
+/// A computed base is rewritten wholesale every frame, a user override layer sits on top, and a forced layer above
+/// that.
+/// The claim under test is that a frame costs O(dirty entities x layers) rather than O(document), so the composed
+/// frame is measured beside the `rebuild` it avoids and **the gap between them is what must not close**.
+struct layered_fixture
 {
-    auto out = layered_samples();
+    vdoc::component_registry registry;
+    vdoc::default_parse_policy policy;
+    vdoc::direct_layer base = vdoc::direct_layer("base");
+    vdoc::direct_layer forced = vdoc::direct_layer("forced");
+    vdoc::op_graph user;
+    vdoc::op_id user_head;
+    cc::vector<produced_wall> plan;
+    vdoc::layer_stack stack;
+    vdoc::parse_report report;
+    vdoc::change_summary changes;
+};
 
-    auto registry = vdoc::component_registry();
-    registry.register_component<vdoc_bench::wall>();
-    auto const policy = vdoc::default_parse_policy::create_with_registry(registry);
-
-    auto base = vdoc::direct_layer("base");
-    auto forced = vdoc::direct_layer("forced");
-    auto user = vdoc::op_graph();
-
-    auto const plan = plan_walls(entities);
+[[nodiscard]] cc::unique_ptr<layered_fixture> open_layered(isize entities)
+{
+    auto f = cc::make_unique<layered_fixture>();
+    f->registry.register_component<vdoc_bench::wall>();
+    f->policy = vdoc::default_parse_policy::create_with_registry(f->registry);
+    f->plan = plan_walls(entities);
 
     // the base's first full production is setup rather than a measured frame
-    for (auto const& wall : plan)
-        produce_wall(base, wall, {});
+    for (auto const& wall : f->plan)
+        produce_wall(f->base, wall, {});
 
     // a handful of user overrides, which is what a real session has: a few pinned properties, not thousands
     auto staged = vdoc::op_builder();
@@ -498,73 +525,117 @@ void produce_wall(vdoc::direct_layer& layer, produced_wall const& wall, cc::opti
                         .component = vdoc::component_type_id::of("transform"),
                         .property = vdoc::property_id::of("y")},
                        vdoc::value::of(-1.0));
-    auto const user_head = user.add(staged.build(user));
+    f->user_head = f->user.add(staged.build(f->user));
 
-    auto stack = vdoc::layer_stack();
-    (void)stack.push_direct_layer("base", base);
-    (void)stack.push_graph_layer("user", user, user_head);
-    (void)stack.push_direct_layer("forced", forced);
+    (void)f->stack.push_direct_layer("base", f->base);
+    (void)f->stack.push_graph_layer("user", f->user, f->user_head);
+    (void)f->stack.push_direct_layer("forced", f->forced);
 
-    auto report = vdoc::parse_report();
-    auto changes = vdoc::change_summary();
-    stack.rebuild(policy, report, changes);
-    REQUIRE(stack.composed().entity_count() == entities);
+    f->stack.rebuild(f->policy, f->report, f->changes);
+    REQUIRE(f->stack.composed().entity_count() == entities);
+    return f;
+}
 
-    for (isize frame = 0; frame < samples; ++frame)
-    {
-        // The producer rewrites EVERYTHING and only a few entities actually move, which is the case the diff exists for.
-        auto const moved_x = vdoc::value::of(f64(frame));
+/// What a layered measurement is allowed to cost.
+constexpr auto layered_config = nx::bench::run_config{
+    .min_time_secs = 0.2,
+    .max_time_secs = 2.0,
+    .min_samples = 32,
+    .target_relative_error = 0.05,
+    .warmup_time_secs = 0.02,
+    .batch = false,
+    .measure_counters = false,
+};
 
-        auto const t_produce = clock_type::now();
-        base.begin_rebuild();
-        for (isize i = 0; i < plan.size(); ++i)
-            produce_wall(base, plan[i], i < 4 ? cc::optional<vdoc::value>(moved_x) : cc::optional<vdoc::value>());
-        base.finish_rebuild();
-        out.produce.add(seconds_since(t_produce));
+/// Rewrites the base wholesale, moving four entities, which is the producer's half of a frame.
+void produce_frame(layered_fixture& f, isize frame)
+{
+    // Only a few entities actually move, which is the case the diff exists for.
+    auto const moved_x = vdoc::value::of(f64(frame));
 
-        auto stats = vdoc::layered_apply_stats();
-        auto const t_apply = clock_type::now();
-        stack.apply(policy, report, changes, {}, &stats);
-        out.apply.add(seconds_since(t_apply));
+    f.base.begin_rebuild();
+    for (isize i = 0; i < f.plan.size(); ++i)
+        produce_wall(f.base, f.plan[i], i < 4 ? cc::optional<vdoc::value>(moved_x) : cc::optional<vdoc::value>());
+    f.base.finish_rebuild();
+}
 
-        CHECK(stats.took_fast_path);
+struct layered_results
+{
+    nx::bench::result apply;
+    nx::bench::result rebuild;
+    nx::bench::result produce;
+};
 
-        // The same state composed from nothing, on a throwaway stack, so the two are comparable per frame.
-        auto fresh = vdoc::layer_stack();
-        (void)fresh.push_direct_layer("base", base);
-        (void)fresh.push_graph_layer("user", user, user_head);
-        (void)fresh.push_direct_layer("forced", forced);
+/// The three loops the layering claim is read off.
+///
+/// **`apply` is the baseline and `rebuild` is what it is measured against**, because that pair IS the claim: composing
+/// only what moved must beat recomposing everything, and by more as the document grows.
+///
+/// The producer is measured beside them rather than folded into either.
+/// It rewrites the whole document by construction, so a frame TOTAL is O(document) whatever composing costs — and at
+/// 8,000 entities it is over 99% of the frame, which is exactly enough to hide the thing under test.
+/// Comparing that total against `rebuild` says nothing about the composition, which is what a first attempt at this
+/// table did.
+///
+/// The produce is PAUSED out of the other two, so each loop times its own stage against the same dirtied state.
+layered_results measure_layered(layered_fixture& f)
+{
+    auto frame = isize(0);
+    auto out = layered_results();
 
-        auto fresh_report = vdoc::parse_report();
-        auto const t_rebuild = clock_type::now();
-        fresh.rebuild(policy, fresh_report, changes);
-        out.rebuild.add(seconds_since(t_rebuild));
-    }
+    out.apply = nx::bench::run("apply (only what moved)", layered_config,
+                               [&](nx::bench::iteration& it)
+                               {
+                                   it.pause();
+                                   produce_frame(f, frame++);
+                                   it.resume();
 
-    auto const frame_total = out.frame();
+                                   auto stats = vdoc::layered_apply_stats();
+                                   f.stack.apply(f.policy, f.report, f.changes, {}, &stats);
+                                   CC_ASSERT(stats.took_fast_path, "a composed frame must take the incremental path");
+                               });
 
-    std::printf("entities=%6lld samples=%4lld  three layers: computed base, user overrides, forced\n",
-                (long long)entities, (long long)samples);
-    print_stage("produce", out.produce);
-    print_stage("apply", out.apply);
-    print_stage("FRAME", frame_total);
-    print_stage("rebuild", out.rebuild);
+    out.rebuild = nx::bench::run("rebuild (from nothing)", layered_config,
+                                 [&](nx::bench::iteration& it)
+                                 {
+                                     it.pause();
+                                     produce_frame(f, frame++);
 
-    if (record)
-    {
-        nx::pgo::report_time_for("layered-frame-p95", frame_total.p95());
-        nx::pgo::report_time_for("layered-apply-p95", out.apply.p95());
-        nx::pgo::report_time_for("layered-rebuild-p95", out.rebuild.p95());
-    }
+                                     // A throwaway stack, so the two are comparable per frame.
+                                     auto fresh = vdoc::layer_stack();
+                                     (void)fresh.push_direct_layer("base", f.base);
+                                     (void)fresh.push_graph_layer("user", f.user, f.user_head);
+                                     (void)fresh.push_direct_layer("forced", f.forced);
+                                     auto fresh_report = vdoc::parse_report();
+                                     it.resume();
 
+                                     fresh.rebuild(f.policy, fresh_report, f.changes);
+                                 });
+
+    // The producer's own cost, which a frame pays on top of whichever of the two above it uses.
+    // Here so the frame total is recoverable, and because it is what actually dominates a frame today.
+    out.produce = nx::bench::run("produce (rewrites everything)", layered_config, [&] { produce_frame(f, frame++); });
     return out;
 }
+
 } // namespace
 
 // The representative size, recorded: an editing session's worth of history, one op at a time.
+//
+// p95 rather than the median, because the target is a claim about the tail.
+// The harness reports it only where a sample is one iteration, which is why these run unbatched.
 PGO_BENCHMARK("bench-vdoc-edit-latency (one op at a time)")
 {
-    (void)measure(2000, 50, /*record =*/true);
+    auto const linear = measure_linear(2000);
+    nx::pgo::report_time_for("edit-p50", linear.time.median);
+    nx::pgo::report_time_for("edit-p95", linear.time.p95);
+    nx::pgo::report_time_for("edit-max", linear.time.max);
+
+    auto s = open_session(2000);
+    auto const fanned = measure_drag(*s, drag_frames_per_gesture, /*fanned =*/true);
+    auto const chained = measure_drag(*s, drag_frames_per_gesture, /*fanned =*/false);
+    nx::pgo::report_time_for("drag-fanned-frame-p95", fanned.time.p95 / f64(drag_frames_per_gesture));
+    nx::pgo::report_time_for("drag-chained-frame-p95", chained.time.p95 / f64(drag_frames_per_gesture));
 }
 
 // The human-facing sweep the write-up analyses.
@@ -572,26 +643,52 @@ PGO_BENCHMARK("bench-vdoc-edit-latency (one op at a time)")
 // The sizes are held down by what is affordable TODAY rather than by what is interesting: op_builder::build walks the
 // whole history on every call, so seeding aside, the sweep itself is quadratic until that is fixed.
 // They go up as the stages land.
-TEST("bench-vdoc-edit-latency (full sweep)", nx::config::manual)
+BENCHMARK("bench-vdoc-edit-latency - one linear edit")
 {
-    (void)measure(500, 100, /*record =*/false);
-    (void)measure(2000, 50, /*record =*/false);
-    (void)measure(8000, 20, /*record =*/false);
+    (void)measure_linear(500);
+    (void)measure_linear(2000);
+    (void)measure_linear(8000);
+}
+
+// The two drag shapes look identical to a user and cost very differently, which is why they share a table: the
+// comparison column is exactly the price of fanning.
+BENCHMARK("bench-vdoc-edit-latency - a drag, chained against fanned")
+{
+    auto s = open_session(2000);
+    (void)measure_drag(*s, drag_frames_per_gesture, /*fanned =*/false);
+    (void)measure_drag(*s, drag_frames_per_gesture, /*fanned =*/true);
 }
 
 // The layered per-frame shape, recorded: the three-layer stack layering exists for.
 PGO_BENCHMARK("bench-vdoc-layered-frame (three layers, per frame)")
 {
-    (void)measure_layered(2000, 30, /*record =*/true);
+    auto f = open_layered(2000);
+    auto const r = measure_layered(*f);
+
+    nx::pgo::report_time_for("layered-frame-p95", r.produce.time.p95 + r.apply.time.p95);
+    nx::pgo::report_time_for("layered-apply-p95", r.apply.time.p95);
+    nx::pgo::report_time_for("layered-rebuild-p95", r.rebuild.time.p95);
 }
 
-// The sweep that says whether composing is O(dirty) or O(document).
+// The tables that say whether composing is O(dirty) or O(document).
 //
-// `apply` must stay roughly flat across these sizes while `rebuild` grows with them.
-// If the two converge, the composition has started walking the whole document, and nothing else would notice.
-TEST("bench-vdoc-layered-frame (full sweep)", nx::config::manual)
+// `apply` must stay roughly flat across these sizes while `rebuild` grows with them, so `rebuild`'s comparison column
+// must get LARGER as the document does.
+// If it shrinks towards `~same`, the composition has started walking the whole document, and nothing else would notice.
+BENCHMARK("bench-vdoc-layered-frame - compose against rebuild, 500 entities")
 {
-    (void)measure_layered(500, 40, /*record =*/false);
-    (void)measure_layered(2000, 30, /*record =*/false);
-    (void)measure_layered(8000, 15, /*record =*/false);
+    auto f = open_layered(500);
+    (void)measure_layered(*f);
+}
+
+BENCHMARK("bench-vdoc-layered-frame - compose against rebuild, 2000 entities")
+{
+    auto f = open_layered(2000);
+    (void)measure_layered(*f);
+}
+
+BENCHMARK("bench-vdoc-layered-frame - compose against rebuild, 8000 entities")
+{
+    auto f = open_layered(8000);
+    (void)measure_layered(*f);
 }
