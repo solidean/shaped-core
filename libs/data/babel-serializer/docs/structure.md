@@ -26,8 +26,8 @@ src/babel-serializer/
   geometry/    [in progress]   mesh / geometry formats
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
-  image/       [in progress]   image formats (read + write; committed stb backend, plus two native codecs)
-    png        [done]          low-level reader + writer (native IHDR fields; rich metadata [todo])
+  image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus two native codecs)
+    png        [done]          low-level reader + writer (native IHDR fields; ancillary chunks read and written)
     jpg        [done]          low-level reader + writer (native SOF/JFIF fields; rich metadata [todo])
     hdr        [done]          low-level reader + writer, fully native — Radiance RGBE, f32 out
     pfm        [done]          low-level reader + writer, fully native — Portable FloatMap, f32 out
@@ -121,8 +121,11 @@ Both are rules now, in [coding-guidelines.md](coding-guidelines.md).
 
 Low-level PNG reader + writer; see [png.hh](../src/babel-serializer/image/png.hh).
 
-- `[planned]` **native metadata** — gamma, ICC, text chunks and physical dimensions are designed and `[todo]`.
-  The fields exist now so a native chunk walker lands without an API change; stb exposes none of it.
+Runs on the vendored libspng, which is also what reads and writes the ancillary chunks: gAMA, sRGB, iCCP, tEXt / zTXt / iTXt and pHYs.
+`channels` follows the file rather than a fixed output shape, and a tRNS chunk becomes an alpha channel.
+
+- `[planned]` **16-bit output** — `bit_depth` already reports the file's own depth, but `pixels` are narrowed to 8-bit whatever it says.
+- `[planned]` **the remaining chunks** — cHRM, bKGD, sBIT and tIME, each an added field rather than an API change.
 
 ### jpg [done]
 

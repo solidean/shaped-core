@@ -13,7 +13,7 @@ upstreams:
     pin_hash: fb768002d4288590083a476af628e51c3f1d47cd
     license: BSD-2-Clause AND libpng-2.0
     license_files: [LICENSE, LICENSE-libpng]
-    used_by: babel-serializer — the PNG codec behind babel::png (vendored; the switch off stb is a separate change, so nothing links it yet)
+    used_by: babel-serializer — the PNG codec behind babel::png
     notes: |
       Two licenses, jointly rather than at our choice, which is why the expression is `AND` and not `OR`.
       Upstream's own code is BSD-2-Clause and ships as `LICENSE`.

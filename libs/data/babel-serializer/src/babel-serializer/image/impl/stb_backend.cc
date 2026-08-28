@@ -60,18 +60,6 @@ cc::result<stb_image> stb_decode(cc::span<byte const> bytes, int req_channels)
     return cc::move(result);
 }
 
-cc::result<cc::vector<byte>> stb_encode_png(cc::span<byte const> pixels, int width, int height, int channels)
-{
-    CC_RETURN_IF_ERROR(check_encode_inputs(pixels, width, height, channels));
-
-    auto out = cc::vector<byte>();
-    auto const stride = width * channels; // tightly packed
-    auto const ok = stbi_write_png_to_func(&append_to_vector, &out, width, height, channels, pixels.data(), stride);
-    if (ok == 0)
-        return cc::error("png encode failed");
-    return cc::move(out);
-}
-
 cc::result<cc::vector<byte>> stb_encode_jpg(cc::span<byte const> pixels, int width, int height, int channels, int quality)
 {
     CC_RETURN_IF_ERROR(check_encode_inputs(pixels, width, height, channels));

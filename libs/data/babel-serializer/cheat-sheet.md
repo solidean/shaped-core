@@ -343,7 +343,7 @@ h.reopen(other_rowid);                     // same handle, next row — cheaper 
 ## Images (`babel::image` + `babel::png` / `babel::jpg` / `babel::hdr` / `babel::pfm`)
 
 Two layers: low-level per-format codecs that expose the format's own metadata, and an aggregator for "just the pixels".
-`png` / `jpg` decode through the vendored, always-linked **stb** — never visible from a babel header, and never reached by the aggregator.
+`png` decodes through the vendored **libspng** and `jpg` through the vendored **stb** — always linked, never visible from a babel header, and never reached by the aggregator.
 `hdr` / `pfm` are fully native and reach no backend at all.
 
 ```cpp
@@ -371,15 +371,16 @@ cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::fo
 #include <babel-serializer/image/jpg.hh>   // low-level JPG: pixels + native metadata
 
 babel::png::data p = babel::png::read(bytes).value();
-p.width; p.height; p.channels; p.pixels;       // populated from the decoder
-p.bit_depth; p.color; p.interlace;             // native IHDR fields (parsed natively)
-p.gamma; p.icc_profile; p.texts; p.physical;   // [todo] designed, not yet populated (stb exposes no metadata)
+p.width; p.height; p.channels; p.pixels;       // channels follow the file: 1 grey / 2 GA / 3 rgb / 4 rgba, +1 for a tRNS chunk
+p.bit_depth; p.color; p.interlace;             // native IHDR fields; pixels are always 8-bit whatever bit_depth says
+p.gamma; p.srgb_intent; p.icc_profile; p.texts; p.physical;  // gAMA / sRGB / iCCP / tEXt+zTXt+iTXt / pHYs, read AND written
 
 babel::jpg::data j = babel::jpg::read(bytes).value();
 j.bit_depth; j.progressive; j.chroma; j.jfif_density; // native SOF/JFIF fields
 j.icc_profile; j.exif; j.comments;                    // [todo] designed, not yet populated
 
-babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stream, ...)
+babel::png::encode(p, {.compression_level = 9});  // -1 (zlib default) .. 9; always 8-bit, non-interlaced
+babel::jpg::encode(j, {.quality = 90});           // + write(stream, ...) for both
 ```
 
 ```cpp

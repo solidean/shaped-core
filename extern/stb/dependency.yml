@@ -11,7 +11,7 @@ upstreams:
     pin_hash: 31c1ad37456438565541f4919958214b6e762fb4
     license: MIT OR Unlicense
     license_files: [LICENSE]
-    used_by: babel-serializer — the PNG and JPEG codecs behind babel::image
+    used_by: babel-serializer — the JPEG codec behind babel::jpg
     notes: |
       stb publishes no release tags — its canonical repo is a rolling master, so the pin is a commit and `track` is the branch head.
       That commit carries stb_image v2.30 and stb_image_write v1.16, versions visible only inside the headers.

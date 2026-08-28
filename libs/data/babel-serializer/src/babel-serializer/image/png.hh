@@ -20,12 +20,13 @@ struct write_options;
 // This is the format layer — babel::image sits on top and throws the metadata away for the "just give me pixels" case.
 //
 // WHAT IS POPULATED TODAY.
-// Pixels come from the stb backend: 8-bit samples, expanded / de-palettized / de-interlaced.
-// The structural IHDR fields (bit_depth / color / interlace) are parsed natively.
-// Everything below the pixels in `data` is DESIGNED but [todo]: stb exposes no metadata, so filling it needs a native chunk walker.
-// The fields exist now so that walker lands without an API change.
-// `bit_depth` is the file's native depth (1/2/4/8/16), while the decoded `pixels` are always 8-bit for now
+// Everything below, read by the libspng backend: the IHDR fields, the pixels, and the ancillary chunks.
+// Pixels are 8-bit samples, expanded / de-palettized / de-interlaced.
+// `bit_depth` is the file's native depth (1/2/4/8/16), while the decoded `pixels` are always 8-bit
 // (`decoded == component::u8`); a 16-bit path is future work.
+//
+// `channels` follows the file rather than a fixed output shape: 1 grey, 2 grey+alpha, 3 rgb, 4 rgba,
+// and one more than that wherever a tRNS chunk becomes an alpha channel.
 //
 //   auto const img = babel::png::read(bytes).value();
 //   auto const stride = img.width * img.channels; // tightly packed, top-left origin
@@ -54,7 +55,8 @@ enum class babel::png::component : babel::u8
     u16,
 };
 
-/// One text chunk (tEXt / zTXt / iTXt). [todo] not populated yet — needs a native chunk walker.
+/// One text chunk (tEXt / zTXt / iTXt).
+/// On encode, an entry carrying a language or a translated keyword is written as iTXt, and `compressed` picks zTXt over tEXt.
 struct babel::png::text_entry
 {
     cc::string keyword;
@@ -64,7 +66,7 @@ struct babel::png::text_entry
     bool compressed = false;       // zTXt / compressed iTXt
 };
 
-/// Physical pixel dimensions (pHYs chunk). [todo]
+/// Physical pixel dimensions (pHYs chunk).
 struct babel::png::physical_dimensions
 {
     int ppu_x = 0; // pixels per unit, x axis
@@ -76,7 +78,6 @@ struct babel::png::physical_dimensions
 /// Read-once; deliberately not built for mutation.
 struct babel::png::data
 {
-    // --- populated now ---
     int width = 0;
     int height = 0;
     int channels = 0;                    // samples per pixel in `pixels` (1 grey / 2 GA / 3 rgb / 4 rgba)
@@ -86,7 +87,6 @@ struct babel::png::data
     component decoded = component::u8;                   // sample type of `pixels`
     cc::vector<byte> pixels;                             // row-major, top-left origin, tightly packed
 
-    // --- designed now, [todo] populate via a future native chunk walker (stb exposes none of these) ---
     cc::optional<double> gamma;                 // gAMA
     cc::optional<int> srgb_intent;              // sRGB rendering intent (0..3)
     cc::vector<byte> icc_profile;               // iCCP profile (inflated)
@@ -117,17 +117,19 @@ namespace babel::png
 } // namespace babel::png
 
 /// PNG encode knobs.
-/// PNG is lossless, and babel exposes no encoder tuning today.
+/// PNG is lossless, so nothing here trades quality — only encode time against file size.
 struct babel::png::write_options
 {
-    // [todo] int compression_level once a non-stb encoder lands
+    /// zlib's Deflate level: 0 (store) to 9 (smallest), or -1 for zlib's own default.
+    int compression_level = -1;
 };
 
 namespace babel::png
 {
 
-/// Encode `img`'s pixels to PNG file bytes.
-/// Metadata fields stb cannot emit are ignored (see the header note).
+/// Encode `img`'s pixels and metadata to PNG file bytes.
+/// Always 8-bit and non-interlaced, whatever `bit_depth` and `interlace` say — those describe a file that was read, not one being written.
+/// The color type follows `channels`, so a decode / encode round-trip preserves both the pixels and the chunks above them.
 [[nodiscard]] cc::result<cc::vector<byte>> encode(data const& img, write_options opts = {});
 
 /// Encode and write to a stream.

@@ -12,8 +12,13 @@ rules:
     files: src/babel-serializer/data/sqlite.cc
 
   - kind: allow-include
+    value: <spng.h>
+    reason: the PNG codec behind babel::png, confined to the backend TU
+    files: src/babel-serializer/image/impl/spng_backend.cc
+
+  - kind: allow-include
     value: [<stb_image.h>, <stb_image_write.h>]
-    reason: the PNG/JPEG codec behind babel::image, confined to the backend TU
+    reason: the JPEG codec behind babel::jpg, confined to the backend TU
     files: src/babel-serializer/image/impl/stb_backend.cc
 
   - kind: allow-include
