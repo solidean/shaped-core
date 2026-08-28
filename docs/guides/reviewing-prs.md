@@ -78,6 +78,10 @@ Where they rot, in practice:
 - **Stale identifiers after a rename** — a parameter renamed in the signature and still named by its old name in the `///` above it.
 - **Structure and status tables** (`[done]` / `[in progress]` / `[planned]`) the change should have moved.
 - **Cheat sheets** whose field lists no longer match the struct.
+- **A count in prose, once the set grows.** "Two backends", "both codecs", "`frame` framing only" — each was true when written and false the moment a third member landed.
+  None of them shows up in the diff, because the change that falsified them never touched the line.
+  So when a change adds the Nth member of a set, grep the old cardinality across the subsystem before reading anything else.
+  pr-151 is the worked case: adding deflate beside zstd and lz4 left four such sentences wrong, three of them in files the branch itself edited.
 
 Verify each doc claim against the branch by looking up the symbol, not by reading the sentence.
 
@@ -185,6 +189,27 @@ The worked example is sv's `generate_material_shader`.
 Its key was `resolved_material::permutation_key`, which covers the resolution's shape and nothing about how it was spelled.
 The emitted text also depends on the bindless table counts, the entry point and both include paths.
 A `gpu_resource_manager` configured with non-default budgets generated a shader declaring the *default* array sizes against a group layout of a different size.
+
+### Adding a member behind a seam means re-reading the seam's callers
+
+A vtable, a trait, an enum with a switch — the written contract covers the members that exist, and a caller is free to lean on a property all of them happen to share.
+The Nth member then arrives satisfying the written contract and not the unwritten one.
+Nothing in the diff shows it, because the caller's line did not change.
+
+So when a change plugs a new implementation into an existing seam, list that seam's callers and read each for an assumption only the old members satisfied.
+The tell is a comment at the call site explaining why the call is safe.
+That sentence is the unwritten contract, and it is exactly what nobody rechecks when a member is added.
+
+The worked example is clean-core's `declared_size`.
+It reports the uncompressed size a compressed blob declares, and for zstd and lz4 that number sits in the frame header.
+`decompressing_read_stream_adapter::impl_refill` therefore probed it from the first window of bytes the inner stream had buffered.
+The comment above that probe said so: "the declared size comes off the frame header".
+gzip declares its size in the *trailer*, so on a stream not fully buffered up front the probe read four bytes of compressed payload as a length, and `read_all` reserved on it — up to 4 GB.
+The seam's own contract was never violated, and both halves are correct read on their own.
+
+The generalization the maintainer drew is worth keeping beside it: **trailer metadata is a design smell for anything that cannot assume bounded frames.**
+"Seek to the end and read it properly" works only where the frame ends where the stream ends, which a blob embedded in a container never does.
+So the answer was that deflate has no streaming size hint at all, rather than a cleverer way to find one.
 
 ### "No callers in the repo" is not evidence of dead code
 
