@@ -47,6 +47,10 @@ float3 pt_instance_position(sv::instance inst, uint vertex)
 ///
 /// Skips the closest-hit — only visibility matters — and routes to the shadow miss (miss index 1), which is what sets
 /// `visible` on a clear path.
+///
+/// `FORCE_OPAQUE` is not an optimization here, it is a correctness guard: without it this trace would invoke `PtAnyHit`,
+/// which declares the raygen's payload rather than this one. The cost is that a cutout casts a solid shadow, and the
+/// viewer TODO carries the two fixes that would let a shadow ray see through one.
 bool pt_occluded(float3 origin, float3 dir, float dist)
 {
     ShadowPayload sp;
@@ -57,7 +61,8 @@ bool pt_occluded(float3 origin, float3 dir, float dist)
     ray.Direction = dir;
     ray.TMin = 1e-3;
     ray.TMax = dist;
-    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, 0, 0, 1, ray, sp);
+    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_FORCE_OPAQUE,
+             0xFF, 0, 0, 1, ray, sp);
 
     return sp.visible < 0.5;
 }
@@ -148,9 +153,10 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
 /// Only permutations whose material can actually cut out get one of these attached — see `material_permutation::can_cut_out`
 /// — and only an instance whose `opaque_override` is cleared can invoke it, which `view_renderer` sets from the same flag.
 ///
-/// UNRESOLVED: the payload declared here is `PtPayload`, and `pt_occluded` reaches this same hit group carrying a
-/// `ShadowPayload`, which DXR leaves undefined. Nothing in the tree binds `opacity`, so no instance is non-opaque today and
-/// the mismatch is unreachable — but it has to be settled before a material does. See libs/graphics/shaped-viewer/docs/TODO.md.
+/// The payload declared here is `PtPayload`, and only the raygen's trace may reach it: `pt_occluded` carries a
+/// `ShadowPayload`, and an any-hit invoked against a payload type its caller did not pass is undefined under DXR.
+/// `RAY_FLAG_FORCE_OPAQUE` on the shadow trace is what keeps that from happening, and it is an INTERIM — it also makes a
+/// cutout cast a solid shadow. See libs/graphics/shaped-viewer/docs/TODO.md for the two real fixes.
 [shader("anyhit")]
 void PtAnyHit(inout PtPayload payload, in PtAttributes attribs)
 {

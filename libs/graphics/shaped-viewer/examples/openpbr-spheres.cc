@@ -16,12 +16,9 @@ using namespace cc::primitive_defines;
 // Everything is the builtin `openpbr` material type — `sv::builtin_material::openpbr` — with a handful of attributes bound; an
 // attribute no row mentions keeps the specification's own default.
 //
-// The rows, bottom to top:
-//   dielectric   the default surface, a rough-to-smooth specular sweep over a grey base
-//   metal        base_metalness 1, so base_color is the reflectance and specular_color its tint at grazing
-//   coated       a clear coat over a red base — coat_weight 1, and its own roughness fixed while the base sweeps
-//   fuzz         a sheen layer over a dark base, which is what makes velvet read as velvet
-//   diffuse      base_diffuse_roughness, the Oren-Nayar axis: flat at 0, dusty toward 1
+// `make_rows` is the list, in the order they are laid out from the camera: dielectric, metal, coated, fuzz, anisotropic,
+// thin film, coat normal, glass, thin walled, absorbing, dispersion, subsurface, scattering, opacity, diffuse.
+// Each carries its own comment where the parameters need one.
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/openpbr-spheres

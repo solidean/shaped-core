@@ -319,16 +319,18 @@ importance-samples the continuation — so what is left is coverage of the model
   `sg::tlas_instance::opaque_override`.
   Without that second half every BLAS sv builds is opaque, and DXR behaves as if no any-hit were attached at all — so the
   whole path was unreachable and `geometry_opacity` affected nothing.
-- **The any-hit's payload type is unresolved, and it blocks binding `opacity` on anything.**
-  `PtAnyHit` declares `PtPayload`, and `pt_occluded` reaches the same hit group carrying a `ShadowPayload`, which DXR
-  leaves undefined.
-  Nothing in the tree binds `opacity`, so no instance is non-opaque and the mismatch is currently unreachable — but it has
-  to be settled before a material does.
-  Two shapes were tried and neither works: an empty payload for the any-hit is rejected by DXC ("shader must include inout
-  payload structure parameter"), and putting `PtPayload` on the shadow trace as well fails the pipeline build.
-  What is left is a second hit record per permutation, with the shadow ray taking `RayContributionToHitGroupIndex` 1 and
-  its own any-hit compiled against `ShadowPayload` — or `RAY_FLAG_FORCE_OPAQUE` on the shadow trace, which is cheap and
-  makes a cutout cast a solid shadow.
+- **A cutout casts a SOLID shadow, which is an interim rather than the intended behaviour.**
+  `PtAnyHit` declares `PtPayload` because that is what the raygen's trace carries, and `pt_occluded` carries a
+  `ShadowPayload` — so a shadow ray reaching the same hit group would invoke an any-hit against a payload type its caller
+  never passed, which DXR leaves undefined.
+  `RAY_FLAG_FORCE_OPAQUE` on the shadow trace is what prevents that, at the cost of the shadow.
+  `openpbr-spheres`' opacity row is the first material in the tree to bind `opacity`, so this is live rather than
+  theoretical.
+  Two shapes were tried and neither works.
+  An empty payload for the any-hit is rejected by DXC ("shader must include inout payload structure parameter"), and
+  putting `PtPayload` on the shadow trace as well builds the shaders but fails the pipeline build.
+  What is left is a second hit record per permutation: the shadow ray takes `RayContributionToHitGroupIndex` 1 and its own
+  any-hit compiled against `ShadowPayload`, which costs one more record and one more compile per material.
 
 ## Everything else
 
