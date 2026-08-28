@@ -91,6 +91,12 @@ struct process_usage;        // memory and handles this process holds right now
 struct process_cpu_counters; // monotone per-process CPU time and I/O
 struct process_cpu_load;     // how many cores' worth this process used over an interval
 class process_cpu_sampler;
+
+struct mount_point;      // one mounted filesystem and how full it is (platform/storage_devices.hh)
+struct disk_device;      // one physical storage device
+struct disk_io_counters; // monotone per-device I/O since boot
+struct disk_io_rate;     // what one device moved over a sampling interval
+class disk_io_sampler;
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>

@@ -257,6 +257,21 @@ rules:
     files: src/clean-core/platform/system_info.cc
 
   - kind: allow-include
+    value: <winioctl.h>
+    reason: IOCTL_DISK_PERFORMANCE and the storage descriptor, the only per-device counters Windows exposes
+    files: src/clean-core/platform/storage_devices.cc
+
+  - kind: allow-include
+    value: [<sys/mount.h>, <sys/param.h>]
+    reason: getmntinfo is Darwin's mount table
+    files: src/clean-core/platform/storage_devices.cc
+
+  - kind: allow-include
+    value: <sys/statvfs.h>
+    reason: statvfs is the POSIX free-space call, and its f_bavail is what a user may actually take
+    files: src/clean-core/platform/storage_devices.cc
+
+  - kind: allow-include
     value: [<psapi.h>, <tlhelp32.h>]
     reason: the working set and its peak, and the thread snapshot that is the only unprivileged thread count
     files: src/clean-core/platform/process_metrics.cc

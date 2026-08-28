@@ -120,6 +120,11 @@ TEST("cc process_metrics - the default argument is this process")
     auto const explicit_id = cc::query_process_usage(cc::current_process);
 
     CHECK(implicit.has_value() == explicit_id.has_value());
-    if (implicit.has_value())
-        CHECK(implicit.value().thread_count == explicit_id.value().thread_count);
+    if (!implicit.has_value())
+        return;
+
+    // Compared on a MONOTONE field, not a live one.
+    // Thread count and resident set move between the two calls — the suite runs tests in parallel — so asserting they
+    // are equal is a test that fails on a busy machine and passes on an idle one.
+    CHECK(explicit_id.value().peak_resident_bytes >= implicit.value().peak_resident_bytes);
 }

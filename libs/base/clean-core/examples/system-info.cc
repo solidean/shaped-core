@@ -1,5 +1,6 @@
 #include <clean-core/platform/process_metrics.hh>
 #include <clean-core/platform/resource_limits.hh>
+#include <clean-core/platform/storage_devices.hh>
 #include <clean-core/platform/system_info.hh>
 #include <clean-core/platform/system_metrics.hh>
 #include <clean-core/string/format.hh>
@@ -163,6 +164,45 @@ EXAMPLE("clean-core/system-info")
     else
     {
         cc::println("  {:<16} (unavailable: {})", "cpu load", load.error().detail);
+    }
+
+    cc::println("");
+    cc::println("storage");
+    auto const mounts = cc::query_mounts();
+    if (mounts.has_value())
+        for (auto const& m : mounts.value())
+            cc::println("  {:<16} {} free of {} ({}{})", m.path, bytes_as_text(m.available_bytes),
+                        bytes_as_text(m.total_bytes),
+                        m.filesystem.empty() ? cc::string_view("?") : cc::string_view(m.filesystem),
+                        m.removable ? ", removable" : "");
+    else
+        cc::println("  {:<16} (unavailable: {})", "mounts", mounts.error().detail);
+
+    auto const disks = cc::enumerate_disks();
+    if (disks.empty())
+        cc::println("  {:<16} (unavailable)", "devices");
+
+    for (auto const& d : disks)
+    {
+        auto const capacity = d.capacity_bytes.has_value() ? bytes_as_text(d.capacity_bytes.value()) : cc::string("?");
+        cc::println("  {:<18} {} ({})", d.id, capacity,
+                    d.model.empty() ? cc::string_view("?") : cc::string_view(d.model));
+
+        if (auto const total = cc::read_disk_io_counters(d.id); total.has_value())
+            cc::println("    {:<14} {} read, {} written since boot", "totals", bytes_as_text(total.value().bytes_read),
+                        bytes_as_text(total.value().bytes_written));
+
+        auto sampler = cc::disk_io_sampler(d.id);
+        cc::this_thread_sleep_secs(0.05);
+        auto const rate = sampler.sample();
+        if (rate.has_value())
+            cc::println("    {:<14} {}/s read, {}/s written{}", "io", bytes_as_text(i64(rate.value().read_bytes_per_sec)),
+                        bytes_as_text(i64(rate.value().write_bytes_per_sec)),
+                        rate.value().busy_fraction.has_value()
+                            ? cc::format(", {:.0f}% busy", 100.0f * rate.value().busy_fraction.value())
+                            : cc::string());
+        else
+            cc::println("    {:<14} (unavailable: {})", "io", rate.error().detail);
     }
 
     cc::println("");
