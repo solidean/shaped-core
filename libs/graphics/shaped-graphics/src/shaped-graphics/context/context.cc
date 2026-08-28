@@ -107,6 +107,17 @@ cc::optional<double> context::wait_for_seconds(gpu_timestamp const& timestamp)
     return double(ticks.value()) * timestamp._tick_to_seconds;
 }
 
+cc::result<gpu_memory_usage> context::query_gpu_memory() const
+{
+    return cc::error("this backend does not report GPU memory");
+}
+
+cc::result<gpu_load> context::query_gpu_load() const
+{
+    // Not "0% busy": a caller drawing that would show an idle GPU on a machine that is pinned.
+    return cc::error("this backend does not report GPU load");
+}
+
 context::~context()
 {
     // The backend destructor calls shutdown() before this base destructor runs.

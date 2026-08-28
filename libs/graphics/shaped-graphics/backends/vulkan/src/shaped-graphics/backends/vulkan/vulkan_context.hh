@@ -287,6 +287,8 @@ public:
     // Body in vulkan_context.cc.
     bool note_device_lost_if_lost(VkResult r, char const* what);
 
+    [[nodiscard]] cc::result<sg::gpu_memory_usage> query_gpu_memory() const override;
+
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
     VkDevice _device = VK_NULL_HANDLE;

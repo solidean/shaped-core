@@ -12,6 +12,7 @@
 #include <shaped-graphics/context/adapter_info.hh>
 #include <shaped-graphics/context/cached.hh>
 #include <shaped-graphics/context/download.hh>
+#include <shaped-graphics/context/gpu_metrics.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/context/transient.hh>
 #include <shaped-graphics/context/uncached.hh>
@@ -318,6 +319,25 @@ protected:
                                                                              subresource_index const& subresource,
                                                                              texture_region const& region,
                                                                              stream_scope scope) = 0;
+
+    // GPU metrics.
+    //
+    // Non-pure with a refusing default, so a backend that cannot answer needs no code at all and a caller gets a clean
+    // error rather than a fabricated zero.
+
+    /// What this process may use of the GPU's memory right now, and what it is using.
+    ///
+    /// Portable in principle and available on both shipping backends: DXGI reports it directly, and Vulkan does where
+    /// VK_EXT_memory_budget is present.
+    /// The card's own size is `adapter().dedicated_video_memory_bytes`, and the two are different scales — see there.
+    [[nodiscard]] virtual cc::result<gpu_memory_usage> query_gpu_memory() const;
+
+    /// How busy the GPU is.
+    ///
+    /// **Neither D3D12 nor Vulkan exposes this**, so it comes from the OS or the vendor instead: D3DKMT on Windows,
+    /// `raw:/sys/class/drm/*/device/gpu_busy_percent` on Linux where the driver provides it, IOKit on macOS.
+    /// Only the Windows path exists today; everywhere else this refuses rather than guessing.
+    [[nodiscard]] virtual cc::result<gpu_load> query_gpu_load() const;
 
     // Streaming scheduling knobs, reached via ctx.stream.
     // Defaults are no-ops so a backend without a streaming tier simply ignores them.

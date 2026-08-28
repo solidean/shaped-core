@@ -74,3 +74,26 @@ void dx12_context::shutdown()
     _is_shut_down = true;
 }
 } // namespace sg::backend::dx12
+
+cc::result<sg::gpu_memory_usage> sg::backend::dx12::dx12_context::query_gpu_memory() const
+{
+    if (_adapter == nullptr)
+        return cc::error("IDXGIAdapter3 unavailable, so this runtime cannot report a video memory budget");
+
+    DXGI_QUERY_VIDEO_MEMORY_INFO info = {};
+    if (auto const hr = _adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info); FAILED(hr))
+        return cc::error("QueryVideoMemoryInfo failed");
+
+    // The LOCAL segment is memory on the card; NON_LOCAL is system memory the GPU may reach across the bus, and adding
+    // them would report a budget far larger than anything the device can actually keep resident.
+    return sg::gpu_memory_usage{.budget_bytes = i64(info.Budget), .current_usage_bytes = i64(info.CurrentUsage)};
+}
+
+cc::result<sg::gpu_load> sg::backend::dx12::dx12_context::query_gpu_load() const
+{
+    // D3D12 has no utilization query at all.
+    // The Windows route is D3DKMTQueryStatistics, which is what a task manager uses and which this does not implement
+    // yet.
+    // Refusing beats a plausible zero: a zero draws as an idle GPU on a machine that is pinned.
+    return cc::error("GPU load is not implemented on the dx12 backend yet");
+}
