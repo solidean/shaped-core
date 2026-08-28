@@ -567,6 +567,28 @@ a.annot:hover { color: var(--accent); }
   justify-content: space-between;
 }
 
+/* An image peek is bounded by the viewport rather than by the image, so a 4K reference still fits the popover.
+   The checker under it is what makes a transparent PNG readable — without one, alpha reads as the popover's own
+   background and the picture looks like it has holes in the wrong places. */
+.pop-image {
+  margin-top: 6px;
+  max-width: min(72ch, 80vw);
+  background-color: var(--bg-sunken);
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+  border-radius: 4px;
+}
+
+.pop-image img { display: block; max-width: 100%; max-height: 44vh; margin: 0 auto; }
+
+.pop-binary { margin-top: 6px; color: var(--text-dim); font-size: 0.85rem; }
+
+.file-image { display: block; padding: 16px; }
+.file-image img { display: block; max-width: 100%; margin: 0 auto; }
+
 /* ---- the file page ------------------------------------------------------- */
 
 body.file-page { margin: 0; padding: 0 0 40px; background: var(--bg); color: var(--text); }

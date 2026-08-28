@@ -90,9 +90,12 @@ def _comment_slot(anchor: str, comments: list[Comment]) -> str:
     )
 
 
-def _answer_card(answer: Answer) -> str:
+def _answer_card(answer: Answer, repo: Path | None = None) -> str:
     state = "tentative" if answer.tentative else f"round {answer.round}"
-    chosen = "".join(f"<li>{_esc(choice)}</li>" for choice in answer.selected)
+    # Rendered the same way the option was before it was chosen.
+    # The answered form is the one that stays on screen for the rest of the review, so escaping it here would put the
+    # backticks and the `raw:` prefix back the moment a question is answered.
+    chosen = "".join(f"<li>{render_inline(choice, repo=repo)}</li>" for choice in answer.selected)
     chosen_html = f"<ul class=\"answer-choices\">{chosen}</ul>" if chosen else ""
     text_html = f'<div class="answer-text">{_esc(answer.text)}</div>' if answer.text.strip() else ""
     return (
@@ -260,7 +263,7 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
             discharges = f'<div class="discharges">discharges {ids}</div>'
 
         if answer is not None and not answer.tentative:
-            body = _answer_card(answer)
+            body = _answer_card(answer, repo=repo)
         else:
             body = _ask_form(entry, block, answer, prompt_hash, repo=repo)
 

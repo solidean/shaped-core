@@ -576,11 +576,30 @@ async function peek(el) {
     peekCache.set(path, result.body);
   }
   const body = peekCache.get(path);
-  showPopover(el,
-    `<div class="pop-head">${_esc(body.path)}` +
-    `<span>${line ? `line ${line} of ` : ""}${body.lines} lines</span></div>` +
-    `<pre class="pg pop-scroll"><code>${withLineNumbers(body.html, body.start)}</code></pre>`);
-  focusPopoverLine(line);
+  showPopover(el, `<div class="pop-head">${_esc(body.path)}<span>${peekMeta(body, line)}</span></div>` + peekBody(body));
+  if (body.kind === "text") focusPopoverLine(line);
+}
+
+// What the head line says about the file, which is the only thing a reader gets before an image paints.
+function peekMeta(body, line) {
+  if (body.kind === "image") return [body.dimensions, body.size].filter(Boolean).join(" · ");
+  if (body.kind === "binary") return body.size;
+  return `${line ? `line ${line} of ` : ""}${body.lines} lines`;
+}
+
+// One viewer per kind of file.
+//
+// Everything here used to assume text, so a reference to a committed image was highlighted as a screen of
+// replacement characters — slow, and telling the reader nothing about the picture they were pointing at.
+// A binary that is not an image has nothing to draw, so it says what it is rather than pretending.
+function peekBody(body) {
+  if (body.kind === "image") {
+    return `<div class="pop-image"><img src="${_esc(body.src)}" alt="${_esc(body.path)}" loading="lazy"></div>`;
+  }
+  if (body.kind === "binary") {
+    return `<div class="pop-binary">binary file — nothing to show here</div>`;
+  }
+  return `<pre class="pg pop-scroll"><code>${withLineNumbers(body.html, body.start)}</code></pre>`;
 }
 
 // Top when no line was given, and the line itself when one was — a third of the way down, so the lines

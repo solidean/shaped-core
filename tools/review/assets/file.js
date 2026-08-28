@@ -19,12 +19,32 @@ async function main() {
     return;
   }
 
+  document.getElementById("file-editor").href = `vscode://file/${body.absolute}${line ? ":" + line : ""}`;
+
+  // An image is shown, a binary is described, and only text goes through the highlighter and the gutter.
+  if (body.kind === "image") {
+    document.getElementById("file-meta").textContent = [body.dimensions, body.size].filter(Boolean).join(" · ");
+    document.getElementById("file-body").innerHTML =
+      `<span class="file-image"><img src="${escapeAttribute(body.src)}" alt="${escapeAttribute(body.path)}"></span>`;
+    return;
+  }
+  if (body.kind === "binary") {
+    document.getElementById("file-meta").textContent = body.size;
+    document.getElementById("file-body").textContent = "binary file — nothing to show here";
+    return;
+  }
+
   document.getElementById("file-body").innerHTML = body.html;
   document.getElementById("file-meta").textContent = `${body.lines} lines`;
-  document.getElementById("file-editor").href = `vscode://file/${body.absolute}${line ? ":" + line : ""}`;
 
   numberLines(body.start);
   if (line) focusLine(line);
+}
+
+// The one place this page builds an attribute out of server data.
+// Both values come from the index rather than from a query string, so this is belt-and-braces rather than a fix.
+function escapeAttribute(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // Line numbers are added here rather than server-side: the highlighter emits one blob, and a gutter is a reading
