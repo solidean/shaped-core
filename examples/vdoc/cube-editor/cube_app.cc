@@ -196,7 +196,7 @@ void app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::en
     if (_captured_frames < _capture.accumulate_frames)
         return;
 
-    auto const written = sr::write_capture_image(*_ctx, _capture_target, _viewport, _capture.output_path);
+    auto const written = sr::write_capture_image(*_ctx, _capture_target, _capture.output_path);
     if (written.has_error())
         cc::eprintln("capture failed: {}", written.error().to_string());
 }
