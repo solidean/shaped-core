@@ -7,26 +7,39 @@
 // PGO benchmark (PGO_BENCHMARK): prints the table and records mimalloc/system throughput at 64 B and
 // 4 KiB via nx::pgo for the PGO speedup report.
 
-#include "bench_util.hh"
 
 #include <clean-core/container/span.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/bench/units.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 
-#include <chrono>
-#include <cstdio>
 
 using namespace cc::primitive_defines;
 
 namespace
 {
-// Millions of alloc+free cycles per second for `res`, keeping `live` blocks of `size` bytes alive at once.
-double mops(cc::memory_resource const& res, isize size, isize align)
+/// Sweep points measure different amounts of work, so they carry no baseline.
+///
+/// 5% rather than the default 2%: allocator churn moves between samples as the allocator's own state does — a slab
+/// refill, a page fault, a size class crossing a boundary — and no sample count irons that out.
+constexpr auto sweep_config = nx::bench::run_config{
+    .min_time_secs = 0.1,
+    .max_samples = 512,
+    .target_relative_error = 0.05,
+    .no_baseline = true,
+};
+
+/// One alloc+free churn loop for `res`, keeping `live` blocks of `size` bytes alive at once.
+nx::bench::result mops(cc::string_view name,
+                       nx::bench::run_config const& cfg,
+                       cc::memory_resource const& res,
+                       isize size,
+                       isize align)
 {
     constexpr isize live = 64;       // working set of concurrently-live allocations
     constexpr isize per_pass = 4096; // alloc/free cycles per timed pass
@@ -38,34 +51,37 @@ double mops(cc::memory_resource const& res, isize size, isize align)
         res.allocate_bytes(&slots[i], size, size, align, res.userdata);
 
     isize idx = 0;
-    double const ops_per_sec
-        = bench::measure_units_per_sec(double(per_pass),
-                                       [&]
-                                       {
-                                           u64 acc = 0;
-                                           for (isize n = 0; n < per_pass; ++n)
-                                           {
-                                               byte*& slot = slots[idx];
-                                               res.deallocate_bytes(slot, size, align, res.userdata);
-                                               res.allocate_bytes(&slot, size, size, align, res.userdata);
-                                               slot[0] = byte(n); // touch both ends to fault the pages, like real use
-                                               slot[size - 1] = byte(n); //
-                                               acc ^= reinterpret_cast<u64>(slot);
-                                               idx = (idx + 1) % live;
-                                           }
-                                           return acc;
-                                       });
+    auto const r = nx::bench::run(name, cfg,
+                                  [&](nx::bench::iteration& it)
+                                  {
+                                      u64 acc = 0;
+                                      for (isize n = 0; n < per_pass; ++n)
+                                      {
+                                          byte*& slot = slots[idx];
+                                          res.deallocate_bytes(slot, size, align, res.userdata);
+                                          res.allocate_bytes(&slot, size, size, align, res.userdata);
+                                          slot[0] = byte(n);        // touch both ends to fault the pages, like real use
+                                          slot[size - 1] = byte(n); //
+                                          acc ^= reinterpret_cast<u64>(slot);
+                                          idx = (idx + 1) % live;
+                                      }
+                                      nx::bench::sink(acc);
+                                      it.items(per_pass); // alloc+free cycles
+                                  });
 
     for (isize i = 0; i < live; ++i)
         res.deallocate_bytes(slots[i], size, align, res.userdata);
 
-    return ops_per_sec / 1e6;
+    return r;
 }
 
 // Millions of create+destroy cycles per second for the owning cc::allocation<byte> handle on `res`.
 // Same churn as mops(), but through the container-facing handle (create_uninitialized + move-assign +
 // dtor) instead of the bare resource, so the delta is the handle's per-cycle bookkeeping overhead.
-double alloc_mops(cc::memory_resource const& res, isize size)
+nx::bench::result alloc_mops(cc::string_view name,
+                             nx::bench::run_config const& cfg,
+                             cc::memory_resource const& res,
+                             isize size)
 {
     constexpr isize live = 64;
     constexpr isize per_pass = 4096;
@@ -77,24 +93,22 @@ double alloc_mops(cc::memory_resource const& res, isize size)
         slots[i] = alloc_t::create_uninitialized(size, &res);
 
     isize idx = 0;
-    double const ops_per_sec = bench::measure_units_per_sec(double(per_pass),
-                                                            [&]
-                                                            {
-                                                                u64 acc = 0;
-                                                                for (isize n = 0; n < per_pass; ++n)
-                                                                {
-                                                                    slots[idx] = alloc_t::create_uninitialized(
-                                                                        size, &res); // move-assign frees the old block
-                                                                    byte* const p = slots[idx].obj_start;
-                                                                    p[0] = byte(n); // touch both ends, like real use
-                                                                    p[size - 1] = byte(n); //
-                                                                    acc ^= reinterpret_cast<u64>(p);
-                                                                    idx = (idx + 1) % live;
-                                                                }
-                                                                return acc;
-                                                            });
-
-    return ops_per_sec / 1e6;
+    return nx::bench::run(name, cfg,
+                          [&](nx::bench::iteration& it)
+                          {
+                              u64 acc = 0;
+                              for (isize n = 0; n < per_pass; ++n)
+                              {
+                                  slots[idx] = alloc_t::create_uninitialized(size, &res); // move-assign frees the old
+                                  byte* const p = slots[idx].obj_start;
+                                  p[0] = byte(n);        // touch both ends, like real use
+                                  p[size - 1] = byte(n); //
+                                  acc ^= reinterpret_cast<u64>(p);
+                                  idx = (idx + 1) % live;
+                              }
+                              nx::bench::sink(acc);
+                              it.items(per_pass);
+                          });
 }
 
 // Millions of alloc+free cycles per second for the thread-local node allocator at `Size` bytes.
@@ -106,7 +120,7 @@ double alloc_mops(cc::memory_resource const& res, isize size)
 // The live set is kept small (32) on purpose: a single slab holds 62-63 usable slots for these classes, so the whole working set fits one slab.
 // Every cycle therefore stays on the wait-free fast path, and growing the live set past a slab would trigger refill, which is not what this benchmark is measuring.
 template <isize Size>
-double node_mops()
+nx::bench::result node_mops(cc::string_view name, nx::bench::run_config const& cfg)
 {
     constexpr isize live = 32;
     constexpr isize per_pass = 4096;
@@ -120,28 +134,28 @@ double node_mops()
         slots[i] = alloc.allocate_node_bytes(class_idx, Size, align);
 
     isize idx = 0;
-    double const ops_per_sec
-        = bench::measure_units_per_sec(double(per_pass),
-                                       [&]
-                                       {
-                                           u64 acc = 0;
-                                           for (isize n = 0; n < per_pass; ++n)
-                                           {
-                                               byte*& slot = slots[idx];
-                                               cc::node_allocation_free(slot, class_idx);
-                                               slot = alloc.allocate_node_bytes(class_idx, Size, align);
-                                               slot[0] = byte(n);        // touch both ends, like real use
-                                               slot[Size - 1] = byte(n); //
-                                               acc ^= reinterpret_cast<u64>(slot);
-                                               idx = (idx + 1) % live;
-                                           }
-                                           return acc;
-                                       });
+    auto const r = nx::bench::run(name, cfg,
+                                  [&](nx::bench::iteration& it)
+                                  {
+                                      u64 acc = 0;
+                                      for (isize n = 0; n < per_pass; ++n)
+                                      {
+                                          byte*& slot = slots[idx];
+                                          cc::node_allocation_free(slot, class_idx);
+                                          slot = alloc.allocate_node_bytes(class_idx, Size, align);
+                                          slot[0] = byte(n);        // touch both ends, like real use
+                                          slot[Size - 1] = byte(n); //
+                                          acc ^= reinterpret_cast<u64>(slot);
+                                          idx = (idx + 1) % live;
+                                      }
+                                      nx::bench::sink(acc);
+                                      it.items(per_pass);
+                                  });
 
     for (isize i = 0; i < live; ++i)
         cc::node_allocation_free(slots[i], class_idx);
 
-    return ops_per_sec / 1e6;
+    return r;
 }
 
 // --- Steady-state small-batch benchmark -----------------------------------------------------------------
@@ -151,17 +165,13 @@ double node_mops()
 // Only the alloc+free work is timed: the permutation is precomputed once and reused for the whole run, so no shuffling or RNG cost leaks into the measurement.
 // Because every batch is fully freed before the next, the slab returns to the same freemap each iteration — deterministic, cache-hot, and entirely on the wait-free fast path.
 // That isolates the raw per-op allocator cost.
-// It runs 3x and prints all three numbers as the simplest possible noise measure.
+// Noise is reported as the harness's interval rather than by printing three timed runs side by side.
 //
 // Metric: millions of alloc+free PAIRS per second (one pair = one allocate + one matching free). Each
-// iteration contributes N pairs, so a run of `iters` iterations is iters*N pairs.
+// Each iteration contributes N alloc+free pairs, which is what it declares through iteration::items.
 namespace steady
 {
-using clock = std::chrono::steady_clock;
-
-constexpr isize batch_n = 10;      // nodes allocated/freed per iteration
-constexpr isize iters = 1'000'000; // iterations per timed run
-constexpr int runs = 3;            // repeated timed runs (noise measure)
+constexpr isize batch_n = 10; // nodes allocated/freed per iteration
 
 // A fixed permutation of 0..batch_n-1: the order in which the batch is freed.
 // Non-sequential on purpose, so the free order is neither pure-LIFO nor pure-FIFO, either of which could unrealistically flatter one allocator.
@@ -183,29 +193,23 @@ void run3(char const* label, isize size, AllocOne alloc_one, FreeOne free_one)
             free_one(nodes[free_order[i]]);
     }
 
-    std::printf("%-14s %6lld B :", label, (long long)size);
-    for (int r = 0; r < runs; ++r)
-    {
-        u64 acc = 0;
-        auto const t0 = clock::now();
-        for (isize it = 0; it < iters; ++it)
-        {
-            for (isize i = 0; i < batch_n; ++i)
-                nodes[i] = alloc_one();
-            for (isize i = 0; i < batch_n; ++i)
-            {
-                byte* const p = nodes[free_order[i]];
-                acc ^= reinterpret_cast<u64>(p); // keep the pointer live so nothing is elided
-                free_one(p);
-            }
-        }
-        double const seconds = std::chrono::duration<double>(clock::now() - t0).count();
-        bench::sink ^= acc;
-
-        double const mpairs = double(iters * batch_n) / seconds / 1e6;
-        std::printf(" %8.1f", mpairs);
-    }
-    std::printf("   M pairs/s\n");
+    // One loop rather than three timed runs printed side by side: the harness's interval says what those three
+    // columns were there to let a reader eyeball, and says it from hundreds of samples rather than three.
+    nx::bench::run(cc::format("{} @{}B batch", label, size), sweep_config,
+                   [&](nx::bench::iteration& it)
+                   {
+                       u64 acc = 0;
+                       for (isize i = 0; i < batch_n; ++i)
+                           nodes[i] = alloc_one();
+                       for (isize i = 0; i < batch_n; ++i)
+                       {
+                           byte* const p = nodes[free_order[i]];
+                           acc ^= reinterpret_cast<u64>(p); // keep the pointer live so nothing is elided
+                           free_one(p);
+                       }
+                       nx::bench::sink(acc);
+                       it.items(batch_n); // alloc+free pairs
+                   });
 }
 
 // Same 3x harness, but interleaved: a primed batch of N is kept live and each step frees one node and
@@ -232,31 +236,25 @@ void run3_interleaved(char const* label, isize size, bool touch, AllocOne alloc_
             nodes[i] = alloc_one();
         }
 
-    std::printf("%-14s %6lld B :", label, (long long)size);
-    for (int r = 0; r < runs; ++r)
-    {
-        u64 acc = 0;
-        auto const t0 = clock::now();
-        for (isize it = 0; it < iters; ++it)
-            for (isize i = 0; i < batch_n; ++i)
-            {
-                free_one(nodes[i]);
-                byte* const p = alloc_one();
-                nodes[i] = p;
-                if (touch)
-                {
-                    p[0] = byte(i);
-                    p[size - 1] = byte(i);
-                }
-                acc ^= reinterpret_cast<u64>(p);
-            }
-        double const seconds = std::chrono::duration<double>(clock::now() - t0).count();
-        bench::sink ^= acc;
-
-        double const mpairs = double(iters * batch_n) / seconds / 1e6;
-        std::printf(" %8.1f", mpairs);
-    }
-    std::printf("   M pairs/s\n");
+    nx::bench::run(cc::format("{} @{}B interleaved{}", label, size, touch ? " + touch" : ""), sweep_config,
+                   [&](nx::bench::iteration& it)
+                   {
+                       u64 acc = 0;
+                       for (isize i = 0; i < batch_n; ++i)
+                       {
+                           free_one(nodes[i]);
+                           byte* const p = alloc_one();
+                           nodes[i] = p;
+                           if (touch)
+                           {
+                               p[0] = byte(i);
+                               p[size - 1] = byte(i);
+                           }
+                           acc ^= reinterpret_cast<u64>(p);
+                       }
+                       nx::bench::sink(acc);
+                       it.items(batch_n);
+                   });
 
     for (isize i = 0; i < batch_n; ++i)
         free_one(nodes[i]);
@@ -329,76 +327,55 @@ CC_DONT_INLINE u64 node_alloc_free_hotloop_probe(cc::node_allocator& alloc, byte
 template <isize... Sizes>
 void run_all()
 {
-    std::printf("\n=== steady-state small batch: alloc %lld, free %lld (permuted), then repeat, x%lld iters, %d runs "
-                "===\n",
-                (long long)batch_n, (long long)batch_n, (long long)iters, runs);
-    std::printf("%-14s %8s : %8s %8s %8s\n", "allocator", "size", "run1", "run2", "run3");
+    // Three access patterns, each as its own set of loops: batched alloc-then-free, interleaved free-then-alloc, and
+    // the same interleaved with a payload touch.
+    // The names carry which is which, so the harness's own table replaces the three printed section headers.
     (row_batch<Sizes>(), ...);
-
-    std::printf("\n=== steady-state interleaved: free one, alloc one (%lld live), no payload touch, x%lld iters, %d "
-                "runs ===\n",
-                (long long)batch_n, (long long)iters, runs);
-    std::printf("%-14s %8s : %8s %8s %8s\n", "allocator", "size", "run1", "run2", "run3");
     (row_interleaved<Sizes>(/*touch*/ false), ...);
-
-    std::printf("\n=== steady-state interleaved + payload touch (reproduces old churn inner loop), x%lld iters, %d "
-                "runs ===\n",
-                (long long)iters, runs);
-    std::printf("%-14s %8s : %8s %8s %8s\n", "allocator", "size", "run1", "run2", "run3");
     (row_interleaved<Sizes>(/*touch*/ true), ...);
-    std::fflush(stdout);
 }
 } // namespace steady
 
-// Sweeps `sizes`, printing one mimalloc/system row each.
-// When `record`, the 64 B and 4 KiB points are also reported as guide metrics.
-// So pass the representative-only sizes for a fast PGO benchmark, or the full set with record=false for the human analysis table.
-void run(cc::span<isize const> sizes, bool record)
+/// Sweeps `sizes`, two loops each — mimalloc against the system resource.
+///
+/// A size sweep, so the rows carry no baseline: comparing a 64 B churn against a 64 KiB one is a statement about the
+/// size rather than about the allocator, and items/s is what stays comparable.
+void run(cc::span<isize const> sizes, nx::bench::run_config const& cfg, bool record)
 {
     isize const align = 16; // typical malloc alignment; both resources honor it
 
-    std::printf("\n=== allocation throughput (M alloc+free / s) — 64 live, churn ===\n");
-    std::printf("%10s %14s %14s\n", "size", "mimalloc", "system");
-    std::printf("%10s %14s %14s\n", "----", "--------", "------");
     for (isize const size : sizes)
     {
-        double const mi = mops(*cc::default_memory_resource, size, align);
-        double const sys = mops(cc::system_memory_resource, size, align);
-        std::printf("%10lld %14.1f %14.1f\n", (long long)size, mi, sys);
+        auto const mi = mops(cc::format("mimalloc @{}B", size), cfg, *cc::default_memory_resource, size, align);
+        auto const sys = mops(cc::format("system @{}B", size), cfg, cc::system_memory_resource, size, align);
 
         if (record && (size == 64 || size == 4096))
         {
             char const* const label = size == 64 ? "64B" : "4KiB";
-            nx::pgo::report(cc::string("mimalloc@") + label, mi * 1e6, nx::bench::unit_items_per_second);
-            nx::pgo::report(cc::string("system@") + label, sys * 1e6, nx::bench::unit_items_per_second);
+            nx::pgo::report(cc::string("mimalloc@") + label, mi.items_per_second, nx::bench::unit_items_per_second);
+            nx::pgo::report(cc::string("system@") + label, sys.items_per_second, nx::bench::unit_items_per_second);
         }
     }
-    std::fflush(stdout);
 }
 
 // One comparison row at compile-time size `Size`: bare mimalloc, the cc::allocation<byte> handle over it,
 // and the node allocator (which needs the compile-time class index, hence the template).
 template <isize Size>
-void comparison_row()
+void comparison_row(nx::bench::run_config const& cfg)
 {
     constexpr isize align = 16; // for the raw + handle columns; node uses its own 8 B-aligned class model
-    double const mi = mops(*cc::default_memory_resource, Size, align);
-    double const al = alloc_mops(*cc::default_memory_resource, Size);
-    double const nd = node_mops<Size>();
-    std::printf("%10lld %14.1f %16.1f %14.1f\n", (long long)Size, mi, al, nd);
+    mops(cc::format("mimalloc raw @{}B", Size), cfg, *cc::default_memory_resource, Size, align);
+    alloc_mops(cc::format("cc::allocation @{}B", Size), cfg, *cc::default_memory_resource, Size);
+    node_mops<Size>(cc::format("node @{}B", Size), cfg);
 }
 
 // Compares the three allocation paths across `Sizes`: the bare mimalloc resource, the owning cc::allocation<byte> handle over it, and the thread-local node allocator.
 // Node small classes (<= 256 B) are the point of interest.
 // The larger rows show the node header-path cliff — its large path is just mimalloc plus a 24 B header — and the handle overhead converging with the raw resource once the allocation itself dominates.
 template <isize... Sizes>
-void run_comparison()
+void run_comparison(nx::bench::run_config const& cfg)
 {
-    std::printf("\n=== allocation throughput (M alloc+free / s) — churn ===\n");
-    std::printf("%10s %14s %16s %14s\n", "size", "mimalloc raw", "cc::allocation", "node");
-    std::printf("%10s %14s %16s %14s\n", "----", "------------", "--------------", "----");
-    (comparison_row<Sizes>(), ...);
-    std::fflush(stdout);
+    (comparison_row<Sizes>(cfg), ...);
 }
 
 // The representative sizes the PGO benchmark sweeps: one small block (64 B) and one page-sized (4 KiB).
@@ -409,32 +386,31 @@ isize const full_sizes[] = {16, 32, 64, 128, 256, 512, 1024, 4096, 16384, 65536}
 // Lean PGO benchmark: just the representative sizes, recorded for the PGO speedup report.
 PGO_BENCHMARK("bench-alloc (mimalloc vs system)")
 {
-    run(guide_sizes, /*record*/ true);
+    run(guide_sizes, {.min_time_secs = 0.1, .max_samples = 512}, /*record*/ true);
 }
 
-// Full human-facing sweep (manual): the complete size table the docs analyze.
-// Run by exact name.
-TEST("bench-alloc (mimalloc vs system, full sweep)", nx::config::manual)
+// The complete size table the docs analyze.
+BENCHMARK("bench-alloc - mimalloc vs system, full sweep")
 {
-    run(full_sizes, /*record*/ false);
+    run(full_sizes, sweep_config, /*record*/ false);
 }
 
 // Raw resource vs the cc::allocation<byte> handle vs the node allocator, across realistic sizes.
-// Manual (not recorded as a guide metric): the table analyzed in
-// libs/base/clean-core/docs/systems/allocation.md and libs/base/clean-core/docs/systems/node-allocation.md.
-TEST("bench-alloc (handle & node comparison)", nx::config::manual)
+// The table analyzed in libs/base/clean-core/docs/systems/allocation.md and
+// libs/base/clean-core/docs/systems/node-allocation.md.
+BENCHMARK("bench-alloc - handle and node comparison")
 {
     // Small node classes (<= 256 B), then a few larger blocks that expose the node large-path cliff.
-    run_comparison<8, 16, 32, 64, 128, 256, 512, 1024, 4096>();
+    run_comparison<8, 16, 32, 64, 128, 256, 512, 1024, 4096>(sweep_config);
 }
 
-// Steady-state small-batch: alloc 10 nodes, free 10 in a fixed permuted order, x1M iters, node vs mimalloc.
+// Steady-state small-batch: alloc 10 nodes, free 10 in a fixed permuted order, node vs mimalloc.
 // The single cleanest measurement of the node allocator's raw fast-path cost — the case it exists to win.
-TEST("bench-alloc (steady-state small batch)", nx::config::manual)
+BENCHMARK("bench-alloc - steady-state small batch")
 {
     steady::run_all<8, 16, 32, 64>();
 
     // Keep the disassembly probe alive (TU-local + noinline) without perturbing the timings above.
     byte* probe_nodes[steady::batch_n] = {};
-    bench::sink ^= steady::node_alloc_free_hotloop_probe(cc::default_node_allocator(), probe_nodes, steady::free_order);
+    nx::bench::sink(steady::node_alloc_free_hotloop_probe(cc::default_node_allocator(), probe_nodes, steady::free_order));
 }
