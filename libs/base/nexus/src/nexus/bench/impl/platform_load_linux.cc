@@ -17,16 +17,20 @@ bool s_have_prev = false;
 // Read rather than parsed properly, because only two sums are wanted and the field order is fixed by the kernel.
 bool read_proc_stat(u64& idle_out, u64& total_out)
 {
-    auto stream = cc::open_file_read("/proc/stat");
-    if (!stream.has_value())
+    // The adapter owns the buffer the stream reads through, so it has to outlive the stream rather than being a
+    // temporary this call chains off.
+    auto file = cc::file_read_stream_adapter::open("/proc/stat");
+    if (!file.has_value())
         return false;
+
+    auto stream = file.value().stream();
 
     char buffer[512] = {};
-    auto const read = stream.value().read(cc::span<byte>(reinterpret_cast<byte*>(buffer), sizeof(buffer) - 1));
-    if (read <= 0)
+    auto const read = stream.read(cc::span<byte>(reinterpret_cast<byte*>(buffer), sizeof(buffer) - 1));
+    if (!read.has_value() || read.value() <= 0)
         return false;
 
-    auto line = cc::string_view(buffer, read);
+    auto line = cc::string_view(buffer, read.value());
     if (!line.starts_with("cpu "))
         return false;
 
