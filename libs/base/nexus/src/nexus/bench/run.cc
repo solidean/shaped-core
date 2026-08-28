@@ -20,8 +20,12 @@ constexpr auto overhead_warn_fraction = f64(0.02);
 // Below this share of the empty-loop floor, the body cannot have run: it was optimized away.
 constexpr auto deleted_body_fraction = f64(0.5);
 
-// Above this share of the measured span spent paused, the pause pairs are most of the measurement.
-constexpr auto paused_warn_fraction = f64(0.25);
+// Above this share of the measured per-iteration time, a pause pair's two clock reads are a real part of the answer.
+//
+// Deliberately NOT a share of the wall time spent paused: a body that pauses around a 10 us refill and measures a
+// 10 us sort is paused half the time and pays 14 ns for it, which is nothing.
+// What matters is the pair's cost against what was MEASURED, and those are different numbers.
+constexpr auto paused_warn_fraction = f64(0.05);
 
 // A batch may not grow past this however cheap the body is, so a bad per-iteration estimate cannot produce a batch
 // that runs for minutes before the first sample arrives.
@@ -41,6 +45,9 @@ struct nx::bench::impl::run_state
 
     // Accumulated over MEASURED iterations only; warmup contributes nothing.
     isize items = 0;
+
+    // Whether the body ever paused, which is what decides if the pair's cost is worth warning about at all.
+    bool used_pause = false;
 
     struct quantity_acc
     {
@@ -99,6 +106,7 @@ void nx::bench::iteration::pause()
     if (_state == nullptr || _state->is_paused)
         return;
     _state->is_paused = true;
+    _state->used_pause = true;
     _state->pause_started_at = cc::current_cycles();
 }
 
@@ -349,15 +357,15 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         });
     }
 
-    if (r.paused_fraction > paused_warn_fraction)
+    if (state.used_pause && cal.clock_pair_secs > 0 && r.time.median > 0
+        && cal.clock_pair_secs > r.time.median * paused_warn_fraction)
     {
         r.warnings.push_back({
             .kind = warning_kind::paused_fraction_high,
             .severity = warning_severity::warning,
-            .detail = cc::format("{:.0f}% of the span was spent paused, so the pause pairs are a large part of what "
-                                 "was "
-                                 "measured — move the setup out of the loop, or take the void(isize) form",
-                                 r.paused_fraction * 100),
+            .detail = cc::format("a pause/resume pair costs about {:.1f} ns here, against {:.1f} ns measured per "
+                                 "iteration — move the setup out of the loop, or take the void(isize) form",
+                                 cal.clock_pair_secs * 1e9, r.time.median * 1e9),
         });
     }
 

@@ -8,9 +8,13 @@ Back to [guides](_index.md).
 > **This is not the benchmarking framework.**
 > A PGO benchmark is a *tracking signal* — a handful of representative points, watched over time and consumed by `dev.py pgo`.
 > It is the wrong tool for the question "is my new implementation faster than the old one", which wants many configurations, a baseline to compare against, and a table you read once.
-> Write that as a plain `nx::config::manual` test, which never runs in a sweep and may print whatever it likes —
-> [sort-benchmark.cc](../../libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the model.
-> A real microbenchmark harness in nexus is still to be written; until then, `bench_util.hh`'s adaptive timers are what the existing benchmarks share.
+> Write that as a `BENCHMARK` and run it with `dev.py benchmark` — [benchmarking.md](benchmarking.md) is the guide,
+> and [sort-benchmark.cc](../../libs/base/clean-core/tests/benchmarks/sort-benchmark.cc) is the worked example.
+>
+> The two live happily in one file: a `BENCHMARK` sweeping the space, and a `PGO_BENCHMARK` pinning two stable points
+> out of it.
+> `nx::bench::run` outside a `BENCHMARK` reports to nobody and hands its result back, which is how a PGO benchmark
+> reaches one number through the same machinery.
 
 ## Writing a PGO benchmark
 

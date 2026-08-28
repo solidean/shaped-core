@@ -94,9 +94,11 @@ enum class nx::bench::warning_kind : nx::u8
     /// Sampling hit max_time_secs or max_samples without reaching target_relative_error.
     did_not_converge,
 
-    /// A large share of the measured span was spent between pause() and resume().
-    /// Two clock reads per pair are not free, and a body that pauses around more than it measures is mostly measuring
-    /// the clock.
+    /// A pause/resume pair's two clock reads are a real part of what was measured.
+    ///
+    /// **Not** "a lot of the wall time was spent paused": a body that pauses around a 10 us refill and measures a
+    /// 10 us sort is paused half the time and pays about 14 ns for it, which is nothing.
+    /// What matters is the pair's cost against the per-iteration time, and those are different numbers.
     paused_fraction_high,
 
     /// Fewer samples than the median's interval needs, so ci95 is the sample range rather than a real interval.
@@ -206,7 +208,10 @@ struct nx::bench::result
     /// The harness's own estimated per-iteration cost, as a fraction of the measured per-iteration time.
     f64 overhead_fraction = 0;
 
-    /// The share of the measured span spent paused.
+    /// The share of the wall time spent paused.
+    ///
+    /// Reported because it says how much of the loop was setup, which is worth knowing.
+    /// It is NOT what the pause warning fires on — see warning_kind::paused_fraction_high.
     f64 paused_fraction = 0;
 
     /// Whether sampling reached target_relative_error rather than hitting a bound.

@@ -311,3 +311,29 @@ TEST("bench - pinning reports what it achieved rather than assuming")
     CHECK(!nx::bench::try_pin_to_core(-1));
     CHECK(!nx::bench::try_pin_to_core(1 << 20));
 }
+
+TEST("bench - a sweep opts out of the comparison column")
+{
+    // Three orders of magnitude of work apart: a ratio against the first point is a statement about the input sizes
+    // rather than about the code, and it reads as a percentage in the millions.
+    auto loops = cc::vector<nx::bench::result>{
+        loop_with("n=16", 1e-8, 0.99e-8, 1.01e-8),
+        loop_with("n=1000", 1e-6, 0.99e-6, 1.01e-6),
+        loop_with("n=1000000", 1e-3, 0.99e-3, 1.01e-3),
+    };
+
+    // Without the opt-out the table happily prints the nonsense.
+    auto const compared = nx::bench::format_report("sweep", loops, plain());
+    CHECK(compared.contains("baseline"));
+    CHECK(compared.contains('%'));
+
+    // One loop opting out drops the column for the whole table.
+    loops[0].config.no_baseline = true;
+    auto const swept = nx::bench::format_report("sweep", loops, plain());
+    CHECK(!swept.contains("baseline"));
+    CHECK(!swept.contains('%'));
+
+    // The rows themselves are untouched, and items/s is what stays comparable across a sweep.
+    CHECK(swept.contains("n=16"));
+    CHECK(swept.contains("n=1000000"));
+}

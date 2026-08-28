@@ -87,6 +87,14 @@ struct nx::bench::run_config
     /// With no loop marked, the first one declared is the baseline; see the comparison report.
     bool is_baseline = false;
 
+    /// This loop belongs to a sweep, so comparing it against a baseline says nothing.
+    ///
+    /// One loop setting it drops the comparison column from the whole table.
+    /// A size sweep is the case: every point measures a different amount of work, so a ratio against the first point
+    /// is a statement about the input sizes rather than about the code — and at three orders of magnitude apart it
+    /// reads as a percentage in the millions.
+    bool no_baseline = false;
+
     /// The defaults above: an adaptive, batched run of about half a second.
     [[nodiscard]] static constexpr run_config standard() { return {}; }
 

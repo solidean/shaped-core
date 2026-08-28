@@ -149,8 +149,11 @@ TEST("bench - pause excludes its span from the measurement")
                                       nx::bench::sink(acc);
                                   });
 
-    // The paused span was the overwhelming majority of the wall time, so the harness must have noticed.
+    // Most of the wall time went into the paused span, which is reported.
     CHECK(r.paused_fraction > 0.5);
+
+    // But it is NOT what the warning fires on: the measured body here is a single mix, far cheaper than the clock
+    // pair, so the pair genuinely is a real part of the answer and the warning is earned on those grounds.
     CHECK(r.find_warning(nx::bench::warning_kind::paused_fraction_high) != nullptr);
 }
 
@@ -377,4 +380,33 @@ TEST("bench - a loop's results reach cc::rec, at its boundary rather than per sa
     // Emphatically NOT one per sample: hundreds of samples, one event each.
     CHECK(r.samples.size() > 1);
     CHECK(rec.all().count("bench/median seconds") == 1);
+}
+
+TEST("bench - a pause around expensive setup is not warned about")
+{
+    auto cfg = quick();
+    cfg.batch = false;
+    cfg.min_samples = 6;
+    cfg.max_samples = 6;
+    cfg.min_time_secs = 0;
+
+    auto acc = u64(0);
+    auto const r = nx::bench::run("cheap pause", cfg,
+                                  [&](nx::bench::iteration& it)
+                                  {
+                                      it.pause();
+                                      for (auto i = 0; i < 2000; ++i)
+                                          acc = work(acc);
+                                      nx::bench::sink(acc);
+                                      it.resume();
+
+                                      // Measured work far above the clock pair's cost, which is the case the old
+                                      // wall-fraction rule warned about wrongly: paused for ages, paying nanoseconds.
+                                      for (auto i = 0; i < 2000; ++i)
+                                          acc = work(acc);
+                                      nx::bench::sink(acc);
+                                  });
+
+    CHECK(r.paused_fraction > 0.3); // half the wall time, near enough
+    CHECK(r.find_warning(nx::bench::warning_kind::paused_fraction_high) == nullptr);
 }

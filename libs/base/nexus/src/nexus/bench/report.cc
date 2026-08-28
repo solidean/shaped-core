@@ -347,13 +347,16 @@ cc::string nx::bench::format_report(cc::string_view title, cc::span<result const
             break;
         }
 
-    // The comparison column always shows, against the first loop declared unless one asked to be the baseline.
+    // The comparison column shows against the first loop declared, unless one asked to be the baseline — or unless a
+    // loop opted the table out of comparison entirely.
     //
-    // A sweep has no meaningful baseline — comparing every size against the smallest says nothing — but opting out of
-    // it belongs to the sweep rather than to a guess here.
-    // An earlier version dropped the column once there were more than three loops, which quietly took it away from a
-    // four-row comparison that wanted it.
-    auto const show_comparison = true;
+    // A sweep has no meaningful baseline, and opting out belongs to the sweep rather than to a guess here: an earlier
+    // version dropped the column once there were more than three loops, which quietly took it away from a four-row
+    // comparison that wanted it.
+    auto show_comparison = true;
+    for (auto const& r : loops)
+        if (r.config.no_baseline)
+            show_comparison = false;
 
     auto const* secs = &cc::rec::unit_seconds;
 

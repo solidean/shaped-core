@@ -124,8 +124,21 @@ BENCHMARK("cc::sort - sweep")
 `min_time_secs` defaults to 0.5, so twenty points at the default is ten seconds of measurement plus warmup.
 Lowering it per sweep is what keeps that in hand.
 
-A sweep's comparison column is against the first point, which for a size sweep says little — read the rows rather than
-the column.
+**Set `.no_baseline = true` on a sweep's loops.**
+Otherwise every point is compared against the first, which for a size sweep is a statement about the input sizes
+rather than about the code — three orders of magnitude apart it reads as a percentage in the millions.
+One loop setting it drops the comparison column from the whole table, and `items/s` is what stays comparable.
+
+**A pause is worth nothing on a body smaller than the clock.**
+A pause/resume pair costs about 14 ns, so excluding a 10 ns setup from a 20 ns body measures mostly the clock — and
+the harness says so.
+Where a sweep reaches sizes that small, do several per iteration and let the pair amortize:
+
+```cpp
+auto const copies = cc::max(isize(1), isize(4096) / n);   // one block per iteration, whatever n is
+```
+
+The per-item rate is unchanged by construction, so the small points stay comparable with the large ones.
 
 ## Reading the report
 
@@ -159,7 +172,7 @@ better spent on depth.
 | `overhead_significant` | the harness is over 2% of the per-iteration time — take the `void(isize)` form |
 | `body_deleted` | per-iteration time is below the empty-loop floor, so the body was optimized away. **An error**, and it fails the benchmark |
 | `did_not_converge` | sampling hit a bound without reaching the target precision |
-| `paused_fraction_high` | most of the span was spent between `pause` and `resume` |
+| `paused_fraction_high` | a pause/resume pair's two clock reads are a real part of the per-iteration time. **Not** "a lot of wall time was paused" |
 | `too_few_samples` | the sample count supports no interval, so the reported one is the sample range |
 
 ## The driver
