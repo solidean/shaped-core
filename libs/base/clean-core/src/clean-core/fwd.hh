@@ -102,6 +102,8 @@ struct network_interface; // one network interface (platform/network_devices.hh)
 struct net_counters;      // monotone per-interface traffic
 struct net_traffic_rate;  // what one interface carried over a sampling interval
 class net_traffic_sampler;
+
+struct resource_snapshot; // every level-valued reading at one instant (platform/resource_snapshot.hh)
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>
