@@ -225,6 +225,10 @@ raytracing pipeline  [in progress]  raytracing_pipeline + shader table + cmd.ray
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; dx12 real (WARP),
                                   vulkan stub. Deferred: occlusion + pipeline-statistics queries
+gpu metrics          [in progress]  ctx.query_gpu_memory -> { budget, usage } and adapter().dedicated_video_memory_bytes;
+                                  dx12 QueryVideoMemoryInfo, vulkan VK_EXT_memory_budget; sg.gpu stamps a recording.
+                                  Deferred: ctx.query_gpu_load, which refuses everywhere -- no graphics API reports
+                                  utilization, so it needs D3DKMT / gpu_busy_percent / IOKit
 swapchain / surface  [in progress]  ctx.create_swapchain -> sg::swapchain (acquire_backbuffer -> render_target_view;
                                   present via ctx.submit_command_list_and_present; once-per-epoch auto-resize;
                                   vsync/immediate; HDR flag); dx12 real (IDXGISwapChain3 flip model, back buffers as

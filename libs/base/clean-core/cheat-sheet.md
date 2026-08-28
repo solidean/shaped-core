@@ -1291,6 +1291,63 @@ cc::install_crash_handler();                        // segfault/abort/etc -> std
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 ```
 
+### System info & resource metrics (see [systems/system-info](docs/systems/system-info.md))
+
+Three concepts, kept apart: a **description** cannot change, a **snapshot** is true now, a **sampler** is a rate.
+A load of 1 is the whole machine, never one core.
+Absence is always reported, never zero-filled.
+
+```cpp
+#include <clean-core/platform/system_info.hh>
+auto const& si = cc::get_system_info();             // memoized; immutable for the process's life
+si.cpu_brand; si.cpu_vendor; si.cpu_architecture;   // cc::string, empty where unknown
+si.core_classes;                                    // vector<cpu_core_class> — P/E cores are separate entries
+si.logical_cores(); si.physical_cores();            // i32, derived so they cannot disagree with the topology
+si.largest_cache_bytes(3);                          // optional<i64>
+si.ram_total_bytes; si.page_size_bytes;             // optional<i64>
+si.os_name; si.os_version; si.os_build;             // cc::string
+si.timezone_at_start;                               // the _at_start suffix says WHEN it was captured
+si.uptime_secs();                                   // derived from boot_time_wall_secs
+
+#include <clean-core/platform/resource_limits.hh>
+i32 n = cc::recommended_worker_count();             // SIZE POOLS FROM THIS — not logical_cores(), which is the machine
+auto lim = cc::query_resource_limits();             // NOT memoized: a cgroup quota is rewritten under a live process
+lim.cpu_quota; lim.memory_limit_bytes;              // optional; absent outside a container
+lim.affinity_cores; lim.containerized;              // i32 / bool
+lim.hypervisor_present;                             // NOT "is a VM": Windows VBS sets it on bare metal
+
+#include <clean-core/platform/system_metrics.hh>
+auto sampler = cc::cpu_load_sampler();              // takes a baseline; NOT thread-safe, hold one per subsystem
+auto load = sampler.sample();                       // result<cpu_load, query_error>
+load.value().total;                                 // f32 in [0,1] — 1 is every core busy
+load.value().cores_used;                            // the same load as a core count
+load.value().interval_secs;                         // what the reading covers; read it, don't assume a cadence
+load.value().per_core;                              // span into the sampler, dead after the next sample()
+cc::query_memory_usage();                           // result<memory_usage>; available != total - used
+cc::read_cpu_counters();                            // the monotone primitive underneath
+cc::is_metric_supported(cc::metric::cpu_load);      // decide once at startup, not per tick
+
+#include <clean-core/platform/process_metrics.hh>
+cc::query_process_usage();                          // resident, OS-tracked peak, private, threads, handles
+cc::process_cpu_sampler().sample();                 // machine_fraction (the house scale) + cores_used
+                                                    // takes a process_id; cc::current_process is the only one today
+
+#include <clean-core/platform/storage_devices.hh>
+cc::query_mounts();                                 // usage, per mount — free AND available, they differ under quotas
+cc::enumerate_disks();                              // I/O, per DEVICE — a different question from usage
+cc::disk_io_sampler(id);                            // keyed on the stable id, never on an enumeration index
+
+#include <clean-core/platform/network_devices.hh>
+cc::enumerate_network_interfaces();                 // filter pseudo-interfaces excluded, or one NIC appears 4x
+cc::net_traffic_sampler(id);
+
+#include <clean-core/platform/resource_snapshot.hh>
+cc::take_resource_snapshot();                       // every LEVEL at one instant; samplers deliberately excluded
+
+#include <clean-core/platform/system_identifier.hh>
+cc::query_system_identifier(cc::identity_field::hostname);  // ALL personal data; flags argument has no default
+```
+
 ### Terminal color
 
 ```cpp

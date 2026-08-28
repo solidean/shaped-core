@@ -86,6 +86,12 @@ ctx.accepted_shader_formats()                      // span<shader_format const>,
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
+ctx.adapter().dedicated_video_memory_bytes         // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
+ctx.query_gpu_memory()                             // result<gpu_memory_usage> — { budget_bytes, current_usage_bytes }
+                                                   //   the budget is what THIS PROCESS may use now and shrinks as others take memory
+                                                   //   NOT the same scale as the board size — dividing one by the other is the classic wrong dashboard
+ctx.query_gpu_load()                               // result<gpu_load> — refuses on every backend today; no graphics API reports utilization
+                                                   //   see docs/concepts/gpu-metrics.md
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
