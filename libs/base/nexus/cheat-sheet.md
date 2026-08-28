@@ -51,7 +51,7 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexu
     CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
 }                                        // no co_ keyword? then `return` a COLD cc::shared_async<cc::unit> instead
 
-// Buckets: every test is in one bucket — normal (default), manual, pgo_benchmark, or example. A sweep selects
+// Buckets: every test is in one bucket — normal (default), manual, pgo_benchmark, benchmark, or example. A sweep selects
 // one bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
@@ -71,6 +71,60 @@ EXAMPLE("clean-core/vector")             // swept only via `--examples`, or run 
 // `main_thread` is baked in, so the body runs on the thread nx::run was entered on, one example at a time.
 // The run still installs an ambient async scheduler; EXAMPLE("x", no_scheduler) is how one installs its own.
 ```
+
+## Benchmarks (`BENCHMARK` + `nx::bench`)
+
+Measures whether one implementation beats another, with statistics rather than a stopwatch.
+Full guide: [docs/guides/benchmarking.md](../../../docs/guides/benchmarking.md).
+
+```cpp
+BENCHMARK("sort - cc::sort vs std::sort")  // a test in the `benchmark` bucket; always exclusive_global + main_thread,
+{                                          //   swept only via `--benchmarks`, or run by exact name
+    auto data = make_input();
+
+    nx::bench::run("cc::sort", [&] { cc::sort(data); });   // first loop declared is the table's baseline
+    nx::bench::run("std::sort", [&] { std::sort(...); });  // every later one is compared against it
+}
+```
+
+```cpp
+// The three body shapes — the harness picks by signature, no opt-in needed.
+nx::bench::run("name", [] { work(); });                       // void()            — the harness owns the loop
+nx::bench::run("name", [](nx::bench::iteration& it) { … });   // void(iteration&)  — items, pause/resume, quantities
+nx::bench::run("name", [](isize count) { … });                // void(isize)       — the body owns the inner loop
+
+// Inside a void(iteration&) body:
+it.items(n);                                   // n elements this iteration -> the items/s column
+it.pause(); setup(); it.resume();              // keep setup out of the measurement
+it.record("bytes", cc::rec::unit_bytes, n);    // an extra column; the unit says how it aggregates
+it.index(); it.is_warmup();                    // where in the run this iteration is
+
+// Guards — without one, the optimizer deletes work nothing observes.
+nx::bench::sink(value);                        // the write side: value is now observed
+auto v = nx::bench::keep(expr);                // the read side: expr's input cannot be folded away
+nx::bench::compiler_barrier();                 // zero instructions, orders the optimizer only
+nx::bench::evict_data_caches();                // real milliseconds; a cold-cache measurement wants it
+
+// Config — a designated-initializer literal at the call site, never filled field by field.
+nx::bench::run("name", {.min_time_secs = 2.0, .target_relative_error = 0.05}, body);
+nx::bench::run_config::standard();             // the defaults
+nx::bench::run_config::single_shot();          // one iteration per sample, no batching, no calibration
+// .batch = false           -> one sample IS one iteration, which is what makes p95/p99 meaningful
+// .no_baseline = true      -> a sweep: no comparison column at all
+// .is_baseline = true      -> this loop is the baseline instead of the first declared
+```
+
+```cpp
+// A result, if you want the numbers rather than the table.
+auto const r = nx::bench::run("name", body);
+r.time.median; r.time.p95; r.time.ci95_low;    // seconds; p95/p99 only meaningful when .batch = false
+r.items_per_second; r.converged;
+r.find_warning(nx::bench::warning_kind::body_deleted);   // nullptr if it did not fire
+```
+
+Run them: `uv run dev.py benchmark "<match>"` (no arg lists them all).
+Defaults to a **release** preset — the only `dev.py` subcommand that does, because `relwithdebinfo-*` compiles `CC_ASSERT` in.
+`--json <file>` writes a sidecar carrying every sample; `--rec <file>` writes a `.ccrec` of the whole run.
 
 ## PGO benchmarks (PGO metrics)
 

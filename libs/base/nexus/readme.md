@@ -24,12 +24,13 @@ Headers are included by their full path from `src/`, e.g. `#include <nexus/tests
 
 ## Beyond TEST and CHECK
 
-Four capabilities are easy to miss from the macros alone:
+Several capabilities are easy to miss from the macros alone:
 
 | capability | entry point | doc |
 |---|---|---|
 | parametrized / data-driven tests | `INVOCABLE_TEST` + `nx::invoke_tests` | [docs/invocable-tests.md](docs/invocable-tests.md) |
 | API-sequence fuzzing with shrinking and emitted reproducers | `nx::fuzz::test` | [docs/fuzz-testing.md](docs/fuzz-testing.md) |
+| measuring whether one implementation beats another | `BENCHMARK` + `nx::bench::run` | [docs/guides/benchmarking.md](../../../docs/guides/benchmarking.md) |
 | recorded perf metrics, consumed by `dev.py pgo` | `PGO_BENCHMARK` + `nx::pgo` | [docs/guides/perf-results.md](../../../docs/guides/perf-results.md) |
 | runnable demonstrations of an API in practice | `EXAMPLE` + `dev.py example` | [docs/guides/examples.md](../../../docs/guides/examples.md) |
 | a command line, with help, validation and completion | `nx::args` | [docs/args.md](docs/args.md) |
@@ -42,10 +43,10 @@ Source lives in `src/nexus/`, grouped by responsibility:
 
 | Folder | What's in it |
 |---|---|
-| *(root)* | the macro surface (`test.hh`), the runner entry point (`run.hh`), and pgo-benchmark reporting (`guide.hh`) |
+| *(root)* | the macro surface (`test.hh`), the runner entry point (`run.hh`), and PGO metric reporting (`pgo.hh`) |
 | `tests/` | the runner itself — registry, config, scheduling, execution, checks, sections, aliases, and the invocable machinery |
-| `tests/export/` | output formats: Catch2 XML, JUnit XML, the JSON test listing `dev.py test` pre-selects binaries with, and the perf sidecar |
-| `bench/` | hardware performance counters, with a per-OS backend under `impl/` |
+| `tests/export/` | output formats: Catch2 XML, JUnit XML, the JSON test listing `dev.py test` pre-selects binaries with, and the benchmark and PGO sidecars |
+| `bench/` | the benchmark harness — barriers, sampling, statistics and the report — plus hardware performance counters, with per-OS backends under `impl/` |
 | `fuzz/` | the API-sequence fuzzing engine: operations, the state machine, shrinking, and regression emission |
 | `args/` | `nx::args`: the grammar, subcommands, validation, help rendering, completion, and the ambient accessors |
 | `web/` | the Emscripten browser-runner ABI, wired up by `cmake/NexusWebRunner.cmake`'s `sc_add_nexus_web_runner` |
