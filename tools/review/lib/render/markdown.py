@@ -98,8 +98,8 @@ _MD.add_render_rule("code_inline", _code_inline)
 
 # The same escape on a link destination, which is the third place a reference can be written.
 #
-# `[the guide](raw:../../docs/guide.md)` is the case: a relative link quoted verbatim out of another file, whose
-# target resolves against that file rather than against the repository root.
+# The case is a relative link quoted verbatim out of another file, written `[the guide]` followed by a `raw:`-prefixed
+# target: it resolves against that file rather than against the repository root.
 # The prefix is dropped from the href, so the link the reader clicks is the one the author wrote.
 def _link_open(self, tokens, index, options, env):
     token = tokens[index]
