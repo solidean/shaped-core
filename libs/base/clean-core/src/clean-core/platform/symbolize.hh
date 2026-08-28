@@ -98,6 +98,8 @@ struct cc::symbolizer
     /// A module whose path is a UNC path or sits on a network drive is NOT opened, and contributes name and offset
     /// only — the debug-info library would otherwise wait out a network timeout on the first resolve against it.
     /// `symbolize_options::load_remote_images` turns that off for a share known to answer.
+    /// Each module skipped this way is logged at debug level, so a reader who expected names can tell this
+    /// apart from the debug info simply being absent.
     explicit symbolizer(cc::span<cc::loaded_module const> modules, cc::symbolize_options opts = {});
 
     ~symbolizer();

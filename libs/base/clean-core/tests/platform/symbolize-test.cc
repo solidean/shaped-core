@@ -1,4 +1,5 @@
 #include <clean-core/common/log.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/module_table.hh>
@@ -7,8 +8,6 @@
 #include <clean-core/record/value.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
-
-#include <chrono> // steady_clock — one test here asserts a bound in wall-clock time, and says why
 
 using namespace cc::primitive_defines;
 
@@ -325,7 +324,7 @@ TEST("symbolize - a module on an unreachable path resolves without waiting for t
         .identity = "DEADBEEF2000",
     };
 
-    auto const t0 = std::chrono::steady_clock::now();
+    auto const t0 = cc::current_time_steady_secs();
 
     cc::symbolizer sym(cc::span<cc::loaded_module const>(&unreachable, 1));
     for (auto i = 0; i < 8; ++i)
@@ -335,6 +334,6 @@ TEST("symbolize - a module on an unreachable path resolves without waiting for t
         CHECK(info.module_offset == u64(i));
     }
 
-    auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    auto const seconds = cc::current_time_steady_secs() - t0;
     CHECK(seconds < 2.0);
 }

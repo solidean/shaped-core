@@ -1,6 +1,7 @@
 #include "symbolize.hh"
 
 #include <clean-core/common/profiling.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
 
@@ -37,8 +38,25 @@ constexpr bool has_symbolization = true;
 /// rather than a corner.
 [[nodiscard]] bool is_locally_reachable(cc::string_view path)
 {
+    auto const is_sep = [](char c) { return c == '\\' || c == '/'; };
+
+    // A `\\?\` or `\\.\` prefix turns off path parsing; what follows is `UNC\server\share` or an ordinary drive path.
+    // Stripping it first is what keeps a local `\\?\C:\...` off the UNC branch its two leading separators would
+    // otherwise take.
+    auto const has_device_prefix = path.size() >= 4 && is_sep(path[0]) && is_sep(path[1])
+                                && (path[2] == '?' || path[2] == '.') && is_sep(path[3]);
+    if (has_device_prefix)
+    {
+        path = path.subview(4);
+
+        // The one device path that still names another machine.
+        auto const is_unc = path.size() >= 4 && (path[0] == 'U' || path[0] == 'u') && (path[1] == 'N' || path[1] == 'n')
+                         && (path[2] == 'C' || path[2] == 'c') && is_sep(path[3]);
+        if (is_unc)
+            return false;
+    }
     // A UNC path names another machine outright.
-    if (path.size() >= 2 && (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/'))
+    else if (path.size() >= 2 && is_sep(path[0]) && is_sep(path[1]))
         return false;
 
     // Not rooted at a drive letter: a relative or device path, which resolves against this process and not a server.
@@ -138,7 +156,12 @@ cc::symbolizer::symbolizer(cc::span<cc::loaded_module const> modules, cc::symbol
         // Registering it buys symbols only when the remote machine is there, and costs an unbounded wait when it is
         // not — while resolve() names the frame from _modules either way, before it ever asks DbgHelp.
         if (!opts.load_remote_images && !is_locally_reachable(m.path))
+        {
+            // Says why these frames come back as `module+offset` when a reader expected names, which is otherwise
+            // indistinguishable from the debug info simply being absent.
+            CC_LOG_DEBUG("symbolize: {} not registered, its path is not locally reachable ({})", m.name(), m.path);
             continue;
+        }
 
         // At the base the RECORDING used, not wherever this process would have put it.
         // A module whose file is missing simply fails to load, and resolve still reports its name and the offset from
