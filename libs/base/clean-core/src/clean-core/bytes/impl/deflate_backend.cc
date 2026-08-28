@@ -20,6 +20,10 @@ constexpr isize k_gzip_magic_size = 3;
 /// The smallest possible gzip member: a 10-byte header, an empty deflate stream, and the 8-byte CRC-32 + ISIZE trailer.
 constexpr isize k_gzip_min_size = 18;
 
+/// The most DEFLATE can expand: a 258-byte match encoded in two bits, which is the format's own ceiling.
+/// It is what makes a declared size above it provably a lie rather than merely a large number.
+constexpr isize k_max_expansion = 1032;
+
 /// deflate holds unflushed output in its pending buffer between calls and flushes it at the top of the next deflate(),
 /// so one stream_compress can emit a previous call's pending bytes on top of its own and the bound must cover both.
 /// pending_buf_size is lit_bufsize * 4, with lit_bufsize = 1 << (memLevel + 6) — 64 KiB at the default memLevel 8 we init with.
@@ -499,6 +503,12 @@ template <class Sink>
     // The floor keeps a tiny seed from turning the growth loop into a per-byte realloc, but it must never lift the
     // capacity back over a limit the caller set — max_output_size = 0 has to mean zero.
     auto capacity = cc::max(isize(64), hint.value_or(cc::max(isize(4096), data.size() * 4)));
+
+    // A hint above what DEFLATE could possibly expand this input to is provably wrong, and four bytes of trailing
+    // garbage read as ISIZE ask for gigabytes.
+    // Without a max_output_size that is an allocation any caller can be handed, and a 32-bit target refuses it outright.
+    capacity = cc::min(capacity, cc::max(isize(4096), data.size() * k_max_expansion));
+
     if (cfg.max_output_size >= 0)
         capacity = cc::min(capacity, cfg.max_output_size);
 

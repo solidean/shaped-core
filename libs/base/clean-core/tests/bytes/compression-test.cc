@@ -879,6 +879,11 @@ TEST("compression - trailing garbage after a gzip member is not a member")
     auto const back = cc::decompress(blob, {.algorithm = algo::deflate});
     REQUIRE(back.has_value());
     CHECK(same_bytes(back.value(), payload));
+
+    // Those 32 bytes put 0x78787878 where ISIZE is read, so the seed allocation would be 2 GB if the declared size
+    // were believed — an out-of-memory abort on a 32-bit target, from four bytes anybody can append.
+    // DEFLATE cannot expand by more than 1032x, so a hint above that is a lie rather than a large payload.
+    CHECK(back.value().capacity() <= blob.size() * 1032 + 4096);
 }
 
 TEST("compression - a dictionary under gzip framing is refused with the reason")
