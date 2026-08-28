@@ -57,7 +57,7 @@ from .lib.entry.askhash import canonical as ask_canonical
 from .lib.entry.askhash import hash_ask
 from .lib.entry.generate import (ANYTHING_SLUG, ANYTHING_TITLE, COVERAGE_SLUG, COVERAGE_TITLE,
                                  OVERVIEW_SLUG, OVERVIEW_TITLE)
-from .lib.entry.generate import (anything_body, anything_front, coverage_body, coverage_front,
+from .lib.entry.generate import (ANYTHING_ASK, anything_body, anything_front, coverage_body, coverage_front,
                                  ensure as ensure_entry, overview_body, overview_front)
 from .lib.entry.grammar import (
     ACK_PREFIX,
@@ -166,6 +166,7 @@ __all__ = [
     "check_supersedes",
     "compose",
     "console",
+    "ANYTHING_ASK",
     "anything_body",
     "anything_front",
     "coverage_body",

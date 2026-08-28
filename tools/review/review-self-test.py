@@ -31,6 +31,8 @@ from tools.review.lib.annotate.table import build as build_tokens  # noqa: E402
 from tools.review.lib.annotate.providers import CommitProvider  # noqa: E402
 from tools.review.lib.annotate.glossary import GlossaryProvider, malformed_in, terms_in  # noqa: E402
 from tools.review.lib.entry.generate import _tree_html as tree_html  # noqa: E402
+from tools.review.lib.entry.generate import (  # noqa: E402
+    ANYTHING_ASK, anything_body, anything_front, ensure as ensure_entry)
 from tools.review.lib.serve.app import _forge_commit_url as forge_url, favicon_svg  # noqa: E402
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
@@ -837,6 +839,27 @@ def test_compose_is_parseable(root: Path) -> None:
     entry = parse_text(text, Path("010-x.md"))
     assert entry.id == "010"
     assert entry.blocks[0].attrs["generated"] == "overview"
+
+
+def test_refreshing_a_generated_entry_does_not_re_emit_its_ask(root: Path) -> None:
+    """`generate` runs again after every sync, and an ask it re-emitted would collide with the one already there.
+
+    That is not a cosmetic duplicate: an ask name is the answer key, so the second copy makes the entry — and with it
+    every later command on the review — refuse to parse, and the repair is hand-editing a file holding an answer.
+    """
+    path = Path(root) / "988-anything-else.md"
+    ensure_entry(path, anything_front(), "anything", anything_body(), on_create=ANYTHING_ASK)
+    first = path.read_text(encoding="utf-8")
+    assert first.count("## ask  anything-else") == 1
+
+    # A second pass, as `sync` then `generate` does — the ask is untouched and the generated prose is still replaced.
+    ensure_entry(path, anything_front(), "anything", anything_body().replace("Anything you", "Whatever you"),
+                 on_create=ANYTHING_ASK)
+    again = path.read_text(encoding="utf-8")
+    assert again.count("## ask  anything-else") == 1, again
+    assert "Whatever you" in again, "the generated block is still the tool's to rewrite"
+
+    parse_text(again, path)
 
 
 # ---- answers ----------------------------------------------------------------
