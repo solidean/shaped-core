@@ -217,10 +217,22 @@ void vulkan_upload_async_system::process(vulkan_async_upload_job& job)
         // Wait: the graphics-queue token this upload was deferred behind, so it never overwrites bytes an
         // already-submitted list still reads.
         // Signal: this window's reuse value always, plus the destination's completion value on the last chunk.
-        VkSemaphore waits[1] = {_ctx->_submission_timeline};
-        u64 wait_values[1] = {u64(job.wait_token)};
-        VkPipelineStageFlags const wait_stages[1] = {VK_PIPELINE_STAGE_TRANSFER_BIT};
-        u32 const wait_count = job.wait_token != sg::submission_token::not_submitted ? 1u : 0u;
+        VkSemaphore waits[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+        u64 wait_values[2] = {0, 0};
+        VkPipelineStageFlags const wait_stages[2] = {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT};
+        u32 wait_count = 0;
+        if (job.wait_token != sg::submission_token::not_submitted)
+        {
+            waits[wait_count] = _ctx->_submission_timeline;
+            wait_values[wait_count] = u64(job.wait_token);
+            ++wait_count;
+        }
+        if (job.download_wait.is_pending() && !job.download_wait.has_reached())
+        {
+            waits[wait_count] = job.download_wait.group->timeline;
+            wait_values[wait_count] = job.download_wait.value;
+            ++wait_count;
+        }
 
         ++_window_next_value;
         _window_values[slot] = _window_next_value;
@@ -253,7 +265,9 @@ void vulkan_upload_async_system::process(vulkan_async_upload_job& job)
             .signalSemaphoreCount = signal_count,
             .pSignalSemaphores = signals,
         };
-        VkResult const r = vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE);
+        // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
+        VkResult const r = _ctx->queue_guard().lock(
+            [&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
         CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
     }
 }
@@ -288,6 +302,8 @@ void vulkan_upload_async_system::upload_buffer(sg::raw_buffer_handle const& buff
     // Reverse: captured now rather than at stage time, so a list submitted after this cannot be waited on by it.
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
+    if (auto const pending = dst->_pending_async_download_value.load(cc::memory_order_acquire); pending != 0)
+        job.download_wait = {.group = dst->_download_group, .value = pending};
 
     _actor->enqueue_message(cc::move(job));
 }

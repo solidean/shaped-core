@@ -672,6 +672,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // nowhere to stage without it.
     if (auto async = ctx->_upload_async.initialize(*ctx, config.async_upload_window_bytes); async.has_error())
         return cc::error(cc::move(async).error());
+    if (auto async = ctx->_download_async.initialize(*ctx, config.async_download_window_bytes); async.has_error())
+        return cc::error(cc::move(async).error());
 
     // The extension was required above, so a missing entry point here is a driver that advertises it without
     // implementing it — worth failing on rather than discovering at the first descriptor write.

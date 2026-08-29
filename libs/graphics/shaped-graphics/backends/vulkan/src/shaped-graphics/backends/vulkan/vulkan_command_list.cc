@@ -192,7 +192,8 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 .signalSemaphoreCount = signal_count,
                 .pSignalSemaphores = signal_semaphores,
             };
-            VkResult const sr = vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE);
+            VkResult const sr
+                = _queue_guard.lock([&](int&) { return vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE); });
             // Record device loss here but don't throw inside the lock; the throw happens after it releases.
             if (sr != VK_SUCCESS && !note_device_lost_if_lost(sr, "vkQueueSubmit"))
                 CC_ASSERT(false, "vkQueueSubmit failed");

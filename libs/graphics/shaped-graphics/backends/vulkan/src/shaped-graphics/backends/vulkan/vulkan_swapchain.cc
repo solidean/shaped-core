@@ -250,7 +250,7 @@ sg::render_target_view vulkan_swapchain::acquire_backbuffer()
             _last_resize_epoch = epoch;
             if (tg::vec2i const client = current_extent(); client != _size && client[0] > 0 && client[1] > 0)
             {
-                vkDeviceWaitIdle(_ctx._device);
+                _ctx.queue_guard().lock([&](int&) { vkDeviceWaitIdle(_ctx._device); });
                 if (auto r = build(client); r.has_error())
                     throw sg::exception(cc::format("swapchain resize failed: {}", cc::move(r).error()));
             }
@@ -265,7 +265,7 @@ sg::render_target_view vulkan_swapchain::acquire_backbuffer()
     // Rebuild and retry once — twice in a row means something other than a resize is wrong.
     if (r == VK_ERROR_OUT_OF_DATE_KHR)
     {
-        vkDeviceWaitIdle(_ctx._device);
+        _ctx.queue_guard().lock([&](int&) { vkDeviceWaitIdle(_ctx._device); });
         if (auto rebuilt = build(current_extent()); rebuilt.has_error())
             throw sg::exception(cc::format("swapchain rebuild failed: {}", cc::move(rebuilt).error()));
         r = vkAcquireNextImageKHR(_ctx._device, _swapchain, UINT64_MAX, _acquire_semaphores[_frame], VK_NULL_HANDLE,
@@ -320,7 +320,7 @@ void vulkan_swapchain::present()
         .pSwapchains = &_swapchain,
         .pImageIndices = &_acquired_index,
     };
-    VkResult const r = vkQueuePresentKHR(_ctx._queue, &info);
+    VkResult const r = _ctx.queue_guard().lock([&](int&) { return vkQueuePresentKHR(_ctx._queue, &info); });
 
     // Both of these mean "rebuild", which the next acquire does — presenting is not the place to drain the GPU.
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR && r != VK_ERROR_OUT_OF_DATE_KHR)
@@ -338,7 +338,7 @@ vulkan_swapchain::~vulkan_swapchain()
     // Borrowed images and semaphores the presentation engine may still hold, so this waits rather than deferring:
     // a swapchain outlives no epoch, and its images are not ours to hand to the deletion queue.
     if (_ctx._device != VK_NULL_HANDLE)
-        vkDeviceWaitIdle(_ctx._device);
+        _ctx.queue_guard().lock([&](int&) { vkDeviceWaitIdle(_ctx._device); });
 
     _backbuffers.clear();
     for (auto const s : _acquire_semaphores)

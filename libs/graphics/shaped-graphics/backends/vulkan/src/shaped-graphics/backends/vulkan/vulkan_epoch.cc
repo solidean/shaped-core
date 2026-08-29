@@ -41,7 +41,7 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &_epoch_timeline,
     };
-    VkResult const r = vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE);
+    VkResult const r = _queue_guard.lock([&](int&) { return vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE); });
     if (r != VK_SUCCESS)
     {
         if (note_device_lost_if_lost(r, "epoch signal vkQueueSubmit"))
@@ -158,10 +158,28 @@ void vulkan_context::process_completed_epochs()
     _download_inline.on_epochs_completed(sg::epoch(completed));
     _descriptor_heap.on_epochs_completed(sg::epoch(completed));
 
+    // A resource still named by an unfinished transfer-queue copy is put back rather than released, and retried on
+    // a later cycle — the epoch says the graphics queue is done with it, not the transfer queue.
+    cc::vector<vulkan_expiring_resource> deferred;
     cc::vector<cc::unique_function<void()>> finalizers;
     for (auto& e : done)
         for (auto& res : e.expiring)
+        {
+            if (res.copy_wait.is_pending() && !res.copy_wait.has_reached())
+            {
+                deferred.push_back(cc::move(res));
+                continue;
+            }
             release_expiring(_device, res, finalizers);
+        }
+
+    if (!deferred.empty())
+        _epoch_state.lock(
+            [&](vulkan_epoch_state& s)
+            {
+                for (auto& res : deferred)
+                    s.staged.push_back(cc::move(res));
+            });
 
     // Run finalizers outside the lock — they may be slow or re-entrant, and the thread is not fixed.
     for (auto& f : finalizers)

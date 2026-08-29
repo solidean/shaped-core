@@ -18,6 +18,9 @@ struct vulkan_async_upload_job;      // one async upload handed to the copy acto
 struct vulkan_transfer_wake;         // a bare wake for the copy actor
 class vulkan_upload_actor;           // drains async uploads in enqueue order
 class vulkan_upload_async_system;    // ctx.upload's transfer-queue system
+struct vulkan_async_download_job;    // one async readback handed to the readback actor
+class vulkan_download_async_actor;   // drains them in enqueue order
+class vulkan_download_async_system;  // ctx.download's transfer-queue system
 struct vulkan_download_copy_job;     // one staged readback awaiting its copy-out (see vulkan_download_inline.hh)
 class vulkan_download_actor;         // drains them in submission order
 class vulkan_download_inline_system; // the readback ring

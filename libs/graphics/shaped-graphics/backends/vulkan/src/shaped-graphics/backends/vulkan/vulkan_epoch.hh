@@ -6,6 +6,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/fwd.hh>
 
 namespace sg::backend::vulkan
@@ -38,6 +39,14 @@ struct sg::backend::vulkan::vulkan_expiring_resource
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     cc::vector<cc::unique_function<void()>> finalizers;
+
+    /// A transfer-queue copy that must finish before this may be released.
+    ///
+    /// The epoch alone is not enough: async transfer runs on its own queue and is deliberately decoupled from the
+    /// epoch cycle, so a buffer released in epoch N may still be the source or destination of a copy the transfer
+    /// queue has not reached.
+    /// An entry whose value has not been reached is put back and retried on a later cycle.
+    vulkan_group_value copy_wait;
 };
 
 /// Everything one epoch owns and must reclaim once its GPU work finishes.

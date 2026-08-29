@@ -32,6 +32,10 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     /// Captured at *enqueue*, not at stage time: a token created later could belong to a list that is itself waiting
     /// on this upload, which is the cycle the interleaved-writes test exists to catch.
     sg::submission_token wait_token = sg::submission_token::not_submitted;
+
+    /// And until any async readback of the same buffer has finished, so a write never overtakes a read that is
+    /// already in flight on the other transfer queue.
+    vulkan_group_value download_wait;
 };
 
 /// Drains uploads in enqueue order, which is what preserves the per-destination ordering a completion timeline

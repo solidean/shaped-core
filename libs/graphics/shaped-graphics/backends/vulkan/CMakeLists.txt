@@ -11,6 +11,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_completion_group.cc
+    src/shaped-graphics/backends/vulkan/vulkan_download_async.cc
     src/shaped-graphics/backends/vulkan/vulkan_upload_async.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc

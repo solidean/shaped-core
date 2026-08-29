@@ -138,10 +138,11 @@ void vulkan_context::shutdown()
 
     if (_device != VK_NULL_HANDLE)
     {
-        vkDeviceWaitIdle(_device);
+        _queue_guard.lock([&](int&) { vkDeviceWaitIdle(_device); });
 
         // Before the device: the ring holds a buffer and a mapped allocation on it.
         _upload_async.shutdown(); // drains its queue and idles the transfer queue before anything it reads goes
+        _download_async.shutdown();
         _upload_inline.shutdown();
         _download_inline.shutdown(); // drains its actor first, which memcpys out of the ring
         _descriptor_heap.shutdown();

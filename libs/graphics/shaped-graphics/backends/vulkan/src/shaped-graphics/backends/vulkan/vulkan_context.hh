@@ -13,6 +13,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_compute_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_download_async.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
@@ -61,6 +62,9 @@ struct sg::backend::vulkan::vulkan_config
     /// Three of these are allocated, so CPU staging and GPU copy overlap; an upload larger than one packs across
     /// successive windows.
     isize async_upload_window_bytes = 4 * 1024 * 1024;
+
+    /// The same, for ctx.download's readback windows.
+    isize async_download_window_bytes = 4 * 1024 * 1024;
 
     /// Capacity of the descriptor heap, in bytes, and the share of it reserved for transient binding groups.
     /// Sized in bytes rather than in descriptors because a descriptor's size is a device property.
@@ -121,6 +125,17 @@ public:
 
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
+
+    /// Serializes every queue operation on this device.
+    ///
+    /// **Vulkan queues are externally synchronized; D3D12's are free-threaded.**
+    /// That is invisible until a second thread submits — and async transfer is exactly that, with two copy actors
+    /// submitting while the app submits graphics work.
+    /// Per-queue locks would cover vkQueueSubmit, but vkDeviceWaitIdle needs *every* queue at once, so one device-wide
+    /// guard is both simpler and the only thing that makes an idle-wait safe.
+    ///
+    /// Contention is not the concern it looks: a submit is a short call, and the work it queues runs outside the lock.
+    [[nodiscard]] cc::mutex<int>& queue_guard() const { return _queue_guard; }
 
     /// The queues async transfer runs on, and the family they belong to.
     ///
@@ -391,10 +406,11 @@ public:
         CC_UNREACHABLE("vulkan async texture upload is not implemented yet");
     }
 
-    // Async download (ctx.download) — not implemented yet, and aborts rather than handing back an unbacked bytes_future.
-    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle, isize, isize) override
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                                    isize offset,
+                                                                    isize size_in_bytes) override
     {
-        CC_UNREACHABLE("vulkan async download is not implemented yet");
+        return _download_async.download_buffer(buffer, offset, size_in_bytes);
     }
     [[nodiscard]] sg::bytes_future async_download_bytes_from_texture(sg::raw_texture_handle,
                                                                      sg::subresource_index const&,
@@ -507,8 +523,9 @@ public:
     /// The staging ring behind cmd.upload; owned here because its space is reclaimed on the epoch cycle.
     vulkan_upload_inline_system _upload_inline;
 
-    /// The transfer-queue system behind ctx.upload, which is epoch-independent.
+    /// The transfer-queue systems behind ctx.upload / ctx.download, which are epoch-independent.
     vulkan_upload_async_system _upload_async;
+    vulkan_download_async_system _download_async;
 
     /// The readback ring behind cmd.download, and the actor that drains it.
     vulkan_download_inline_system _download_inline;
@@ -550,6 +567,10 @@ public:
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;
     bool _headless_surface_supported = false;
+
+    // See queue_guard.
+    // Mutable so a const context can still be submitted through.
+    mutable cc::mutex<int> _queue_guard;
 
     // See upload_queue / download_queue.
     // Owned by the device, so nothing destroys them.

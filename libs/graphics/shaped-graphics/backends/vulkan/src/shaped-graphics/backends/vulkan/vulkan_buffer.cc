@@ -37,6 +37,18 @@ void vulkan_buffer::release_storage() const
     expiring.buffer = _buffer;
     expiring.memory = _memory;
     expiring.finalizers = cc::move(_finalizers);
+
+    // The transfer queue may still be copying into or out of this buffer, which the epoch says nothing about.
+    // Both directions share one entry, so the gate takes whichever timeline actually has something pending — they
+    // are different groups, and a value from one means nothing on the other.
+    auto const upload_pending = _pending_async_upload_value.load(cc::memory_order_acquire);
+    auto const stream_pending = _pending_stream_copy_value.load(cc::memory_order_acquire);
+    auto const download_pending = _pending_async_download_value.load(cc::memory_order_acquire);
+    auto const highest_upload = upload_pending > stream_pending ? upload_pending : stream_pending;
+    if (highest_upload != 0 && _upload_group != nullptr)
+        expiring.copy_wait = {.group = _upload_group, .value = highest_upload};
+    else if (download_pending != 0 && _download_group != nullptr)
+        expiring.copy_wait = {.group = _download_group, .value = download_pending};
     _buffer = VK_NULL_HANDLE;
     _memory = VK_NULL_HANDLE;
     _ctx.schedule_deferred_deletion(cc::move(expiring));
