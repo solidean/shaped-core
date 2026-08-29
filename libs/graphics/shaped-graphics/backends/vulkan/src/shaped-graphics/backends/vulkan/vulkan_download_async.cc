@@ -214,7 +214,7 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
             // side left, and hand the texture back in `general`, recorded on the tracker.
             auto const range = sg::subresource_range(job.subresource);
             auto const current = texture->canonical_layout_of(range);
-            auto const sub_range = VkImageSubresourceRange{.aspectMask = vk_aspect_mask_from(range),
+            auto const sub_range = VkImageSubresourceRange{.aspectMask = vk_aspect_mask_from(range, texture->format()),
                                                            .baseMipLevel = u32(job.subresource.mip_level),
                                                            .levelCount = 1,
                                                            .baseArrayLayer = u32(job.subresource.array_layer),
@@ -243,7 +243,7 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
                 .bufferOffset = VkDeviceSize(isize(slot) * _window_bytes),
                 .bufferRowLength = 0,
                 .bufferImageHeight = 0,
-                .imageSubresource = {.aspectMask = vk_aspect_mask_from(range),
+                .imageSubresource = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
                                      .mipLevel = u32(job.subresource.mip_level),
                                      .baseArrayLayer = u32(job.subresource.array_layer),
                                      .layerCount = 1},

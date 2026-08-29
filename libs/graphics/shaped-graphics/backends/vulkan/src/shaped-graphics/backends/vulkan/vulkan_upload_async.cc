@@ -499,7 +499,7 @@ bool vulkan_upload_async_system::run_one_window()
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = texture->_image,
-            .subresourceRange = {.aspectMask = vk_aspect_mask_from(range),
+            .subresourceRange = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
                                  .baseMipLevel = u32(job.subresource.mip_level),
                                  .levelCount = 1,
                                  .baseArrayLayer = u32(job.subresource.array_layer),
@@ -517,7 +517,7 @@ bool vulkan_upload_async_system::run_one_window()
             .bufferOffset = VkDeviceSize(isize(slot) * _window_bytes),
             .bufferRowLength = 0, // tightly packed to imageExtent, which is what sg hands over
             .bufferImageHeight = 0,
-            .imageSubresource = {.aspectMask = vk_aspect_mask_from(range),
+            .imageSubresource = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
                                  .mipLevel = u32(job.subresource.mip_level),
                                  .baseArrayLayer = u32(job.subresource.array_layer),
                                  .layerCount = 1},

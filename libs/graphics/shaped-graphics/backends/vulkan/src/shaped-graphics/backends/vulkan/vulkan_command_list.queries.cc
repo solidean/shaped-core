@@ -88,8 +88,18 @@ void vulkan_command_list::finalize_queries_before_close()
         offset_bytes += size_bytes;
     }
 
+    // Returned through the epoch rather than straight away.
+    //
+    // A pool is reset on the HOST when it is next leased, and `vkResetQueryPool` is illegal while any command still
+    // pending references the pool — which the copy just recorded above is, right up until this epoch retires.
+    // Handing it back at submit therefore lets the next frame reset a pool the GPU is still writing.
     for (auto& lease : _leased_query_pools)
-        _ctx._query_system.release_pool(cc::move(lease));
+    {
+        auto expiring = vulkan_expiring_resource();
+        expiring.finalizers.push_back([system = &_ctx._query_system, held = cc::move(lease)]() mutable
+                                      { system->release_pool(cc::move(held)); });
+        _ctx.schedule_deferred_deletion(cc::move(expiring));
+    }
     _leased_query_pools.clear();
     _active_timestamp_lease = -1;
 }
@@ -98,6 +108,7 @@ void vulkan_command_list::release_queries_on_drop()
 {
     // A dropped list never runs, so its pools go back unresolved and every handle keeps its invalid future — which
     // is exactly what "forever not ready" means for a timestamp whose list was dropped.
+    // Straight back rather than through the epoch: nothing was submitted, so no pending command references them.
     for (auto& lease : _leased_query_pools)
         _ctx._query_system.release_pool(cc::move(lease));
     _leased_query_pools.clear();

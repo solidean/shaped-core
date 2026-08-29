@@ -27,7 +27,7 @@ namespace sg::backend::vulkan
 [[nodiscard]] VkImageLayout vk_layout_from(sg::texture_layout layout);
 
 /// The aspect mask a subresource range's aspect span covers.
-[[nodiscard]] VkImageAspectFlags vk_aspect_mask_from(sg::subresource_range const& range);
+[[nodiscard]] VkImageAspectFlags vk_aspect_mask_from(sg::subresource_range const& range, sg::pixel_format format);
 
 /// A whole-buffer memory barrier for `barrier`.
 /// Vulkan can scope a buffer barrier to a byte range, but sg tracks access per resource rather than per range, so
@@ -37,8 +37,10 @@ namespace sg::backend::vulkan
 /// An image barrier for `barrier`, scoped to `range`.
 /// A `src_layout` of `undefined` means the previous contents are not preserved, which is exactly what Vulkan's
 /// `VK_IMAGE_LAYOUT_UNDEFINED` as an old layout already says — so a discard needs no separate flag.
+/// `format` is the texture's own, and is what turns the range's positional aspect indices into aspect bits.
 [[nodiscard]] VkImageMemoryBarrier2 make_image_barrier(VkImage image,
                                                        sg::subresource_range const& range,
+                                                       sg::pixel_format format,
                                                        sg::access_barrier const& barrier);
 
 /// Records one `vkCmdPipelineBarrier2` for everything staged, or nothing at all when both spans are empty.

@@ -128,20 +128,21 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         async_wait_values.push_back(value);
     };
 
-    for (auto const* buffer : cmd->_touched_buffers)
+    for (auto const& buffer : cmd->_touched_buffers)
     {
         add_async_wait(buffer->_upload_group, buffer->_pending_async_upload_value.load(cc::memory_order_acquire));
         add_async_wait(buffer->_download_group, buffer->_pending_async_download_value.load(cc::memory_order_acquire));
     }
 
-    for (auto const* buffer : cmd->_touched_buffers)
+    for (auto const& buffer : cmd->_touched_buffers)
         buffer->finalize_slot(cmd->slot());
 
     // A texture finalize can return barriers — reverting to the canonical layout when other lists are still open —
     // so they are recorded onto this list before it closes.
-    for (auto const* texture : cmd->_touched_textures)
+    for (auto const& texture : cmd->_touched_textures)
         for (auto const& sub : texture->finalize_slot(cmd->slot()))
-            cmd->_pending_image_barriers.push_back(make_image_barrier(texture->_image, sub.range, sub.barrier));
+            cmd->_pending_image_barriers.push_back(
+                make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
     cmd->_touched_textures.clear();
     submit_barriers(cmd->_buffer, {}, cmd->_pending_image_barriers);
     cmd->_pending_image_barriers.clear();
@@ -205,7 +206,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             // The reverse half of async sync: a later async transfer on any of these buffers defers behind this
             // token, so it never overwrites bytes this list still reads.
             // Stamped inside the lock, so the token a transfer captures is never one from a list submitted after it.
-            for (auto const* buffer : cmd->_touched_buffers)
+            for (auto const& buffer : cmd->_touched_buffers)
             {
                 u64 const stamp = u64(t);
                 u64 previous = buffer->_last_used_submission_token.load(cc::memory_order_relaxed);
@@ -258,10 +259,10 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     // untouched — including when it was the last list tracking a buffer.
     cmd.release_queries_on_drop();
 
-    for (auto const* buffer : cmd._touched_buffers)
+    for (auto const& buffer : cmd._touched_buffers)
         buffer->discard_slot(cmd.slot());
     cmd._touched_buffers.clear();
-    for (auto const* texture : cmd._touched_textures)
+    for (auto const& texture : cmd._touched_textures)
         texture->discard_slot(cmd.slot());
     cmd._touched_textures.clear();
 
@@ -294,7 +295,7 @@ void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
 
     // Once per list, so submit can finalize the slot and drop can discard it.
     if (buffer.mark_recorded(_slot))
-        _touched_buffers.push_back(&buffer);
+        _touched_buffers.push_back(std::static_pointer_cast<vulkan_buffer const>(buffer.shared_from_this()));
 }
 
 void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
@@ -312,7 +313,7 @@ void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
         _pending_barrier_textures.push_back(&texture);
 
     if (texture.mark_recorded(_slot))
-        _touched_textures.push_back(&texture);
+        _touched_textures.push_back(std::static_pointer_cast<vulkan_texture const>(texture.shared_from_this()));
 }
 
 void vulkan_command_list::flush_barriers()
@@ -324,7 +325,8 @@ void vulkan_command_list::flush_barriers()
     // A texture flush is per subresource box, so one texture may contribute several barriers.
     for (auto const* texture : _pending_barrier_textures)
         for (auto const& sub : texture->flush_access(_slot))
-            _pending_image_barriers.push_back(make_image_barrier(texture->_image, sub.range, sub.barrier));
+            _pending_image_barriers.push_back(
+                make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
 
     _pending_barrier_buffers.clear();
     _pending_barrier_textures.clear();
@@ -370,10 +372,11 @@ struct texture_staging_layout
 }
 
 // The image subresource one sg subresource_index addresses.
-[[nodiscard]] VkImageSubresourceLayers image_subresource_of(sg::subresource_index const& sub)
+// The format is what turns its positional aspect index into a Vulkan aspect bit; see sg::format_aspect_at.
+[[nodiscard]] VkImageSubresourceLayers image_subresource_of(sg::subresource_index const& sub, sg::pixel_format format)
 {
     return VkImageSubresourceLayers{
-        .aspectMask = vk_aspect_mask_from(sg::subresource_range(sub)),
+        .aspectMask = vk_aspect_mask_from(sg::subresource_range(sub), format),
         .mipLevel = u32(sub.mip_level),
         .baseArrayLayer = u32(sub.array_layer),
         .layerCount = 1,
@@ -410,7 +413,7 @@ void vulkan_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
         // Zero means tightly packed to imageExtent, which is exactly what sg hands us.
         .bufferRowLength = 0,
         .bufferImageHeight = 0,
-        .imageSubresource = image_subresource_of(subresource),
+        .imageSubresource = image_subresource_of(subresource, dst->description().format),
         .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
         .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
     };
@@ -444,7 +447,7 @@ sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_textur
         .bufferOffset = VkDeviceSize(staging.offset),
         .bufferRowLength = 0,
         .bufferImageHeight = 0,
-        .imageSubresource = image_subresource_of(subresource),
+        .imageSubresource = image_subresource_of(subresource, src->description().format),
         .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
         .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
     };

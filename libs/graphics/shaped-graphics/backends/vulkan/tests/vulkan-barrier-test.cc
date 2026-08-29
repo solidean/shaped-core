@@ -67,15 +67,26 @@ TEST("sg vulkan - an undefined source layout is the discard")
     CHECK(vulkan::vk_layout_from(sg::texture_layout::undefined) == VK_IMAGE_LAYOUT_UNDEFINED);
 }
 
-TEST("sg vulkan - aspect masks come from the range's aspect span")
+TEST("sg vulkan - aspect masks come from the range's aspect span, read against the format")
 {
-    auto color = sg::subresource_range();
-    CHECK(vulkan::vk_aspect_mask_from(color) == VK_IMAGE_ASPECT_COLOR_BIT);
+    // An aspect index is POSITIONAL within its format's planes, so the same range means a different aspect for a
+    // different format — plane 0 is color on a color texture and depth on a depth one.
+    // Reading the index as a texture_aspect value instead names the color plane of a depth image, which Vulkan
+    // rejects on every barrier and every image view.
+    auto whole = sg::subresource_range();
+    CHECK(vulkan::vk_aspect_mask_from(whole, sg::pixel_format::rgba8_unorm) == VK_IMAGE_ASPECT_COLOR_BIT);
+    CHECK(vulkan::vk_aspect_mask_from(whole, sg::pixel_format::depth32_float) == VK_IMAGE_ASPECT_DEPTH_BIT);
 
-    // A depth+stencil range spans two aspects and must produce both bits in one mask.
+    // A depth+stencil format is the only two-plane one, and a range spanning both must produce both bits in one mask.
     auto depth_stencil = sg::subresource_range();
-    depth_stencil.aspect_range = {.start = int(sg::texture_aspect::depth), .end = int(sg::texture_aspect::stencil) + 1};
-    CHECK(vulkan::vk_aspect_mask_from(depth_stencil) == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT));
+    depth_stencil.aspect_range = {.start = 0, .end = 2};
+    CHECK(vulkan::vk_aspect_mask_from(depth_stencil, sg::pixel_format::depth32_float_stencil8)
+          == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT));
+
+    auto stencil_only = sg::subresource_range();
+    stencil_only.aspect_range = {.start = 1, .end = 2};
+    CHECK(vulkan::vk_aspect_mask_from(stencil_only, sg::pixel_format::depth32_float_stencil8)
+          == VK_IMAGE_ASPECT_STENCIL_BIT);
 }
 
 TEST("sg vulkan - an image barrier carries the range as counts, not endpoints")
@@ -95,7 +106,7 @@ TEST("sg vulkan - an image barrier carries the range as counts, not endpoints")
     barrier.src_layout = sg::texture_layout::copy_dst;
     barrier.dst_layout = sg::texture_layout::shader_readonly;
 
-    auto const b = vulkan::make_image_barrier(VkImage(nullptr), range, barrier);
+    auto const b = vulkan::make_image_barrier(VkImage(nullptr), range, sg::pixel_format::rgba8_unorm, barrier);
     CHECK(b.subresourceRange.baseMipLevel == 2);
     CHECK(b.subresourceRange.levelCount == 3);
     CHECK(b.subresourceRange.baseArrayLayer == 1);

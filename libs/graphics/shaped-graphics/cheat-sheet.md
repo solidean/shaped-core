@@ -11,7 +11,7 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 > **Scope note:** this sheet covers the surface that exists today.
 > The sg core API and the **dx12** backend are real.
 > The **vulkan** backend is real across the whole surface too, and runs the same tier-1 API suite dx12 does.
-> One gap remains there: a windowed swapchain off Windows, which needs a platform-tagged window handle sg does not carry yet.
+> A windowed swapchain needs the platform's development headers at build time, and reports the platform by name where they were missing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
@@ -353,6 +353,8 @@ sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)
+sg::format_aspect_at(f, i)      // texture_aspect — the plane at POSITIONAL index i: 0 is color on a color format,
+                                //   depth on a depth one. Never cast an aspect index to texture_aspect directly.
 ```
 
 ## texture — GPU-resident texture  (raw resource + typed wrapper)
@@ -455,14 +457,18 @@ v.aspect_ratio()             // -> float  width/height; both clamped >= 1, so ne
 sg::is_render_target_format(f) // bool — a renderable color format (not depth, not compressed, not undefined)
 ```
 
-## swapchain — window presentation  (see docs/concepts/presentation.md; dx12 real, via ctx.create_swapchain)
+## swapchain — window presentation  (see docs/concepts/presentation.md; dx12 + vulkan, via ctx.create_swapchain)
 
 ```cpp
 #include <shaped-graphics/present/swapchain.hh>
-sg::swapchain_description       // { void* native_window_handle=nullptr (HWND on Windows); int buffer_count=2 (>=2);
-                                //   pixel_format format=bgra8_unorm; present_mode present_mode=vsync; bool enable_hdr=false }
+sg::swapchain_description       // { native_window window; int buffer_count=2 (>=2); pixel_format format=bgra8_unorm;
+                                //   present_mode present_mode=vsync; bool enable_hdr=false;
+                                //   cc::optional<tg::isize2> headless_extent (set => no window, fixed size) }
+sg::native_window               // { window_platform platform; void* display; void* handle; u64 window_id }
+                                //   win32: handle=HWND | xlib/xcb: display + window_id | wayland: display + handle
+                                //   .is_valid() states which slots that platform needs; ::from_win32(hwnd) is the shorthand
 sg::present_mode                // vsync (wait for vblank) | immediate (uncapped, may tear)
-auto sc = ctx.create_swapchain({.native_window_handle = hwnd});   // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
+auto sc = ctx.create_swapchain({.window = win->native_window()});  // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
 // per frame:
 auto rt = sc->acquire_backbuffer();   // -> render_target_view for the current back buffer (auto-resizes to the window, once/epoch)
 auto size = rt.size();                   // -> tg::vec2i, THIS frame's size — the swapchain has no size getter (a later acquire may resize)
@@ -470,7 +476,7 @@ float aspect = rt.aspect_ratio();        // -> float, for the projection; rt.wid
 //   ... render into rt this frame (rt.cleared(color) / cmd.raster.render_to({.color_targets = {...}})) ...
 ctx.submit_command_list_and_present(*sc, std::move(cmd));  // the present path: folds the present-layout transition into cmd,
                                                            //   submits, then presents — exactly one per successful acquire
-sc->format() sc->buffer_count() sc->present_mode() sc->is_hdr_enabled() sc->native_window_handle() sc->description()
+sc->format() sc->buffer_count() sc->present_mode() sc->is_hdr_enabled() sc->window() sc->description()
 // acquire / submit_command_list_and_present throw sg::device_lost_exception on device loss. Bad handle / count / format asserts.
 ```
 
@@ -487,7 +493,8 @@ sg::sampler_border_color    // transparent_black | opaque_black | opaque_white  
 sg::compare_op              // never|less|equal|less_equal|greater|not_equal|greater_equal|always (comparison/shadow sampler)
 // two ways in (see the bind path): STATIC = named_sampler on create_binding_group_layout (baked into the pipeline layout's root sig);
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
-// dx12 only; a cube UAV analogue — samplers live in their own descriptor heap + root table.
+// both backends: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
+//   layout's immutable samplers. A pipeline-level static sampler (one on no group) is dx12 only so far.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -523,7 +530,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 // data model only: no compiler yet (construct by hand / future loader)
 ```
 
-## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (dx12 real; vulkan stubs)
+## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (both backends real)
 
 ```cpp
 #include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
@@ -647,11 +654,11 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> b
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
 // blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
-//   dx12 real (WARP); vulkan is_supported()==false + stubs.
+//   both backends real (dx12 on WARP).
 tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RayQuery, or a full TraceRay pipeline)
 ```
 
-## raytracing pipeline + shader table + dispatch_rays  (dx12 real on WARP; see docs/concepts/raytracing-pipeline.md)
+## raytracing pipeline + shader table + dispatch_rays  (both backends real; see docs/concepts/raytracing-pipeline.md)
 
 ```cpp
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
@@ -773,7 +780,7 @@ h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info, con
 // protected pure-virtual query_buffer_requirements(size, usage) is the backend hook both public methods build on
 // flow: query reqs -> your allocator picks offset -> h.acquire_allocation_for_*(...) -> pass allocation_info to create_*
 // create_raw_buffer takes the allocation_info; dedicated and placed both work on dx12 (CreatePlacedResource).
-// Textures are not placeable — memory_heap only sizes buffers. vulkan stubs heaps and placement entirely.
+// Textures are not placeable — memory_heap only sizes buffers.
 ```
 
 ## backends — subclass the abstract sg types

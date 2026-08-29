@@ -316,6 +316,35 @@ path.
 **Collect every owner first, then build the structs that point into them**, and keep that shape even where the counts
 look small enough not to matter.
 
+## Write an example the moment the backend passes the suite
+
+The vulkan backend passed all 135 tier-1 tests and the whole `check` gate, and then a first example — a rotating cube,
+about 300 lines — found four bugs in an afternoon.
+Every one of them is a lifetime or reuse question, and every one is invisible to a suite by construction.
+
+- **A per-frame transient texture released before its list is submitted.**
+  Vulkan's touched-resource lists held raw pointers where dx12 held handles, so the per-list access state was
+  finalized on a freed object.
+  A test builds a resource, uses it and drops it in one scope; a frame loop drops it *mid*-scope, every frame.
+- **A view cache keyed on a resource address.**
+  The address of a per-frame texture is recycled, so a new texture inherited the previous one's `VkImageView` — of an
+  image that no longer existed.
+  Intermittent by allocator luck, which is exactly the failure a suite reports as flaky and a frame loop reports every
+  few seconds.
+- **A query pool returned to its free list at submit rather than at epoch retire.**
+  It is reset on the host when next leased, and that is illegal while a pending command still names it — which a
+  single-submit-then-wait test never exercises.
+- **An aspect index read as a `texture_aspect` value.**
+  Plane 0 is `color` on a color format and `depth` on a depth one, so the first depth attachment anywhere produced a
+  barrier with the wrong aspect bit.
+  No tier-1 test had a depth target.
+
+The common shape is that **a test runs each path once and a frame runs it sixty times a second**, against resources
+whose addresses and slots are recycled.
+So the example is not a victory lap — it is the first test of reuse, and it is cheap.
+Write one as soon as raster works, run it under `--capture` (which needs no display) and under the sanitize preset,
+and repeat it a dozen times: the intermittent ones only show up in a batch.
+
 ## House conventions that bite a newcomer
 
 Small, and each costs a build cycle to rediscover.

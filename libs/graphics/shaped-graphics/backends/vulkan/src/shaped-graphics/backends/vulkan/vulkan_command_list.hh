@@ -157,10 +157,14 @@ public:
     // Also the accounting pass: a bound array binding with no declaration is an error.
     void declare_array_accesses();
 
-    // Every buffer this list has tracked, so submit can finalize each slot and drop can discard it.
-    // Public so the context can walk it at submit; deduplicated by vulkan_buffer::mark_recorded.
-    cc::vector<vulkan_buffer const*> _touched_buffers;
-    cc::vector<vulkan_texture const*> _touched_textures;
+    // Every resource this list has tracked, so submit can finalize each slot and drop can discard it.
+    // Public so the context can walk it at submit; deduplicated by mark_recorded.
+    //
+    // Owning, and that is the point: a transient resource is released the moment its handle leaves scope, which for
+    // a per-frame depth buffer is normally before the list is submitted.
+    // The per-slot access state lives on the resource, so finalize would then run on a freed object.
+    cc::vector<vulkan_buffer_handle> _touched_buffers;
+    cc::vector<vulkan_texture_handle> _touched_textures;
 
 protected:
     // Stages the bytes in the context's upload ring and records a copy out of it.

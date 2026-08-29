@@ -19,7 +19,14 @@
 /// that hash over exactly the fields reaching a descriptor, so two equal views share one image view by construction.
 
 /// Creates and owns the VkImageViews a texture descriptor needs.
-/// One per context; a view is created on first use and lives until the context goes.
+/// One per context; a view is created on first use and lives until its texture is released.
+///
+/// **A cached view is dropped with its texture, and that is load-bearing rather than tidy.**
+/// Both keys hash the texture's address, and a transient texture is destroyed and recreated every frame — so a new
+/// one landing on a freed one's address would otherwise inherit its entry and hand back a view of an image that no
+/// longer exists.
+/// The drop rides the texture's own finalizer, so it happens exactly when the VkImage does: at epoch retire, once
+/// the GPU is done with both.
 class sg::backend::vulkan::vulkan_image_view_cache
 {
 public:
@@ -45,6 +52,10 @@ public:
     void shutdown();
 
 private:
+    /// Registers a finalizer on `texture` that erases `key` from `map` and destroys the view it named.
+    /// Called once per entry, when the entry is created.
+    void forget_with_texture(sg::raw_texture const& texture, cc::mutex<cc::map<u64, VkImageView>>& map, u64 key);
+
     vulkan_context& _ctx;
     cc::mutex<cc::map<u64, VkImageView>> _views;
     cc::mutex<cc::map<u64, VkImageView>> _attachment_views;

@@ -3,6 +3,7 @@
 #include <clean-core/common/hash.hh>    // cc::make_hash (subresource_range's hidden friend)
 #include <clean-core/common/utility.hh> // cc::start_end
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/pixel_format.hh> // format_aspect_at maps an index onto a format's planes
 
 /// Subresource addressing for textures.
 /// A texture's subresource domain is the discrete grid of (mip level × array slice × aspect plane).
@@ -33,6 +34,22 @@ struct sg::subresource_extent
 
     [[nodiscard]] int total() const { return mip_count * array_count * aspect_count; }
 };
+
+namespace sg
+{
+/// The aspect plane at `index` within a format's own subresource domain.
+///
+/// The index is POSITIONAL, not a `texture_aspect` value: plane 0 is `color` for a color format and `depth` for a
+/// depth one, and only a combined depth-stencil format has a plane 1.
+/// That is what makes `format_aspect_count` a count rather than a bit set — and casting the index straight to
+/// `texture_aspect` names the color plane of a depth texture, which every graphics API rejects.
+[[nodiscard]] constexpr texture_aspect format_aspect_at(pixel_format f, int index)
+{
+    if (!is_depth_format(f))
+        return texture_aspect::color;
+    return index == 0 ? texture_aspect::depth : texture_aspect::stencil;
+}
+} // namespace sg
 
 /// Addresses a single subresource: one (mip level, array layer, aspect) point in the grid — the point analog of `subresource_range`.
 /// Defaults to the first subresource: mip 0, layer 0, color.

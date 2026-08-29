@@ -91,11 +91,11 @@ VkImageLayout vk_layout_from(sg::texture_layout layout)
     CC_UNREACHABLE("unhandled texture_layout in vk_layout_from");
 }
 
-VkImageAspectFlags vk_aspect_mask_from(sg::subresource_range const& range)
+VkImageAspectFlags vk_aspect_mask_from(sg::subresource_range const& range, sg::pixel_format format)
 {
     VkImageAspectFlags mask = 0;
     for (auto i = range.aspect_range.start; i < range.aspect_range.end; ++i)
-        switch (sg::texture_aspect(i))
+        switch (sg::format_aspect_at(format, i))
         {
         case sg::texture_aspect::color:
             mask |= VK_IMAGE_ASPECT_COLOR_BIT;
@@ -140,6 +140,7 @@ VkBufferMemoryBarrier2 make_buffer_barrier(VkBuffer buffer, sg::access_barrier c
 
 VkImageMemoryBarrier2 make_image_barrier(VkImage image,
                                          sg::subresource_range const& range,
+                                         sg::pixel_format format,
                                          sg::access_barrier const& barrier)
 {
     return VkImageMemoryBarrier2{
@@ -155,7 +156,7 @@ VkImageMemoryBarrier2 make_image_barrier(VkImage image,
         .image = image,
         .subresourceRange =
             {
-                .aspectMask = vk_aspect_mask_from(range),
+                .aspectMask = vk_aspect_mask_from(range, format),
                 .baseMipLevel = u32(range.mip_range.start),
                 .levelCount = u32(range.mip_range.end - range.mip_range.start),
                 .baseArrayLayer = u32(range.array_range.start),

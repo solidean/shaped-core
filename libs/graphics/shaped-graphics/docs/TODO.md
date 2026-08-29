@@ -4,7 +4,6 @@ Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
 - **Transfer.** Still open:
-  - the **vulkan** async and streaming implementation — `ctx.upload` / `ctx.download` / `ctx.stream` are stubs, and need the dedicated copy queue;
   - **device→device texture copy** — `cmd.copy` does buffer regions only;
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
     The ring blocks on in-flight epochs first, but with nothing in flight it asserts.
@@ -39,9 +38,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   sg's resources are polymorphic, so `default_shared_traits`' `sizeof(T)`-derived control offset cannot find the counts through a base-typed handle — the same blocker slib hits.
   They also derive from `std::enable_shared_from_this`, with 30+ `shared_from_this()` call sites and no `cc::shared_ptr` equivalent.
   See the [coding-guidelines](coding-guidelines.md) note.
-- **Backend-typed handles are inconsistently const:** `vulkan_buffer_handle` / `vulkan_texture_handle` are `shared_ptr<T>`.
-  sg's `*_handle` typedefs and dx12's backend-typed ones are `shared_ptr<T const>`.
-  Nothing needs the mutability — `add_finalizer` is `const` — so vulkan should follow dx12.
 - **`cc::atomic`:** sg still names `std::atomic` / `std::memory_order` directly.
   About 110 occurrences, across the dx12 and vulkan backends, `raw_buffer`, `raw_texture`, `bytes_future` and `acceleration_structure`.
   clean-core has migrated to [`cc::atomic`](../../../base/clean-core/src/clean-core/thread/atomic.hh), and `<atomic>` is no longer blessed to call into directly.
@@ -69,7 +65,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **SDK detection:** dx12 links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`) straight off the default lib path, with no explicit SDK presence or version check.
   vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`; its device floor is 1.3 plus descriptor_buffer and robustness2, refused by name at creation.
 - **Epoch system.** See [concepts/epochs.md](concepts/epochs.md). Still deferred:
-  - the **vulkan** async copy queue, which has neither the queue nor the per-resource pending syncs;
   - a **texture-capable transient heap** — `ctx.transient`'s bump allocator is buffers-only, so a transient texture falls back to a dedicated allocation the backend auto-expires at the next epoch.
 - **Render routines want a shared/exclusive lock, not a mutex.**
   The model to reach is: a routine's init phases exclude every `execute`, while `execute` calls that only *read* run in parallel with each other.
@@ -83,17 +78,20 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).
 - **Swapchain / presentation.** See [concepts/presentation.md](concepts/presentation.md).
-  dx12 is real; vulkan is a not-implemented `cc::error` stub.
+  Both backends are real, windowed and headless.
   Still open:
-  - the **vulkan** implementation — `VkSurfaceKHR` + `VkSwapchainKHR` + acquire/present semaphores;
-  - a proper **`native_window_handle` type** to replace the opaque `void*` in `swapchain_description`.
-    A small platform-tagged struct (HWND / xcb+window / wl_surface / NSWindow), added once a second windowing backend actually needs one;
+  - a **cocoa arm on `sg::window_platform`**, for the metal backend that would consume it — see shaped-rendering's [TODO](../../shaped-rendering/docs/TODO.md);
   - **deeper HDR** — metadata and tone-mapping beyond the colorspace set;
   - **exclusive fullscreen** and **multi-window**;
   - letting a windowed renderer thread the swapchain's back-buffer count into `advance_epoch`;
-  - a headless/offscreen present target, so the present path can be pixel-verified on CI.
-    Today the WARP swapchain test needs a real hidden window and SKIPs without one.
-    Tentative, with no caller waiting on it: shaped-viewer's headless mode does NOT need one, since it skips presenting
-    rather than presenting somewhere else.
-    So this buys sg's own suite a present path it can exercise without a window, and nothing else.
+- **A shared async pool can outlive the device a node's value belongs to.**
+  Seen once, under a full `check` (five presets building and testing at once): `vkDestroyDevice` reported two
+  `VkPipeline`s and their `VkPipelineCache`s leaked, from a tier-2 test that had already dropped every handle to them.
+  The pipeline cache releases its providers at shutdown, so the only remaining owner is the `cc::async` node the build
+  ran on — and the pool is process-wide while a device is per test.
+  Not reproduced in isolation: 40 repeats of that test, three full-suite runs and a second `check` are all green, so it
+  needs the contention.
+  The single-threaded pool had the same shape and was fixed by dropping finished nodes in `participate_until_ready`;
+  whether the threaded one retains a finished node anywhere is the thing to establish.
+
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

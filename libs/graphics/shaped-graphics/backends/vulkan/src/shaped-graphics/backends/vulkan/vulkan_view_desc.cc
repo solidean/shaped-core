@@ -115,7 +115,7 @@ VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle c
                 .format = to_vk_format(format),
                 .subresourceRange =
                     {
-                        .aspectMask = vk_aspect_mask_from(range),
+                        .aspectMask = vk_aspect_mask_from(range, format),
                         .baseMipLevel = u32(range.mip_range.start),
                         .levelCount = u32(range.mip_range.end - range.mip_range.start),
                         .baseArrayLayer = u32(range.array_range.start),
@@ -127,6 +127,7 @@ VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle c
             VkResult const r = vkCreateImageView(_ctx._device, &info, nullptr, &created);
             CC_ASSERT(r == VK_SUCCESS, "vkCreateImageView failed for a rendering-scope attachment");
             views[key] = created;
+            forget_with_texture(*texture, _attachment_views, key);
             return created;
         });
 }
@@ -151,7 +152,7 @@ VkImageView vulkan_image_view_cache::acquire(sg::raw_texture_view const& view)
                 .format = to_vk_format(view.format),
                 .subresourceRange =
                     {
-                        .aspectMask = vk_aspect_mask_from(view.range),
+                        .aspectMask = vk_aspect_mask_from(view.range, view.format),
                         .baseMipLevel = u32(view.range.mip_range.start),
                         .levelCount = u32(view.range.mip_range.end - view.range.mip_range.start),
                         .baseArrayLayer = u32(view.range.array_range.start),
@@ -163,7 +164,32 @@ VkImageView vulkan_image_view_cache::acquire(sg::raw_texture_view const& view)
             VkResult const r = vkCreateImageView(_ctx._device, &info, nullptr, &created);
             CC_ASSERT(r == VK_SUCCESS, "vkCreateImageView failed for a bound texture view");
             views[key] = created;
+            forget_with_texture(texture, _views, key);
             return created;
+        });
+}
+
+void vulkan_image_view_cache::forget_with_texture(sg::raw_texture const& texture,
+                                                  cc::mutex<cc::map<u64, VkImageView>>& map,
+                                                  u64 key)
+{
+    // Runs where the texture's own deferred release runs, so the view goes at the same moment the VkImage does.
+    // `this` outlives every texture: the cache belongs to the context, and a texture cannot survive it.
+    texture.add_finalizer(
+        [this, &map, key]
+        {
+            VkImageView doomed = VK_NULL_HANDLE;
+            map.lock(
+                [&](cc::map<u64, VkImageView>& views)
+                {
+                    if (auto const* existing = views.get_ptr(key); existing != nullptr)
+                    {
+                        doomed = *existing;
+                        views.erase(key);
+                    }
+                });
+            if (doomed != VK_NULL_HANDLE)
+                vkDestroyImageView(_ctx._device, doomed, nullptr);
         });
 }
 
