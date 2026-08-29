@@ -4,12 +4,14 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_inline.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -170,17 +172,28 @@ public:
     }
 
     // The bind path and the pipelines — not implemented yet.
+    [[nodiscard]] cc::result<vulkan_binding_group_layout_handle> create_vulkan_binding_group_layout(
+        cc::span<sg::binding const> bindings,
+        cc::span<sg::named_sampler const> static_samplers);
+
     [[nodiscard]] cc::result<sg::binding_group_layout_handle> try_create_binding_group_layout(
-        cc::span<sg::binding const>,
-        cc::span<sg::named_sampler const>,
-        sg::lifetime_scope) override
+        cc::span<sg::binding const> bindings,
+        cc::span<sg::named_sampler const> static_samplers,
+        sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan binding_group_layout creation is not implemented yet");
+        // Layouts are cached schemas, so a transient one is a category error rather than an unimplemented case.
+        CC_ASSERT(scope == sg::lifetime_scope::persistent, "binding group layouts are persistent-only");
+        return cc::result<sg::binding_group_layout_handle>(create_vulkan_binding_group_layout(bindings, static_samplers));
     }
-    [[nodiscard]] cc::result<sg::pipeline_layout_handle> try_create_pipeline_layout(sg::pipeline_layout_description const&,
-                                                                                    sg::lifetime_scope) override
+    [[nodiscard]] cc::result<vulkan_pipeline_layout_handle> create_vulkan_pipeline_layout(
+        sg::pipeline_layout_description const& desc);
+
+    [[nodiscard]] cc::result<sg::pipeline_layout_handle> try_create_pipeline_layout(
+        sg::pipeline_layout_description const& desc,
+        sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan pipeline_layout creation is not implemented yet");
+        CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipeline layouts are persistent-only");
+        return cc::result<sg::pipeline_layout_handle>(create_vulkan_pipeline_layout(desc));
     }
     [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(sg::compute_pipeline_description const&,
                                                                                       sg::lifetime_scope) override

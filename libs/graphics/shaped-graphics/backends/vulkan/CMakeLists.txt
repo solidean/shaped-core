@@ -10,9 +10,12 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
     src/shaped-graphics/backends/vulkan/vulkan_barrier.cc
+    src/shaped-graphics/backends/vulkan/vulkan_binding_group_layout.cc
+    src/shaped-graphics/backends/vulkan/vulkan_pipeline_layout.cc
     src/shaped-graphics/backends/vulkan/vulkan_buffer.cc
     src/shaped-graphics/backends/vulkan/vulkan_format.cc
     src/shaped-graphics/backends/vulkan/vulkan_memory_heap.cc
+    src/shaped-graphics/backends/vulkan/vulkan_sampler.cc
     src/shaped-graphics/backends/vulkan/vulkan_texture.cc
     src/shaped-graphics/backends/vulkan/vulkan_upload_inline.cc
 )
@@ -30,10 +33,13 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_barrier.hh
+    src/shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh
+    src/shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh
     src/shaped-graphics/backends/vulkan/vulkan_buffer.hh
     src/shaped-graphics/backends/vulkan/vulkan_buffer_access.hh
     src/shaped-graphics/backends/vulkan/vulkan_format.hh
     src/shaped-graphics/backends/vulkan/vulkan_memory_heap.hh
+    src/shaped-graphics/backends/vulkan/vulkan_sampler.hh
     src/shaped-graphics/backends/vulkan/vulkan_texture.hh
     src/shaped-graphics/backends/vulkan/vulkan_texture_access.hh
     src/shaped-graphics/backends/vulkan/vulkan_upload_inline.hh
