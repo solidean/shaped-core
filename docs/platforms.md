@@ -40,6 +40,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | WebAssembly | wasm32 | Emscripten (Clang) | 1 | CI — single-threaded, no WebGPU; runs under Node |
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
+| SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
 | WebAssembly + threads | wasm32 | Emscripten (Clang) | 3 | `-pthread`; planned |
 | WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 3 | emdawnwebgpu; planned |
 | WebAssembly — WASI | wasm32 | wasi-sdk (Clang) | 3 | planned |
@@ -47,6 +48,21 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 
 The Tier-3 WebAssembly variants have configure knobs already: `SC_THREADS`, `SC_WASM_WEBGPU` and `SC_WASM_EXCEPTIONS`.
 They fail configure today with a clear "not yet supported" message rather than building — [requirements.md](requirements.md#emscripten--wasm) owns those knobs.
+
+### SteamOS
+
+SteamOS is generic Linux x64 to the build, and Tier 2 rather than Tier 1 only because no CI runner runs it.
+It is worth naming separately anyway, because its immutable base image ships a runtime where a plain Linux assumption does not hold.
+
+- **`std::stacktrace` does not link**, so clean-core configures the empty stub and `CC_HAS_STACKTRACE` is 0.
+  The image carries `libstdc++.so` but not the `libstdc++exp` that implements `<stacktrace>`, and the LLVM toolchain's libc++ ships no `<stacktrace>` header at all.
+  An assert therefore reports "stacktrace unavailable on this platform" instead of frames.
+- **No dx12, and vulkan builds without registering a test driver**, so the cross-backend sg API tests are not compiled here — see shaped-graphics' `_sg_test_drivers`.
+  A Vulkan SDK being present is what makes SteamOS the first platform to separate "a backend builds" from "a backend can be driven".
+- **The hardware-counter budget is smaller than the PMU's counter count**, because the NMI watchdog holds a PMC.
+  `nx::bench` discovers the usable width rather than assuming it, so this costs extra measurement passes and nothing else.
+
+None of this is SteamOS-specific in principle — any Linux without `libstdc++exp`, or with a watchdog on a PMC, behaves the same way.
 
 ## Frame pointers (`SC_FRAME_POINTERS`)
 
