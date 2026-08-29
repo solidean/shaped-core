@@ -254,7 +254,10 @@ uv run dev.py format --commit <rev>          # only the sources that commit or r
 `--commit` asks the same question of an already-committed change set instead — see [Re-checking a commit or a range](#re-checking-a-commit-or-a-range).
 
 clang-format output is not stable across major versions, so the command pins to the major version declared by `.clang-format`'s `Requires: clang-format >= N` header.
-It **errors** if the installed clang-format's major differs; `--allow-different-version` downgrades that to a warning and proceeds anyway.
+When the clang-format it finds is missing or a different major, it fetches the pinned build into `tools/bin/` and uses that.
+That is a ~1.5 MB download, once per machine, owned by [tools/bin/fetch-clang-format.py](../../tools/bin/fetch-clang-format.py).
+The fetched binary is gitignored, and it outranks PATH precisely because its version is the one we chose.
+It **errors** only when that fails too, and `--allow-different-version` downgrades the surviving mismatch to a warning; `SC_SKIP_CLANG_FORMAT_FETCH=1` opts out of the fetch entirely.
 Like every other step, the clang-format run is captured under `build/run-logs/`.
 Before committing, prefer `uv run dev.py check --fix`, which runs this check and the others in one shot — see [Pre-commit checks](#pre-commit-checks).
 
@@ -609,6 +612,19 @@ dev.py then puts that runtime on `PATH` when launching the binaries.
 But **clang-cl's ASan is broken with C++ exceptions**: any `throw`/`catch` faults during exception dispatch, a toolchain bug reproducible with a two-line program.
 Since nexus catches test exceptions, the suite can never be green under ASan on Windows, so `sanitize-clang` is **excluded from the `check` gate** there.
 It stays available for manually ASan-checking exception-free code paths.
+
+Two things these presets change beyond turning the sanitizers on, both worth knowing before you read a report.
+
+**The allocator is different.** They set `SC_MIMALLOC=OFF`, so `cc::default_memory_resource` is `cc::system_memory_resource`.
+Every allocation then goes through the global `operator new`, which is what these tools actually intercept.
+Without that, LeakSanitizer never scans mimalloc memory and reports anything owned only by a `cc::` container as a direct leak.
+The cost is that allocation behaviour is not what the other presets do — in-place resize always declines — so a bug that only reproduces here may be the allocator rather than the code.
+[platforms.md](../platforms.md#default-allocator-sc_mimalloc) owns the knob, and it is independent of `SANITIZE`: sanitizing a mimalloc build stays available for when mimalloc itself is the suspect.
+
+**Vendored code is excluded.** [tools/cmake/sanitizer-ignorelist.txt](../../tools/cmake/sanitizer-ignorelist.txt) suppresses findings attributed to `extern/`.
+We cannot fix those without diverging from upstream, and a finding nobody will ever act on trains the reader to scroll past the next one.
+Only attribution is suppressed: our own code stays fully instrumented, including the calls it makes into those libraries.
+The flag is not wired for clang-cl, so the Windows sanitize preset still reports them.
 
 ## Useful flags
 

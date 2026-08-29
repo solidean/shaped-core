@@ -117,6 +117,8 @@ Still open:
 
 - **Cheaper ring re-walk** — cache the last-known-full point instead of an O(ring) scan per exhaustion.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.
+- **A leaked node is invisible to a leak checker** — the slab is the allocation, so a dead slot is unused bytes in a live block.
+  A build mode routing every class through the large-node path would fix it; [TODO](../TODO.md) has the shape.
 
 **Confidence gaps — `TODO`s before the cross-thread guarantee is *proven*, not just *argued*:**
 

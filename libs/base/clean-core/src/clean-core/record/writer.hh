@@ -132,8 +132,11 @@ CC_FORCE_INLINE void record_bytes(rec::desc const& d, void const* payload, isize
 
     auto const needed = event_bytes_for(payload_size);
 
+    // Compared as a capacity rather than as `cur + needed > end`, because a fresh thread's cursor is null by design
+    // (writer_tls) and forming `nullptr + needed` is undefined even though every target computes what we want.
+    // `end - cur` is well defined for the null pair, yielding 0, so the first record still fails and takes the cold path.
     auto& w = t_writer;
-    if (w.cur + needed > w.end) [[unlikely]]
+    if (needed > w.end - w.cur) [[unlikely]]
     {
         if (!writer_rotate(needed))
         {

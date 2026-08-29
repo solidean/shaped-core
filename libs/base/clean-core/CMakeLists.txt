@@ -4,8 +4,9 @@ project(clean-core LANGUAGES CXX)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # dependencies
-# - mimalloc (private): backs the default general memory resource; see
+# - mimalloc (private, SC_MIMALLOC=ON only): backs the default general memory resource; see
 #   src/clean-core/memory/mimalloc_resource.cc. Header stays private to that .cc.
+#   SC_MIMALLOC=OFF compiles memory/system_resource.cc instead and links no mimalloc at all.
 # - xxhash (private): backs cc::hash128 (XXH3 128-bit); see
 #   src/clean-core/bytes/hash128.cc. Header stays private to that .cc.
 # - blake3 (private): backs cc::blake3 / cc::hash256 (the cryptographic hash); see
@@ -45,7 +46,6 @@ add_library(clean-core
     src/clean-core/platform/network_devices.cc
     src/clean-core/platform/resource_snapshot.cc
     src/clean-core/memory/allocation.cc
-    src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
     src/clean-core/record/domain.cc
@@ -138,6 +138,7 @@ target_sources(clean-core
     src/clean-core/platform/file_path.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
+    src/clean-core/platform/leak_annotations.hh
     src/clean-core/platform/stack_capture.hh
     src/clean-core/platform/module_table.hh
     src/clean-core/platform/symbolize.hh
@@ -285,10 +286,25 @@ target_include_directories(clean-core
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-# mimalloc backs the default general memory resource; xxhash backs cc::hash128; blake3 backs cc::blake3.
+# SC_MIMALLOC is the root CMakeLists' option, defaulted here for a standalone add_subdirectory() consumer that has no
+# root of ours — see SC_THREADS below for why this is a fallback default rather than a second option().
+if(NOT DEFINED SC_MIMALLOC)
+    set(SC_MIMALLOC ON)
+endif()
+
+# mimalloc_resource.cc defines cc::default_memory_resource, so it is compiled only when it is the default.
+# With it out, allocation.cc points the default at cc::system_memory_resource instead — one definition either way.
+if(SC_MIMALLOC)
+    target_sources(clean-core PRIVATE src/clean-core/memory/mimalloc_resource.cc)
+endif()
+
+# xxhash backs cc::hash128; blake3 backs cc::blake3; mimalloc backs the default memory resource where it is enabled.
 # PRIVATE: only mimalloc_resource.cc / hash128.cc / blake3.cc include the respective headers;
 # CMake still propagates the static libs to consumers' final link.
-target_link_libraries(clean-core PRIVATE mimalloc xxhash blake3 zstd lz4 zlib)
+target_link_libraries(clean-core PRIVATE xxhash blake3 zstd lz4 zlib)
+if(SC_MIMALLOC)
+    target_link_libraries(clean-core PRIVATE mimalloc)
+endif()
 
 # std::thread / pthread_setname_np (cc::threaded_actor, cc::set_current_thread_name) need the
 # platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.
@@ -330,20 +346,29 @@ target_compile_definitions(clean-core
     $<$<CONFIG:Release>:CC_RELEASE>
     $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
     $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
+    $<$<NOT:$<BOOL:${SC_MIMALLOC}>>:CC_NO_MIMALLOC>
     $<$<BOOL:${SC_FRAME_POINTERS}>:CC_FRAME_POINTERS>
 )
 
 # Detect and link the correct library for std::stacktrace support.
-# When no working <stacktrace> is found (e.g. Emscripten / WASI libc++ ships no such header), this is not
-# fatal: clean-core/platform/stacktrace.hh detects the same condition via __has_include and falls back to
-# an empty stub (CC_HAS_STACKTRACE 0). Only the GCC paths need an explicit link library.
+# This is a link probe, so it is the authoritative answer and it publishes that answer as CC_HAS_STACKTRACE.
+# stacktrace.hh can only ask __has_include, which proves the header exists and not that anything implements it —
+# a libstdc++ shipped without libstdc++exp has <stacktrace> and none of its symbols, and that combination links
+# only because the header believed itself. When the probe finds nothing (Emscripten / WASI ship no such header
+# at all) this is not fatal: the header falls back to an empty stub. Only the GCC paths need a link library.
+# PUBLIC because consumers include stacktrace.hh and must reach the same verdict.
 include(DetectStacktraceLib)
 cc_detect_stacktrace_link(_CC_STACKTRACE_LIB)
 
 if(_CC_STACKTRACE_LIB STREQUAL "NOTFOUND")
     message(STATUS "[clean-core] std::stacktrace unavailable — building with the empty stacktrace stub")
-elseif(NOT _CC_STACKTRACE_LIB STREQUAL "")
-    target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
+    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=0)
+else()
+    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=1)
+
+    if(NOT _CC_STACKTRACE_LIB STREQUAL "")
+        target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
+    endif()
 endif()
 
 # DbgHelp backs the crash handler's per-thread stack walk (crash_handler.cc). std::stacktrace only ever

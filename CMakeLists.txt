@@ -38,6 +38,17 @@ option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVE
 # so it is a whole-build switch: never set it per-target. Must precede include(Emscripten) below.
 option(SC_THREADS "Build with OS thread support; OFF forces a single-threaded build" ON)
 
+# Back cc::default_memory_resource with mimalloc; OFF uses the global operator new instead.
+#
+# No API changes with it and no struct layout does either — both are cc::memory_resource implementations behind the
+# same pointer, so this is purely which allocator the default resource calls.
+# OFF exists because tools cannot see through mimalloc: sanitizers, Valgrind and heap profilers intercept operator new
+# and not mi_malloc, so LeakSanitizer never scans mimalloc memory and reports anything owned only by a cc:: container
+# as a direct leak. The sanitize-* presets therefore default it OFF.
+# Independent of SANITIZE on purpose: sanitizing a mimalloc build stays possible, and is the right configuration when
+# what you are chasing is in mimalloc's own behavior.
+option(SC_MIMALLOC "Back the default memory resource with mimalloc; OFF uses the global operator new" ON)
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #

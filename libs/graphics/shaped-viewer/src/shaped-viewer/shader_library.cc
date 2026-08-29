@@ -1,5 +1,7 @@
 #include "shader_library.hh"
 
+#include <clean-core/platform/leak_annotations.hh> // cc::leak_scope — this library is never freed, by design
+#include <clean-core/thread/mutex.hh>
 #include <shaped-rendering/shaders.hh> // sr::shader_package (the blit the compositor drives)
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -24,6 +26,11 @@ cc::result<slib::shader_library*> impl::acquire_default_shader_library()
 {
     // Deliberately leaked: the generated package symbols an asset is reached through are process-wide globals that outlive any
     // owner, so destroying the library at exit would leave them naming freed assets.
+    // The whole construction is scoped rather than the library pointer annotated, because the filesystems the packages mount are
+    // owned through a cc:: container and LeakSanitizer cannot reach them from `lib` — cc::leak_scope's header says why.
+    // libs/graphics/shaped-viewer/docs/TODO.md carries the case for a shape that leaks nothing and needs no annotation at all.
+    auto const leak_guard = cc::leak_scope();
+
     auto* const lib = new slib::shader_library();
 
 #if SLIB_HAS_DXC
@@ -42,19 +49,30 @@ cc::result<slib::shader_library*> acquire_shader_library()
 {
     // One library for the process, which is not a preference but slib's rule: a second would fight the first over the package
     // globals both write into.
-    static slib::shader_library* cached = nullptr;
-    if (cached != nullptr)
-        return cached;
+    //
+    // The memoization is under a lock because "give me the process-wide library" is a call anything may make from any thread,
+    // and a plain check-then-set is not that.
+    // Two first callers both found no library and both built one, and the second construction trips slib's own assertion —
+    // so the race did not read as a race, it read as an abort with no message.
+    // A parallel test run is what found it, on the one platform whose interleaving happened to hit it.
+    static auto cached = cc::mutex<slib::shader_library*>(nullptr);
 
-    auto r = g_acquire_shader_library ? g_acquire_shader_library() : impl::acquire_default_shader_library();
+    return cached.lock(
+        [](slib::shader_library*& lib) -> cc::result<slib::shader_library*>
+        {
+            if (lib != nullptr)
+                return lib;
 
-    // A failure is deliberately not cached: it leaves a caller free to call `set_acquire_shader_library` and try again.
-    if (r.has_error())
-        return r;
-    if (r.value() == nullptr)
-        return cc::error("shaped-viewer: the shader library provider returned no library");
+            auto r = g_acquire_shader_library ? g_acquire_shader_library() : impl::acquire_default_shader_library();
 
-    cached = r.value();
-    return cached;
+            // A failure is deliberately not cached: it leaves a caller free to call `set_acquire_shader_library` and try again.
+            if (r.has_error())
+                return r;
+            if (r.value() == nullptr)
+                return cc::error("shaped-viewer: the shader library provider returned no library");
+
+            lib = r.value();
+            return lib;
+        });
 }
 } // namespace sv

@@ -51,7 +51,7 @@ struct itrace::memory_regions
 };
 
 /// Parsed command line.
-/// See usage_text() for the flags, and readme.md for what they mean.
+/// See usage_text() for the flags, and tools/instruction-tracer/readme.md for what they mean.
 struct itrace::options
 {
     cc::string exe;

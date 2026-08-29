@@ -66,11 +66,31 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                   generated.source, sg::shader_stage::closest_hit, hit_entry_point, _format,
                   {.include_dir = include_dir, .label = cc::format("<material '{}'>", r.type->name)});
 
+    // The same source, compiled a second time at its other entry point.
+    // Only where the material can cut out: otherwise the any-hit could reject nothing, and a hit group carrying one gives up
+    // the hardware's opaque path for every intersection on it.
+    auto any_hit = sg::async_compiled_shader();
+    auto shadow_any_hit = sg::async_compiled_shader();
+    if (generated.can_cut_out && lib.has_value())
+    {
+        any_hit = lib.value()->compile_source(
+            generated.source, sg::shader_stage::any_hit, any_hit_entry_point, _format,
+            {.include_dir = include_dir, .label = cc::format("<material '{}' any-hit>", r.type->name)});
+
+        // The shadow record's copy, which differs only in the payload it declares.
+        shadow_any_hit = lib.value()->compile_source(
+            generated.source, sg::shader_stage::any_hit, shadow_any_hit_entry_point, _format,
+            {.include_dir = include_dir, .label = cc::format("<material '{}' shadow any-hit>", r.type->name)});
+    }
+
     auto entry = _by_key.entry(key);
     return entry.get_or_emplace(material_permutation{.key = generated.key,
                                                      .layout = cc::move(generated.layout),
                                                      .samplers = cc::move(generated.samplers),
                                                      .shader = cc::move(shader),
+                                                     .any_hit = cc::move(any_hit),
+                                                     .shadow_any_hit = cc::move(shadow_any_hit),
+                                                     .can_cut_out = generated.can_cut_out,
                                                      .source = cc::move(generated.source)});
 }
 } // namespace sv

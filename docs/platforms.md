@@ -40,6 +40,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | WebAssembly | wasm32 | Emscripten (Clang) | 1 | CI — single-threaded, no WebGPU; runs under Node |
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
+| SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
 | WebAssembly + threads | wasm32 | Emscripten (Clang) | 3 | `-pthread`; planned |
 | WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 3 | emdawnwebgpu; planned |
 | WebAssembly — WASI | wasm32 | wasi-sdk (Clang) | 3 | planned |
@@ -47,6 +48,21 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 
 The Tier-3 WebAssembly variants have configure knobs already: `SC_THREADS`, `SC_WASM_WEBGPU` and `SC_WASM_EXCEPTIONS`.
 They fail configure today with a clear "not yet supported" message rather than building — [requirements.md](requirements.md#emscripten--wasm) owns those knobs.
+
+### SteamOS
+
+SteamOS is generic Linux x64 to the build, and Tier 2 rather than Tier 1 only because no CI runner runs it.
+It is worth naming separately anyway, because its immutable base image ships a runtime where a plain Linux assumption does not hold.
+
+- **`std::stacktrace` does not link**, so clean-core configures the empty stub and `CC_HAS_STACKTRACE` is 0.
+  The image carries `libstdc++.so` but not the `libstdc++exp` that implements `<stacktrace>`, and the LLVM toolchain's libc++ ships no `<stacktrace>` header at all.
+  An assert therefore reports "stacktrace unavailable on this platform" instead of frames.
+- **No dx12, and vulkan builds without registering a test driver**, so the cross-backend sg API tests are not compiled here — see shaped-graphics' `_sg_test_drivers`.
+  A Vulkan SDK being present is what makes SteamOS the first platform to separate "a backend builds" from "a backend can be driven".
+- **The hardware-counter budget is smaller than the PMU's counter count**, because the NMI watchdog holds a PMC.
+  `nx::bench` discovers the usable width rather than assuming it, so this costs extra measurement passes and nothing else.
+
+None of this is SteamOS-specific in principle — any Linux without `libstdc++exp`, or with a watchdog on a PMC, behaves the same way.
 
 ## Frame pointers (`SC_FRAME_POINTERS`)
 
@@ -78,6 +94,24 @@ See [shaped-graphics threading](../libs/graphics/shaped-graphics/docs/concepts/t
 It does change struct layout — node_allocation's slab header — so it is a whole-build switch, never per-target.
 
 `uv run dev.py check` runs a RelWithDebInfo single-threaded preset alongside the others, so both threading modes stay exercised at precommit.
+
+## Default allocator (`SC_MIMALLOC`)
+
+`SC_MIMALLOC` (default `ON`) chooses what backs `cc::default_memory_resource`; it reaches C++ as clean-core's `CC_HAS_MIMALLOC`, 0 or 1.
+`OFF` points the default at `cc::system_memory_resource` — the malloc/free resource that is always present as an explicit opt-out — and links no mimalloc at all.
+
+No API and no struct layout changes with it, since both are `cc::memory_resource` implementations behind the same pointer.
+What changes is whether a tool can see our allocations.
+Sanitizers, Valgrind and heap profilers intercept malloc and operator new, and none of them intercepts `mi_malloc`.
+So under mimalloc LeakSanitizer never scans memory the default resource handed out, and an object owned only by a `cc::` container is reported as a **direct leak** rather than as reachable.
+
+That is why the `sanitize-*` presets set it `OFF`.
+The two flags stay independent on purpose, and `SANITIZE` implies nothing about `SC_MIMALLOC`.
+Sanitizing a mimalloc build stays available for the times the thing being chased is mimalloc's own behavior.
+
+The one behavioral difference is in-place resize.
+mimalloc reports its usable size and can grow a block into that slack, while the system resource always declines and the caller reallocates and copies.
+So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a platform assumption.
 
 ## Build types
 

@@ -47,8 +47,10 @@ A container selects a non-default allocator by seeding an empty allocation that 
 - `deallocate_bytes(p, bytes, align, ud)` — `bytes`/`align` must match the allocation.
 - `try_resize_bytes_in_place(...)` — grow/shrink without moving (optional; see the gotcha below).
 
-Two resources ship: `cc::default_memory_resource` (mimalloc-backed, the default) and `cc::system_memory_resource` (platform `malloc`/`_aligned_malloc`, the explicit opt-out).
-Pass the latter as a custom resource to bypass mimalloc for one allocation.
+Two resources ship: `cc::default_memory_resource` and `cc::system_memory_resource` (platform `malloc`/`_aligned_malloc`).
+Which allocator backs the default is a build choice, and `CC_HAS_MIMALLOC` is what says: mimalloc under 1, and `cc::system_memory_resource` **itself** under 0, where the two names are one object.
+Pass `&cc::system_memory_resource` as a custom resource to bypass mimalloc for one allocation; that is always well defined, and it is simply a no-op where mimalloc is not in the build.
+`SC_MIMALLOC=OFF` is what selects the second world, and the `sanitize-*` presets set it — [platforms.md](../../../../../docs/platforms.md#default-allocator-sc_mimalloc) is the why.
 
 ## Gotchas
 
@@ -64,6 +66,7 @@ Pass the latter as a custom resource to bypass mimalloc for one allocation.
 
 - **In-place resize is resource-dependent and weak.**
   `system_memory_resource` always returns `-1`, since malloc has no in-place resize.
+  That includes the case where it *is* the default resource (`CC_HAS_MIMALLOC` 0), so a caller must handle `-1` rather than assume the default can ever resize in place.
   mimalloc "succeeds" only when the request already fits the block's existing usable size (`mi_usable_size`); it never grows a block past its size class.
   So `try_resize_alloc_inplace` growth mostly just claims the slack the allocator already rounded up to, and a genuine larger request still reallocates and moves.
   That is a backing-allocator limitation rather than a bug — but do not rely on cheap in-place growth.

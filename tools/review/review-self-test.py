@@ -254,6 +254,10 @@ def test_binary_and_mode_changes_are_atoms(root: Path) -> None:
     base = commit(root, "base", {"a.txt": "content\n"})
 
     (root / "img.bin").write_bytes(b"\x00\x01\x02after-and-longer")
+    # Both halves are needed, one per platform, because commit() ends in `git add -A`.
+    # Where core.filemode is true (Linux, macOS) that re-stats the file and would drop an index-only exec bit, so the bit has to be real on disk.
+    # Where it is false (Windows) the on-disk chmod is a no-op git never sees, and staging the mode directly is the only thing that records it.
+    (root / "run.sh").chmod(0o755)
     subprocess.run(["git", "update-index", "--chmod=+x", "run.sh"], cwd=root, check=True, capture_output=True)
     head = commit(root, "binary and mode", {})
 

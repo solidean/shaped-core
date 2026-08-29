@@ -261,11 +261,12 @@
         {
             "name": "x64-linux-clang-ninja-sanitize-address-undefined",
             "displayName": "Sanitize Address+Undefined Clang (Ninja, Linux)",
-            "description": "Debug build with address and undefined behavior sanitizers",
+            "description": "Debug build with address and undefined behavior sanitizers, and the default memory resource on operator new so they can see our allocations (SC_MIMALLOC is independent: set it ON to sanitize a mimalloc build)",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "SANITIZE": "address,undefined"
+                "SANITIZE": "address,undefined",
+                "SC_MIMALLOC": "OFF"
             }
         },
         {
@@ -441,21 +442,23 @@
         {
             "name": "x64-windows-clang-ninja-sanitize-address-undefined",
             "displayName": "Sanitize Address+Undefined Clang (Ninja, Windows)",
-            "description": "Debug build with address and undefined behavior sanitizers",
+            "description": "Debug build with address and undefined behavior sanitizers, and the default memory resource on operator new so they can see our allocations (SC_MIMALLOC is independent: set it ON to sanitize a mimalloc build)",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "SANITIZE": "address,undefined"
+                "SANITIZE": "address,undefined",
+                "SC_MIMALLOC": "OFF"
             }
         },
         {
             "name": "macos-arm-llvm-sanitize-address-undefined",
             "displayName": "Sanitize Address+Undefined Clang (macOS ARM)",
-            "description": "Debug build with address and undefined behavior sanitizers",
+            "description": "Debug build with address and undefined behavior sanitizers, and the default memory resource on operator new so they can see our allocations (SC_MIMALLOC is independent: set it ON to sanitize a mimalloc build)",
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "SANITIZE": "address,undefined"
+                "SANITIZE": "address,undefined",
+                "SC_MIMALLOC": "OFF"
             }
         },
         {

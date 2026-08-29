@@ -35,7 +35,7 @@ sv::layer_blend                  // replace | over (premultiplied) — scene_3d 
 sv::primary_scene_3d(v) / sv::ensure_scene_3d(v)  // -> layer const* / layer& — the view's first traced layer, appended on demand
 sv::refresh_policy               // { float rate; } — fraction of the loop's rate: 1 every frame, 0.5 every second, 0 only on invalidation
 sv::temporal_input               // { u64 id; optional<vec2i> resolution; pixel_format; u64 reset_hash; } — unset resolution = the view's own
-sv::temporal_inputs_of(view_data) -> vector<temporal_input>  // what the view declared, PLUS one accumulator per scene_3d layer
+sv::temporal_inputs_of(view_data) -> vector<temporal_input>  // what the view declared, PLUS one rgba32_float accumulator per scene_3d layer
 sv::temporal_id::accumulation(layer) -> u64   // the id a traced layer accumulates under; >= caller_range_end, so a caller cannot collide
 sv::view_id                      // stable identity across frames; view_id::from_string("main", seed=0) — keys everything a view keeps
                                  //   the WHOLE string is hashed, `##` included, so "angle##0" and "angle##1" are two views
@@ -151,10 +151,10 @@ m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the ma
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
-sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv_instance
+sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
 ```
 
-A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv_attribute_desc`
+A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv::attribute_desc`
 (`{bindless index, 0, element stride}`) per mesh-sourced attribute, and a bindless index per sampled texture.
 
 Gotchas:
@@ -171,7 +171,7 @@ Gotchas:
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
 - **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
-- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `sv_instance` in `shaders/material_runtime.hlsli`.
+- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `sv::instance` in `shaders/material_runtime.hlsli`.
 
 ## Materials — a type, an instance, and the frequency chain
 
@@ -179,21 +179,26 @@ Gotchas:
 
 ```cpp
 sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; hash128 hash; }
-sv::material_type::create(name, signature, shader)   // -> hashes all three; asserts a name declared twice, and a default that is not its format's size
+sv::material_type::create(name, signature, shader, opacity_attribute = {})  // -> hashes all four; asserts a name declared twice, and a default that is not its format's size
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
 sv::material_signature_entry::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
 sv::material                     // { string name; material_type_id type; vector<material_attribute_binding> overrides; hash128 hash; }
 sv::material::create(name, type, overrides)          // -> hashes type + overrides; validates NOTHING (it cannot see the type)
+sv::material_signature_entry::of_rotation("tangent_frame", q)  // -> the same, blended as a QUATERNION across the hit triangle
+                                 //   requires an f32x4; corners are hemisphere-aligned before the blend, which sv::interpolate_f4 would not do
+sv::attribute_interpolation      // linear | rotation — a property of the DECLARATION, so it rides the type hash into the permutation key
 sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
 sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
 
-sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `pbr` and `unlit`
+sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `pbr` and `unlit`
 lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
 lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
-sv::builtin_material::pbr / unlit                    // the names the builtins register under
+sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
+                                 //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
+                                 //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
@@ -230,6 +235,14 @@ Gotchas:
 - **`material::create` validates nothing** against the type, because it cannot see one.
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
 - **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+- **A cutout is a DECLARATION, not a detection.** `material_type::opacity_attribute` names which attribute the fragment writes `geometry_opacity` from.
+  A permutation can cut out only where something other than the signature's own default supplied that attribute.
+  That is what becomes the instance's `opaque_override`, so a type that leaves it empty keeps the hardware's opaque path on every ray.
+- **`surface` is OpenPBR's parameter set** (`sv::surface`, `shaders/openpbr.hlsli`), not a metallic-roughness struct.
+  Every type writes that one vocabulary, which is what lets the integrator evaluate a single layered BSDF whatever the material was authored as.
+- **The generator emits `#define SV_ATTR_SUPPLIED_<name> 0/1` per attribute**, one constant per permutation.
+  It separates "something supplied this" from "the declaration's default came through", which a fragment cannot tell and the tangent frame depends on:
+  an unsupplied frame must fall back to the geometric one rather than trust the identity rotation, which points at object-space +z.
 
 ## Material shaders — one permutation, generated
 
@@ -252,7 +265,7 @@ cache.acquire(resolved)          // -> material_permutation const& {hash128 key;
 cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
-sv::material_slot_kind           // constant | attribute_descriptor (an sv_attribute_desc) | texture_index (a u32 into the 2D table)
+sv::material_slot_kind           // constant | attribute_descriptor (an sv::attribute_desc) | texture_index (a u32 into the 2D table)
 
 slib::shader_library::compile_source(src, stage, entry, format, {.include_dir = "sv_shaders"})  // -> sg::async_compiled_shader
 ```
@@ -261,6 +274,7 @@ The generated source is, in order: the runtime include, only the bindless tables
 distinct sampler, then the entry function.
 That function declares one local per signature attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
 and then runs the type's fragment verbatim over them.
+The loads run in a NESTED BLOCK, so the parameter buffer, an attribute's descriptor and a sampled uv never reach the fragment's scope.
 `g.key` is `material_shader_key(resolved.permutation_key, opts)`: the resolution's shape AND how these options spell it.
 Two calls agreeing on that pair generate byte-identical source, and nothing else may share their cache entry — a second cache over different bindless budgets gets its own.
 
@@ -268,12 +282,14 @@ Gotchas:
 
 - **The layout is the contract, and both sides read it.** The shader loads slot `offset`; the CPU fills slot `offset`.
   Nothing recomputes it independently, which is why it comes back with the source rather than being derivable.
-- **A sampled attribute takes TWO slots** — the texture index, and the `sv_attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
+- **A sampled attribute takes TWO slots** — the texture index, and the `sv::attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
   Three strides plus a runtime branch would be the other trade; see `material_runtime.hlsli`.
 - **`SampleLevel`, never `Sample`** — a ray tracing hit shader has no derivatives to pick a mip from.
 - **Every bindless index is wrapped in `NonUniformResourceIndex`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
+- **The runtime lives in `namespace sv`**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
+  `sv_` survives only for `sv_sampler_i` and the entry point, which are file scope and cannot be namespaced without changing what reflection reports.
 - **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier, is an HLSL keyword or builtin type, starts with `sv_`, or is `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
 - **A generated permutation does not hot-reload on an include edit** — the key hashes the resolution and the options, not the include's contents.
@@ -335,6 +351,14 @@ It is **event-driven and time-free** — every input carries the motion it cause
 `sv::viewer` drives one per view for you; a caller running its own event pump (see `viewer-window-manual-test.cc`) just feeds it `wsys->events()`.
 
 ```cpp
+sv::camera_style                 // { orbit, fly } — which built-in controller a view's camera is driven by
+```
+
+A view picks one with `view.camera_style(...)`, re-asserted every frame.
+`sv::viewer` routes that view's events to the chosen controller and calls the fly one's `update(dt)` itself, so neither needs a hand-rolled event pump.
+It also calls `release_input()` while the window is unfocused, so a key released out of sight cannot keep the camera flying.
+
+```cpp
 sv::fps_state                    // { pos3d position; angle_d yaw, pitch, vertical_fov; } — yaw around +y, 0 looks along +z
 s.forward() / s.to_camera()      // -> vec3d view direction / -> camera; fps_state::from_camera(cam) is the exact inverse (roll dropped)
 sv::fps_camera_controller        // { fps_state pose; fps_camera_controller_config config; }
@@ -350,6 +374,7 @@ Right-drag looks, W/A/S/D move along the view, E/Q rise and fall along world +y,
 Free-flying — no gravity or collision, and forward follows the pitch, so W into a raised view climbs.
 Unlike the orbit controller it **integrates over time**, hence the two halves: `handle` for events, `update(dt)` once per frame for the motion they imply.
 Set `look_requires_button = false` once the caller has captured the cursor (`sr::window::set_relative_mouse_mode`), so every motion turns the view.
+Reachable through `view.camera_style(sv::camera_style::fly)` — a caller does not have to own the loop to use it.
 
 ## Resources by id — the managers
 
@@ -466,6 +491,7 @@ sv::shader_package()                                 // register once on an slib
 ```
 
 [`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward both the area light and the SH environment.
+Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
 What a caller supplies is a view.
 The `view_renderer` builds `pt_frame_constants_gpu` from the view's first `area_light` plus `render_settings::samples_per_pixel` / `max_bounces`.
@@ -474,9 +500,12 @@ That is unlike a Cornell box, whose light rect must match the emitter.
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 
-**Temporal accumulation** rides on that persistent target: `accum_frame == 0` overwrites, anything above blends in place, capped at 4096 frames so the running mean stays inside half-float precision.
-The restart signal is a hash of the bytes the trace uploads — camera, size, lights, background, settings, every instance transform, geometry identity.
+**Temporal accumulation** rides on that persistent target: `accum_frame == 0` overwrites, anything above blends into it in place at a weight of `1 / (accum_frame + 1)`.
+It stops at `sv::accumulation_frame_cap` (4096), which bounds GPU LOAD rather than the estimate.
+The target is `rgba32_float` and the mean stays exact, so what the cap costs is only a mean nobody is still looking at.
+Restarting is therefore the whole policy, and the signal is a hash of the bytes the trace uploads — camera, size, lights, background, settings, every instance transform, geometry identity.
 Hashing what is uploaded rather than what the view holds is what keeps it from drifting away from the shader.
+The camera is in it deliberately: every sample the target holds was drawn through one eye, which is what makes the mean the image this frame is asking for.
 `view::position` is deliberately outside it: it only decides where `viewer_renderer` blits, so relayout must not discard a converged image.
 
 ## Persistent per-view state
@@ -565,7 +594,11 @@ view.layout_rows(style) / .layout_columns(style) / .layout_grid(c, r, style) / .
                                                                //   fills the view with a tree; asking twice returns the SAME tree
                                                                //   all one container: rows pins one column, columns one row, the params form pins either
 view.camera(cam)                                               // the caller owns it THIS frame: the controller leaves this view alone
-view.initial_camera(cam) / .initial_orbit(orbit)               // applied only the first time this id is seen
+view.initial_camera(cam) / .initial_orbit(orbit) / .initial_fps(pose)
+                                                               //   applied only the first time this id is seen
+view.camera_style(sv::camera_style::fly)                       // which built-in controller drives this view; orbit by default
+                                                               //   RE-ASSERT every frame — dropping it hands the view back to orbit
+                                                               //   the camera survives the switch: the incoming controller is re-seeded from it
 view.resolution(vec2i)                                         // pin a fixed pixel size instead of taking the rect it lands in
 view.refresh_rate(rate)                                        // 1 every frame, 0.5 every second frame
 view.display_name("name") / .display_name() -> string_view     // persistent; defaults to the id up to its ##, and "" restores that default
@@ -704,7 +737,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   A test driving that routine directly must set it, or it will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
-  Seed with `initial_camera` / `initial_orbit` instead for a view that should converge.
+  Seed with `initial_camera` / `initial_orbit` / `initial_fps` instead for a view that should converge.
 - **Nothing about placement may reach a trace.** A `view_data` has no position at all, and a leaf's fit, sampler, zoom and post-process
   parameters never reach an upload — which is why relayout, magnifying, or dragging a wipe slider all leave a converged image alone.
   The one deliberate exception is the resolution, folded into the trace hash explicitly: it reaches the upload only through the camera's

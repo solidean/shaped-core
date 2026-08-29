@@ -17,13 +17,17 @@
 namespace cc
 {
 /// Default memory resource used when allocation::custom_resource == nullptr.
-/// Backed by mimalloc (see memory/mimalloc_resource.cc), our fast general-purpose allocator.
+/// What backs it is a build choice, and CC_HAS_MIMALLOC is the one that says which: mimalloc under 1
+/// (memory/mimalloc_resource.cc, our fast general-purpose allocator), and cc::system_memory_resource itself under 0.
+/// So the two are the same object in a CC_HAS_MIMALLOC=0 build, which is what the sanitize presets configure —
+/// see docs/platforms.md, "Default allocator (SC_MIMALLOC)".
 /// Stored in the data segment, making the pointer valid even during static initialization in
 /// other translation units (safe for use in global/static constructors).
 extern cc::memory_resource const* const default_memory_resource;
 
 /// The platform malloc/free resource (_aligned_malloc / posix_memalign + free), data-segment resident like the default.
-/// The explicit opt-out from mimalloc: pass &cc::system_memory_resource as a custom resource to bypass it for one allocation.
+/// Passing &cc::system_memory_resource as a custom resource is always well defined; where mimalloc backs the default it
+/// is the explicit opt-out from it, and where it does not there is nothing to opt out of.
 extern cc::memory_resource const system_memory_resource;
 } // namespace cc
 

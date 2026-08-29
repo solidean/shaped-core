@@ -124,7 +124,12 @@ void cache_fixture::idle()
 blob make_blob(cc::string_view text)
 {
     auto data = cc::pinned_data<byte>::create_uninitialized(text.size());
-    cc::memcpy(data.data(), text.data(), size_t(text.size()));
+
+    // Guarded because memcpy's pointers must be non-null even when the count is 0, and a zero-size pinned_data owns no buffer to point at.
+    // `make_blob("")` is a case the suite deliberately exercises — an empty payload is a value the cache must store rather than an input to reject — so this is reached and not merely possible.
+    if (!text.empty())
+        cc::memcpy(data.data(), text.data(), size_t(text.size()));
+
     return blob(data);
 }
 

@@ -62,7 +62,9 @@ option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF
 # babel-serializer keeps its sqlite API always available and reports an unfetched backend at runtime.
 option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.install (OFF expects an external `sqlite` target)" ON)
 
-if(SC_USE_VENDORED_MIMALLOC)
+# Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
+# dead weight in exactly the sanitizer builds that are already the slowest.
+if(SC_USE_VENDORED_MIMALLOC AND SC_MIMALLOC)
     add_subdirectory(mimalloc)
 endif()
 

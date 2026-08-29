@@ -38,7 +38,7 @@ constexpr auto uv_format = sv::attribute_format::of_vector(sv::scalar_type::f32,
 {
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f, final_default));
-    return sv::material_type::create("test", cc::move(signature), "surface.roughness = roughness;");
+    return sv::material_type::create("test", cc::move(signature), "surface.specular_roughness = roughness;");
 }
 
 [[nodiscard]] sv::texture_sample_source make_sample(sv::texture_id id, cc::string uv = "uv")
@@ -76,10 +76,15 @@ TEST("sv::material_type - a name the generator cannot emit is rejected")
     CHECK_ASSERTS(one("min16uint4x4"));
     CHECK_ASSERTS(one("Texture2D"));
     CHECK_ASSERTS(one("return"));
-    CHECK_ASSERTS(one("sv_params")); // the whole sv_ prefix is the generator's
+    CHECK_ASSERTS(one("sv_sampler_0")); // the whole sv_ prefix is the generator's
     CHECK_ASSERTS(one("sv_anything"));
     CHECK_ASSERTS(one("surface")); // the entry function's own two locals
     CHECK_ASSERTS(one("ctx"));
+
+    // The loads happen in a nested block, so the generator's own temporaries are names a signature may take.
+    CHECK(one("params").signature[0].name == "params");
+    CHECK(one("desc").signature[0].name == "desc");
+    CHECK(one("uv").signature[0].name == "uv");
 
     // An ordinary name still goes through, prefix-adjacent spellings included.
     CHECK(one("roughness").signature[0].name == "roughness");

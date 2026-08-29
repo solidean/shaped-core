@@ -1,0 +1,8 @@
+# The clang-format that fetch-clang-format.py installs here, and its pin marker.
+# Fetched rather than committed: it is a ~4 MB per-platform binary, and every dev's copy is reproducible from the pin.
+# The tool binaries we DO commit (diag-launcher.exe and friends) are not matched by these patterns.
+clang-format
+clang-format.exe
+clang-format.part
+clang-format.exe.part
+.clang-format-pin.txt

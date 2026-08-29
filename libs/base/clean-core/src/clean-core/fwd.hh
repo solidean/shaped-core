@@ -104,6 +104,8 @@ struct net_traffic_rate;  // what one interface carried over a sampling interval
 class net_traffic_sampler;
 
 struct resource_snapshot; // every level-valued reading at one instant (platform/resource_snapshot.hh)
+
+struct leak_scope; // suppresses LeakSanitizer reports for the calling thread, for a deliberate leak (platform/leak_annotations.hh)
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>

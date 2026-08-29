@@ -697,24 +697,19 @@ TEST("sv - a traced layer implies an accumulation temporal input, sized by the p
     auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
     REQUIRE(plan.validate());
 
-    // Two per traced layer — the accumulator and the primary-hit geometry beside it — and none for the layout
-    // views, which accumulate nothing.
-    REQUIRE(plan.temporals.size() == 2);
+    // One per traced layer — its accumulator — and none for the layout views, which accumulate nothing.
+    REQUIRE(plan.temporals.size() == 1);
     auto const& t = plan.temporals[0];
     CHECK(t.id == sv::view_id::from_string("traced"));
     CHECK(t.temporal_id == sv::temporal_id::accumulation(0));
     CHECK(t.resolution == tg::vec2i(128, 64)); // the view's own, taken from the rect it landed in
-    CHECK(t.format == sg::pixel_format::rgba16_float);
 
-    // The G-buffer shares the accumulator's extent: the raygen writes both at the dispatch's own pixel.
-    auto const& g = plan.temporals[1];
-    CHECK(g.temporal_id == sv::temporal_id::gbuffer(0));
-    CHECK(g.resolution == t.resolution);
+    // Full floats, because the accumulation is uncapped: at frame n the blend weight is 1 / (n + 1), and a half
+    // float stops moving the mean while the estimate is still converging.
+    CHECK(t.format == sg::pixel_format::rgba32_float);
 
-    // Both ids are outside the range a caller may declare in, so the two cannot collide.
+    // Outside the range a caller may declare in, so an implied id and a declared one cannot collide.
     CHECK(t.temporal_id >= sv::temporal_id::caller_range_end);
-    CHECK(g.temporal_id >= sv::temporal_id::caller_range_end);
-    CHECK(t.temporal_id != g.temporal_id);
 }
 
 // A layer inserted *above* a traced one must not hand its accumulator to a different layer.
@@ -739,7 +734,7 @@ TEST("sv - a caller-declared temporal input rides alongside the implied one")
     def.root_view = root;
 
     auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
-    REQUIRE(plan.temporals.size() == 3); // the caller's, plus the traced layer's two
+    REQUIRE(plan.temporals.size() == 2); // the caller's, plus the traced layer's accumulator
 
     // The declaration is carried verbatim — a set resolution is NOT overwritten by the view's.
     auto const& own = plan.temporals[0];
@@ -748,11 +743,9 @@ TEST("sv - a caller-declared temporal input rides alongside the implied one")
     CHECK(own.format == sg::pixel_format::rgba8_unorm);
     CHECK(own.reset_hash == 0xABCDu);
 
-    // The implied pair still lands, at the view's own resolution.
+    // The implied one still lands, at the view's own resolution.
     CHECK(plan.temporals[1].temporal_id == sv::temporal_id::accumulation(0));
     CHECK(plan.temporals[1].resolution == tg::vec2i(128, 64));
-    CHECK(plan.temporals[2].temporal_id == sv::temporal_id::gbuffer(0));
-    CHECK(plan.temporals[2].resolution == tg::vec2i(128, 64));
 }
 
 // A scene layer that is authored but holds no geometry.

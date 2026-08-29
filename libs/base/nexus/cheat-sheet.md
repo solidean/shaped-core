@@ -160,7 +160,8 @@ nx::bench::print_hw_counters();          // the same, printed;  `uv run dev.py p
 
 - **Best-effort, never fails as a whole** — elapsed time always comes back, and reference cycles wherever a cheap counter exists (x86).
 - An unreadable counter is `nullopt`, so gate on `has_value()` rather than on a machine assumption.
-- **Only a few PMU counters fit at once.** `hw_measure_config::measure_all` re-runs the body over subsets so nothing is left unmeasured.
+- **Only a few PMU counters fit at once**, and how many cannot be queried.
+  `hw_measure_config::measure_all` re-runs the body over subsets, narrowing until they fit, so the budget never leaves a counter unmeasured — only unavailability does.
   The body must be deterministic for that.
 - [docs/guides/profiling.md](../../../docs/guides/profiling.md) owns this surface: the counter list, the per-platform rules, and the Windows non-admin setup.
   It also has a worked cache-traversal example.

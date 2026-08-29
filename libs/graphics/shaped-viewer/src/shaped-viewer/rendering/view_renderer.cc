@@ -80,9 +80,17 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
 
         // The TLAS instance's own id is the row of the instance table this item occupies, which is what `InstanceID()` reads.
+        // The opaque override is what makes an any-hit reachable at all: a BLAS is built opaque, and DXR then behaves as
+        // if the hit group carried no any-hit whatever the pipeline attached.
+        // Per instance rather than per BLAS, because "can this cut out" is a property of the MATERIAL — the same mesh
+        // under an opaque material and a cutout one would otherwise need two acceleration structures.
+        // Two records per permutation — the primary one and the shadow one — so the offset is the permutation's index
+        // doubled, and `pt_occluded` reaches the second by adding 1 at the trace.
+        auto const permutation = hit_group_of(out, item.shader_key, resources);
         auto inst = sg::tlas_instance{.blas = mesh->blas,
                                       .instance_id = u32(out.instances.size()),
-                                      .hit_group_offset = hit_group_of(out, item.shader_key, resources)};
+                                      .hit_group_offset = permutation * 2,
+                                      .opaque_override = !out.hit_groups[permutation]->can_cut_out};
         pack_transform(inst, item.transform);
         out.instances.push_back(cc::move(inst));
 
@@ -134,7 +142,6 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 
     fc.samples_per_pixel = l.settings.samples_per_pixel;
     fc.max_bounces = l.settings.max_bounces;
-    fc.debug_view = l.settings.debug_accumulation ? 1u : 0u;
 
     // `seed` and `accum_frame` are stamped by execute from the view's persistent record, once it knows whether this frame restarts.
     return fc;
@@ -155,24 +162,19 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 /// `shader_generation` is the second: the shaders are not uploaded bytes but they decide what the numbers mean, so a
 /// reload has to restart the estimator rather than average two different integrators together.
 ///
-/// **The camera is deliberately excluded**, along with everything that describes the history rather than the image.
-/// Moving the eye no longer makes the accumulated image wrong — the raygen reprojects it and rejects per pixel what
-/// no longer matches — so hashing the camera would throw away exactly the convergence reprojection exists to keep.
-/// What is left means "the scene changed", which is the only thing a whole-image restart is still the right answer to.
+/// **The camera is in it**, which is what makes the accumulator a single, honest estimate: every sample it holds was
+/// drawn through the same eye, so the mean it converges to is the image this frame is asking for and no other.
+/// Moving the eye therefore restarts it, and that is the trade — no reprojection to salvage the old samples, and in
+/// exchange no smearing, no per-pixel rejection heuristic, and an uncapped mean that converges to ground truth.
 [[nodiscard]] u64 trace_hash(pt_frame_constants_gpu fc,
                              background_gpu const& bg,
                              resolved_view const& r,
                              tg::vec2i resolution,
                              u64 shader_generation)
 {
-    // Fields that legitimately differ every frame, or that describe the history rather than the image it holds.
-    // Hashing any of them would restart the estimator forever.
+    // The two fields that legitimately differ every frame; hashing either would restart the estimator forever.
     fc.seed = 0;
     fc.accum_frame = 0;
-    fc.camera = {};
-    fc.prev_camera = {};
-    fc.has_history = false;
-    fc.history_max_frames = 0;
 
     auto h = cc::make_hash_of_bytes(cc::span<pt_frame_constants_gpu const>(&fc, 1).as_bytes());
     h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<background_gpu const>(&bg, 1).as_bytes()));
@@ -207,39 +209,10 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
     return h;
 }
 
-/// Bytes one accumulation target costs, for the cache's budget: rgba16_float is 8 bytes a pixel.
-[[nodiscard]] isize accumulation_bytes(tg::vec2i size)
+/// Bytes a texture of `size` in `format` costs, for the cache's budget.
+[[nodiscard]] isize texture_bytes(tg::vec2i size, sg::pixel_format format)
 {
-    return isize(size[0]) * isize(size[1]) * 8;
-}
-
-/// How far a reprojected pixel's sample count may be carried once the camera has moved.
-///
-/// The hybrid: a still camera reprojects every pixel onto itself, so leaving the count uncapped keeps the exact
-/// running mean and lets a static view converge to ground truth exactly as it did before reprojection existed.
-/// Once the eye moves, a carried sample is an approximation — it came from a slightly different direction — so the
-/// cap bounds how long one can persist, trading a little noise for an image that stops smearing.
-constexpr u32 moving_history_frames = 32;
-
-/// Whether `a` and `b` describe the same eye, byte for byte.
-///
-/// A pure comparison of what was uploaded, so it cannot disagree with what the shader reprojects through.
-/// Padding counts, which is safe here only because every `camera_gpu` is built by `camera_gpu::from` with its pad
-/// lanes explicitly zeroed.
-[[nodiscard]] bool same_camera(camera_gpu const& a, camera_gpu const& b)
-{
-    return cc::memcmp(&a, &b, sizeof(camera_gpu)) == 0;
-}
-
-/// Fills in everything a trace needs to reuse its history, and reports the camera forward for the next frame.
-void apply_history(pt_frame_constants_gpu& fc, impl::view_state& rec, impl::temporal_slot const& slot)
-{
-    fc.has_history = slot.has_history && rec.has_last_traced_camera;
-    fc.prev_camera = rec.last_traced_camera;
-
-    // A still camera keeps the exact mean; a moved one ages its carried samples out.
-    fc.history_max_frames
-        = fc.has_history && same_camera(fc.camera, rec.last_traced_camera) ? u32(-1) : moving_history_frames;
+    return isize(size[0]) * isize(size[1]) * isize(sg::format_block_size(format));
 }
 
 /// The slot `store` keeps for `(id, temporal_id)`, its texture created or re-created if the extent moved.
@@ -272,12 +245,8 @@ struct ensured_slot
 
         if (slot.texture.raw() != nullptr)
             slot.texture.raw()->expire();
-        if (slot.history.raw() != nullptr)
-            slot.history.raw()->expire();
 
         slot.texture = ctx.persistent.create_texture_2d(desc);
-        slot.history = ctx.persistent.create_texture_2d(desc);
-        slot.has_history = false; // neither half holds a frame yet
     }
 
     return {.slot = &slot, .resized = resized};
@@ -344,39 +313,6 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
         e.slot->declared_hash = t.reset_hash;
     }
 
-    // Rotate the pair on exactly the traces that record this frame.
-    // A reprojecting read must not alias its own write, and a throttled trace must be left alone or the image its
-    // parent re-presents would be the one from two frames ago.
-    for (auto const& tr : plan.traces)
-    {
-        if (!tr.refresh)
-            continue;
-
-        auto& rec = store.get_or_create(tr.id);
-
-        // Every slot this trace writes rotates together, on the *trace's* progress — which only the accumulator counts.
-        // Asking each slot for its own `accum_frame` freezes the G-buffer at zero forever, since nothing increments
-        // that one: its pair never rotates, the history half stays the texture nothing ever wrote, and every pixel
-        // fails the disocclusion test against garbage geometry.
-        auto const* const accumulator = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
-        auto const carries_history = accumulator != nullptr && accumulator->accum_frame > 0;
-
-        for (auto const tid : {temporal_id::accumulation(tr.layer), temporal_id::gbuffer(tr.layer)})
-        {
-            auto* const slot = rec.temporal.get_ptr(tid);
-            if (slot == nullptr)
-                continue;
-
-            slot->has_history = carries_history;
-            if (carries_history)
-            {
-                auto const written = slot->texture;
-                slot->texture = slot->history;
-                slot->history = written;
-            }
-        }
-    }
-
     for (auto i = u32(0); i < plan.traces.size(); ++i)
     {
         auto const& tr = plan.traces[i];
@@ -396,15 +332,12 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
 
         auto bytes = isize(0);
         if (rec->composite.raw() != nullptr)
-            bytes += accumulation_bytes(tg::vec2i(rec->composite.width(), rec->composite.height()));
+            bytes += texture_bytes(tg::vec2i(rec->composite.width(), rec->composite.height()),
+                                   rec->composite.raw()->description().format);
         for (auto const& [temporal_id, slot] : rec->temporal)
-        {
-            // Both halves of the pair, since both stay resident for as long as the view does.
             if (slot.texture.raw() != nullptr)
-                bytes += accumulation_bytes(tg::vec2i(slot.texture.width(), slot.texture.height()));
-            if (slot.history.raw() != nullptr)
-                bytes += accumulation_bytes(tg::vec2i(slot.history.width(), slot.history.height()));
-        }
+                bytes += texture_bytes(tg::vec2i(slot.texture.width(), slot.texture.height()),
+                                       slot.texture.raw()->description().format);
         store.set_payload_bytes(id, bytes);
     }
 
@@ -444,8 +377,7 @@ void view_renderer::trace(sg::command_list& cmd,
 
     auto& rec = store.get_or_create(v.id);
     auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
-    auto const* const gbuffer = rec.temporal.get_ptr(temporal_id::gbuffer(tr.layer));
-    if (slot == nullptr || gbuffer == nullptr)
+    if (slot == nullptr)
         return; // resolve() refused it; nothing to accumulate into
 
     // A different image must not be averaged into the old one.
@@ -459,7 +391,6 @@ void view_renderer::trace(sg::command_list& cmd,
     // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot->accum_frame;
     fc.seed = slot->accum_frame + 1;
-    apply_history(fc, rec, *slot);
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
         1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
@@ -479,16 +410,9 @@ void view_renderer::trace(sg::command_list& cmd,
                                      .background = background,
                                      .instances = resolved.instances,
                                      .output = output,
-                                     .gbuffer = gbuffer->texture,
-                                     .history_color = slot->history,
-                                     .history_gbuffer = gbuffer->history,
                                      .instance_table = instance_table,
                                      .hit_groups = resolved.hit_groups,
                                      .bindless = &bindless});
-
-    // What the next frame reprojects through.
-    rec.last_traced_camera = fc.camera;
-    rec.has_last_traced_camera = true;
 
     if (slot->accum_frame < accumulation_frame_cap)
         ++slot->accum_frame;
@@ -522,38 +446,21 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
     auto const layer = u8(scene - v.layers.begin());
     auto const acc = ensure_temporal(ctx, store, v.id, temporal_id::accumulation(layer), v.resolution,
-                                     sg::pixel_format::rgba16_float);
-    auto const gb
-        = ensure_temporal(ctx, store, v.id, temporal_id::gbuffer(layer), v.resolution, sg::pixel_format::rgba16_float);
+                                     sg::pixel_format::rgba32_float);
     auto& slot = *acc.slot;
 
-    if (acc.resized || gb.resized)
-        store.set_payload_bytes(v.id, 4 * accumulation_bytes(v.resolution)); // two slots, a pair each
+    if (acc.resized)
+        store.set_payload_bytes(v.id, texture_bytes(v.resolution, sg::pixel_format::rgba32_float));
 
     // A fresh target holds no history, and a different image must not be averaged into the old one.
     if (acc.resized || slot.reset_hash != hash)
         slot.accum_frame = 0;
     slot.reset_hash = hash;
 
-    // No plan drove a rotation here either, so this path rotates its own pair — see resolve() for why it is
-    // conditional on having recorded something.
-    auto& rec = store.get_or_create(v.id);
-    for (auto* const s : {acc.slot, gb.slot})
-    {
-        s->has_history = slot.accum_frame > 0;
-        if (s->has_history)
-        {
-            auto const written = s->texture;
-            s->texture = s->history;
-            s->history = written;
-        }
-    }
-
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
     // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot.accum_frame;
     fc.seed = slot.accum_frame + 1;
-    apply_history(fc, rec, slot);
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
         1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
@@ -573,16 +480,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
                                      .background = background,
                                      .instances = resolved.instances,
                                      .output = slot.texture,
-                                     .gbuffer = gb.slot->texture,
-                                     .history_color = slot.history,
-                                     .history_gbuffer = gb.slot->history,
                                      .instance_table = instance_table,
                                      .hit_groups = resolved.hit_groups,
                                      .bindless = &bindless});
-
-    // What the next frame reprojects through.
-    rec.last_traced_camera = fc.camera;
-    rec.has_last_traced_camera = true;
 
     if (slot.accum_frame < accumulation_frame_cap)
         ++slot.accum_frame;

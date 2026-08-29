@@ -57,7 +57,7 @@ camera / controls                        [in progress]  dev-friendly pinhole cam
 persistent per-view state                [in progress]  view_id keys what a view keeps — camera, controller, zoom, display name, last rect, composite target and accumulators — all in one sv::view_store the frame owns
 id stack (push_id / scoped_id)           [done]         seeds view_id so one name under N scopes names N views; independent of layout nesting, and a duplicate within a frame asserts.
                                                         Ids are formattable and take an ImGui-style ## suffix, which separates two views without changing what a human reads
-temporal accumulation                    [in progress]  a traced layer reprojects its history through the previous camera and blends per pixel; only a scene change restarts the whole image
+temporal accumulation                    [in progress]  a traced layer blends into one rgba32_float target in place, uncapped; the camera or the scene changing restarts it, nothing else does
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through sr::box_filter_mipmap_routine) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
                                                         Still to come: async streaming, placeholders while pending, and mapping visibility onto sg's stream priorities
@@ -120,12 +120,26 @@ The whole sv API compiles everywhere, though: without a backend a routine simply
 
 ## First library-extension seams (per the "living libraries" rule)
 
-- **PBR/BRDF shading** is authored fresh in `shaders/pbr.hlsli`; a shared shader BRDF library is the natural home once a second consumer appears.
+- **The BSDF is sv's own**, in `shaders/openpbr.hlsli`: the OpenPBR Surface subset the path tracer shades through, plus the GGX / Fresnel / sheen primitives under it.
+  A shared shader BRDF library in shaped-rendering is the natural home once a second consumer appears, and the primitives are the half that would move.
+  The flat `pbr_raytrace_routine` still has its own `shaders/pbr.hlsli`, which is one of the reasons to retire that routine.
+- **The shader-side `sv::` namespace is provisional**, and a new shader type should not land at its top level by default.
+  It replaced the old `sv_` prefix and now holds four unrelated groups flat: the microfacet and Fresnel primitives
+  (`ggx_*`, `fresnel_*`, `sheen_*`, `oren_nayar`, `dispersive_ior`, `thin_film_reflectance`, `luminance`), the shading frame
+  (`frame`, `make_frame`, `to_local`, `perturb_frame`, …), the material model (`surface`, `bsdf`, `bsdf_*`, `medium_*`), and
+  the generated-shader runtime (`instance`, `attribute_desc`, `shading_context`, `interpolate_*`).
+  Names a layer above or below will want are already in it — `sv::surface`, `sv::luminance`, and `sv::frame`, which is an
+  orthonormal shading basis in HLSL and the immediate-mode frame in C++.
+  The split is deliberately deferred rather than skipped: it wants doing together with the move of the primitives to
+  shaped-rendering above, since that move decides which group leaves and what the rest is named around.
+- **Meshing primitives belong in typed-geometry.** Both examples hand-roll their geometry: a cube in `hello-cube`, a UV sphere in `openpbr-spheres`.
+  Two callers is enough to want a `tg::` sphere / box tessellation.
 - **The id-pool now exists** as `sv::impl::lru_pool<Id, Record>` (budget + idle eviction, LRU).
   If a second library wants it, promoting a generational version into clean-core is the next step.
 - **TLAS is rebuilt every frame**, since refit/update is not implemented in sg yet; `tlas_id` exists for a future prebuilt/persistent TLAS.
 - **Texture download** exists in sg as `cmd.download.bytes_from_texture`, but the trace stays on the proven UAV-write-then-blit path.
-  Pixel-level tests have not been written against it yet.
+  Two tests read pixels back through it now — `volumetric-furnace-test` and `openpbr-bsdf-test` — and both are skipped on Windows on ARM, where that path fastfails.
+  See the known issue in [TODO.md](TODO.md).
 - **Compositing is a raster blit, not a compute copy**, and that is sg's constraint rather than a preference.
   A swapchain backbuffer is created render-target-only (`DXGI_USAGE_RENDER_TARGET_OUTPUT`, no UAV), and there is no GPU texture-to-texture copy.
   A compute compositor would have to write an offscreen UAV and then blit *that* to the backbuffer — one extra full-screen pass.

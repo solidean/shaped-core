@@ -161,11 +161,18 @@ target_compile_options(shaped-graphics
 # Backends: each is its own static library that links this core. A backend is built only where it is
 # available for the platform/build: dx12 needs Windows (its SDK ships with it), vulkan needs the
 # Vulkan SDK on a non-web target. Enabled backends are collected so the test binary link-checks them.
+#
+# _sg_test_drivers is the narrower list: the backends that also register an entry-point driver in the API test
+# binary. It is not the same question as "does this backend build" — vulkan builds wherever the SDK is, and its
+# driver stays unregistered while its transfer ops abort (see tests/backends/vulkan-entry.cc). A backend that
+# builds without registering can invoke nothing, so it must not switch the cross-backend API tests on.
 set(_sg_backends "")
+set(_sg_test_drivers "")
 
 if(WIN32)
     add_subdirectory(backends/dx12)
     list(APPEND _sg_backends shaped-graphics-dx12)
+    list(APPEND _sg_test_drivers dx12)
 endif()
 
 if(NOT EMSCRIPTEN)
@@ -181,8 +188,8 @@ endif()
 
 # Test executable. Tests are organized by topic under tests/<topic>/. Pure/abstract-surface tests (value
 # types, no GPU) compile unconditionally; the backend-agnostic sg *API* tests are context_handle
-# INVOCABLE_TESTs run against every available backend and are gated on a backend being present (below), since
-# the nexus orphan check fails an enabled invocable that no driver invokes. Per-backend smoke tests and
+# INVOCABLE_TESTs run against every available backend and are gated on a registered driver being present
+# (_sg_test_drivers, below), since the nexus orphan check fails an enabled invocable that no driver invokes. Per-backend smoke tests and
 # internal invariants live with their backend as their own *-test binary (see backends/dx12/tests).
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-test
@@ -207,14 +214,15 @@ if(SC_BUILD_TESTS)
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
-    # each invocable runnable by name across all backends. Only meaningful when at least one backend is present.
+    # each invocable runnable by name across all backends. Only meaningful when some driver actually registers —
+    # a compiled-but-unregistered backend leaves all 133 invocables orphaned, which fails the binary.
     #
     # TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
     # support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
-    # It would make this `if(_sg_backends)` guard unnecessary (a backend is always present), let large parts of
-    # the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
+    # It would make this `if(_sg_test_drivers)` guard unnecessary (a driver is always present), let large parts
+    # of the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
     # against. Future work.
-    if(_sg_backends)
+    if(_sg_test_drivers)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
             tests/context/context-test.cc
