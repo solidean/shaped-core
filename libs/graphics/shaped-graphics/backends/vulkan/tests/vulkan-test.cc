@@ -1,3 +1,4 @@
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
@@ -89,7 +90,20 @@ namespace
 sg::context_handle make_context()
 {
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
-    return ctx.has_value() ? ctx.value() : nullptr;
+    if (ctx.has_error())
+        return nullptr;
+
+    // Any validation message of warning severity or worse fails the running test, which is what makes the layer a
+    // gate rather than log noise.
+    // A test whose subject IS the bad input clears the callback for its duration.
+    static_cast<vulkan::vulkan_context&>(*ctx.value())
+        .set_message_callback(
+            [](vulkan::vulkan_message_severity severity, cc::string_view message)
+            {
+                if (severity <= vulkan::vulkan_message_severity::warning)
+                    CHECK(false).context(cc::format("vulkan validation: {}", message));
+            });
+    return ctx.value();
 }
 } // namespace
 
@@ -207,4 +221,67 @@ TEST("sg vulkan - the device probe and the command list answer ray tracing separ
     // On this hardware the probe is true, so the two answers really do differ rather than agreeing by accident.
     CHECK(!cmd.value()->raytracing.is_supported());
     c.drop_vulkan_command_list(cc::move(cmd.value()));
+}
+
+TEST("sg vulkan - an installed message callback receives validation messages")
+{
+    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
+    if (ctx.has_error())
+        return; // no Vulkan device.
+    auto& c = static_cast<vulkan::vulkan_context&>(*ctx.value());
+
+    // make_context installs a fail-the-test listener; this one owns its context, so it can install a recording one.
+    int seen = 0;
+    auto last = cc::string();
+    auto last_severity = vulkan::vulkan_message_severity::verbose;
+    c.set_message_callback(
+        [&](vulkan::vulkan_message_severity severity, cc::string_view message)
+        {
+            ++seen;
+            last = cc::string(message);
+            last_severity = severity;
+        });
+
+    c.dispatch_validation_message(vulkan::vulkan_message_severity::error, "provoked");
+    CHECK(seen == 1);
+    CHECK(last == "provoked");
+    CHECK(last_severity == vulkan::vulkan_message_severity::error);
+
+    // Clearing restores the log default, so a later message reaches no listener.
+    c.set_message_callback({});
+    c.dispatch_validation_message(vulkan::vulkan_message_severity::warning, "ignored");
+    CHECK(seen == 1);
+}
+
+TEST("sg vulkan - the debug messenger reaches the installed callback")
+{
+    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
+    if (ctx.has_error())
+        return; // no Vulkan device.
+    auto& c = static_cast<vulkan::vulkan_context&>(*ctx.value());
+
+    int seen = 0;
+    c.set_message_callback([&](vulkan::vulkan_message_severity, cc::string_view) { ++seen; });
+
+    // A zero-size buffer violates VUID-VkBufferCreateInfo-size-00912, which the layer reports and the driver then
+    // rejects — a pure diagnostic with no object created and nothing to clean up.
+    // Going through vkCreateBuffer directly is the point: create_vulkan_buffer treats size 0 as a legal empty buffer
+    // and never calls Vulkan, so only the raw call can provoke the layer.
+    auto const info = VkBufferCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = 0,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    VkBuffer buffer = VK_NULL_HANDLE;
+    vkCreateBuffer(c._device, &info, nullptr, &buffer);
+    if (buffer != VK_NULL_HANDLE)
+        vkDestroyBuffer(c._device, buffer, nullptr); // a lenient driver may still have made one
+
+    // This is what says the messenger is wired to the callback rather than only to the log.
+    // It needs the validation layer installed; without it there is no messenger and nothing to observe.
+    if (c._debug_messenger != VK_NULL_HANDLE)
+        CHECK(seen > 0);
+
+    c.set_message_callback({});
 }

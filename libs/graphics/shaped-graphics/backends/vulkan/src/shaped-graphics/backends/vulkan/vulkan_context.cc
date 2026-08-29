@@ -1,6 +1,7 @@
 // vulkan_context: device-level lifetime bodies (shutdown / teardown) plus small shared helpers.
 // Bring-up lives in vulkan_context.create.cc, the epoch bodies in vulkan_epoch.cc.
 
+#include <clean-core/common/log.hh>
 #include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
@@ -64,6 +65,33 @@ char const* vk_result_name(VkResult r)
         return "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS";
     default:
         return "VK_RESULT_<unknown>";
+    }
+}
+
+// One validation message, to the installed callback or to the log.
+// The layer already decided how bad it is, so the severity maps straight across rather than flattening onto one level.
+void vulkan_context::dispatch_validation_message(vulkan_message_severity severity, cc::string_view message) const
+{
+    if (_message_callback)
+    {
+        _message_callback(severity, message);
+        return;
+    }
+
+    switch (severity)
+    {
+    case vulkan_message_severity::error:
+        CC_LOG_ERROR("validation: {}", message);
+        break;
+    case vulkan_message_severity::warning:
+        CC_LOG_WARNING("validation: {}", message);
+        break;
+    case vulkan_message_severity::info:
+        CC_LOG_INFO("validation: {}", message);
+        break;
+    case vulkan_message_severity::verbose:
+        CC_LOG_DEBUG("validation: {}", message);
+        break;
     }
 }
 

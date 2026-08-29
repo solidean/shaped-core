@@ -24,28 +24,28 @@ char const* const k_validation_layer = "VK_LAYER_KHRONOS_validation";
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_messenger_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                         VkDebugUtilsMessageTypeFlagsEXT /*types*/,
                                                         VkDebugUtilsMessengerCallbackDataEXT const* data,
-                                                        void* /*user_data*/)
+                                                        void* user_data)
 {
-    char const* level = "message";
+    auto mapped = vulkan_message_severity::verbose;
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-        level = "error";
+        mapped = vulkan_message_severity::error;
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-        level = "warning";
+        mapped = vulkan_message_severity::warning;
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
-        level = "info";
-    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
-        level = "verbose";
-    // The validation layer already told us how bad it is, so the level maps straight across rather than flattening
-    // every message onto one.
-    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+        mapped = vulkan_message_severity::info;
+
+    // The messenger created alongside the instance carries no context yet, so its create-time messages go to the log.
+    // The standalone one created after the context carries it, which is what lets a test fail on a validation message.
+    if (auto* const ctx = static_cast<vulkan_context*>(user_data); ctx != nullptr)
+        ctx->dispatch_validation_message(mapped, cc::string_view(data->pMessage));
+    else if (mapped == vulkan_message_severity::error)
         CC_LOG_ERROR("validation: {}", data->pMessage);
-    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    else if (mapped == vulkan_message_severity::warning)
         CC_LOG_WARNING("validation: {}", data->pMessage);
-    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+    else if (mapped == vulkan_message_severity::info)
         CC_LOG_INFO("validation: {}", data->pMessage);
     else
         CC_LOG_DEBUG("validation: {}", data->pMessage);
-    (void)level;
     return VK_FALSE;
 }
 
@@ -336,14 +336,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (VkResult r = vkCreateInstance(&instance_info, nullptr, &instance); r != VK_SUCCESS)
         return vulkan_error(r, "vkCreateInstance failed");
 
+    // The standalone messenger is created after the context below, so it can carry it as user data and a caller can
+    // redirect messages with set_message_callback.
+    // Instance create/destroy messages are already covered by dbg_info on the instance's pNext.
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
-    if (enable_validation)
-    {
-        auto create_fn
-            = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
-        if (create_fn)
-            create_fn(instance, &dbg_info, nullptr, &messenger); // best-effort; ignore failure
-    }
 
     // Physical device selection: rank every device that exposes a graphics queue, keep the best.
     auto const picked = pick_physical_device(instance, config.prefer_software_device);
@@ -453,6 +449,19 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                                                 submission_timeline, messenger);
     ctx->set_adapter_info(describe_adapter(best_device));
     ctx->set_raytracing_supported(raytracing_supported);
+
+    // Now that the context exists it can own the messenger and receive its messages.
+    // Best-effort, like the layer itself: without it validation still reaches the log, just not a listener.
+    if (enable_validation)
+    {
+        auto ctx_dbg_info = dbg_info;
+        ctx_dbg_info.pUserData = ctx.get();
+        auto create_fn
+            = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+        if (create_fn && create_fn(instance, &ctx_dbg_info, nullptr, &messenger) == VK_SUCCESS)
+            ctx->set_debug_messenger(messenger);
+    }
+
     owned_by_context = true;
     return context_handle(cc::move(ctx));
 }

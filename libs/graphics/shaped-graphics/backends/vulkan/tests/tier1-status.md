@@ -45,6 +45,18 @@ That is the whole reason this list is names rather than a pattern.
 **A pass is not always coverage.** The three raytracing entries and the one query entry pass by `SKIP`ping, because `raytracing_is_supported()` and `query_timestamps_supported()` both answer false.
 They turn into real coverage when those milestones land, and until then they prove only that the honest-false path works.
 
+## The validation layer is the oracle
+
+Both test tiers install a listener that fails the running test on any validation message of warning severity or worse,
+the way the dx12 drivers do — `docs/testing.md` records that dx12 accumulated ~680 unnoticed messages before it grew one.
+
+It is wired end to end rather than assumed: `sg vulkan - the debug messenger reaches the installed callback` provokes
+a real VUID violation and checks the callback saw it.
+That matters because a listener nobody has seen fire is indistinguishable from one that is not connected.
+
+With it installed, the 52 passing tests above pass **without producing a validation message** — which is a statement
+about the backend rather than about the listener.
+
 ## What each remaining group is waiting on
 
 Every failure so far is a missing milestone rather than a defect — checked one by one, including the four topics that fail exactly one test.

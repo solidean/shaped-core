@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
@@ -26,6 +27,17 @@ struct sg::backend::vulkan::vulkan_config
     /// Prefer a software (CPU) physical device, e.g. lavapipe.
     /// Only a preference: Vulkan has no guaranteed software device, so this still falls back to hardware when none is present.
     bool prefer_software_device = false;
+};
+
+/// Severity of a validation-layer message, mapped from VkDebugUtilsMessageSeverityFlagBitsEXT.
+/// Ordered worst-first so `severity <= vulkan_message_severity::warning` reads as "warning or worse",
+/// matching how the dx12 backend's listener is written.
+enum class sg::backend::vulkan::vulkan_message_severity
+{
+    error,
+    warning,
+    info,
+    verbose,
 };
 
 /// Vulkan implementation of sg::context.
@@ -69,6 +81,29 @@ public:
 
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
+
+    /// Routes this instance's validation messages to `callback` instead of the log.
+    /// Only ever called when the context was created with enable_validation_layers, and only for messages raised
+    /// after creation returned — the instance's own create/destroy messages go to the log either way.
+    /// The layer raises a message on whatever thread provoked it, and this setter is not synchronized against that:
+    /// set it before the context is driven from a second thread.
+    /// An empty function restores the log default.
+    ///
+    /// Unlike dx12's, this is genuinely per-context: a Vulkan messenger belongs to one VkInstance and delivers only
+    /// that instance's messages, so silencing one context leaves every other context's listener untouched.
+    /// dx12 needs a thread-scoped guard instead because D3D12 was observed handing one message to every callback in
+    /// the process; that is a runtime behaviour of its debug layer rather than a difference in how the two register.
+    void set_message_callback(cc::unique_function<void(vulkan_message_severity, cc::string_view)> callback)
+    {
+        _message_callback = cc::move(callback);
+    }
+
+    // Set by create_vulkan_context once the context exists, so the messenger can carry it as user data.
+    void set_debug_messenger(VkDebugUtilsMessengerEXT messenger) { _debug_messenger = messenger; }
+
+    // Delivers one validation message to the installed callback, or to the log when none is installed.
+    // Called from the debug messenger; body in vulkan_context.cc.
+    void dispatch_validation_message(vulkan_message_severity severity, cc::string_view message) const;
 
     // backend-typed API — prefer these when you already hold a vulkan_context
 
@@ -297,6 +332,10 @@ public:
 
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
+
+    // Where validation messages go; empty means the log.
+    // See set_message_callback.
+    cc::unique_function<void(vulkan_message_severity, cc::string_view)> _message_callback;
 
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
