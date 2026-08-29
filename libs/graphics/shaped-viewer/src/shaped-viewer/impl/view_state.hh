@@ -21,17 +21,10 @@ namespace sv::impl
 struct temporal_slot
 {
     /// What the frame writes, and what everything downstream samples.
-    sg::texture_2d texture;
-
-    /// The previous *recorded* frame's `texture`, read-only for this frame.
     ///
-    /// A pair rather than one texture because reprojection reads at a different pixel than it writes, which in place
-    /// would be a race — and the two rotate only on frames that record, so a throttled view keeps re-presenting the
-    /// last image it actually produced rather than the one before it.
-    sg::texture_2d history;
-
-    /// Whether `history` holds a frame at all, as opposed to an allocated texture nothing has written yet.
-    bool has_history = false;
+    /// One texture rather than a pair: the tracer reads it back at the pixel it is about to write, so its blend is
+    /// race-free in place — and a throttled view re-presents exactly the image it last produced.
+    sg::texture_2d texture;
 
     /// The reset rule of whatever *writes* this resource, as of the last frame it did.
     /// For a traced layer that is the tracer's own content hash, covering the bytes it uploads.
@@ -69,6 +62,19 @@ struct view_state
     bool camera_seeded = false;
 
     orbit_camera_controller controller = {};
+
+    /// The fly controller, which unlike the orbit one integrates over time — so the viewer updates it every frame rather
+    /// than only on frames that saw an event.
+    fps_camera_controller fly = {};
+
+    /// Which of the two drives this view, re-asserted every frame like `movable_this_frame`.
+    ///
+    /// Routing runs before authoring, so it reads the *previous* frame's answer — the last complete one there is.
+    /// `style_seeded` is what makes a switch re-seed the incoming controller from the camera the outgoing one left, rather
+    /// than snapping to whatever pose it still held from before.
+    camera_style style_this_frame = camera_style::orbit;
+    camera_style style_last_frame = camera_style::orbit;
+    bool style_seeded = false;
 
     /// The camera this view renders from when the caller does not supply one.
     /// Kept alongside the controller's orbit because a caller may set a camera the orbit cannot express exactly.
@@ -119,14 +125,6 @@ struct view_state
     /// Keyed rather than indexed because a temporal resource names itself: a traced layer's accumulator, and whatever
     /// else a view declares, have to survive a layer being inserted above them.
     cc::map<u64, temporal_slot> temporal;
-
-    /// The camera the last recorded trace of this view drew from, and whether there was one.
-    ///
-    /// Reprojection maps this frame's pixels back through it to find where they were, so this is what makes a camera
-    /// move reuse the converged image instead of discarding it.
-    /// Per view rather than per temporal slot: every layer of a view is traced from the one camera.
-    camera_gpu last_traced_camera = {};
-    bool has_last_traced_camera = false;
 
     /// The frame this view last re-recorded, which is what its refresh rate is measured against.
     /// The one piece of history with no texture to read it off, so the frame stamps it.

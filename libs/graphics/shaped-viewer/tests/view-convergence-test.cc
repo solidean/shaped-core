@@ -53,8 +53,8 @@ TEST("sv - only accumulation slots count")
 {
     auto state = view_with(cc::array<cc::pair<u8, u32>>{{1, 50}});
 
-    // A gbuffer is written fresh every frame rather than accumulated, so it says nothing about convergence.
-    state.temporal[sv::temporal_id::gbuffer(1)].accum_frame = 0;
+    // A reserved id of some other kind is not an accumulator, so it says nothing about convergence.
+    state.temporal[(u64(2) << sv::temporal_id::kind_shift) | 1].accum_frame = 0;
     // Neither does a slot a caller declared for itself, which keeps out of the reserved range entirely.
     state.temporal[7].accum_frame = 0;
 

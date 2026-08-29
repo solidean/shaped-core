@@ -159,23 +159,29 @@ namespace
 }
 } // namespace
 
-material_type material_type::create(cc::string name, cc::vector<material_signature_entry> signature, cc::string shader)
+material_type material_type::create(cc::string name,
+                                    cc::vector<material_signature_entry> signature,
+                                    cc::string shader,
+                                    cc::string opacity_attribute)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_string(name);
     b.add_string(shader);
+    b.add_string(opacity_attribute);
     b.add_pod(i64(signature.size()));
     for (auto const& d : signature)
     {
         b.add_string(d.name);
         b.add_pod(d.format);
         b.add_bool(d.is_final);
+        b.add_pod(d.interpolation);
         b.add_pod_span_sized(cc::span<byte const>(d.default_value));
     }
 
     auto type = material_type{.name = cc::move(name),
                               .signature = cc::move(signature),
                               .shader = cc::move(shader),
+                              .opacity_attribute = cc::move(opacity_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)
@@ -185,6 +191,11 @@ material_type material_type::create(cc::string name, cc::vector<material_signatu
     for (auto const& d : type.signature)
         CC_ASSERT(d.default_value.size() == d.format.size_bytes(), "a declaration's default must be exactly its "
                                                                    "format's size");
+
+    for (auto const& d : type.signature)
+        CC_ASSERT(d.interpolation != attribute_interpolation::rotation
+                      || d.format == attribute_format::of_vector(scalar_type::f32, 4),
+                  "an attribute interpolated as a rotation must be a 4-component f32 — a quaternion in xyzw order");
 
     // A name is pasted into generated HLSL as a local, and a material type's own fragment is written against it — so a name
     // the generator cannot emit is rejected rather than sanitized, since mangling it would silently break that fragment.
@@ -197,11 +208,14 @@ material_type material_type::create(cc::string name, cc::vector<material_signatu
                   "a material attribute may not be named after an HLSL "
                   "keyword or builtin type");
         CC_ASSERT(!cc::string_view(d.name).starts_with("sv_"),
-                  "the sv_ prefix belongs to the generator (sv_params, "
-                  "sv_desc_*, sv_uv_*, sv_tex_*, sv_sampler_*); a declared "
-                  "attribute may not use it");
+                  "the sv_ prefix belongs to the generator (sv_sampler_*, and "
+                  "the entry function itself); a declared attribute may not "
+                  "use it");
         CC_ASSERT(d.name != "surface" && d.name != "ctx", "'surface' and 'ctx' are the entry function's own locals");
     }
+
+    CC_ASSERT(type.opacity_attribute.empty() || type.find(type.opacity_attribute) != nullptr,
+              "a material type's opacity_attribute must name an attribute its signature declares");
 
     return type;
 }

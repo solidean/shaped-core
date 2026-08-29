@@ -50,9 +50,8 @@ namespace
     return nullptr;
 }
 
-/// One declaration walked down the chain, coarsest rank first.
-/// Every step overwrites the winner, and a `final` one stops the walk — so the last rank that supplied a value is what comes back.
-[[nodiscard]] resolved_attribute resolve_one(material_signature_entry const& d, material const& m, sv::mesh const& mesh)
+/// Which rank supplies `d`, and what it supplies — the walk itself, without the declaration's own interpolation mode.
+[[nodiscard]] resolved_attribute resolve_source(material_signature_entry const& d, material const& m, sv::mesh const& mesh)
 {
     auto winner = resolved_attribute{.name = d.name,
                                      .format = d.format,
@@ -106,6 +105,18 @@ namespace
                 = {.name = d.name, .format = d.format, .frequency = material_frequency::mesh_texture, .sample = t, .uv = uv};
 
     return winner;
+}
+
+/// One declaration walked down the chain, coarsest rank first.
+/// Every step overwrites the winner, and a `final` one stops the walk — so the last rank that supplied a value is what comes back.
+///
+/// The interpolation mode is set once, after the walk: it is the declaration's whatever rank won, and none of the branches
+/// above has any say in it.
+[[nodiscard]] resolved_attribute resolve_one(material_signature_entry const& d, material const& m, sv::mesh const& mesh)
+{
+    auto r = resolve_source(d, m, mesh);
+    r.interpolation = d.interpolation;
+    return r;
 }
 } // namespace
 

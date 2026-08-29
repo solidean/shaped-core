@@ -86,6 +86,22 @@ So the partial image is there to look at, and the capture still counts as failed
 `dev.py` reads a file at the requested path as the run having succeeded, and the exit code alone cannot tell it otherwise.
 Without that split a sweep would refresh a half-converged image over the committed reference and report it as captured.
 
+### What the default view owes the reader
+
+An example's committed capture is its documentation, and it is the only part a reader sees before deciding whether to open the source.
+So the default view is part of the example rather than a detail of how it was run.
+
+- **It shows everything the example demonstrates.**
+  Not most of it: a parameter sweep whose far half is occluded demonstrates the near half.
+  Fifteen rows behind one another is the shape that fails here — depth compresses toward the horizon, so laying them out across the frame instead is usually the fix rather than moving the camera back.
+- **Nothing the example is about is clipped or crushed.**
+  A roughness sweep whose columns are all white is not a sweep.
+- **The sidecar's `size` and `accumulate` are part of it**, since they decide whether the image is converged enough to read.
+- **Look at it before you commit it.**
+  The other three are only checkable that way, and this is the one that keeps failing.
+
+Both examples in the tree were authored by someone reasoning carefully about the camera, and in both the framing defect was obvious the first time anyone looked at the picture.
+
 ### An example is capturable when it says so
 
 Capture is opt-in, through a `.capture.json` beside the example source, keyed by example name:

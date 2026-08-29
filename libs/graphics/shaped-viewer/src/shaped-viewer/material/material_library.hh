@@ -99,10 +99,11 @@ namespace impl
 
 /// The material library every viewer draws from: the caller's provider if they set one, otherwise the built-in default.
 /// Created on the first call and shared by every caller after.
-/// Not thread-safe, like the rest of viewer setup.
+/// The ACQUISITION is thread-safe — two threads asking at once get one object, not two.
+/// What it hands back is not: the library itself carries the same single-threaded contract the rest of viewer setup does.
 [[nodiscard]] cc::result<material_library*> acquire_material_library();
 
-/// Registers the builtin types into `lib` — `sv::builtin_material::pbr` and `unlit`.
+/// Registers the builtin types into `lib` — `sv::builtin_material::openpbr`, `pbr` and `unlit`.
 /// Public so a caller supplying their own library still gets them without reaching into the default.
 void register_builtin_material_types(material_library& lib);
 
@@ -118,6 +119,11 @@ void register_builtin_material_types(material_library& lib);
 /// The names the builtin material types are registered under.
 namespace sv::builtin_material
 {
+/// The OpenPBR Surface subset the renderer models — the type to reach for when a material is authored rather than imported.
+inline constexpr cc::string_view openpbr = "openpbr";
+
+/// glTF-style metallic-roughness, which is what an imported asset carries; its fragment maps onto the same OpenPBR surface.
 inline constexpr cc::string_view pbr = "pbr";
+
 inline constexpr cc::string_view unlit = "unlit";
 } // namespace sv::builtin_material

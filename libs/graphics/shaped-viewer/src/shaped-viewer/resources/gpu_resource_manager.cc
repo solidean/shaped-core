@@ -166,7 +166,7 @@ void gpu_resource_manager::advance_to(sg::epoch e)
 
 namespace
 {
-/// sv_attribute_desc: buffer, offset, stride — three uints, which is what a descriptor slot is sized for.
+/// sv::attribute_desc: buffer, offset, stride — three uints, which is what a descriptor slot is sized for.
 constexpr i32 attribute_desc_size = 12;
 
 /// Appends `value` to `out` as raw bytes, which is how every slot of a parameter block is written.
@@ -325,7 +325,7 @@ instance_id gpu_resource_manager::acquire_instance(resolved_material const& r, m
             // A descriptor slot serves either the attribute itself or, for a sampled one, the uv set it samples through.
             auto const* const source = a.sample != nullptr ? a.uv : a.attribute;
             CC_ASSERT(source != nullptr, "a descriptor slot names a mesh attribute the resolve found");
-            CC_ASSERT(slot.size_bytes == attribute_desc_size, "an sv_attribute_desc slot is exactly its three uints");
+            CC_ASSERT(slot.size_bytes == attribute_desc_size, "an sv::attribute_desc slot is exactly its three uints");
             record.slots.push_back({.kind = slot.kind,
                                     .offset = slot.offset,
                                     .size_bytes = slot.size_bytes,

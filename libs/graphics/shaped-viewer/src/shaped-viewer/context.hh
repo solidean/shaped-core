@@ -44,6 +44,7 @@ namespace impl
 ///
 /// Created on the first call and shared by every caller after, so viewers run in succession — or side by side — on one
 /// device rather than one each.
-/// Not thread-safe, like the rest of viewer setup: the window system it feeds is main-thread bound anyway.
+/// The ACQUISITION is thread-safe — two threads asking at once get one device, not two.
+/// What it hands back keeps sg's own rules, and the window system it feeds is main-thread bound anyway.
 [[nodiscard]] cc::result<sg::context_handle> acquire_viewer_context();
 } // namespace sv
