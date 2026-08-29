@@ -1,9 +1,11 @@
 #pragma once
 
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer_access.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
@@ -12,6 +14,9 @@ namespace sg::backend::vulkan
 /// The VkDevice of a context, for a header that cannot see vulkan_context's definition.
 /// Defined in vulkan_buffer.cc, where the context is complete.
 [[nodiscard]] VkDevice ctx_device_of(vulkan_context& ctx);
+
+/// A completion group from the context's pool, for the same reason.
+[[nodiscard]] vulkan_completion_group_handle ctx_acquire_completion_group(vulkan_context& ctx);
 } // namespace sg::backend::vulkan
 
 /// Vulkan implementation of sg::raw_buffer.
@@ -34,6 +39,12 @@ public:
         _memory(memory),
         _heap(cc::move(heap))
     {
+        // A timeline only where a transfer is even possible, so a buffer nothing can copy costs no semaphore.
+        if (usage.has(sg::buffer_usage::copy_dst))
+            _upload_group = ctx_acquire_completion_group(ctx);
+        if (usage.has(sg::buffer_usage::copy_src))
+            _download_group = ctx_acquire_completion_group(ctx);
+
         if (_buffer != VK_NULL_HANDLE)
         {
             auto const info = VkBufferDeviceAddressInfo{
@@ -118,6 +129,37 @@ public:
 
     // The heap a placed buffer sits in, held so the heap outlives the placement; null for a dedicated buffer.
     sg::memory_heap_handle _heap;
+
+    // The completion timelines this resource's transfers run on — one per direction, fixed for its lifetime.
+    // Immutable after construction, which is what lets the record path read them with no lock.
+    vulkan_completion_group_handle _upload_group;
+    vulkan_completion_group_handle _download_group;
+
+    // Four per-resource cross-queue stamps that make the CPU timeline (submit -> async transfer -> submit) mirror GPU
+    // ordering between the graphics queue and the transfer queues.
+    // All only ever grow and are never reset — a stale value just yields a cheap already-satisfied wait.
+    // Mutable and atomic, so they can be stamped through a const handle from any thread.
+    // Distinct from the access-state tracking below: that orders graphics-queue lists against each other, while these
+    // order a transfer queue against the graphics queue.
+
+    // Forward: highest value an ASYNC upload here will signal on _upload_group.
+    // A later graphics-queue list that touches this buffer waits for it at submit, so it sees the async write.
+    mutable cc::atomic<u64> _pending_async_upload_value = {0};
+
+    // Reverse: highest graphics-queue submission token of a command list that used this buffer.
+    // An async upload defers behind it, so it never overwrites the buffer while an earlier list still reads it; the
+    // async download reuses it, so a readback only runs after the last writer finished.
+    mutable cc::atomic<u64> _last_used_submission_token = {0};
+
+    // Forward for the async DOWNLOAD: highest value a pending readback here will signal on _download_group.
+    // A later graphics-queue list that WRITES this buffer waits for it, so it never overwrites bytes still being read.
+    mutable cc::atomic<u64> _pending_async_download_value = {0};
+
+    // Lifetime-only twin of _pending_async_upload_value, for STREAMING transfers.
+    // Deliberately separate: the async stamp doubles as the forward reader wait, and streaming must not buy the
+    // deferred-deletion gate at the price of making every later reader wait on it.
+    // Deferred deletion gates on the max of the two; command-list access tracking reads only the async one.
+    mutable cc::atomic<u64> _pending_stream_copy_value = {0};
 
     // Guarded because concurrent command lists may record against the same buffer.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the buffer, not a change to it.

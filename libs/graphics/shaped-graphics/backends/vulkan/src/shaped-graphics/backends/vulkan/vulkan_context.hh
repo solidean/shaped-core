@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_compute_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh>
@@ -24,6 +25,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_swapchain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_upload_async.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -54,6 +56,11 @@ struct sg::backend::vulkan::vulkan_config
 
     /// Capacity of the readback ring behind cmd.download, in bytes.
     isize download_ring_bytes = 16 * 1024 * 1024;
+
+    /// Staging window for ctx.upload's transfer-queue system, in bytes.
+    /// Three of these are allocated, so CPU staging and GPU copy overlap; an upload larger than one packs across
+    /// successive windows.
+    isize async_upload_window_bytes = 4 * 1024 * 1024;
 
     /// Capacity of the descriptor heap, in bytes, and the share of it reserved for transient binding groups.
     /// Sized in bytes rather than in descriptors because a descriptor's size is a device property.
@@ -114,6 +121,29 @@ public:
 
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
+
+    /// The queues async transfer runs on, and the family they belong to.
+    ///
+    /// Upload and download want separate queues, because a wait stalls everything behind it in a queue's FIFO — an
+    /// upload deferred behind a graphics submission would otherwise hold up an unrelated download queued after it.
+    /// Where the device could not give two they are the same queue, and where it could give none they are the
+    /// graphics queue: async transfer stays correct either way, and only its concurrency degrades.
+    [[nodiscard]] VkQueue upload_queue() const { return _upload_queue; }
+    [[nodiscard]] VkQueue download_queue() const { return _download_queue; }
+    [[nodiscard]] u32 transfer_queue_family() const { return _transfer_queue_family; }
+
+    /// Whether the transfer queues are genuinely separate from the graphics queue.
+    /// False means a copy competes with rendering for the same queue, which is worth knowing before blaming a
+    /// transfer for a frame-time spike.
+    [[nodiscard]] bool has_dedicated_transfer_queue() const { return _transfer_queue_family != _queue_family_index; }
+
+    void set_transfer_queues(u32 family, VkQueue upload, VkQueue download, u32 effective_family)
+    {
+        _transfer_queue_family = effective_family;
+        _upload_queue = upload;
+        _download_queue = download;
+        (void)family;
+    }
 
     /// Whether this context can create a swapchain at all, and whether it can do so without a window.
     /// Both are instance/device facts settled at creation, so a create_swapchain failure is reported rather than
@@ -349,10 +379,9 @@ public:
         drop_vulkan_command_list(std::unique_ptr<vulkan_command_list>(static_cast<vulkan_command_list*>(cmd.release())));
     }
 
-    // Async upload (ctx.upload) — not implemented yet, and aborts rather than erroring: the signatures return void.
-    void async_upload_bytes_to_buffer(sg::raw_buffer_handle, cc::pinned_data<byte const>, isize) override
+    void async_upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::pinned_data<byte const> data, isize offset) override
     {
-        CC_UNREACHABLE("vulkan async upload is not implemented yet");
+        _upload_async.upload_buffer(buffer, cc::move(data), offset);
     }
     void async_upload_bytes_to_texture(sg::raw_texture_handle,
                                        cc::pinned_data<byte const>,
@@ -478,6 +507,9 @@ public:
     /// The staging ring behind cmd.upload; owned here because its space is reclaimed on the epoch cycle.
     vulkan_upload_inline_system _upload_inline;
 
+    /// The transfer-queue system behind ctx.upload, which is epoch-independent.
+    vulkan_upload_async_system _upload_async;
+
     /// The readback ring behind cmd.download, and the actor that drains it.
     vulkan_download_inline_system _download_inline;
 
@@ -509,12 +541,21 @@ public:
     /// The ray-tracing entry points; only loaded where the device has the extensions.
     vulkan_raytracing_functions _raytracing_functions;
 
+    /// Hands out the per-resource transfer timelines; see vulkan_completion_group.
+    vulkan_completion_group_pool _group_pool;
+
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
 
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;
     bool _headless_surface_supported = false;
+
+    // See upload_queue / download_queue.
+    // Owned by the device, so nothing destroys them.
+    VkQueue _upload_queue = VK_NULL_HANDLE;
+    VkQueue _download_queue = VK_NULL_HANDLE;
+    u32 _transfer_queue_family = 0;
 
     // See descriptor_buffer_properties.
     VkPhysicalDeviceDescriptorBufferPropertiesEXT _descriptor_buffer_properties = {};

@@ -109,6 +109,46 @@ bool find_graphics_queue_family(VkPhysicalDevice dev, u32& out_index)
     return false;
 }
 
+/// The family async transfers should run on, and how many queues it can give.
+///
+/// Preference order: a transfer family with no graphics — a real DMA engine, which copies without competing with
+/// rendering — then any non-graphics family that can transfer, then the graphics family itself.
+///
+/// **Two queues, not one.** A wait stalls everything behind it in a queue's FIFO, so an upload deferred behind a
+/// graphics submission would hold up an unrelated download queued after it.
+/// Where the family cannot give two, both directions share one and that stall is the cost; where there is no
+/// transfer family at all, they share the graphics queue and async transfer is asynchronous only in the CPU sense.
+/// Reporting which case applies is what keeps a surprise-free timing story: see vulkan_context::transfer_queue_note.
+u32 find_transfer_queue_family(VkPhysicalDevice dev, u32 graphics_family, u32& out_queue_count)
+{
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, nullptr);
+    auto families = cc::vector<VkQueueFamilyProperties>::create_uninitialized(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, families.data());
+
+    auto const can_transfer = [&](uint32_t i)
+    {
+        // A graphics or compute family transfers implicitly, whether or not it sets the bit.
+        return (families[i].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) != 0;
+    };
+
+    for (uint32_t i = 0; i < count; ++i)
+        if (can_transfer(i) && (families[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) == 0)
+        {
+            out_queue_count = families[i].queueCount;
+            return i;
+        }
+    for (uint32_t i = 0; i < count; ++i)
+        if (i != graphics_family && can_transfer(i))
+        {
+            out_queue_count = families[i].queueCount;
+            return i;
+        }
+
+    out_queue_count = families[graphics_family].queueCount;
+    return graphics_family;
+}
+
 // Even `unsuitable` beats no device at all, so a lone less-ideal device is still picked.
 // `prefer_software` lifts CPU devices (lavapipe) to the top; otherwise a discrete GPU wins and CPU comes last.
 int device_type_rank(VkPhysicalDeviceType type, bool prefer_software)
@@ -451,6 +491,17 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // Logical device with a single graphics queue.
     // Every feature is enabled up front, whether or not the milestone using it has landed: a feature costs nothing
     // unused, and enabling them one at a time means re-editing this chain for each.
+    // The transfer family and how many of its queues async transfer gets: two where it can, one otherwise.
+    u32 transfer_family_queue_count = 0;
+    u32 const transfer_family = find_transfer_queue_family(best_device, best_family, transfer_family_queue_count);
+    bool const transfer_shares_graphics_family = transfer_family == best_family;
+    u32 transfer_queue_count = transfer_family_queue_count >= 2 ? 2u : 1u;
+    if (transfer_shares_graphics_family)
+    {
+        // The graphics family already spends one queue on rendering, so only what is left over is available.
+        transfer_queue_count = transfer_family_queue_count >= 3 ? 2u : (transfer_family_queue_count >= 2 ? 1u : 0u);
+    }
+
     float const queue_priority = 1.0f;
     auto const queue_info = VkDeviceQueueCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -500,11 +551,36 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .timelineSemaphore = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
     };
+    // One create-info per family: the graphics one always, plus the transfer family when it is a different one.
+    // A shared family asks for its extra queues on the single info instead, which Vulkan requires — two infos for one
+    // family is invalid.
+    // Three entries covers every case: the shared family asks for at most 1 graphics + 2 transfer queues.
+    float const transfer_priorities[3] = {1.0f, 1.0f, 1.0f};
+    cc::vector<VkDeviceQueueCreateInfo> queue_infos;
+    if (transfer_shares_graphics_family)
+    {
+        auto shared = queue_info;
+        shared.queueCount = 1 + transfer_queue_count;
+        shared.pQueuePriorities = transfer_priorities;
+        queue_infos.push_back(transfer_queue_count != 0 ? shared : queue_info);
+    }
+    else
+    {
+        queue_infos.push_back(queue_info);
+        if (transfer_queue_count != 0)
+            queue_infos.push_back(VkDeviceQueueCreateInfo{
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .queueFamilyIndex = transfer_family,
+                .queueCount = transfer_queue_count,
+                .pQueuePriorities = transfer_priorities,
+            });
+    }
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &vk12_features,
-        .queueCreateInfoCount = 1,
-        .pQueueCreateInfos = &queue_info,
+        .queueCreateInfoCount = u32(queue_infos.size()),
+        .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),
         .ppEnabledExtensionNames = device_extensions.data(),
     };
@@ -514,6 +590,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 
     VkQueue queue = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, best_family, 0, &queue);
+
+    // The transfer queues, if any.
+    // A shared family hands them out after the graphics queue's own index.
+    u32 const transfer_base_index = transfer_shares_graphics_family ? 1u : 0u;
+    VkQueue transfer_queues[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    for (u32 i = 0; i < transfer_queue_count; ++i)
+        vkGetDeviceQueue(device, transfer_family, transfer_base_index + i, &transfer_queues[i]);
 
     // Two timeline semaphores on the one queue: the epoch timeline drives reclamation, the submission timeline answers per-list completion.
     // Each starts at first-1, so nothing reads as complete before the first signal.
@@ -566,7 +649,17 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         raytracing_supported = ctx->_raytracing_functions.load(device);
     }
     ctx->set_raytracing_supported(raytracing_supported);
+    ctx->_group_pool.initialize(*ctx);
     ctx->set_presentation_support(swapchain_supported, has_headless_surface);
+
+    // Both directions get their own queue where the family could give two, and share one otherwise.
+    // A device with no spare queue at all falls back to the graphics queue, which keeps async transfer correct while
+    // making it asynchronous only in the CPU sense.
+    ctx->set_transfer_queues(transfer_family, transfer_queues[0] != VK_NULL_HANDLE ? transfer_queues[0] : queue,
+                             transfer_queues[1] != VK_NULL_HANDLE
+                                 ? transfer_queues[1]
+                                 : (transfer_queues[0] != VK_NULL_HANDLE ? transfer_queues[0] : queue),
+                             transfer_queues[0] != VK_NULL_HANDLE ? transfer_family : best_family);
 
     // The staging ring is part of a usable context rather than something acquired lazily: without it cmd.upload has
     // nowhere to write, so a context that cannot allocate one is not worth handing back.
@@ -574,6 +667,11 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         return cc::error(cc::move(ring).error());
     if (auto ring = ctx->_download_inline.initialize(*ctx, config.download_ring_bytes); ring.has_error())
         return cc::error(cc::move(ring).error());
+
+    // The async transfer system is part of a usable context for the same reason the inline rings are: ctx.upload has
+    // nowhere to stage without it.
+    if (auto async = ctx->_upload_async.initialize(*ctx, config.async_upload_window_bytes); async.has_error())
+        return cc::error(cc::move(async).error());
 
     // The extension was required above, so a missing entry point here is a driver that advertises it without
     // implementing it — worth failing on rather than discovering at the first descriptor write.

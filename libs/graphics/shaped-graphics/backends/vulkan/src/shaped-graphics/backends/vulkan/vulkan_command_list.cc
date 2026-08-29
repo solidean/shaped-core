@@ -101,9 +101,37 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     // Only the last list tracking a buffer promotes it.
     // Under the same lock as the submit below, so finalize order matches submit order — the later list's canonical
     // state has to be the one that actually ran last.
+    // The forward half of async sync: this list waits for any async upload still pending on a buffer it touches, so
+    // it sees bytes the transfer queue wrote.
+    //
+    // Gathered per *timeline* rather than merged into one value, because a completion value only means anything on
+    // the group that issued it — see vulkan_completion_group.
+    // Deduplicated by keeping the highest value per group, since one list may touch several buffers sharing none.
+    cc::vector<VkSemaphore> async_waits;
+    cc::vector<u64> async_wait_values;
+    auto const add_async_wait = [&](vulkan_completion_group_handle const& group, u64 value)
+    {
+        if (group == nullptr || value == 0 || group->has_reached(value))
+            return; // already satisfied, so not worth a wait entry
+        for (isize i = 0; i < async_waits.size(); ++i)
+            if (async_waits[i] == group->timeline)
+            {
+                if (value > async_wait_values[i])
+                    async_wait_values[i] = value;
+                return;
+            }
+        async_waits.push_back(group->timeline);
+        async_wait_values.push_back(value);
+    };
+
+    for (auto const* buffer : cmd->_touched_buffers)
+    {
+        add_async_wait(buffer->_upload_group, buffer->_pending_async_upload_value.load(cc::memory_order_acquire));
+        add_async_wait(buffer->_download_group, buffer->_pending_async_download_value.load(cc::memory_order_acquire));
+    }
+
     for (auto const* buffer : cmd->_touched_buffers)
         buffer->finalize_slot(cmd->slot());
-    cmd->_touched_buffers.clear();
 
     // A texture finalize can return barriers — reverting to the canonical layout when other lists are still open —
     // so they are recorded onto this list before it closes.
@@ -131,12 +159,25 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             u64 const signal_values[2] = {u64(t), 0};
             u32 const signal_count = cmd->_present_signal != VK_NULL_HANDLE ? 2u : 1u;
 
-            // A presenting list waits for the image to be acquired before it writes any color.
-            VkPipelineStageFlags const wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            u32 const wait_count = cmd->_present_wait != VK_NULL_HANDLE ? 1u : 0u;
+            // Waits: the async-transfer timelines gathered above, plus — for a presenting list — the acquire
+            // semaphore, which must be satisfied before any color is written.
+            cc::vector<VkSemaphore> waits = async_waits;
+            cc::vector<u64> wait_values = async_wait_values;
+            cc::vector<VkPipelineStageFlags> wait_stages;
+            for (isize i = 0; i < async_waits.size(); ++i)
+                wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+            if (cmd->_present_wait != VK_NULL_HANDLE)
+            {
+                waits.push_back(cmd->_present_wait);
+                wait_values.push_back(0); // binary, so its value is ignored
+                wait_stages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+            }
+            u32 const wait_count = u32(waits.size());
 
             auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
                 .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                .waitSemaphoreValueCount = wait_count,
+                .pWaitSemaphoreValues = wait_count != 0 ? wait_values.data() : nullptr,
                 .signalSemaphoreValueCount = signal_count,
                 .pSignalSemaphoreValues = signal_values,
             };
@@ -144,8 +185,8 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                 .pNext = &timeline_info,
                 .waitSemaphoreCount = wait_count,
-                .pWaitSemaphores = wait_count != 0 ? &cmd->_present_wait : nullptr,
-                .pWaitDstStageMask = wait_count != 0 ? &wait_stage : nullptr,
+                .pWaitSemaphores = wait_count != 0 ? waits.data() : nullptr,
+                .pWaitDstStageMask = wait_count != 0 ? wait_stages.data() : nullptr,
                 .commandBufferCount = 1,
                 .pCommandBuffers = &cmd->_buffer,
                 .signalSemaphoreCount = signal_count,
@@ -155,6 +196,20 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             // Record device loss here but don't throw inside the lock; the throw happens after it releases.
             if (sr != VK_SUCCESS && !note_device_lost_if_lost(sr, "vkQueueSubmit"))
                 CC_ASSERT(false, "vkQueueSubmit failed");
+
+            // The reverse half of async sync: a later async transfer on any of these buffers defers behind this
+            // token, so it never overwrites bytes this list still reads.
+            // Stamped inside the lock, so the token a transfer captures is never one from a list submitted after it.
+            for (auto const* buffer : cmd->_touched_buffers)
+            {
+                u64 const stamp = u64(t);
+                u64 previous = buffer->_last_used_submission_token.load(cc::memory_order_relaxed);
+                while (previous < stamp
+                       && !buffer->_last_used_submission_token.compare_exchange_weak(
+                           previous, stamp, cc::memory_order_acq_rel, cc::memory_order_relaxed))
+                {
+                }
+            }
 
             // Inside the lock, so the actor's queue order matches submission order — which is also the order the
             // readback ring handed out its space.
@@ -166,6 +221,9 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     // Surface it now that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
     if (is_device_lost())
         throw sg::device_lost_exception(device_loss_reason());
+
+    // Cleared only now: the reverse stamp inside the lock above reads this list, so it cannot be emptied earlier.
+    cmd->_touched_buffers.clear();
 
     // The pool is in flight until this epoch retires, so hand it to the current epoch.
     // Null the list's handles so its destructor cannot destroy the pool just handed off.

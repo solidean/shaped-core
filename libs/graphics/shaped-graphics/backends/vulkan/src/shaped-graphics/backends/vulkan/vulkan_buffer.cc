@@ -12,6 +12,11 @@ VkDevice ctx_device_of(vulkan_context& ctx)
 }
 
 
+vulkan_completion_group_handle ctx_acquire_completion_group(vulkan_context& ctx)
+{
+    return ctx._group_pool.acquire();
+}
+
 std::shared_ptr<vulkan_buffer> vulkan_context::register_if_transient(std::shared_ptr<vulkan_buffer> buffer,
                                                                      sg::lifetime_scope scope)
 {
@@ -60,15 +65,26 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
     // Empty buffer: no allocation (Vulkan rejects a zero-size buffer); null handles are the representation.
     if (size_in_bytes > 0)
     {
+        // A buffer any async transfer can touch is shared CONCURRENTLY between the graphics and transfer families.
+        //
+        // EXCLUSIVE cannot express two families holding a resource at once, and the alternative — a queue-family
+        // ownership transfer, which is a release barrier on one queue paired with an acquire on the other —
+        // serializes exactly the concurrency async transfer exists to provide.
+        // Vulkan is the strict backend here: D3D12 has no notion of queue ownership for a buffer at all.
+        //
+        // Only where the families actually differ: CONCURRENT naming one family is invalid, and a device that gave
+        // no separate transfer queue has nothing to share with.
+        u32 const families[2] = {_queue_family_index, _transfer_queue_family};
+        bool const shared
+            = has_dedicated_transfer_queue() && usage.has_any(sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+
         auto const buffer_info = VkBufferCreateInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = VkDeviceSize(size_in_bytes),
             .usage = to_vk_buffer_usage(usage) | extra_usage,
-            // TODO: the streaming usages need VK_SHARING_MODE_CONCURRENT over the graphics + transfer
-            // families — EXCLUSIVE cannot express two families holding a resource at once, and ownership
-            // transfer serializes the very concurrency streaming exists to allow.
-            // Vulkan is the strict backend here: dx12 needs a flag only for a region inside a subresource.
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .sharingMode = shared ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = shared ? 2u : 0u,
+            .pQueueFamilyIndices = shared ? families : nullptr,
         };
 
         if (VkResult r = vkCreateBuffer(_device, &buffer_info, nullptr, &buffer); r != VK_SUCCESS)

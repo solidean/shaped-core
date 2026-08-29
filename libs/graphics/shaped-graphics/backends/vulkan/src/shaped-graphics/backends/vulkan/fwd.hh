@@ -14,11 +14,19 @@ class vulkan_buffer;
 struct vulkan_buffer_access;         // cross-list access tracking for one buffer (see vulkan_buffer_access.hh)
 struct vulkan_upload_allocation;     // one reservation in the inline upload ring (see vulkan_upload_inline.hh)
 class vulkan_upload_inline_system;   // the ring itself
+struct vulkan_async_upload_job;      // one async upload handed to the copy actor
+struct vulkan_transfer_wake;         // a bare wake for the copy actor
+class vulkan_upload_actor;           // drains async uploads in enqueue order
+class vulkan_upload_async_system;    // ctx.upload's transfer-queue system
 struct vulkan_download_copy_job;     // one staged readback awaiting its copy-out (see vulkan_download_inline.hh)
 class vulkan_download_actor;         // drains them in submission order
 class vulkan_download_inline_system; // the readback ring
-struct vulkan_descriptor_functions;  // the VK_EXT_descriptor_buffer entry points, loaded per device
-struct vulkan_raytracing_functions;  // the acceleration-structure + ray-tracing-pipeline entry points
+struct vulkan_completion_group;      // one resource's transfer timeline in one direction
+using vulkan_completion_group_handle = std::shared_ptr<vulkan_completion_group>;
+struct vulkan_group_value;          // a completion value plus the timeline it belongs to
+class vulkan_completion_group_pool; // hands them out and takes them back
+struct vulkan_descriptor_functions; // the VK_EXT_descriptor_buffer entry points, loaded per device
+struct vulkan_raytracing_functions; // the acceleration-structure + ray-tracing-pipeline entry points
 class vulkan_blas;
 class vulkan_tlas;
 struct vulkan_descriptor_range;    // one allocated range within the descriptor heap

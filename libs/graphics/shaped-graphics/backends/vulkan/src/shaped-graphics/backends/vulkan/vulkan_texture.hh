@@ -1,8 +1,11 @@
 #pragma once
 
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_buffer.hh> // ctx_acquire_completion_group
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
@@ -27,6 +30,11 @@ public:
         _owns_image(owns_image),
         _access(vulkan_texture_access(subresource_extent_of(desc)))
     {
+        // A timeline only where a transfer is even possible — see the same rule on vulkan_buffer.
+        if (desc.usage.has(sg::texture_usage::copy_dst))
+            _upload_group = ctx_acquire_completion_group(ctx);
+        if (desc.usage.has(sg::texture_usage::copy_src))
+            _download_group = ctx_acquire_completion_group(ctx);
     }
 
     // Deferred deletion: hands the GPU handles and finalizers to the context, freed once the owning epoch retires.
@@ -89,6 +97,14 @@ public:
     // Mutable because release_storage() is const: expiry is a lifetime event on a const handle.
     mutable VkImage _image = VK_NULL_HANDLE;
     mutable VkDeviceMemory _memory = VK_NULL_HANDLE;
+
+    /// The completion timelines and cross-queue stamps, exactly as on vulkan_buffer — see the notes there.
+    vulkan_completion_group_handle _upload_group;
+    vulkan_completion_group_handle _download_group;
+    mutable cc::atomic<u64> _pending_async_upload_value = {0};
+    mutable cc::atomic<u64> _last_used_submission_token = {0};
+    mutable cc::atomic<u64> _pending_async_download_value = {0};
+    mutable cc::atomic<u64> _pending_stream_copy_value = {0};
 
     /// False for a *borrowed* image, which something else owns — a swapchain's, whose images belong to the
     /// VkSwapchainKHR and are destroyed with it.
