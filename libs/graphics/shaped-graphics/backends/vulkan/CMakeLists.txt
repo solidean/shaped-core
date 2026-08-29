@@ -8,6 +8,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
+    src/shaped-graphics/backends/vulkan/vulkan_barrier.cc
     src/shaped-graphics/backends/vulkan/vulkan_buffer.cc
     src/shaped-graphics/backends/vulkan/vulkan_format.cc
     src/shaped-graphics/backends/vulkan/vulkan_texture.cc
@@ -24,6 +25,7 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_context.hh
     src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
+    src/shaped-graphics/backends/vulkan/vulkan_barrier.hh
     src/shaped-graphics/backends/vulkan/vulkan_buffer.hh
     src/shaped-graphics/backends/vulkan/vulkan_format.hh
     src/shaped-graphics/backends/vulkan/vulkan_texture.hh
@@ -54,6 +56,7 @@ target_compile_options(shaped-graphics-vulkan
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-vulkan-test
         tests/main.cc
+        tests/vulkan-barrier-test.cc
         tests/vulkan-test.cc
     )
 
