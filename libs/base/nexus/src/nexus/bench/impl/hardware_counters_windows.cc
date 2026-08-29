@@ -273,6 +273,12 @@ struct pmc_state
     bool running[max_cpus] = {};
     u64 last_in[max_cpus][MAX_HW_COUNTERS] = {};
     u64 totals[MAX_HW_COUNTERS] = {};
+
+    /// How many per-interval deltas were folded into totals.
+    /// Programming the counters and actually reading them are different things.
+    /// A session can start and configure its sources while no context switch ever delivers PMC extended data, which is what a virtualized host does.
+    /// Zero folds means the totals are untouched rather than measured, so the samples must come back invalid — otherwise a caller cannot tell "this counter read zero" from "this counter never ran".
+    u64 folds = 0;
 };
 
 // ProcessTrace callback, one call per delivered event.
@@ -318,6 +324,7 @@ void WINAPI on_event(EVENT_RECORD* rec)
         for (auto i = isize(0); i < n; ++i)
             st->totals[i] += pmc[i] - st->last_in[cpu][i];
         st->running[cpu] = false;
+        ++st->folds;
     }
     // Our thread starts running on this CPU: snapshot the per-CPU counters.
     if (new_tid == st->target_tid)
@@ -527,7 +534,10 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
             if (mapped[i].id != c)
                 continue;
             name = mapped[i].name;
-            if (counters_live && i < configured)
+            // state.folds is part of the condition because counters_live only says the session programmed them.
+            // A host that delivers no PMC data leaves every total at 0, and reporting that as a reading is what makes a
+            // zero indistinguishable from a counter that never flowed.
+            if (counters_live && i < configured && state.folds > 0)
             {
                 value = state.totals[i];
                 valid = true;
