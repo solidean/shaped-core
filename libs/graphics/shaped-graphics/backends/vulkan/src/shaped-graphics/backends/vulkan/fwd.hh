@@ -25,6 +25,8 @@ class vulkan_download_async_system;  // ctx.download's transfer-queue system
 struct vulkan_download_copy_job;     // one staged readback awaiting its copy-out (see vulkan_download_inline.hh)
 class vulkan_download_actor;         // drains them in submission order
 class vulkan_download_inline_system; // the readback ring
+struct vulkan_query_pool_lease;      // one VkQueryPool leased by a command list
+class vulkan_query_system;           // the pool of them
 struct vulkan_completion_group;      // one resource's transfer timeline in one direction
 using vulkan_completion_group_handle = std::shared_ptr<vulkan_completion_group>;
 struct vulkan_group_value;          // a completion value plus the timeline it belongs to

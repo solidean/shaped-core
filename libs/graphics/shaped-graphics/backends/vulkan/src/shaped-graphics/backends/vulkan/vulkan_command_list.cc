@@ -101,6 +101,10 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     // Only the last list tracking a buffer promotes it.
     // Under the same lock as the submit below, so finalize order matches submit order — the later list's canonical
     // state has to be the one that actually ran last.
+    // Resolve the recorded queries first: it records copies of its own, so it has to happen before the finalize
+    // barriers below and before the buffer is closed.
+    cmd->finalize_queries_before_close();
+
     // The forward half of async sync: this list waits for any async upload still pending on a buffer it touches, so
     // it sees bytes the transfer queue wrote.
     //
@@ -252,6 +256,8 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
 
     // The recorded work never runs, so this list's declared accesses leave no hazard behind and canonical is
     // untouched — including when it was the last list tracking a buffer.
+    cmd.release_queries_on_drop();
+
     for (auto const* buffer : cmd._touched_buffers)
         buffer->discard_slot(cmd.slot());
     cmd._touched_buffers.clear();

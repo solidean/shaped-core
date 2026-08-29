@@ -547,6 +547,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pNext = &vk13_features,
         .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
         .descriptorBindingPartiallyBound = VK_TRUE,
+        // How the query system resets a pool: vkCmdResetQueryPool cannot be recorded inside a render-pass instance,
+        // and a timestamp legitimately can be.
+        // See vulkan_query.hh.
+        .hostQueryReset = VK_TRUE,
         .runtimeDescriptorArray = VK_TRUE,
         .timelineSemaphore = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
@@ -650,6 +654,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     }
     ctx->set_raytracing_supported(raytracing_supported);
     ctx->_group_pool.initialize(*ctx);
+    // Required at the floor, so device creation would have failed without it.
+    ctx->set_host_query_reset(true);
+    ctx->_query_system.initialize(*ctx);
     ctx->set_presentation_support(swapchain_supported, has_headless_surface);
 
     // Both directions get their own queue where the family could give two, and share one otherwise.

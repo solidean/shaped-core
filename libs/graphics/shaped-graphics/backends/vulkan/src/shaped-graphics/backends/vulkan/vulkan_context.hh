@@ -18,6 +18,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_query.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raster_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_functions.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
@@ -146,6 +147,11 @@ public:
     [[nodiscard]] VkQueue upload_queue() const { return _upload_queue; }
     [[nodiscard]] VkQueue download_queue() const { return _download_queue; }
     [[nodiscard]] u32 transfer_queue_family() const { return _transfer_queue_family; }
+    [[nodiscard]] u32 queue_family_index() const { return _queue_family_index; }
+
+    /// Whether hostQueryReset was enabled, which is how the query system resets a pool.
+    [[nodiscard]] bool supports_host_query_reset() const { return _host_query_reset; }
+    void set_host_query_reset(bool supported) { _host_query_reset = supported; }
 
     /// Whether the transfer queues are genuinely separate from the graphics queue.
     /// False means a copy competes with rendering for the same queue, which is worth knowing before blaming a
@@ -561,12 +567,18 @@ public:
     /// Hands out the per-resource transfer timelines; see vulkan_completion_group.
     vulkan_completion_group_pool _group_pool;
 
+    /// The query pools behind cmd.query.
+    vulkan_query_system _query_system;
+
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
 
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;
     bool _headless_surface_supported = false;
+
+    // See supports_host_query_reset.
+    bool _host_query_reset = false;
 
     // See queue_guard.
     // Mutable so a const context can still be submitted through.

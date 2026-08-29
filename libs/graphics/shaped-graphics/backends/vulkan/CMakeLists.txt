@@ -11,6 +11,8 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_completion_group.cc
+    src/shaped-graphics/backends/vulkan/vulkan_query.cc
+    src/shaped-graphics/backends/vulkan/vulkan_command_list.queries.cc
     src/shaped-graphics/backends/vulkan/vulkan_download_async.cc
     src/shaped-graphics/backends/vulkan/vulkan_upload_async.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
@@ -96,6 +98,7 @@ if(SC_BUILD_TESTS)
         tests/vulkan-compute-test.cc
         tests/vulkan-raster-test.cc
         tests/vulkan-present-test.cc
+        tests/vulkan-query-test.cc
         tests/vulkan-raytracing-test.cc
         tests/vulkan-texture-access-test.cc
         tests/vulkan-test.cc

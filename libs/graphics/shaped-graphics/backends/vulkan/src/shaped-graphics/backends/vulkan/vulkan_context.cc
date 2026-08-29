@@ -162,6 +162,8 @@ void vulkan_context::shutdown()
         _image_views.shutdown();
         _samplers.shutdown();
 
+        _query_system.shutdown(); // VkQueryPools are device objects like any other
+
         // The transfer timelines the pool still holds.
         // A group a live resource still references destroys its own.
         _group_pool.shutdown();

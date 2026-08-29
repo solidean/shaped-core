@@ -4,10 +4,12 @@
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_query.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -229,9 +231,22 @@ protected:
                                   int height,
                                   int depth) override;
 
-    // GPU queries (reached through cmd.query) — not implemented yet, and the last seam that is not.
-    // Timestamps report unsupported, and record_gpu_timestamp stays callable but always returns an invalid query, so
-    // a caller that checks is_supported() gets an honest answer rather than an abort.
-    [[nodiscard]] bool query_timestamps_supported() const override { return false; }
-    [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override { return {}; }
+    // GPU queries (reached through cmd.query). Bodies in vulkan_command_list.queries.cc.
+    [[nodiscard]] bool query_timestamps_supported() const override;
+    [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override;
+
+public:
+    /// Resolves every leased query pool into a transient buffer and starts its readback; runs just before close.
+    void finalize_queries_before_close();
+
+    /// Returns the leased pools unresolved; runs on the drop path.
+    void release_queries_on_drop();
+
+    /// The query pools this list has leased, and which of them is being filled.
+    /// finalize_queries_before_close resolves + reads them back at submit and returns them; a drop returns them
+    /// unresolved.
+    cc::vector<cc::unique_ptr<vulkan_query_pool_lease>> _leased_query_pools;
+    int _active_timestamp_lease = -1;
+
+protected:
 };

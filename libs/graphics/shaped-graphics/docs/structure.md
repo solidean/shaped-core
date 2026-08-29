@@ -69,7 +69,7 @@ src/shaped-graphics/
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
     raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (both backends real)
-    query.hh/.cc                  [in progress] cmd.query: record_gpu_timestamp / is_supported (dx12 real; vulkan stub)
+    query.hh/.cc                  [done]        cmd.query: record_gpu_timestamp / is_supported (both backends real)
 
   compute/
     compute_pipeline.hh/.cc       [done]        abstract: compute shader + pipeline layout; dx12 = PSO, vulkan = VkPipeline + VkPipelineCache
