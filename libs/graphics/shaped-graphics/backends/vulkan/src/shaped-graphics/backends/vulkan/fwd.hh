@@ -11,9 +11,12 @@ class vulkan_context;
 enum class vulkan_message_severity;
 class vulkan_command_list;
 class vulkan_buffer;
-struct vulkan_buffer_access;       // cross-list access tracking for one buffer (see vulkan_buffer_access.hh)
-struct vulkan_upload_allocation;   // one reservation in the inline upload ring (see vulkan_upload_inline.hh)
-class vulkan_upload_inline_system; // the ring itself
+struct vulkan_buffer_access;         // cross-list access tracking for one buffer (see vulkan_buffer_access.hh)
+struct vulkan_upload_allocation;     // one reservation in the inline upload ring (see vulkan_upload_inline.hh)
+class vulkan_upload_inline_system;   // the ring itself
+struct vulkan_download_copy_job;     // one staged readback awaiting its copy-out (see vulkan_download_inline.hh)
+class vulkan_download_actor;         // drains them in submission order
+class vulkan_download_inline_system; // the readback ring
 class vulkan_texture;
 
 /// Backend-typed resource handles.

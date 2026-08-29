@@ -134,6 +134,10 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             // Record device loss here but don't throw inside the lock; the throw happens after it releases.
             if (sr != VK_SUCCESS && !note_device_lost_if_lost(sr, "vkQueueSubmit"))
                 CC_ASSERT(false, "vkQueueSubmit failed");
+
+            // Inside the lock, so the actor's queue order matches submission order — which is also the order the
+            // readback ring handed out its space.
+            _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
             return t;
         });
 
@@ -171,6 +175,10 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     for (auto const* buffer : cmd._touched_buffers)
         buffer->discard_slot(cmd.slot());
     cmd._touched_buffers.clear();
+
+    // The recorded readbacks never run, so their futures are cancelled rather than left unsettled.
+    // A future nobody ever settles parks its dependents for the life of the process.
+    _download_inline.discard_unsubmitted(cmd._pending_downloads);
 
     // Never submitted, so the GPU never touched this pool — return it straight to the free set, where reset happens at reuse.
     // Null the handles so nothing double-frees them.
@@ -215,12 +223,20 @@ void vulkan_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                                  cc::span<byte const> data,
                                                  isize offset_in_bytes)
 {
-    // sg has already bounds-checked the write and rejected a null destination; an empty one is a no-op by contract.
+    // The upload scope forwards straight to this seam without validating, so the contract is checked here.
+    // Bounds are checked before the empty early-out, so an empty write at a bad offset is still a contract violation.
+    CC_ASSERT(buffer != nullptr, "upload target buffer is null");
+    auto const dst_handle = std::dynamic_pointer_cast<vulkan_buffer const>(buffer);
+    CC_ASSERT(dst_handle != nullptr, "buffer is not a vulkan buffer");
+    CC_ASSERT(!dst_handle->is_expired(), "upload target is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + data.size() <= dst_handle->size_in_bytes(),
+              "upload range is out of the buffer's bounds");
     if (data.empty())
         return;
+    CC_ASSERT(dst_handle->usage().has(sg::buffer_usage::copy_dst), "upload target buffer must have "
+                                                                   "buffer_usage::copy_dst");
 
-    auto const& dst = static_cast<vulkan_buffer const&>(*buffer);
-    CC_ASSERT(dst._buffer != VK_NULL_HANDLE, "cannot upload into an empty buffer");
+    auto const& dst = *dst_handle;
 
     // Stage the bytes first: reserving can block on an in-flight epoch, and doing that before anything is declared
     // keeps the tracking state consistent whichever way the wait goes.
@@ -236,6 +252,61 @@ void vulkan_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
         .size = VkDeviceSize(data.size()),
     };
     vkCmdCopyBuffer(_buffer, staging.buffer, dst._buffer, 1, &region);
+}
+
+sg::bytes_future vulkan_command_list::download_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                                 isize offset_in_bytes,
+                                                                 isize size_in_bytes)
+{
+    // As with upload, the download scope forwards straight here, so this seam owns the contract checks.
+    CC_ASSERT(buffer != nullptr, "download source buffer is null");
+    auto const src_handle = std::dynamic_pointer_cast<vulkan_buffer const>(buffer);
+    CC_ASSERT(src_handle != nullptr, "buffer is not a vulkan buffer");
+    CC_ASSERT(!src_handle->is_expired(), "download source is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(size_in_bytes >= 0, "download size must be non-negative");
+    CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= src_handle->size_in_bytes(),
+              "download range is out of the buffer's bounds");
+
+    // A zero-size read is a ready empty future by contract, and needs no staging.
+    if (size_in_bytes == 0)
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
+
+    CC_ASSERT(src_handle->usage().has(sg::buffer_usage::copy_src), "download source buffer must have "
+                                                                   "buffer_usage::copy_src");
+
+    auto const& src = *src_handle;
+
+    auto dst = cc::pinned_data<byte>::create_uninitialized(size_in_bytes);
+    auto const dst_span = dst.span();
+    auto completion = cc::make_async_manual<cc::unit>();
+    auto gate = std::make_shared<sg::bytes_wait_gate>();
+
+    // The GPU copy is recorded now; the memcpy out of the ring can only run once that copy has finished, which is
+    // what the actor waits for.
+    auto const staging = _ctx._download_inline.reserve(size_in_bytes);
+
+    track_buffer_access(src, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    flush_barriers();
+
+    auto const region = VkBufferCopy{
+        .srcOffset = VkDeviceSize(offset_in_bytes),
+        .dstOffset = VkDeviceSize(staging.offset),
+        .size = VkDeviceSize(size_in_bytes),
+    };
+    vkCmdCopyBuffer(_buffer, src._buffer, staging.buffer, 1, &region);
+
+    _ctx._download_inline.account_pending_copy(staging.epoch_copies);
+
+    vulkan_download_copy_job job;
+    job.deferred_cpu_copy = [source = staging.mapped, dst_span, size_in_bytes]
+    { cc::memcpy(dst_span.data(), source, size_t(size_in_bytes)); };
+    job.pin = std::weak_ptr<void const>(dst.pin());
+    job.completion = completion;
+    job.gate = gate;
+    job.epoch_copies = staging.epoch_copies;
+    _pending_downloads.push_back(cc::move(job));
+
+    return sg::bytes_future(cc::pinned_data<byte const>(cc::move(dst)), cc::move(completion), cc::move(gate));
 }
 
 // False until the recording paths below exist, whatever the device offers.

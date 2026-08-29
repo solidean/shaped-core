@@ -5,6 +5,7 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
@@ -49,6 +50,9 @@ public:
     cc::vector<vulkan_buffer const*> _pending_barrier_buffers;
     cc::vector<VkBufferMemoryBarrier2> _pending_buffer_barriers;
 
+    // Readbacks recorded by this list, still token-less: submit stamps them and hands them to the actor, drop cancels.
+    cc::vector<vulkan_download_copy_job> _pending_downloads;
+
     // Every buffer this list has tracked, so submit can finalize each slot and drop can discard it.
     // Public so the context can walk it at submit; deduplicated by vulkan_buffer::mark_recorded.
     cc::vector<vulkan_buffer const*> _touched_buffers;
@@ -64,10 +68,11 @@ protected:
     {
         CC_UNREACHABLE("vulkan inline texture upload is not implemented yet");
     }
-    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle, isize, isize) override
-    {
-        CC_UNREACHABLE("vulkan inline buffer download is not implemented yet");
-    }
+    // Records a copy into the context's readback ring and returns a future the download actor settles.
+    // Body in vulkan_command_list.cc.
+    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                              isize offset_in_bytes,
+                                                              isize size_in_bytes) override;
     [[nodiscard]] sg::bytes_future download_bytes_from_texture(sg::raw_texture_handle,
                                                                sg::subresource_index const&,
                                                                sg::texture_region const&) override

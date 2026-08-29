@@ -18,29 +18,32 @@ That is the whole reason this list is names rather than a pattern.
 
 ## Where it stands
 
-**52 of 135 invocables pass.**
+**60 of 135 invocables pass.**
 
 | topic | passing | of |
 |---|---|---|
-| `texture/texture-create-test.cc` | 11 | 11 |
 | `error-handling/error-handling-test.cc` | 11 | 12 |
+| `texture/texture-create-test.cc` | 11 | 11 |
+| `transfer/transfer-test.cc` | 10 | 10 |
 | `buffer/buffer-test.cc` | 9 | 10 |
 | `context/context-test.cc` | 5 | 5 |
 | `command_list/command_list-test.cc` | 4 | 4 |
 | `raytracing/raytracing-test.cc` | 3 | 3 |
-| `transfer/transfer-test.cc` | 3 | 10 |
 | `transfer/stream-test.cc` | 2 | 16 |
+| `barrier/barrier-test.cc` | 1 | 2 |
 | `binding/staging-binding-group-test.cc` | 1 | 11 |
+| `query/query-test.cc` | 1 | 1 |
 | `transfer/upload-async-test.cc` | 1 | 8 |
 | `transient/transient-test.cc` | 1 | 10 |
-| `query/query-test.cc` | 1 | 1 |
-| `barrier/barrier-test.cc` | 0 | 2 |
 | `binding/binding-group-array-test.cc` | 0 | 8 |
 | `binding/bindless-array-test.cc` | 0 | 7 |
 | `copy/copy-test.cc` | 0 | 6 |
 | `transfer/download-async-test.cc` | 0 | 8 |
 | `transfer/transfer-fuzz-test.cc` | 0 | 2 |
 | `shader_package/shader_package-test.cc` | 0 | 1 |
+
+**Inline transfer is complete**, so `transfer/` passes in full — including the round-trips, the cross-list case, and
+`wait_for` delivering a readback with no epoch advance, which is what exercises the readback actor's cooperative pump.
 
 **A pass is not always coverage.** The three raytracing entries and the one query entry pass by `SKIP`ping, because `raytracing_is_supported()` and `query_timestamps_supported()` both answer false.
 They turn into real coverage when those milestones land, and until then they prove only that the honest-false path works.
@@ -61,8 +64,8 @@ about the backend rather than about the listener.
 
 Every failure so far is a missing milestone rather than a defect — checked one by one, including the four topics that fail exactly one test.
 
-- **Inline transfer and barriers** — `transfer`, `copy`, `barrier`, `transfer-fuzz`, and the transfer-shaped tests inside other topics.
-  Blocked on the host-visible staging path: nothing in the backend requests a `HOST_VISIBLE` memory type, so there is no ring to copy through.
+- **Texture and device-to-device copies** — `copy`, `transfer-fuzz`, the remaining `barrier` test, and the transfer-shaped tests inside other topics.
+  Buffer upload and download are done; what is left needs `vkCmdCopyBufferToImage` / `vkCmdCopyImageToBuffer` and texture layout tracking.
 - **The bind path** — `binding-group-array`, `bindless-array`, `staging-binding-group`, and `error-handling`'s one failure.
   `try_create_binding_group_layout` and its four siblings are still `cc::error` stubs.
 - **The transient scope** — `transient`, and `buffer`'s one failure (`create_buffer<T> (transient)`).

@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_inline.hh>
@@ -33,6 +34,9 @@ struct sg::backend::vulkan::vulkan_config
     /// One epoch's inline uploads must fit, since the ring is only reclaimed when an epoch retires.
     /// Matches the dx12 backend's default.
     isize upload_ring_bytes = 16 * 1024 * 1024;
+
+    /// Capacity of the readback ring behind cmd.download, in bytes.
+    isize download_ring_bytes = 16 * 1024 * 1024;
 };
 
 /// Severity of a validation-layer message, mapped from VkDebugUtilsMessageSeverityFlagBitsEXT.
@@ -328,6 +332,10 @@ public:
     /// The inline rings ask before blocking: with nothing in flight, a full ring cannot be reclaimed by waiting, and
     /// the request is a budget error rather than back-pressure.
     [[nodiscard]] bool has_epochs_in_flight();
+
+    /// Blocks until `token`'s command list has finished executing.
+    /// The readback actor uses it after it has exhausted cooperative pumping; see vulkan_download_inline.hh.
+    void wait_for_submission_token(sg::submission_token token);
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
 
     void shutdown() override;
@@ -344,6 +352,9 @@ public:
 
     /// The staging ring behind cmd.upload; owned here because its space is reclaimed on the epoch cycle.
     vulkan_upload_inline_system _upload_inline;
+
+    /// The readback ring behind cmd.download, and the actor that drains it.
+    vulkan_download_inline_system _download_inline;
 
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;

@@ -460,6 +460,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // nowhere to write, so a context that cannot allocate one is not worth handing back.
     if (auto ring = ctx->_upload_inline.initialize(*ctx, config.upload_ring_bytes); ring.has_error())
         return cc::error(cc::move(ring).error());
+    if (auto ring = ctx->_download_inline.initialize(*ctx, config.download_ring_bytes); ring.has_error())
+        return cc::error(cc::move(ring).error());
 
     // Now that the context exists it can own the messenger and receive its messages.
     // Best-effort, like the layer itself: without it validation still reaches the log, just not a listener.

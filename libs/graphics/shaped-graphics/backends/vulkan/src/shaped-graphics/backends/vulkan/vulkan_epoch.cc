@@ -52,6 +52,7 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // The ring's bytes were read by GPU copies recorded in `last`, so its span is only reclaimable once `last` retires.
     // Record where it ended before the epoch is packaged.
     _upload_inline.on_epoch_advance(last);
+    _download_inline.on_epoch_advance(last);
 
     // Package everything `last` owns and push it onto the in-flight FIFO.
     // Advance is externally synchronized, so the pool drain races no submit — but the deletion staging below is fed from any thread.
@@ -127,6 +128,7 @@ void vulkan_context::process_completed_epochs()
 
     // Every epoch up to `completed` has finished on the GPU, so the staging bytes their copies read are free.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
+    _download_inline.on_epochs_completed(sg::epoch(completed));
 
     cc::vector<cc::unique_function<void()>> finalizers;
     for (auto& e : done)
@@ -159,6 +161,27 @@ void vulkan_context::wait_for_epoch(sg::epoch e)
         }
     }
     process_completed_epochs();
+}
+
+void vulkan_context::wait_for_submission_token(sg::submission_token token)
+{
+    if (_submission_timeline == VK_NULL_HANDLE || token == sg::submission_token::not_submitted)
+        return;
+
+    u64 const target = u64(token);
+    u64 current = 0;
+    vkGetSemaphoreCounterValue(_device, _submission_timeline, &current);
+    if (current >= target)
+        return;
+
+    auto const wait = VkSemaphoreWaitInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+        .semaphoreCount = 1,
+        .pSemaphores = &_submission_timeline,
+        .pValues = &target,
+    };
+    VkResult const r = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+    note_device_lost_if_lost(r, "submission semaphore wait");
 }
 
 void vulkan_context::wait_for_next_inflight_epoch()

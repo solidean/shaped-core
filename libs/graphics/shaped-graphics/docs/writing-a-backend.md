@@ -117,6 +117,10 @@ Recorded as each is met, because this is what the next backend most wants to kno
 - **Creation-path ownership transfer is a double-free waiting to happen.**
   A scope guard that unwinds partial creation must be disarmed the moment the context object is constructed, not at the end of the function.
   From construction onward the context's destructor owns those handles, and a later failure would otherwise free them twice.
+- **Not every sg scope validates before it reaches you.**
+  `cmd.upload.bytes_to_buffer` forwards straight to the backend seam with no checking at all, so the backend owns the null, bounds, usage and expiry contract.
+  The trap is that a `CC_UNREACHABLE` stub *satisfies* the `CHECK_ASSERTS` tests for those contracts, so they pass while unimplemented and regress the moment you implement the seam.
+  Copy the reference backend's assert list rather than inferring it, and mind the ordering: bounds are checked before the empty-input early-out, so an empty write at a bad offset is still a violation.
 - **Keep translation logic device-free, and it becomes testable everywhere.**
   Barrier translation and access tracking are pure logic with no device in them, so their tests run on any machine rather than only where a device exists.
   On a platform with no software adapter that is the difference between covered and skipped, and it is worth splitting files along that line deliberately.
