@@ -97,9 +97,14 @@ It reads back all zeros in user mode on every machine tried, because its `HwCoun
 ### Caveats
 
 - **Limited PMC budget.**
-  Only a few hardware counters can be programmed at once (a handful per core, minus whatever other ETW sessions currently hold).
-  A single pass **degrades to as many as fit**, keeping the earliest-requested counters — so put the ones you care about first; a counter that lost the budget race comes back `nullopt`.
-  Set `hw_measure_config::measure_all` to lift this: the body is re-run over budget-sized subsets until every requested counter is measured (it must be deterministic, and runs once per pass).
+  Only a few hardware counters can be programmed at once: a handful per core, minus whatever already holds one — another ETW session on Windows, the NMI watchdog on Linux.
+  The number cannot be queried up front, and it is not the PMU's nominal counter count.
+  What an over-wide request costs differs by platform.
+  Windows **degrades to as many as fit**, keeping the earliest-requested counters, so put the ones you care about first and a counter that lost the race comes back `nullopt`.
+  Linux refuses the whole group when the values are read, so an over-wide pass returns nothing and is indistinguishable from having no PMU access.
+  Set `hw_measure_config::measure_all` to lift both: the body is re-run over subsets, halving the width whenever a pass comes back empty, until every requested counter has a value.
+  The budget is then never what leaves a counter unmeasured — only this machine being unable to deliver it at all is, which one pass carrying it alone establishes.
+  (The body must be deterministic, and runs once per pass.)
 - **Windows granularity.**
   Counters are read at context switches, so the measured region is bracketed by forced switches and the count is quantum-granular with a small fixed overhead.
   Good for "what did this whole benchmark cost" and A/B comparisons; not for counting a 200-instruction region.

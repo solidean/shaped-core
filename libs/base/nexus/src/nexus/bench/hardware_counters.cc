@@ -128,22 +128,36 @@ hw_measurement measure_hw_counters(cc::function_ref<void()> body, hw_measure_con
     auto is_baseline
         = [](hw_counter c) { return c == hw_counter::elapsed_nanoseconds || c == hw_counter::reference_cycles; };
 
-    // The PMU counters still lacking a value after the passes so far, in request order.
+    // Counters a pass of their own could not read: unreadable on this machine rather than casualties of the budget.
+    cc::vector<hw_counter> retired;
+    auto is_retired = [&](hw_counter c)
+    {
+        for (auto const r : retired)
+            if (r == c)
+                return true;
+        return false;
+    };
+
+    // The PMU counters still lacking a value and still worth another pass, in request order.
     auto still_missing = [&]
     {
         cc::vector<hw_counter> out;
         for (auto const& s : best)
-            if (!s.valid && !is_baseline(s.id))
+            if (!s.valid && !is_baseline(s.id) && !is_retired(s.id))
                 out.push_back(s.id);
         return out;
     };
 
-    // measure_all: re-run the body over the not-yet-measured counters until every requested counter has a value.
+    // measure_all: re-run the body over the not-yet-measured counters until each one has a value or has been shown unreadable.
+    // The budget must never be what ends this loop — only a counter this machine cannot deliver may be given up on.
     //
     // The simultaneous-counter budget cannot be asked for up front, and is not the PMU's nominal counter count: whatever else already holds a PMC (the NMI watchdog, typically) shrinks it.
     // A group that overshoots it is refused when the values are read rather than when the events are opened, so an over-wide pass looks exactly like a pass with no PMU access at all.
-    // Narrowing is what tells the two apart: halve the chunk and retry, and conclude the counters are unreadable only once a chunk of one comes back invalid.
+    // Narrowing is what tells the two apart: halve the chunk and retry.
     // The width that works is then kept for the following passes, instead of re-widening into the same refusal.
+    //
+    // A counter still invalid after a pass carrying it alone is unreadable on its own terms, so it is retired and the ones behind it carry on.
+    // Breaking out there instead would let one unsupported event decide that everything after it goes unmeasured.
     auto budget = isize(0);
     for (auto missing = still_missing(); !missing.empty(); missing = still_missing())
     {
@@ -175,8 +189,9 @@ hw_measurement measure_hw_counters(cc::function_ref<void()> body, hw_measure_con
         if (!progressed)
         {
             if (take <= 1)
-                break; // one counter alone is as narrow as this gets, so nothing here is readable
-            budget = (take + 1) / 2;
+                retired.push_back(missing[0]);
+            else
+                budget = (take + 1) / 2;
         }
     }
 
