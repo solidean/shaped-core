@@ -118,7 +118,7 @@ thread_local thread_exit_sentinel tl_exit_sentinel;
 void write_bookkeeping(cc::rec::desc const& d, void const* payload, isize payload_size, u64 cycles)
 {
     auto& w = t_writer;
-    if (w.cur + cc::rec::impl::event_bytes_for(payload_size) > w.end)
+    if (cc::rec::impl::event_bytes_for(payload_size) > w.end - w.cur)
         return;
 
     cc::rec::impl::write_event_at(d, cc::rec::impl::monotonic_stamp(cycles), 0, cc::rec::impl::flag_none, payload,
@@ -252,7 +252,7 @@ bool cc::rec::impl::writer_rotate(isize needed)
     auto const acquired = acquired_payload{.cold_path_cycles = cold_end - cold_begin, .chunk_seq = fresh->seq};
     write_bookkeeping(acquired_desc, &acquired, isize(sizeof(acquired)), cold_end);
 
-    return w.cur + needed <= w.end;
+    return needed <= w.end - w.cur;
 }
 
 
@@ -280,7 +280,7 @@ cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payl
 
     // A rotation is worth it only when the current chunk cannot hold a useful payload at all.
     // Otherwise a long message is better truncated than allowed to abandon most of a megabyte.
-    if (w.cur + header_bytes + impl::padded_payload(1) > w.end)
+    if (header_bytes + impl::padded_payload(1) > w.end - w.cur)
     {
         if (!impl::writer_rotate(header_bytes + impl::padded_payload(1)))
         {
