@@ -78,8 +78,8 @@ src/shaped-graphics/
     context.hh/.cc                [in progress] abstract; infallible create_command_list over pure-virtual try_create_*; sticky device-loss status; every create funneled through a scope
     persistent.hh/.cc             [done]        ctx.persistent: the persistent-lifetime resource factory
     transient.hh/.cc              [in progress] ctx.transient: per-epoch bump allocator over one owned memory_heap (buffers only; textures fall back to dedicated)
-    upload.hh/.cc                 [in progress] ctx.upload: async bulk streaming on the dedicated copy queue (dx12 real; vulkan stub)
-    download.hh/.cc               [in progress] ctx.download: async bulk readback on the copy queue -> bytes_future (dx12 real; vulkan stub)
+    upload.hh/.cc                 [done]        ctx.upload: async bulk streaming on the dedicated copy queue (both backends real)
+    download.hh/.cc               [done]        ctx.download: async bulk readback on the copy queue -> bytes_future (both backends real)
     uncached.hh/.cc               [in progress] ctx.uncached: the raw, non-memoized layout / pipeline factory
     cached.hh/.cc                 [in progress] ctx.cached: get-or-create over pipeline_cache (layouts sync, pipelines async); raster pipelines still missing
     pipeline_cache.hh/.cc         [in progress] content-addressed tiered cache for group layouts, pipeline layouts, compute + raytracing pipelines

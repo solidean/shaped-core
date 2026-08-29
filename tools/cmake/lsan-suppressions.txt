@@ -1,0 +1,22 @@
+# LeakSanitizer runtime suppressions, applied to every sanitized test run (see tools/dev/lib/pipeline/test.py).
+#
+# Distinct from sanitizer-ignorelist.txt beside it, which is a COMPILE-time list excluding vendored sources from
+# instrumentation. This one is a RUNTIME list, for allocations that are not ours and have no call site of ours to
+# annotate.
+#
+# clean-core's leak_annotations.hh says to annotate at the allocation and never with a name-matching suppression,
+# and that is the right rule for anything we allocate: a suppression silently covers whatever else grows into
+# matching it, while cc::leak_intentionally / cc::leak_scope cover exactly what they are given.
+# It only applies where there IS a call site of ours to annotate.
+#
+# A Vulkan ICD's one-time initialization has none. It runs from the driver's own thread-start path under
+# pthread_once, so the whole stack below the sanitizer's thread trampoline is inside a dlopened module the tool
+# cannot even name, and no scope on our side is open when it happens.
+# It is one 128-byte block for the process, is never freed by design, and appears the moment async transfer starts a
+# copy actor.
+#
+# Deliberately keyed on __pthread_once rather than on a module: the driver is dlopened and reports as
+# <unknown module>, so there is nothing else in the stack to match. We call pthread_once nowhere ourselves —
+# cc uses std::call_once and static initialization, which report as __cxa_guard — so this covers third-party
+# one-time init and nothing of ours.
+leak:__pthread_once

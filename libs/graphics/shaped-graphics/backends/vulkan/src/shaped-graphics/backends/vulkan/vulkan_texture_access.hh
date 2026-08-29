@@ -109,6 +109,40 @@ public:
                                });
     }
 
+    /// The canonical layout of `range`'s first subresource.
+    ///
+    /// For the async transfer path, which records on the *transfer* queue and so cannot go through the per-list
+    /// declare/flush rhythm: it transitions from whatever the graphics side left, and hands the texture back in a
+    /// layout it then records here.
+    /// Whole-subresource transfers are the only ones that reach it, so one layout describes the range.
+    [[nodiscard]] sg::texture_layout canonical_layout_of(sg::subresource_range range)
+    {
+        sg::texture_layout layout = sg::texture_layout::undefined;
+        bool first = true;
+        _canonical.for_each_in(range,
+                               [&](sg::resource_access_state const& state)
+                               {
+                                   if (first)
+                                   {
+                                       layout = state.curr_layout;
+                                       first = false;
+                                   }
+                               });
+        return layout;
+    }
+
+    /// Records the layout the transfer queue left `range` in, so a later graphics list transitions from the truth.
+    /// The counterpart of canonical_layout_of, and the only writer of canonical outside a finalize.
+    void set_canonical_layout(sg::subresource_range range, sg::texture_layout layout)
+    {
+        _canonical.for_each_in(range,
+                               [&](sg::resource_access_state& state)
+                               {
+                                   state.curr_layout = layout;
+                                   state.prev_layout = layout;
+                               });
+    }
+
     /// Accumulate one declared access over `range` for `slot`, seeding from canonical on first touch.
     /// Call once per binding; several declares of one box merge into a single barrier at flush.
     ///

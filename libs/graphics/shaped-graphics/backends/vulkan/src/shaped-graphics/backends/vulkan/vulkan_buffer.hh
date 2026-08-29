@@ -155,11 +155,17 @@ public:
     // A later graphics-queue list that WRITES this buffer waits for it, so it never overwrites bytes still being read.
     mutable cc::atomic<u64> _pending_async_download_value = {0};
 
-    // Lifetime-only twin of _pending_async_upload_value, for STREAMING transfers.
-    // Deliberately separate: the async stamp doubles as the forward reader wait, and streaming must not buy the
-    // deferred-deletion gate at the price of making every later reader wait on it.
-    // Deferred deletion gates on the max of the two; command-list access tracking reads only the async one.
+    // Lifetime-only twins of the two async stamps, for STREAMING transfers.
+    //
+    // Deliberately separate: an async stamp doubles as the forward wait, and streaming must not buy the
+    // deferred-deletion gate at the price of making every later list wait on it.
+    // Deferred deletion gates on the max within each direction; command-list access tracking reads only the async
+    // ones, which is what makes a streamed transfer invisible to a later list until promote_to_async.
+    //
+    // One per direction rather than one shared: a value is meaningless on a timeline that did not issue it, and the
+    // two directions are two different groups.
     mutable cc::atomic<u64> _pending_stream_copy_value = {0};
+    mutable cc::atomic<u64> _pending_stream_download_value = {0};
 
     // Guarded because concurrent command lists may record against the same buffer.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the buffer, not a change to it.

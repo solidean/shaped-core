@@ -130,6 +130,19 @@ void vulkan_context::shutdown()
     // device — so the cache, not the caller, is what would outlive it.
     release_cached_pipelines();
 
+    // The async transfer systems go BEFORE the final drain, not after.
+    //
+    // A resource released while a transfer-queue copy still names it is put back for a later cycle rather than freed
+    // (see vulkan_expiring_resource::copy_wait), and the drain below is the last cycle there is — so anything still
+    // waiting on a copy at that point would be re-staged and never reclaimed.
+    // Shutting these down first settles every transfer, which makes every copy_wait satisfied by the time the drain
+    // looks at it.
+    if (_device != VK_NULL_HANDLE)
+    {
+        _upload_async.shutdown();
+        _download_async.shutdown();
+    }
+
     // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing every
     // resource (in-flight and staged) and running finalizers — before the device is released.
     // Externally synchronized: no create/submit/drop may run concurrently with shutdown.
@@ -141,8 +154,6 @@ void vulkan_context::shutdown()
         _queue_guard.lock([&](int&) { vkDeviceWaitIdle(_device); });
 
         // Before the device: the ring holds a buffer and a mapped allocation on it.
-        _upload_async.shutdown(); // drains its queue and idles the transfer queue before anything it reads goes
-        _download_async.shutdown();
         _upload_inline.shutdown();
         _download_inline.shutdown(); // drains its actor first, which memcpys out of the ring
         _descriptor_heap.shutdown();

@@ -62,6 +62,17 @@ public:
         _access.lock([&](vulkan_texture_access& a) { a.declare(slot, range, stages, access, layout); });
     }
 
+    /// The canonical layout of `range`, and the hand-back the async transfer path uses.
+    /// Thread-safe.
+    [[nodiscard]] sg::texture_layout canonical_layout_of(sg::subresource_range range) const
+    {
+        return _access.lock([&](vulkan_texture_access& a) { return a.canonical_layout_of(range); });
+    }
+    void set_canonical_layout(sg::subresource_range range, sg::texture_layout layout) const
+    {
+        _access.lock([&](vulkan_texture_access& a) { a.set_canonical_layout(range, layout); });
+    }
+
     /// Test-and-set the per-op pending flag; true only the first time since the last flush.
     [[nodiscard]] bool mark_pending_barrier(sg::command_list_slot slot) const
     {
@@ -105,6 +116,7 @@ public:
     mutable cc::atomic<u64> _last_used_submission_token = {0};
     mutable cc::atomic<u64> _pending_async_download_value = {0};
     mutable cc::atomic<u64> _pending_stream_copy_value = {0};
+    mutable cc::atomic<u64> _pending_stream_download_value = {0};
 
     /// False for a *borrowed* image, which something else owns — a swapchain's, whose images belong to the
     /// VkSwapchainKHR and are destroyed with it.

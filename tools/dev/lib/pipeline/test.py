@@ -39,6 +39,21 @@ def _selected_no_tests(stderr_log: Path) -> bool:
         return False
 
 
+def _lsan_suppression_env() -> dict[str, str]:
+    """LSAN_OPTIONS pointing at the runtime suppression list.
+
+    Harmless on a non-sanitized build, which ignores the variable, so this is set unconditionally rather than probed
+    per preset.
+    Appends to whatever the caller already set, so a developer debugging a leak can add options without losing these.
+    """
+    suppressions = Path(__file__).resolve().parents[3] / "cmake" / "lsan-suppressions.txt"
+    if not suppressions.is_file():
+        return {}
+    existing = os.environ.get("LSAN_OPTIONS", "")
+    value = f"suppressions={suppressions.as_posix()}"
+    return {"LSAN_OPTIONS": f"{existing}:{value}" if existing else value}
+
+
 def _sanitizer_path_env(build_dir: Path) -> dict[str, str]:
     """PATH override so a Windows ASan binary finds its dynamic runtime DLL.
 
@@ -108,6 +123,7 @@ def test(
         }
         # Per-preset env additions that apply to every binary, such as the Windows ASan runtime dir on PATH.
         preset_env = _sanitizer_path_env(preset.build_dir)
+        preset_env.update(_lsan_suppression_env())
 
         # Emscripten test artifacts are .js/.wasm that run under node, which the emsdk environment puts on PATH.
         # Native presets keep the inherited environment.

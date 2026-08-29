@@ -1,6 +1,7 @@
 // vulkan epoch system: advance/retire, waits, and deferred-deletion staging.
 // The per-epoch bookkeeping types live in vulkan_epoch.hh, device-level teardown in vulkan_context.cc.
 
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/exceptions.hh>
 
@@ -193,6 +194,16 @@ void vulkan_context::wait_for_epoch(sg::epoch e)
         u64 const target = u64(e);
         u64 current = 0;
         vkGetSemaphoreCounterValue(_device, _epoch_timeline, &current);
+
+        // Yield before blocking.
+        //
+        // The GPU work this epoch is waiting on may itself be waiting on an async transfer's completion value, and
+        // where the copy actor has no thread of its own it runs on whoever sweeps the pump registry.
+        // Blocking straight into vkWaitSemaphores would therefore be a deadlock rather than a slow path: the only
+        // thread that could signal the value is the one parked in the wait.
+        while (current < target && cc::thread_pump_all())
+            vkGetSemaphoreCounterValue(_device, _epoch_timeline, &current);
+
         if (current < target)
         {
             auto const wait = VkSemaphoreWaitInfo{

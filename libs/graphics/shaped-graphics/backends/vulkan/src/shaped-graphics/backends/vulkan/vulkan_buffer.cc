@@ -44,11 +44,13 @@ void vulkan_buffer::release_storage() const
     auto const upload_pending = _pending_async_upload_value.load(cc::memory_order_acquire);
     auto const stream_pending = _pending_stream_copy_value.load(cc::memory_order_acquire);
     auto const download_pending = _pending_async_download_value.load(cc::memory_order_acquire);
+    auto const stream_download_pending = _pending_stream_download_value.load(cc::memory_order_acquire);
     auto const highest_upload = upload_pending > stream_pending ? upload_pending : stream_pending;
+    auto const highest_download = download_pending > stream_download_pending ? download_pending : stream_download_pending;
     if (highest_upload != 0 && _upload_group != nullptr)
         expiring.copy_wait = {.group = _upload_group, .value = highest_upload};
-    else if (download_pending != 0 && _download_group != nullptr)
-        expiring.copy_wait = {.group = _download_group, .value = download_pending};
+    else if (highest_download != 0 && _download_group != nullptr)
+        expiring.copy_wait = {.group = _download_group, .value = highest_download};
     _buffer = VK_NULL_HANDLE;
     _memory = VK_NULL_HANDLE;
     _ctx.schedule_deferred_deletion(cc::move(expiring));

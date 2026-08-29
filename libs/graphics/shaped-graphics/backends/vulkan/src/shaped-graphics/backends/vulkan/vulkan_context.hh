@@ -295,7 +295,7 @@ public:
         return cc::result<sg::swapchain_handle>(create_vulkan_swapchain(desc));
     }
 
-    // The bind path and the pipelines — not implemented yet.
+    // The bind path and the pipelines.
     [[nodiscard]] cc::result<vulkan_binding_group_layout_handle> create_vulkan_binding_group_layout(
         cc::span<sg::binding const> bindings,
         cc::span<sg::named_sampler const> static_samplers);
@@ -398,12 +398,12 @@ public:
     {
         _upload_async.upload_buffer(buffer, cc::move(data), offset);
     }
-    void async_upload_bytes_to_texture(sg::raw_texture_handle,
-                                       cc::pinned_data<byte const>,
-                                       sg::subresource_index const&,
-                                       sg::texture_region const&) override
+    void async_upload_bytes_to_texture(sg::raw_texture_handle texture,
+                                       cc::pinned_data<byte const> data,
+                                       sg::subresource_index const& subresource,
+                                       sg::texture_region const& region) override
     {
-        CC_UNREACHABLE("vulkan async texture upload is not implemented yet");
+        _upload_async.upload_texture(texture, cc::move(data), subresource, region);
     }
 
     [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle buffer,
@@ -412,75 +412,75 @@ public:
     {
         return _download_async.download_buffer(buffer, offset, size_in_bytes);
     }
-    [[nodiscard]] sg::bytes_future async_download_bytes_from_texture(sg::raw_texture_handle,
-                                                                     sg::subresource_index const&,
-                                                                     sg::texture_region const&) override
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_texture(sg::raw_texture_handle texture,
+                                                                     sg::subresource_index const& subresource,
+                                                                     sg::texture_region const& region) override
     {
-        CC_UNREACHABLE("vulkan async texture download is not implemented yet");
+        return _download_async.download_texture(texture, subresource, region);
     }
 
-    // Streaming transfers (ctx.stream) — not implemented yet, and aborting for the same reason as the async pair:
-    // a handle whose completion nothing will ever settle parks its dependents forever, which is worse than a stop.
-    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_buffer(sg::raw_buffer_handle,
-                                                                  cc::pinned_data<byte const>,
-                                                                  isize,
+    // Streaming transfers (ctx.stream), both directions and both drivers — resident payload or source, resident
+    // destination or sink.
+    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_buffer(sg::raw_buffer_handle buffer,
+                                                                  cc::pinned_data<byte const> data,
+                                                                  isize offset,
                                                                   sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan streaming upload is not implemented yet");
+        return _upload_async.stream_buffer(buffer, cc::move(data), offset);
     }
-    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_texture(sg::raw_texture_handle,
-                                                                   cc::pinned_data<byte const>,
-                                                                   sg::subresource_index const&,
-                                                                   sg::texture_region const&,
+    [[nodiscard]] sg::stream_upload_handle stream_bytes_to_texture(sg::raw_texture_handle texture,
+                                                                   cc::pinned_data<byte const> data,
+                                                                   sg::subresource_index const& subresource,
+                                                                   sg::texture_region const& region,
                                                                    sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan streaming texture upload is not implemented yet");
+        return _upload_async.stream_texture(texture, cc::move(data), subresource, region);
     }
-    [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle,
-                                                                   std::unique_ptr<sg::stream_source>,
-                                                                   isize,
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle buffer,
+                                                                   std::unique_ptr<sg::stream_source> source,
+                                                                   isize offset,
                                                                    sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan source-driven streaming upload is not implemented yet");
+        return _upload_async.stream_source_buffer(buffer, cc::move(source), offset);
     }
-    [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle,
-                                                                    std::unique_ptr<sg::stream_source>,
-                                                                    sg::subresource_index const&,
-                                                                    sg::texture_region const&,
+    [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle texture,
+                                                                    std::unique_ptr<sg::stream_source> source,
+                                                                    sg::subresource_index const& subresource,
+                                                                    sg::texture_region const& region,
                                                                     sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan source-driven streaming texture upload is not implemented yet");
+        return _upload_async.stream_source_texture(texture, cc::move(source), subresource, region);
     }
-    [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle,
-                                                                      isize,
-                                                                      isize,
+    [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                                      isize offset,
+                                                                      isize size_in_bytes,
                                                                       sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan streaming download is not implemented yet");
+        return _download_async.stream_buffer(buffer, offset, size_in_bytes);
     }
-    [[nodiscard]] sg::stream_download_handle stream_bytes_from_texture(sg::raw_texture_handle,
-                                                                       sg::subresource_index const&,
-                                                                       sg::texture_region const&,
+    [[nodiscard]] sg::stream_download_handle stream_bytes_from_texture(sg::raw_texture_handle texture,
+                                                                       sg::subresource_index const& subresource,
+                                                                       sg::texture_region const& region,
                                                                        sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan streaming texture download is not implemented yet");
+        return _download_async.stream_to_sink_texture(texture, sg::stream_sink{}, subresource, region);
     }
 
-    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_buffer(sg::raw_buffer_handle,
-                                                                        sg::stream_sink,
-                                                                        isize,
-                                                                        isize,
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_buffer(sg::raw_buffer_handle buffer,
+                                                                        sg::stream_sink sink,
+                                                                        isize offset,
+                                                                        isize size_in_bytes,
                                                                         sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan sink-driven streaming download is not implemented yet");
+        return _download_async.stream_to_sink_buffer(buffer, cc::move(sink), offset, size_in_bytes);
     }
-    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_texture(sg::raw_texture_handle,
-                                                                         sg::stream_sink,
-                                                                         sg::subresource_index const&,
-                                                                         sg::texture_region const&,
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_from_texture(sg::raw_texture_handle texture,
+                                                                         sg::stream_sink sink,
+                                                                         sg::subresource_index const& subresource,
+                                                                         sg::texture_region const& region,
                                                                          sg::stream_scope) override
     {
-        CC_UNREACHABLE("vulkan sink-driven streaming texture download is not implemented yet");
+        return _download_async.stream_to_sink_texture(texture, cc::move(sink), subresource, region);
     }
 
     // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once that epoch retires.

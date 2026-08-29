@@ -63,6 +63,16 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
     if (desc.is_cube)
         layers *= 6;
 
+    // A texture any async transfer can touch is shared CONCURRENTLY between the graphics and transfer families, for
+    // the same reason a buffer is: an ownership transfer would serialize the concurrency async transfer provides.
+    //
+    // It is not free the way a buffer's is — some hardware disables lossless compression for a concurrently-shared
+    // image — which is why it is scoped to textures whose usage says a transfer is possible at all, rather than
+    // applied to every image.
+    u32 const families[2] = {_queue_family_index, _transfer_queue_family};
+    bool const shared = has_dedicated_transfer_queue()
+                     && desc.usage.has_any(sg::texture_usage::copy_src | sg::texture_usage::copy_dst);
+
     auto const image_info = VkImageCreateInfo{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .flags = VkImageCreateFlags(desc.is_cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0),
@@ -74,11 +84,9 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
         .samples = VkSampleCountFlagBits(desc.sample_count), // enum values equal the sample counts
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = to_vk_image_usage(desc.usage),
-        // TODO: the streaming usages need VK_SHARING_MODE_CONCURRENT over the graphics + transfer
-        // families — EXCLUSIVE cannot express two families holding a resource at once, and ownership
-        // transfer serializes the very concurrency streaming exists to allow.
-        // Vulkan is the strict backend here: dx12 needs a flag only for a region inside a subresource.
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .sharingMode = shared ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = shared ? 2u : 0u,
+        .pQueueFamilyIndices = shared ? families : nullptr,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 

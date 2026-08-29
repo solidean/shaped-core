@@ -212,10 +212,8 @@ protected:
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
 
-    // Ray tracing (reached through cmd.raytracing) — the recording paths are not implemented yet.
-    // is_supported() reports the device's extensions rather than a hardcoded answer, so it already tells the truth
-    // about the hardware; it is the build/dispatch stubs below that still have to land.
-    // Body in vulkan_command_list.cc, which has vulkan_context complete.
+    // Ray tracing (reached through cmd.raytracing).
+    // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                   sg::accel_build_flags flags) override;
@@ -231,8 +229,9 @@ protected:
                                   int height,
                                   int depth) override;
 
-    // GPU queries (reached through cmd.query) — not implemented yet.
-    // Timestamps report unsupported, and record_gpu_timestamp stays callable but always returns an invalid query.
+    // GPU queries (reached through cmd.query) — not implemented yet, and the last seam that is not.
+    // Timestamps report unsupported, and record_gpu_timestamp stays callable but always returns an invalid query, so
+    // a caller that checks is_supported() gets an honest answer rather than an abort.
     [[nodiscard]] bool query_timestamps_supported() const override { return false; }
     [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override { return {}; }
 };

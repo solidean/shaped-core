@@ -17,6 +17,7 @@ class vulkan_upload_inline_system;   // the ring itself
 struct vulkan_async_upload_job;      // one async upload handed to the copy actor
 struct vulkan_transfer_wake;         // a bare wake for the copy actor
 class vulkan_upload_actor;           // drains async uploads in enqueue order
+class vulkan_upload_waker;           // the wake channel handed to every stream source
 class vulkan_upload_async_system;    // ctx.upload's transfer-queue system
 struct vulkan_async_download_job;    // one async readback handed to the readback actor
 class vulkan_download_async_actor;   // drains them in enqueue order

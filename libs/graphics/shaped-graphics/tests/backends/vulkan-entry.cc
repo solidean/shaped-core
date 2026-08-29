@@ -9,11 +9,9 @@
 // When a device is present it invokes every sg::context_handle API test against it.
 // Compiled only where the vulkan backend builds, so where the SDK is present.
 //
-// The backend is registered but its driver is disabled, and the two flags do different jobs while it is built out.
-// Registering is what makes backends.cc build an alias per invocable, so `dev.py test "sg - <name>"` can run one API test against vulkan.
-// nx::config::disabled keeps a full sweep out, because the recording paths vulkan has not reached yet abort rather than fail.
-// Naming a test by its alias enables it deliberately, which is exactly the by-name run the build-out wants.
-// Drop the disabled once no recording seam aborts.
+// The driver ran `nx::config::disabled` throughout the build-out, because a seam vulkan had not reached yet aborted
+// rather than failing — which turns a clean skip into a crash that takes the suite with it.
+// No seam aborts any more, so it is enabled and the whole tier-1 suite sweeps against vulkan like dx12's.
 
 namespace
 {
@@ -37,7 +35,7 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sg vulkan backend", nx::config::disabled)
+TEST("sg vulkan backend")
 {
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())

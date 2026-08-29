@@ -12,6 +12,10 @@
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/subresource.hh>
+#include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/stream_handle.hh>
+#include <shaped-graphics/transfer/stream_sink.hh>
 
 /// One async download handed to the readback actor.
 ///
@@ -20,6 +24,11 @@
 struct sg::backend::vulkan::vulkan_async_download_job
 {
     std::weak_ptr<vulkan_buffer const> buffer_source;
+    std::weak_ptr<vulkan_texture const> texture_source;
+    bool is_texture = false;
+    sg::subresource_index subresource; // texture readbacks
+    sg::texture_region region;         // texture readbacks
+    isize row_bytes = 0;               // texture readbacks: the chunk granularity
     isize src_offset = 0;
     isize size_in_bytes = 0;
 
@@ -35,6 +44,13 @@ struct sg::backend::vulkan::vulkan_async_download_job
 
     /// Defer the read until this graphics-queue token completes, so it reads what the last writer left.
     sg::submission_token wait_token = sg::submission_token::not_submitted;
+
+    /// Set only for a STREAMING readback; null marks the async tier.
+    std::shared_ptr<sg::impl::stream_control> stream;
+
+    /// Set only for a sink-driven readback: each chunk is handed over as it arrives and nothing accumulates.
+    /// The span it receives points into the staging window, so it is valid for the call and no longer.
+    sg::stream_sink sink;
 
     /// And until any async upload to the same buffer has landed.
     ///
@@ -52,6 +68,7 @@ public:
 
 protected:
     [[nodiscard]] cc::string_view actor_name() const noexcept override { return "sg-vulkan-download-async"; }
+    void on_thread_init() override;
     void on_message(vulkan_async_download_job job) override;
 
 private:
@@ -71,6 +88,28 @@ class sg::backend::vulkan::vulkan_download_async_system
 public:
     [[nodiscard]] cc::result<cc::unit> initialize(vulkan_context& ctx, isize window_bytes);
 
+    /// The streaming twin of download_buffer: it stamps only the lifetime value, so a later command list waits on
+    /// nothing until promote_to_async is called.
+    [[nodiscard]] sg::stream_download_handle stream_buffer(sg::raw_buffer_handle const& buffer,
+                                                           isize offset,
+                                                           isize size_in_bytes);
+
+    /// The same, delivering each chunk to `sink` as it arrives rather than accumulating a resident result.
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_buffer(sg::raw_buffer_handle const& buffer,
+                                                                   sg::stream_sink sink,
+                                                                   isize offset,
+                                                                   isize size_in_bytes);
+
+    /// The texture forms.
+    /// A readback's chunks are whole rows, the smallest unit a texture copy can address.
+    [[nodiscard]] sg::bytes_future download_texture(sg::raw_texture_handle const& texture,
+                                                    sg::subresource_index const& subresource,
+                                                    sg::texture_region const& region);
+    [[nodiscard]] sg::stream_download_handle stream_to_sink_texture(sg::raw_texture_handle const& texture,
+                                                                    sg::stream_sink sink,
+                                                                    sg::subresource_index const& subresource,
+                                                                    sg::texture_region const& region);
+
     /// Records an async readback of `size_in_bytes` from `buffer` at `offset`.
     /// Stamps the buffer so a later graphics-queue writer waits, and hands the job to the actor.
     /// An empty range is a ready empty future.
@@ -80,6 +119,9 @@ public:
 
     /// Runs one job on the actor thread: submits the copy, waits for it, then delivers.
     void process(vulkan_async_download_job& job);
+
+    /// The driver's per-thread initialization, under a leak annotation — see the upload system's twin.
+    void warm_up_driver_thread();
 
 private:
     void wait_for_window(int slot);
