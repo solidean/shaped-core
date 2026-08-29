@@ -1,0 +1,10 @@
+{
+    "shaped-graphics/rotating-cube": {
+        "mechanism": "custom",
+        "size": "1280x720",
+        "format": "jpg",
+        "captures": [
+            {}
+        ]
+    }
+}
