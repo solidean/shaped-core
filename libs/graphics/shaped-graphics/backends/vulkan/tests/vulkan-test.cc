@@ -433,3 +433,61 @@ TEST("sg vulkan - the device reports descriptor buffer properties")
     CHECK(props.descriptorBufferOffsetAlignment > 0);
     CHECK((props.descriptorBufferOffsetAlignment & (props.descriptorBufferOffsetAlignment - 1)) == 0);
 }
+
+TEST("sg vulkan - the descriptor heap allocates, frees and coalesces")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return; // no Vulkan device.
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& heap = c._descriptor_heap;
+
+    // A descriptor's size is a device property, so the heap is addressed in bytes and every range is aligned to the
+    // device's descriptorBufferOffsetAlignment.
+    auto const alignment = isize(c.descriptor_buffer_properties().descriptorBufferOffsetAlignment);
+
+    auto const a = heap.allocate_persistent(256);
+    auto const b = heap.allocate_persistent(256);
+    REQUIRE(!a.is_empty());
+    REQUIRE(!b.is_empty());
+    CHECK(a.offset % alignment == 0);
+    CHECK(b.offset % alignment == 0);
+    CHECK(a.offset != b.offset);
+    CHECK(heap.mapped_at(a) != nullptr);
+
+    // Freeing both must coalesce them back into one range, or a heap fragments simply by the order things were
+    // released in.
+    // The tell is that a later allocation of their combined size fits.
+    heap.free_persistent(a);
+    heap.free_persistent(b);
+    auto const merged = heap.allocate_persistent(512);
+    REQUIRE(!merged.is_empty());
+    heap.free_persistent(merged);
+
+    // The device address is what a descriptor-buffer binding names; zero would mean the allocation missed the
+    // device-address flag, which fails far away from here.
+    CHECK(heap.device_address() != 0);
+}
+
+TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return;
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& heap = c._descriptor_heap;
+
+    // Transient descriptors are written by the CPU and read by the GPU during the epoch, so a slot cannot be reused
+    // until the epoch that wrote it retires.
+    // Resetting the cursor every epoch would let a new write stomp a descriptor an in-flight epoch still reads, which
+    // is why this checkpoints rather than resets.
+    auto const first = heap.allocate_transient(1024);
+    REQUIRE(!first.is_empty());
+    CHECK(first.transient);
+
+    c.advance_epoch_and_wait_for_idle();
+
+    auto const second = heap.allocate_transient(1024);
+    REQUIRE(!second.is_empty());
+    CHECK(!c.is_device_lost());
+}

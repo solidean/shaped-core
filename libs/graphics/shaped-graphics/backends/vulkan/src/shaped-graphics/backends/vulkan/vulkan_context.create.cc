@@ -496,6 +496,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (auto ring = ctx->_download_inline.initialize(*ctx, config.download_ring_bytes); ring.has_error())
         return cc::error(cc::move(ring).error());
 
+    // The extension was required above, so a missing entry point here is a driver that advertises it without
+    // implementing it — worth failing on rather than discovering at the first descriptor write.
+    if (!ctx->_descriptor_functions.load(device))
+        return cc::error("the device advertises VK_EXT_descriptor_buffer but does not export its entry points");
+
+    if (auto heap
+        = ctx->_descriptor_heap.initialize(*ctx, config.descriptor_heap_bytes, config.descriptor_transient_fraction);
+        heap.has_error())
+        return cc::error(cc::move(heap).error());
+
     // Now that the context exists it can own the messenger and receive its messages.
     // Best-effort, like the layer itself: without it validation still reaches the log, just not a listener.
     if (enable_validation)

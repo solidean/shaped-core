@@ -139,6 +139,7 @@ void vulkan_context::shutdown()
         // Before the device: the ring holds a buffer and a mapped allocation on it.
         _upload_inline.shutdown();
         _download_inline.shutdown(); // drains its actor first, which memcpys out of the ring
+        _descriptor_heap.shutdown();
 
         // Every command pool is idle now (the drain retired every in-flight epoch, returning pools to
         // the free set); destroy them before the device.

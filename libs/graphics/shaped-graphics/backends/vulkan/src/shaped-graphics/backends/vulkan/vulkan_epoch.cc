@@ -53,6 +53,7 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // Record where it ended before the epoch is packaged.
     _upload_inline.on_epoch_advance(last);
     _download_inline.on_epoch_advance(last);
+    _descriptor_heap.on_epoch_advance(last);
 
     // Package everything `last` owns and push it onto the in-flight FIFO.
     // Advance is externally synchronized, so the pool drain races no submit — but the deletion staging below is fed from any thread.
@@ -129,6 +130,7 @@ void vulkan_context::process_completed_epochs()
     // Every epoch up to `completed` has finished on the GPU, so the staging bytes their copies read are free.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
     _download_inline.on_epochs_completed(sg::epoch(completed));
+    _descriptor_heap.on_epochs_completed(sg::epoch(completed));
 
     cc::vector<cc::unique_function<void()>> finalizers;
     for (auto& e : done)

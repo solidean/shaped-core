@@ -7,6 +7,8 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_context.cc
     src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
     src/shaped-graphics/backends/vulkan/vulkan_download_inline.cc
+    src/shaped-graphics/backends/vulkan/vulkan_descriptor_functions.cc
+    src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
     src/shaped-graphics/backends/vulkan/vulkan_barrier.cc
@@ -30,6 +32,8 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_common.hh
     src/shaped-graphics/backends/vulkan/vulkan_context.hh
     src/shaped-graphics/backends/vulkan/vulkan_download_inline.hh
+    src/shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh
+    src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh
     src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_barrier.hh

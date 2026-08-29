@@ -8,6 +8,8 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
@@ -42,6 +44,11 @@ struct sg::backend::vulkan::vulkan_config
 
     /// Capacity of the readback ring behind cmd.download, in bytes.
     isize download_ring_bytes = 16 * 1024 * 1024;
+
+    /// Capacity of the descriptor heap, in bytes, and the share of it reserved for transient binding groups.
+    /// Sized in bytes rather than in descriptors because a descriptor's size is a device property.
+    isize descriptor_heap_bytes = 4 * 1024 * 1024;
+    float descriptor_transient_fraction = 0.25f;
 };
 
 /// Severity of a validation-layer message, mapped from VkDebugUtilsMessageSeverityFlagBitsEXT.
@@ -387,6 +394,12 @@ public:
 
     /// The readback ring behind cmd.download, and the actor that drains it.
     vulkan_download_inline_system _download_inline;
+
+    /// Descriptors live here, and a binding group is a range of it.
+    vulkan_descriptor_heap _descriptor_heap;
+
+    /// The descriptor-buffer entry points, loaded once at creation.
+    vulkan_descriptor_functions _descriptor_functions;
 
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
