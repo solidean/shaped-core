@@ -309,6 +309,53 @@ sg::bytes_future vulkan_command_list::download_bytes_from_buffer(sg::raw_buffer_
     return sg::bytes_future(cc::pinned_data<byte const>(cc::move(dst)), cc::move(completion), cc::move(gate));
 }
 
+void vulkan_command_list::copy_buffer_region(sg::raw_buffer_handle src,
+                                             sg::raw_buffer_handle dst,
+                                             isize src_offset_in_bytes,
+                                             isize dst_offset_in_bytes,
+                                             isize size_in_bytes)
+{
+    CC_ASSERT(src != nullptr, "copy source buffer is null");
+    CC_ASSERT(dst != nullptr, "copy dest buffer is null");
+    auto const s = std::dynamic_pointer_cast<vulkan_buffer const>(src);
+    auto const d = std::dynamic_pointer_cast<vulkan_buffer const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "buffer is not a vulkan buffer");
+    CC_ASSERT(!s->is_expired() && !d->is_expired(), "copy uses a transient buffer past its epoch (expired)");
+    CC_ASSERT(size_in_bytes >= 0, "copy size must be non-negative");
+    CC_ASSERT(src_offset_in_bytes >= 0 && src_offset_in_bytes + size_in_bytes <= s->size_in_bytes(),
+              "copy source range is out of the buffer's bounds");
+    CC_ASSERT(dst_offset_in_bytes >= 0 && dst_offset_in_bytes + size_in_bytes <= d->size_in_bytes(),
+              "copy dest range is out of the buffer's bounds");
+    if (size_in_bytes == 0)
+        return;
+    CC_ASSERT(s->usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
+    CC_ASSERT(d->usage().has(sg::buffer_usage::copy_dst), "copy dest buffer must have buffer_usage::copy_dst");
+
+    bool const same_resource = s->_buffer == d->_buffer;
+    if (same_resource)
+        CC_ASSERT(dst_offset_in_bytes + size_in_bytes <= src_offset_in_bytes
+                      || src_offset_in_bytes + size_in_bytes <= dst_offset_in_bytes,
+                  "source and destination ranges overlap in a same-buffer copy");
+
+    // A self-copy reads and writes one resource, so it declares a single combined access and produces one barrier.
+    // Declaring it twice would have the tracker treat the read and the write as separate ops on the same resource.
+    if (same_resource)
+        track_buffer_access(*s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read | sg::access_flag::copy_write);
+    else
+    {
+        track_buffer_access(*s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+        track_buffer_access(*d, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    }
+    flush_barriers();
+
+    auto const region = VkBufferCopy{
+        .srcOffset = VkDeviceSize(src_offset_in_bytes),
+        .dstOffset = VkDeviceSize(dst_offset_in_bytes),
+        .size = VkDeviceSize(size_in_bytes),
+    };
+    vkCmdCopyBuffer(_buffer, s->_buffer, d->_buffer, 1, &region);
+}
+
 // False until the recording paths below exist, whatever the device offers.
 // The question is whether THIS command list can trace rays, not whether the GPU could: answering yes while every
 // build and dispatch seam is a stub turns a clean skip into a failure and tells a caller nothing it can act on.

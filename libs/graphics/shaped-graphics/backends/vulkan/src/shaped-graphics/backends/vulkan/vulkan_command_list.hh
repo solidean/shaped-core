@@ -79,10 +79,13 @@ protected:
     {
         CC_UNREACHABLE("vulkan inline texture download is not implemented yet");
     }
-    void copy_buffer_region(sg::raw_buffer_handle, sg::raw_buffer_handle, isize, isize, isize) override
-    {
-        CC_UNREACHABLE("vulkan inline buffer copy is not implemented yet");
-    }
+    // Device-to-device buffer copy.
+    // Body in vulkan_command_list.cc.
+    void copy_buffer_region(sg::raw_buffer_handle src,
+                            sg::raw_buffer_handle dst,
+                            isize src_offset_in_bytes,
+                            isize dst_offset_in_bytes,
+                            isize size_in_bytes) override;
 
     // Compute recording (reached through cmd.compute) — not implemented yet.
     void compute_bind_pipeline(sg::compute_pipeline const&) override
