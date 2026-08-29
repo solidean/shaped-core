@@ -62,6 +62,8 @@ enum class babel::png::component : babel::u8
 
 /// One text chunk (tEXt / zTXt / iTXt).
 /// On encode, an entry carrying a language or a translated keyword is written as iTXt, and `compressed` picks zTXt over tEXt.
+/// `keyword` must be 1..79 characters and `text` non-empty, and `text` must carry no embedded NUL — the encoder would
+/// write everything after one away, and a lossless format has no business dropping half a body quietly.
 struct babel::png::text_entry
 {
     cc::string keyword;
@@ -98,7 +100,7 @@ struct babel::png::data
     cc::string icc_profile_name;                // iCCP profile name
     cc::vector<text_entry> texts;               // tEXt / zTXt / iTXt
     cc::optional<physical_dimensions> physical; // pHYs
-    // ... cHRM, bKGD, tRNS, sBIT, tIME — add fields as the walker lands ...
+    // ... cHRM, bKGD, sBIT, tIME — add fields ...
 
     [[nodiscard]] bool is_empty() const { return width <= 0 || height <= 0; }
 };

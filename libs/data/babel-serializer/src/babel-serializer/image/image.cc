@@ -36,7 +36,15 @@ bool format_accepts(format fmt, component comp)
 /// The aggregator's spelling of a PNG decode's own sample type.
 component component_of(babel::png::component c)
 {
-    return c == babel::png::component::u16 ? component::u16 : component::u8;
+    // No default: a third babel::png::component must be mapped here rather than silently becoming u8.
+    switch (c)
+    {
+    case babel::png::component::u8:
+        return component::u8;
+    case babel::png::component::u16:
+        return component::u16;
+    }
+    return component::u8;
 }
 
 cc::string_view name_of(format fmt)
@@ -163,7 +171,6 @@ cc::result<image> read(cc::span<byte const> bytes)
         auto& d = decoded.value();
         auto result
             = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component_of(d.decoded)};
-        CC_ASSERT(format_accepts(format::png, result.comp), "a PNG decode produced a sample type PNG cannot store");
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }

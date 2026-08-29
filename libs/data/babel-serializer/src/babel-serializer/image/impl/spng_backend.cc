@@ -268,6 +268,9 @@ struct encode_metadata
                     cc::format("png encode: text keyword must be 1..79 characters, got {}", t.keyword.size()));
             if (t.text.empty())
                 return cc::error(cc::format("png encode: text chunk {} carries no text", t.keyword));
+            if (t.text.contains('\0'))
+                return cc::error(cc::format(
+                    "png encode: text chunk {} carries an embedded NUL, which would be written truncated", t.keyword));
 
             auto entry = spng_text{};
             cc::memcpy(entry.keyword, t.keyword.data(), size_t(t.keyword.size()));
@@ -275,7 +278,8 @@ struct encode_metadata
             // The body must be NUL-terminated: libspng's encoder ignores `length` and measures with strlen,
             // so pointing at a cc::string's own bytes reads past its end.
             // `length` is still set, because spng_set_text rejects a zero one.
-            // The same strlen is why a `text` carrying an embedded NUL is written truncated at it.
+            // That same strlen is what the embedded-NUL check above rules out, a lossless format having no business
+            // dropping half a body quietly.
             c_strings.push_back(cc::string::create_copy_c_str_materialized(t.text));
             entry.text = as_spng_string(c_strings.back().c_str_if_terminated());
             entry.length = size_t(t.text.size());
@@ -332,9 +336,15 @@ constexpr size_t max_png_chunk_bytes = size_t(16) * 1024 * 1024;
 constexpr size_t max_png_chunk_cache_bytes = size_t(64) * 1024 * 1024;
 
 /// Largest image dimension babel will decode, per axis.
-/// Well past any real photograph or texture, and it is what keeps a hostile IHDR from being believed and allocated
-/// for before a single IDAT byte is read.
+/// Well past any real photograph or texture, and it is what makes the `int(ihdr.width)` narrowing below safe.
 constexpr u32 max_png_dimension = 65535;
+
+/// Largest decoded pixel buffer babel will allocate for one image.
+/// The per-axis cap bounds neither the product nor the sample width, and spng_decoded_image_size answers from the
+/// IHDR alone — so this is the ceiling that stands between 13 header bytes and an allocation.
+/// It bites on sample width rather than pixel count: 65535 x 65535 grey-8 is 4,294,836,225 bytes and still passes,
+/// 131,071 bytes under this ceiling.
+constexpr size_t max_png_decoded_bytes = size_t(4) * 1024 * 1024 * 1024;
 } // namespace
 
 cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
@@ -370,6 +380,10 @@ cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
     auto size = size_t(0);
     if (auto const err = spng_decoded_image_size(guard.ctx, plan.fmt, &size); err != 0)
         return cc::error(spng_message("decoded_image_size", err));
+    if (size > max_png_decoded_bytes)
+        return cc::error(
+            cc::format("png decode: {}x{} at {} channels and {}-bit samples needs {} bytes, over the {} byte ceiling",
+                       ihdr.width, ihdr.height, plan.channels, ihdr.bit_depth, size, max_png_decoded_bytes));
 
     auto result = babel::png::data{
         .width = int(ihdr.width),
@@ -387,8 +401,11 @@ cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
     if (auto const err = spng_decode_image(guard.ctx, result.pixels.data(), size, plan.fmt, SPNG_DECODE_TRNS); err != 0)
         return cc::error(spng_message("decode_image", err));
 
-    // Chunks stored after IDAT are only reachable once the image is decoded, and a file carrying none is not an error.
-    spng_decode_chunks(guard.ctx);
+    // Chunks stored after IDAT are only reachable once the image is decoded.
+    // A file carrying none returns 0, so a non-zero code here is a real failure — a ceiling above included — and
+    // reporting it beats letting the next getter re-enter an invalidated context and report EBADSTATE.
+    if (auto const err = spng_decode_chunks(guard.ctx); err != 0)
+        return cc::error(spng_message("decode_chunks", err));
     CC_RETURN_IF_ERROR(read_metadata(guard.ctx, result));
 
     return cc::move(result);

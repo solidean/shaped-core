@@ -5,6 +5,7 @@
 #include <babel-serializer/image/jpg.hh>
 #include <babel-serializer/image/pfm.hh>
 #include <babel-serializer/image/png.hh>
+#include <clean-core/bytes/compression.hh>
 #include <clean-core/common/utility.hh> // cc::max
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -316,6 +317,16 @@ TEST("png - malformed input is rejected rather than decoded")
     CHECK(babel::png::read(truncated).has_error());
 }
 
+TEST("png - encode rejects a text body it could only write truncated")
+{
+    // libspng's encoder measures the body with strlen, so an embedded NUL would silently drop everything after it.
+    // An empty keyword and an empty body are already errors; this is the same class of caller mistake, and the only
+    // one of the three that would lose data rather than fail.
+    auto img = babel::png::data{.width = 1, .height = 1, .channels = 1, .pixels = make_gradient(1, 1, 1).pixels};
+    img.texts.push_back({.keyword = "Comment", .text = cc::string_view("before\0after", 12)});
+    CHECK(babel::png::encode(img).has_error());
+}
+
 TEST("image - png round-trips through the read_stream overload")
 {
     auto const src = make_gradient(3, 2, 3); // RGB
@@ -491,7 +502,8 @@ TEST("image - encode rejects a sample type the format cannot store")
 // -------------------------------------------------------------------------------------------------
 // babel::png::encode always writes a non-interlaced, non-palette, tRNS-free file at 8 or 16 bits, so a
 // round-trip reaches exactly one of plan_decode's five branches.
-// These four PNGs are hand-built by fixtures/make-png-fixtures.py to reach the other four.
+// Four of the PNGs hand-built by fixtures/make-png-fixtures.py reach the other four; the fifth reaches
+// no branch at all, being a header the decode must refuse before it sizes anything from it.
 
 namespace
 {
@@ -499,7 +511,118 @@ cc::span<byte const> fixture(cc::span<unsigned char const> bytes)
 {
     return cc::span<byte const>(reinterpret_cast<byte const*>(bytes.data()), bytes.size());
 }
+
+/// PNG's own CRC-32, over chunk type + body.
+/// A chunk carrying a wrong one is silently discarded by libspng rather than reported, so a hand-built
+/// chunk that is meant to be REJECTED has to be otherwise valid or the test proves nothing.
+u32 png_crc32(cc::span<byte const> data)
+{
+    auto crc = u32(0xFFFFFFFF);
+    for (auto const b : data)
+    {
+        crc ^= u32(u8(b));
+        for (auto bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ (0xEDB88320u & u32(-i32(crc & 1u)));
+    }
+    return crc ^ 0xFFFFFFFF;
+}
+
+void push_u32_be(cc::vector<byte>& out, u32 v)
+{
+    out.push_back(byte(v >> 24));
+    out.push_back(byte(v >> 16));
+    out.push_back(byte(v >> 8));
+    out.push_back(byte(v));
+}
+
+void push_chunk(cc::vector<byte>& out, cc::string_view type, cc::span<byte const> body)
+{
+    auto typed = cc::vector<byte>();
+    for (auto const c : type)
+        typed.push_back(byte(c));
+    typed.push_back_range(body);
+
+    push_u32_be(out, u32(body.size()));
+    out.push_back_range(typed);
+    push_u32_be(out, png_crc32(typed));
+}
+
+/// A zTXt chunk whose body inflates to `inflated_bytes`, well past max_png_chunk_bytes.
+/// Deliberately built here rather than committed: 20 MB of zeros deflates to ~20 KB, which is ~122 KB of hex
+/// in the generated fixture header for one behaviour the decode only has to refuse.
+cc::vector<byte> ztxt_bomb(i64 inflated_bytes)
+{
+    auto payload = cc::vector<byte>();
+    payload.resize_to_constructed(inflated_bytes, byte(0));
+
+    auto body = cc::vector<byte>();
+    for (auto const c : cc::string_view("Comment"))
+        body.push_back(byte(c));
+    body.push_back(byte(0)); // keyword terminator
+    body.push_back(byte(0)); // compression method 0 = deflate
+    // A zTXt body's compressed half is a zlib stream, which is exactly this framing.
+    body.push_back_range(cc::compress(
+        payload, {.algorithm = cc::compression_algorithm::deflate, .framing = cc::compression_framing::zlib}));
+    return body;
+}
+
+/// A 1x1 grey PNG carrying one zTXt bomb, placed before or after IDAT.
+/// Which side it sits on decides which libspng call trips over it, and both must report the ceiling.
+cc::vector<byte> png_with_ztxt_bomb(bool after_idat)
+{
+    auto ihdr = cc::vector<byte>();
+    push_u32_be(ihdr, 1);    // width
+    push_u32_be(ihdr, 1);    // height
+    ihdr.push_back(byte(8)); // bit depth
+    ihdr.push_back(byte(0)); // color type: greyscale
+    ihdr.push_back(byte(0)); // compression
+    ihdr.push_back(byte(0)); // filter
+    ihdr.push_back(byte(0)); // interlace
+
+    auto scanline = cc::vector<byte>();
+    scanline.push_back(byte(0)); // filter type None
+    scanline.push_back(byte(0)); // the single sample
+    auto const idat = cc::compress(
+        scanline, {.algorithm = cc::compression_algorithm::deflate, .framing = cc::compression_framing::zlib});
+
+    auto const bomb = ztxt_bomb(20 * 1024 * 1024);
+
+    auto out = cc::vector<byte>();
+    for (auto const c : cc::string_view("\x89PNG\r\n\x1a\n"))
+        out.push_back(byte(c));
+    push_chunk(out, "IHDR", ihdr);
+    if (!after_idat)
+        push_chunk(out, "zTXt", bomb);
+    push_chunk(out, "IDAT", idat);
+    if (after_idat)
+        push_chunk(out, "zTXt", bomb);
+    push_chunk(out, "IEND", {});
+    return out;
+}
 } // namespace
+
+TEST("png - a hostile IHDR is refused before its pixels are allocated")
+{
+    // 65535x65535 RGBA16 is just under 32 GiB, and spng_decoded_image_size answers from the 13-byte IHDR alone.
+    // The per-axis cap passes it, so only the decoded-size ceiling stands between this <100 byte file and that
+    // allocation — which is why the error text is what this asserts on, not merely that an error came back.
+    auto const d = babel::png::read(fixture(babel_test::png_hostile_ihdr));
+    REQUIRE(d.has_error());
+    CHECK(d.error().to_string().contains("ceiling"));
+}
+
+TEST("png - an oversized zTXt is refused on either side of IDAT")
+{
+    // Before IDAT the chunk walk trips over it; after IDAT only spng_decode_chunks reaches it.
+    // The second is the one that regresses quietly: a discarded return code leaves the context invalid and the
+    // next getter reports a state error naming neither the limit nor the chunk.
+    auto const before = babel::png::read(png_with_ztxt_bomb(false));
+    REQUIRE(before.has_error());
+
+    auto const after = babel::png::read(png_with_ztxt_bomb(true));
+    REQUIRE(after.has_error());
+    CHECK(after.error().to_string().contains("decode_chunks"));
+}
 
 TEST("png - a palette file de-palettizes, and its tRNS becomes alpha")
 {

@@ -127,12 +127,14 @@ Runs on the vendored libspng, which is also what reads and writes the ancillary 
 16-bit files decode to `u16` samples and re-encode at that width, host-endian in memory and big-endian on disk.
 Sub-byte depths (1/2/4) unpack to `u8`, so `bit_depth` is the only place they survive.
 
-A PNG is untrusted input, so the decode caps image dimensions and ancillary-chunk memory rather than believing a header.
-Both ceilings are `spng_backend.cc` constants, and both are errors rather than a truncated decode.
+A PNG is untrusted input, so the decode caps image dimensions, the decoded pixel buffer and ancillary-chunk memory rather than believing a header.
+All three ceilings are `spng_backend.cc` constants, and all three are errors rather than a truncated decode.
 libspng ships no default worth having, and the chunks are deflate-compressed, so a few crafted kilobytes would otherwise inflate to gigabytes.
+The pixel-buffer ceiling is the one a per-axis cap cannot stand in for: the axes bound neither their product nor the sample width, and the decoded size is answered from the IHDR alone.
 
 Four decode behaviours babel's own encoder cannot produce are pinned by hand-built PNGs under `tests/image/fixtures/`, embedded as bytes by the script that generates them.
 Palette, tRNS-becomes-alpha, sub-byte grey and Adam7 — every one of them decode-only, and so unreachable through a round-trip.
+A fifth fixture is a hostile IHDR rather than a behaviour, and the ceilings it and the oversized-chunk test pin are what the decode's untrusted-input claim rests on.
 
 - `[planned]` **the remaining chunks** — cHRM, bKGD, sBIT and tIME, each an added field rather than an API change.
 
