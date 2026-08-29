@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_acceleration_structure.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
@@ -160,6 +161,14 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create(vulkan_cont
                     group->referenced.push_back(cc::move(buffer));
                     group->hazard_views.push_back({group->referenced.back(), bv->access});
                 }
+            }
+            else if (auto const* tv_as = sg::try_as_tlas_view(view); tv_as != nullptr && tv_as->tlas != nullptr)
+            {
+                // A trace reads the TLAS's storage buffer, so that is what is kept alive and declared accel_read at
+                // dispatch — the structure object itself is not a resource the barrier vocabulary knows.
+                auto const& tlas = static_cast<vulkan_tlas const&>(*tv_as->tlas);
+                group->referenced.push_back(tlas._vulkan_storage);
+                group->hazard_views.push_back({group->referenced.back(), sg::view_class::acceleration_structure});
             }
             else if (is_array)
                 array_binding.elements.push_back({}); // vacant

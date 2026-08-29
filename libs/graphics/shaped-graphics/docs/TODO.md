@@ -26,10 +26,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - the **transient (single-epoch) AS variant** for per-frame rebuilds — a property of the build call's result, not a new scope;
   - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
-  - the **vulkan** implementation — `to_vk_buffer_usage` must map the `accel_structure_*` usages and add the buffer device address, then the real `VkAccelerationStructureKHR` build path.
-    Flip the `nx::config::disabled` / `register_backend` toggle in `tests/backends/vulkan-entry.cc` once it lands.
+  - **compaction** on both backends, which is the one build-time flag neither implements.
 - **Raytracing pipeline.** The dx12 trace path is in — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
-  Still open: **local root signatures**, a **state-object cached blob**, and the **vulkan** trace implementation.
+  Still open: **local root signatures** and a **state-object cached blob**.
   Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.
   [types.hh](../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately, so the storage needs a type of its own.
 - **`cc::shared_ptr`:** the `*_handle` typedefs still use `std::shared_ptr`.

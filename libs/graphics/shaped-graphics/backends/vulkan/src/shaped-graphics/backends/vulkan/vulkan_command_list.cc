@@ -525,12 +525,11 @@ void vulkan_command_list::copy_buffer_region(sg::raw_buffer_handle src,
     vkCmdCopyBuffer(_buffer, s->_buffer, d->_buffer, 1, &region);
 }
 
-// False until the recording paths below exist, whatever the device offers.
-// The question is whether THIS command list can trace rays, not whether the GPU could: answering yes while every
-// build and dispatch seam is a stub turns a clean skip into a failure and tells a caller nothing it can act on.
-// vulkan_context::is_raytracing_supported() holds the device's answer, ready for this to start reporting it.
+// Now the device's own answer, since every build and dispatch seam is real.
+// The question this asks is whether THIS command list can trace rays rather than whether the GPU could — which is why
+// it reported false while the seams were stubs, and why it can stop doing so only now.
 bool vulkan_command_list::raytracing_is_supported() const
 {
-    return false;
+    return _ctx.is_raytracing_supported();
 }
 } // namespace sg::backend::vulkan

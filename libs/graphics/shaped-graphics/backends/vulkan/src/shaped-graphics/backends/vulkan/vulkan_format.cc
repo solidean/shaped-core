@@ -180,6 +180,13 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
     if (usage.has(sg::buffer_usage::readonly_buffer) || usage.has(sg::buffer_usage::readwrite_buffer))
         flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
+    if (usage.has(sg::buffer_usage::indirect_command_buffer))
+        flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+    if (usage.has(sg::buffer_usage::accel_structure_storage))
+        flags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+    if (usage.has(sg::buffer_usage::accel_structure_build_input))
+        flags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+
     // Vulkan rejects a zero-usage buffer, so a usage-less non-empty buffer keeps a benign transfer-dst bit and stays valid.
     if (flags == 0)
         flags = VK_BUFFER_USAGE_TRANSFER_DST_BIT;

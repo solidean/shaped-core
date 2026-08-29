@@ -115,7 +115,34 @@ public:
     // The hazard declares a draw owes: the bound groups' shader accesses plus the input-assembly reads.
     void declare_raster_draw_barriers(bool indexed);
 
-    // Resolves the pending array declares against the bound groups and tracks each named element.
+    /// What build_acceleration_structure hands back: the filled build info plus everything the caller has to keep.
+    /// A struct rather than out-params, because a build's result is one thing with several parts.
+    struct built_acceleration_structure
+    {
+        VkAccelerationStructureBuildGeometryInfoKHR info = {};
+        vulkan_buffer_handle result;
+        VkAccelerationStructureKHR accel = VK_NULL_HANDLE;
+        VkDeviceAddress address = 0;
+        isize size_in_bytes = 0;
+        isize build_scratch_size_in_bytes = 0;
+        isize update_scratch_size_in_bytes = 0;
+        cc::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
+    };
+
+    // Sizes the structure, allocates its storage and scratch, creates the object, and declares the result/scratch
+    // accesses.
+    // Bodies in vulkan_raytracing.cc.
+    [[nodiscard]] built_acceleration_structure build_acceleration_structure(
+        VkAccelerationStructureTypeKHR type,
+        cc::span<VkAccelerationStructureGeometryKHR const> geometries,
+        cc::span<u32 const> primitive_counts,
+        cc::span<VkAccelerationStructureBuildRangeInfoKHR const> ranges,
+        sg::accel_build_flags flags);
+
+    // Flushes what the build declared, then records it.
+    void record_acceleration_structure_build(built_acceleration_structure const& built);
+
+    /// Resolves the pending array declares against the bound groups and tracks each named element.
     // Also the accounting pass: a bound array binding with no declaration is an error.
     void declare_array_accesses();
 
@@ -181,31 +208,19 @@ protected:
     // about the hardware; it is the build/dispatch stubs below that still have to land.
     // Body in vulkan_command_list.cc, which has vulkan_context complete.
     [[nodiscard]] bool raytracing_is_supported() const override;
-    [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const>,
-                                                                  sg::accel_build_flags) override
-    {
-        CC_UNREACHABLE("vulkan raytracing build_blas is not implemented yet");
-    }
-    [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const>, sg::accel_build_flags) override
-    {
-        CC_UNREACHABLE("vulkan raytracing build_blas is not implemented yet");
-    }
-    [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const>, sg::accel_build_flags) override
-    {
-        CC_UNREACHABLE("vulkan raytracing build_tlas is not implemented yet");
-    }
-    void raytracing_bind_pipeline(sg::raytracing_pipeline const&) override
-    {
-        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
-    }
-    void raytracing_bind_group(int, sg::binding_group const&) override
-    {
-        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
-    }
-    void raytracing_dispatch_rays(sg::raytracing_shader_table const&, sg::raygen_index, int, int, int) override
-    {
-        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
-    }
+    [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
+                                                                  sg::accel_build_flags flags) override;
+    [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
+                                                              sg::accel_build_flags flags) override;
+    [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
+                                                        sg::accel_build_flags flags) override;
+    void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;
+    void raytracing_bind_group(int group_index, sg::binding_group const& group) override;
+    void raytracing_dispatch_rays(sg::raytracing_shader_table const& table,
+                                  sg::raygen_index raygen,
+                                  int width,
+                                  int height,
+                                  int depth) override;
 
     // GPU queries (reached through cmd.query) — not implemented yet.
     // Timestamps report unsupported, and record_gpu_timestamp stays callable but always returns an invalid query.

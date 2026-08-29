@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_acceleration_structure.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
@@ -102,7 +103,16 @@ void vulkan_staging_binding_group::write_view_descriptors(int first_descriptor,
             CC_ASSERT(buffer != nullptr, "bound buffer is not a vulkan buffer");
             res = {.buffer = cc::move(buffer), .texture = {}, .range = {}, .access = bv->access};
         }
-        // else: the null acceleration structure, which references nothing and tracks nothing.
+        else if (auto const* av = sg::try_as_tlas_view(view); av != nullptr && av->tlas != nullptr)
+        {
+            // A trace reads the TLAS's storage buffer, so that is what a minted group keeps alive and declares.
+            // A null handle is the null acceleration structure rather than a mistake, and references nothing.
+            auto const& tlas = static_cast<vulkan_tlas const&>(*av->tlas);
+            res = {.buffer = tlas._vulkan_storage,
+                   .texture = {},
+                   .range = {},
+                   .access = sg::view_class::acceleration_structure};
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_acceleration_structure.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_barrier.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
@@ -249,15 +250,19 @@ void write_view_descriptor(vulkan_context& ctx,
     }
     else if (auto const* tlas_view = sg::try_as_tlas_view(view); tlas_view != nullptr)
     {
+        // A descriptor names the structure by device address, the same way a TLAS instance names a BLAS.
+        //
         // A null TLAS is legal and binds the null acceleration structure, which every ray misses — so address 0 is a
         // valid descriptor rather than an error, and there is nothing to keep alive for it.
         // It is the nullDescriptor feature that makes it writable at all; vkGetDescriptorEXT rejects address 0 without
         // it, which is why device creation requires VK_EXT_robustness2.
-        //
-        // A non-null one cannot occur yet: cmd.raytracing.is_supported() answers false until the ray-tracing
-        // milestone, so nothing can build the acceleration structure this would need the address of.
-        CC_ASSERT(tlas_view->tlas == nullptr, "vulkan acceleration-structure views are not implemented yet");
         info.data.accelerationStructure = 0;
+        if (tlas_view->tlas != nullptr)
+        {
+            auto const& tlas = static_cast<vulkan_tlas const&>(*tlas_view->tlas);
+            CC_ASSERT(tlas._address != 0, "a bound acceleration structure has no device address");
+            info.data.accelerationStructure = u64(tlas._address);
+        }
     }
     else
         CC_UNREACHABLE("unhandled raw_view arm in write_view_descriptor");

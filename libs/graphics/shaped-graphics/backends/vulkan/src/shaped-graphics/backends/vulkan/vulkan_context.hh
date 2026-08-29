@@ -17,6 +17,9 @@
 #include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raster_pipeline.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_raytracing_functions.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
@@ -126,6 +129,28 @@ public:
 
     void set_device_properties(VkPhysicalDeviceProperties const& props) { _device_properties = props; }
 
+    /// The device's acceleration-structure limits, read once at creation.
+    /// A build needs the scratch alignment from here, which is a device property rather than a portable constant.
+    [[nodiscard]] VkPhysicalDeviceAccelerationStructurePropertiesKHR const& acceleration_structure_properties() const
+    {
+        return _acceleration_structure_properties;
+    }
+
+    /// The device's ray-tracing pipeline limits — shader-group handle size and the shader-table alignments.
+    [[nodiscard]] VkPhysicalDeviceRayTracingPipelinePropertiesKHR const& raytracing_pipeline_properties() const
+    {
+        return _raytracing_pipeline_properties;
+    }
+
+    void set_raytracing_properties(VkPhysicalDeviceAccelerationStructurePropertiesKHR const& accel,
+                                   VkPhysicalDeviceRayTracingPipelinePropertiesKHR const& pipeline)
+    {
+        _acceleration_structure_properties = accel;
+        _raytracing_pipeline_properties = pipeline;
+        _acceleration_structure_properties.pNext = nullptr; // the chain it was queried through does not outlive creation
+        _raytracing_pipeline_properties.pNext = nullptr;
+    }
+
     void set_descriptor_buffer_properties(VkPhysicalDeviceDescriptorBufferPropertiesEXT const& props)
     {
         _descriptor_buffer_properties = props;
@@ -158,9 +183,14 @@ public:
     // backend-typed API — prefer these when you already hold a vulkan_context
 
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();
+    /// `extra_usage` is backend-internal, for a Vulkan usage sg has no vocabulary for.
+    /// The one caller is the ray-tracing shader table, whose buffer must carry SHADER_BINDING_TABLE_BIT_KHR — a bit
+    /// sg::buffer_usage deliberately does not model, since the table is its own abstraction rather than a buffer kind
+    /// (see the note in shaped-graphics/types.hh).
     [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(isize size_in_bytes,
                                                                         sg::buffer_usages usage,
-                                                                        sg::allocation_info const& alloc);
+                                                                        sg::allocation_info const& alloc,
+                                                                        VkBufferUsageFlags extra_usage = 0);
     [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
                                                                           sg::allocation_info const& alloc);
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
@@ -249,17 +279,25 @@ public:
         CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipelines are persistent-only");
         return cc::result<sg::raster_pipeline_handle>(create_vulkan_raster_pipeline(desc));
     }
+    [[nodiscard]] cc::result<vulkan_raytracing_pipeline_handle> create_vulkan_raytracing_pipeline(
+        sg::raytracing_pipeline_description const& desc);
+
     [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
-        sg::raytracing_pipeline_description const&,
-        sg::lifetime_scope) override
+        sg::raytracing_pipeline_description const& desc,
+        sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan raytracing_pipeline creation is not implemented yet");
+        CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipelines are persistent-only");
+        return cc::result<sg::raytracing_pipeline_handle>(create_vulkan_raytracing_pipeline(desc));
     }
+    [[nodiscard]] cc::result<vulkan_raytracing_shader_table_handle> create_vulkan_raytracing_shader_table(
+        sg::raytracing_shader_table_description const& desc);
+
     [[nodiscard]] cc::result<sg::raytracing_shader_table_handle> try_create_raytracing_shader_table(
-        sg::raytracing_shader_table_description const&,
-        sg::lifetime_scope) override
+        sg::raytracing_shader_table_description const& desc,
+        sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan raytracing_shader_table creation is not implemented yet");
+        CC_ASSERT(scope == sg::lifetime_scope::persistent, "shader tables are persistent-only");
+        return cc::result<sg::raytracing_shader_table_handle>(create_vulkan_raytracing_shader_table(desc));
     }
     [[nodiscard]] cc::result<vulkan_binding_group_handle> create_vulkan_binding_group(
         sg::binding_group_layout_handle const& layout,
@@ -453,6 +491,9 @@ public:
     /// The descriptor-buffer entry points, loaded once at creation.
     vulkan_descriptor_functions _descriptor_functions;
 
+    /// The ray-tracing entry points; only loaded where the device has the extensions.
+    vulkan_raytracing_functions _raytracing_functions;
+
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
 
@@ -461,6 +502,10 @@ public:
 
     // See device_properties.
     VkPhysicalDeviceProperties _device_properties = {};
+
+    // See acceleration_structure_properties / raytracing_pipeline_properties.
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR _acceleration_structure_properties = {};
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR _raytracing_pipeline_properties = {};
 
     // Where validation messages go; empty means the log.
     // See set_message_callback.

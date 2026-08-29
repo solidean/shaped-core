@@ -10,8 +10,8 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 
 > **Scope note:** this sheet covers the surface that exists today.
 > The sg core API and the **dx12** backend are real.
-> The **vulkan** backend is real through the device, resources, memory heaps, inline transfer and copies, the whole bind path, compute dispatch and raster.
-> Ray tracing, presentation and both async transfer scopes are still stubs there.
+> The **vulkan** backend is real through the device, resources, memory heaps, inline transfer and copies, the whole bind path, compute, raster and ray tracing.
+> Presentation and both async transfer scopes are still stubs there.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.

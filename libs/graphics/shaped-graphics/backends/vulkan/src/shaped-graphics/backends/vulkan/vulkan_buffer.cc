@@ -49,7 +49,8 @@ vulkan_buffer::~vulkan_buffer()
 
 cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size_in_bytes,
                                                                       sg::buffer_usages usage,
-                                                                      sg::allocation_info const& alloc)
+                                                                      sg::allocation_info const& alloc,
+                                                                      VkBufferUsageFlags extra_usage)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
 
@@ -62,7 +63,7 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
         auto const buffer_info = VkBufferCreateInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = VkDeviceSize(size_in_bytes),
-            .usage = to_vk_buffer_usage(usage),
+            .usage = to_vk_buffer_usage(usage) | extra_usage,
             // TODO: the streaming usages need VK_SHARING_MODE_CONCURRENT over the graphics + transfer
             // families — EXCLUSIVE cannot express two families holding a resource at once, and ownership
             // transfer serializes the very concurrency streaming exists to allow.

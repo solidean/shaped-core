@@ -235,6 +235,11 @@ constexpr char const* k_raytracing_extensions[] = {
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
     VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
     VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+    // Ray query is in the required set rather than probed separately, because DXC emits the RayQueryKHR capability
+    // into every ray-tracing SPIR-V module it produces, used or not.
+    // So a device without it could not load any shader our own toolchain compiles, which makes "has ray tracing" and
+    // "has ray query" the same question for this backend.
+    VK_KHR_RAY_QUERY_EXTENSION_NAME,
 };
 
 // Whether `dev` advertises every extension in `names`.
@@ -404,7 +409,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 
     // Ray tracing is optional above the floor: enable the extensions where the device has them, and record the
     // answer so cmd.raytracing.is_supported() reports the device rather than a hardcoded false.
-    bool const raytracing_supported = device_extensions_available(best_device, k_raytracing_extensions);
+    bool raytracing_supported = device_extensions_available(best_device, k_raytracing_extensions);
 
     cc::vector<char const*> device_extensions;
     device_extensions.push_back(k_descriptor_buffer_extension);
@@ -424,8 +429,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pQueuePriorities = &queue_priority,
     };
 
+    auto ray_query_features = VkPhysicalDeviceRayQueryFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+        .rayQuery = VK_TRUE,
+    };
     auto accel_features = VkPhysicalDeviceAccelerationStructureFeaturesKHR{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &ray_query_features,
         .accelerationStructure = VK_TRUE,
     };
     auto rt_pipeline_features = VkPhysicalDeviceRayTracingPipelineFeaturesKHR{
@@ -497,15 +507,34 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto descriptor_props = VkPhysicalDeviceDescriptorBufferPropertiesEXT{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT,
     };
+    // The ray-tracing limits ride the same query, chained only where the extensions are there: asking for them on a
+    // device without the extensions is undefined rather than merely empty.
+    auto accel_props = VkPhysicalDeviceAccelerationStructurePropertiesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
+        .pNext = &descriptor_props,
+    };
+    auto rt_pipeline_props = VkPhysicalDeviceRayTracingPipelinePropertiesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR,
+        .pNext = &accel_props,
+    };
     auto device_props = VkPhysicalDeviceProperties2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &descriptor_props,
+        .pNext = raytracing_supported ? static_cast<void*>(&rt_pipeline_props) : static_cast<void*>(&descriptor_props),
     };
     vkGetPhysicalDeviceProperties2(best_device, &device_props);
     ctx->set_descriptor_buffer_properties(descriptor_props);
     ctx->set_device_properties(device_props.properties);
 
     ctx->set_adapter_info(describe_adapter(best_device));
+
+    // Ray tracing is supported only if its entry points are actually there too, which is the same all-or-nothing rule
+    // the descriptor-buffer loader applies — except that here a false answer is a legitimate device rather than a
+    // reason to refuse one.
+    if (raytracing_supported)
+    {
+        ctx->set_raytracing_properties(accel_props, rt_pipeline_props);
+        raytracing_supported = ctx->_raytracing_functions.load(device);
+    }
     ctx->set_raytracing_supported(raytracing_supported);
 
     // The staging ring is part of a usable context rather than something acquired lazily: without it cmd.upload has

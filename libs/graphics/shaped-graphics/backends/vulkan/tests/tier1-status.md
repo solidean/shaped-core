@@ -48,12 +48,17 @@ uv run dev.py test 'sg - a staging binding must be set\, even to nothing'
 | `transfer/download-async-test.cc` | 0 | 8 |
 | `transfer/upload-async-test.cc` | 0 | 8 |
 
-**Every remaining failure is one milestone.**
+**Every remaining failure is one milestone**, and has been since the bind path landed.
 Async transfer and streaming — `upload-async`, `download-async`, `stream`, and `transfer-fuzz`'s async half — need the dedicated copy queue, which is the last thing to build.
 Fifteen topics pass in full.
 
-**A pass is not always coverage.** The three raytracing entries and the one query entry pass by `SKIP`ping, because `raytracing_is_supported()` and `query_timestamps_supported()` both answer false.
-They turn into real coverage when those milestones land, and until then they prove only that the honest-false path works.
+**A pass is not always coverage.** The one query entry still passes by `SKIP`ping, because `query_timestamps_supported()` answers false.
+It turns into real coverage when that milestone lands, and until then it proves only that the honest-false path works.
+
+The three raytracing entries used to be in that group and no longer are: they build acceleration structures on real
+hardware now, so the same three passes are worth far more than they were.
+That is why this table can stand still while the backend moves — a count of passing tests is not a measure of
+coverage, and the milestone list below is what actually tracks progress.
 
 ## The validation layer is the oracle
 

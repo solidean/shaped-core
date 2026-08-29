@@ -18,14 +18,17 @@ struct vulkan_download_copy_job;     // one staged readback awaiting its copy-ou
 class vulkan_download_actor;         // drains them in submission order
 class vulkan_download_inline_system; // the readback ring
 struct vulkan_descriptor_functions;  // the VK_EXT_descriptor_buffer entry points, loaded per device
-struct vulkan_descriptor_range;      // one allocated range within the descriptor heap
-class vulkan_descriptor_heap;        // host-visible memory descriptors are written into
-class vulkan_image_view_cache;       // VkImageViews for bound texture views, keyed by view identity
-class vulkan_sampler_cache;          // VkSamplers for bound sampler states, keyed by sampler identity
-struct vulkan_hazard_view;           // a bound buffer + the access class it is used as (see vulkan_binding_group.hh)
-struct vulkan_texture_hazard_view;   // the texture analogue
-struct vulkan_array_element;         // one element of an array binding
-struct vulkan_array_binding;         // an array binding's per-element resources
+struct vulkan_raytracing_functions;  // the acceleration-structure + ray-tracing-pipeline entry points
+class vulkan_blas;
+class vulkan_tlas;
+struct vulkan_descriptor_range;    // one allocated range within the descriptor heap
+class vulkan_descriptor_heap;      // host-visible memory descriptors are written into
+class vulkan_image_view_cache;     // VkImageViews for bound texture views, keyed by view identity
+class vulkan_sampler_cache;        // VkSamplers for bound sampler states, keyed by sampler identity
+struct vulkan_hazard_view;         // a bound buffer + the access class it is used as (see vulkan_binding_group.hh)
+struct vulkan_texture_hazard_view; // the texture analogue
+struct vulkan_array_element;       // one element of an array binding
+struct vulkan_array_binding;       // an array binding's per-element resources
 class vulkan_binding_group;
 using vulkan_binding_group_handle = std::shared_ptr<vulkan_binding_group const>;
 class vulkan_staging_binding_group;
@@ -36,6 +39,10 @@ struct vulkan_array_buffer_declare;  // one declare_array_buffer_access, held un
 struct vulkan_array_texture_declare; // the texture analogue
 class vulkan_compute_pipeline;
 class vulkan_raster_pipeline;
+class vulkan_raytracing_pipeline;
+using vulkan_raytracing_pipeline_handle = std::shared_ptr<vulkan_raytracing_pipeline const>;
+class vulkan_raytracing_shader_table;
+using vulkan_raytracing_shader_table_handle = std::shared_ptr<vulkan_raytracing_shader_table const>;
 using vulkan_raster_pipeline_handle = std::shared_ptr<vulkan_raster_pipeline const>;
 using vulkan_compute_pipeline_handle = std::shared_ptr<vulkan_compute_pipeline const>;
 class vulkan_pipeline_layout;

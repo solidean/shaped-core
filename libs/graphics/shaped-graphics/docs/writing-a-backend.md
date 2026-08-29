@@ -164,6 +164,14 @@ Recorded as each is met, because this is what the next backend most wants to kno
   **A frame that transitions its resources before the scope opens never pays this**, which is worth saying in the
   backend's own docs rather than leaving as a surprise.
 
+- **An acceleration structure is an object here and an address there.**
+  DXR names a structure by the GPU address of its storage buffer, so dx12's `blas`/`tlas` subclasses hold nothing but
+  a typed handle to that buffer.
+  Vulkan needs a `VkAccelerationStructureKHR` created over the buffer, with a device address of its own — so the
+  subclass owns an object, and the ownership question ("what frees this, and when") appears where dx12 has none.
+  The sg-level policy is untouched: result persistent, scratch transient, and the AS access bits illegal on non-AS
+  buffers.
+
 - **`used_cached_pipeline()` looked like an sg-surface gap and was not.**
   dx12 answers it precisely because D3D12 fails PSO creation on a blob it cannot use, while Vulkan silently starts
   from an empty cache — so "did creation succeed" carries no information there.
@@ -201,6 +209,13 @@ Recorded as each is met, because this is what the next backend most wants to kno
   Both fixes belonged in sg rather than the backend — `context::shutdown` now releases the cache the way it already
   cleared routines — so look for the *category* on the first one rather than fixing them one validation message at a
   time.
+
+- **Your own compiler's output decides what the device floor really is.**
+  DXC emits the `RayQueryKHR` capability into every ray-tracing SPIR-V module it produces, used or not.
+  So a device with ray-tracing pipelines but no ray query could not load a single shader our toolchain compiles, and
+  ray query belongs in the required set rather than beside it as a separate probe.
+  **Check what the compiler actually emits before deciding which capabilities are optional** — a feature nothing in
+  the source asks for can still be a hard requirement.
 
 - **A per-pipeline cached blob maps onto a per-pipeline VkPipelineCache.**
   Vulkan's cache is normally one shared object, and sg's surface is one blob per pipeline, so each pipeline owns a
@@ -251,6 +266,24 @@ So the reference backend's tier-2 suite is the specification for those, and your
   `VkPipelineLayout` outlived `vkDestroyDevice` — a clean-core fix, found only because the mode is gated.
   A backend leans on `ctx.cached.acquire_*` for every pipeline, which makes it the consumer most exposed to how that
   tier behaves in each mode.
+
+## Answer a capability query for what the backend can do, not what the hardware can
+
+`cmd.raytracing.is_supported()` is the model for any "can this backend do X" seam.
+
+The vulkan backend enabled the ray-tracing extensions at device creation — milestones ahead of using them — while
+every build and dispatch seam was still a stub.
+Reporting the *device's* answer then would have turned a clean skip into a crash, and told a caller nothing it could
+act on.
+So the context held the device's answer and the command list reported `false`, with a comment saying why, and a
+tier-2 test pinned the gap as deliberate rather than an omission.
+
+When the seams landed, the list started reporting the context and that test was rewritten to pin the agreement.
+**Both halves matter**: a test that pins a temporary divergence is what stops it being read as a bug, and rewriting it
+is part of finishing the milestone rather than a chore left behind.
+
+The context's own answer is worth making stricter than the extension list: it is true only once the entry points have
+resolved too, so a driver advertising an extension it does not implement reports false rather than crashing later.
 
 ## The pointer-into-a-growing-vector trap
 
