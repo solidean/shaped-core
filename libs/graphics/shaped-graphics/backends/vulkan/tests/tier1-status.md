@@ -59,5 +59,9 @@ Every failure so far is a missing milestone rather than a defect — checked one
   These need the dedicated copy queue, which is the last milestone.
 - **`shader_package`** — needs a SPIR-V producer; there is no shader compiler on Linux yet.
 
-The `cc::error` stubs are what make these fail cleanly rather than abort: the throwing façade turns each into a typed exception that nexus reports as a failed test.
-A test only reaches an aborting recording seam once the creation it needs has started working, which is why the list grows without the suite getting less usable.
+Every failure here is a reported test failure rather than a teardown, from both stub kinds.
+The `cc::error` creation stubs become typed exceptions through the throwing façade.
+The `CC_UNREACHABLE` recording stubs are caught by nexus and reported as a failed check naming the seam — measured, not assumed: a full sweep with the driver enabled runs all 249 tests to completion.
+
+**That holds where assertions are on, so in `relwithdebinfo-*` and not in `release-*`.**
+With `CC_ASSERT` compiled out a `CC_UNREACHABLE` is undefined behaviour rather than a caught failure, which is the reason the driver stays `nx::config::disabled` rather than merely being left to fail.

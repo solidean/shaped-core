@@ -62,6 +62,14 @@ public:
     // create_vulkan_context fills this in once it has picked a physical device.
     using sg::context::set_adapter_info;
 
+    /// Whether this device has the ray-tracing extensions, which are optional above the required floor.
+    /// Read by every command list's cmd.raytracing.is_supported(), so a device without them reports honestly
+    /// rather than the backend hardcoding an answer.
+    [[nodiscard]] bool is_raytracing_supported() const { return _raytracing_supported; }
+
+    // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
+    void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
+
     // backend-typed API — prefer these when you already hold a vulkan_context
 
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();
@@ -286,6 +294,9 @@ public:
     // See sg::context::is_device_lost for the sticky-loss surface this feeds.
     // Body in vulkan_context.cc.
     bool note_device_lost_if_lost(VkResult r, char const* what);
+
+    // Set once at creation from the device's extension set; see is_raytracing_supported.
+    bool _raytracing_supported = false;
 
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed

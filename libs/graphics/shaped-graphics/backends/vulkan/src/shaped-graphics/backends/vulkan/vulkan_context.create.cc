@@ -2,6 +2,8 @@
 // Split off from the other vulkan_context bodies because it grows with every device feature opted into.
 
 #include <clean-core/common/log.hh>
+#include <clean-core/common/utility.hh> // CC_DEFER
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
@@ -65,7 +67,7 @@ bool validation_layer_available()
 {
     uint32_t count = 0;
     vkEnumerateInstanceLayerProperties(&count, nullptr);
-    auto layers = cc::vector<VkLayerProperties>::create_defaulted(count);
+    auto layers = cc::vector<VkLayerProperties>::create_uninitialized(count);
     vkEnumerateInstanceLayerProperties(&count, layers.data());
     for (auto const& l : layers)
         if (cc::string_view(l.layerName) == k_validation_layer)
@@ -77,7 +79,7 @@ bool debug_utils_extension_available()
 {
     uint32_t count = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
-    auto exts = cc::vector<VkExtensionProperties>::create_defaulted(count);
+    auto exts = cc::vector<VkExtensionProperties>::create_uninitialized(count);
     vkEnumerateInstanceExtensionProperties(nullptr, &count, exts.data());
     for (auto const& e : exts)
         if (cc::string_view(e.extensionName) == VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
@@ -90,7 +92,7 @@ bool find_graphics_queue_family(VkPhysicalDevice dev, u32& out_index)
 {
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, nullptr);
-    auto families = cc::vector<VkQueueFamilyProperties>::create_defaulted(count);
+    auto families = cc::vector<VkQueueFamilyProperties>::create_uninitialized(count);
     vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, families.data());
     for (uint32_t i = 0; i < count; ++i)
         if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
@@ -154,7 +156,7 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
 {
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
-    auto devices = cc::vector<VkPhysicalDevice>::create_defaulted(device_count);
+    auto devices = cc::vector<VkPhysicalDevice>::create_uninitialized(device_count);
     vkEnumeratePhysicalDevices(instance, &device_count, devices.data());
 
     cc::optional<selected_physical_device> best;
@@ -204,14 +206,76 @@ void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT messe
         fn(instance, messenger, nullptr);
 }
 
+// The Vulkan version sg requires of a device, and the floor every feature below is core in.
+// Hardcoded rather than probed per capability: a branch taken on nobody's machine is a path nobody exercises,
+// so a device under the floor is refused at creation with one legible error instead of degrading silently.
+constexpr u32 k_required_api_version = VK_API_VERSION_1_3;
+
+// The ray-tracing device extensions, which are optional above the floor.
+// A device without them still comes up; cmd.raytracing.is_supported() then answers false.
+constexpr char const* k_raytracing_extensions[] = {
+    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+};
+
+// Whether `dev` advertises every extension in `names`.
+bool device_extensions_available(VkPhysicalDevice dev, cc::span<char const* const> names)
+{
+    u32 count = 0;
+    vkEnumerateDeviceExtensionProperties(dev, nullptr, &count, nullptr);
+    auto props = cc::vector<VkExtensionProperties>::create_uninitialized(count);
+    vkEnumerateDeviceExtensionProperties(dev, nullptr, &count, props.data());
+
+    for (auto const* wanted : names)
+    {
+        bool found = false;
+        for (auto const& p : props)
+            if (cc::string_view(p.extensionName) == cc::string_view(wanted))
+            {
+                found = true;
+                break;
+            }
+        if (!found)
+            return false;
+    }
+    return true;
+}
+
 // Whether the device supports timeline semaphores — the epoch system's core sync primitive.
 // Core in the 1.2 baseline, but still a feature bit a device may not expose.
-bool timeline_semaphore_supported(VkPhysicalDevice dev)
+// The first thing sg requires that `dev` does not have, or an empty view when it satisfies the floor.
+// Naming the missing capability is the point: "this GPU is too old" is not something a caller can act on.
+cc::string_view missing_required_capability(VkPhysicalDevice dev)
 {
-    VkPhysicalDeviceVulkan12Features vk12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkPhysicalDeviceProperties props = {};
+    vkGetPhysicalDeviceProperties(dev, &props);
+    if (props.apiVersion < k_required_api_version)
+        return "Vulkan 1.3";
+
+    VkPhysicalDeviceVulkan13Features vk13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    VkPhysicalDeviceVulkan12Features vk12
+        = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &vk13};
     VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk12};
     vkGetPhysicalDeviceFeatures2(dev, &features);
-    return vk12.timelineSemaphore == VK_TRUE;
+
+    // The epoch system rests on timeline semaphores; barriers on synchronization2; the raster scope on dynamic
+    // rendering; bindless arrays on the three descriptor-indexing bits; acceleration structures on device addresses.
+    if (vk12.timelineSemaphore != VK_TRUE)
+        return "timelineSemaphore";
+    if (vk13.synchronization2 != VK_TRUE)
+        return "synchronization2";
+    if (vk13.dynamicRendering != VK_TRUE)
+        return "dynamicRendering";
+    if (vk12.runtimeDescriptorArray != VK_TRUE)
+        return "runtimeDescriptorArray";
+    if (vk12.descriptorBindingPartiallyBound != VK_TRUE)
+        return "descriptorBindingPartiallyBound";
+    if (vk12.descriptorBindingUpdateUnusedWhilePending != VK_TRUE)
+        return "descriptorBindingUpdateUnusedWhilePending";
+    if (vk12.bufferDeviceAddress != VK_TRUE)
+        return "bufferDeviceAddress";
+    return {};
 }
 
 // Creates a timeline semaphore starting at `initial_value`.
@@ -245,7 +309,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto const app = VkApplicationInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "shaped-graphics",
-        .apiVersion = VK_API_VERSION_1_2, // baseline we require; widely supported by current drivers
+        .apiVersion = k_required_api_version, // the floor every feature below is core in; see k_required_api_version
     };
 
     cc::vector<char const*> layers;
@@ -292,16 +356,43 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto const best_device = picked.value().device;
     auto const best_family = picked.value().queue_family;
 
-    // The epoch system rests on timeline semaphores; bail with a clear error if the device lacks them.
-    if (!timeline_semaphore_supported(best_device))
+    // Everything created from here is owned by this function until the context takes it, so one guard unwinds
+    // whatever exists at the point of an early return.
+    // It disarms once the context owns the handles, which is why the success path frees nothing.
+    VkDevice device = VK_NULL_HANDLE;
+    VkSemaphore epoch_timeline = VK_NULL_HANDLE;
+    VkSemaphore submission_timeline = VK_NULL_HANDLE;
+    bool owned_by_context = false;
+    CC_DEFER
     {
+        if (owned_by_context)
+            return;
+        if (submission_timeline != VK_NULL_HANDLE)
+            vkDestroySemaphore(device, submission_timeline, nullptr);
+        if (epoch_timeline != VK_NULL_HANDLE)
+            vkDestroySemaphore(device, epoch_timeline, nullptr);
+        if (device != VK_NULL_HANDLE)
+            vkDestroyDevice(device, nullptr);
         destroy_debug_messenger(instance, messenger);
         vkDestroyInstance(instance, nullptr);
-        return cc::error("selected Vulkan device does not support timeline semaphores");
-    }
+    };
+
+    // Refuse a device under the floor, naming what it is missing.
+    if (auto const missing = missing_required_capability(best_device); !missing.empty())
+        return cc::error(cc::format("selected Vulkan device does not support {}", missing));
+
+    // Ray tracing is optional above the floor: enable the extensions where the device has them, and record the
+    // answer so cmd.raytracing.is_supported() reports the device rather than a hardcoded false.
+    bool const raytracing_supported = device_extensions_available(best_device, k_raytracing_extensions);
+
+    cc::vector<char const*> device_extensions;
+    if (raytracing_supported)
+        for (auto const* name : k_raytracing_extensions)
+            device_extensions.push_back(name);
 
     // Logical device with a single graphics queue.
-    // timelineSemaphore must be opted into explicitly even though it is core in 1.2.
+    // Every feature is enabled up front, whether or not the milestone using it has landed: a feature costs nothing
+    // unused, and enabling them one at a time means re-editing this chain for each.
     float const queue_priority = 1.0f;
     auto const queue_info = VkDeviceQueueCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -310,53 +401,59 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pQueuePriorities = &queue_priority,
     };
 
+    auto accel_features = VkPhysicalDeviceAccelerationStructureFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .accelerationStructure = VK_TRUE,
+    };
+    auto rt_pipeline_features = VkPhysicalDeviceRayTracingPipelineFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .pNext = &accel_features,
+        .rayTracingPipeline = VK_TRUE,
+    };
+    auto vk13_features = VkPhysicalDeviceVulkan13Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .pNext = raytracing_supported ? static_cast<void*>(&rt_pipeline_features) : nullptr,
+        .synchronization2 = VK_TRUE,
+        .dynamicRendering = VK_TRUE,
+    };
     auto vk12_features = VkPhysicalDeviceVulkan12Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &vk13_features,
+        .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
+        .descriptorBindingPartiallyBound = VK_TRUE,
+        .runtimeDescriptorArray = VK_TRUE,
         .timelineSemaphore = VK_TRUE,
+        .bufferDeviceAddress = VK_TRUE,
     };
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &vk12_features,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queue_info,
+        .enabledExtensionCount = u32(device_extensions.size()),
+        .ppEnabledExtensionNames = device_extensions.data(),
     };
 
-    VkDevice device = VK_NULL_HANDLE;
     if (VkResult r = vkCreateDevice(best_device, &device_info, nullptr, &device); r != VK_SUCCESS)
-    {
-        destroy_debug_messenger(instance, messenger);
-        vkDestroyInstance(instance, nullptr);
         return vulkan_error(r, "vkCreateDevice failed");
-    }
 
     VkQueue queue = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, best_family, 0, &queue);
 
     // Two timeline semaphores on the one queue: the epoch timeline drives reclamation, the submission timeline answers per-list completion.
     // Each starts at first-1, so nothing reads as complete before the first signal.
-    VkSemaphore epoch_timeline = VK_NULL_HANDLE;
     if (VkResult r = create_timeline_semaphore(device, u64(sg::epoch::first) - 1, epoch_timeline); r != VK_SUCCESS)
-    {
-        vkDestroyDevice(device, nullptr);
-        destroy_debug_messenger(instance, messenger);
-        vkDestroyInstance(instance, nullptr);
         return vulkan_error(r, "vkCreateSemaphore (epoch timeline) failed");
-    }
 
-    VkSemaphore submission_timeline = VK_NULL_HANDLE;
     if (VkResult r = create_timeline_semaphore(device, u64(sg::submission_token::first) - 1, submission_timeline);
         r != VK_SUCCESS)
-    {
-        vkDestroySemaphore(device, epoch_timeline, nullptr);
-        vkDestroyDevice(device, nullptr);
-        destroy_debug_messenger(instance, messenger);
-        vkDestroyInstance(instance, nullptr);
         return vulkan_error(r, "vkCreateSemaphore (submission timeline) failed");
-    }
 
     auto ctx = std::make_shared<vulkan_context>(instance, best_device, device, queue, best_family, epoch_timeline,
                                                 submission_timeline, messenger);
     ctx->set_adapter_info(describe_adapter(best_device));
+    ctx->set_raytracing_supported(raytracing_supported);
+    owned_by_context = true;
     return context_handle(cc::move(ctx));
 }
 } // namespace sg

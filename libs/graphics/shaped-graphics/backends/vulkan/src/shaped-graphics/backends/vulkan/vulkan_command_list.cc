@@ -164,4 +164,13 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     (void)_command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
+
+// False until the recording paths below exist, whatever the device offers.
+// The question is whether THIS command list can trace rays, not whether the GPU could: answering yes while every
+// build and dispatch seam is a stub turns a clean skip into a failure and tells a caller nothing it can act on.
+// vulkan_context::is_raytracing_supported() holds the device's answer, ready for this to start reporting it.
+bool vulkan_command_list::raytracing_is_supported() const
+{
+    return false;
+}
 } // namespace sg::backend::vulkan

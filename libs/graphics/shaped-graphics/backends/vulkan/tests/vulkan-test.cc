@@ -187,3 +187,24 @@ TEST("sg vulkan - throttle bounds epochs in flight")
     auto const in_flight = c._epoch_state.lock([](vulkan::vulkan_epoch_state& s) { return s.in_flight.size(); });
     CHECK(in_flight <= 1);
 }
+
+TEST("sg vulkan - the device probe and the command list answer ray tracing separately")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return; // no Vulkan device (e.g. headless CI).
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    // The context records what the device offers; the command list reports what the backend can actually record.
+    // They are allowed to disagree, and today they do: the extensions are enabled at device creation so the
+    // ray-tracing milestone has them, while every build and dispatch seam is still a stub.
+    // This pins that gap as deliberate — when the recording paths land, is_supported() starts reporting the probe
+    // and this test is what says the two were separated on purpose rather than by omission.
+    auto cmd = c.create_vulkan_command_list();
+    REQUIRE(cmd.has_value());
+
+    // The invariant with teeth: no command list records ray tracing yet, however capable the device is.
+    // On this hardware the probe is true, so the two answers really do differ rather than agreeing by accident.
+    CHECK(!cmd.value()->raytracing.is_supported());
+    c.drop_vulkan_command_list(cc::move(cmd.value()));
+}

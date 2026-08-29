@@ -126,9 +126,11 @@ protected:
         CC_UNREACHABLE("vulkan raster draw is not implemented yet");
     }
 
-    // Ray tracing (reached through cmd.raytracing) — not implemented yet.
-    // is_supported() returns false, so a correct caller never reaches the build stubs below.
-    [[nodiscard]] bool raytracing_is_supported() const override { return false; }
+    // Ray tracing (reached through cmd.raytracing) — the recording paths are not implemented yet.
+    // is_supported() reports the device's extensions rather than a hardcoded answer, so it already tells the truth
+    // about the hardware; it is the build/dispatch stubs below that still have to land.
+    // Body in vulkan_command_list.cc, which has vulkan_context complete.
+    [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const>,
                                                                   sg::accel_build_flags) override
     {
