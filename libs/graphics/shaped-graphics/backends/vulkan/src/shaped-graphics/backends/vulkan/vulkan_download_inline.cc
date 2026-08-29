@@ -122,7 +122,8 @@ void vulkan_download_inline_system::shutdown()
     _ctx = nullptr;
 }
 
-vulkan_download_inline_system::reservation vulkan_download_inline_system::reserve(isize size_in_bytes)
+vulkan_download_inline_system::reservation vulkan_download_inline_system::reserve(isize size_in_bytes,
+                                                                                  isize alignment_in_bytes)
 {
     CC_ASSERT(_mapped != nullptr, "the inline readback ring is not initialized");
     CC_ASSERT(size_in_bytes > 0 && size_in_bytes <= _capacity, "an inline readback larger than the whole ring cannot "
@@ -135,7 +136,8 @@ vulkan_download_inline_system::reservation vulkan_download_inline_system::reserv
             {
                 reclaim(s, _last_completed);
 
-                u64 start = s.next_pos;
+                u64 const align = u64(alignment_in_bytes);
+                u64 start = (s.next_pos + align - 1) / align * align;
                 isize const offset = isize(start % u64(_capacity));
                 if (offset + size_in_bytes > _capacity)
                     start += u64(_capacity - offset);

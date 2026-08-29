@@ -76,8 +76,11 @@ public:
         std::shared_ptr<std::atomic<isize>> epoch_copies;
     };
 
-    /// Reserves contiguous ring space for the current epoch, blocking on an in-flight epoch when full.
-    [[nodiscard]] reservation reserve(isize size_in_bytes);
+    /// Reserves contiguous ring space for the current epoch at a multiple of `alignment_in_bytes`, blocking on an
+    /// in-flight epoch when full.
+    /// Image copies need the alignment; buffer copies do not.
+    /// See the upload ring's reserve for why.
+    [[nodiscard]] reservation reserve(isize size_in_bytes, isize alignment_in_bytes = 1);
 
     /// Counts one job against its epoch, paired one-to-one with a job actually enqueued or discarded.
     /// Called when the job is created rather than at reservation, so a reservation that produces no job counts nothing.

@@ -36,6 +36,13 @@ public:
     /// Declaring is separate from flushing so a buffer bound several times to one op produces a single merged barrier.
     void track_buffer_access(vulkan_buffer const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
 
+    /// The texture equivalent, scoped to one subresource range and carrying the layout the op needs it in.
+    void track_texture_access(vulkan_texture const& texture,
+                              sg::subresource_range range,
+                              sg::pipeline_stage_flags stages,
+                              sg::access_flags access,
+                              sg::texture_layout layout);
+
     /// Record one vkCmdPipelineBarrier2 for everything declared since the last flush, then clear the staging.
     /// Called once per op, immediately before recording it.
     void flush_barriers();
@@ -49,6 +56,8 @@ public:
     // Declared for the current op and awaiting the pre-op flush; empty between ops.
     cc::vector<vulkan_buffer const*> _pending_barrier_buffers;
     cc::vector<VkBufferMemoryBarrier2> _pending_buffer_barriers;
+    cc::vector<vulkan_texture const*> _pending_barrier_textures;
+    cc::vector<VkImageMemoryBarrier2> _pending_image_barriers;
 
     // Readbacks recorded by this list, still token-less: submit stamps them and hands them to the actor, drop cancels.
     cc::vector<vulkan_download_copy_job> _pending_downloads;
@@ -56,29 +65,26 @@ public:
     // Every buffer this list has tracked, so submit can finalize each slot and drop can discard it.
     // Public so the context can walk it at submit; deduplicated by vulkan_buffer::mark_recorded.
     cc::vector<vulkan_buffer const*> _touched_buffers;
+    cc::vector<vulkan_texture const*> _touched_textures;
 
 protected:
     // Stages the bytes in the context's upload ring and records a copy out of it.
     // Body in vulkan_command_list.cc.
     void upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) override;
-    void upload_bytes_to_texture(sg::raw_texture_handle,
-                                 cc::span<byte const>,
-                                 sg::subresource_index const&,
-                                 sg::texture_region const&) override
-    {
-        CC_UNREACHABLE("vulkan inline texture upload is not implemented yet");
-    }
+    // Body in vulkan_command_list.cc.
+    void upload_bytes_to_texture(sg::raw_texture_handle texture,
+                                 cc::span<byte const> pixels,
+                                 sg::subresource_index const& subresource,
+                                 sg::texture_region const& region) override;
     // Records a copy into the context's readback ring and returns a future the download actor settles.
     // Body in vulkan_command_list.cc.
     [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle buffer,
                                                               isize offset_in_bytes,
                                                               isize size_in_bytes) override;
-    [[nodiscard]] sg::bytes_future download_bytes_from_texture(sg::raw_texture_handle,
-                                                               sg::subresource_index const&,
-                                                               sg::texture_region const&) override
-    {
-        CC_UNREACHABLE("vulkan inline texture download is not implemented yet");
-    }
+    // Body in vulkan_command_list.cc.
+    [[nodiscard]] sg::bytes_future download_bytes_from_texture(sg::raw_texture_handle texture,
+                                                               sg::subresource_index const& subresource,
+                                                               sg::texture_region const& region) override;
     // Device-to-device buffer copy.
     // Body in vulkan_command_list.cc.
     void copy_buffer_region(sg::raw_buffer_handle src,

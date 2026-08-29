@@ -84,7 +84,7 @@ void vulkan_upload_inline_system::shutdown()
     _ctx = nullptr;
 }
 
-vulkan_upload_allocation vulkan_upload_inline_system::reserve(isize size_in_bytes)
+vulkan_upload_allocation vulkan_upload_inline_system::reserve(isize size_in_bytes, isize alignment_in_bytes)
 {
     CC_ASSERT(_mapped != nullptr, "the inline upload ring is not initialized");
     CC_ASSERT(size_in_bytes > 0 && size_in_bytes <= _capacity, "an inline upload larger than the whole ring cannot be "
@@ -98,7 +98,10 @@ vulkan_upload_allocation vulkan_upload_inline_system::reserve(isize size_in_byte
                 // A reservation never straddles the seam, so one that would wrap starts at the next multiple of
                 // the capacity instead and the tail is skipped.
                 // That keeps the copy a single contiguous region.
-                u64 start = s.next_pos;
+                // Align first, then check the seam: an aligned start that would wrap restarts at the top, which is
+                // itself aligned as long as the ring's capacity is.
+                u64 const align = u64(alignment_in_bytes);
+                u64 start = (s.next_pos + align - 1) / align * align;
                 isize const offset = isize(start % u64(_capacity));
                 if (offset + size_in_bytes > _capacity)
                     start += u64(_capacity - offset);

@@ -105,6 +105,15 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         buffer->finalize_slot(cmd->slot());
     cmd->_touched_buffers.clear();
 
+    // A texture finalize can return barriers — reverting to the canonical layout when other lists are still open —
+    // so they are recorded onto this list before it closes.
+    for (auto const* texture : cmd->_touched_textures)
+        for (auto const& sub : texture->finalize_slot(cmd->slot()))
+            cmd->_pending_image_barriers.push_back(make_image_barrier(texture->_image, sub.range, sub.barrier));
+    cmd->_touched_textures.clear();
+    submit_barriers(cmd->_buffer, {}, cmd->_pending_image_barriers);
+    cmd->_pending_image_barriers.clear();
+
     VkResult const end = vkEndCommandBuffer(cmd->_buffer);
     CC_ASSERT(end == VK_SUCCESS, "vkEndCommandBuffer failed");
 
@@ -175,6 +184,9 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     for (auto const* buffer : cmd._touched_buffers)
         buffer->discard_slot(cmd.slot());
     cmd._touched_buffers.clear();
+    for (auto const* texture : cmd._touched_textures)
+        texture->discard_slot(cmd.slot());
+    cmd._touched_textures.clear();
 
     // The recorded readbacks never run, so their futures are cancelled rather than left unsettled.
     // A future nobody ever settles parks its dependents for the life of the process.
@@ -208,15 +220,161 @@ void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
         _touched_buffers.push_back(&buffer);
 }
 
+void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
+                                               sg::subresource_range range,
+                                               sg::pipeline_stage_flags stages,
+                                               sg::access_flags access,
+                                               sg::texture_layout layout)
+{
+    if (texture._image == VK_NULL_HANDLE)
+        return;
+
+    texture.declare_access(_slot, range, stages, access, layout);
+
+    if (texture.mark_pending_barrier(_slot))
+        _pending_barrier_textures.push_back(&texture);
+
+    if (texture.mark_recorded(_slot))
+        _touched_textures.push_back(&texture);
+}
+
 void vulkan_command_list::flush_barriers()
 {
     for (auto const* buffer : _pending_barrier_buffers)
         if (auto const barrier = buffer->flush_access(_slot); barrier.needed)
             _pending_buffer_barriers.push_back(make_buffer_barrier(buffer->_buffer, barrier));
 
+    // A texture flush is per subresource box, so one texture may contribute several barriers.
+    for (auto const* texture : _pending_barrier_textures)
+        for (auto const& sub : texture->flush_access(_slot))
+            _pending_image_barriers.push_back(make_image_barrier(texture->_image, sub.range, sub.barrier));
+
     _pending_barrier_buffers.clear();
-    submit_barriers(_buffer, _pending_buffer_barriers, {});
+    _pending_barrier_textures.clear();
+    submit_barriers(_buffer, _pending_buffer_barriers, _pending_image_barriers);
     _pending_buffer_barriers.clear();
+    _pending_image_barriers.clear();
+}
+
+namespace
+{
+// The tightly-packed byte size of `region` in `format`, and the alignment its staging offset needs.
+// Vulkan takes tightly-packed image data when bufferRowLength / bufferImageHeight are 0, so unlike D3D12 there is no
+// row-pitch padding to compute — only the total, and the offset rule.
+struct texture_staging_layout
+{
+    isize size_in_bytes = 0;
+    isize alignment = 4;
+};
+
+[[nodiscard]] texture_staging_layout staging_layout_of(sg::pixel_format format, sg::texture_region const& region)
+{
+    int const block_extent = sg::format_block_extent(format);
+    int const block_size = sg::format_block_size(format);
+
+    // A block-compressed format stores whole blocks, so a partial block at an edge still costs a full one.
+    isize const blocks_x = (region.size[0] + block_extent - 1) / block_extent;
+    isize const blocks_y = (region.size[1] + block_extent - 1) / block_extent;
+
+    // bufferOffset must be a multiple of 4 and of the texel block size.
+    isize const alignment = block_size % 4 == 0 ? isize(block_size) : isize(block_size) * 4;
+    return {.size_in_bytes = blocks_x * blocks_y * isize(region.size[2]) * isize(block_size), .alignment = alignment};
+}
+
+// The image subresource one sg subresource_index addresses.
+[[nodiscard]] VkImageSubresourceLayers image_subresource_of(sg::subresource_index const& sub)
+{
+    return VkImageSubresourceLayers{
+        .aspectMask = vk_aspect_mask_from(sg::subresource_range(sub)),
+        .mipLevel = u32(sub.mip_level),
+        .baseArrayLayer = u32(sub.array_layer),
+        .layerCount = 1,
+    };
+}
+} // namespace
+
+void vulkan_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture,
+                                                  cc::span<byte const> pixels,
+                                                  sg::subresource_index const& subresource,
+                                                  sg::texture_region const& region)
+{
+    CC_ASSERT(texture != nullptr, "upload target texture is null");
+    auto const dst = std::dynamic_pointer_cast<vulkan_texture const>(texture);
+    CC_ASSERT(dst != nullptr, "texture is not a vulkan texture");
+    CC_ASSERT(!dst->is_expired(), "upload target is a transient texture used past its epoch (expired)");
+    CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "upload target texture must have "
+                                                             "texture_usage::copy_dst");
+
+    // The region arrives resolved: sg has defaulted it to the whole subresource, bounds-checked it, and skipped it
+    // when empty.
+    auto const layout = staging_layout_of(dst->description().format, region);
+    CC_ASSERT(pixels.size() == layout.size_in_bytes, "pixel data size does not match the copy region");
+
+    auto const staging = _ctx._upload_inline.reserve(layout.size_in_bytes, layout.alignment);
+    cc::memcpy(staging.mapped, pixels.data(), size_t(layout.size_in_bytes));
+
+    track_texture_access(*dst, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                         sg::access_flag::copy_write, sg::texture_layout::copy_dst);
+    flush_barriers();
+
+    auto const copy = VkBufferImageCopy{
+        .bufferOffset = VkDeviceSize(staging.offset),
+        // Zero means tightly packed to imageExtent, which is exactly what sg hands us.
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = image_subresource_of(subresource),
+        .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
+        .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
+    };
+    vkCmdCopyBufferToImage(_buffer, staging.buffer, dst->_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+}
+
+sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_texture_handle texture,
+                                                                  sg::subresource_index const& subresource,
+                                                                  sg::texture_region const& region)
+{
+    CC_ASSERT(texture != nullptr, "download source texture is null");
+    auto const src = std::dynamic_pointer_cast<vulkan_texture const>(texture);
+    CC_ASSERT(src != nullptr, "texture is not a vulkan texture");
+    CC_ASSERT(!src->is_expired(), "download source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(src->usage().has(sg::texture_usage::copy_src), "download source texture must have "
+                                                             "texture_usage::copy_src");
+
+    auto const layout = staging_layout_of(src->description().format, region);
+    auto dst = cc::pinned_data<byte>::create_uninitialized(layout.size_in_bytes);
+    auto const dst_span = dst.span();
+    auto completion = cc::make_async_manual<cc::unit>();
+    auto gate = std::make_shared<sg::bytes_wait_gate>();
+
+    auto const staging = _ctx._download_inline.reserve(layout.size_in_bytes, layout.alignment);
+
+    track_texture_access(*src, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                         sg::access_flag::copy_read, sg::texture_layout::copy_src);
+    flush_barriers();
+
+    auto const copy = VkBufferImageCopy{
+        .bufferOffset = VkDeviceSize(staging.offset),
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = image_subresource_of(subresource),
+        .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
+        .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
+    };
+    vkCmdCopyImageToBuffer(_buffer, src->_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging.buffer, 1, &copy);
+
+    _ctx._download_inline.account_pending_copy(staging.epoch_copies);
+
+    vulkan_download_copy_job job;
+    auto const size = layout.size_in_bytes;
+    job.deferred_cpu_copy
+        = [source = staging.mapped, dst_span, size] { cc::memcpy(dst_span.data(), source, size_t(size)); };
+    job.pin = std::weak_ptr<void const>(dst.pin());
+    job.completion = completion;
+    job.gate = gate;
+    job.epoch_copies = staging.epoch_copies;
+    _pending_downloads.push_back(cc::move(job));
+
+    return sg::bytes_future(cc::pinned_data<byte const>(cc::move(dst)), cc::move(completion), cc::move(gate));
 }
 
 void vulkan_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,

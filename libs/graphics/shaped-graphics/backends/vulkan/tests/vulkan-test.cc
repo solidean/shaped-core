@@ -337,3 +337,77 @@ TEST("sg vulkan - staging survives more uploads than the ring holds at once")
     c.advance_epoch_and_wait_for_idle();
     CHECK(!c.is_device_lost());
 }
+
+TEST("sg vulkan - a texture round-trips through the staging rings")
+{
+    auto handle = make_context(); // installs the fail-on-validation listener
+    if (handle == nullptr)
+        return; // no Vulkan device.
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& base = static_cast<sg::context&>(c);
+
+    // 8x8 rgba8: 256 tightly-packed bytes, and small enough to compare byte for byte.
+    auto texture = base.persistent.create_texture_2d({
+        .width = 8,
+        .height = 8,
+        .format = sg::pixel_format::rgba8_unorm,
+        .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst,
+    });
+    REQUIRE(texture.raw() != nullptr);
+
+    byte pixels[256];
+    for (int i = 0; i < 256; ++i)
+        pixels[i] = byte(i);
+
+    auto cmd = base.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(texture.raw(), cc::span<byte const>(pixels, 256), sg::subresource_index{});
+
+    // Same list: the download must be ordered after the upload by a layout transition from copy_dst to copy_src,
+    // which is the texture tracker and the barrier translator working together.
+    auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
+    base.submit_command_list(cc::move(cmd));
+
+    auto const read = base.wait_for(future);
+    REQUIRE(read.has_value());
+    REQUIRE(read.value().size() == 256);
+
+    bool matched = true;
+    for (int i = 0; i < 256; ++i)
+        if (read.value()[i] != byte(i))
+            matched = false;
+    CHECK(matched);
+}
+
+TEST("sg vulkan - a block-compressed texture stages at its block size")
+{
+    // BC formats store whole 4x4 blocks, so an 8x8 BC1 subresource is 4 blocks of 8 bytes rather than 8x8 texels.
+    // Getting the staging size or its offset alignment wrong here is a validation error rather than a wrong image,
+    // which is what makes this worth pinning separately.
+    auto handle = make_context();
+    if (handle == nullptr)
+        return;
+    auto& base = static_cast<sg::context&>(*handle);
+
+    auto texture = base.persistent.create_texture_2d({
+        .width = 8,
+        .height = 8,
+        .format = sg::pixel_format::bc1_rgba_unorm,
+        .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst,
+    });
+    REQUIRE(texture.raw() != nullptr);
+
+    byte blocks[32]; // (8/4) * (8/4) blocks * 8 bytes
+    for (int i = 0; i < 32; ++i)
+        blocks[i] = byte(i * 3);
+
+    auto cmd = base.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(texture.raw(), cc::span<byte const>(blocks, 32), sg::subresource_index{});
+    auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
+    base.submit_command_list(cc::move(cmd));
+
+    auto const read = base.wait_for(future);
+    REQUIRE(read.has_value());
+    CHECK(read.value().size() == 32);
+}

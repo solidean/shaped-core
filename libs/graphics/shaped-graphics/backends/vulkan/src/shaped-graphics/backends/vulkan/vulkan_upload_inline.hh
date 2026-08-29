@@ -35,12 +35,16 @@ public:
     /// Safe to call twice, and on an uninitialized system.
     void shutdown();
 
-    /// Reserves `size_in_bytes` of contiguous ring space for the current epoch.
+    /// Reserves `size_in_bytes` of contiguous ring space for the current epoch, at an offset that is a multiple of
+    /// `alignment_in_bytes`.
+    ///
+    /// A buffer copy needs no alignment, but an image copy does: Vulkan requires bufferOffset to be a multiple of 4
+    /// and of the texel block size, so a texture upload passes that constraint in rather than hoping for it.
     ///
     /// Blocks on an in-flight epoch when the ring is full, which is the back-pressure that bounds it.
     /// Asserts when nothing is in flight and the request still does not fit: that means one epoch's inline uploads
     /// exceed the whole ring, which is a budget error rather than something waiting can fix.
-    [[nodiscard]] vulkan_upload_allocation reserve(isize size_in_bytes);
+    [[nodiscard]] vulkan_upload_allocation reserve(isize size_in_bytes, isize alignment_in_bytes = 1);
 
     /// Records where the closing epoch ended, so its span can be freed when it retires.
     void on_epoch_advance(sg::epoch closed);

@@ -22,8 +22,10 @@
 /// The two flags are independent.
 struct sg::backend::vulkan::vulkan_config
 {
-    /// Enable the Khronos validation layer plus a debug messenger that routes messages to stderr.
+    /// Enable the Khronos validation layer plus a debug messenger for its messages.
+    /// Messages reach set_message_callback when one is installed, and the recording log otherwise — not stderr directly.
     /// Best-effort — skipped if the layer / VK_EXT_debug_utils isn't installed.
+    /// The analogue of dx12_config::enable_debug_layer, and off by default for the same reason: it costs real time.
     bool enable_validation_layers = false;
 
     /// Prefer a software (CPU) physical device, e.g. lavapipe.
