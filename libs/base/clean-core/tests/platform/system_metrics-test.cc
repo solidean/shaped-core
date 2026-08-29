@@ -1,3 +1,4 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/platform/system_info.hh>
 #include <clean-core/platform/system_metrics.hh>
 #include <clean-core/thread/thread.hh>
@@ -8,6 +9,22 @@ using namespace cc::primitive_defines;
 // A load is whatever this machine happens to be doing, so nothing here asserts a number.
 // What it pins is that a ratio is a ratio, that the counters really are monotone, and that the first sample is honest
 // about covering the sampler's lifetime rather than reporting a value it cannot have.
+
+namespace
+{
+/// Real elapsed wall time, in a build where sleeping does not exist.
+///
+/// `cc::this_thread_sleep_secs` is a documented no-op without CC_HAS_THREADS — nothing else is runnable, so a sleep
+/// could only waste the wait.
+/// A test asserting one interval is longer than another then compares two sub-microsecond gaps and is a coin flip, so
+/// the elapsed time a sampler is meant to measure has to be spent rather than slept.
+void spend_secs(f64 secs)
+{
+    auto const until = cc::current_time_steady_secs() + secs;
+    while (cc::current_time_steady_secs() < until)
+        cc::this_thread_yield();
+}
+} // namespace
 
 TEST("cc system_metrics - cpu counters are monotone across two readings")
 {
@@ -49,7 +66,7 @@ TEST("cc system_metrics - a sampled load is a ratio, and says what it covers")
     }
 
     auto sampler = cc::cpu_load_sampler();
-    cc::this_thread_sleep_secs(0.02);
+    spend_secs(0.02);
 
     auto load = sampler.sample();
     REQUIRE(load.has_value());
@@ -110,10 +127,10 @@ TEST("cc system_metrics - two samplers do not interfere")
     // The reason the baseline lives in the object: two subsystems sampling at different cadences must each get their
     // own interval, which a hidden process-wide previous reading could not give them.
     auto slow = cc::cpu_load_sampler();
-    cc::this_thread_sleep_secs(0.02);
+    spend_secs(0.02);
 
     auto fast = cc::cpu_load_sampler();
-    cc::this_thread_sleep_secs(0.02);
+    spend_secs(0.02);
 
     auto const slow_load = slow.sample();
     auto const fast_load = fast.sample();

@@ -33,6 +33,27 @@ TEST("cc storage_devices - a mount describes one coherent filesystem")
     }
 }
 
+TEST("cc storage_devices - one entry per device, never one per mount")
+{
+    auto mounts = cc::query_mounts();
+    if (mounts.has_error())
+        return;
+
+    // One filesystem is reachable at many paths, and each answers identically.
+    // Without this the same disk arrives thirteen times on an ordinary Linux box, and anything summing the list is off
+    // by that factor — the storage twin of the filter pseudo-interfaces enumerate_network_interfaces excludes.
+    //
+    // The device itself is not reachable through this API, so what is pinned is the half that is: a path appears once.
+    // That is what catches an automounter's entry and the filesystem behind it, which is the duplicate that survives
+    // every other filter because both spell the same path and answer identically.
+    // Two paths on one device are caught by the implementation rather than here, and deliberately: a test cannot tell
+    // them from two devices that happen to be the same size, which a machine with two 1 MiB tmpfs mounts really has.
+    auto const& all = mounts.value();
+    for (isize i = 0; i < all.size(); ++i)
+        for (isize j = i + 1; j < all.size(); ++j)
+            CHECK(all[i].path != all[j].path);
+}
+
 TEST("cc storage_devices - every enumerated disk has an id to key a sampler on")
 {
     // Counted rather than checked per device, so the test asserts the property itself and still says something on a

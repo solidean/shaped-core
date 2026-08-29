@@ -211,7 +211,7 @@ It is the format tooling reads instead of scraping the console — the three plo
 ```json
 {
   "suite": "nexus-test",
-  "system": {"os": "windows", "arch": "x64", "cpu": "unknown", "logical_cores": 20,
+  "system": {"os": "windows", "arch": "x64", "cpu": "AMD Ryzen 9 7950X3D 16-Core Processor", "logical_cores": 32,
              "build": "release", "assertions_enabled": false, "is_provisional": false},
   "calibration": {"seconds_per_tick": 3.4e-10, "empty_iteration_secs": 1.1e-10,
                   "clock_pair_secs": 1.3e-08, "has_cheap_counter": true},

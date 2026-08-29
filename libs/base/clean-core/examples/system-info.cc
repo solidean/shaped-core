@@ -33,6 +33,20 @@ cc::string bytes_as_text(i64 value)
     return unit == 0 ? cc::format("{} B", value) : cc::format("{:.1f} {}", scaled, k_units[unit]);
 }
 
+/// Whether this filesystem is one the kernel keeps for itself rather than one anybody stores anything in.
+///
+/// A NAME LIST, which cc itself refuses to carry — a list goes stale, and cc cannot know what a given caller considers
+/// worth drawing.
+/// A caller can, and this is what that decision looks like: an ordinary Linux box mounts a dozen of these, and a
+/// dashboard listing them all buries the two disks somebody actually wants to see.
+bool is_scratch_filesystem(cc::string_view fs)
+{
+    for (auto const known : {"tmpfs", "devtmpfs", "efivarfs", "autofs", "overlay", "squashfs", "ramfs"})
+        if (fs == cc::string_view(known))
+            return true;
+    return false;
+}
+
 void print_text(cc::string_view label, cc::string_view value)
 {
     if (value.empty())
@@ -120,7 +134,7 @@ EXAMPLE("clean-core/system-info")
     if (limits.cpu_quota.has_value())
         cc::println("  {:<16} {:.2f} CPUs", "cpu quota", limits.cpu_quota.value());
     else
-        cc::println("  {:<16} (none)", "cpu quota");
+        cc::println("  {:<16} (unavailable)", "cpu quota");
     print_bytes("memory limit", limits.memory_limit_bytes);
     cc::println("  {:<16} {}", "affinity", limits.affinity_cores);
     cc::println("  {:<16} {}", "containerized", limits.containerized ? "yes" : "no");
@@ -171,11 +185,29 @@ EXAMPLE("clean-core/system-info")
     cc::println("storage");
     auto const mounts = cc::query_mounts();
     if (mounts.has_value())
+    {
+        auto hidden = 0;
         for (auto const& m : mounts.value())
+        {
+            // cc hands back every distinct filesystem, deliberately: which of them are worth drawing is a question only
+            // the caller can answer, and this example is the caller.
+            // A dashboard wants the disks a person could fill, so the kernel's own scratch filesystems are counted
+            // rather than listed — they are real, and they are not what anyone opened this to see.
+            if (is_scratch_filesystem(m.filesystem))
+            {
+                ++hidden;
+                continue;
+            }
+
             cc::println("  {:<16} {} free of {} ({}{})", m.path, bytes_as_text(m.available_bytes),
                         bytes_as_text(m.total_bytes),
                         m.filesystem.empty() ? cc::string_view("?") : cc::string_view(m.filesystem),
                         m.removable ? ", removable" : "");
+        }
+
+        if (hidden > 0)
+            cc::println("  {:<16} {} kernel scratch filesystems not shown", "(other)", hidden);
+    }
     else
         cc::println("  {:<16} (unavailable: {})", "mounts", mounts.error().detail);
 

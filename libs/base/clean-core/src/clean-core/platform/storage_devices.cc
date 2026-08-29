@@ -15,9 +15,11 @@
 
 #include <sys/mount.h>
 #include <sys/param.h>
+#include <sys/stat.h> // stat, for the st_dev a mount is deduplicated on
 
 #elif defined(CC_OS_LINUX) || defined(CC_OS_ANDROID)
 
+#include <sys/stat.h> // stat, for the st_dev a mount is deduplicated on
 #include <sys/statvfs.h>
 
 #endif
@@ -42,6 +44,24 @@ f64 per_second(i64 before, i64 after, f64 interval)
         return 0;
     return f64(after - before) / interval;
 }
+
+#if !defined(CC_OS_WINDOWS)
+/// Whether this device has already been seen, recording it when it has not.
+///
+/// One filesystem is reachable at many paths — a bind mount, a container's overlay, a systemd per-service mount, an
+/// automounter's entry and the filesystem behind it — and each answers statvfs identically.
+/// So a caller summing free space over the list counts one device once per path, which on an ordinary Linux box is a
+/// couple of dozen terabytes that do not exist.
+bool claim_device(cc::vector<u64>& seen, u64 device)
+{
+    for (auto const id : seen)
+        if (id == device)
+            return false;
+
+    seen.push_back(device);
+    return true;
+}
+#endif
 } // namespace
 } // namespace cc
 
@@ -71,6 +91,7 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
         return cc::error(storage_failed("GetLogicalDriveStrings"));
 
     auto out = cc::vector<cc::mount_point>();
+    auto seen = cc::vector<cc::string>();
 
     // The result is a run of NUL-terminated roots ending in a double NUL.
     for (auto const* root = buffer; *root != 0;)
@@ -81,6 +102,22 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
         auto const type = ::GetDriveTypeA(root_view.data());
         if (type == DRIVE_NO_ROOT_DIR || type == DRIVE_CDROM)
             continue;
+
+        // One entry per device: two drive letters can name one volume, which SUBST and a mounted folder both do.
+        char volume[64] = {};
+        if (::GetVolumeNameForVolumeMountPointA(root_view.data(), volume, sizeof(volume)))
+        {
+            auto const name = cc::string_view(volume);
+            auto already = false;
+            for (auto const& id : seen)
+                if (cc::string_view(id) == name)
+                    already = true;
+
+            if (already)
+                continue;
+
+            seen.push_back(cc::string(name));
+        }
 
         ULARGE_INTEGER available = {};
         ULARGE_INTEGER total = {};
@@ -189,10 +226,16 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
         return cc::error(storage_failed("getmntinfo"));
 
     auto out = cc::vector<cc::mount_point>();
+    auto seen = cc::vector<u64>();
     for (auto i = 0; i < count; ++i)
     {
         auto const& m = mounts[i];
         if (m.f_blocks == 0)
+            continue;
+
+        // One entry per device — a firmlink puts one volume under two paths, the way a bind mount does on Linux.
+        struct stat info = {};
+        if (::stat(m.f_mntonname, &info) != 0 || !cc::claim_device(seen, u64(info.st_dev)))
             continue;
 
         auto const block = i64(m.f_bsize);
@@ -243,6 +286,7 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
         return cc::error(storage_failed("/proc/self/mounts"));
 
     auto out = cc::vector<cc::mount_point>();
+    auto seen = cc::vector<u64>();
 
     auto rest = cc::string_view(text.value());
     auto line = cc::string_view();
@@ -271,8 +315,16 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
         if (::statvfs(mount.c_str_materialize(), &stats) != 0)
             continue;
 
-        // A pseudo filesystem reports no blocks, which is a better filter than a name list that would go stale.
+        // A filesystem reporting no blocks holds nothing a dashboard can draw, which catches proc, sysfs and cgroup
+        // without a name list that would go stale.
+        // It does NOT catch tmpfs, devtmpfs, efivarfs or overlay, which are pseudo filesystems with real block counts —
+        // those are kept, because a full /tmp is a real problem.
         if (stats.f_blocks == 0)
+            continue;
+
+        // One entry per device: everything below this line is a path the caller has already been given.
+        struct stat info = {};
+        if (::stat(mount.c_str_materialize(), &info) != 0 || !cc::claim_device(seen, u64(info.st_dev)))
             continue;
 
         auto const block = i64(stats.f_frsize != 0 ? stats.f_frsize : stats.f_bsize);

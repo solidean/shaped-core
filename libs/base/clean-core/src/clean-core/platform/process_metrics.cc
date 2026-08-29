@@ -247,7 +247,10 @@ cc::result<cc::process_usage, cc::query_error> read_usage()
 
     // VmHWM is the kernel's own high-water mark, which is exactly the peak no sampling could reconstruct.
     out.peak_resident_bytes = status_kib(text.value(), "VmHWM").value_or(out.resident_bytes);
-    out.private_bytes = status_kib(text.value(), "VmData").value_or(0);
+    // RssAnon is the anonymous memory this process actually holds, and VmSwap the part of it pushed out to swap.
+    // NOT VmData, which is private address space whether or not a page was ever touched — mimalloc's arena reservation
+    // alone puts about a gigabyte in it, which is the reserved-and-untouched figure this field promises not to be.
+    out.private_bytes = status_kib(text.value(), "RssAnon").value_or(0) + status_kib(text.value(), "VmSwap").value_or(0);
 
     if (auto const threads = cc::impl::field_from(text.value(), "Threads", ':'); threads.has_value())
         if (auto const value = cc::from_string<i64>(cc::string_view(threads.value())); value.has_value())
@@ -277,9 +280,11 @@ cc::result<cc::process_cpu_counters, cc::query_error> read_cpu()
     auto const clock = ::sysconf(_SC_CLK_TCK);
     auto const per_tick = clock > 0 ? 1.0 / f64(clock) : 1.0 / 100.0;
 
-    // After the name and state, utime is field 14 and stime is 15 — the 11th and 12th of what is left here.
+    // The closing parenthesis ends field 2, so `rest` starts at field 3 — the run state — and index n here is
+    // documented field n + 2.
+    // minflt is field 10, utime is 14 and stime is 15.
     auto out = cc::process_cpu_counters();
-    for (auto index = 1; index <= 12 && !rest.empty(); ++index)
+    for (auto index = 1; index <= 13 && !rest.empty(); ++index)
     {
         auto const next = rest.find(' ');
         auto const token = next < 0 ? rest : rest.subview_clamped(0, next);
@@ -290,10 +295,10 @@ cc::result<cc::process_cpu_counters, cc::query_error> read_cpu()
             continue;
 
         if (index == 8)
-            out.page_faults = value.value(); // majflt
-        else if (index == 11)
-            out.user_secs = f64(value.value()) * per_tick;
+            out.page_faults = value.value(); // minflt, which is the count Windows' PageFaultCount is closest to
         else if (index == 12)
+            out.user_secs = f64(value.value()) * per_tick;
+        else if (index == 13)
             out.kernel_secs = f64(value.value()) * per_tick;
     }
 

@@ -506,7 +506,7 @@ f64 cc::rec::cycles_per_second()
 
 cc::rec::listener_handle cc::rec::register_listener(cc::rec::listener& l)
 {
-    auto const handle = g_processing.lock(
+    return g_processing.lock(
         [&](processing& p)
         {
             // A cleared slot is reused rather than appended past.
@@ -531,8 +531,6 @@ cc::rec::listener_handle cc::rec::register_listener(cc::rec::listener& l)
 
             return h;
         });
-
-    return handle;
 }
 
 bool cc::rec::is_listener_registered(cc::rec::listener_handle h)

@@ -77,6 +77,8 @@ struct cc::process_cpu_counters
     cc::optional<i64> bytes_read;
     cc::optional<i64> bytes_written;
 
+    /// Minor page faults — a page satisfied without going to disk, which is almost all of them.
+    /// Windows has no split and reports every fault, so this is the closest the three platforms agree.
     cc::optional<i64> page_faults;
 };
 

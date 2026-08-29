@@ -9,7 +9,8 @@ namespace
 {
 // Read-only after construction, so the sharing across threads is not a race.
 // A function-local static rather than a namespace one: the allocation happens at the first call rather than at static
-// init, and a binary that never evicts never pays the 64 MB.
+// init, so a binary that never evicts never pays default_evict_bytes() — 64 MiB at the floor, and several times that on
+// a machine with a large last-level cache.
 cc::vector<u64> const& evict_buffer()
 {
     static cc::vector<u64> const buffer

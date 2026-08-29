@@ -37,6 +37,12 @@ Windows enables VBS; `ullTotalPageFile` is a commit limit rather than a page fil
 read 100% on an idle machine; NDIS stacks a filter pseudo-interface per adapter, so one NIC appeared four times and a
 sum over interfaces quadrupled the machine's traffic.
 
+Two more came from running the Linux branches for the first time, and both are the same shape.
+`VmData` reported as a process's private memory is address space it reserved and never touched, so a 15 MiB process
+claimed 1.1 GiB — the allocator's arena, measured instead of the program.
+And `/proc/self/mounts` lists one filesystem once per path it is reachable at, so summing free space over the mounts of
+an ordinary machine produced 23 TiB on a 2 TB disk.
+
 **A load of 1 is the whole machine.**
 Never one core.
 A process using two cores of thirty-two reports `0.0625`, not `2.0`; `cores_used` carries the other reading beside it so

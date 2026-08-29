@@ -1,3 +1,4 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/process_metrics.hh>
 #include <clean-core/platform/system_info.hh>
@@ -81,6 +82,42 @@ TEST("cc process_metrics - cpu counters are monotone and bounded by wall time")
 
     if (first.value().bytes_read.has_value() && second.value().bytes_read.has_value())
         CHECK(second.value().bytes_read.value() >= first.value().bytes_read.value());
+}
+
+TEST("cc process_metrics - burning CPU moves the counters")
+{
+    auto first = cc::read_process_cpu_counters();
+    if (first.has_error())
+    {
+        CHECK(!cc::process_cpu_sampler::is_supported());
+        return;
+    }
+
+    // Monotonicity alone is satisfied by the WRONG monotone counter, which is how a field read one position early
+    // survived every check: the counter it landed on never went backwards, and never moved either.
+    // Burning userspace work must move USER time specifically, and that is what tells the two apart — a total would
+    // still climb if only the kernel half were being read.
+    //
+    // Stops as soon as the counter moves, so it costs a few tens of milliseconds rather than the deadline.
+    auto acc = u64(0);
+    auto const deadline = cc::current_time_steady_secs() + 2.0;
+    auto second = cc::read_process_cpu_counters();
+
+    while (cc::current_time_steady_secs() < deadline)
+    {
+        for (auto i = 0; i < 65536; ++i)
+            acc = acc * 6364136223846793005ull + 1442695040888963407ull;
+
+        second = cc::read_process_cpu_counters();
+        if (second.has_value() && second.value().user_secs > first.value().user_secs)
+            break;
+    }
+
+    CHECK(acc != 0);
+    REQUIRE(second.has_value());
+
+    CHECK(second.value().user_secs > first.value().user_secs);
+    CHECK(second.value().total_secs() > first.value().total_secs());
 }
 
 TEST("cc process_metrics - a sampled load is cores, not a percentage")

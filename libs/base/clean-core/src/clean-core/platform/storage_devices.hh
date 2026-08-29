@@ -109,10 +109,18 @@ private:
 
 namespace cc
 {
-/// Every mounted filesystem that reports a size.
+/// Every distinct filesystem that reports a size, at the first path it is mounted on.
 ///
-/// Pseudo filesystems — proc, sysfs, cgroup and the rest — are excluded by that rule rather than by a name list, since
-/// a list would go stale and a zero-sized mount is nothing a dashboard can draw.
+/// A filesystem reporting no blocks is left out — proc, sysfs and cgroup go that way, without a name list that would go
+/// stale, since a zero-sized mount is nothing a dashboard can draw.
+/// tmpfs, devtmpfs, efivarfs and overlay are pseudo filesystems that DO report blocks, and they are kept: a full /tmp is
+/// a real problem.
+///
+/// **One entry per device, never one per mount**, and that is the difference between a free-space figure and nonsense.
+/// A bind mount, a container's overlay, a systemd per-service mount and an automounter's entry all put one filesystem
+/// under another path, and each answers identically — so a caller summing this list counted one 2 TB disk thirteen
+/// times before it was deduplicated.
+/// The same rule as cc::enumerate_network_interfaces excluding filter pseudo-interfaces, and for the same arithmetic.
 [[nodiscard]] cc::result<cc::vector<cc::mount_point>, cc::query_error> query_mounts();
 
 /// The physical storage devices, or empty where the platform will not enumerate them.

@@ -82,8 +82,8 @@ Deep dives on the internal machinery, including holes and gotchas not obvious fr
   The short version: under a few hundred bytes nothing compresses without a dictionary, and zstd 19 costs 180x zstd 3's time for 24% better ratio.
   Deflate is the interoperability codec and loses to zstd on ratio and both speeds at once, so it is what a zip, a gzip or a PNG stream forces rather than a choice.
 - [systems/recording](systems/recording.md) — `cc::rec`, one per-thread event stream under logging, profiling, values, stats and tracing.
-- [systems/system-info](systems/system-info.md) — what machine this is and how loaded it is: the description / snapshot / sampler split, and the rule that a value is never synthesized.
   What a site costs, the chunk pool and its refcount-as-capture model, why the state preamble is written by the consumer, and the layer rule that lets a listener log without feeding itself.
+- [systems/system-info](systems/system-info.md) — what machine this is and how loaded it is: the description / snapshot / sampler split, and the rule that a value is never synthesized.
 - [systems/recording-formats](systems/recording-formats.md) — getting a recording out of the process it made it: the self-describing file format, and the crash dump that writes it without allocating.
   One format and two writers, what travels and what cannot, and why an event's descriptor pointer becomes an index.
 - [systems/async](systems/async.md) — `cc::async<T, E>`, the value/dataflow async.

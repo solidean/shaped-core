@@ -1732,7 +1732,8 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             continue;
         }
 
-        // own_pool names its own width; everything else is capped by the run's --jobs, where 0 means the machine's hardware concurrency.
+        // own_pool names its own width; everything else is capped by the run's --jobs, where 0 means cc::recommended_worker_count() —
+        // the machine narrowed by the affinity mask and the cgroup quota, which inside a container is far below its core count.
         // Resolved here rather than at argument parsing, so a hand-built config means the same thing as a command line.
         auto const jobs = phase.mode == nx::config::scheduler_mode::own_pool ? phase.threads
                         : config.jobs <= 0                                   ? cc::recommended_worker_count()

@@ -707,6 +707,20 @@ void fill_platform(cc::system_info& info)
         info.timezone_at_start = cc::string(cc::string_view(tz));
     else if (auto const zone = cc::impl::read_text_file("/etc/timezone"); zone.has_value())
         info.timezone_at_start = cc::string(cc::impl::trimmed(zone.value()));
+    else
+    {
+        // /etc/timezone is a Debian file, and most of the world is systemd: there the zone name exists only as what
+        // /etc/localtime points at, as ".../zoneinfo/Europe/Berlin".
+        char link[512] = {};
+        auto const length = ::readlink("/etc/localtime", link, sizeof(link) - 1);
+        if (length > 0)
+        {
+            auto const target = cc::string_view(link, isize(length));
+            constexpr auto k_marker = cc::string_view("zoneinfo/");
+            if (auto const at = target.find(k_marker); at >= 0)
+                info.timezone_at_start = cc::string(target.subview(at + k_marker.size()));
+        }
+    }
 
     for (auto const* name : {"LC_ALL", "LC_CTYPE", "LANG"})
         if (auto const* value = std::getenv(name); value != nullptr && value[0] != '\0')
