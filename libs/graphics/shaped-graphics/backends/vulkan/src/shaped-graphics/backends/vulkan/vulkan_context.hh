@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_compute_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
@@ -117,6 +118,13 @@ public:
         return _descriptor_buffer_properties;
     }
 
+    /// The device's core properties, read once at creation.
+    /// The pipeline path needs the vendor, device and cache UUID to tell whether a serialized cache blob is one this
+    /// device will actually use.
+    [[nodiscard]] VkPhysicalDeviceProperties const& device_properties() const { return _device_properties; }
+
+    void set_device_properties(VkPhysicalDeviceProperties const& props) { _device_properties = props; }
+
     void set_descriptor_buffer_properties(VkPhysicalDeviceDescriptorBufferPropertiesEXT const& props)
     {
         _descriptor_buffer_properties = props;
@@ -220,10 +228,15 @@ public:
         CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipeline layouts are persistent-only");
         return cc::result<sg::pipeline_layout_handle>(create_vulkan_pipeline_layout(desc));
     }
-    [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(sg::compute_pipeline_description const&,
-                                                                                      sg::lifetime_scope) override
+    [[nodiscard]] cc::result<vulkan_compute_pipeline_handle> create_vulkan_compute_pipeline(
+        sg::compute_pipeline_description const& desc);
+
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
+        sg::compute_pipeline_description const& desc,
+        sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan compute_pipeline creation is not implemented yet");
+        CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipelines are persistent-only");
+        return cc::result<sg::compute_pipeline_handle>(create_vulkan_compute_pipeline(desc));
     }
     [[nodiscard]] cc::result<sg::raster_pipeline_handle> try_create_raster_pipeline(sg::raster_pipeline_description const&,
                                                                                     sg::lifetime_scope) override
@@ -439,6 +452,9 @@ public:
 
     // See descriptor_buffer_properties.
     VkPhysicalDeviceDescriptorBufferPropertiesEXT _descriptor_buffer_properties = {};
+
+    // See device_properties.
+    VkPhysicalDeviceProperties _device_properties = {};
 
     // Where validation messages go; empty means the log.
     // See set_message_callback.

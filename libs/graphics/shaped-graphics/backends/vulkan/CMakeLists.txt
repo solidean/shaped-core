@@ -11,8 +11,10 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
+    src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc
     src/shaped-graphics/backends/vulkan/vulkan_barrier.cc
     src/shaped-graphics/backends/vulkan/vulkan_binding_group.cc
+    src/shaped-graphics/backends/vulkan/vulkan_compute_pipeline.cc
     src/shaped-graphics/backends/vulkan/vulkan_staging_binding_group.cc
     src/shaped-graphics/backends/vulkan/vulkan_binding_group_layout.cc
     src/shaped-graphics/backends/vulkan/vulkan_pipeline_layout.cc
@@ -80,6 +82,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/vulkan-barrier-test.cc
         tests/vulkan-buffer-access-test.cc
+        tests/vulkan-compute-test.cc
         tests/vulkan-texture-access-test.cc
         tests/vulkan-test.cc
     )

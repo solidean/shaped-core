@@ -54,7 +54,7 @@ src/shaped-graphics/
     binding.hh/.cc                [done]        backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
     sampler.hh                    [done]        sampler value type + filter/address/border/compare vocabulary; both backends real
     binding_group_layout.hh/.cc   [done]        abstract: one group's schema; dx12 = descriptor-table schema, vulkan = VkDescriptorSetLayout
-    pipeline_layout.hh/.cc        [in progress] abstract: ordered group layouts (bind slots); dx12 = root signature (vulkan stub)
+    pipeline_layout.hh/.cc        [done]        abstract: ordered group layouts (bind slots); dx12 = root signature, vulkan = VkPipelineLayout
     binding_group.hh/.cc          [done]        abstract: group-layout instance bound to raw_views (named_view); a descriptor-heap range in both backends
     staging_binding_group.hh/.cc  [done]        abstract: mutable descriptor image that mints immutable groups (binding_slot -> slot table, shape-named setters, snapshot);
                                                 dx12 = private non-shader-visible heap + CopyDescriptorsSimple, vulkan = a host descriptor image + one memcpy
@@ -66,13 +66,13 @@ src/shaped-graphics/
     upload.hh/.cc                 [done]        cmd.upload: inline host→device buffer + texture writes (both backends real)
     download.hh/.cc               [done]        cmd.download: inline readback of buffers + textures -> bytes_future (both backends real)
     copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (both backends real); texture copies pending
-    compute.hh/.cc                [in progress] cmd.compute: bind_pipeline / bind_group / dispatch (dx12 real; vulkan stub)
+    compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [in progress] cmd.raster: rendering scope, bindings, viewport/scissor state, draws (dx12 real; vulkan stub)
     raytracing.hh/.cc             [in progress] cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12 real; vulkan stub)
     query.hh/.cc                  [in progress] cmd.query: record_gpu_timestamp / is_supported (dx12 real; vulkan stub)
 
   compute/
-    compute_pipeline.hh/.cc       [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)
+    compute_pipeline.hh/.cc       [done]        abstract: compute shader + pipeline layout; dx12 = PSO, vulkan = VkPipeline + VkPipelineCache
 
   context/
     context.hh/.cc                [in progress] abstract; infallible create_command_list over pure-virtual try_create_*; sticky device-loss status; every create funneled through a scope

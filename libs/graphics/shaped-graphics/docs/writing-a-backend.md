@@ -154,9 +154,14 @@ Recorded as each is met, because this is what the next backend most wants to kno
   **Expect the reference backend's own tests to encode its namespacing**, and read a shared test's layout before
   assuming your backend is what is wrong.
 
-- **`used_cached_pipeline()` cannot be answered exactly on every API.**
-  dx12 reports it precisely because D3D12 never silently ignores a cached PSO, and `VkPipelineCache` does.
-  This is an sg-surface question rather than a backend detail, so raise it rather than approximating.
+- **`used_cached_pipeline()` looked like an sg-surface gap and was not.**
+  dx12 answers it precisely because D3D12 fails PSO creation on a blob it cannot use, while Vulkan silently starts
+  from an empty cache — so "did creation succeed" carries no information there.
+  The exact answer comes from somewhere else: a pipeline-cache blob's header is a *specified* structure, carrying the
+  version, vendor, device and cache UUID a driver checks, so the backend runs the same check before handing the blob
+  over and reports what it found.
+  **Look for a spelled-out rule the API expects you to apply yourself** before concluding a question is unanswerable —
+  an escalation that turns out to be a missing lookup costs the whole surface a needless change.
 
 ---
 
@@ -187,6 +192,11 @@ Recorded as each is met, because this is what the next backend most wants to kno
   cleared routines — so look for the *category* on the first one rather than fixing them one validation message at a
   time.
 
+- **A per-pipeline cached blob maps onto a per-pipeline VkPipelineCache.**
+  Vulkan's cache is normally one shared object, and sg's surface is one blob per pipeline, so each pipeline owns a
+  cache it was built with and serializes on request.
+  It is not the idiomatic Vulkan shape, and it is the honest one for the contract sg states.
+
 - **Objects a descriptor merely names want a per-context cache, not per-group ownership.**
   A dx12 sampler descriptor leaves no object behind, and D3D12 creates a view straight into a heap.
   Vulkan needs a VkSampler and a VkImageView that outlive every group holding them, and giving each group its own
@@ -200,6 +210,25 @@ Recorded as each is met, because this is what the next backend most wants to kno
   On a platform with no software adapter that is the difference between covered and skipped, and it is worth splitting files along that line deliberately.
 
 ---
+
+## Where the tier-2 suite carries the whole weight
+
+[testing](testing.md) puts backend-specific behaviour in tier 2 and API invariants in tier 1.
+One consequence is easy to miss until you go looking for a dispatch test: **the tier-1 suite has no compute, raster or
+ray-tracing execution test at all**, because none of them can be written without shader bytecode, and bytecode is
+per-backend by construction.
+
+So the reference backend's tier-2 suite is the specification for those, and yours is written beside it:
+
+- **Embed a compiled blob rather than building one.** dx12 checks in `double_compute.dxil.h` next to its `.hlsl`, with
+  the compiler command line in the source's comment; vulkan does the same with `double_compute.spirv.h`.
+  It keeps the tier-2 binary free of the shader library and the compiler toolchain, and it makes the fixture
+  reproducible by hand.
+- **Write the reflection by hand next to it**, so the test states the binding shape it means rather than inheriting
+  whatever a reflector produced.
+- **Size a resource-exhaustion test so that it actually exhausts**, then check that it does by breaking it on purpose.
+  A free-list test on a region large enough to fit every allocation passes without touching the free list, and reads
+  exactly like one that works.
 
 ## House conventions that bite a newcomer
 

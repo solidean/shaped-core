@@ -503,6 +503,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     };
     vkGetPhysicalDeviceProperties2(best_device, &device_props);
     ctx->set_descriptor_buffer_properties(descriptor_props);
+    ctx->set_device_properties(device_props.properties);
 
     ctx->set_adapter_info(describe_adapter(best_device));
     ctx->set_raytracing_supported(raytracing_supported);

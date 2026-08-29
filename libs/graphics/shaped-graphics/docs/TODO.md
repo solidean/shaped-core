@@ -4,13 +4,12 @@ Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
 - **Transfer.** Still open:
-  - the **vulkan** implementation — a `CC_UNREACHABLE` stub today;
+  - the **vulkan** async and streaming implementation — `ctx.upload` / `ctx.download` / `ctx.stream` are stubs, and need the dedicated copy queue;
   - **device→device texture copy** — `cmd.copy` does buffer regions only;
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
     The ring blocks on in-flight epochs first, but with nothing in flight it asserts.
   - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
-  - **vulkan** barrier emission — it reuses the shared vocabulary and state machine, and lands with vulkan's compute/transfer milestone;
   - **array bindings in raster draws** — compute/RT dispatches resolve `declare_array_*_access` against the bound groups, but the raster scope has no declare pair and asserts on a bound array binding;
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
@@ -67,7 +66,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **Blessed escape hatch:** an sg API returning the raw underlying GPU handles without exposing the concrete backend types, so a caller never reaches for `dynamic_cast` to an `sg::backend::*` type.
   See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
 - **SDK detection:** dx12 links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`) straight off the default lib path, with no explicit SDK presence or version check.
-  vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`; a version/feature floor beyond the 1.2 baseline is still worth adding.
+  vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`; its device floor is 1.3 plus descriptor_buffer and robustness2, refused by name at creation.
 - **Epoch system.** See [concepts/epochs.md](concepts/epochs.md). Still deferred:
   - the **vulkan** async copy queue, which has neither the queue nor the per-resource pending syncs;
   - a **texture-capable transient heap** — `ctx.transient`'s bump allocator is buffers-only, so a transient texture falls back to a dedicated allocation the backend auto-expires at the next epoch.

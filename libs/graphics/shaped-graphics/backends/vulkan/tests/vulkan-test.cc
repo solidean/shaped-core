@@ -1,3 +1,5 @@
+#include "vulkan-test-common.hh"
+
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
@@ -86,25 +88,7 @@ TEST("sg vulkan - software-preferred context")
 
 namespace
 {
-// Fresh context for an epoch test, or nullptr on a host without a Vulkan device.
-sg::context_handle make_context()
-{
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
-    if (ctx.has_error())
-        return nullptr;
-
-    // Any validation message of warning severity or worse fails the running test, which is what makes the layer a
-    // gate rather than log noise.
-    // A test whose subject IS the bad input clears the callback for its duration.
-    static_cast<vulkan::vulkan_context&>(*ctx.value())
-        .set_message_callback(
-            [](vulkan::vulkan_message_severity severity, cc::string_view message)
-            {
-                if (severity <= vulkan::vulkan_message_severity::warning)
-                    CHECK(false).context(cc::format("vulkan validation: {}", message));
-            });
-    return ctx.value();
-}
+using vulkan::test::make_context; // see vulkan-test-common.hh
 } // namespace
 
 TEST("sg vulkan - epoch advance and retire")

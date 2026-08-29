@@ -3,10 +3,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/string.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
+#include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -14,6 +16,20 @@
 /// Owns its command pool and the single command buffer allocated from it, handed out already recording.
 /// Recording is not implemented: every recording call below aborts.
 /// The exceptions are the raytracing / query support queries, which honestly answer false, and record_gpu_timestamp, which returns an invalid query.
+/// One declare_array_buffer_access call, held until the next dispatch resolves it against the bound groups.
+struct sg::backend::vulkan::vulkan_array_buffer_declare
+{
+    cc::string name;
+    cc::vector<sg::array_buffer_access> elements;
+};
+
+/// One declare_array_texture_access call, the texture analogue of vulkan_array_buffer_declare.
+struct sg::backend::vulkan::vulkan_array_texture_declare
+{
+    cc::string name;
+    cc::vector<sg::array_texture_access> elements;
+};
+
 class sg::backend::vulkan::vulkan_command_list final : public sg::command_list
 {
 public:
@@ -62,6 +78,22 @@ public:
     // Readbacks recorded by this list, still token-less: submit stamps them and hands them to the actor, drop cancels.
     cc::vector<vulkan_download_copy_job> _pending_downloads;
 
+    // What compute_bind_* set up and the next dispatch consumes.
+    // The layout supplies each slot's schema; the groups supply the resources whose accesses are declared at dispatch.
+    vulkan_pipeline_layout const* _bound_pipeline_layout = nullptr;
+    cc::vector<vulkan_binding_group const*> _bound_groups;
+
+    // Array bindings are not auto-tracked, so their accesses arrive as explicit declarations and wait here.
+    cc::vector<vulkan_array_buffer_declare> _pending_array_buffer_declares;
+    cc::vector<vulkan_array_texture_declare> _pending_array_texture_declares;
+
+    // Set inside a rendering scope; a dispatch inside one is rejected because Vulkan forbids it outright.
+    bool _in_render_pass = false;
+
+    // Resolves the pending array declares against the bound groups and tracks each named element.
+    // Also the accounting pass: a bound array binding with no declaration is an error.
+    void declare_array_accesses();
+
     // Every buffer this list has tracked, so submit can finalize each slot and drop can discard it.
     // Public so the context can walk it at submit; deduplicated by vulkan_buffer::mark_recorded.
     cc::vector<vulkan_buffer const*> _touched_buffers;
@@ -93,28 +125,15 @@ protected:
                             isize dst_offset_in_bytes,
                             isize size_in_bytes) override;
 
-    // Compute recording (reached through cmd.compute) — not implemented yet.
-    void compute_bind_pipeline(sg::compute_pipeline const&) override
-    {
-        CC_UNREACHABLE("vulkan compute bind_pipeline is not implemented yet");
-    }
-    void compute_bind_group(int, sg::binding_group const&) override
-    {
-        CC_UNREACHABLE("vulkan compute bind_group is not implemented yet");
-    }
-    void compute_dispatch(int, int, int) override { CC_UNREACHABLE("vulkan compute dispatch is not implemented yet"); }
-    void compute_declare_array_buffer_access(cc::string_view, cc::span<sg::array_buffer_access const>) override
-    {
-        CC_UNREACHABLE("vulkan compute declare_array_buffer_access is not implemented yet");
-    }
-    void compute_declare_array_texture_access(cc::string_view, cc::span<sg::array_texture_access const>) override
-    {
-        CC_UNREACHABLE("vulkan compute declare_array_texture_access is not implemented yet");
-    }
-    void compute_set_inline_constants(cc::span<byte const>, cc::optional<isize>) override
-    {
-        CC_UNREACHABLE("vulkan compute set_inline_constants is not implemented yet");
-    }
+    // Compute recording (reached through cmd.compute). Bodies in vulkan_command_list.compute.cc.
+    void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
+    void compute_bind_group(int group_index, sg::binding_group const& group) override;
+    void compute_dispatch(int x, int y, int z) override;
+    void compute_declare_array_buffer_access(cc::string_view binding_name,
+                                             cc::span<sg::array_buffer_access const> elements) override;
+    void compute_declare_array_texture_access(cc::string_view binding_name,
+                                              cc::span<sg::array_texture_access const> elements) override;
+    void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
 
     // Raster rendering scope + draws (reached through cmd.raster / cmd.raster.manual) — not implemented yet.
     void raster_begin_rendering(sg::rendering_info const&) override

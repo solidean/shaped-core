@@ -10,8 +10,8 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 
 > **Scope note:** this sheet covers the surface that exists today.
 > The sg core API and the **dx12** backend are real.
-> The **vulkan** backend brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
-> Every other `try_create_*`, both async transfer scopes, and all recording are stubs.
+> The **vulkan** backend is real through the device, resources, memory heaps, inline transfer and copies, the whole bind path, and compute dispatch.
+> Raster, ray tracing, presentation and both async transfer scopes are still stubs there.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
@@ -233,10 +233,10 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 //   ctx.wait_for(future) is the only completion guarantee. See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
-// vulkan transfer is a TODO stub.
+// both backends real.
 
 // GPU queries (cmd.query scope). See docs/concepts/queries.md.
-cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (dx12 direct queue: yes; vulkan stub: no)
+cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (dx12 direct queue: yes; vulkan: not yet)
 cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a point-in-time GPU tick here; invalid if unsupported
 // resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
 
