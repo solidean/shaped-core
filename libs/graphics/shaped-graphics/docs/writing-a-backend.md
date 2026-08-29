@@ -69,6 +69,44 @@ Each line is what the next one needs.
 6. **Presentation.**
 7. **Async transfer + streaming.** The largest single piece, and the only one needing a second queue.
 
+### What actually depends on what
+
+The list above is the order the work is *described* in.
+The order it was *built* in differed, and the differences are the useful part — each is a dependency that looked real in a plan and was not, or one that did not appear in a plan at all.
+
+- **The shader toolchain is not a prerequisite for the bind path.**
+  This is the biggest one.
+  Only compute *pipelines* need compiled shaders; group layouts, the descriptor storage, binding groups and staging groups need none.
+  The vulkan build-out planned the toolchain before the bind path, then built layouts, the descriptor-buffer foundation, the heap and the view translation *first*.
+  The toolchain landed in the middle of that, and nothing had to be reordered.
+  A backend whose bytecode format already has a compiler can skip the question entirely; one that does not should not let it block half a milestone.
+
+- **The memory heap is independent of everything and unblocks a whole topic.**
+  `ctx.transient` bump-allocates from one, so until it exists every transient test fails for a reason that has nothing to do with transient resources.
+  It has no dependency on barriers, transfers or bindings, so it can land as early as the device does.
+
+- **Registering the test driver comes before all of it**, because nothing else is measurable until it does.
+
+- **Host-visible memory is the real gate on transfers**, not barriers.
+  Barrier translation and access tracking are device-free and can be written and tested before any transfer plumbing exists; what actually blocks a copy is having somewhere for the CPU to write.
+
+- **Within transfers the order is: barriers, then buffers, then textures.**
+  Buffer upload and download share a ring and a tracker with the copy path, and texture transfer needs layout tracking on top of all of it.
+  Doing textures first means building the layout tracker with nothing able to exercise it.
+
+- **Device features are the one thing genuinely worth doing up front**, since everything above depends on some of them and nothing depends on the order they were enabled in.
+
+So the real shape is less a ladder than three chains that only meet near the end:
+
+```text
+device + features + test driver
+   ├── barriers → buffer access → inline transfer → texture access → texture transfer
+   ├── memory heap → transient
+   └── layouts → descriptor storage → binding groups ─┐
+                                                       ├── compute pipelines → dispatch
+       shader toolchain ───────────────────────────────┘
+```
+
 **Enable every device feature up front**, in one commit, whether or not the milestone using it has landed.
 A feature costs nothing unused, and adding them one at a time means re-editing the same struct chain five times.
 
