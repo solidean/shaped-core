@@ -139,6 +139,41 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
         out.bindings.push_back(cc::move(out_binding));
     }
 
+    // A push-constant block is sg's `inline_constants`, and it is NOT a descriptor — it lives in no set, so the
+    // enumeration above never sees it.
+    // Reported as a uniform_buffer binding with neither a group_index nor a space, which is what tells a caller
+    // apart from a `cbuffer` in a descriptor set: that one always carries its set.
+    //
+    // Without this an HLSL shader written for both backends cannot use inline constants at all — the DXIL arm
+    // reflects a root-constant register and the SPIR-V arm reflected nothing.
+    uint32_t push_count = 0;
+    if (auto const r = spvReflectEnumeratePushConstantBlocks(&module, &push_count, nullptr);
+        r != SPV_REFLECT_RESULT_SUCCESS)
+        return cc::error(cc::format("SPIR-V reflection failed to count push-constant blocks (code {})", int(r)));
+
+    if (push_count > 0)
+    {
+        auto blocks = cc::vector<SpvReflectBlockVariable*>::create_defaulted(isize(push_count));
+        if (auto const r = spvReflectEnumeratePushConstantBlocks(&module, &push_count, blocks.data());
+            r != SPV_REFLECT_RESULT_SUCCESS)
+            return cc::error(cc::format("SPIR-V reflection failed to read push-constant blocks (code {})", int(r)));
+
+        // Vulkan allows several blocks only across stages, and DXC emits at most one per module — so more than one
+        // here is a shader sg has no way to describe, and saying so beats picking the first.
+        if (push_count > 1)
+            return cc::error(cc::format("SPIR-V module declares {} push-constant blocks; sg's inline constants are one",
+                                        push_count));
+
+        auto const* const block = blocks[0];
+        CC_ASSERT(block != nullptr, "SPIRV-Reflect returned a null push-constant block");
+
+        sg::binding out_binding;
+        out_binding.name = block->name != nullptr ? cc::string(block->name) : cc::string();
+        out_binding.type = sg::binding_type::uniform_buffer;
+        out_binding.block_size = isize(block->size);
+        out.bindings.push_back(cc::move(out_binding));
+    }
+
     if (sg::is_compute_stage(stage))
     {
         auto const* const entry = find_entry_point(module, entry_point);

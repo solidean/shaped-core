@@ -173,6 +173,42 @@ All three are fixed from the shader being compiled, at every depth — an includ
 The last is what reaches a library mounted outside any package, so `#include "common/brdf.hlsli"` resolves against the `mount` above.
 Every path that resolves becomes a reload dependency of the shader that pulled it in.
 
+## Writing HLSL for both backends
+
+One `.hlsl` serves dx12 and vulkan, and the package compiles it once per format the context accepts.
+What differs is that **SPIR-V has none of HLSL's implicit addressing** — no register classes, no semantics — so three things have to be said out loud.
+None of them costs anything on the DXIL side: DXC ignores a `[[vk::…]]` attribute when it is not generating SPIR-V.
+
+- **`[[vk::binding(N, set)]]` on every resource.**
+  There is no `-fvk-*-shift` in our compile line, so an unannotated `b0`/`t0`/`u0` collapse onto the same SPIR-V binding number and collide.
+  The set an annotation names becomes the binding's `group_index`, which pins the slot the group must be bound at.
+  So an annotated shader bakes in its group split, and honouring it is the author's contract.
+  HLSL-for-dx12 leaves that split a runtime choice; both models stay supported.
+- **`[[vk::location(N)]]` on every vertex input**, numbered in the order the sg vertex layout lists its attributes.
+  sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
+  A mismatch is silent: the pipeline builds and the geometry is wrong.
+- **`[[vk::push_constant]]` for inline constants**, which is the one that needs a fork.
+  A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
+  A shader that does not say `push_constant` therefore declares a resource the pipeline layout never binds.
+  There is no DXIL spelling of the attribute, and a root constant there is an ordinary `register(b0)`:
+
+```hlsl
+struct cube_constants
+{
+    float4x4 view_projection;
+};
+
+#ifdef __spirv__
+[[vk::push_constant]] ConstantBuffer<cube_constants> gConstants;
+#else
+ConstantBuffer<cube_constants> gConstants : register(b0);
+#endif
+```
+
+`__spirv__` is DXC's own macro, and it works here because **slib flattens a shader's includes once per target rather than once per shader**.
+The preprocess pass is given the same target the compile is, so the fork is resolved against the format actually being built.
+[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example of all three.
+
 ## Adding a shader
 
 1. Put the `.hlsl` under your target's `SOURCE_DIR`.

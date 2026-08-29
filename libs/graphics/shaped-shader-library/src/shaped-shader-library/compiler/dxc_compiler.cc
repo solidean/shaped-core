@@ -40,7 +40,9 @@ public:
         if (compiler == nullptr)
             return cc::error("failed to create the DXC compiler");
 
-        auto result = compiler->preprocess(to_dxc(desc), resolve);
+        // The target goes in here as well as at compile: it is what defines `__spirv__`, which is how one source
+        // writes both a DXIL and a SPIR-V spelling of the same binding.
+        auto result = compiler->preprocess(to_dxc(desc), resolve, {.target = _target});
         if (result.has_error())
             return cc::error(cc::move(result.error()));
         return cc::move(result.value().source);
