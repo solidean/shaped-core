@@ -49,6 +49,10 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
         CC_ASSERT(false, "vkQueueSubmit (epoch signal) failed");
     }
 
+    // The ring's bytes were read by GPU copies recorded in `last`, so its span is only reclaimable once `last` retires.
+    // Record where it ended before the epoch is packaged.
+    _upload_inline.on_epoch_advance(last);
+
     // Package everything `last` owns and push it onto the in-flight FIFO.
     // Advance is externally synchronized, so the pool drain races no submit — but the deletion staging below is fed from any thread.
     vulkan_epoch_data data;
@@ -86,6 +90,11 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
     apply_pending_transient_budget();
 }
 
+bool vulkan_context::has_epochs_in_flight()
+{
+    return _epoch_state.lock([](vulkan_epoch_state& s) { return !s.in_flight.empty(); });
+}
+
 void vulkan_context::process_completed_epochs()
 {
     if (_epoch_timeline == VK_NULL_HANDLE)
@@ -115,6 +124,9 @@ void vulkan_context::process_completed_epochs()
                     p.free.push_back(cp);
                 }
         });
+
+    // Every epoch up to `completed` has finished on the GPU, so the staging bytes their copies read are free.
+    _upload_inline.on_epochs_completed(sg::epoch(completed));
 
     cc::vector<cc::unique_function<void()>> finalizers;
     for (auto& e : done)

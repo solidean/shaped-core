@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_upload_inline.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
@@ -27,6 +28,11 @@ struct sg::backend::vulkan::vulkan_config
     /// Prefer a software (CPU) physical device, e.g. lavapipe.
     /// Only a preference: Vulkan has no guaranteed software device, so this still falls back to hardware when none is present.
     bool prefer_software_device = false;
+
+    /// Capacity of the staging ring behind cmd.upload, in bytes.
+    /// One epoch's inline uploads must fit, since the ring is only reclaimed when an epoch retires.
+    /// Matches the dx12 backend's default.
+    isize upload_ring_bytes = 16 * 1024 * 1024;
 };
 
 /// Severity of a validation-layer message, mapped from VkDebugUtilsMessageSeverityFlagBitsEXT.
@@ -317,6 +323,11 @@ public:
     void process_completed_epochs() override;
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
+
+    /// Whether any submitted epoch has yet to retire.
+    /// The inline rings ask before blocking: with nothing in flight, a full ring cannot be reclaimed by waiting, and
+    /// the request is a budget error rather than back-pressure.
+    [[nodiscard]] bool has_epochs_in_flight();
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
 
     void shutdown() override;
@@ -330,6 +341,9 @@ public:
     // See sg::context::is_device_lost for the sticky-loss surface this feeds.
     // Body in vulkan_context.cc.
     bool note_device_lost_if_lost(VkResult r, char const* what);
+
+    /// The staging ring behind cmd.upload; owned here because its space is reclaimed on the epoch cycle.
+    vulkan_upload_inline_system _upload_inline;
 
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;

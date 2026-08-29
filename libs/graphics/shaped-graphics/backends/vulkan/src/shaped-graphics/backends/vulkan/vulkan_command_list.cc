@@ -2,7 +2,9 @@
 // The list type itself is header-only, so its create / submit / drop bodies and its destructor live here.
 
 #include <clean-core/common/log.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/print.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_barrier.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/exceptions.hh>
 
@@ -95,6 +97,14 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
 
+    // Finalize before closing: what this list leaves in flight is what the next list must synchronize against.
+    // Only the last list tracking a buffer promotes it.
+    // Under the same lock as the submit below, so finalize order matches submit order — the later list's canonical
+    // state has to be the one that actually ran last.
+    for (auto const* buffer : cmd->_touched_buffers)
+        buffer->finalize_slot(cmd->slot());
+    cmd->_touched_buffers.clear();
+
     VkResult const end = vkEndCommandBuffer(cmd->_buffer);
     CC_ASSERT(end == VK_SUCCESS, "vkEndCommandBuffer failed");
 
@@ -156,6 +166,12 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     CC_ASSERT(!cmd._consumed, "command list already submitted or dropped");
     cmd._consumed = true;
 
+    // The recorded work never runs, so this list's declared accesses leave no hazard behind and canonical is
+    // untouched — including when it was the last list tracking a buffer.
+    for (auto const* buffer : cmd._touched_buffers)
+        buffer->discard_slot(cmd.slot());
+    cmd._touched_buffers.clear();
+
     // Never submitted, so the GPU never touched this pool — return it straight to the free set, where reset happens at reuse.
     // Null the handles so nothing double-frees them.
     _command_pools.lock([&](vulkan_command_pool_set& p) { p.free.push_back({cmd._pool, cmd._buffer}); });
@@ -163,6 +179,63 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     cmd._buffer = VK_NULL_HANDLE;
     (void)_command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+}
+
+void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
+                                              sg::pipeline_stage_flags stages,
+                                              sg::access_flags access)
+{
+    // An empty buffer owns no VkBuffer, so there is nothing to synchronize on.
+    if (buffer._buffer == VK_NULL_HANDLE)
+        return;
+
+    buffer.declare_access(_slot, stages, access);
+
+    // Once per op, however many times this buffer is bound to it.
+    if (buffer.mark_pending_barrier(_slot))
+        _pending_barrier_buffers.push_back(&buffer);
+
+    // Once per list, so submit can finalize the slot and drop can discard it.
+    if (buffer.mark_recorded(_slot))
+        _touched_buffers.push_back(&buffer);
+}
+
+void vulkan_command_list::flush_barriers()
+{
+    for (auto const* buffer : _pending_barrier_buffers)
+        if (auto const barrier = buffer->flush_access(_slot); barrier.needed)
+            _pending_buffer_barriers.push_back(make_buffer_barrier(buffer->_buffer, barrier));
+
+    _pending_barrier_buffers.clear();
+    submit_barriers(_buffer, _pending_buffer_barriers, {});
+    _pending_buffer_barriers.clear();
+}
+
+void vulkan_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
+                                                 cc::span<byte const> data,
+                                                 isize offset_in_bytes)
+{
+    // sg has already bounds-checked the write and rejected a null destination; an empty one is a no-op by contract.
+    if (data.empty())
+        return;
+
+    auto const& dst = static_cast<vulkan_buffer const&>(*buffer);
+    CC_ASSERT(dst._buffer != VK_NULL_HANDLE, "cannot upload into an empty buffer");
+
+    // Stage the bytes first: reserving can block on an in-flight epoch, and doing that before anything is declared
+    // keeps the tracking state consistent whichever way the wait goes.
+    auto const staging = _ctx._upload_inline.reserve(data.size());
+    cc::memcpy(staging.mapped, data.data(), size_t(data.size()));
+
+    track_buffer_access(dst, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    flush_barriers();
+
+    auto const region = VkBufferCopy{
+        .srcOffset = VkDeviceSize(staging.offset),
+        .dstOffset = VkDeviceSize(offset_in_bytes),
+        .size = VkDeviceSize(data.size()),
+    };
+    vkCmdCopyBuffer(_buffer, staging.buffer, dst._buffer, 1, &region);
 }
 
 // False until the recording paths below exist, whatever the device offers.

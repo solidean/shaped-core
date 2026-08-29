@@ -285,3 +285,55 @@ TEST("sg vulkan - the debug messenger reaches the installed callback")
 
     c.set_message_callback({});
 }
+
+TEST("sg vulkan - an inline upload records, submits and reclaims its staging")
+{
+    auto handle = make_context(); // installs the fail-on-validation listener
+    if (handle == nullptr)
+        return; // no Vulkan device.
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    auto buffer = c.create_vulkan_buffer(1024, sg::buffer_usage::copy_dst, sg::allocation_info{});
+    REQUIRE(buffer.has_value());
+
+    byte bytes[256];
+    for (int i = 0; i < 256; ++i)
+        bytes[i] = byte(i);
+
+    auto cmd = c.create_vulkan_command_list();
+    REQUIRE(cmd.has_value());
+    cmd.value()->upload.bytes_to_buffer(buffer.value(), cc::span<byte const>(bytes, 256));
+    c.submit_vulkan_command_list(cc::move(cmd.value()));
+
+    // The validation listener is what makes this meaningful: a wrong barrier, a bad copy region or an unbalanced
+    // command buffer would fail the test rather than pass silently.
+    // Byte correctness needs a readback, which is what the download path adds.
+    c.advance_epoch_and_wait_for_idle();
+    CHECK(!c.is_device_lost());
+}
+
+TEST("sg vulkan - staging survives more uploads than the ring holds at once")
+{
+    // Exercises the reclaim path: with a ring far smaller than the total uploaded, reserve has to block on an
+    // in-flight epoch and reuse the space it frees.
+    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .upload_ring_bytes = 64 * 1024});
+    if (ctx.has_error())
+        return; // no Vulkan device.
+    auto& c = static_cast<vulkan::vulkan_context&>(*ctx.value());
+
+    auto buffer = c.create_vulkan_buffer(32 * 1024, sg::buffer_usage::copy_dst, sg::allocation_info{});
+    REQUIRE(buffer.has_value());
+
+    auto payload = cc::vector<byte>::create_filled(32 * 1024, byte(7));
+    for (int epoch = 0; epoch < 8; ++epoch) // 256 KiB through a 64 KiB ring
+    {
+        auto cmd = c.create_vulkan_command_list();
+        REQUIRE(cmd.has_value());
+        cmd.value()->upload.bytes_to_buffer(buffer.value(), payload);
+        c.submit_vulkan_command_list(cc::move(cmd.value()));
+        c.advance_epoch(1); // bounds what is in flight, so the ring must be reclaimed to keep going
+    }
+
+    c.advance_epoch_and_wait_for_idle();
+    CHECK(!c.is_device_lost());
+}

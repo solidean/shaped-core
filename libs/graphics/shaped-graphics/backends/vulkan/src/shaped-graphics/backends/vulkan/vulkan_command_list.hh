@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
@@ -30,18 +31,32 @@ public:
     /// The access-tracking slot this list holds for its lifetime (a backend helper, not sg API).
     [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
 
+    /// Accumulate one declared access for the next op, and enqueue the buffer for the pre-op flush exactly once.
+    /// Declaring is separate from flushing so a buffer bound several times to one op produces a single merged barrier.
+    void track_buffer_access(vulkan_buffer const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
+
+    /// Record one vkCmdPipelineBarrier2 for everything declared since the last flush, then clear the staging.
+    /// Called once per op, immediately before recording it.
+    void flush_barriers();
+
     vulkan_context& _ctx;        // creating context — outlives this list
     sg::command_list_slot _slot; // released to the context's slot allocator on submit/drop
     bool _consumed = false;      // set by submit/drop; gates the destructor's auto-drop
     VkCommandPool _pool = VK_NULL_HANDLE;
     VkCommandBuffer _buffer = VK_NULL_HANDLE; // owned by _pool, freed with it
 
+    // Declared for the current op and awaiting the pre-op flush; empty between ops.
+    cc::vector<vulkan_buffer const*> _pending_barrier_buffers;
+    cc::vector<VkBufferMemoryBarrier2> _pending_buffer_barriers;
+
+    // Every buffer this list has tracked, so submit can finalize each slot and drop can discard it.
+    // Public so the context can walk it at submit; deduplicated by vulkan_buffer::mark_recorded.
+    cc::vector<vulkan_buffer const*> _touched_buffers;
+
 protected:
-    // TODO: inline buffer transfer for the vulkan backend (see the dx12 backend for the reference impl).
-    void upload_bytes_to_buffer(sg::raw_buffer_handle, cc::span<byte const>, isize) override
-    {
-        CC_UNREACHABLE("vulkan inline buffer upload is not implemented yet");
-    }
+    // Stages the bytes in the context's upload ring and records a copy out of it.
+    // Body in vulkan_command_list.cc.
+    void upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) override;
     void upload_bytes_to_texture(sg::raw_texture_handle,
                                  cc::span<byte const>,
                                  sg::subresource_index const&,

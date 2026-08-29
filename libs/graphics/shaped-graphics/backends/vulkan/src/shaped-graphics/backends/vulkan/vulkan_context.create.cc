@@ -447,8 +447,19 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 
     auto ctx = std::make_shared<vulkan_context>(instance, best_device, device, queue, best_family, epoch_timeline,
                                                 submission_timeline, messenger);
+
+    // The context owns every handle above from here on, and its destructor releases them.
+    // Disarming the guard now rather than at the end of the function is what keeps a later failure from freeing
+    // them twice — once through ~vulkan_context and once through the guard.
+    owned_by_context = true;
+
     ctx->set_adapter_info(describe_adapter(best_device));
     ctx->set_raytracing_supported(raytracing_supported);
+
+    // The staging ring is part of a usable context rather than something acquired lazily: without it cmd.upload has
+    // nowhere to write, so a context that cannot allocate one is not worth handing back.
+    if (auto ring = ctx->_upload_inline.initialize(*ctx, config.upload_ring_bytes); ring.has_error())
+        return cc::error(cc::move(ring).error());
 
     // Now that the context exists it can own the messenger and receive its messages.
     // Best-effort, like the layer itself: without it validation still reaches the log, just not a listener.
@@ -462,7 +473,6 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
             ctx->set_debug_messenger(messenger);
     }
 
-    owned_by_context = true;
     return context_handle(cc::move(ctx));
 }
 } // namespace sg

@@ -131,6 +131,9 @@ void vulkan_context::shutdown()
     {
         vkDeviceWaitIdle(_device);
 
+        // Before the device: the ring holds a buffer and a mapped allocation on it.
+        _upload_inline.shutdown();
+
         // Every command pool is idle now (the drain retired every in-flight epoch, returning pools to
         // the free set); destroy them before the device.
         _command_pools.lock(
