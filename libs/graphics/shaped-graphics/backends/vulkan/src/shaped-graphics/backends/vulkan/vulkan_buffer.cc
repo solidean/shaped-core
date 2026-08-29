@@ -2,35 +2,10 @@
 // The buffer type itself is header-only, so the allocating create path and the destructor live here.
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_format.hh>
 
 namespace sg::backend::vulkan
 {
-namespace
-{
-VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
-{
-    VkBufferUsageFlags flags = 0;
-    if (usage.has(sg::buffer_usage::copy_src))
-        flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    if (usage.has(sg::buffer_usage::copy_dst))
-        flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (usage.has(sg::buffer_usage::vertex_buffer))
-        flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    if (usage.has(sg::buffer_usage::index_buffer))
-        flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if (usage.has(sg::buffer_usage::uniform_buffer))
-        flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    // Vulkan does not distinguish read-only from read-write storage at the usage-bit level — that is a descriptor/access concern.
-    // So both map to the same STORAGE_BUFFER_BIT.
-    if (usage.has(sg::buffer_usage::readonly_buffer) || usage.has(sg::buffer_usage::readwrite_buffer))
-        flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-    // Vulkan rejects a zero-usage buffer, so a usage-less non-empty buffer keeps a benign transfer-dst bit and stays valid.
-    if (flags == 0)
-        flags = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    return flags;
-}
-} // namespace
 
 vulkan_buffer::~vulkan_buffer()
 {
@@ -104,6 +79,7 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
         }
     }
 
-    return std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage, buffer, memory);
+    return vulkan_buffer_handle(
+        std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage, buffer, memory));
 }
 } // namespace sg::backend::vulkan

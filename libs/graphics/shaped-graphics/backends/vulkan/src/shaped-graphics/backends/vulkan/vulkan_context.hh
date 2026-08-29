@@ -67,6 +67,7 @@ public:
         _submission_timeline(submission_timeline),
         _debug_messenger(debug_messenger)
     {
+        vkGetPhysicalDeviceMemoryProperties(_physical_device, &_memory_properties);
     }
 
     ~vulkan_context() override { shutdown(); } // runs shutdown() before the base dtor asserts it
@@ -339,6 +340,10 @@ public:
 
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
+
+    // The device's memory types, read once at construction: they never change, and a staging ring allocates far too
+    // often to re-query them per allocation.
+    VkPhysicalDeviceMemoryProperties _memory_properties = {};
     VkDevice _device = VK_NULL_HANDLE;
     VkQueue _queue = VK_NULL_HANDLE; // owned by the device, not destroyed
     u32 _queue_family_index = 0;

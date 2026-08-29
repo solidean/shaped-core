@@ -9,6 +9,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
     src/shaped-graphics/backends/vulkan/vulkan_buffer.cc
+    src/shaped-graphics/backends/vulkan/vulkan_format.cc
     src/shaped-graphics/backends/vulkan/vulkan_texture.cc
 )
 
@@ -24,6 +25,7 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_buffer.hh
+    src/shaped-graphics/backends/vulkan/vulkan_format.hh
     src/shaped-graphics/backends/vulkan/vulkan_texture.hh
 )
 

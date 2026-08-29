@@ -97,10 +97,9 @@ void vulkan_context::dispatch_validation_message(vulkan_message_severity severit
 
 u32 vulkan_context::find_memory_type(u32 type_bits, VkMemoryPropertyFlags properties) const
 {
-    VkPhysicalDeviceMemoryProperties mem = {};
-    vkGetPhysicalDeviceMemoryProperties(_physical_device, &mem);
-    for (u32 i = 0; i < mem.memoryTypeCount; ++i)
-        if ((type_bits & (1u << i)) && (mem.memoryTypes[i].propertyFlags & properties) == properties)
+    // The device's memory types never change, so they are queried once at construction rather than per allocation.
+    for (u32 i = 0; i < _memory_properties.memoryTypeCount; ++i)
+        if ((type_bits & (1u << i)) && (_memory_properties.memoryTypes[i].propertyFlags & properties) == properties)
             return i;
     return UINT32_MAX;
 }
