@@ -17,6 +17,8 @@ class vulkan_upload_inline_system;   // the ring itself
 struct vulkan_download_copy_job;     // one staged readback awaiting its copy-out (see vulkan_download_inline.hh)
 class vulkan_download_actor;         // drains them in submission order
 class vulkan_download_inline_system; // the readback ring
+class vulkan_memory_heap;
+using vulkan_memory_heap_handle = std::shared_ptr<vulkan_memory_heap const>;
 class vulkan_texture;
 struct vulkan_subresource_barrier; // one barrier scoped to a subresource range (see vulkan_texture_access.hh)
 enum class layout_combine;         // how two required layouts for one op combined

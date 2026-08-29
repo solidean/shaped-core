@@ -121,6 +121,11 @@ void vulkan_context::shutdown()
     // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.
     routines.clear();
 
+    // The transient bump heap is device memory, so it goes before the device does.
+    // Released before the final drain rather than after, so the epoch that retires below also reclaims whatever the
+    // heap's destruction staged.
+    release_transient_heap();
+
     // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing every
     // resource (in-flight and staged) and running finalizers — before the device is released.
     // Externally synchronized: no create/submit/drop may run concurrently with shutdown.

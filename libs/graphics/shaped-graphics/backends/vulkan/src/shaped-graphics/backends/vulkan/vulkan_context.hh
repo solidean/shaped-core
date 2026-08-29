@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_inline.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -156,9 +157,11 @@ public:
 
     // Not implemented yet.
     // These return an error rather than aborting, so the sg throwing façade turns each into a typed exception.
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize) override
+    [[nodiscard]] cc::result<vulkan_memory_heap_handle> create_vulkan_memory_heap(isize size_in_bytes);
+
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
     {
-        return cc::error("vulkan memory_heap creation is not implemented yet");
+        return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes));
     }
 
     [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const&) override

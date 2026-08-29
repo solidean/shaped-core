@@ -26,9 +26,6 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
                                                                       sg::allocation_info const& alloc)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
-    // TEMPORARY: only dedicated allocations are implemented.
-    // Placement into a memory_heap needs vkBindBufferMemory at an offset into the heap's VkDeviceMemory, which is not wired up.
-    CC_ASSERT(alloc.is_dedicated(), "placed allocations (non-null memory_heap) not implemented yet");
 
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -52,6 +49,27 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
 
         VkMemoryRequirements req = {};
         vkGetBufferMemoryRequirements(_device, buffer, &req);
+
+        if (alloc.is_placed())
+        {
+            // Placed: the heap owns the memory and the caller picked the offset, so this binds and allocates nothing.
+            // The buffer holds a handle to the heap, which is what keeps the memory alive under the placement.
+            auto const heap = std::dynamic_pointer_cast<vulkan_memory_heap const>(alloc.heap);
+            CC_ASSERT(heap != nullptr, "allocation heap is not a vulkan memory heap");
+            CC_ASSERT(alloc.offset >= 0 && alloc.offset + isize(req.size) <= heap->size_in_bytes(),
+                      "placement does not fit inside the heap");
+            CC_ASSERT(alloc.offset % isize(req.alignment) == 0, "placement offset violates the buffer's alignment");
+
+            if (VkResult r = vkBindBufferMemory(_device, buffer, heap->_memory, VkDeviceSize(alloc.offset));
+                r != VK_SUCCESS)
+            {
+                vkDestroyBuffer(_device, buffer, nullptr);
+                return vulkan_error(r, "vkBindBufferMemory (placed) failed");
+            }
+
+            return vulkan_buffer_handle(std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage,
+                                                                        buffer, VK_NULL_HANDLE, alloc.heap));
+        }
 
         u32 const type = find_memory_type(u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (type == UINT32_MAX)

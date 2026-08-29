@@ -198,6 +198,15 @@ private:
     // No-op if nothing is pending; reached via context::apply_pending_transient_budget from a backend's advance_epoch.
     void apply_pending_budget_at_epoch_boundary();
 
+    // Drops the transient heap, called from context::shutdown before a backend tears its device down.
+    //
+    // The heap is GPU memory allocated from the device, so it must not outlive it — the same rule routines.clear()
+    // above is there for.
+    // dx12 happens to survive without this because its heap holds a device reference of its own.
+    // A backend whose device is not reference counted, such as vulkan, leaks the allocation instead, and its
+    // validation layer reports it at vkDestroyDevice.
+    void release_heap_at_shutdown();
+
     context& _ctx;
 
     // The bump allocator state: the heap (lazy), its budget, the current head, the epoch the head was last reset for, and a budget change awaiting the next epoch boundary.

@@ -351,6 +351,12 @@ protected:
     /// No-op if no budget change is pending.
     void apply_pending_transient_budget() { transient.apply_pending_budget_at_epoch_boundary(); }
 
+    /// Drops the transient bump heap, which is device memory and must not outlive the device.
+    /// A backend calls this from its shutdown, before it destroys the device.
+    /// The base shutdown also calls it, which covers a backend that forgets — but by then the device may already be
+    /// gone, so calling it at the right point is the backend's job.
+    void release_transient_heap() { transient.release_heap_at_shutdown(); }
+
     /// Allocates a GPU-resident buffer; size must be >= 0, and 0 is a valid empty buffer.
     /// `alloc` selects the backing memory (see allocation_info).
     [[nodiscard]] virtual cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,

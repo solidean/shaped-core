@@ -18,8 +18,14 @@ public:
                   isize size_in_bytes,
                   sg::buffer_usages usage,
                   VkBuffer buffer,
-                  VkDeviceMemory memory)
-      : sg::raw_buffer(size_in_bytes, usage), _ctx(ctx), _creation_epoch(created_in), _buffer(buffer), _memory(memory)
+                  VkDeviceMemory memory,
+                  sg::memory_heap_handle heap = nullptr)
+      : sg::raw_buffer(size_in_bytes, usage),
+        _ctx(ctx),
+        _creation_epoch(created_in),
+        _buffer(buffer),
+        _memory(memory),
+        _heap(cc::move(heap))
     {
     }
 
@@ -77,7 +83,10 @@ public:
     vulkan_context& _ctx;      // creating context — outlives this buffer
     sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
     VkBuffer _buffer = VK_NULL_HANDLE;
-    VkDeviceMemory _memory = VK_NULL_HANDLE;
+    VkDeviceMemory _memory = VK_NULL_HANDLE; // owned allocation; null for a placed buffer, which owns no memory
+
+    // The heap a placed buffer sits in, held so the heap outlives the placement; null for a dedicated buffer.
+    sg::memory_heap_handle _heap;
 
     // Guarded because concurrent command lists may record against the same buffer.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the buffer, not a change to it.

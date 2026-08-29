@@ -125,6 +125,12 @@ Recorded as each is met, because this is what the next backend most wants to kno
   `cmd.upload.bytes_to_buffer` forwards straight to the backend seam with no checking at all, so the backend owns the null, bounds, usage and expiry contract.
   The trap is that a `CC_UNREACHABLE` stub *satisfies* the `CHECK_ASSERTS` tests for those contracts, so they pass while unimplemented and regress the moment you implement the seam.
   Copy the reference backend's assert list rather than inferring it, and mind the ordering: bounds are checked before the empty-input early-out, so an empty write at a bad offset is still a violation.
+- **A reference-counted device hides teardown-order bugs.**
+  dx12's memory heap holds a `ComPtr<ID3D12Device>`, so the device simply outlives it and nothing has to order the two.
+  A `VkDevice` is not reference counted, so anything holding device memory has to be released *before* it.
+  sg's transient bump heap was not, and the validation layer reported it as a leaked `VkDeviceMemory` at `vkDestroyDevice`.
+  The fix belonged in sg rather than the backend: `context::shutdown` already clears routines for exactly this reason, and the transient heap now goes the same way.
+  Wherever the reference backend gets a lifetime for free, check whether yours does.
 - **Keep translation logic device-free, and it becomes testable everywhere.**
   Barrier translation and access tracking are pure logic with no device in them, so their tests run on any machine rather than only where a device exists.
   On a platform with no software adapter that is the difference between covered and skipped, and it is worth splitting files along that line deliberately.

@@ -120,6 +120,10 @@ void context::shutdown()
     // Routine instances are released at the top of each backend's shutdown (see routines.clear() there), before its resource systems are torn down.
     // A routine's cached GPU state must not outlive the device it was built on.
     routines.clear();
+
+    // Same rule, one layer down: the transient heap is GPU memory from the device about to be destroyed.
+    transient.release_heap_at_shutdown();
+
     _is_shut_down = true;
 }
 } // namespace sg
