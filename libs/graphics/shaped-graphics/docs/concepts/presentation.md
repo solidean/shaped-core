@@ -12,6 +12,9 @@ A back buffer is an ordinary texture as far as the rest of sg is concerned, and 
 `acquire_backbuffer()` resizes the chain to the window's current client area before handing a buffer back, so any size read off the swapchain could be one acquire out of date.
 The returned `render_target_view`'s `width()` / `height()` are this frame's authoritative resolution, and everything sized against the frame should be sized against those.
 
+A **headless** chain is fixed at its `headless_extent` and never resizes, so the acquired view's size is the one it was created with.
+The size getter is still absent there, because a caller should read the frame's resolution the same way whichever kind of chain it holds.
+
 The resize is checked **at most once per epoch**.
 Resizing drains the GPU, so an unbounded check would let `acquire_backbuffer` stall — or advance an epoch — under a caller that only asked for a render target.
 One check per epoch bounds that to the frame boundary the caller already owns.
@@ -49,12 +52,36 @@ A present signals it, and the next acquire of that same buffer index waits for t
 The two timelines answer different questions: [epochs](epochs.md) ask "has the GPU finished with this resource", the present fence asks "has the display finished with this buffer index".
 A swapchain's `buffer_count` is the natural pipelining depth to pass `ctx.advance_epoch`, which is where the two meet.
 
+## Presenting with no window
+
+`headless_extent` presents at a fixed size with no window, and states both facts in one field.
+
+That is deliberate: a handle is required exactly when the extent is unset, and ignored when it is set.
+So a headless chain carrying a stale window handle is **unrepresentable** rather than merely invalid.
+`is_windowed()` is the question everything else asks.
+
+**Headless present is complete-the-frame-and-rotate.**
+The chain cycles, and the presented buffer stays readable until its epoch retires.
+That is what makes it pixel-verifiable, which is the entire reason for having it — a null presentation target would only prove the calls did not crash.
+
+The two backends reach it differently, and the difference is worth knowing:
+
+- **vulkan** creates a real `VkSwapchainKHR` over a `VK_EXT_headless_surface`, so every step the windowed path takes is taken here too.
+  The acquire returns an index, the submit waits on the acquire semaphore, and the present waits on the render-finished one.
+  What headless removes is only the display.
+- **dx12** has no such surface: DXGI needs a real presentation target, so a headless chain is `buffer_count` ordinary render-target textures and a present that signals the fence and rotates the index.
+  An emulation, and enough for the contract above.
+
 ## The window handle is opaque
 
 `swapchain_description::native_window_handle` is a `void*` — an `HWND` on Windows — because sg core cannot name a platform windowing type and stay backend-agnostic.
 The backend reinterprets it.
 [`sr::window`](../../../shaped-rendering/src/shaped-rendering/window.hh) is the supported producer.
-A platform-tagged handle type is deferred until a second windowing backend needs one — see [TODO](../TODO.md).
+
+**This is what blocks a windowed Vulkan swapchain off Windows.**
+X11 needs a display plus an XID and wayland a display plus a surface, and neither fits one pointer.
+So `sr::window::native_window_handle()` already returns null everywhere but Win32, and the vulkan backend reports that rather than guessing.
+A platform-tagged handle is the fix, and it now has its second caller — see [TODO](../TODO.md).
 
 The rest of the description is fixed for the swapchain's lifetime.
 `buffer_count` (at least 2), a renderable `format`, a `present_mode`, and an `enable_hdr` request.
@@ -86,11 +113,10 @@ DXGI's Alt+Enter fullscreen handling is suppressed (`DXGI_MWA_NO_ALT_ENTER`); th
 See [TODO](../TODO.md) for the full list.
 The ones worth knowing while using this:
 
-- a **platform-tagged `native_window_handle`** replacing the opaque `void*`;
+- a **platform-tagged `native_window_handle`** replacing the opaque `void*`, which is what a windowed Vulkan swapchain needs off Windows;
 - **deeper HDR** — metadata and tone-mapping beyond selecting a color space;
 - **exclusive fullscreen** and **multi-window**;
-- a **headless present target**, so the present path can be pixel-verified on CI.
-  The WARP swapchain test needs a real hidden window today and skips without one.
+- **exclusive fullscreen** and **multi-window**.
 
 ## See also
 

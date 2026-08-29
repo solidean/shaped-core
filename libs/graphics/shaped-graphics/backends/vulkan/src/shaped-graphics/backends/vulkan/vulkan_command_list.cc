@@ -125,19 +125,31 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             sg::submission_token const t = next;
             next = sg::submission_token(u64(next) + 1);
 
-            u64 const signal_value = u64(t);
+            // The submission timeline always signals; a presenting list also signals its render-finished semaphore.
+            // The value array needs one entry per signal semaphore even though a binary one ignores its value.
+            VkSemaphore signal_semaphores[2] = {_submission_timeline, cmd->_present_signal};
+            u64 const signal_values[2] = {u64(t), 0};
+            u32 const signal_count = cmd->_present_signal != VK_NULL_HANDLE ? 2u : 1u;
+
+            // A presenting list waits for the image to be acquired before it writes any color.
+            VkPipelineStageFlags const wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            u32 const wait_count = cmd->_present_wait != VK_NULL_HANDLE ? 1u : 0u;
+
             auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
                 .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                .signalSemaphoreValueCount = 1,
-                .pSignalSemaphoreValues = &signal_value,
+                .signalSemaphoreValueCount = signal_count,
+                .pSignalSemaphoreValues = signal_values,
             };
             auto const submit = VkSubmitInfo{
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                 .pNext = &timeline_info,
+                .waitSemaphoreCount = wait_count,
+                .pWaitSemaphores = wait_count != 0 ? &cmd->_present_wait : nullptr,
+                .pWaitDstStageMask = wait_count != 0 ? &wait_stage : nullptr,
                 .commandBufferCount = 1,
                 .pCommandBuffers = &cmd->_buffer,
-                .signalSemaphoreCount = 1,
-                .pSignalSemaphores = &_submission_timeline,
+                .signalSemaphoreCount = signal_count,
+                .pSignalSemaphores = signal_semaphores,
             };
             VkResult const sr = vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE);
             // Record device loss here but don't throw inside the lock; the throw happens after it releases.

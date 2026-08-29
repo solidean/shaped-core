@@ -39,6 +39,8 @@ struct vulkan_array_buffer_declare;  // one declare_array_buffer_access, held un
 struct vulkan_array_texture_declare; // the texture analogue
 class vulkan_compute_pipeline;
 class vulkan_raster_pipeline;
+class vulkan_swapchain;
+using vulkan_swapchain_handle = std::shared_ptr<vulkan_swapchain>;
 class vulkan_raytracing_pipeline;
 using vulkan_raytracing_pipeline_handle = std::shared_ptr<vulkan_raytracing_pipeline const>;
 class vulkan_raytracing_shader_table;

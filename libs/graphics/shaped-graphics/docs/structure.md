@@ -89,7 +89,7 @@ src/shaped-graphics/
     memory_heap.hh/.cc            [in progress] abstract heap + memory_requirements; both backends place buffers, textures still dedicated-only
 
   present/
-    swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire_backbuffer / present / resize / HDR flag); dx12 real (vulkan stub)
+    swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire / present / resize / HDR / headless); both backends real, vulkan windowed off Windows pending a platform-tagged handle
 
   query/
     gpu_timestamp.hh/.cc          [done]        pollable tick result of cmd.query.record_gpu_timestamp

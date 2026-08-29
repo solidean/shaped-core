@@ -25,7 +25,10 @@ void vulkan_texture::release_storage() const
         return;
 
     vulkan_expiring_resource expiring;
-    expiring.image = _image;
+    // A borrowed image is not ours to destroy — its owner outlives this wrapper by contract — so only the finalizers
+    // are staged for it.
+    if (_owns_image)
+        expiring.image = _image;
     expiring.memory = _memory;
     expiring.finalizers = cc::move(_finalizers);
     _image = VK_NULL_HANDLE;

@@ -75,16 +75,22 @@ bool validation_layer_available()
     return false;
 }
 
-bool debug_utils_extension_available()
+// Whether the loader offers `name` as an instance extension.
+bool instance_extension_available(cc::string_view name)
 {
     uint32_t count = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
     auto exts = cc::vector<VkExtensionProperties>::create_uninitialized(count);
     vkEnumerateInstanceExtensionProperties(nullptr, &count, exts.data());
     for (auto const& e : exts)
-        if (cc::string_view(e.extensionName) == VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
+        if (cc::string_view(e.extensionName) == name)
             return true;
     return false;
+}
+
+bool debug_utils_extension_available()
+{
+    return instance_extension_available(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 }
 
 // First queue family with graphics support, or false if the device has none.
@@ -343,6 +349,23 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
+    // Presentation extensions, each enabled only where the loader has it.
+    // An instance extension that is not there fails instance creation outright, and a context that cannot present is
+    // still a usable context.
+    // Which of them a swapchain then needs is decided per swapchain: headless takes the headless surface, a window
+    // takes its platform's.
+    bool const has_surface = instance_extension_available(VK_KHR_SURFACE_EXTENSION_NAME);
+    bool const has_headless_surface = has_surface && instance_extension_available(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+    if (has_surface)
+        extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    if (has_headless_surface)
+        extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    bool const has_win32_surface = has_surface && instance_extension_available(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+    if (has_win32_surface)
+        extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#endif
+
     auto const dbg_info = make_debug_messenger_info();
 
     auto const instance_info = VkInstanceCreateInfo{
@@ -414,6 +437,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     cc::vector<char const*> device_extensions;
     device_extensions.push_back(k_descriptor_buffer_extension);
     device_extensions.push_back(k_robustness2_extension);
+
+    // The device half of presentation.
+    // Optional: a device without it simply cannot create a swapchain.
+    char const* const swapchain_names[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    bool const swapchain_supported = has_surface && device_extensions_available(best_device, swapchain_names);
+    if (swapchain_supported)
+        device_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     if (raytracing_supported)
         for (auto const* name : k_raytracing_extensions)
             device_extensions.push_back(name);
@@ -536,6 +566,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         raytracing_supported = ctx->_raytracing_functions.load(device);
     }
     ctx->set_raytracing_supported(raytracing_supported);
+    ctx->set_presentation_support(swapchain_supported, has_headless_surface);
 
     // The staging ring is part of a usable context rather than something acquired lazily: without it cmd.upload has
     // nowhere to write, so a context that cannot allocate one is not worth handing back.

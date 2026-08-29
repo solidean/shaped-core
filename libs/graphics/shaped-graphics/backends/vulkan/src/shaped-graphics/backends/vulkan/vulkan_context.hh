@@ -22,6 +22,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_swapchain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
@@ -113,6 +114,18 @@ public:
 
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
+
+    /// Whether this context can create a swapchain at all, and whether it can do so without a window.
+    /// Both are instance/device facts settled at creation, so a create_swapchain failure is reported rather than
+    /// discovered at the first present.
+    [[nodiscard]] bool is_swapchain_supported() const { return _swapchain_supported; }
+    [[nodiscard]] bool is_headless_present_supported() const { return _headless_surface_supported; }
+
+    void set_presentation_support(bool swapchain, bool headless_surface)
+    {
+        _swapchain_supported = swapchain;
+        _headless_surface_supported = headless_surface;
+    }
 
     /// Descriptor sizes and offset alignment for this device, read once at creation.
     /// The bind path sizes every descriptor range from these, since a descriptor's size is a device property rather
@@ -230,9 +243,11 @@ public:
         return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes));
     }
 
-    [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const&) override
+    [[nodiscard]] cc::result<vulkan_swapchain_handle> create_vulkan_swapchain(sg::swapchain_description const& desc);
+
+    [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override
     {
-        return cc::error("vulkan swapchain creation is not implemented yet");
+        return cc::result<sg::swapchain_handle>(create_vulkan_swapchain(desc));
     }
 
     // The bind path and the pipelines — not implemented yet.
@@ -496,6 +511,10 @@ public:
 
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
+
+    // See is_swapchain_supported / is_headless_present_supported.
+    bool _swapchain_supported = false;
+    bool _headless_surface_supported = false;
 
     // See descriptor_buffer_properties.
     VkPhysicalDeviceDescriptorBufferPropertiesEXT _descriptor_buffer_properties = {};

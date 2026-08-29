@@ -24,6 +24,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_raytracing_functions.cc
     src/shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.cc
     src/shaped-graphics/backends/vulkan/vulkan_raytracing_shader_table.cc
+    src/shaped-graphics/backends/vulkan/vulkan_swapchain.cc
     src/shaped-graphics/backends/vulkan/vulkan_raster_state.cc
     src/shaped-graphics/backends/vulkan/vulkan_buffer.cc
     src/shaped-graphics/backends/vulkan/vulkan_format.cc
@@ -91,6 +92,7 @@ if(SC_BUILD_TESTS)
         tests/vulkan-buffer-access-test.cc
         tests/vulkan-compute-test.cc
         tests/vulkan-raster-test.cc
+        tests/vulkan-present-test.cc
         tests/vulkan-raytracing-test.cc
         tests/vulkan-texture-access-test.cc
         tests/vulkan-test.cc

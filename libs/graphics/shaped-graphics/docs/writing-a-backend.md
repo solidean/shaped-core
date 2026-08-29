@@ -267,6 +267,20 @@ So the reference backend's tier-2 suite is the specification for those, and your
   A backend leans on `ctx.cached.acquire_*` for every pipeline, which makes it the consumer most exposed to how that
   tier behaves in each mode.
 
+- **A present handshake may need something from submit, or nothing at all.**
+  DXGI gates back-buffer reuse with a fence signaled *after* Present, so dx12's swapchain needs no hook into command
+  submission whatsoever.
+  `vkAcquireNextImageKHR` signals a semaphore the first submit must wait on, and `vkQueuePresentKHR` waits on one that
+  submit must signal — so the vulkan command list carries two semaphore fields, null on every ordinary list.
+  sg's split of the handshake into `record_present_transition` + `present` around the submit is what leaves room for
+  that, without either backend learning about the other's model.
+
+- **Presenting with no window may be a real surface rather than an emulation.**
+  `VK_EXT_headless_surface` gives a genuine `VkSwapchainKHR` with no display, so the headless path exercises every step
+  the windowed one does.
+  DXGI has no counterpart, so dx12 emulates with plain render-target textures and a rotating index.
+  **Check for the real thing before writing the emulation** — the coverage is not close.
+
 ## Answer a capability query for what the backend can do, not what the hardware can
 
 `cmd.raytracing.is_supported()` is the model for any "can this backend do X" seam.

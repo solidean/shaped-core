@@ -17,12 +17,14 @@ public:
                    sg::epoch created_in,
                    sg::texture_description const& desc,
                    VkImage image,
-                   VkDeviceMemory memory)
+                   VkDeviceMemory memory,
+                   bool owns_image = true)
       : sg::raw_texture(desc),
         _ctx(ctx),
         _creation_epoch(created_in),
         _image(image),
         _memory(memory),
+        _owns_image(owns_image),
         _access(vulkan_texture_access(subresource_extent_of(desc)))
     {
     }
@@ -87,6 +89,12 @@ public:
     // Mutable because release_storage() is const: expiry is a lifetime event on a const handle.
     mutable VkImage _image = VK_NULL_HANDLE;
     mutable VkDeviceMemory _memory = VK_NULL_HANDLE;
+
+    /// False for a *borrowed* image, which something else owns — a swapchain's, whose images belong to the
+    /// VkSwapchainKHR and are destroyed with it.
+    /// The wrapper still tracks access, which is what lets a back buffer flow through the ordinary barrier path
+    /// rather than being special-cased at every use.
+    bool _owns_image = true;
 
     // Guarded because concurrent command lists may record against the same texture.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the texture, not a change to it.

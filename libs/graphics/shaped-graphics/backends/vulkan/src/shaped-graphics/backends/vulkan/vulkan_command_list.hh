@@ -76,6 +76,15 @@ public:
     cc::vector<vulkan_texture const*> _pending_barrier_textures;
     cc::vector<VkImageMemoryBarrier2> _pending_image_barriers;
 
+    // The present handshake's half of the submit, set by vulkan_swapchain::record_present_transition.
+    //
+    // This is where Vulkan needs something from submit that dx12 does not: DXGI gates back-buffer reuse with a fence
+    // signaled *after* Present, so its swapchain needs no hook here at all, while vkAcquireNextImageKHR signals a
+    // semaphore the first submit must wait on and vkQueuePresentKHR waits on one this submit must signal.
+    // Both stay null on an ordinary list, which then submits exactly as before.
+    VkSemaphore _present_wait = VK_NULL_HANDLE;
+    VkSemaphore _present_signal = VK_NULL_HANDLE;
+
     // Readbacks recorded by this list, still token-less: submit stamps them and hands them to the actor, drop cancels.
     cc::vector<vulkan_download_copy_job> _pending_downloads;
 
