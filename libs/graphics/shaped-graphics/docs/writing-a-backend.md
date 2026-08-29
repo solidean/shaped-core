@@ -103,6 +103,10 @@ Recorded as each is met, because this is what the next backend most wants to kno
   Vulkan has no decay, so the last writer must survive its own command list.
   The fix was not a new design — it is the canonical/promote model dx12 already uses for *textures*, minus the subresource partition.
   **If your API lacks an implicit-decay rule, expect this.**
+- **The layout a resource is *created* in is not the same question on every API.**
+  dx12 seeds its texture tracker's canonical state with `general`, because a D3D12 resource is created in COMMON and that is what `general` means.
+  A Vulkan image can only be created `UNDEFINED` or `PREINITIALIZED`, so the same seed would have the first barrier declare an old layout the image is not in — which Vulkan rejects.
+  Check what your API's creation call actually leaves the resource in, and seed the tracker with that rather than inheriting the reference backend's answer.
 - **`used_cached_pipeline()` cannot be answered exactly on every API.**
   dx12 reports it precisely because D3D12 never silently ignores a cached PSO, and `VkPipelineCache` does.
   This is an sg-surface question rather than a backend detail, so raise it rather than approximating.
