@@ -33,9 +33,13 @@ cc::result<slib::shader_library*> impl::acquire_default_shader_library()
     auto* const lib = new slib::shader_library();
 
 #if SLIB_HAS_DXC
-    auto compiler = slib::create_dxc_compiler();
-    if (compiler.has_value())
-        lib->add_compiler(cc::move(compiler.value()));
+    // Both formats, so a shader resolves for whichever backend acquires it: shader_asset picks by asking the context
+    // what it accepts, so registering both is what makes one library serve a dx12 and a vulkan context alike.
+    // Each registration is best-effort — a format this build cannot produce simply is not offered.
+    if (auto dxil = slib::create_dxc_compiler(); dxil.has_value())
+        lib->add_compiler(cc::move(dxil.value()));
+    if (auto spirv = slib::create_dxc_spirv_compiler(); spirv.has_value())
+        lib->add_compiler(cc::move(spirv.value()));
 #endif
 
     // Both packages, always: sv's routines trace with theirs, and the compositor places every view with sr's blit.

@@ -20,6 +20,10 @@ void main(uint3 tid : SV_DispatchThreadID)
 )";
 } // namespace
 
+// DXIL reflection reads a container beside the bytecode through the Windows SDK's d3d12shader.h, which the Linux DXC
+// release does not ship — so the tests that assert reflected bindings from a DXIL compile are Windows-only.
+// The SPIR-V test at the end of this file is the cross-platform counterpart.
+#ifdef CC_OS_WINDOWS
 TEST("ssc::dxc compile - compute shader -> DXIL + reflection")
 {
     auto comp = ssc::dxc::compiler::create();
@@ -116,6 +120,8 @@ TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to
     CHECK(out->index == 0u);                                 // u0
 }
 
+#endif // CC_OS_WINDOWS
+
 TEST("ssc::dxc compile - a syntax error surfaces a diagnostic")
 {
     auto comp = ssc::dxc::compiler::create();
@@ -160,14 +166,7 @@ TEST("ssc::dxc compile - compute shader -> SPIR-V")
     auto compiled = compiler.value().compile({.source = src, .entry_point = "main", .stage = sg::shader_stage::compute},
                                              {.target = ssc::dxc::compile_target::spirv});
 
-    // Reflection is the one part still missing, and it fails loudly rather than returning empty bindings — so a
-    // compile that reaches it reports that error rather than a shader with no resources.
-    if (compiled.has_error())
-    {
-        CHECK(cc::string_view(compiled.error().to_string()).contains("SPIR-V reflection is not implemented"));
-        return;
-    }
-
+    REQUIRE(compiled.has_value());
     auto const& shader = compiled.value();
     CHECK(shader.format == sg::shader_format::spirv);
     REQUIRE(shader.bytecode.size() >= 4);
@@ -178,4 +177,22 @@ TEST("ssc::dxc compile - compute shader -> SPIR-V")
     CHECK(int(shader.bytecode[1]) == 0x02);
     CHECK(int(shader.bytecode[2]) == 0x23);
     CHECK(int(shader.bytecode[3]) == 0x07);
+
+    // Reflection comes out of the module itself here, not a container beside it.
+    REQUIRE(shader.bindings.size() == 1);
+    auto const& b = shader.bindings[0];
+    CHECK(b.name == "Out");
+    CHECK(b.index == 0);
+    CHECK(b.type == sg::binding_type::readwrite_structured_buffer);
+
+    // The set fills group_index and `space` stays absent, which is the opposite of what the DXIL arm reports for the
+    // same source, and what a vulkan group layout needs.
+    REQUIRE(b.group_index.has_value());
+    CHECK(b.group_index.value() == 0);
+    CHECK(!b.space.has_value());
+
+    REQUIRE(shader.workgroup_size.has_value());
+    CHECK(shader.workgroup_size.value().x == 64);
+    CHECK(shader.workgroup_size.value().y == 1);
+    CHECK(shader.workgroup_size.value().z == 1);
 }

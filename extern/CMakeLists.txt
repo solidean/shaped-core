@@ -33,6 +33,11 @@ option(SC_USE_VENDORED_ZLIB "Build the in-tree vendored zlib (OFF expects an ext
 # Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
 option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an external `stb` target)" ON)
 
+# SPIRV-Reflect, committed in-source (three files).
+# Backs shaped-shader-compiler-dxc's SPIR-V reflection: a module carries its bindings in its own instruction stream, so
+# reading them back is a parser rather than a query, and DXC emits no reflection container for a -spirv compile.
+option(SC_USE_VENDORED_SPIRV_REFLECT "Build the in-tree vendored SPIRV-Reflect (OFF expects an external `spirv-reflect` target)" ON)
+
 # Dear ImGui, tracked on the docking branch.
 # Consumed by shaped-rendering, which draws it through sg —
 # upstream's own per-API backends are not vendored, so nothing here pulls in native graphics calls.
@@ -90,6 +95,10 @@ endif()
 
 if(SC_USE_VENDORED_STB)
     add_subdirectory(stb)
+endif()
+
+if(SC_USE_VENDORED_SPIRV_REFLECT)
+    add_subdirectory(spirv-reflect)
 endif()
 
 if(SC_USE_VENDORED_IMGUI)

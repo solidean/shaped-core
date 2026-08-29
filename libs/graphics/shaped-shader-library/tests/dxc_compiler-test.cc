@@ -31,30 +31,48 @@ sg::compiled_shader const& await(sg::async_compiled_shader const& shader)
     REQUIRE(shader->has_value());
     return *shader->try_value();
 }
+
+// Which bytecode this build can actually produce end to end.
+// DXIL reflection reads a container beside the bytecode through the Windows SDK's d3d12shader.h, which the Linux DXC
+// release does not ship — so these tests exercise the platform's own format rather than asserting one of them.
+// What is under test is the slib adapter, not either bytecode format.
+#ifdef CC_OS_WINDOWS
+constexpr auto k_target_format = sg::shader_format::dxil;
+[[nodiscard]] auto make_dxc_compiler()
+{
+    return make_dxc_compiler();
+}
+#else
+constexpr auto k_target_format = sg::shader_format::spirv;
+[[nodiscard]] auto make_dxc_compiler()
+{
+    return slib::create_dxc_spirv_compiler();
+}
+#endif
 } // namespace
 
-TEST("slib - dxc compiler advertises the hlsl -> dxil edge", exclusive("slib-shader-library"))
+TEST("slib - dxc compiler advertises its hlsl -> bytecode edge", exclusive("slib-shader-library"))
 {
-    auto compiler = slib::create_dxc_compiler();
+    auto compiler = make_dxc_compiler();
     REQUIRE(compiler.has_value());
 
     CHECK(compiler.value()->source_language() == slib::shader_language::hlsl);
-    CHECK(compiler.value()->target_format() == sg::shader_format::dxil);
+    CHECK(compiler.value()->target_format() == k_target_format);
 }
 
 TEST("slib - dxc compiles the generated package's compute shader", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
-    auto compiler = slib::create_dxc_compiler();
+    auto compiler = make_dxc_compiler();
     REQUIRE(compiler.has_value());
     lib.add_compiler(cc::move(compiler.value()));
 
     lib.add_package(slib_test::shaders::package());
 
-    auto const& shader = await(slib_test::shaders::invert.compute.main->acquire(sg::shader_format::dxil));
+    auto const& shader = await(slib_test::shaders::invert.compute.main->acquire(k_target_format));
 
     CHECK(shader.stage == sg::shader_stage::compute);
-    CHECK(shader.format == sg::shader_format::dxil);
+    CHECK(shader.format == k_target_format);
     CHECK(shader.entry_point == "main");
     CHECK(shader.bytecode.size() > 0);
     CHECK(shader.compiler.name == "dxc");
@@ -72,13 +90,13 @@ TEST("slib - dxc compiles the generated package's compute shader", exclusive("sl
 TEST("slib - dxc compiles both entry points of one file", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
-    auto compiler = slib::create_dxc_compiler();
+    auto compiler = make_dxc_compiler();
     REQUIRE(compiler.has_value());
     lib.add_compiler(cc::move(compiler.value()));
     lib.add_package(slib_test::shaders::package());
 
-    auto const& vs = await(slib_test::shaders::blit.vertex.main_vs->acquire(sg::shader_format::dxil));
-    auto const& ps = await(slib_test::shaders::blit.fragment.main_ps->acquire(sg::shader_format::dxil));
+    auto const& vs = await(slib_test::shaders::blit.vertex.main_vs->acquire(k_target_format));
+    auto const& ps = await(slib_test::shaders::blit.fragment.main_ps->acquire(k_target_format));
 
     CHECK(vs.stage == sg::shader_stage::vertex);
     CHECK(ps.stage == sg::shader_stage::fragment);
@@ -99,13 +117,13 @@ TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-
     fs->write("broken.hlsl", "this is not HLSL at all");
 
     slib::shader_library lib;
-    auto compiler = slib::create_dxc_compiler();
+    auto compiler = make_dxc_compiler();
     REQUIRE(compiler.has_value());
     lib.add_compiler(cc::move(compiler.value()));
     lib.add_package(slib::shader_package{.name = "broken_pkg", .definitions = definitions}, fs);
 
     // A shader that does not build must not throw or abort — it is an error a caller handles.
-    auto const shader = broken->acquire(sg::shader_format::dxil);
+    auto const shader = broken->acquire(k_target_format);
     REQUIRE(shader != nullptr);
     (void)cc::try_async_blocking_get(shader);
     CHECK(shader->has_error());
@@ -131,18 +149,18 @@ TEST("slib - dxc hot-reloads a real shader", exclusive("slib-shader-library"))
     fs->write("cs.hlsl", shader_with_group_size(8));
 
     slib::shader_library lib;
-    auto compiler = slib::create_dxc_compiler();
+    auto compiler = make_dxc_compiler();
     REQUIRE(compiler.has_value());
     lib.add_compiler(cc::move(compiler.value()));
     lib.add_package(slib::shader_package{.name = "reload_pkg", .definitions = definitions}, fs);
 
-    CHECK(await(asset->acquire(sg::shader_format::dxil)).workgroup_size.value().x == 8);
+    CHECK(await(asset->acquire(k_target_format)).workgroup_size.value().x == 8);
     lib.start_hot_reload({.unthreaded = true});
 
     fs->write("cs.hlsl", shader_with_group_size(16));
     lib.poll_hot_reload();
 
-    CHECK(await(asset->acquire(sg::shader_format::dxil)).workgroup_size.value().x == 16);
+    CHECK(await(asset->acquire(k_target_format)).workgroup_size.value().x == 16);
     CHECK(asset->generation() == 1);
 }
 

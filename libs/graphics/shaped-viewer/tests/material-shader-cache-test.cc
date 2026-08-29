@@ -1,6 +1,9 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 
-#if SLIB_HAS_DXC
+// sv's material shaders are generated for its DXR path and compiled to DXIL, whose reflection reads a container
+// beside the bytecode through the Windows SDK's d3d12shader.h — a header the Linux DXC release does not ship.
+// So these need Windows as well as a DXC build, unlike the rest of the viewer suite.
+#if SLIB_HAS_DXC && defined(CC_OS_WINDOWS)
 
 #include "viewer_test_env.hh"
 

@@ -16,6 +16,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [LZ4](https://github.com/lz4/lz4) | v1.10.0 | `BSD-2-Clause` | clean-core — cc::compress / cc::decompress, the LZ4 algorithm | [lz4.txt](lz4.txt) |
 | [mimalloc](https://github.com/microsoft/mimalloc) | v3.3.2 | `MIT` | clean-core — the default general memory resource | [mimalloc.txt](mimalloc.txt) |
 | [SDL3](https://github.com/libsdl-org/SDL) | release-3.4.12 | `Zlib` | shaped-rendering — sr::window_system and sr::window | [sdl3.txt](sdl3.txt) |
+| [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.321.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the PNG and JPEG codecs behind babel::image | [stb.txt](stb.txt) |
 | [xxHash](https://github.com/Cyan4973/xxHash) | v0.8.3 | `BSD-2-Clause` | clean-core — cc::hash128 (the XXH3 128-bit hash) | [xxhash.txt](xxhash.txt) |
