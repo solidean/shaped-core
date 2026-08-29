@@ -96,7 +96,7 @@ if(SC_USE_VENDORED_IMGUI)
     add_subdirectory(imgui)
 endif()
 
-if(SC_USE_VENDORED_DXC AND WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
+if(SC_USE_VENDORED_DXC AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
     add_subdirectory(dxc)
 endif()
 

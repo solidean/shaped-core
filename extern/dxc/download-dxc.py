@@ -30,6 +30,7 @@ import platform
 import shutil
 import sys
 import urllib.request
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -66,10 +67,53 @@ def already_installed(pin_hash: str) -> bool:
     return PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == pin_hash
 
 
-def license_member(archive: zipfile.ZipFile) -> str | None:
-    """The release's license member, whose exact name has moved between releases (LICENSE.txt, LICENSE-MIT, ...)."""
-    names = [n for n in archive.namelist() if Path(n).name.upper().startswith("LICENSE")]
-    return min(names, key=len) if names else None
+class Archive:
+    """A zip or a tar.gz behind one interface, since the Windows and Linux releases ship different formats."""
+
+    def __init__(self, data: bytes, asset: str):
+        self._is_tar = asset.endswith((".tar.gz", ".tgz"))
+        if self._is_tar:
+            self._tar = tarfile.open(fileobj=io.BytesIO(data), mode="r:gz")
+        else:
+            self._zip = zipfile.ZipFile(io.BytesIO(data))
+
+    def names(self) -> list[str]:
+        return self._tar.getnames() if self._is_tar else self._zip.namelist()
+
+    def extract(self, member: str, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if self._is_tar:
+            src = self._tar.extractfile(member)
+            if src is None:
+                raise KeyError(member)
+            with src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+        else:
+            with self._zip.open(member) as src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+
+    def find(self, suffix: str) -> str | None:
+        """The member whose path ends with `suffix`, since a tar prefixes every entry with `./`."""
+        for name in self.names():
+            if name == suffix or name.endswith("/" + suffix):
+                return name
+        return None
+
+
+def license_members(archive: Archive) -> list[str]:
+    """The release's license members, whose names have moved between releases and differ per platform.
+
+    The Windows zip ships one; the Linux tarball ships the Microsoft terms and the LLVM ones separately, and both are
+    collected because `dev.py deps licenses` is a `check` gate and a missing one is a real omission.
+    Anything under a subdirectory is skipped: those belong to bundled headers rather than to DXC itself.
+    """
+    out = []
+    for name in archive.names():
+        stem = Path(name).name.upper()
+        depth = len([p for p in Path(name).parts if p not in (".", "")])
+        if stem.startswith("LICENSE") and depth == 1:
+            out.append(name)
+    return sorted(out, key=len)
 
 
 def main() -> int:
@@ -83,10 +127,9 @@ def main() -> int:
         print(f"dxc {up.tag} already installed at {INSTALL.as_posix()} — nothing to do")
         return 0
 
-    if sys.platform != "win32":
-        sys.exit("download-dxc.py currently supports Windows only (uses the Windows release + d3d12shader.h reflection)")
-
-    arch = host_arch()
+    # The Windows release lays its members out per architecture; the Linux one is flat and ships x86_64 only.
+    is_windows = sys.platform == "win32"
+    arch = host_arch() if is_windows else "x86_64"
     print(f"downloading {up.name} {up.tag} ({up.asset}, {arch}) ...", flush=True)
     request = urllib.request.Request(up.url, headers={"User-Agent": "shaped-core-dxc-fetch"})
     with urllib.request.urlopen(request) as response:  # noqa: S310 (pinned github release URL)
@@ -97,7 +140,7 @@ def main() -> int:
         sys.exit(f"sha256 mismatch for {up.asset}: got {got}, expected {up.pin_hash}.\n"
                  "Update tag/version/asset/pin_hash together in dependency.yml, after vetting the new release.")
 
-    archive = zipfile.ZipFile(io.BytesIO(data))
+    archive = Archive(data, up.asset)
 
     # Fresh install (drop any prior arch/version).
     if INSTALL.exists():
@@ -107,31 +150,48 @@ def main() -> int:
     (INSTALL / "include" / "dxc").mkdir(parents=True)
 
     def extract(member: str, dest: Path) -> None:
-        with archive.open(member) as src, open(dest, "wb") as out:
-            shutil.copyfileobj(src, out)
+        archive.extract(member, dest)
 
-    # The minimal set: the compiler DLL + its dxil.dll signer, the import lib, and the two headers
-    # dxcapi.h needs (d3d12shader.h sits next to it for dxcapi.h's own include).
-    extract(f"bin/{arch}/dxcompiler.dll", INSTALL / "bin" / "dxcompiler.dll")
-    extract(f"bin/{arch}/dxil.dll", INSTALL / "bin" / "dxil.dll")
-    extract(f"lib/{arch}/dxcompiler.lib", INSTALL / "lib" / "dxcompiler.lib")
-    extract("inc/dxcapi.h", INSTALL / "include" / "dxc" / "dxcapi.h")
-    extract("inc/d3d12shader.h", INSTALL / "include" / "dxc" / "d3d12shader.h")
-
-    # The license, so `dev.py deps licenses` has something to collect for a binary-only dependency.
-    # A release that ships none is not worth failing a build over, so warn and carry on.
-    member = license_member(archive)
-    if member is None:
-        print(f"warning: {up.asset} ships no LICENSE member — docs/licenses/ will keep its committed copy", file=sys.stderr)
+    if is_windows:
+        # The compiler DLL plus its dxil.dll signer, the import lib, and the two headers dxcapi.h needs
+        # (d3d12shader.h sits next to it for dxcapi.h's own include, and backs the DXIL reflection path).
+        extract(f"bin/{arch}/dxcompiler.dll", INSTALL / "bin" / "dxcompiler.dll")
+        extract(f"bin/{arch}/dxil.dll", INSTALL / "bin" / "dxil.dll")
+        extract(f"lib/{arch}/dxcompiler.lib", INSTALL / "lib" / "dxcompiler.lib")
+        extract("inc/dxcapi.h", INSTALL / "include" / "dxc" / "dxcapi.h")
+        extract("inc/d3d12shader.h", INSTALL / "include" / "dxc" / "d3d12shader.h")
+        installed = "bin/dxcompiler.dll, bin/dxil.dll, lib/dxcompiler.lib, include/dxc/"
     else:
-        license_dest = INSTALL.parent / up.license_files[0]
+        # No import library, and no d3d12shader.h at all: the Linux release ships no DXIL reflection interfaces, which
+        # is why the SPIR-V path reflects the emitted module instead of the container.
+        # WinAdapter.h is what gives dxcapi.h its HRESULT / CComPtr / IID_PPV_ARGS off Windows, so it is not optional.
+        for name, dest in (
+            ("lib/libdxcompiler.so", INSTALL / "lib" / "libdxcompiler.so"),
+            ("include/dxc/dxcapi.h", INSTALL / "include" / "dxc" / "dxcapi.h"),
+            ("include/dxc/WinAdapter.h", INSTALL / "include" / "dxc" / "WinAdapter.h"),
+            ("include/dxc/dxcerrors.h", INSTALL / "include" / "dxc" / "dxcerrors.h"),
+            ("include/dxc/Support/ErrorCodes.h", INSTALL / "include" / "dxc" / "Support" / "ErrorCodes.h"),
+        ):
+            member = archive.find(name)
+            if member is None:
+                sys.exit(f"{up.asset} is missing {name}, which this install needs")
+            extract(member, dest)
+        installed = "lib/libdxcompiler.so, include/dxc/"
+
+    # The licenses, so `dev.py deps licenses` has something to collect for a binary-only dependency.
+    # A release that ships none is not worth failing a build over, so warn and carry on.
+    members = license_members(archive)
+    if not members:
+        print(f"warning: {up.asset} ships no LICENSE member — docs/licenses/ will keep its committed copy", file=sys.stderr)
+    for member, declared in zip(members, up.license_files):
+        license_dest = INSTALL.parent / declared
         license_dest.parent.mkdir(parents=True, exist_ok=True)
         extract(member, license_dest)
 
     PIN_FILE.write_text(up.pin_hash + "\n", encoding="utf-8")
 
     print(f"\ninstalled {up.name} {up.tag} ({arch}) -> {INSTALL.as_posix()}")
-    print("  bin/dxcompiler.dll, bin/dxil.dll, lib/dxcompiler.lib, include/dxc/")
+    print(f"  {installed}")
     return 0
 
 

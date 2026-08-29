@@ -9,7 +9,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | Dependency | Version | License | Used by | Text |
 |---|---|---|---|---|
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.6 | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | clean-core — cc::blake3 / cc::hash256 (the cryptographic hash) | [blake3-cc0.txt](blake3-cc0.txt), [blake3-a2.txt](blake3-a2.txt), [blake3-a2llvm.txt](blake3-a2llvm.txt) |
-| [DXC](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2602.24 | `LicenseRef-Microsoft-DXC-Binary` | shaped-shader-compiler-dxc — HLSL to sg::compiled_shader | [dxc.txt](dxc.txt) |
+| [DXC](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2602.24 | `LicenseRef-Microsoft-DXC-Binary` | shaped-shader-compiler-dxc — HLSL to sg::compiled_shader | [dxc.txt](dxc.txt), [dxc-llvm.txt](dxc-llvm.txt) |
 | [Dear ImGui](https://github.com/ocornut/imgui) | v1.92.8-docking | `MIT` | shaped-rendering — sr::imgui_context and sr::imgui_routine | [dear-imgui.txt](dear-imgui.txt) |
 | [ImPlot](https://github.com/epezent/implot) | d65a2bef53d3 | `MIT` | shaped-rendering — plotting inside the imgui bundle | [implot.txt](implot.txt) |
 | [ImGuizmo](https://github.com/cedricguillemet/ImGuizmo) | dc25afb98bc3 | `MIT` | shaped-rendering — manipulation gizmos inside the imgui bundle | [imguizmo.txt](imguizmo.txt) |

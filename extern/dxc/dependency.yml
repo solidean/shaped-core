@@ -12,11 +12,18 @@ upstreams:
     track: github-releases
     version: 1.9.2602.24
     tag: v1.9.2602.24
-    asset: dxc_2026_05_27.zip
     digest_algo: sha256
-    pin_hash: cf658aacf070d3045e31b8f1f8a696c2945f37c1095019481ef7c513368db3b4
+    # Per-OS assets: the same release ships a Windows zip and a Linux tarball, with different layouts and different
+    # license members. `pin_hash` for the host is resolved at load, so everything downstream sees one value.
+    # prereqs.py's line scan looks for the host's suffixed key first, which is what keeps a Linux checkout from
+    # re-fetching on every configure because it matched the Windows hash.
+    asset_windows: dxc_2026_05_27.zip
+    pin_hash_windows: cf658aacf070d3045e31b8f1f8a696c2945f37c1095019481ef7c513368db3b4
+    asset_linux: linux_dxc_2026_05_26.x86_64.tar.gz
+    pin_hash_linux: 928b3e9986d11dc4279050e02340950c29bcbd1e5efb9d3ded9669dade37639d
     license: LicenseRef-Microsoft-DXC-Binary
-    license_files: [.install/LICENSE.txt]
+    # The Windows zip ships one license member; the Linux tarball ships the MS terms and the LLVM ones separately.
+    license_files: [.install/LICENSE.txt, .install/LICENSE-LLVM.txt]
     used_by: shaped-shader-compiler-dxc — HLSL to sg::compiled_shader
     notes: |
       The one dependency that is not permissively licensed, and the only one we take as a binary rather than as source.

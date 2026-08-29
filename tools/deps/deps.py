@@ -681,7 +681,12 @@ def collect(upstreams: list) -> tuple[list[Bundle], list[str]]:
         paths = up.license_paths()
         for path in paths:
             # A dependency under several licenses gets one file each, suffixed from the source file's own name.
-            suffix = "" if len(paths) == 1 else "-" + path.name.lower().removeprefix("license").strip("._-")
+            # Taken from the stem rather than the name: a member called LICENSE.txt would otherwise suffix itself
+            # "-txt" and one called LICENSE-LLVM.txt would land as `<slug>-llvm.txt.txt`.
+            # A stem that is bare "LICENSE" distinguishes itself by carrying no suffix at all, so a dependency whose
+            # members are LICENSE and LICENSE-LLVM yields `<slug>.txt` and `<slug>-llvm.txt` rather than a bare dash.
+            stem = path.stem.lower().removeprefix("license").strip("._-")
+            suffix = f"-{stem}" if len(paths) > 1 and stem else ""
             filename = f"{up.slug}{suffix}.txt"
             if path.is_file():
                 bundles.append(Bundle(filename, path.read_text(encoding="utf-8", errors="replace"), up.name))
