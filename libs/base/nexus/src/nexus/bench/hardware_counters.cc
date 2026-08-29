@@ -1,5 +1,6 @@
 #include "hardware_counters.hh"
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/bench/impl/hardware_counters_backend.hh>
@@ -137,17 +138,25 @@ hw_measurement measure_hw_counters(cc::function_ref<void()> body, hw_measure_con
         return out;
     };
 
-    // measure_all: re-run the body over the not-yet-measured counters, each pass grabbing a budget-sized
-    // chunk (the backend degrades from the end), until every requested counter has a value — or a pass adds
-    // nothing, meaning no PMU counter is readable at all (then stop rather than loop forever).
+    // measure_all: re-run the body over the not-yet-measured counters until every requested counter has a value.
+    //
+    // The simultaneous-counter budget cannot be asked for up front, and is not the PMU's nominal counter count: whatever else already holds a PMC (the NMI watchdog, typically) shrinks it.
+    // A group that overshoots it is refused when the values are read rather than when the events are opened, so an over-wide pass looks exactly like a pass with no PMU access at all.
+    // Narrowing is what tells the two apart: halve the chunk and retry, and conclude the counters are unreadable only once a chunk of one comes back invalid.
+    // The width that works is then kept for the following passes, instead of re-widening into the same refusal.
+    auto budget = isize(0);
     for (auto missing = still_missing(); !missing.empty(); missing = still_missing())
     {
+        if (budget == 0)
+            budget = missing.size();
+        auto const take = cc::min(budget, missing.size());
+
         cc::vector<hw_counter> subset;
-        subset.reserve(missing.size() + 2);
+        subset.reserve(take + 2);
         subset.push_back(hw_counter::elapsed_nanoseconds); // baseline is free (no PMC slot) and re-armed anyway
         subset.push_back(hw_counter::reference_cycles);
-        for (auto const c : missing)
-            subset.push_back(c);
+        for (auto i = isize(0); i < take; ++i)
+            subset.push_back(missing[i]);
 
         auto const pass = impl::backend_measure(body, subset);
         auto progressed = false;
@@ -164,7 +173,11 @@ hw_measurement measure_hw_counters(cc::function_ref<void()> body, hw_measure_con
                 }
         }
         if (!progressed)
-            break;
+        {
+            if (take <= 1)
+                break; // one counter alone is as narrow as this gets, so nothing here is readable
+            budget = (take + 1) / 2;
+        }
     }
 
     return {.samples = best};
