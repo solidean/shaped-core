@@ -1284,6 +1284,11 @@ cc::scoped_environment_variable const s("K", "v");  // set for a scope, restored
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
 
+#include <clean-core/platform/leak_annotations.hh> // tell LeakSanitizer a leak is deliberate; no-op without it
+cc::leak_intentionally(p);                          // this object is never freed on purpose (state WHY at the site)
+auto const g = cc::leak_scope();                    // ...and this for what it OWNS: LSan cannot see through a cc::
+                                                    // container (mimalloc), so a singleton's ctor needs the scope
+
 #include <clean-core/error/crash_handler.hh>
 cc::install_crash_handler();                        // segfault/abort/etc -> stderr: reason + hooks + stacktrace
                                                     // + EVERY other thread's stack (Windows; where a hang lives)

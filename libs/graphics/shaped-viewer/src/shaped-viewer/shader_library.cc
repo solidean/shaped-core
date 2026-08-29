@@ -1,6 +1,7 @@
 #include "shader_library.hh"
 
-#include <shaped-rendering/shaders.hh> // sr::shader_package (the blit the compositor drives)
+#include <clean-core/platform/leak_annotations.hh> // cc::leak_scope — this library is never freed, by design
+#include <shaped-rendering/shaders.hh>             // sr::shader_package (the blit the compositor drives)
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/rendering/shaders.hh>
@@ -24,6 +25,11 @@ cc::result<slib::shader_library*> impl::acquire_default_shader_library()
 {
     // Deliberately leaked: the generated package symbols an asset is reached through are process-wide globals that outlive any
     // owner, so destroying the library at exit would leave them naming freed assets.
+    // The whole construction is scoped rather than the library pointer annotated, because the filesystems the packages mount are
+    // owned through a cc:: container and LeakSanitizer cannot reach them from `lib` — cc::leak_scope's header says why.
+    // libs/graphics/shaped-viewer/docs/TODO.md carries the case for a shape that leaks nothing and needs no annotation at all.
+    auto const leak_guard = cc::leak_scope();
+
     auto* const lib = new slib::shader_library();
 
 #if SLIB_HAS_DXC

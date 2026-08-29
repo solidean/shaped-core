@@ -68,6 +68,7 @@ template <class T, class NodeTraits>
 struct poly_node_allocation;
 struct scoped_default_node_allocator; // scoped override of the default node allocator (memory/node_allocation.hh)
 struct scoped_environment_variable; // one environment variable, set for a scope and put back (platform/environment.hh)
+struct leak_scope; // suppresses LeakSanitizer reports for the calling thread, for a deliberate leak (platform/leak_annotations.hh)
 template <class T>
 struct unique_ptr;
 template <class T, class Traits>
