@@ -127,6 +127,7 @@ target_sources(clean-core
     src/clean-core/platform/file_path.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
+    src/clean-core/platform/leak_annotations.hh
     src/clean-core/platform/stack_capture.hh
     src/clean-core/platform/module_table.hh
     src/clean-core/platform/symbolize.hh
@@ -306,16 +307,24 @@ target_compile_definitions(clean-core
 )
 
 # Detect and link the correct library for std::stacktrace support.
-# When no working <stacktrace> is found (e.g. Emscripten / WASI libc++ ships no such header), this is not
-# fatal: clean-core/platform/stacktrace.hh detects the same condition via __has_include and falls back to
-# an empty stub (CC_HAS_STACKTRACE 0). Only the GCC paths need an explicit link library.
+# This is a link probe, so it is the authoritative answer and it publishes that answer as CC_HAS_STACKTRACE.
+# stacktrace.hh can only ask __has_include, which proves the header exists and not that anything implements it —
+# a libstdc++ shipped without libstdc++exp has <stacktrace> and none of its symbols, and that combination links
+# only because the header believed itself. When the probe finds nothing (Emscripten / WASI ship no such header
+# at all) this is not fatal: the header falls back to an empty stub. Only the GCC paths need a link library.
+# PUBLIC because consumers include stacktrace.hh and must reach the same verdict.
 include(DetectStacktraceLib)
 cc_detect_stacktrace_link(_CC_STACKTRACE_LIB)
 
 if(_CC_STACKTRACE_LIB STREQUAL "NOTFOUND")
     message(STATUS "[clean-core] std::stacktrace unavailable — building with the empty stacktrace stub")
-elseif(NOT _CC_STACKTRACE_LIB STREQUAL "")
-    target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
+    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=0)
+else()
+    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=1)
+
+    if(NOT _CC_STACKTRACE_LIB STREQUAL "")
+        target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
+    endif()
 endif()
 
 # DbgHelp backs the crash handler's per-thread stack walk (crash_handler.cc). std::stacktrace only ever
