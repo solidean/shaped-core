@@ -21,6 +21,8 @@
 // SC_MIMALLOC=OFF removes that blind spot, and the sanitize-* presets set it — but a leak_scope is what stays correct
 // in both builds, so prefer it over narrowing an annotation to a configuration that may not be the one running.
 
+#include <clean-core/fwd.hh>
+
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) && __has_include(<sanitizer/lsan_interface.h>)
 #define CC_HAS_LEAK_ANNOTATIONS 1
