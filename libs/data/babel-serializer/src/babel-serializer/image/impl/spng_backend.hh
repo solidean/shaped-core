@@ -18,10 +18,13 @@
 namespace babel::impl
 {
 /// Decode a whole PNG buffer: the IHDR fields, the pixels, and every ancillary chunk png::data models.
-/// Pixels come back 8-bit and tightly packed, at the channel count the file's color type and tRNS imply.
+/// Pixels come back tightly packed, at the channel count the file's color type and tRNS imply, and at the sample
+/// width `decoded` reports — u16 for a 16-bit file, u8 for every other depth.
+/// The input is untrusted, so the decode caps image dimensions and ancillary-chunk memory; both are errors.
 [[nodiscard]] cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes);
 
 /// Encode `img`'s pixels and metadata to PNG file bytes.
+/// `img.pixels` must be exactly the size `width`, `height`, `channels` and `decoded` imply.
 /// `compression_level` is zlib's: 0..9, or -1 for zlib's own default.
 [[nodiscard]] cc::result<cc::vector<byte>> spng_encode_png(babel::png::data const& img, int compression_level);
 } // namespace babel::impl

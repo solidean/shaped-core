@@ -1,3 +1,5 @@
+#include "fixtures/png_fixtures.hh"
+
 #include <babel-serializer/image/hdr.hh>
 #include <babel-serializer/image/image.hh>
 #include <babel-serializer/image/jpg.hh>
@@ -483,4 +485,108 @@ TEST("image - encode rejects a sample type the format cannot store")
     auto const f32_rgba = make_float_gradient(8, 8, 4);
     CHECK(img::encode(f32_rgba, img::format::hdr).has_error());
     CHECK(img::encode(f32_rgba, img::format::pfm).has_error());
+}
+
+// Decode-only fixtures
+// -------------------------------------------------------------------------------------------------
+// babel::png::encode always writes a non-interlaced, non-palette, tRNS-free file at 8 or 16 bits, so a
+// round-trip reaches exactly one of plan_decode's five branches.
+// These four PNGs are hand-built by fixtures/make-png-fixtures.py to reach the other four.
+
+namespace
+{
+cc::span<byte const> fixture(cc::span<unsigned char const> bytes)
+{
+    return cc::span<byte const>(reinterpret_cast<byte const*>(bytes.data()), bytes.size());
+}
+} // namespace
+
+TEST("png - a palette file de-palettizes, and its tRNS becomes alpha")
+{
+    auto const d = babel::png::read(fixture(babel_test::png_indexed_trns));
+    REQUIRE(d.has_value());
+
+    auto const& p = d.value();
+    CHECK(p.width == 4);
+    CHECK(p.height == 2);
+    CHECK(p.color == babel::png::color_type::palette); // the file's own type, reported verbatim
+    CHECK(p.bit_depth == 8);
+    CHECK(p.channels == 4); // de-palettized to rgb, plus the alpha tRNS adds
+    CHECK(p.decoded == babel::png::component::u8);
+    REQUIRE(p.pixels.size() == 4 * 2 * 4);
+
+    // Row 0 is palette entries 0..3: black, red, green, blue, with entry 0 transparent.
+    auto const px = [&](int x, int y, int c) { return int(u8(p.pixels[(i64(y) * 4 + x) * 4 + c])); };
+    CHECK(px(0, 0, 3) == 0);   // entry 0 is the one tRNS zeroes
+    CHECK(px(1, 0, 0) == 255); // red
+    CHECK(px(1, 0, 3) == 255);
+    CHECK(px(2, 0, 1) == 255); // green
+    CHECK(px(3, 0, 2) == 255); // blue
+}
+
+TEST("png - a one-bit greyscale file unpacks to u8 samples")
+{
+    auto const d = babel::png::read(fixture(babel_test::png_grey_1bit));
+    REQUIRE(d.has_value());
+
+    auto const& p = d.value();
+    CHECK(p.width == 8);
+    CHECK(p.height == 2);
+    CHECK(p.color == babel::png::color_type::grey);
+    CHECK(p.bit_depth == 1); // the only place the sub-byte depth survives
+    CHECK(p.channels == 1);
+    CHECK(p.decoded == babel::png::component::u8);
+    REQUIRE(p.pixels.size() == 8 * 2); // one byte per pixel, not one bit
+
+    // Row 0 is 0b10101010, so the samples alternate.
+    CHECK(int(u8(p.pixels[0])) == 255);
+    CHECK(int(u8(p.pixels[1])) == 0);
+}
+
+TEST("png - a grey file's tRNS becomes an alpha channel")
+{
+    auto const d = babel::png::read(fixture(babel_test::png_grey_trns));
+    REQUIRE(d.has_value());
+
+    auto const& p = d.value();
+    CHECK(p.width == 4);
+    CHECK(p.height == 2);
+    CHECK(p.color == babel::png::color_type::grey); // one channel in the file
+    CHECK(p.bit_depth == 8);
+    CHECK(p.channels == 2); // two out of it, because tRNS adds the alpha
+    REQUIRE(p.pixels.size() == 4 * 2 * 2);
+
+    // Row 0 greys are 0, 64, 128, 255 and tRNS names 128, so exactly that pixel is transparent.
+    auto const alpha = [&](int x, int y) { return int(u8(p.pixels[(i64(y) * 4 + x) * 2 + 1])); };
+    CHECK(alpha(0, 0) == 255);
+    CHECK(alpha(1, 0) == 255);
+    CHECK(alpha(2, 0) == 0);
+    CHECK(alpha(3, 0) == 255);
+}
+
+TEST("png - an Adam7 file is de-interlaced")
+{
+    auto const d = babel::png::read(fixture(babel_test::png_rgb_adam7));
+    REQUIRE(d.has_value());
+
+    auto const& p = d.value();
+    CHECK(p.width == 8);
+    CHECK(p.height == 8);
+    CHECK(p.interlace == babel::png::interlace_method::adam7); // the file's own method, reported verbatim
+    CHECK(p.color == babel::png::color_type::rgb);
+    CHECK(p.channels == 3);
+    REQUIRE(p.pixels.size() == 8 * 8 * 3);
+
+    // The fixture's pixel value is a function of (x, y) alone, so every pass landing in the right place
+    // is checkable rather than merely plausible.
+    auto ok = true;
+    for (auto y = 0; y < 8; ++y)
+        for (auto x = 0; x < 8; ++x)
+        {
+            auto const at = (i64(y) * 8 + x) * 3;
+            ok = ok && u8(p.pixels[at + 0]) == u8(x * 32 % 256);
+            ok = ok && u8(p.pixels[at + 1]) == u8(y * 32 % 256);
+            ok = ok && u8(p.pixels[at + 2]) == u8((x + y) * 16 % 256);
+        }
+    CHECK(ok);
 }

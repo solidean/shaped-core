@@ -481,11 +481,14 @@ Only what the signatures above cannot tell you.
 - **JPG is lossy, PNG lossless.** Round-trip PNG for exact pixels, and expect small per-channel deltas through JPG.
 - **`channels` is the *decoded* count**, since palette PNGs are de-palettized and Adam7 is de-interlaced.
   The native `color` / `interlace` fields still report the original encoding.
-- **The sample type follows the format.** PNG / JPEG decode to `u8` whatever the file's native `bit_depth` says (`u16` is API-ready but not decoded); HDR / PFM decode to `f32`.
+- **The sample type follows the format.** JPEG decodes to `u8` and HDR / PFM to `f32`; PNG is the one that spans two, `u16` for a 16-bit file and `u8` for every other depth.
   `encode` errors on a mismatch rather than reinterpreting the buffer, so check `comp` after a `read` that picked its own format.
 - **HDR is lossy and PFM is not.** RGBE quantizes a pixel's three mantissas against one shared exponent (~0.2% of the pixel's largest channel); PFM stores the bits, so its round-trip is exact.
 - **HDR and PFM both store rows the other way up**, and both are flipped to a top-left origin on read — `stored_bottom_up` reports what the HDR file did.
 - **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
+- **`babel::png::encode` wants the buffer size exactly.** `width * height * channels * (decoded == u16 ? 2 : 1)`, so a buffer that merely fits is `decoded` disagreeing with it and is an error.
+- **A PNG decode caps dimensions and ancillary-chunk memory**, because the input is untrusted and libspng's own defaults are effectively unbounded.
+  A file past either ceiling is an error, not a truncated decode.
 
 ## Umbrellas
 

@@ -17,8 +17,8 @@ and deletes the clone.
 The subset is the whole library: upstream is two files, spng.c and spng.h. What
 is dropped is only the scaffolding around them -- CMakeLists.txt, meson.build
 and cmake/ (build machinery we replace), tests/, examples/, docs/ and the CI
-definitions. That is the smallest vendored payload here, which is what puts
-libspng in the xxhash tier rather than the fetched SQLite one.
+definitions. Two files and no build machinery worth keeping is what puts libspng
+in the xxhash tier rather than the fetched SQLite one.
 
 libspng carries no inflate/deflate of its own. It builds against the vendored
 zlib, not the miniz alternative SPNG_USE_MINIZ selects: zlib is already in the

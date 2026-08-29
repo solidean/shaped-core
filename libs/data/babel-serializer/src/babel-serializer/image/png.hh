@@ -135,6 +135,8 @@ namespace babel::png
 /// Encode `img`'s pixels and metadata to PNG file bytes.
 /// The written depth comes from `decoded` (8 or 16) and the color type from `channels`, so a decode / encode
 /// round-trip preserves the samples at their own width, plus the chunks above them.
+/// `pixels` must be exactly `width * height * channels * (decoded == component::u16 ? 2 : 1)` bytes — a size that
+/// merely fits is `decoded` disagreeing with the buffer, and is an error rather than a partial encode.
 /// `bit_depth` and `interlace` are ignored — they describe a file that was read, not one being written, so a
 /// sub-byte-depth PNG re-encodes as 8-bit and an Adam7 one re-encodes non-interlaced.
 [[nodiscard]] cc::result<cc::vector<byte>> encode(data const& img, write_options opts = {});

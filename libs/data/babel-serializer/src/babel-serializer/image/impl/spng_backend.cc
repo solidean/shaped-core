@@ -30,6 +30,18 @@ cc::string spng_message(char const* what, int err)
     return cc::format("png: {} failed: {}", what, spng_strerror(err));
 }
 
+/// Whether a chunk getter found its chunk.
+/// `SPNG_ECHUNKAVAIL` is "the file carries none", which is not an error; every other non-zero code is one,
+/// including the limit and allocation failures the ceilings below turn a hostile file into.
+cc::result<bool> chunk_present(char const* what, int err)
+{
+    if (err == 0)
+        return true;
+    if (err == SPNG_ECHUNKAVAIL)
+        return false;
+    return cc::error(spng_message(what, err));
+}
+
 /// libspng's chunk setters take `char*` and only ever read through it — spng_set_text and spng_set_iccp
 /// store the pointer as-is rather than copying, which is also why the pointee must outlive the encode.
 char* as_spng_string(char const* p)
@@ -117,19 +129,26 @@ decode_plan plan_decode(spng_ihdr const& ihdr, bool has_trns)
 }
 
 /// Read every ancillary chunk png::data models.
-/// A getter returning SPNG_ECHUNKAVAIL means the chunk is absent, which is not an error — the field stays empty.
-void read_metadata(spng_ctx* ctx, babel::png::data& out)
+/// An absent chunk leaves its field empty; anything else a getter reports is returned, so a file that trips the
+/// decode ceilings fails loudly rather than coming back with silently missing metadata.
+cc::result<cc::unit> read_metadata(spng_ctx* ctx, babel::png::data& out)
 {
     auto gamma = 0.0;
-    if (spng_get_gama(ctx, &gamma) == 0)
+    auto has_gama = chunk_present("get_gama", spng_get_gama(ctx, &gamma));
+    CC_RETURN_IF_ERROR(has_gama);
+    if (has_gama.value())
         out.gamma = gamma;
 
     auto intent = u8(0);
-    if (spng_get_srgb(ctx, &intent) == 0)
+    auto has_srgb = chunk_present("get_srgb", spng_get_srgb(ctx, &intent));
+    CC_RETURN_IF_ERROR(has_srgb);
+    if (has_srgb.value())
         out.srgb_intent = int(intent);
 
     auto iccp = spng_iccp{};
-    if (spng_get_iccp(ctx, &iccp) == 0)
+    auto has_iccp = chunk_present("get_iccp", spng_get_iccp(ctx, &iccp));
+    CC_RETURN_IF_ERROR(has_iccp);
+    if (has_iccp.value())
     {
         out.icc_profile_name = cc::string(iccp.profile_name); // char[80], always NUL-terminated by libspng
         out.icc_profile.resize_to_uninitialized(isize(iccp.profile_len));
@@ -137,20 +156,24 @@ void read_metadata(spng_ctx* ctx, babel::png::data& out)
     }
 
     auto phys = spng_phys{};
-    if (spng_get_phys(ctx, &phys) == 0)
+    auto has_phys = chunk_present("get_phys", spng_get_phys(ctx, &phys));
+    CC_RETURN_IF_ERROR(has_phys);
+    if (has_phys.value())
         out.physical = babel::png::physical_dimensions{.ppu_x = int(phys.ppu_x), //
                                                        .ppu_y = int(phys.ppu_y),
                                                        .unit_is_meter = phys.unit_specifier == 1};
 
     // Two calls by design: a null `text` asks only for the count.
     auto count = u32(0);
-    if (spng_get_text(ctx, nullptr, &count) != 0 || count == 0)
-        return;
+    auto has_text = chunk_present("get_text", spng_get_text(ctx, nullptr, &count));
+    CC_RETURN_IF_ERROR(has_text);
+    if (!has_text.value() || count == 0)
+        return cc::unit{};
 
     auto entries = cc::vector<spng_text>();
     entries.resize_to_filled(isize(count), spng_text{});
-    if (spng_get_text(ctx, entries.data(), &count) != 0)
-        return;
+    if (auto const err = spng_get_text(ctx, entries.data(), &count); err != 0)
+        return cc::error(spng_message("get_text", err));
 
     out.texts.reserve(isize(count));
     for (auto i = u32(0); i < count; ++i)
@@ -164,6 +187,8 @@ void read_metadata(spng_ctx* ctx, babel::png::data& out)
             .compressed = t.type == SPNG_ZTXT || (t.type == SPNG_ITXT && t.compression_flag != 0),
         });
     }
+
+    return cc::unit{};
 }
 
 /// spng_rw_fn sink: append `length` encoded bytes into the cc::vector behind `user`.
@@ -191,13 +216,23 @@ struct encode_metadata
             if (auto const err = spng_set_gama(ctx, img.gamma.value()); err != 0)
                 return cc::error(spng_message("set_gama", err));
 
+        // Range-checked before the narrowing cast, or 256 would arrive as a perfectly valid intent 0.
         if (img.srgb_intent.has_value())
-            if (auto const err = spng_set_srgb(ctx, u8(img.srgb_intent.value())); err != 0)
+        {
+            auto const intent = img.srgb_intent.value();
+            if (intent < 0 || intent > 3)
+                return cc::error(cc::format("png encode: sRGB rendering intent must be 0..3, got {}", intent));
+            if (auto const err = spng_set_srgb(ctx, u8(intent)); err != 0)
                 return cc::error(spng_message("set_srgb", err));
+        }
 
         if (img.physical.has_value())
         {
             auto const& p = img.physical.value();
+            // Same reason: pHYs is unsigned on the wire, so a negative here would be written as a huge positive.
+            if (p.ppu_x < 0 || p.ppu_y < 0)
+                return cc::error(
+                    cc::format("png encode: physical dimensions must be non-negative, got {}x{}", p.ppu_x, p.ppu_y));
             auto phys
                 = spng_phys{.ppu_x = u32(p.ppu_x), .ppu_y = u32(p.ppu_y), .unit_specifier = u8(p.unit_is_meter ? 1 : 0)};
             if (auto const err = spng_set_phys(ctx, &phys); err != 0)
@@ -240,6 +275,7 @@ struct encode_metadata
             // The body must be NUL-terminated: libspng's encoder ignores `length` and measures with strlen,
             // so pointing at a cc::string's own bytes reads past its end.
             // `length` is still set, because spng_set_text rejects a zero one.
+            // The same strlen is why a `text` carrying an embedded NUL is written truncated at it.
             c_strings.push_back(cc::string::create_copy_c_str_materialized(t.text));
             entry.text = as_spng_string(c_strings.back().c_str_if_terminated());
             entry.length = size_t(t.text.size());
@@ -283,6 +319,22 @@ cc::result<int> spng_color_type_for(int channels)
         return cc::error(cc::format("png encode: unsupported channel count {}", channels));
     }
 }
+
+// Decode ceilings, because a PNG is untrusted input and libspng ships none by default —
+// `spng_ctx_new` leaves the chunk cache at SIZE_MAX and the per-chunk bound at 2^31-1.
+// The chunks are deflate-compressed, so without these a few kilobytes of crafted zTXt inflate into gigabytes.
+
+/// Largest single inflated ancillary chunk (iCCP profile, zTXt / iTXt body).
+/// Sized against real colour profiles: a large printer ICC profile is a few megabytes, so this clears them by ~4x.
+constexpr size_t max_png_chunk_bytes = size_t(16) * 1024 * 1024;
+
+/// Total ancillary-chunk memory one decode may hold, across the up-to-1000 chunks libspng already caps a file at.
+constexpr size_t max_png_chunk_cache_bytes = size_t(64) * 1024 * 1024;
+
+/// Largest image dimension babel will decode, per axis.
+/// Well past any real photograph or texture, and it is what keeps a hostile IHDR from being believed and allocated
+/// for before a single IDAT byte is read.
+constexpr u32 max_png_dimension = 65535;
 } // namespace
 
 cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
@@ -293,6 +345,12 @@ cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
     auto guard = context_guard(0);
     if (guard.ctx == nullptr)
         return cc::error("png decode: could not create an spng context");
+
+    // Before the buffer, so nothing is read under the defaults.
+    if (auto const err = spng_set_image_limits(guard.ctx, max_png_dimension, max_png_dimension); err != 0)
+        return cc::error(spng_message("set_image_limits", err));
+    if (auto const err = spng_set_chunk_limits(guard.ctx, max_png_chunk_bytes, max_png_chunk_cache_bytes); err != 0)
+        return cc::error(spng_message("set_chunk_limits", err));
 
     if (auto const err = spng_set_png_buffer(guard.ctx, bytes.data(), size_t(bytes.size())); err != 0)
         return cc::error(spng_message("set_png_buffer", err));
@@ -305,7 +363,9 @@ cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
     CC_RETURN_IF_ERROR(color);
 
     auto trns = spng_trns{};
-    auto const plan = plan_decode(ihdr, spng_get_trns(guard.ctx, &trns) == 0);
+    auto has_trns = chunk_present("get_trns", spng_get_trns(guard.ctx, &trns));
+    CC_RETURN_IF_ERROR(has_trns);
+    auto const plan = plan_decode(ihdr, has_trns.value());
 
     auto size = size_t(0);
     if (auto const err = spng_decoded_image_size(guard.ctx, plan.fmt, &size); err != 0)
@@ -329,7 +389,7 @@ cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
 
     // Chunks stored after IDAT are only reachable once the image is decoded, and a file carrying none is not an error.
     spng_decode_chunks(guard.ctx);
-    read_metadata(guard.ctx, result);
+    CC_RETURN_IF_ERROR(read_metadata(guard.ctx, result));
 
     return cc::move(result);
 }
@@ -344,10 +404,15 @@ cc::result<cc::vector<byte>> spng_encode_png(babel::png::data const& img, int co
     auto color = spng_color_type_for(img.channels); // not const: CC_RETURN_IF_ERROR moves the error out
     CC_RETURN_IF_ERROR(color);
 
+    // Exact rather than a lower bound: `pixels` is tightly packed, so a size that merely fits is `decoded`
+    // disagreeing with the buffer.
+    // The one that would otherwise pass silently is u16 pixels with `decoded` left at its u8 default, which
+    // encodes the first half of the buffer as an 8-bit image.
     auto const wide = img.decoded == babel::png::component::u16;
     auto const needed = isize(img.width) * isize(img.height) * isize(img.channels) * (wide ? 2 : 1);
-    if (img.pixels.size() < needed)
-        return cc::error(cc::format("png encode: pixel buffer too small ({} < {})", img.pixels.size(), needed));
+    if (img.pixels.size() != needed)
+        return cc::error(cc::format("png encode: pixel buffer is {} bytes, expected exactly {} for {}x{}x{} {} samples",
+                                    img.pixels.size(), needed, img.width, img.height, img.channels, wide ? "u16" : "u8"));
 
     auto guard = context_guard(SPNG_CTX_ENCODER);
     if (guard.ctx == nullptr)

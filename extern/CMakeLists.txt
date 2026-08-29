@@ -34,7 +34,7 @@ option(SC_USE_VENDORED_ZLIB "Build the in-tree vendored zlib (OFF expects an ext
 option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an external `stb` target)" ON)
 
 # libspng, committed in-source: two files, and the PNG half of babel-serializer's image codecs.
-# It is the smallest thing vendored here, which is why it is in-source rather than fetched.
+# Two files with no build machinery worth keeping puts it in the xxhash tier, which is why it is in-source rather than fetched.
 # Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
 option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
 
