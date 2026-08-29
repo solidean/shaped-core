@@ -95,6 +95,24 @@ It does change struct layout — node_allocation's slab header — so it is a wh
 
 `uv run dev.py check` runs a RelWithDebInfo single-threaded preset alongside the others, so both threading modes stay exercised at precommit.
 
+## Default allocator (`SC_MIMALLOC`)
+
+`SC_MIMALLOC` (default `ON`) chooses what backs `cc::default_memory_resource`; it reaches C++ as clean-core's `CC_HAS_MIMALLOC`, 0 or 1.
+`OFF` points the default at `cc::system_memory_resource` — the malloc/free resource that is always present as an explicit opt-out — and links no mimalloc at all.
+
+No API and no struct layout changes with it, since both are `cc::memory_resource` implementations behind the same pointer.
+What changes is whether a tool can see our allocations.
+Sanitizers, Valgrind and heap profilers intercept malloc and operator new, and none of them intercepts `mi_malloc`.
+So under mimalloc LeakSanitizer never scans memory the default resource handed out, and an object owned only by a `cc::` container is reported as a **direct leak** rather than as reachable.
+
+That is why the `sanitize-*` presets set it `OFF`.
+The two flags stay independent on purpose, and `SANITIZE` implies nothing about `SC_MIMALLOC`.
+Sanitizing a mimalloc build stays available for the times the thing being chased is mimalloc's own behavior.
+
+The one behavioral difference is in-place resize.
+mimalloc reports its usable size and can grow a block into that slack, while the system resource always declines and the caller reallocates and copies.
+So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a platform assumption.
+
 ## Build types
 
 The standard **Debug / RelWithDebInfo / Release** build types should all work on every supported platform.

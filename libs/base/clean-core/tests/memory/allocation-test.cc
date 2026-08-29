@@ -348,22 +348,44 @@ TEST("allocation - alignment stored correctly")
     CHECK(cc::is_aligned(alloc.alloc_start, 64));
 }
 
-TEST("memory_resource - system resource is a distinct opt-out")
+TEST("memory_resource - the system resource is reachable as a custom resource")
 {
-    // The default is mimalloc-backed; the system resource is the explicit malloc/free opt-out.
-    CHECK(cc::default_memory_resource != &cc::system_memory_resource);
-
-    // Allocating through the system resource as a custom resource round-trips cleanly.
+    // Whether it is also the default depends on SC_MIMALLOC, which is the next test's question.
+    // Allocating through it as a custom resource round-trips cleanly either way.
     auto alloc = cc::allocation<int>::create_empty(8, alignof(int), &cc::system_memory_resource);
     CHECK(alloc.is_valid());
     CHECK(alloc.custom_resource == &cc::system_memory_resource);
     CHECK(&alloc.resource() == &cc::system_memory_resource);
 }
 
-TEST("memory_resource - mimalloc default supports in-place resize")
+TEST("memory_resource - SC_MIMALLOC decides what the default resource is")
+{
+    // With mimalloc in the build the system resource is the explicit opt-out from it, so the two are distinct objects.
+    // With SC_MIMALLOC=OFF there is nothing to opt out of and the default IS the system resource — the same object,
+    // which is what the sanitizer presets build so a leak checker can see through our allocations.
+#if CC_HAS_MIMALLOC
+    CHECK(cc::default_memory_resource != &cc::system_memory_resource);
+#else
+    CHECK(cc::default_memory_resource == &cc::system_memory_resource);
+#endif
+}
+
+TEST("memory_resource - only mimalloc resizes in place")
 {
     auto const& res = *cc::default_memory_resource;
+
     REQUIRE(res.try_resize_bytes_in_place != nullptr);
+
+    // The system resource offers the entry point and always declines, because malloc cannot grow a block without moving it — and moving is exactly what this member exists to avoid.
+    // So a caller must handle -1 rather than assume the default resource can ever resize in place.
+#if !CC_HAS_MIMALLOC
+    byte* q = nullptr;
+    REQUIRE(res.allocate_bytes(&q, 64, 64, 16, res.userdata) == 64);
+    CHECK(res.try_resize_bytes_in_place(q, 64, 65, 128, 16, res.userdata) == -1);
+    CHECK(res.try_resize_bytes_in_place(q, 64, 1, 8, 16, res.userdata) == -1);
+    res.deallocate_bytes(q, 64, 16, res.userdata);
+    return;
+#endif
 
     // Allocate with a generous max so the reported size reveals mimalloc's usable capacity.
     byte* p = nullptr;

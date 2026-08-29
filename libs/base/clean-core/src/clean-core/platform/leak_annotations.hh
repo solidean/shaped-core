@@ -18,6 +18,8 @@
 // An object owned only by a cc::vector or cc::map is therefore reported as a DIRECT leak rather than a reachable one,
 // and leak_intentionally on the object that owns the container does not cover it — reachability is exactly what broke.
 // Annotating a singleton whose members own anything means wrapping its construction in a leak_scope.
+// SC_MIMALLOC=OFF removes that blind spot, and the sanitize-* presets set it — but a leak_scope is what stays correct
+// in both builds, so prefer it over narrowing an annotation to a configuration that may not be the one running.
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) && __has_include(<sanitizer/lsan_interface.h>)

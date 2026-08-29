@@ -433,6 +433,8 @@ auto al = cc::allocation<int>::create_defaulted(n, res);  // create_empty/_fille
 al.obj_span();  al.resource();  al.is_valid();  al.alloc_size_bytes();
 cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface (default backed by mimalloc)
 cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
+// CC_HAS_MIMALLOC is 0 under SC_MIMALLOC=OFF (the sanitize presets), and the default IS the system resource there.
+// Only mimalloc resizes in place; the system resource always returns -1, so never assume the default can.
 
 #include <clean-core/memory/node_allocation.hh>   // cc::node_allocation<T> — move-only single-object slab handle
 auto na = cc::node_allocation<T>::create_from(cc::default_node_allocator(), args...);

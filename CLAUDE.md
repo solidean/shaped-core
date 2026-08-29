@@ -198,6 +198,10 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   **No API is gated on it** — threaded types keep their full surface and fall back to running on the calling thread, so never `#if` a declaration away.
   OFF is a whole-build switch, never per-target, and `check` runs a `singlethreaded-*` preset so both modes stay exercised.
   See [docs/platforms.md](docs/platforms.md#threading-sc_threads).
+* `SC_MIMALLOC` (default ON) picks what backs `cc::default_memory_resource` → clean-core's `CC_HAS_MIMALLOC`.
+  OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
+  Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
+  See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
 
 ---
 
