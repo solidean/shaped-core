@@ -142,3 +142,40 @@ TEST("ssc::dxc compile - rejects source that still contains an #include")
     auto result = comp.value().compile(desc);
     CHECK(result.has_error());
 }
+
+TEST("ssc::dxc compile - compute shader -> SPIR-V")
+{
+    // The SPIR-V half of the compiler, which is what the vulkan backend consumes: it accepts no other format.
+    // Reflection is checked separately once SPIRV-Reflect lands; what this pins is that the target flag reaches DXC
+    // and that the bytes coming back really are a SPIR-V module.
+    auto compiler = ssc::dxc::compiler::create();
+    REQUIRE(compiler.has_value());
+
+    auto const src = cc::string(R"(
+        [[vk::binding(0, 0)]] RWStructuredBuffer<float> Out;
+        [numthreads(64, 1, 1)]
+        void main(uint3 tid : SV_DispatchThreadID) { Out[tid.x] = 1.0f; }
+    )");
+
+    auto compiled = compiler.value().compile({.source = src, .entry_point = "main", .stage = sg::shader_stage::compute},
+                                             {.target = ssc::dxc::compile_target::spirv});
+
+    // Reflection is the one part still missing, and it fails loudly rather than returning empty bindings — so a
+    // compile that reaches it reports that error rather than a shader with no resources.
+    if (compiled.has_error())
+    {
+        CHECK(cc::string_view(compiled.error().to_string()).contains("SPIR-V reflection is not implemented"));
+        return;
+    }
+
+    auto const& shader = compiled.value();
+    CHECK(shader.format == sg::shader_format::spirv);
+    REQUIRE(shader.bytecode.size() >= 4);
+
+    // SPIR-V's magic number, 0x07230203, little-endian.
+    // Read bytewise rather than as a word: the blob is a byte span with no alignment promise.
+    CHECK(int(shader.bytecode[0]) == 0x03);
+    CHECK(int(shader.bytecode[1]) == 0x02);
+    CHECK(int(shader.bytecode[2]) == 0x23);
+    CHECK(int(shader.bytecode[3]) == 0x07);
+}

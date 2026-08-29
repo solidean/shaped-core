@@ -1,5 +1,10 @@
 #include <shaped-shader-compiler-dxc/impl/reflection.hh>
 
+// Windows-only: see reflection.hh.
+// The CMakeLists excludes this TU elsewhere, and this guard is what makes that exclusion a compile-time fact rather
+// than a build-file convention.
+#ifdef CC_OS_WINDOWS
+
 namespace ssc::dxc::impl
 {
 namespace
@@ -193,3 +198,4 @@ cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::s
     return out;
 }
 } // namespace ssc::dxc::impl
+#endif // CC_OS_WINDOWS

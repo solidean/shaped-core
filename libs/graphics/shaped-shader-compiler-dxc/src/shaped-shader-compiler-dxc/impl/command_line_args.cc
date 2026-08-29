@@ -119,6 +119,16 @@ cc::result<arg_storage> build_compile_args(shader_description const& desc, compi
     a.emplace_back(L"-T");
     a.emplace_back(to_wide(profile.value()));
     a.emplace_back(optimization_flag(opts.optimization));
+
+    // SPIR-V is one flag plus a target environment.
+    // Deliberately no -fvk-*-shift: HLSL's four register classes are mapped by [[vk::binding(N, set)]] annotations in
+    // the shader source instead, so the set and binding a module declares are the ones its author wrote.
+    // See libs/graphics/shaped-graphics/docs/shaders.md for the authoring rule that implies.
+    if (opts.target == compile_target::spirv)
+    {
+        a.emplace_back(L"-spirv");
+        a.emplace_back(L"-fspv-target-env=vulkan1.3");
+    }
     if (opts.debug_info)
     {
         a.emplace_back(L"-Zi");

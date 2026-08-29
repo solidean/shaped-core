@@ -11,6 +11,7 @@ add_library(shaped-shader-compiler-dxc
     src/shaped-shader-compiler-dxc/impl/command_line_args.cc
     src/shaped-shader-compiler-dxc/impl/include_handler.cc
     src/shaped-shader-compiler-dxc/impl/reflection.cc
+    src/shaped-shader-compiler-dxc/impl/spirv_reflection.cc
 )
 
 # Public headers (co-located in src/). impl/ headers are internal — reachable via the src/ include
@@ -91,9 +92,14 @@ if(SC_BUILD_TESTS)
     # Stage the DXC runtime DLLs (dxcompiler + its dxil.dll signer) next to the test binary so it loads
     # them at run time. DXC_RUNTIME_DLLS is set by extern/dxc; dxil.dll isn't the imported target, so
     # $<TARGET_RUNTIME_DLLS> alone would miss it.
-    add_custom_command(TARGET shaped-shader-compiler-dxc-test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${DXC_RUNTIME_DLLS} $<TARGET_FILE_DIR:shaped-shader-compiler-dxc-test>
-        COMMAND_EXPAND_LISTS
-    )
+    #
+    # The list is empty off Windows — there is no signer, and the loader finds the .so through the imported target —
+    # and copy_if_different with no sources is a usage error rather than a no-op, so the emptiness is the guard.
+    if(DXC_RUNTIME_DLLS)
+        add_custom_command(TARGET shaped-shader-compiler-dxc-test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${DXC_RUNTIME_DLLS} $<TARGET_FILE_DIR:shaped-shader-compiler-dxc-test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endif()
