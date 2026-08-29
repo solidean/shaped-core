@@ -88,6 +88,8 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
 
     auto const info = VkDescriptorSetLayoutCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        // A layout used with descriptor buffers has to say so at creation; it cannot also be allocated from a pool.
+        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT,
         .bindingCount = u32(vk_bindings.size()),
         .pBindings = vk_bindings.data(),
     };

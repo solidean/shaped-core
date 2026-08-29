@@ -411,3 +411,25 @@ TEST("sg vulkan - a block-compressed texture stages at its block size")
     REQUIRE(read.has_value());
     CHECK(read.value().size() == 32);
 }
+
+TEST("sg vulkan - the device reports descriptor buffer properties")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return; // no Vulkan device.
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    // The bind path sizes every descriptor range from these, so a zero here would silently produce empty ranges.
+    // A descriptor's size is a device property rather than something the API fixes, which is the main way the
+    // descriptor-buffer model differs from allocating opaque sets from a pool.
+    auto const& props = c.descriptor_buffer_properties();
+    CHECK(props.uniformBufferDescriptorSize > 0);
+    CHECK(props.storageBufferDescriptorSize > 0);
+    CHECK(props.sampledImageDescriptorSize > 0);
+    CHECK(props.storageImageDescriptorSize > 0);
+    CHECK(props.samplerDescriptorSize > 0);
+
+    // Offsets into a descriptor buffer must be a multiple of this, and it must be a power of two to be useful as one.
+    CHECK(props.descriptorBufferOffsetAlignment > 0);
+    CHECK((props.descriptorBufferOffsetAlignment & (props.descriptorBufferOffsetAlignment - 1)) == 0);
+}

@@ -211,6 +211,17 @@ void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT messe
 // so a device under the floor is refused at creation with one legible error instead of degrading silently.
 constexpr u32 k_required_api_version = VK_API_VERSION_1_3;
 
+// Descriptor buffers back the whole bind path: a binding group is a range of plain memory a shader reads through a
+// bound address, which is what lets a staging group snapshot by copying bytes rather than re-writing every descriptor.
+// Required rather than probed, for the same reason the version floor is — see k_required_api_version.
+//
+// This is the older spelling of the feature.
+// VK_EXT_descriptor_heap supersedes it — vulkan_core.h defines the descriptor-buffer capture-replay bit as an alias of
+// the descriptor-heap one — and is where this should end up.
+// RADV does not expose descriptor_heap yet, though, and requiring it would mean the backend cannot create a device on
+// the machine it is developed on.
+constexpr char const* k_descriptor_buffer_extension = VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME;
+
 // The ray-tracing device extensions, which are optional above the floor.
 // A device without them still comes up; cmd.raytracing.is_supported() then answers false.
 constexpr char const* k_raytracing_extensions[] = {
@@ -377,11 +388,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (auto const missing = missing_required_capability(best_device); !missing.empty())
         return cc::error(cc::format("selected Vulkan device does not support {}", missing));
 
+    char const* const descriptor_buffer_names[] = {k_descriptor_buffer_extension};
+    if (!device_extensions_available(best_device, descriptor_buffer_names))
+        return cc::error(cc::format("selected Vulkan device does not support {}", k_descriptor_buffer_extension));
+
     // Ray tracing is optional above the floor: enable the extensions where the device has them, and record the
     // answer so cmd.raytracing.is_supported() reports the device rather than a hardcoded false.
     bool const raytracing_supported = device_extensions_available(best_device, k_raytracing_extensions);
 
     cc::vector<char const*> device_extensions;
+    device_extensions.push_back(k_descriptor_buffer_extension);
     if (raytracing_supported)
         for (auto const* name : k_raytracing_extensions)
             device_extensions.push_back(name);
@@ -406,9 +422,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pNext = &accel_features,
         .rayTracingPipeline = VK_TRUE,
     };
+    auto descriptor_buffer_features = VkPhysicalDeviceDescriptorBufferFeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
+        .pNext = raytracing_supported ? static_cast<void*>(&rt_pipeline_features) : nullptr,
+        .descriptorBuffer = VK_TRUE,
+    };
     auto vk13_features = VkPhysicalDeviceVulkan13Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .pNext = raytracing_supported ? static_cast<void*>(&rt_pipeline_features) : nullptr,
+        .pNext = &descriptor_buffer_features,
         .synchronization2 = VK_TRUE,
         .dynamicRendering = VK_TRUE,
     };
@@ -452,6 +473,18 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // Disarming the guard now rather than at the end of the function is what keeps a later failure from freeing
     // them twice — once through ~vulkan_context and once through the guard.
     owned_by_context = true;
+
+    // Descriptor sizes and the offset alignment are device properties, so the bind path reads them once here rather
+    // than querying per allocation.
+    auto descriptor_props = VkPhysicalDeviceDescriptorBufferPropertiesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT,
+    };
+    auto device_props = VkPhysicalDeviceProperties2{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &descriptor_props,
+    };
+    vkGetPhysicalDeviceProperties2(best_device, &device_props);
+    ctx->set_descriptor_buffer_properties(descriptor_props);
 
     ctx->set_adapter_info(describe_adapter(best_device));
     ctx->set_raytracing_supported(raytracing_supported);

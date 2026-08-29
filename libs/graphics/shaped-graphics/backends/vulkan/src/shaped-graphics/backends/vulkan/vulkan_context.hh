@@ -98,6 +98,20 @@ public:
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
 
+    /// Descriptor sizes and offset alignment for this device, read once at creation.
+    /// The bind path sizes every descriptor range from these, since a descriptor's size is a device property rather
+    /// than something the API fixes.
+    [[nodiscard]] VkPhysicalDeviceDescriptorBufferPropertiesEXT const& descriptor_buffer_properties() const
+    {
+        return _descriptor_buffer_properties;
+    }
+
+    void set_descriptor_buffer_properties(VkPhysicalDeviceDescriptorBufferPropertiesEXT const& props)
+    {
+        _descriptor_buffer_properties = props;
+        _descriptor_buffer_properties.pNext = nullptr; // the chain it was queried through does not outlive creation
+    }
+
     /// Routes this instance's validation messages to `callback` instead of the log.
     /// Only ever called when the context was created with enable_validation_layers, and only for messages raised
     /// after creation returned — the instance's own create/destroy messages go to the log either way.
@@ -376,6 +390,9 @@ public:
 
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
+
+    // See descriptor_buffer_properties.
+    VkPhysicalDeviceDescriptorBufferPropertiesEXT _descriptor_buffer_properties = {};
 
     // Where validation messages go; empty means the log.
     // See set_message_callback.
