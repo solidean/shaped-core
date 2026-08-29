@@ -129,15 +129,36 @@ window::~window()
     SDL_DestroyWindow(as_sdl(_native_window));
 }
 
-void* window::native_window_handle() const
+sg::native_window window::native_window() const
 {
-#if defined(SDL_PLATFORM_WIN32)
-    return SDL_GetPointerProperty(SDL_GetWindowProperties(as_sdl(_native_window)), SDL_PROP_WINDOW_WIN32_HWND_POINTER,
-                                  nullptr);
-#else
-    // X11 wants a display plus an XID and wayland a display plus a surface — neither fits a single pointer.
-    return nullptr;
-#endif
+    auto* const props = SDL_GetWindowProperties(as_sdl(_native_window));
+
+    // Which set of properties carries the window is a runtime fact rather than a compile-time one: one SDL3 build
+    // drives X11 and wayland both, and picks per session.
+    // So the driver name decides, and an unrecognized one leaves the result invalid rather than guessing.
+    auto const driver = cc::string_view(SDL_GetCurrentVideoDriver());
+
+    sg::native_window win;
+    if (driver == "windows")
+    {
+        win.platform = sg::window_platform::win32;
+        win.handle = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+    }
+    else if (driver == "x11")
+    {
+        // xlib rather than xcb: SDL hands out the Display*, and an xcb connection derived from it would outlive
+        // nothing we control.
+        win.platform = sg::window_platform::xlib;
+        win.display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+        win.window_id = u64(SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+    }
+    else if (driver == "wayland")
+    {
+        win.platform = sg::window_platform::wayland;
+        win.display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+        win.handle = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    }
+    return win;
 }
 
 // The setters below return void, so a platform refusal cannot be reported — it is a bug or a broken driver, not something a caller can act on.
@@ -491,7 +512,7 @@ void window::send_to_back()
     // Win32 directly: SDL has SDL_RaiseWindow and no counterpart to lower a window.
     // Unchecked because a window manager declining is an ordinary outcome, not an error worth propagating.
 #if defined(CC_OS_WINDOWS)
-    auto* const hwnd = static_cast<HWND>(this->native_window_handle());
+    auto* const hwnd = static_cast<HWND>(this->native_window().handle);
     if (hwnd != nullptr)
         (void)SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 #endif

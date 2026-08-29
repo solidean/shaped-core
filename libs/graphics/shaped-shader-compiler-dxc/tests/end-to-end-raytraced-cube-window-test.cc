@@ -279,7 +279,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
     if (hwnd == nullptr)
         SKIP("no interactive window station (headless host) — cannot open a window");
 
-    auto sc_r = ctx.try_create_swapchain({.native_window_handle = hwnd, .buffer_count = 3});
+    auto sc_r = ctx.try_create_swapchain({.window = sg::native_window::from_win32(hwnd), .buffer_count = 3});
     if (sc_r.has_error())
         SKIP("could not create a swapchain for the window (likely a headless / session-0 host)");
     sg::swapchain_handle const sc = sc_r.value();

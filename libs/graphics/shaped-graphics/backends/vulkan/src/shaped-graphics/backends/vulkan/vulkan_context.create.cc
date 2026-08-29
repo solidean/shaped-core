@@ -400,10 +400,27 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
     if (has_headless_surface)
         extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+    // One optional extension per windowing system this build can compile a surface call for.
+    // Enabled only where the loader has it, since an instance extension that is not there fails creation outright.
+    bool platform_surface[4] = {false, false, false, false};
+    auto const enable_platform_surface = [&](sg::window_platform platform, char const* name)
+    {
+        if (!has_surface || !instance_extension_available(name))
+            return;
+        platform_surface[int(platform)] = true;
+        extensions.push_back(name);
+    };
 #ifdef VK_USE_PLATFORM_WIN32_KHR
-    bool const has_win32_surface = has_surface && instance_extension_available(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-    if (has_win32_surface)
-        extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+    enable_platform_surface(sg::window_platform::win32, VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+    enable_platform_surface(sg::window_platform::xlib, VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+    enable_platform_surface(sg::window_platform::xcb, VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+#endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    enable_platform_surface(sg::window_platform::wayland, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 #endif
 
     auto const dbg_info = make_debug_messenger_info();
@@ -658,6 +675,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->set_host_query_reset(true);
     ctx->_query_system.initialize(*ctx);
     ctx->set_presentation_support(swapchain_supported, has_headless_surface);
+    for (int i = 0; i < 4; ++i)
+        ctx->set_window_platform_supported(sg::window_platform(i), platform_surface[i]);
 
     // Both directions get their own queue where the family could give two, and share one otherwise.
     // A device with no spare queue at all falls back to the graphics queue, which keeps async transfer correct while

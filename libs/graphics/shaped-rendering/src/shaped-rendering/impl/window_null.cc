@@ -26,10 +26,8 @@ cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_syste
     return cc::error(cc::string(no_backend_reason));
 }
 
-window_system::~window_system()
-{
-    // Reached only if a window_system was somehow constructed, which try_create never does.
-}
+// Nothing to tear down, and nothing that could have been constructed to tear down: try_create never returns one.
+window_system::~window_system() = default;
 
 void window_system::assert_owning_thread() const
 {
@@ -53,7 +51,7 @@ void window_system::poll_events()
 
 window::~window() = default;
 
-void* window::native_window_handle() const
+sg::native_window window::native_window() const
 {
     unreachable_without_backend();
 }

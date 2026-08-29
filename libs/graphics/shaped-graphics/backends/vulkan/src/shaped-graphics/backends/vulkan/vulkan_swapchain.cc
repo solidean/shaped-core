@@ -42,24 +42,81 @@ namespace
         return surface;
     }
 
+    // One call per windowing system, each behind the instance extension for it.
+    // The platform tag is what makes this a switch rather than a guess: sg carries the window in its own system's
+    // terms, so there is nothing to infer here.
+    switch (desc.window.platform)
+    {
+    case sg::window_platform::win32:
+    {
 #ifdef VK_USE_PLATFORM_WIN32_KHR
-    auto const info = VkWin32SurfaceCreateInfoKHR{
-        .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
-        .hinstance = GetModuleHandleW(nullptr),
-        .hwnd = HWND(desc.native_window_handle),
-    };
-    if (VkResult const r = vkCreateWin32SurfaceKHR(ctx._instance, &info, nullptr, &surface); r != VK_SUCCESS)
-        return vulkan_error(r, "vkCreateWin32SurfaceKHR failed");
-    return surface;
+        if (!ctx.is_window_platform_supported(sg::window_platform::win32))
+            return cc::error("this Vulkan instance has no VK_KHR_win32_surface");
+        auto const info = VkWin32SurfaceCreateInfoKHR{
+            .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+            .hinstance = GetModuleHandleW(nullptr),
+            .hwnd = HWND(desc.window.handle),
+        };
+        if (VkResult const r = vkCreateWin32SurfaceKHR(ctx._instance, &info, nullptr, &surface); r != VK_SUCCESS)
+            return vulkan_error(r, "vkCreateWin32SurfaceKHR failed");
+        return surface;
 #else
-    // X11 wants a display plus an XID and wayland a display plus a surface, and sg's window handle is one `void*`.
-    // sr's window::native_window_handle() already says this is where that gets settled — see the note there and
-    // libs/graphics/shaped-graphics/docs/concepts/presentation.md.
-    // Reported rather than asserted, since it is a platform's answer rather than a caller's mistake.
-    (void)desc;
-    return cc::error("a windowed Vulkan swapchain needs a platform-tagged window handle, which sg does not carry yet "
-                     "(headless_extent presents with no window)");
+        return cc::error("this build has no Win32 surface support");
 #endif
+    }
+    case sg::window_platform::xlib:
+    {
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+        if (!ctx.is_window_platform_supported(sg::window_platform::xlib))
+            return cc::error("this Vulkan instance has no VK_KHR_xlib_surface");
+        auto const info = VkXlibSurfaceCreateInfoKHR{
+            .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+            .dpy = static_cast<Display*>(desc.window.display),
+            .window = ::Window(desc.window.window_id),
+        };
+        if (VkResult const r = vkCreateXlibSurfaceKHR(ctx._instance, &info, nullptr, &surface); r != VK_SUCCESS)
+            return vulkan_error(r, "vkCreateXlibSurfaceKHR failed");
+        return surface;
+#else
+        return cc::error("this build has no Xlib surface support");
+#endif
+    }
+    case sg::window_platform::xcb:
+    {
+#ifdef VK_USE_PLATFORM_XCB_KHR
+        if (!ctx.is_window_platform_supported(sg::window_platform::xcb))
+            return cc::error("this Vulkan instance has no VK_KHR_xcb_surface");
+        auto const info = VkXcbSurfaceCreateInfoKHR{
+            .sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
+            .connection = static_cast<xcb_connection_t*>(desc.window.display),
+            .window = xcb_window_t(desc.window.window_id),
+        };
+        if (VkResult const r = vkCreateXcbSurfaceKHR(ctx._instance, &info, nullptr, &surface); r != VK_SUCCESS)
+            return vulkan_error(r, "vkCreateXcbSurfaceKHR failed");
+        return surface;
+#else
+        return cc::error("this build has no XCB surface support");
+#endif
+    }
+    case sg::window_platform::wayland:
+    {
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+        if (!ctx.is_window_platform_supported(sg::window_platform::wayland))
+            return cc::error("this Vulkan instance has no VK_KHR_wayland_surface");
+        auto const info = VkWaylandSurfaceCreateInfoKHR{
+            .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
+            .display = static_cast<wl_display*>(desc.window.display),
+            .surface = static_cast<wl_surface*>(desc.window.handle),
+        };
+        if (VkResult const r = vkCreateWaylandSurfaceKHR(ctx._instance, &info, nullptr, &surface); r != VK_SUCCESS)
+            return vulkan_error(r, "vkCreateWaylandSurfaceKHR failed");
+        return surface;
+#else
+        return cc::error("this build has no Wayland surface support");
+#endif
+    }
+    }
+    return cc::error("unhandled window platform");
 }
 
 /// The surface format matching `format`, or an error when the surface does not offer it.
@@ -77,7 +134,7 @@ namespace
     auto const wanted_space = want_hdr ? VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
     // The requested colorspace first, then the format in any colorspace: HDR is best-effort at the sg level, so a
-    // surface that has the format but not the space is a success with a note rather than a failure.
+    // surface that has the format but not the space is a success rather than a failure.
     for (auto const& f : formats)
         if (f.format == wanted && f.colorSpace == wanted_space)
             return f;

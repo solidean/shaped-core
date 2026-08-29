@@ -40,7 +40,7 @@ See [imgui.md](../libs/graphics/shaped-rendering/docs/imgui.md).
 
 And sr is where the family meets the OS.
 `sr::window_system` / `sr::window` are the **window abstraction**, backed by SDL3 and exposing none of it.
-A window's `native_window_handle()` is what `sg::swapchain_description` consumes, so a windowed renderer can be written against sr alone.
+A window's `native_window()` is what `sg::swapchain_description` consumes, so a windowed renderer can be written against sr alone.
 Multiple windows are supported today, which is the groundwork for imgui docking and multiple viewports.
 
 - **SDL3 is downloaded on demand**, not vendored.

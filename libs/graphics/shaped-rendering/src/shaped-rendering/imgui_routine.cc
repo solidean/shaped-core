@@ -14,6 +14,7 @@
 #include <shaped-rendering/imgui_context.hh> // render_imgui drives update_viewports
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
+#include <shaped-rendering/window.hh>
 #include <sr_shaders.hh>
 
 // ImDrawVert is {ImVec2 pos; ImVec2 uv; ImU32 col;} — 20 bytes, matching imgui.hlsl's vs_input.
@@ -78,11 +79,14 @@ sg::swapchain* swapchain_for(sg::context& ctx, ImGuiViewport* viewport)
         return existing->chain.get();
 
     // The platform side created the window hidden, so it already has a native handle to present against.
-    if (viewport->PlatformHandleRaw == nullptr)
+    // PlatformHandle rather than PlatformHandleRaw: the raw one is imgui's own win32 slot, and a swapchain needs the
+    // display alongside the handle on the two X11 platforms.
+    auto const* const win = static_cast<sr::window const*>(viewport->PlatformHandle);
+    if (win == nullptr || !win->native_window().is_valid())
         return nullptr;
 
     // Fallible rather than throwing, for the same reason the pipeline build is: this runs inside the caller's frame, and a viewport that cannot get a swapchain should simply not draw.
-    auto created = ctx.try_create_swapchain({.native_window_handle = viewport->PlatformHandleRaw, //
+    auto created = ctx.try_create_swapchain({.window = win->native_window(), //
                                              .format = viewport_format});
     if (!created.has_value())
         return nullptr;

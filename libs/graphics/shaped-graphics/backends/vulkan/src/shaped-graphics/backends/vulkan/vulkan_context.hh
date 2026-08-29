@@ -34,6 +34,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory/allocation_info.hh>
+#include <shaped-graphics/present/native_window.hh>
 
 #include <atomic>
 
@@ -171,6 +172,19 @@ public:
     /// discovered at the first present.
     [[nodiscard]] bool is_swapchain_supported() const { return _swapchain_supported; }
     [[nodiscard]] bool is_headless_present_supported() const { return _headless_surface_supported; }
+
+    /// Whether this instance can create a surface for `platform`.
+    /// False for one whose extension the loader does not offer, and for one this build was compiled without — a
+    /// windowed swapchain then reports that rather than failing somewhere less legible.
+    [[nodiscard]] bool is_window_platform_supported(sg::window_platform platform) const
+    {
+        return _window_platform_supported[int(platform)];
+    }
+
+    void set_window_platform_supported(sg::window_platform platform, bool supported)
+    {
+        _window_platform_supported[int(platform)] = supported;
+    }
 
     void set_presentation_support(bool swapchain, bool headless_surface)
     {
@@ -576,6 +590,9 @@ public:
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;
     bool _headless_surface_supported = false;
+
+    // See is_window_platform_supported; indexed by sg::window_platform.
+    bool _window_platform_supported[4] = {false, false, false, false};
 
     // See supports_host_query_reset.
     bool _host_query_reset = false;

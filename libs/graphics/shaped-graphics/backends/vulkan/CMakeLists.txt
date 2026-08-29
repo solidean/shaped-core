@@ -88,6 +88,53 @@ target_compile_options(shaped-graphics-vulkan
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
+# Which windowing systems a swapchain can create a surface for.
+#
+# A VK_USE_PLATFORM_* define makes vulkan.h declare that platform's surface call, and pulls in that system's own
+# header — so it is only correct where the development headers are actually installed.
+# Probed rather than assumed: a machine with the Vulkan SDK and no X11 headers is ordinary, and guessing there turns a
+# missing package into a compile error deep in a system header.
+#
+# Scoped to the ONE translation unit that creates surfaces, for the reason the PCH note above gives: on Windows
+# VK_USE_PLATFORM_WIN32_KHR reaches an unsanitized windows.h, and confining that to a single file is what keeps it out
+# of the other thirty.
+#
+# With none of them the windowed paths compile to a runtime error naming the platform, which is the honest answer —
+# the backend still builds and still presents headlessly.
+set(_sc_vulkan_surface_defines "")
+if(WIN32)
+    list(APPEND _sc_vulkan_surface_defines VK_USE_PLATFORM_WIN32_KHR)
+elseif(NOT APPLE)
+    include(CheckIncludeFile)
+    check_include_file("X11/Xlib.h" SC_VULKAN_HAS_XLIB_HEADERS)
+    check_include_file("xcb/xcb.h" SC_VULKAN_HAS_XCB_HEADERS)
+    check_include_file("wayland-client.h" SC_VULKAN_HAS_WAYLAND_HEADERS)
+
+    if(SC_VULKAN_HAS_XLIB_HEADERS)
+        list(APPEND _sc_vulkan_surface_defines VK_USE_PLATFORM_XLIB_KHR)
+    endif()
+    if(SC_VULKAN_HAS_XCB_HEADERS)
+        list(APPEND _sc_vulkan_surface_defines VK_USE_PLATFORM_XCB_KHR)
+    endif()
+    if(SC_VULKAN_HAS_WAYLAND_HEADERS)
+        list(APPEND _sc_vulkan_surface_defines VK_USE_PLATFORM_WAYLAND_KHR)
+    endif()
+
+    if(NOT _sc_vulkan_surface_defines)
+        message(STATUS
+            "shaped-graphics-vulkan: no X11, XCB or wayland development headers — a windowed swapchain reports "
+            "unsupported. Headless presentation is unaffected.")
+    endif()
+endif()
+
+if(_sc_vulkan_surface_defines)
+    set_source_files_properties(
+        src/shaped-graphics/backends/vulkan/vulkan_swapchain.cc
+        src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
+        TARGET_DIRECTORY shaped-graphics-vulkan
+        PROPERTIES COMPILE_DEFINITIONS "${_sc_vulkan_surface_defines}")
+endif()
+
 # Backend-specific test binary: device creation, command lists, buffers, epochs.
 # Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)

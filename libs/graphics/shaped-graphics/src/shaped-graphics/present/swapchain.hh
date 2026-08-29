@@ -2,6 +2,7 @@
 
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/present/native_window.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/views.hh> // render_target_view — the acquire_backbuffer result
 #include <shaped-graphics/types.hh>
@@ -18,10 +19,9 @@ enum class sg::present_mode : sg::u8
 /// Defaults describe a plain double-buffered vsync surface.
 struct sg::swapchain_description
 {
-    /// OS window to present into — an HWND on Windows.
-    /// Opaque here so the sg core stays backend-agnostic; the backend reinterprets it.
-    /// Must be non-null unless `headless_extent` is set.
-    void* native_window_handle = nullptr;
+    /// The OS window to present into, named in its own windowing system's terms — see sg::native_window.
+    /// Must name a window unless `headless_extent` is set.
+    native_window window;
 
     /// Present with no window, at this fixed size.
     ///
@@ -85,7 +85,7 @@ public:
     [[nodiscard]] virtual render_target_view acquire_backbuffer() = 0;
 
     // Creation parameters, fixed for the swapchain's lifetime.
-    [[nodiscard]] void* native_window_handle() const { return _desc.native_window_handle; }
+    [[nodiscard]] native_window const& window() const { return _desc.window; }
     [[nodiscard]] int buffer_count() const { return _desc.buffer_count; }
     [[nodiscard]] pixel_format format() const { return _desc.format; }
     [[nodiscard]] sg::present_mode present_mode() const { return _desc.present_mode; }

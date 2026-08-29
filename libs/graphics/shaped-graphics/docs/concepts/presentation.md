@@ -1,7 +1,7 @@
 # Concept: presentation (swapchain)
 
 A [`swapchain`](../../src/shaped-graphics/present/swapchain.hh) is a chain of back buffers you render into and hand to a window.
-`ctx.create_swapchain({.native_window_handle = …})` returns one; `acquire_backbuffer()` gives this frame's target, and `ctx.submit_command_list_and_present(sc, cmd)` hands it to the display.
+`ctx.create_swapchain({.window = …})` returns one; `acquire_backbuffer()` gives this frame's target, and `ctx.submit_command_list_and_present(sc, cmd)` hands it to the display.
 
 Two decisions shape the type, and both are about *not* special-casing presentation.
 A back buffer is an ordinary texture as far as the rest of sg is concerned, and the present handshake is split so it never costs a command list of its own.
@@ -72,16 +72,19 @@ The two backends reach it differently, and the difference is worth knowing:
 - **dx12** has no such surface: DXGI needs a real presentation target, so a headless chain is `buffer_count` ordinary render-target textures and a present that signals the fence and rotates the index.
   An emulation, and enough for the contract above.
 
-## The window handle is opaque
+## The window handle is platform-tagged
 
-`swapchain_description::native_window_handle` is a `void*` — an `HWND` on Windows — because sg core cannot name a platform windowing type and stay backend-agnostic.
-The backend reinterprets it.
-[`sr::window`](../../../shaped-rendering/src/shaped-rendering/window.hh) is the supported producer.
+`swapchain_description::window` is an `sg::native_window`: a `window_platform` tag plus three slots — a `display`, a `handle` and a `window_id`.
+Which slots are filled is the tag's business, and `is_valid()` states it per platform: win32 fills the handle, xlib and xcb a display plus the id, wayland a display plus the handle.
+[`sr::window::native_window()`](../../../shaped-rendering/src/shaped-rendering/window.hh) is the supported producer.
 
-**This is what blocks a windowed Vulkan swapchain off Windows.**
-X11 needs a display plus an XID and wayland a display plus a surface, and neither fits one pointer.
-So `sr::window::native_window_handle()` already returns null everywhere but Win32, and the vulkan backend reports that rather than guessing.
-A platform-tagged handle is the fix, and it now has its second caller — see [TODO](../TODO.md).
+A tag rather than a `void*` because a windowed Vulkan swapchain off Windows needs two values, not one — X11 a display plus an XID, wayland a display plus a surface.
+It is also what lets a backend say *which* window system it cannot serve, instead of failing on a pointer it cannot interpret.
+
+**Which platforms a build can actually serve is decided at compile time.**
+A `VK_USE_PLATFORM_*` define pulls in that windowing system's own headers, so the Vulkan backend probes for them and compiles in the surface calls it found.
+`vulkan_context::is_window_platform_supported` then answers for the instance as well — the extension has to be there too.
+A platform this build has no surface call for reports that by name rather than crashing, and headless presentation is unaffected either way.
 
 The rest of the description is fixed for the swapchain's lifetime.
 `buffer_count` (at least 2), a renderable `format`, a `present_mode`, and an `enable_hdr` request.
@@ -106,16 +109,13 @@ DXGI's Alt+Enter fullscreen handling is suppressed (`DXGI_MWA_NO_ALT_ENTER`); th
   `ResizeBuffers` requires zero outstanding back-buffer references, which is exactly what the wait plus release provide.
 - **Device loss** during acquire, present or resize marks the context lost and throws `sg::device_lost_exception`; other failures throw a generic `sg::exception` carrying the `HRESULT`.
 
-**vulkan** returns an error from `try_create_swapchain` until its `VkSurfaceKHR` / `VkSwapchainKHR` path lands.
 
 ## Deferred
 
 See [TODO](../TODO.md) for the full list.
 The ones worth knowing while using this:
 
-- a **platform-tagged `native_window_handle`** replacing the opaque `void*`, which is what a windowed Vulkan swapchain needs off Windows;
 - **deeper HDR** — metadata and tone-mapping beyond selecting a color space;
-- **exclusive fullscreen** and **multi-window**;
 - **exclusive fullscreen** and **multi-window**.
 
 ## See also

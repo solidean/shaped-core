@@ -70,7 +70,8 @@ cc::result<dx12_swapchain_handle> dx12_context::create_dx12_swapchain(sg::swapch
         return dx12_swapchain_handle(cc::move(headless));
     }
 
-    HWND const hwnd = static_cast<HWND>(desc.native_window_handle);
+    CC_ASSERT(desc.window.platform == sg::window_platform::win32, "dx12 presents to a win32 window only");
+    HWND const hwnd = static_cast<HWND>(desc.window.handle);
     tg::vec2i const size = client_size_of(hwnd);
 
     // Tearing (uncapped present) needs adapter support AND the immediate present mode; it also requires the

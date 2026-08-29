@@ -10,7 +10,7 @@ Only the two tier-1 backends exist — nothing is written for the others yet.
 
 The library is at an **early stage**, though not a stub: the sg core and the **dx12** backend are real across transfer, barriers, bindings, pipelines, raytracing, queries and presentation.
 **vulkan** is real across the same surface and runs the same tier-1 API suite.
-One gap remains there: a windowed swapchain off Windows, which needs a platform-tagged window handle sg does not carry yet.
+Which windowing systems it can present to is decided at build time, by which of their development headers were installed.
 [docs/structure.md](docs/structure.md) is the per-module `[done]` / `[in progress]` / `[planned]` roadmap.
 
 ## Design at a glance
