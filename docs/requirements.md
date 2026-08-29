@@ -74,15 +74,24 @@ To develop that mode natively, use a `singlethreaded-*` preset instead of a wasm
 
 ### `std::stacktrace`
 
-clean-core uses `std::stacktrace`, and which link library provides it is detected at configure time by [DetectStacktraceLib.cmake](../libs/base/clean-core/cmake/DetectStacktraceLib.cmake):
+clean-core uses `std::stacktrace`, and whether it is usable at all is settled by a **link probe** at configure time.
+[DetectStacktraceLib.cmake](../libs/base/clean-core/cmake/DetectStacktraceLib.cmake) is that probe.
+It links a probe program rather than asking whether a header exists, which is the only test that distinguishes a declared `std::stacktrace` from an implemented one.
+Its verdict picks the link library:
 
 * MSVC / libc++ / newer toolchains — no extra library.
 * GCC 14+ libstdc++ — `-lstdc++exp`.
 * GCC 13 libstdc++ — `-lstdc++_libbacktrace`.
+* A libstdc++ shipped **without** `libstdc++exp` — nothing links, so the stub is configured instead.
+  It has `<stacktrace>` and none of its symbols, and SteamOS is where we first hit it; [platforms.md](platforms.md#steamos) has that case.
 
 On the GCC path this makes **GCC 13** the practical floor.
-Where `<stacktrace>` is unavailable altogether — notably Emscripten and WASI libc++ — the build does **not** fail.
-clean-core's [stacktrace.hh](../libs/base/clean-core/src/clean-core/platform/stacktrace.hh) detects that via `__has_include` and falls back to an empty `cc::stacktrace` stub (`CC_HAS_STACKTRACE 0`).
+Where `<stacktrace>` is unavailable altogether — notably Emscripten and WASI libc++ — the build does **not** fail either.
+
+The probe also **publishes** its verdict, as clean-core's `PUBLIC` `CC_HAS_STACKTRACE` define, so no consumer can reach a different answer.
+[stacktrace.hh](../libs/base/clean-core/src/clean-core/platform/stacktrace.hh) falls back to deciding for itself with `__has_include`, but only when nothing defined it.
+That is a build which does not go through our CMake.
+Either way an unavailable `<stacktrace>` means an empty `cc::stacktrace` stub (`CC_HAS_STACKTRACE 0`) rather than a compile error.
 The configure-time detection downgrades to a status message instead of an error.
 
 ### Linkers
